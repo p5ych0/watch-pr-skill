@@ -52,8 +52,12 @@ unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-
 
 ```
 codex plugin marketplace add p5ych0/watch-pr-skill
-codex plugin install watch-pr-skill
+codex plugin add watch-pr-skill@p5ych0-tools
 ```
+
+(Older/newer Codex builds vary — some use `codex plugin install`; if `add` is
+missing, run `codex plugin --help`. The `@p5ych0-tools` marketplace suffix is
+required.)
 
 Install once per tool at user scope; it is then available in every project.
 

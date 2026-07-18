@@ -49,6 +49,10 @@ BUS="/tmp/$SLUG-review-bus"; REPO_DIR="$(git rev-parse --show-toplevel)"
 # Codex expose the plugin's install dir as $CLAUDE_PLUGIN_ROOT (Codex via a
 # legacy-compat alias), so this one path drives the scripts on either tool.
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT}/skills/watch-prs/scripts"
+# Fallback: some Codex builds only populate $CLAUDE_PLUGIN_ROOT for hook commands,
+# not for model-invoked skill bash. If it's unset here, locate the installed
+# plugin in either tool's cache (newest version).
+[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -d "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts "$HOME"/.codex/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | sort -V | tail -1)"
 echo "OWNER=$OWNER REPO=$REPO SLUG=$SLUG PREFIX=${PREFIX}_REVIEW BUS=$BUS RB_SCRIPTS=$RB_SCRIPTS"
 ```
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1] — 2026-07-18
+- `RB_SCRIPTS` falls back to locating the installed plugin in either tool's cache
+  when `$CLAUDE_PLUGIN_ROOT` isn't populated in skill bash (some Codex builds only
+  set it for hook commands).
+- README: correct the Codex install command (`codex plugin add
+  watch-pr-skill@p5ych0-tools`; build-dependent).
+
 ## [1.0.0] — 2026-07-18
 
 Initial release: a dual-tool (Claude Code + Codex) installable review-bus plugin.

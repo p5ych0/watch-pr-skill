@@ -1,6 +1,6 @@
 {
   "name": "watch-pr-skill",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automated PR review-bus loop with a Codex reviewer — a team-grade review rhythm for solo developers.",
   "author": { "name": "p5ych0" },
   "repository": "https://github.com/p5ych0/watch-pr-skill",
