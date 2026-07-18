@@ -1,0 +1,10 @@
+{
+  "name": "p5ych0-tools",
+  "plugins": [
+    {
+      "name": "watch-pr-skill",
+      "source": "./",
+      "description": "Automated PR review-bus loop for solo developers."
+    }
+  ]
+}
