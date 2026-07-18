@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.8] — 2026-07-18
+- Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`
+  fails closed (blocks + writes no request) when the unresolved-threads GraphQL
+  query fails, plus a happy-path check. Recovers the one unique bit of coverage
+  from the retired in-repo legacy smoke test. Suite is now 16 tests.
+
 ## [1.0.7] — 2026-07-18
 - Default `CODEX_REVIEW_MODEL` is now `gpt-5.6-sol` — the correct Codex model id
   (the earlier `gpt-5.6` attempt was the wrong string and returned a hard 400).
