@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4] — 2026-07-18
+- Test suite: ported 7 more daemon/behavior tests (busdir, clone, health,
+  launch-context, prompt, systemd, worktree) — the plugin now carries 15 tests.
+- `review-bus-codex-start.sh` accepts `REVIEW_BUS_WATCHER` / `REVIEW_BUS_MONITOR`
+  overrides (default = the bundled siblings) so tests can inject a stub daemon.
+  No runtime behavior change — the defaults are unchanged.
+
 ## [1.0.3] — 2026-07-18
 - Default `CODEX_REVIEW_MODEL` is now `gpt-5.6` (was `gpt-5.5`). Override with the
   env var as before.

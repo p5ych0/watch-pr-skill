@@ -58,8 +58,10 @@ PID_FILE="$RUN_DIR/watcher.pid"
 MONITOR_PID_FILE="$RUN_DIR/response-monitor.pid"
 WORKTREE_ROOT="${CODEX_REVIEW_WORKTREE_ROOT:-$BUS_DIR/.codex-worktrees}"
 
-WATCHER="$SCRIPT_DIR/review-bus-codex-watcher.sh"
-MONITOR="$SCRIPT_DIR/review-bus-response-monitor.sh"
+# The watcher/monitor are the bundled siblings by default; overridable for tests
+# that inject a stub daemon (REVIEW_BUS_WATCHER / REVIEW_BUS_MONITOR).
+WATCHER="${REVIEW_BUS_WATCHER:-$SCRIPT_DIR/review-bus-codex-watcher.sh}"
+MONITOR="${REVIEW_BUS_MONITOR:-$SCRIPT_DIR/review-bus-response-monitor.sh}"
 
 WATCHER_UNIT="review-bus-${BUS_SLUG}-watcher"
 MONITOR_UNIT="review-bus-${BUS_SLUG}-monitor"
