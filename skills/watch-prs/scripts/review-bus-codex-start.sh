@@ -26,7 +26,7 @@ set -Eeuo pipefail
 codex_watcher_setenv() {
     local CODEX_REVIEW_AUTO_OPEN_PRS="${CODEX_REVIEW_AUTO_OPEN_PRS:-1}"
     local CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-gpt-5.5}"
-    local CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-xhigh}"
+    local CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-max}"
     local CODEX_REVIEW_MAX_ITERATIONS="${CODEX_REVIEW_MAX_ITERATIONS:-0}"
     local v
     for v in $(compgen -v | grep -E '^CODEX_REVIEW_' | sort || true); do

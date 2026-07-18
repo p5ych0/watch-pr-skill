@@ -50,7 +50,7 @@ if [ -z "$CODEX_BIN" ] && [ -x /home/ck/node_modules/.bin/codex ]; then
     CODEX_BIN="/home/ck/node_modules/.bin/codex"
 fi
 CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-gpt-5.5}"
-CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-xhigh}"
+CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-max}"
 
 mkdir -p "$REQ_DIR" "$RESP_DIR" "$SEEN_DIR" "$LOG_DIR" "$WORKTREE_ROOT"
 
@@ -69,7 +69,7 @@ require_tools() {
         missing=1
     fi
     case "$CODEX_REVIEW_REASONING_EFFORT" in
-        minimal|low|medium|high|xhigh) ;;
+        minimal|low|medium|high|xhigh|max) ;;
         *)
             echo "CODEX_BUS_FATAL bad_reasoning_effort=$CODEX_REVIEW_REASONING_EFFORT" >&2
             missing=1

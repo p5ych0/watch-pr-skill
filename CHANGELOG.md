@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.6] — 2026-07-18
+- Reviewer reasoning effort: `max` is now an accepted value and the default (was
+  `xhigh`). Override with `CODEX_REVIEW_REASONING_EFFORT`.
+- Model stays `gpt-5.5` — `gpt-5.6` remains unsupported for Codex ChatGPT accounts
+  (verified: hard 400).
+
 ## [1.0.5] — 2026-07-18
 - Revert default `CODEX_REVIEW_MODEL` back to `gpt-5.5`. `gpt-5.6` is **not
   supported** for Codex on a ChatGPT account (the reviewer returns a hard
