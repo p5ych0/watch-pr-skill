@@ -115,11 +115,33 @@ anytime.)
 | `CODEX_REVIEW_REASONING_EFFORT` | `xhigh` | reviewer reasoning effort |
 | `CODEX_REVIEW_COPILOT_TIMEOUT` | `300` | seconds to wait for a Copilot review |
 
-## How updates work
+## Updating
 
-Bump the plugin version and re-install/update via the tool's plugin commands. The
-`systemd --user` daemons launch from the installed plugin path; the skill is
-idempotent and re-arms on session start, so after an update just re-invoke it.
+**Claude Code:**
+
+```
+/plugin marketplace update p5ych0-tools
+/plugin update watch-pr-skill
+/reload-plugins
+```
+
+**Codex:**
+
+```
+codex plugin marketplace upgrade p5ych0-tools
+codex plugin add watch-pr-skill@p5ych0-tools
+```
+
+The `systemd --user` daemons keep running from the *previously* installed plugin
+path until relaunched — an update alone doesn't switch the live reviewer. After
+updating, relaunch them onto the new version:
+
+```
+systemctl --user stop review-bus-<owner>-<repo>-{watcher,monitor}
+```
+
+then invoke the skill again (or just start a new session in a repo with a
+`.review-bus.md` — the SessionStart hook relaunches them from the new path).
 
 ## Tested versions
 
