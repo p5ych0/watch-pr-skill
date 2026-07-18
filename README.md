@@ -98,9 +98,11 @@ surface reviews. Then:
 
 ### Optional Copilot pass
 
-After a clean Codex signoff the skill can run an optional GitHub Copilot review
-pass. It **asks first**; if you don't answer it **holds the merge** (nothing
-merges unattended). On opt-in it iterates Copilot to a clean signoff, then merges.
+After a clean Codex signoff, the skill asks whether to run an optional GitHub Copilot review pass.
+
+- **If you opt in**, it runs Copilot review rounds until clean signoff, then merges.
+- **If you explicitly decline (skip Copilot)**, it merges on the clean Codex signoff (after final merge-gate checks).
+- **If you do not answer**, it holds and does not merge unattended.
 
 ## Automatic arming (opt-in per repo)
 
