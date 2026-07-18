@@ -39,6 +39,15 @@ unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-
 - Linux with `systemd --user` for the persistent daemons (a `setsid` fallback is
   used where systemd-user is unavailable)
 
+## Platform support
+
+> **Linux only, for now.** The plugin is built and tested on Linux — the daemons
+> rely on `systemd --user` (with a `setsid` fallback) and the scripts assume a
+> POSIX shell + GNU coreutils. **macOS and Windows are not yet supported or
+> tested**; they need dedicated research + implementation (e.g. a `launchd` /
+> Windows service supervisor for the daemons, and coreutils/BSD-utils
+> differences). Contributions welcome.
+
 ## Install
 
 **Claude Code:**
