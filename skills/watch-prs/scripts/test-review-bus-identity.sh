@@ -21,6 +21,9 @@ FILES=( "$ROOT"/review-bus-codex-start.sh
 # consumer strips it); in the plugin it is always there, so it is always linted.
 SKILL="$ROOT/../SKILL.md"
 [ -f "$SKILL" ] && FILES+=( "$SKILL" )
+# The SessionStart hook (plugin-root/hooks/) must also stay repo-agnostic.
+HOOK="$ROOT/../../../hooks/session-start.sh"
+[ -f "$HOOK" ] && FILES+=( "$HOOK" )
 
 hits="$(grep -nHE "$PAT" "${FILES[@]}" 2>/dev/null || true)"
 if [ -n "$hits" ]; then

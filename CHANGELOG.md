@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.2] — 2026-07-18
+- Auto-arm: a shared `hooks/hooks.json` SessionStart hook (both tools) runs
+  `hooks/session-start.sh`, which — only in repos that opt in via a committed
+  `.review-bus.md` — ensures the daemons are up (detached) and injects a prompt to
+  attach the session's review monitor. Quiet in every other repo; always exits 0.
+- `.codex-plugin/plugin.json` declares `"hooks": "./hooks/hooks.json"` (Codex
+  bundled-hook discovery belt-and-suspenders).
+- `test-review-bus-hook.sh` covers the hook's opt-in gating + fail-safe exit.
+
 ## [1.0.1] — 2026-07-18
 - `RB_SCRIPTS` falls back to locating the installed plugin in either tool's cache
   when `$CLAUDE_PLUGIN_ROOT` isn't populated in skill bash (some Codex builds only

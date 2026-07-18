@@ -93,6 +93,17 @@ After a clean Codex signoff the skill can run an optional GitHub Copilot review
 pass. It **asks first**; if you don't answer it **holds the merge** (nothing
 merges unattended). On opt-in it iterates Copilot to a clean signoff, then merges.
 
+## Automatic arming (opt-in per repo)
+
+The plugin ships a `SessionStart` hook (both tools). In any repo that has a
+committed **`.review-bus.md`**, every new session automatically ensures the
+daemons are running (in the background) and prompts the agent to attach the
+session's review monitor — so you don't have to invoke the skill by hand. In
+repos **without** a `.review-bus.md` the hook is a silent no-op, so it never
+intrudes on unrelated work. Adding `.review-bus.md` is therefore both the review
+conventions *and* the on-switch. (You can still invoke the skill manually
+anytime.)
+
 ## Configuration (environment variables, all optional)
 
 | Variable | Default | Meaning |
