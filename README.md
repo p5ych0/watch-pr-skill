@@ -111,7 +111,7 @@ anytime.)
 | `CODEX_REVIEW_AUTO_OPEN_PRS` | `0` | `1` = watcher auto-discovers open PR heads |
 | `CODEX_REVIEW_MAX_ITERATIONS` | `0` | `0` = unlimited; the skill pauses to ask every 10th round |
 | `CODEX_REVIEW_ERROR_RETRY_MAX` | `5` | bound on auto-retries after a reviewer error |
-| `CODEX_REVIEW_MODEL` | `gpt-5.5` | reviewer model |
+| `CODEX_REVIEW_MODEL` | `gpt-5.6` | reviewer model |
 | `CODEX_REVIEW_REASONING_EFFORT` | `xhigh` | reviewer reasoning effort |
 | `CODEX_REVIEW_COPILOT_TIMEOUT` | `300` | seconds to wait for a Copilot review |
 

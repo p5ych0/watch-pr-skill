@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.0.3] — 2026-07-18
+- Default `CODEX_REVIEW_MODEL` is now `gpt-5.6` (was `gpt-5.5`). Override with the
+  env var as before.
+
 ## [1.0.2] — 2026-07-18
 - Auto-arm: a shared `hooks/hooks.json` SessionStart hook (both tools) runs
   `hooks/session-start.sh`, which — only in repos that opt in via a committed
