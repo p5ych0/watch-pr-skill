@@ -49,7 +49,7 @@ CODEX_BIN="${CODEX_BIN:-$(command -v codex || true)}"
 if [ -z "$CODEX_BIN" ] && [ -x /home/ck/node_modules/.bin/codex ]; then
     CODEX_BIN="/home/ck/node_modules/.bin/codex"
 fi
-CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-gpt-5.5}"
+CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-gpt-5.6-sol}"
 CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-max}"
 
 mkdir -p "$REQ_DIR" "$RESP_DIR" "$SEEN_DIR" "$LOG_DIR" "$WORKTREE_ROOT"

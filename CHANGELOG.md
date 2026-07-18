@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.7] — 2026-07-18
+- Default `CODEX_REVIEW_MODEL` is now `gpt-5.6-sol` — the correct Codex model id
+  (the earlier `gpt-5.6` attempt was the wrong string and returned a hard 400).
+  Verified working via `codex exec`.
+
 ## [1.0.6] — 2026-07-18
 - Reviewer reasoning effort: `max` is now an accepted value and the default (was
   `xhigh`). Override with `CODEX_REVIEW_REASONING_EFFORT`.
