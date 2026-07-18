@@ -37,7 +37,7 @@ done
 # ── Always-on knobs get sane defaults even in a clean env ────────────────────
 out="$(env -u CODEX_REVIEW_MODEL -u CODEX_REVIEW_AUTO_OPEN_PRS -u CODEX_REVIEW_REASONING_EFFORT \
         bash -c 'REVIEW_BUS_LIB_ONLY=1 source "$1" >/dev/null 2>&1; codex_watcher_setenv' _ "$START")"
-echo "$out" | grep -qx -- '--setenv=CODEX_REVIEW_MODEL=gpt-5.6'  && pass "MODEL default seeded"        || die "MODEL default missing"
+echo "$out" | grep -qx -- '--setenv=CODEX_REVIEW_MODEL=gpt-5.5'  && pass "MODEL default seeded"        || die "MODEL default missing"
 echo "$out" | grep -qx -- '--setenv=CODEX_REVIEW_AUTO_OPEN_PRS=1' && pass "AUTO_OPEN_PRS default seeded" || die "AUTO_OPEN_PRS default missing"
 
 # ── Iteration cap defaults to unlimited (0); the skill drives the pause ───────

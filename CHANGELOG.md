@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.5] — 2026-07-18
+- Revert default `CODEX_REVIEW_MODEL` back to `gpt-5.5`. `gpt-5.6` is **not
+  supported** for Codex on a ChatGPT account (the reviewer returns a hard
+  `400 invalid_request_error`), which fails every review. Set a valid model via
+  the `CODEX_REVIEW_MODEL` env var if you need a different one.
+
 ## [1.0.4] — 2026-07-18
 - Test suite: ported 7 more daemon/behavior tests (busdir, clone, health,
   launch-context, prompt, systemd, worktree) — the plugin now carries 15 tests.
@@ -8,8 +14,8 @@
   No runtime behavior change — the defaults are unchanged.
 
 ## [1.0.3] — 2026-07-18
-- Default `CODEX_REVIEW_MODEL` is now `gpt-5.6` (was `gpt-5.5`). Override with the
-  env var as before.
+- Default `CODEX_REVIEW_MODEL` set to `gpt-5.6` (was `gpt-5.5`). *(Reverted in
+  1.0.5 — gpt-5.6 is unsupported for Codex ChatGPT accounts.)*
 
 ## [1.0.2] — 2026-07-18
 - Auto-arm: a shared `hooks/hooks.json` SessionStart hook (both tools) runs
