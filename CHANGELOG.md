@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.0.9] — 2026-07-19
+- **New `review-bus-close-round.sh` — one-command round close-out.** The bus
+  handoff after addressing a Codex round is not "push + comment": the loop only
+  continues when every thread is replied-to + resolved, a fresh summary is
+  posted, the next SHA is enqueued, and the handled response is acked. Skipping
+  any of these silently stalls the loop (the watcher holds auto-enqueue while
+  threads are unresolved; `review-bus-request.sh`'s gate blocks). The new script
+  does the whole finalize in one command — preflight up front, then the steps in
+  a fail-safe order: resolve every open thread with a thread-level ack, post the
+  summary, re-enqueue via `review-bus-request.sh` (all gates re-checked), and ack
+  the pre-request responses. It is not transactional — a failure partway stops
+  loudly (non-zero exit) and is safe to re-run — but no step is silently skipped.
+  SKILL step 7 now calls it instead of the hand-run resolve → request → ack
+  sequence that was easy to half-complete. `test-review-bus-close-round.sh`
+  covers it (suite: 17).
+  - Preflight validates the whole close-out BEFORE the first GitHub mutation:
+    HEAD clean + pushed + equal to the PR's head, and `--summary` a **regular**
+    readable file (`-r` alone accepts a dir/FIFO that would only fail inside
+    `gh pr comment` after every thread is resolved). A reply failure leaves its
+    thread unresolved and exits non-zero — never resolve-without-ack.
+  - Race-free ack: the round-summary responses are acked by the digest captured
+    **before** mutating, via a new `review-bus-response-monitor.sh
+    --ack-if-digest <resp> <sha256>` that writes the marker from that value
+    without re-hashing the file. Closes an ack TOCTOU — a watcher that swaps in a
+    fresh same-SHA review between snapshot and ack now yields a different digest
+    the marker can't suppress, so its notification still fires.
+  - The "HEAD pushed" preflight resolves the remote head the same way
+    `review-bus-request.sh` does — `origin/$BRANCH`, then the actual upstream ref
+    — so close-round never rejects a branch (upstream ≠ `origin/$BRANCH`) that the
+    request gate it forwards to would accept.
+  - The pre-mutation response snapshot is tolerant of a junk / mid-write /
+    unreadable `resp-*.json`: it obtains both the pr and the digest defensively
+    and skips a file that yields neither, so a single bad file can no longer abort
+    the whole close-out under `set -euo pipefail`.
+  - The clean-checkout preflight now checks the index too (`git diff --cached`),
+    not just `git diff HEAD` — a staged change whose worktree copy was reverted to
+    HEAD (index ≠ HEAD, worktree = HEAD) is no longer mistaken for clean.
+  - `--summary` validates its argument before shifting: a bare `--summary`, or one
+    followed by another flag, now errors clearly instead of a cryptic `shift`
+    failure (or swallowing the PR number as the summary path).
+  - Fails early with a clear message when the repo owner/repo can't be derived
+    (missing / non-GitHub `origin`) instead of falling through to confusing `gh`
+    errors — pointing at `REVIEW_BUS_OWNER`/`REVIEW_BUS_REPO`.
+  - The "HEAD pushed" error now names the actual upstream ref (not always
+    `origin/$BRANCH`), matching the upstream fallback used to resolve it; and the
+    review-thread pagination breaks unless both `hasNextPage` and a non-empty
+    cursor are present (mirrors `review-bus-request.sh`), so a partial payload
+    can't loop on an invalid cursor.
+
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`
   fails closed (blocks + writes no request) when the unresolved-threads GraphQL
