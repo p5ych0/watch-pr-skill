@@ -93,8 +93,14 @@ if [ -n "$SUMMARY_FILE" ] && { [ ! -f "$SUMMARY_FILE" ] || [ ! -r "$SUMMARY_FILE
     fail "--summary must be a readable regular file: $SUMMARY_FILE" 1
 fi
 if [ "$FORCE" -eq 0 ]; then
-    git diff --quiet --ignore-submodules HEAD -- 2>/dev/null \
-        || fail "dirty worktree — commit or stash before closing the round (or --force to debug the bus)."
+    # Clean == no UNSTAGED and no STAGED diff vs HEAD. `git diff HEAD` alone
+    # misses a staged change whose worktree copy was reverted to HEAD (index !=
+    # HEAD, worktree == HEAD), so also check --cached; together they attest the
+    # checkout truly matches HEAD. (Untracked files are intentionally ignored —
+    # they don't alter the reviewed HEAD state.)
+    { git diff --quiet --ignore-submodules HEAD -- 2>/dev/null \
+        && git diff --cached --quiet --ignore-submodules HEAD -- 2>/dev/null; } \
+        || fail "dirty checkout (unstaged or staged changes) — commit or stash before closing the round (or --force to debug the bus)."
     upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
         || fail "branch $BRANCH has no upstream — run: git push -u origin $BRANCH"
     git fetch --quiet origin "$BRANCH" 2>/dev/null \

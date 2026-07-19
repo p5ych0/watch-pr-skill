@@ -31,6 +31,9 @@
     unreadable `resp-*.json`: it obtains both the pr and the digest defensively
     and skips a file that yields neither, so a single bad file can no longer abort
     the whole close-out under `set -euo pipefail`.
+  - The clean-checkout preflight now checks the index too (`git diff --cached`),
+    not just `git diff HEAD` — a staged change whose worktree copy was reverted to
+    HEAD (index ≠ HEAD, worktree = HEAD) is no longer mistaken for clean.
 
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`

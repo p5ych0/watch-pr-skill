@@ -168,4 +168,22 @@ printf 'this is not json{' > "$BUS/responses/resp-junk.json"     # unparsable
 [ -e "$BUS/.monitor-acked/resp-oldsha1.json.$GOOD_DIGEST" ] && pass "junk-response: good response acked" || die "junk-response: good response not acked"
 ls "$BUS/.monitor-acked"/resp-junk.json.* >/dev/null 2>&1 && die "junk-response: junk file wrongly acked" || pass "junk-response: junk file skipped (not acked)"
 
+# ── 8. A dirty INDEX (staged change, worktree reverted to HEAD) blocks too ───
+# `git diff HEAD` alone is clean when a staged change's worktree copy was
+# reverted to HEAD, so the preflight must also check --cached. Old code would
+# proceed and resolve threads; the fix must fail before any mutation. (Non-force
+# so the git preflight runs; the dirty gate is first, before upstream/head.)
+BUS="$(new_bus 8)"; GHLOG="$TMP/gh8.log"; : > "$GHLOG"
+(
+  cd "$REPO"
+  printf 'staged only\n' >> f
+  git add f
+  git cat-file blob HEAD:f > f          # worktree back to HEAD; index stays staged
+)
+( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --summary "$TMP/sum.md" >/dev/null 2>"$TMP/e8" ); rc=$?
+git -C "$REPO" reset -q --hard HEAD 2>/dev/null      # restore clean tree for any later use
+[ "$rc" -ne 0 ] && pass "dirty-index: staged-only change blocks the close-out" || die "dirty-index: proceeded on a dirty index"
+grep -qi 'dirty' "$TMP/e8" && pass "dirty-index: reports a dirty checkout" || die "dirty-index: did not report dirty ($(cat "$TMP/e8"))"
+[ "$(grep -c RESOLVE "$GHLOG")" -eq 0 ] && pass "dirty-index: mutated nothing" || die "dirty-index: mutated before failing"
+
 exit $fail
