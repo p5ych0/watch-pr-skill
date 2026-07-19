@@ -4,9 +4,12 @@
 # Covers the happy path AND the "fail before irreversible mutation" gates the
 # reviewer flagged: a non-regular --summary (dir/FIFO), a reply failure, and a
 # HEAD that is not the PR's head must all stop BEFORE any thread is resolved.
-# Plus the ack TOCTOU regression: a same-SHA response swapped in AFTER the
-# close-out must still notify (its digest differs, so the marker can't suppress
-# it). Uses a REAL throwaway git repo (bare origin + pushed HEAD with upstream)
+# Plus the ack TOCTOU regression: a same-SHA response swapped in DURING the
+# close-out — after the snapshot, before the ack (injected via the gh summary
+# stub) — must leave the handled (captured) digest marked and the replacement
+# unmarked + re-emitted. Swapping only after close-round returns would prove
+# nothing (the old compare-then---ack passes that); mid-close is what catches a
+# regression. Uses a REAL throwaway git repo (bare origin + pushed HEAD with upstream)
 # so request.sh's git gates pass; identity is forced via REVIEW_BUS_OWNER/REPO
 # so `origin` can stay the local bare repo (the head-mismatch gate needs the git
 # gates to PASS so execution actually reaches the PR-head comparison). `gh` is
@@ -57,7 +60,14 @@ case "\$args" in
   *"reviewThreads"*)                    printf '%s' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"T1","isResolved":false},{"id":"T2","isResolved":false}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}' ;;
   *"addPullRequestReviewThreadReply"*)  [ "\${STUB_REPLY_FAIL:-0}" = "1" ] && { echo "REPLYFAIL" >> "\$GHLOG"; exit 1; }; echo "REPLY" >> "\$GHLOG"; printf '{"data":{}}' ;;
   *"resolveReviewThread"*)              echo "RESOLVE" >> "\$GHLOG"; printf '{"data":{"resolveReviewThread":{"thread":{"isResolved":true}}}}' ;;
-  *"pr comment"*)                       echo "SUMMARY" >> "\$GHLOG"; echo "https://x/comment" ;;
+  *"pr comment"*)                       echo "SUMMARY" >> "\$GHLOG";
+                                        # STUB_SWAP_RESP=1: overwrite the response
+                                        # HERE — mid-close, AFTER close-round's
+                                        # snapshot but BEFORE its ack — to prove
+                                        # the ack keys on the captured digest and
+                                        # cannot regress to a re-hash.
+                                        [ "\${STUB_SWAP_RESP:-0}" = "1" ] && printf '%s' '{"pr":7,"sha":"oldsha1","status":"changes","findings_count":9}' > "\$BUS_DIR/responses/resp-oldsha1.json";
+                                        echo "https://x/comment" ;;
   *)                                    printf '{}' ;;
 esac
 STUB
@@ -111,22 +121,26 @@ BUS="$(new_bus 5)"; GHLOG="$TMP/gh5.log"; : > "$GHLOG"
 grep -q "headRefOid" "$GHLOG" && pass "head-mismatch: reached the PR-head gate (git preflight passed)" || die "head-mismatch: never called headRefOid — failed at an earlier git gate, test is inert"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 0 ] && pass "head-mismatch: mutated nothing" || die "head-mismatch: mutated before failing"
 
-# ── 6. Ack TOCTOU: a same-SHA swap AFTER close-out still notifies ────────────
-# close-round acks resp-oldsha1.json by the digest it CAPTURED. If the watcher
-# then overwrites that path with a fresh same-SHA review (different content →
-# different digest), the marker keyed on the OLD digest must NOT suppress it —
-# the monitor must re-emit the fresh review.
+# ── 6. Ack TOCTOU proven: swap DURING close-out (snapshot < swap < ack) ──────
+# The swap is injected by the gh summary-post stub (STUB_SWAP_RESP=1), so it
+# lands AFTER close-round snapshots the response but BEFORE it acks — the exact
+# interleaving the fix must survive. A swap AFTER close-round returns would prove
+# nothing: the old compare-then---ack passes that too. Here it does NOT:
+#   • THIS impl acks the digest CAPTURED at snapshot → the handled (old) digest
+#     is marked; the mid-close replacement (new digest) stays unmarked + emits.
+#   • The old f55bd6f impl re-hashes the swapped file: its section-5 compare
+#     mismatches, it SKIPS the ack, and the handled digest is left UNMARKED — so
+#     "handled digest marked" fails, catching the regression.
 BUS="$(new_bus 6)"; GHLOG="$TMP/gh6.log"; : > "$GHLOG"
 RESP="$BUS/responses/resp-oldsha1.json"
 OLD_DIGEST="$(sha256sum "$RESP" | awk '{print $1}')"
-( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --summary "$TMP/sum.md" >/dev/null 2>/dev/null ); rc=$?
-[ "$rc" -eq 0 ] || die "ack-race: close-out failed (rc=$rc)"
-[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$OLD_DIGEST" ] && pass "ack-race: marked the handled digest" || die "ack-race: handled digest not marked"
-# Watcher swaps in a FRESH same-SHA review (different content → different digest).
-printf '{"pr":7,"sha":"oldsha1","status":"changes","findings_count":9}' > "$RESP"
+( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" STUB_SWAP_RESP=1 "$CLOSE" 7 --force --summary "$TMP/sum.md" >/dev/null 2>/dev/null ); rc=$?
+[ "$rc" -eq 0 ] || die "swap-during: close-out failed (rc=$rc)"
 NEW_DIGEST="$(sha256sum "$RESP" | awk '{print $1}')"
-[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$NEW_DIGEST" ] && die "ack-race: fresh review's digest wrongly suppressed" || pass "ack-race: fresh same-SHA review NOT suppressed"
+[ "$OLD_DIGEST" != "$NEW_DIGEST" ] || die "swap-during: response was not actually swapped mid-close (test setup broken)"
+[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$OLD_DIGEST" ] && pass "swap-during: HANDLED (captured) digest marked — no regression to re-hash" || die "swap-during: handled digest NOT marked (regressed to compare-then-ack)"
+[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$NEW_DIGEST" ] && die "swap-during: mid-close replacement digest wrongly marked (would suppress a fresh review)" || pass "swap-during: replacement digest unmarked"
 OUT="$( MONITOR_EMITTED_DIR="$TMP/em6" BUS_DIR="$BUS" "$MONITOR" --once 2>/dev/null )"
-echo "$OUT" | grep -q "findings=9" && pass "ack-race: monitor re-emits the fresh review" || die "ack-race: monitor suppressed the fresh review"
+echo "$OUT" | grep -q "findings=9" && pass "swap-during: monitor emits the mid-close replacement" || die "swap-during: replacement suppressed"
 
 exit $fail
