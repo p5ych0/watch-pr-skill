@@ -195,4 +195,13 @@ grep -qi 'dirty' "$TMP/e8" && pass "dirty-index: reports a dirty checkout" || di
 ( cd "$REPO" && PATH="$BIN:$PATH" "$CLOSE" 7 --summary --force >/dev/null 2>"$TMP/e9b" ); rc=$?
 { [ "$rc" -ne 0 ] && grep -q 'requires a file-path' "$TMP/e9b"; } && pass "summary-noval: --summary before a flag errors (flag not swallowed)" || die "summary-noval: flag swallowed as value ($(cat "$TMP/e9b"))"
 
+# ── 10. Missing/non-GitHub origin (no identity env) → clear early error ──────
+# With no origin remote and REVIEW_BUS_OWNER/REPO unset, the derived slug is
+# empty; the guard must fail early naming the env vars, not fall through to a
+# confusing `gh not found`.
+NOORIGIN="$TMP/noorigin"; git init -q "$NOORIGIN"
+( cd "$NOORIGIN" && git config user.email t@t.t && git config user.name t && echo x > f && git add f && git commit -qm init ) >/dev/null 2>&1
+( cd "$NOORIGIN" && PATH="$BIN:$PATH" env -u REVIEW_BUS_OWNER -u REVIEW_BUS_REPO "$CLOSE" 7 --force >/dev/null 2>"$TMP/e10" ); rc=$?
+{ [ "$rc" -ne 0 ] && grep -q 'REVIEW_BUS_OWNER' "$TMP/e10"; } && pass "no-identity: clear owner/repo error naming the env vars" || die "no-identity: unclear error ($(cat "$TMP/e10"))"
+
 exit $fail

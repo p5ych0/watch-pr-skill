@@ -58,6 +58,13 @@ else
     REPO="${REVIEW_BUS_REPO:-}"
 fi
 REPO_SLUG="$OWNER/$REPO"
+# A missing/local-path origin yields an empty (or non-GitHub) slug; without this
+# every gh call below would fail with a confusing "not found" instead of naming
+# the real cause.
+if [ -z "$OWNER" ] || [ -z "$REPO" ]; then
+    echo "ERR: could not derive owner/repo from origin ('${REMOTE:-none}'). Run inside a GitHub checkout, or export REVIEW_BUS_OWNER and REVIEW_BUS_REPO." >&2
+    exit 1
+fi
 BUS_SLUG="$(printf '%s' "${OWNER:+${OWNER}-}${REPO}" | tr -c 'A-Za-z0-9._-' '-')"
 BUS_DIR="${BUS_DIR:-/tmp/${BUS_SLUG:-review}-review-bus}"
 RESP_DIR="$BUS_DIR/responses"
@@ -127,7 +134,7 @@ if [ "$FORCE" -eq 0 ]; then
     # gate it forwards to.
     remote_sha=$(git rev-parse "origin/$BRANCH" 2>/dev/null || git rev-parse "$upstream" 2>/dev/null || echo "")
     { [ -n "$remote_sha" ] && [ "$FULL_SHA" = "$remote_sha" ]; } \
-        || fail "local HEAD ($FULL_SHA) != origin/$BRANCH (${remote_sha:-unknown}). Push HEAD first."
+        || fail "local HEAD ($FULL_SHA) != ${upstream:-origin/$BRANCH} (${remote_sha:-unknown}). Push HEAD first."
     pr_head=$(gh pr view "$PR" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
         || fail "could not fetch head of PR #$PR to confirm this checkout is its branch."
     [ "$pr_head" = "$FULL_SHA" ] \
@@ -192,8 +199,12 @@ while true; do
         fi
     done < <(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false) | .id')
 
-    [ "$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "true" ] || break
-    cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+    # Mirror review-bus-request.sh: continue only when there is a next page AND a
+    # non-empty cursor. A malformed/partial payload with hasNextPage=true but an
+    # empty endCursor would otherwise loop with an invalid `after:` cursor.
+    has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' 2>/dev/null)
+    cursor=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""' 2>/dev/null)
+    { [ "$has_next" = "true" ] && [ -n "$cursor" ]; } || break
 done
 echo "resolved ${resolved} thread(s) on PR #$PR"
 

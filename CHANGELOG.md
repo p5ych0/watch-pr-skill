@@ -40,6 +40,14 @@
   - `--summary` validates its argument before shifting: a bare `--summary`, or one
     followed by another flag, now errors clearly instead of a cryptic `shift`
     failure (or swallowing the PR number as the summary path).
+  - Fails early with a clear message when the repo owner/repo can't be derived
+    (missing / non-GitHub `origin`) instead of falling through to confusing `gh`
+    errors — pointing at `REVIEW_BUS_OWNER`/`REVIEW_BUS_REPO`.
+  - The "HEAD pushed" error now names the actual upstream ref (not always
+    `origin/$BRANCH`), matching the upstream fallback used to resolve it; and the
+    review-thread pagination breaks unless both `hasNextPage` and a non-empty
+    cursor are present (mirrors `review-bus-request.sh`), so a partial payload
+    can't loop on an invalid cursor.
 
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`
