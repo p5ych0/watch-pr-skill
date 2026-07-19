@@ -186,4 +186,13 @@ git -C "$REPO" reset -q --hard HEAD 2>/dev/null      # restore clean tree for an
 grep -qi 'dirty' "$TMP/e8" && pass "dirty-index: reports a dirty checkout" || die "dirty-index: did not report dirty ($(cat "$TMP/e8"))"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 0 ] && pass "dirty-index: mutated nothing" || die "dirty-index: mutated before failing"
 
+# ── 9. --summary without a value fails cleanly during arg-parse ──────────────
+# A bare `--summary` (or one followed by another flag) must error with a clear
+# message during parsing — never `shift 2` past the end (cryptic under set -e) or
+# swallow the PR number / next flag as the summary path.
+( cd "$REPO" && PATH="$BIN:$PATH" "$CLOSE" 7 --summary >/dev/null 2>"$TMP/e9a" ); rc=$?
+{ [ "$rc" -ne 0 ] && grep -q 'requires a file-path' "$TMP/e9a"; } && pass "summary-noval: bare --summary errors clearly" || die "summary-noval: no clear error ($(cat "$TMP/e9a"))"
+( cd "$REPO" && PATH="$BIN:$PATH" "$CLOSE" 7 --summary --force >/dev/null 2>"$TMP/e9b" ); rc=$?
+{ [ "$rc" -ne 0 ] && grep -q 'requires a file-path' "$TMP/e9b"; } && pass "summary-noval: --summary before a flag errors (flag not swallowed)" || die "summary-noval: flag swallowed as value ($(cat "$TMP/e9b"))"
+
 exit $fail

@@ -10,7 +10,11 @@
 # request, and the handled response acked. Skipping any of these silently
 # stalls the loop (the watcher holds auto-enqueue while threads are unresolved,
 # and review-bus-request.sh's own gate blocks). This script performs the whole
-# mechanical close-out atomically so it can't be half-done:
+# mechanical close-out in one command — every local check up front, then the
+# steps in a fail-safe order — so no step is silently skipped. It is NOT
+# transactional: a failure partway (e.g. GitHub flaking mid-resolve) can leave a
+# partial state, but it stops loudly with a non-zero exit and is safe to re-run.
+# The steps:
 #
 #   0. Preflight EVERYTHING local before touching GitHub — summary readable,
 #      worktree clean, HEAD pushed, and HEAD == PR #N's head. A wrong/dirty/
@@ -63,9 +67,18 @@ SUMMARY_FILE=""
 FORCE=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --summary) SUMMARY_FILE="${2:-}"; shift 2 ;;
+        --summary)
+            # Require a value BEFORE shifting: a bare `--summary` (or one followed
+            # by another flag) would otherwise `shift 2` past the end — a cryptic
+            # "shift count out of range" under set -e — or silently swallow the PR
+            # number as the summary path.
+            if [ $# -lt 2 ] || [ "${2#-}" != "$2" ]; then
+                echo "ERR: --summary requires a file-path argument (got: ${2:-<none>})" >&2
+                exit 1
+            fi
+            SUMMARY_FILE="$2"; shift 2 ;;
         --force) FORCE=1; shift ;;
-        --help|-h) sed -n '2,45p' "$0"; exit 0 ;;
+        --help|-h) sed -n '2,44p' "$0"; exit 0 ;;
         *) PR="$1"; shift ;;
     esac
 done

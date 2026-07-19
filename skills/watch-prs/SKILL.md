@@ -243,7 +243,7 @@ closes when every thread is replied-to + resolved, a fresh summary is posted, th
 new SHA is enqueued as a request, and the handled response is acked. Skipping any
 of these silently **stalls the loop** — the watcher holds auto-enqueue while
 threads are unresolved, and `review-bus-request.sh`'s own gate blocks.
-`review-bus-close-round.sh` does the whole handoff atomically so it can't be half-done.
+`review-bus-close-round.sh` does the whole handoff in one command — every local check up front, then the steps in a fail-safe order — so no step is silently skipped. It isn't transactional: a failure partway can leave a partial state, but it stops loudly (non-zero exit) and is safe to re-run.
 
 Decide each finding's disposition (addressed vs. intentionally skipped), write the
 round summary to a file, then run one command from the PR worktree:
