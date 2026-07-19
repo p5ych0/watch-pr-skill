@@ -26,11 +26,13 @@
 #      request.sh's "summary newer than latest inline" gate.
 #   4. Re-enqueue the next review pass via review-bus-request.sh (which
 #      re-verifies clean-tree + head-pushed + zero-unresolved + summary gates).
-#   5. Ack each snapshot response by its CAPTURED digest in one monitor call
-#      (--ack-if-digest). The marker is keyed on the step-1 digest, never a
-#      re-hash of the on-disk file, so a same-SHA re-review written underneath us
-#      carries a different digest and is NOT suppressed — its notification still
-#      fires. No compare-then-ack window. Ack failures are surfaced, not swallowed.
+#   5. Ack each snapshot response by its CAPTURED digest — one `--ack-if-digest`
+#      monitor call PER response. Each call's marker is keyed on the step-1 digest,
+#      never a re-hash of the on-disk file, so a same-SHA re-review written
+#      underneath us carries a different digest and is NOT suppressed — its
+#      notification still fires. No compare-then-ack window per response (the acks
+#      are independent writes, not one atomic batch). Failures are surfaced, not
+#      swallowed.
 #
 # Judgment stays with the implementer: you decide WHICH findings you addressed
 # vs. intentionally skipped (documented in --summary and/or your own per-thread
@@ -201,13 +203,15 @@ req_args=("$PR")
 [ "$FORCE" -eq 1 ] && req_args+=(--force)
 "$SCRIPT_DIR"/review-bus-request.sh "${req_args[@]}"
 
-# ── 5. Ack each snapshot response by its CAPTURED digest (single atomic op) ───
-# The marker is keyed on the digest snapshotted in step 1 — the monitor writes
-# it verbatim, never re-hashing the on-disk file. So if the watcher overwrote
-# resp-$SHA.json with a fresh same-SHA review after the snapshot, that review's
-# digest differs and this marker can't suppress it; its notification still fires.
-# There is no compare-then-ack window because the marker key is a fixed value,
-# not a second read of a file the watcher may have swapped underneath us.
+# ── 5. Ack each snapshot response by its CAPTURED digest (one call per response) ─
+# One `--ack-if-digest` call per snapshot file — independent writes, not a single
+# atomic batch. Each marker is keyed on the digest snapshotted in step 1 — the
+# monitor writes it verbatim, never re-hashing the on-disk file. So if the watcher
+# overwrote resp-$SHA.json with a fresh same-SHA review after the snapshot, that
+# review's digest differs and this marker can't suppress it; its notification
+# still fires. There is no compare-then-ack window for a given response because
+# its marker key is a fixed value, not a second read of a file the watcher may
+# have swapped underneath us.
 ack_failures=0
 for i in "${!snap_files[@]}"; do
     "$SCRIPT_DIR"/review-bus-response-monitor.sh --ack-if-digest "${snap_files[$i]}" "${snap_digests[$i]}" \
