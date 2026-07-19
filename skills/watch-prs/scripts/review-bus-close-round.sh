@@ -114,12 +114,24 @@ if [ "$FORCE" -eq 0 ]; then
 fi
 
 # ── 1. Snapshot pre-round responses (path + digest) BEFORE any mutation ──────
+# Tolerant of a transiently unreadable / mid-write response: under
+# `set -euo pipefail` an unguarded `sha256sum $f` (or `jq`) on an incomplete or
+# vanished file would fail the pipeline and abort the ENTIRE close-round here,
+# before anything useful happens, with no hint which file. So obtain BOTH the pr
+# and the digest defensively (`|| true` defuses set -e/pipefail) and only snapshot
+# a response when both succeeded — a junk/partial file is skipped, not fatal.
 snap_files=(); snap_digests=()
 if [ -d "$RESP_DIR" ]; then
     while IFS= read -r f; do
-        [ "$(jq -r '.pr // ""' "$f" 2>/dev/null)" = "$PR" ] || continue
+        pr_of="$(jq -r '.pr // ""' "$f" 2>/dev/null || true)"
+        [ "$pr_of" = "$PR" ] || continue
+        dg="$(sha256sum "$f" 2>/dev/null | awk '{print $1}' || true)"
+        if [ -z "$dg" ]; then
+            echo "note: skipping unreadable/incomplete response in snapshot: $f" >&2
+            continue
+        fi
         snap_files+=("$f")
-        snap_digests+=("$(sha256sum "$f" | awk '{print $1}')")
+        snap_digests+=("$dg")
     done < <(find "$RESP_DIR" -maxdepth 1 -type f -name 'resp-*.json' 2>/dev/null)
 fi
 

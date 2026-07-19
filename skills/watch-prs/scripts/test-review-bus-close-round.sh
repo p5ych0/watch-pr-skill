@@ -143,4 +143,19 @@ NEW_DIGEST="$(sha256sum "$RESP" | awk '{print $1}')"
 OUT="$( MONITOR_EMITTED_DIR="$TMP/em6" BUS_DIR="$BUS" "$MONITOR" --once 2>/dev/null )"
 echo "$OUT" | grep -q "findings=9" && pass "swap-during: monitor emits the mid-close replacement" || die "swap-during: replacement suppressed"
 
+# ── 7. A junk/unparsable response in the dir must NOT abort the snapshot ──────
+# Section 1 runs under set -euo pipefail; an unguarded jq/sha256sum on an
+# incomplete or unreadable resp-*.json would fail the pipeline and abort the
+# whole close-out before it mutates anything. The snapshot must skip the junk
+# file, still process the good one, and never ack the junk.
+BUS="$(new_bus 7)"; GHLOG="$TMP/gh7.log"; : > "$GHLOG"
+GOOD_DIGEST="$(sha256sum "$BUS/responses/resp-oldsha1.json" | awk '{print $1}')"
+printf 'this is not json{' > "$BUS/responses/resp-junk.json"     # unparsable
+: > "$BUS/responses/resp-empty.json"                             # empty (jq → no pr)
+( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --summary "$TMP/sum.md" >/dev/null 2>/dev/null ); rc=$?
+[ "$rc" -eq 0 ] && pass "junk-response: close-out still succeeds (snapshot tolerant)" || die "junk-response: aborted (rc=$rc)"
+[ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "junk-response: threads still resolved" || die "junk-response: threads not resolved ($(grep -c RESOLVE "$GHLOG"))"
+[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$GOOD_DIGEST" ] && pass "junk-response: good response acked" || die "junk-response: good response not acked"
+ls "$BUS/.monitor-acked"/resp-junk.json.* >/dev/null 2>&1 && die "junk-response: junk file wrongly acked" || pass "junk-response: junk file skipped (not acked)"
+
 exit $fail

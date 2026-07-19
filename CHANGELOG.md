@@ -27,6 +27,10 @@
     `review-bus-request.sh` does — `origin/$BRANCH`, then the actual upstream ref
     — so close-round never rejects a branch (upstream ≠ `origin/$BRANCH`) that the
     request gate it forwards to would accept.
+  - The pre-mutation response snapshot is tolerant of a junk / mid-write /
+    unreadable `resp-*.json`: it obtains both the pr and the digest defensively
+    and skips a file that yields neither, so a single bad file can no longer abort
+    the whole close-out under `set -euo pipefail`.
 
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`
