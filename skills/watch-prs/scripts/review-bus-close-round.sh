@@ -12,22 +12,28 @@
 # and review-bus-request.sh's own gate blocks). This script performs the whole
 # mechanical close-out atomically so it can't be half-done:
 #
-#   1. For every UNRESOLVED review thread on the PR: post a thread-level reply
-#      (pointing at the round summary) and resolve it.
-#   2. Post the round-summary issue comment (from --summary <file>, else a
+#   0. Preflight EVERYTHING local before touching GitHub — summary readable,
+#      worktree clean, HEAD pushed, and HEAD == PR #N's head. A wrong/dirty/
+#      unpushed checkout must fail before any irreversible thread mutation.
+#   1. Snapshot the pre-round responses (path + content digest) BEFORE mutating,
+#      so a review written by auto-enqueue mid-run can't be mistaken for a
+#      handled one.
+#   2. For every UNRESOLVED review thread: post a thread-level reply, then
+#      resolve it. If the reply FAILS, leave the thread unresolved (its ack is
+#      the point) and finish with a non-zero, clearly-incomplete result.
+#   3. Post the round-summary issue comment (from --summary <file>, else a
 #      minimal auto-summary) so it lands AFTER the inline replies — satisfying
 #      request.sh's "summary newer than latest inline" gate.
-#   3. Re-enqueue the next review pass via review-bus-request.sh (which
+#   4. Re-enqueue the next review pass via review-bus-request.sh (which
 #      re-verifies clean-tree + head-pushed + zero-unresolved + summary gates).
-#   4. Ack the responses that existed before the re-request, so already-handled
-#      rounds are never re-surfaced (the fresh resp-<newsha>.json is left
-#      un-acked so the next round emits normally).
+#   5. Ack each snapshot response ONLY IF its file is byte-identical to the
+#      snapshot — a same-path re-review (different digest) is left un-acked so
+#      its notification still fires. Ack failures are surfaced, never swallowed.
 #
 # Judgment stays with the implementer: you decide WHICH findings you addressed
 # vs. intentionally skipped (documented in --summary and/or your own per-thread
-# replies before running this). This script only automates the finalize step
-# that is easy to forget. Pass --force to forward a bus-debug bypass to
-# review-bus-request.sh.
+# replies before running this). Pass --force to skip the local preflight and
+# forward a bus-debug bypass to review-bus-request.sh.
 
 set -euo pipefail
 
@@ -55,7 +61,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --summary) SUMMARY_FILE="${2:-}"; shift 2 ;;
         --force) FORCE=1; shift ;;
-        --help|-h) sed -n '2,40p' "$0"; exit 0 ;;
+        --help|-h) sed -n '2,45p' "$0"; exit 0 ;;
         *) PR="$1"; shift ;;
     esac
 done
@@ -68,38 +74,78 @@ if ! [[ "$PR" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+FULL_SHA=$(git rev-parse HEAD)
 SHA=$(git rev-parse --short=7 HEAD)
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# ── 1. Reply-to + resolve every unresolved review thread (paginated) ─────────
+fail() { echo "ERR: $1" >&2; exit "${2:-2}"; }
+
+# ── 0. Preflight — validate EVERYTHING local before any GitHub mutation ──────
+# The --summary file is checked unconditionally (a typo must never surface only
+# after threads are resolved). --force skips the git/PR-identity gates only.
+if [ -n "$SUMMARY_FILE" ] && [ ! -r "$SUMMARY_FILE" ]; then
+    fail "--summary file not readable: $SUMMARY_FILE" 1
+fi
+if [ "$FORCE" -eq 0 ]; then
+    git diff --quiet --ignore-submodules HEAD -- 2>/dev/null \
+        || fail "dirty worktree — commit or stash before closing the round (or --force to debug the bus)."
+    upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) \
+        || fail "branch $BRANCH has no upstream — run: git push -u origin $BRANCH"
+    git fetch --quiet origin "$BRANCH" 2>/dev/null \
+        || fail "could not fetch origin/$BRANCH to confirm HEAD is pushed. Retry when the remote is reachable."
+    remote_sha=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+    { [ -n "$remote_sha" ] && [ "$FULL_SHA" = "$remote_sha" ]; } \
+        || fail "local HEAD ($FULL_SHA) != origin/$BRANCH (${remote_sha:-unknown}). Push HEAD first."
+    pr_head=$(gh pr view "$PR" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        || fail "could not fetch head of PR #$PR to confirm this checkout is its branch."
+    [ "$pr_head" = "$FULL_SHA" ] \
+        || fail "local HEAD ($FULL_SHA) is not PR #$PR's head ($pr_head) — check out the PR branch before closing its round."
+fi
+
+# ── 1. Snapshot pre-round responses (path + digest) BEFORE any mutation ──────
+snap_files=(); snap_digests=()
+if [ -d "$RESP_DIR" ]; then
+    while IFS= read -r f; do
+        [ "$(jq -r '.pr // ""' "$f" 2>/dev/null)" = "$PR" ] || continue
+        snap_files+=("$f")
+        snap_digests+=("$(sha256sum "$f" | awk '{print $1}')")
+    done < <(find "$RESP_DIR" -maxdepth 1 -type f -name 'resp-*.json' 2>/dev/null)
+fi
+
+# ── 2. Reply-to + resolve every unresolved review thread (paginated) ─────────
 reply_body="🤖 Round \`${SHA}\` close-out via the review bus — see the round-summary comment for this finding's disposition (addressed or intentionally skipped)."
-resolved=0
+resolved=0; reply_failures=0
 cursor=""
 while true; do
     if [ -z "$cursor" ]; then
         page=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f query='
           query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
             reviewThreads(first:100){nodes{id isResolved} pageInfo{hasNextPage endCursor}}}}}' 2>/dev/null) \
-          || { echo "ERR: could not fetch review threads for PR #$PR" >&2; exit 3; }
+          || fail "could not fetch review threads for PR #$PR" 3
     else
         page=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -F c="$cursor" -f query='
           query($owner:String!,$name:String!,$pr:Int!,$c:String!){repository(owner:$owner,name:$name){pullRequest(number:$pr){
             reviewThreads(first:100, after:$c){nodes{id isResolved} pageInfo{hasNextPage endCursor}}}}}' 2>/dev/null) \
-          || { echo "ERR: could not fetch review threads (page) for PR #$PR" >&2; exit 3; }
+          || fail "could not fetch review threads (page) for PR #$PR" 3
     fi
     echo "$page" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 \
-        || { echo "ERR: unexpected review-threads payload for PR #$PR" >&2; exit 3; }
+        || fail "unexpected review-threads payload for PR #$PR" 3
 
     while IFS= read -r tid; do
         [ -n "$tid" ] || continue
-        # Reply first (thread-level ack), then resolve. A reply failure is
-        # non-fatal — the resolve is what unblocks the gate.
-        gh api graphql -F id="$tid" -F body="$reply_body" -f query='
-          mutation($id:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id, body:$body}){clientMutationId}}' \
-          >/dev/null 2>&1 || echo "warn: reply failed for thread $tid (continuing to resolve)" >&2
-        gh api graphql -F id="$tid" -f query='
-          mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' \
-          >/dev/null 2>&1 || { echo "ERR: could not resolve thread $tid" >&2; exit 4; }
-        resolved=$((resolved + 1))
+        # Reply is the point of the thread ack — if it fails, do NOT resolve;
+        # the thread stays open so the next run retries and the gate blocks.
+        if gh api graphql -F id="$tid" -F body="$reply_body" -f query='
+              mutation($id:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id, body:$body}){clientMutationId}}' \
+              >/dev/null 2>&1; then
+            gh api graphql -F id="$tid" -f query='
+              mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' \
+              >/dev/null 2>&1 || fail "could not resolve thread $tid" 4
+            resolved=$((resolved + 1))
+        else
+            echo "warn: reply failed for thread $tid — leaving it UNRESOLVED" >&2
+            reply_failures=$((reply_failures + 1))
+        fi
     done < <(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false) | .id')
 
     [ "$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "true" ] || break
@@ -107,33 +153,38 @@ while true; do
 done
 echo "resolved ${resolved} thread(s) on PR #$PR"
 
-# ── 2. Round-summary issue comment (must land AFTER the inline replies) ──────
+if [ "$reply_failures" -gt 0 ]; then
+    fail "${reply_failures} thread(s) could not be acknowledged (reply failed); left UNRESOLVED — round NOT closed. Retry once the API recovers." 6
+fi
+
+# ── 3. Round-summary issue comment (lands AFTER the inline replies) ──────────
 if [ -n "$SUMMARY_FILE" ]; then
-    [ -f "$SUMMARY_FILE" ] || { echo "ERR: --summary file not found: $SUMMARY_FILE" >&2; exit 1; }
-    gh pr comment "$PR" --repo "$REPO_SLUG" --body-file "$SUMMARY_FILE" >/dev/null \
-        || { echo "ERR: could not post summary comment" >&2; exit 5; }
+    gh pr comment "$PR" --repo "$REPO_SLUG" --body-file "$SUMMARY_FILE" >/dev/null || fail "could not post summary comment" 5
 else
     gh pr comment "$PR" --repo "$REPO_SLUG" --body \
         "## Review round close-out (\`${SHA}\`)"$'\n\n'"Resolved ${resolved} review thread(s); requesting the next Codex pass. Per-finding detail is in the thread replies and this round's commits." >/dev/null \
-        || { echo "ERR: could not post summary comment" >&2; exit 5; }
+        || fail "could not post summary comment" 5
 fi
 echo "summary posted"
 
-# ── 3. Capture pre-request responses to ack, then re-enqueue ─────────────────
-pre_resps=()
-if [ -d "$RESP_DIR" ]; then
-    while IFS= read -r f; do
-        [ "$(jq -r '.pr // ""' "$f" 2>/dev/null)" = "$PR" ] && pre_resps+=("$f")
-    done < <(find "$RESP_DIR" -maxdepth 1 -type f -name 'resp-*.json' 2>/dev/null)
-fi
-
+# ── 4. Re-enqueue the next review pass ───────────────────────────────────────
 req_args=("$PR")
 [ "$FORCE" -eq 1 ] && req_args+=(--force)
 "$SCRIPT_DIR"/review-bus-request.sh "${req_args[@]}"
 
-# ── 4. Ack the responses handled by this round (not the fresh one) ───────────
-for f in "${pre_resps[@]:-}"; do
-    [ -n "$f" ] && [ -f "$f" ] && "$SCRIPT_DIR"/review-bus-response-monitor.sh --ack "$f" 2>/dev/null || true
+# ── 5. Ack ONLY the snapshot responses that are still byte-identical ──────────
+ack_failures=0
+for i in "${!snap_files[@]}"; do
+    f="${snap_files[$i]}"
+    [ -f "$f" ] || continue
+    cur="$(sha256sum "$f" | awk '{print $1}')"
+    if [ "$cur" = "${snap_digests[$i]}" ]; then
+        "$SCRIPT_DIR"/review-bus-response-monitor.sh --ack "$f" \
+            || { echo "ERR: ack failed for $f" >&2; ack_failures=$((ack_failures + 1)); }
+    else
+        echo "note: $f changed since snapshot (a fresh review was written) — NOT acking, so its notification still fires." >&2
+    fi
 done
+[ "$ack_failures" -eq 0 ] || fail "$ack_failures response ack(s) failed — the round is enqueued but a handled response may re-surface." 7
 
 echo "round closed for PR #$PR — next Codex pass enqueued for ${SHA}"
