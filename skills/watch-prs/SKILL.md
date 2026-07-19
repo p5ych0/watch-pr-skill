@@ -1,6 +1,6 @@
 ---
 name: watch-prs
-description: Use at session start to enable the Codex review-bus loop for the repo owning the working directory. Starts the reviewer watcher + response monitor so each review pass fires a chat notification this Claude addresses (read findings, fix, commit, push, reply+resolve, request next pass). Idempotent — safe to re-invoke.
+description: Use at session start to enable the Codex review-bus loop for the repo owning the working directory. Starts the reviewer watcher + response monitor so each review pass fires a chat notification this Claude addresses (read findings, fix, commit, push, then close the round in one command — resolve threads + summary + re-enqueue + ack). Idempotent — safe to re-invoke.
 ---
 
 # /watch-prs — Codex review-bus (repo-agnostic)
@@ -236,45 +236,42 @@ git push
 NEW_SHA=$(git rev-parse HEAD)
 ```
 
-### 7. Close out every addressed thread + post round summary
-For each unresolved thread you addressed:
+### 7. Close the round — ONE command (never stop at push + comment)
+
+Pushing the fix and posting a comment does **NOT** re-trigger Codex. A round only
+closes when every thread is replied-to + resolved, a fresh summary is posted, the
+new SHA is enqueued as a request, and the handled response is acked. Skipping any
+of these silently **stalls the loop** — the watcher holds auto-enqueue while
+threads are unresolved, and `review-bus-request.sh`'s own gate blocks.
+`review-bus-close-round.sh` does the whole handoff atomically so it can't be half-done.
+
+Decide each finding's disposition (addressed vs. intentionally skipped), write the
+round summary to a file, then run one command from the PR worktree:
 
 ```bash
-# Reply with reference to fix SHA
-gh api --method POST "repos/$OWNER/$REPO/pulls/N/comments/<comment_databaseId>/replies" \
-  -f body="Addressed in ${NEW_SHA:0:7} — <one-line fix description>."
-
-# Resolve the thread (uses the GraphQL node id from step 3)
-gh api graphql -F id=<thread.id> -f query='
-  mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } } }'
-```
-
-Post a single round summary PR comment:
-
-```bash
-gh pr comment N --body "$(cat <<EOF
+cat > /tmp/rb-summary.md <<EOF
 ## Iteration <K> — fix(review) ${NEW_SHA:0:7}
 
 Addressed:
 - <thread 1 cite>: <one-line fix>
-- <thread 2 cite>: <one-line fix>
 
 Skipped (nit / out-of-scope):
 - <comment cite>: <reason>
-
-Requesting next Codex pass.
 EOF
-)"
+
+# From the PR worktree (step 2) — reads cwd's HEAD. Resolves every open thread
+# (posting a thread-level ack that points at the summary), posts the summary,
+# re-enqueues the next Codex pass via review-bus-request.sh (re-verifying the
+# push + zero-unresolved + summary gates), and acks the handled response.
+( cd "$WT" && "$RB_SCRIPTS"/review-bus-close-round.sh N --summary /tmp/rb-summary.md )
 ```
 
-Then re-enqueue and **ack the handled response** so it isn't re-surfaced next session (`$RESP_PATH` was captured from the notification above; ack AFTER a successful re-request):
-
-```bash
-( cd "$WT" && "$RB_SCRIPTS"/review-bus-request.sh N )   # from the PR worktree (step 2) — request.sh reads cwd's HEAD
-"$RB_SCRIPTS"/review-bus-response-monitor.sh --ack "$RESP_PATH"
-```
-
-The watcher inotifies the requests dir, runs Codex on the new SHA, writes a fresh `resp-<sha>.json`, the response Monitor surfaces it as a new `${PREFIX}_REVIEW` notification, loop continues.
+You no longer resolve threads, call `review-bus-request.sh`, or `--ack` by hand —
+`close-round` does each, gate-checked, in order (the response path from the
+notification is captured internally). The watcher then inotifies the requests dir,
+runs Codex on the new SHA, writes a fresh `resp-<sha>.json`, the response Monitor
+surfaces it as a new `${PREFIX}_REVIEW` notification, and the loop continues.
+Bypass the request gate only for bus debugging with `--force`.
 
 ### 8. Merge gate (only when `status=approved`)
 

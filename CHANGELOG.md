@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.9] — 2026-07-19
+- **New `review-bus-close-round.sh` — one-command round close-out.** The bus
+  handoff after addressing a Codex round is not "push + comment": the loop only
+  continues when every thread is replied-to + resolved, a fresh summary is
+  posted, the next SHA is enqueued, and the handled response is acked. Skipping
+  any of these silently stalls the loop (the watcher holds auto-enqueue while
+  threads are unresolved; `review-bus-request.sh`'s gate blocks). The new script
+  does the whole finalize atomically — resolve every open thread with a
+  thread-level ack, post the summary, re-enqueue via `review-bus-request.sh`
+  (all gates re-checked), and ack the pre-request responses. SKILL step 7 now
+  calls it instead of the hand-run resolve → request → ack sequence that was
+  easy to half-complete. `test-review-bus-close-round.sh` covers it (suite: 17).
+
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`
   fails closed (blocks + writes no request) when the unresolved-threads GraphQL

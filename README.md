@@ -92,7 +92,11 @@ surface reviews. Then:
    a fresh round-summary comment).
 2. When Codex finishes, a `<PREFIX>_REVIEW` notification arrives.
 3. The skill reads the findings, fixes them, commits `fix(review): …`, pushes,
-   replies + resolves each thread, posts a round summary, and re-requests.
+   then **closes the round in one command** — `review-bus-close-round.sh N
+   --summary <file>` resolves every open thread (with a thread-level ack), posts
+   the summary, re-enqueues the next Codex pass, and acks the handled response.
+   (Push + comment alone does **not** re-trigger Codex — the round must be closed,
+   or the loop stalls on the unresolved-threads gate.)
 4. On a clean signoff it re-checks the merge gate (head unchanged, threads
    resolved, required checks green) and admin-merges.
 

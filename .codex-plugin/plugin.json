@@ -1,6 +1,6 @@
 {
   "name": "watch-pr-skill",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Automated PR review-bus loop with a Codex reviewer — a team-grade review rhythm for solo developers.",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"
