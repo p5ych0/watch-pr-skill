@@ -37,6 +37,7 @@ ACK_DIR="${MONITOR_ACK_DIR:-$BUS_DIR/.monitor-acked}"
 ONCE=0
 ACK_MODE=0
 ACK_FILE=""
+ACK_EXPECT=""
 
 case "${1:-}" in
     --once)
@@ -48,8 +49,18 @@ case "${1:-}" in
         shift
         ACK_FILE="${1:-}"
         ;;
+    --ack-if-digest)
+        # Race-free ack: mark a response handled by a CALLER-CAPTURED digest
+        # instead of re-hashing the on-disk file (which the watcher may have
+        # swapped for a fresh same-SHA review). The marker key is the passed
+        # digest, so it can only ever suppress the exact content the caller
+        # handled — a fresh review carries a different digest and still fires.
+        ACK_MODE=2
+        ACK_FILE="${2:-}"
+        ACK_EXPECT="${3:-}"
+        ;;
     --help|-h)
-        echo "Usage: $0 [--once | --ack <response-file>]"
+        echo "Usage: $0 [--once | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
         exit 0
         ;;
 esac
@@ -61,7 +72,7 @@ esac
 require_tools() {
     local missing=0 tool
     local tools=(jq sha256sum awk find)
-    { [ "$ONCE" -eq 1 ] || [ "$ACK_MODE" -eq 1 ]; } || tools+=(inotifywait)
+    { [ "$ONCE" -eq 1 ] || [ "$ACK_MODE" -ne 0 ]; } || tools+=(inotifywait)
     for tool in "${tools[@]}"; do
         if ! command -v "$tool" >/dev/null 2>&1; then
             echo "MONITOR_FATAL missing_tool=$tool" >&2
@@ -181,6 +192,25 @@ if [ "$ACK_MODE" -eq 1 ]; then
     [ -n "$_ack_digest" ] || { echo "MONITOR_ACK_FATAL cannot_digest=$ACK_FILE" >&2; exit 1; }
     : > "$ACK_DIR/${_ack_base}.${_ack_digest}"
     echo "MONITOR_ACKED resp=$_ack_base digest=${_ack_digest:0:12}"
+    exit 0
+fi
+
+# --ack-if-digest <response-file> <sha256>: mark the response handled by a
+# digest the CALLER captured (before it mutated anything), NOT a re-hash of the
+# on-disk file. This closes the ack TOCTOU: if the watcher overwrites
+# resp-$SHA.json with a fresh same-SHA review between the caller's snapshot and
+# this ack, the fresh review carries a DIFFERENT digest, so the marker written
+# here (keyed on the captured digest) can never suppress it — its notification
+# still fires. The response file need not still exist; only its name + the
+# captured digest form the marker key.
+if [ "$ACK_MODE" -eq 2 ]; then
+    { [ -n "$ACK_FILE" ] && [ -n "$ACK_EXPECT" ]; } \
+        || { echo "MONITOR_ACK_FATAL usage=--ack-if-digest <response-file> <sha256>" >&2; exit 1; }
+    [[ "$ACK_EXPECT" =~ ^[0-9a-f]{64}$ ]] \
+        || { echo "MONITOR_ACK_FATAL bad_digest=$ACK_EXPECT" >&2; exit 1; }
+    _ack_base="$(basename "$ACK_FILE")"
+    : > "$ACK_DIR/${_ack_base}.${ACK_EXPECT}"
+    echo "MONITOR_ACKED resp=$_ack_base digest=${ACK_EXPECT:0:12}"
     exit 0
 fi
 

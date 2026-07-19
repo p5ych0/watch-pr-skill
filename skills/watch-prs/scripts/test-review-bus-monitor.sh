@@ -8,6 +8,9 @@
 #   2c. MONITOR_EMITTED_DIR gives an independent, session-local dedup namespace
 #   2d. --ack marks a response handled; not re-emitted even under a fresh emit dir
 #   2e. ack is digest-specific — same-path new content re-emits despite prior ack
+#   2f. --ack-if-digest keys the marker on a caller-captured digest (rejects a
+#       malformed digest; a same-path swap after ack still notifies) — the ack
+#       TOCTOU fix
 #   3. live watch emits a response created AFTER startup, exactly once
 #   4. deterministic safety net — a response written while inotifywait is slow to
 #      arm is still emitted by the per-iteration sweep (no fixed-sleep race)
@@ -86,6 +89,27 @@ echo "$out6" | grep -q "sha=bbbbbbb" && die "acked response re-emitted under a f
 resp bbbb 50 bbbbbbb approved 9    # rewrite resp-bbbb.json: same path, new content
 out7="$(MONITOR_EMITTED_DIR="$TMP/sess7" "$MONITOR" --once 2>/dev/null || true)"
 echo "$out7" | grep -q "findings=9" && pass "same-path new content re-emits despite prior ack (digest-keyed)" || die "new content wrongly suppressed by a stale ack"
+
+# ── Test 2f: --ack-if-digest keys the marker on a CALLER-CAPTURED digest ─────
+# close-round.sh captures the digest BEFORE mutating, then acks by that value so
+# a watcher swap can't be re-hashed into the marker. Prove: (a) a malformed
+# digest is rejected without writing a marker; (b) acking captured digest D
+# suppresses the D-content response; (c) a same-path swap to different content
+# (digest D') is NOT suppressed — its notification still fires.
+resp dddd 60 ddddddd approved 4
+DIG_D="$(sha256sum "$RESP/resp-dddd.json" | awk '{print $1}')"
+"$MONITOR" --ack-if-digest "$RESP/resp-dddd.json" "not-a-sha" >/dev/null 2>&1 \
+    && die "ack-if-digest: accepted a malformed digest" || pass "ack-if-digest: rejects a malformed digest"
+ls "$BUS_DIR/.monitor-acked"/resp-dddd.json.* >/dev/null 2>&1 && die "ack-if-digest: wrote a marker on a rejected digest" || pass "ack-if-digest: no marker on rejection"
+"$MONITOR" --ack-if-digest "$RESP/resp-dddd.json" "$DIG_D" >/dev/null
+out8="$(MONITOR_EMITTED_DIR="$TMP/sess8" "$MONITOR" --once 2>/dev/null || true)"
+echo "$out8" | grep -q "sha=ddddddd" && die "ack-if-digest: captured-digest response re-emitted (must be suppressed)" || pass "ack-if-digest: captured-digest response suppressed"
+# Swap same path to NEW content — the captured-digest marker must not cover it.
+resp dddd 60 ddddddd approved 7
+DIG_DPRIME="$(sha256sum "$RESP/resp-dddd.json" | awk '{print $1}')"
+[ -e "$BUS_DIR/.monitor-acked/resp-dddd.json.$DIG_DPRIME" ] && die "ack-if-digest: fresh content's digest wrongly marked" || pass "ack-if-digest: fresh content not pre-suppressed"
+out9="$(MONITOR_EMITTED_DIR="$TMP/sess9" "$MONITOR" --once 2>/dev/null || true)"
+echo "$out9" | grep -q "findings=7" && pass "ack-if-digest: same-path swap after ack still notifies" || die "ack-if-digest: swap suppressed by the captured-digest marker"
 
 # ── Test 3: live watch emits a response created AFTER startup, exactly once ──
 rm -rf "$BUS_DIR"; mkdir -p "$RESP"

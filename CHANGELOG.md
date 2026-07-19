@@ -12,6 +12,17 @@
   (all gates re-checked), and ack the pre-request responses. SKILL step 7 now
   calls it instead of the hand-run resolve → request → ack sequence that was
   easy to half-complete. `test-review-bus-close-round.sh` covers it (suite: 17).
+  - Preflight validates the whole close-out BEFORE the first GitHub mutation:
+    HEAD clean + pushed + equal to the PR's head, and `--summary` a **regular**
+    readable file (`-r` alone accepts a dir/FIFO that would only fail inside
+    `gh pr comment` after every thread is resolved). A reply failure leaves its
+    thread unresolved and exits non-zero — never resolve-without-ack.
+  - Race-free ack: the round-summary responses are acked by the digest captured
+    **before** mutating, via a new `review-bus-response-monitor.sh
+    --ack-if-digest <resp> <sha256>` that writes the marker from that value
+    without re-hashing the file. Closes an ack TOCTOU — a watcher that swaps in a
+    fresh same-SHA review between snapshot and ack now yields a different digest
+    the marker can't suppress, so its notification still fires.
 
 ## [1.0.8] — 2026-07-18
 - Test suite: `test-review-bus-request.sh` — verifies `review-bus-request.sh`

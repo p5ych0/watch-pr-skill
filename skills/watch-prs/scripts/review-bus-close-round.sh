@@ -15,9 +15,9 @@
 #   0. Preflight EVERYTHING local before touching GitHub — summary readable,
 #      worktree clean, HEAD pushed, and HEAD == PR #N's head. A wrong/dirty/
 #      unpushed checkout must fail before any irreversible thread mutation.
-#   1. Snapshot the pre-round responses (path + content digest) BEFORE mutating,
-#      so a review written by auto-enqueue mid-run can't be mistaken for a
-#      handled one.
+#   1. Snapshot the pre-round responses (path + content digest) BEFORE mutating.
+#      The captured digest — not a later re-hash — is what step 5 acks, so a
+#      review written by auto-enqueue mid-run can't be mistaken for a handled one.
 #   2. For every UNRESOLVED review thread: post a thread-level reply, then
 #      resolve it. If the reply FAILS, leave the thread unresolved (its ack is
 #      the point) and finish with a non-zero, clearly-incomplete result.
@@ -26,9 +26,11 @@
 #      request.sh's "summary newer than latest inline" gate.
 #   4. Re-enqueue the next review pass via review-bus-request.sh (which
 #      re-verifies clean-tree + head-pushed + zero-unresolved + summary gates).
-#   5. Ack each snapshot response ONLY IF its file is byte-identical to the
-#      snapshot — a same-path re-review (different digest) is left un-acked so
-#      its notification still fires. Ack failures are surfaced, never swallowed.
+#   5. Ack each snapshot response by its CAPTURED digest in one monitor call
+#      (--ack-if-digest). The marker is keyed on the step-1 digest, never a
+#      re-hash of the on-disk file, so a same-SHA re-review written underneath us
+#      carries a different digest and is NOT suppressed — its notification still
+#      fires. No compare-then-ack window. Ack failures are surfaced, not swallowed.
 #
 # Judgment stays with the implementer: you decide WHICH findings you addressed
 # vs. intentionally skipped (documented in --summary and/or your own per-thread
@@ -82,9 +84,13 @@ fail() { echo "ERR: $1" >&2; exit "${2:-2}"; }
 
 # ── 0. Preflight — validate EVERYTHING local before any GitHub mutation ──────
 # The --summary file is checked unconditionally (a typo must never surface only
-# after threads are resolved). --force skips the git/PR-identity gates only.
-if [ -n "$SUMMARY_FILE" ] && [ ! -r "$SUMMARY_FILE" ]; then
-    fail "--summary file not readable: $SUMMARY_FILE" 1
+# after threads are resolved). It must be a REGULAR readable file: `-r` alone is
+# true for directories, FIFOs, and devices, which would pass here and then only
+# fail inside `gh pr comment --body-file` AFTER every thread is resolved —
+# exactly the half-closeout this preflight exists to prevent. --force skips the
+# git/PR-identity gates only, never this one.
+if [ -n "$SUMMARY_FILE" ] && { [ ! -f "$SUMMARY_FILE" ] || [ ! -r "$SUMMARY_FILE" ]; }; then
+    fail "--summary must be a readable regular file: $SUMMARY_FILE" 1
 fi
 if [ "$FORCE" -eq 0 ]; then
     git diff --quiet --ignore-submodules HEAD -- 2>/dev/null \
@@ -172,18 +178,17 @@ req_args=("$PR")
 [ "$FORCE" -eq 1 ] && req_args+=(--force)
 "$SCRIPT_DIR"/review-bus-request.sh "${req_args[@]}"
 
-# ── 5. Ack ONLY the snapshot responses that are still byte-identical ──────────
+# ── 5. Ack each snapshot response by its CAPTURED digest (single atomic op) ───
+# The marker is keyed on the digest snapshotted in step 1 — the monitor writes
+# it verbatim, never re-hashing the on-disk file. So if the watcher overwrote
+# resp-$SHA.json with a fresh same-SHA review after the snapshot, that review's
+# digest differs and this marker can't suppress it; its notification still fires.
+# There is no compare-then-ack window because the marker key is a fixed value,
+# not a second read of a file the watcher may have swapped underneath us.
 ack_failures=0
 for i in "${!snap_files[@]}"; do
-    f="${snap_files[$i]}"
-    [ -f "$f" ] || continue
-    cur="$(sha256sum "$f" | awk '{print $1}')"
-    if [ "$cur" = "${snap_digests[$i]}" ]; then
-        "$SCRIPT_DIR"/review-bus-response-monitor.sh --ack "$f" \
-            || { echo "ERR: ack failed for $f" >&2; ack_failures=$((ack_failures + 1)); }
-    else
-        echo "note: $f changed since snapshot (a fresh review was written) — NOT acking, so its notification still fires." >&2
-    fi
+    "$SCRIPT_DIR"/review-bus-response-monitor.sh --ack-if-digest "${snap_files[$i]}" "${snap_digests[$i]}" \
+        || { echo "ERR: ack failed for ${snap_files[$i]}" >&2; ack_failures=$((ack_failures + 1)); }
 done
 [ "$ack_failures" -eq 0 ] || fail "$ack_failures response ack(s) failed — the round is enqueued but a handled response may re-surface." 7
 
