@@ -7,11 +7,14 @@
   posted, the next SHA is enqueued, and the handled response is acked. Skipping
   any of these silently stalls the loop (the watcher holds auto-enqueue while
   threads are unresolved; `review-bus-request.sh`'s gate blocks). The new script
-  does the whole finalize atomically — resolve every open thread with a
-  thread-level ack, post the summary, re-enqueue via `review-bus-request.sh`
-  (all gates re-checked), and ack the pre-request responses. SKILL step 7 now
-  calls it instead of the hand-run resolve → request → ack sequence that was
-  easy to half-complete. `test-review-bus-close-round.sh` covers it (suite: 17).
+  does the whole finalize in one command — preflight up front, then the steps in
+  a fail-safe order: resolve every open thread with a thread-level ack, post the
+  summary, re-enqueue via `review-bus-request.sh` (all gates re-checked), and ack
+  the pre-request responses. It is not transactional — a failure partway stops
+  loudly (non-zero exit) and is safe to re-run — but no step is silently skipped.
+  SKILL step 7 now calls it instead of the hand-run resolve → request → ack
+  sequence that was easy to half-complete. `test-review-bus-close-round.sh`
+  covers it (suite: 17).
   - Preflight validates the whole close-out BEFORE the first GitHub mutation:
     HEAD clean + pushed + equal to the PR's head, and `--summary` a **regular**
     readable file (`-r` alone accepts a dir/FIFO that would only fail inside
