@@ -14,7 +14,13 @@
 # so `origin` can stay the local bare repo (the head-mismatch gate needs the git
 # gates to PASS so execution actually reaches the PR-head comparison). `gh` is
 # stubbed (env-driven).
-set -uo pipefail
+#
+# Setup runs under `set -Eeuo pipefail` (a failed clone/push/config must abort
+# loudly, not silently continue into misleading assertions). The assertion block
+# then switches to `set +e` so the intentional non-zero close-round runs can be
+# captured via `; rc=$?` and `grep -c` (0 matches → exit 1) works — matching the
+# suite's other failure-capturing tests (worktree/health/error-retry).
+set -Eeuo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 CLOSE="$SELF_DIR/review-bus-close-round.sh"
@@ -78,6 +84,10 @@ new_bus() {   # fresh bus with one pre-existing round-1 response
   printf '{"pr":7,"sha":"oldsha1","status":"changes","findings_count":2}' > "$b/responses/resp-oldsha1.json"
   echo "$b"
 }
+
+# Assertions capture intentional non-zero results (failure-gate cases) and use
+# grep -c (exit 1 on 0 matches), so the -e must not govern them.
+set +e
 
 # ── 1. Happy path (--force + summary): full close-out ───────────────────────
 BUS="$(new_bus 1)"; GHLOG="$TMP/gh1.log"; : > "$GHLOG"
