@@ -99,7 +99,12 @@ if [ "$FORCE" -eq 0 ]; then
         || fail "branch $BRANCH has no upstream — run: git push -u origin $BRANCH"
     git fetch --quiet origin "$BRANCH" 2>/dev/null \
         || fail "could not fetch origin/$BRANCH to confirm HEAD is pushed. Retry when the remote is reachable."
-    remote_sha=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+    # Resolve the remote head exactly as review-bus-request.sh does (it runs
+    # next): try origin/$BRANCH, then fall back to the actual upstream ref. This
+    # keeps close-round from rejecting a branch whose upstream isn't origin/$BRANCH
+    # that request.sh would accept — close-round must never be stricter than the
+    # gate it forwards to.
+    remote_sha=$(git rev-parse "origin/$BRANCH" 2>/dev/null || git rev-parse "$upstream" 2>/dev/null || echo "")
     { [ -n "$remote_sha" ] && [ "$FULL_SHA" = "$remote_sha" ]; } \
         || fail "local HEAD ($FULL_SHA) != origin/$BRANCH (${remote_sha:-unknown}). Push HEAD first."
     pr_head=$(gh pr view "$PR" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null) \

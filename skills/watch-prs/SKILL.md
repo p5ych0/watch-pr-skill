@@ -268,7 +268,7 @@ EOF
 
 You no longer resolve threads, call `review-bus-request.sh`, or `--ack` by hand —
 `close-round` does each, gate-checked, in order (the response path from the
-notification is captured internally). The watcher then inotifies the requests dir,
+notification is captured internally). The watcher then inotify-watches the requests dir,
 runs Codex on the new SHA, writes a fresh `resp-<sha>.json`, the response Monitor
 surfaces it as a new `${PREFIX}_REVIEW` notification, and the loop continues.
 Bypass the request gate only for bus debugging with `--force`.
