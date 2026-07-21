@@ -49,9 +49,13 @@
   `CODEX_AUTO_SKIP reason=round_threshold`), and a concurrent manual + passive
   enqueue at the boundary can't both slip past (the threshold decision and the
   round append share one lock; append-only locking left a check-then-claim TOCTOU).
-  Where `flock` is absent the lock falls back to an ATOMIC mkdir mutex (bounded
-  spin + stale-lock steal) rather than running lock-less — so the gate is never
-  silently racy on a `flock`-free system.
+  Locking uses ONE mutex domain for every process — an atomic **mkdir mutex** (no
+  `flock`/mkdir split that let peers in different domains both enter, and no
+  `flock` dependency). A stale lock is reclaimed only when its recorded holder is
+  **provably dead** (`kill -0` never falses a live/slow PID, so a live holder is
+  never evicted; the reclaim atomically renames the exact stale dir); if the lock
+  can't be acquired within a bound it **fails closed** (callers do not enqueue)
+  rather than time-stealing a possibly-live holder.
   The Codex-vs-Claude-Code progress-consumer split is applied to the arming
   instructions + README too (Codex polls the monitor log; no auto-notification is
   promised there). Progress `CODEX_REVIEW_*` knobs are now forwarded to

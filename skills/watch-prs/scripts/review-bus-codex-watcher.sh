@@ -882,10 +882,15 @@ write_auto_request() {
     # nothing) until the operator crosses via `review-bus-request.sh --continue-threshold`.
     local claim
     claim="$(review_bus_claim_round "$BUS_DIR" "$pr" "$head_oid" "${CODEX_REVIEW_ROUND_THRESHOLD:-10}")"
-    if [ "$claim" = "pause" ]; then
-        echo "CODEX_AUTO_SKIP pr=$pr reason=round_threshold rounds=$(review_bus_rounds_done "$BUS_DIR" "$pr")"
-        return
-    fi
+    case "$claim" in
+        claimed|already) ;;   # round claimed → proceed to write the request
+        pause)
+            echo "CODEX_AUTO_SKIP pr=$pr reason=round_threshold rounds=$(review_bus_rounds_done "$BUS_DIR" "$pr")"
+            return ;;
+        *)  # locktimeout / unexpected → HOLD (fail closed, never bypass the gate)
+            echo "CODEX_AUTO_SKIP pr=$pr reason=round_lock_unavailable"
+            return ;;
+    esac
 
     now="$(date -u +%FT%TZ)"
     tmp="${req}.tmp.$$"

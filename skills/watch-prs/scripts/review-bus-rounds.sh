@@ -36,27 +36,42 @@ review_bus_threshold_reached() {
 }
 
 # _review_bus_locked <lock_base> <fn> <args...>
-# -> run "<fn> <args>" holding an EXCLUSIVE lock, so the whole critical section is
-#    serialized. Prefers flock; falls back to an ATOMIC mkdir mutex where flock is
-#    absent — never a lock-less run (that would restore the check-then-claim race).
-#    The mkdir mutex is POSIX-atomic (only one creator wins) with a bounded spin +
-#    stale-lock steal so a crashed holder can't wedge the counter forever. Set
-#    REVIEW_BUS_FORCE_NO_FLOCK=1 to exercise the fallback where flock exists.
+# -> run "<fn> <args>" holding an EXCLUSIVE lock so the whole critical section is
+#    serialized. ONE mutex mechanism for ALL processes (manual request + systemd
+#    watcher) — an atomic mkdir mutex — so there is no way for two peers to end up
+#    in different lock domains and both enter. (An earlier flock-preferred version
+#    split the domain: flock and the mkdir fallback locked different objects.)
+#
+#    mkdir is POSIX-atomic (one creator wins). A stale lock is reclaimed ONLY when
+#    its recorded holder is PROVABLY dead: kill -0 on a live/slow/scheduled PID
+#    always succeeds, so a live holder is never evicted; a reused PID reads alive,
+#    so we wait (never mis-steal). The reclaim uses an atomic rename to drop the
+#    EXACT stale dir, so two waiters can't both remove it and evict a fresh holder.
+#    If the lock cannot be acquired within the bound (an unprobeable/wedged holder),
+#    it FAILS CLOSED (returns 75) — callers then do NOT enqueue.
 _review_bus_locked() {
     local base="$1"; shift
-    if [ -z "${REVIEW_BUS_FORCE_NO_FLOCK:-}" ] && command -v flock >/dev/null 2>&1; then
-        ( flock 9; "$@" ) 9>>"${base}.lock"
-    else
-        local lock="${base}.lockd" tries=0 rc
-        until mkdir "$lock" 2>/dev/null; do
-            tries=$((tries + 1))
-            [ "$tries" -ge 500 ] && { rmdir "$lock" 2>/dev/null || true; tries=0; }   # ~5s → steal a dead holder
-            sleep 0.01
-        done
-        "$@"; rc=$?
-        rmdir "$lock" 2>/dev/null || true
-        return "$rc"
-    fi
+    local lock="${base}.lockd" pidf="${base}.lockd/pid" holder reap rc tries=0
+    local max="${REVIEW_BUS_LOCK_TIMEOUT_TICKS:-3000}"   # ~10ms ticks; default ~30s
+    while ! mkdir "$lock" 2>/dev/null; do
+        holder="$(cat "$pidf" 2>/dev/null || true)"
+        if [ -n "$holder" ] && [ "$holder" != "$BASHPID" ] && ! kill -0 "$holder" 2>/dev/null; then
+            # Provably-dead holder → atomically claim + drop THIS stale dir only.
+            reap="${lock}.reap.$BASHPID.${RANDOM}"
+            mv "$lock" "$reap" 2>/dev/null && rm -rf "$reap" 2>/dev/null || true
+            continue
+        fi
+        tries=$((tries + 1))
+        if [ "$tries" -ge "$max" ]; then
+            echo "REVIEW_BUS_LOCK_TIMEOUT base=$base holder=${holder:-unknown} — stale lock? remove ${lock} if no reviewer is running" >&2
+            return 75
+        fi
+        sleep 0.01
+    done
+    printf '%s\n' "$BASHPID" > "$pidf" 2>/dev/null || true
+    "$@"; rc=$?
+    rm -rf "$lock" 2>/dev/null || true
+    return "$rc"
 }
 
 # _review_bus_append_once <file> <sha> — dedup append (the record body; run locked).
@@ -67,7 +82,8 @@ _review_bus_append_once() {
 # review_bus_record_round <bus_dir> <pr> <full_sha>
 # -> append the sha as a closed round (deduped, atomically). Unconditional record
 #    (no pause decision) — used only on the operator's explicit --continue-threshold
-#    cross. The normal path uses review_bus_claim_round.
+#    cross. The normal path uses review_bus_claim_round. Returns non-zero (75) if
+#    the lock could not be acquired (fail closed → the caller must not enqueue).
 review_bus_record_round() {
     local bus="$1" pr="$2" sha="$3" f
     f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
@@ -93,10 +109,14 @@ _review_bus_claim_locked() {
 #    append are atomic. Closes the safety-gate TOCTOU: two distinct-SHA enqueues
 #    at the boundary cannot both read the pre-threshold count and both proceed —
 #    the first claims the round, the second (seeing the incremented count) pauses.
-#    Prints: pause (at a threshold multiple — do NOT enqueue) | claimed (recorded,
-#    enqueue) | already (this sha was already recorded — idempotent, enqueue).
+#    Prints one of: claimed (recorded → enqueue) | already (this sha already
+#    recorded → idempotent, enqueue) | pause (at a threshold multiple → do NOT
+#    enqueue) | locktimeout (lock unavailable → fail closed, do NOT enqueue).
 review_bus_claim_round() {
-    local bus="$1" pr="$2" sha="$3" threshold="$4" f
+    local bus="$1" pr="$2" sha="$3" threshold="$4" f out rc
     f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
-    _review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold"
+    out="$(_review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold")"
+    rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$out" ]; then echo locktimeout; return 1; fi
+    printf '%s\n' "$out"
 }

@@ -208,19 +208,28 @@ FULL_SHA=$(git rev-parse HEAD)
 # record) so a concurrent manual + passive enqueue at the boundary can't both slip
 # past. --continue-threshold is the operator's explicit cross: record without a
 # pause decision.
+round_lock_unavailable() {
+    echo "BUS_REQUEST_BLOCKED reason=round_lock_unavailable" >&2
+    echo "    could not acquire the round-counter lock for PR #$PR — NOT enqueuing (fail closed)." >&2
+    echo "    A crashed holder may have left a stale lock: remove $BUS_DIR/.rounds/pr-${PR}.shas.lockd if no reviewer is running." >&2
+    exit 2
+}
 if [ "$CONTINUE_THRESHOLD" -eq 1 ]; then
-    review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA"
+    review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA" || round_lock_unavailable
 else
     claim="$(review_bus_claim_round "$BUS_DIR" "$PR" "$FULL_SHA" "$THRESHOLD")"
-    if [ "$claim" = "pause" ]; then
-        rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
-        echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
-        echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
-        echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
-        echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
-        echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
-        exit 3
-    fi
+    case "$claim" in
+        claimed|already) ;;   # round claimed → proceed to enqueue
+        pause)
+            rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
+            echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
+            echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
+            echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+            echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
+            echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
+            exit 3 ;;
+        *)  round_lock_unavailable ;;   # locktimeout / unexpected → fail closed
+    esac
 fi
 
 REQ_FILE="$REQ_DIR/req-${SHA}.json"

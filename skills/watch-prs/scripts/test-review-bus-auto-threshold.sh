@@ -107,22 +107,40 @@ done
 [ "$races_ok" -eq 1 ] && pass "atomic claim: 5 repeated races all land the counter at 10 (never 11)" \
     || die "atomic claim: a repeated race let the counter reach 11 (pause skipped)"
 
-# ── The flock-LESS fallback (atomic mkdir mutex) must ALSO be race-safe — no
-#    lock-less run that restores the TOCTOU. Force the fallback and re-run the race.
-export REVIEW_BUS_FORCE_NO_FLOCK=1
-nofl_ok=1
-for _ in 1 2 3; do
-    seed_rounds 9
-    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10 > "$TMP/na" ) &
-    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_B" 10 > "$TMP/nb" ) &
-    wait
-    [ "$(review_bus_rounds_done "$BUS_DIR" 7)" -eq 10 ] \
-        && [ "$(printf '%s\n%s\n' "$(cat "$TMP/na")" "$(cat "$TMP/nb")" | sort -u | paste -sd, -)" = "claimed,pause" ] \
-        || nofl_ok=0
-done
-unset REVIEW_BUS_FORCE_NO_FLOCK
-[ "$nofl_ok" -eq 1 ] && pass "no-flock fallback: mkdir mutex is atomic too (one claims, one pauses, count 10)" \
-    || die "no-flock fallback: restored the race (counter reached 11 or double-claim)"
+LOCKD="$BUS_DIR/.rounds/pr-7.shas.lockd"
+
+# ── Single lock domain: only the mkdir mutex (.lockd) is ever used — no flock
+#    .lock object — so two peers cannot land in different domains and both enter.
+seed_rounds 9
+review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10 >/dev/null
+[ -e "$BUS_DIR/.rounds/pr-7.shas.lock" ] \
+    && die "a second (flock) lock object exists — lock domains can split" \
+    || pass "single lock domain: only the mkdir mutex, no split flock object"
+
+# ── A provably-DEAD holder's stale lock is reclaimed → the claim proceeds. ──
+seed_rounds 9
+mkdir -p "$LOCKD"
+( exit 0 ) & deadpid=$!; wait "$deadpid" 2>/dev/null          # a reaped, now-dead pid
+printf '%s\n' "$deadpid" > "$LOCKD/pid"
+claim="$(REVIEW_BUS_LOCK_TIMEOUT_TICKS=100 review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10)"
+{ [ "$claim" = claimed ] && [ "$(review_bus_rounds_done "$BUS_DIR" 7)" -eq 10 ]; } \
+    && pass "dead-holder stale lock reclaimed → claim proceeds (count 9→10)" \
+    || die "dead-holder lock not reclaimed (claim=$claim count=$(review_bus_rounds_done "$BUS_DIR" 7))"
+
+# ── A LIVE holder is NEVER evicted (regression for the time-based steal): a
+#    waiter fails CLOSED (locktimeout) rather than entering concurrently. ──
+seed_rounds 9
+mkdir -p "$LOCKD"
+sleep 30 & livepid=$!
+printf '%s\n' "$livepid" > "$LOCKD/pid"
+claim="$(REVIEW_BUS_LOCK_TIMEOUT_TICKS=15 review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10)"
+{ [ "$claim" = locktimeout ] && [ "$(review_bus_rounds_done "$BUS_DIR" 7)" -eq 9 ]; } \
+    && pass "live holder NOT evicted → waiter fails closed (locktimeout, count stays 9)" \
+    || die "live holder evicted or entered concurrently (claim=$claim count=$(review_bus_rounds_done "$BUS_DIR" 7))"
+kill "$livepid" 2>/dev/null; wait "$livepid" 2>/dev/null; rm -rf "$LOCKD"
+claim="$(review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10)"
+[ "$claim" = claimed ] && pass "after the live holder exits, a claim proceeds" \
+    || die "claim stuck after holder exit (claim=$claim)"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
