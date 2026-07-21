@@ -11,6 +11,11 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Shared round check-in helpers — the SAME logic review-bus-request.sh uses, so
+# the passive auto-enqueue below honors the operator pause it would otherwise
+# bypass (it writes request files directly, not through request.sh).
+# shellcheck source=review-bus-rounds.sh
+. "$SCRIPT_DIR/review-bus-rounds.sh"
 REPO_DIR="${REPO_DIR:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)}"
 
 # Derive the repo identity from this checkout's origin. Every value is
@@ -870,6 +875,15 @@ write_auto_request() {
         return
     fi
 
+    # Round check-in — the SAME gate as the manual path (shared logic). The
+    # passive path has no operator to answer, so at a threshold multiple it HOLDS
+    # (emits CODEX_AUTO_SKIP, writes nothing) until the operator explicitly crosses
+    # the pause with `review-bus-request.sh <PR> --continue-threshold`.
+    if review_bus_threshold_reached "$BUS_DIR" "$pr" "$head_oid" "${CODEX_REVIEW_ROUND_THRESHOLD:-10}"; then
+        echo "CODEX_AUTO_SKIP pr=$pr reason=round_threshold rounds=$(review_bus_rounds_done "$BUS_DIR" "$pr")"
+        return
+    fi
+
     now="$(date -u +%FT%TZ)"
     tmp="${req}.tmp.$$"
     jq -n \
@@ -895,6 +909,9 @@ write_auto_request() {
           }
         }' > "$tmp"
     mv "$tmp" "$req"
+    # Record this SHA as an enqueued round (shared, flock-atomic) so the manual and
+    # passive paths share ONE monotonic per-PR counter.
+    review_bus_record_round "$BUS_DIR" "$pr" "$head_oid"
     echo "CODEX_AUTO_REQUEST pr=$pr sha=$short_sha branch=$branch"
 }
 

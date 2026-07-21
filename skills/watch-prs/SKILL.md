@@ -112,6 +112,23 @@ ${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=reviewing elap
 ${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=posting_comments findings=5
 ```
 
+**Where they land (and how each runtime consumes them).** The `systemd --user`
+monitor daemon writes these lines to its stdout, which is appended to
+`$BUS/.codex-logs/response-monitor.log` — the SAME log the terminal
+`${PREFIX}_REVIEW` handoff is written to. So the log is the runtime-agnostic
+source of truth:
+
+- **Claude Code:** a background watch (the `Monitor` tool tailing that log for
+  `${PREFIX}_REVIEW*`) surfaces both progress and the final handoff into the
+  session automatically — no polling.
+- **Codex (no `Monitor` tool):** there is no automatic in-chat push; **poll the
+  log** for the newest progress while you wait, e.g.
+  `grep "${PREFIX}_REVIEW_PROGRESS" "$BUS/.codex-logs/response-monitor.log" | tail -n 3`
+  (and `grep "${PREFIX}_REVIEW " …` for the terminal handoff). Or run the monitor
+  in the FOREGROUND (`review-bus-response-monitor.sh`, not the daemon) so the lines
+  print to your terminal directly. Progress is a convenience — the loop's
+  correctness never depends on seeing it, only on the terminal `${PREFIX}_REVIEW`.
+
 How to treat them:
 
 - **Tell the user immediately** when the first `state=started` (or `state=resumed`,

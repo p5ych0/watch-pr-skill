@@ -28,6 +28,10 @@ set -euo pipefail
 
 # Single-domain + universal: repo identity derived from this checkout's origin.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Shared round check-in helpers — the SAME logic the watcher's passive
+# auto-enqueue uses, so neither path can bypass the operator pause.
+# shellcheck source=review-bus-rounds.sh
+. "$SCRIPT_DIR/review-bus-rounds.sh"
 REPO_DIR="${REPO_DIR:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)}"
 REMOTE="${REVIEW_BUS_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)}"
 if [ -n "$REMOTE" ]; then
@@ -198,15 +202,10 @@ fi
 # check-in is an operator-safety feature that must be crossed deliberately — pass
 # --continue-threshold, or set CODEX_REVIEW_ROUND_THRESHOLD=0 to disable it.
 THRESHOLD="${CODEX_REVIEW_ROUND_THRESHOLD:-10}"
-ROUNDS_DIR="$BUS_DIR/.rounds"
-ROUNDS_FILE="$ROUNDS_DIR/pr-${PR}.shas"
 FULL_SHA=$(git rev-parse HEAD)
-rounds_done=0
-[ -f "$ROUNDS_FILE" ] && rounds_done=$(grep -c . "$ROUNDS_FILE" 2>/dev/null || echo 0)
 
-if [ "$THRESHOLD" -gt 0 ] && [ "$CONTINUE_THRESHOLD" -eq 0 ] \
-   && [ "$rounds_done" -gt 0 ] && [ $((rounds_done % THRESHOLD)) -eq 0 ] \
-   && ! grep -qxF "$FULL_SHA" "$ROUNDS_FILE" 2>/dev/null; then
+if [ "$CONTINUE_THRESHOLD" -eq 0 ] && review_bus_threshold_reached "$BUS_DIR" "$PR" "$FULL_SHA" "$THRESHOLD"; then
+    rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
     echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
     echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
     echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
@@ -246,9 +245,8 @@ jq -n \
   }' > "$TMP_FILE"
 mv "$TMP_FILE" "$REQ_FILE"
 
-# Record this SHA as an enqueued round (deduped) so the threshold counter above
-# advances by one per DISTINCT round, immune to same-SHA retries.
-mkdir -p "$ROUNDS_DIR"
-grep -qxF "$FULL_SHA" "$ROUNDS_FILE" 2>/dev/null || printf '%s\n' "$FULL_SHA" >> "$ROUNDS_FILE"
+# Record this SHA as an enqueued round (deduped, flock-atomic) so the threshold
+# counter advances by one per DISTINCT round, immune to same-SHA retries.
+review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA"
 
 echo "review request written: ${REQ_FILE}"

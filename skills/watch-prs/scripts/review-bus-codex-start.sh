@@ -265,7 +265,12 @@ launch_unit "$WATCHER_UNIT" "$LOG_DIR/watcher.log" "$WATCHER" \
     --setenv=WIKI_DIR="$CONTEXT_WIKI_DIR" \
     "${CODEX_WATCHER_ENV[@]}"
 
-launch_unit "$MONITOR_UNIT" "$LOG_DIR/response-monitor.log" "$MONITOR"
+# The MONITOR consumes the CODEX_REVIEW_PROGRESS* knobs too (it emits the throttled
+# progress lines) — forward the SAME operator-tunable CODEX_REVIEW_* env, or a
+# --user unit's clean environment would silently reset it to the built-in defaults
+# (30s / status), ignoring an operator override (or an inline disable).
+launch_unit "$MONITOR_UNIT" "$LOG_DIR/response-monitor.log" "$MONITOR" \
+    "${CODEX_WATCHER_ENV[@]}"
 
 # Confirm each daemon actually stayed up (systemd-run success ≠ daemon alive).
 # The poll also replaces the old fixed sleep before reading MainPID.

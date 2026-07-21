@@ -39,7 +39,19 @@
   monitor that (re)starts mid-review replays only the active run as
   `state=resumed`; completed history is never replayed. Knobs:
   `CODEX_REVIEW_PROGRESS`, `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS`,
-  `CODEX_REVIEW_PROGRESS_DETAIL`. New `test-review-bus-progress.sh` (suite: 18).
+  `CODEX_REVIEW_PROGRESS_DETAIL`. New `test-review-bus-progress.sh`.
+
+- **Round check-in covers the PASSIVE auto-enqueue too.** The threshold logic is
+  now a shared library (`review-bus-rounds.sh`) sourced by BOTH the manual
+  `review-bus-request.sh` and the watcher's `write_auto_request`, with
+  flock-atomic round recording — so the polling watcher's auto-enqueue can no
+  longer bypass the operator pause (it HOLDS with `CODEX_AUTO_SKIP
+  reason=round_threshold`). Progress `CODEX_REVIEW_*` knobs are now forwarded to
+  the MONITOR systemd unit too (not only the watcher), so an operator override
+  isn't silently reset to defaults. SKILL documents the runtime-agnostic progress
+  consumer (the monitor log; auto-surfaced via a watch tool in Claude Code, polled
+  in Codex). New `test-review-bus-auto-threshold.sh`; launch-context test extended
+  to the monitor env (suite: 19).
 
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus

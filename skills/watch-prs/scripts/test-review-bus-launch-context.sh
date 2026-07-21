@@ -32,6 +32,7 @@ ORIGIN="$TMP/origin.git"
 IMPL="$TMP/proj"
 BUS="$TMP/bus"
 ENVOUT="$TMP/watcher-env.txt"
+MONENVOUT="$TMP/monitor-env.txt"
 
 # Cleanup: the launcher now runs the daemons as systemd --user services, so
 # stop them by unit name (owner pinned below to make the slug predictable) —
@@ -65,8 +66,14 @@ cat > "$IMPL/scripts/review-bus-codex-watcher.sh" <<STUB
 } > "$ENVOUT"
 sleep 5
 STUB
-cat > "$IMPL/scripts/review-bus-response-monitor.sh" <<'STUB'
+# Stub monitor: record the CODEX_REVIEW_* env start.sh handed IT (the monitor also
+# consumes the progress knobs), then stay alive briefly for the liveness check.
+cat > "$IMPL/scripts/review-bus-response-monitor.sh" <<STUB
 #!/usr/bin/env bash
+{
+    echo "CODEX_REVIEW_PROGRESS_DETAIL=\$CODEX_REVIEW_PROGRESS_DETAIL"
+    echo "CODEX_REVIEW_MAX_ITERATIONS=\$CODEX_REVIEW_MAX_ITERATIONS"
+} > "$MONENVOUT"
 sleep 5
 STUB
 chmod +x "$IMPL/scripts/"*.sh
@@ -87,6 +94,7 @@ env -u WIKI_DIR -u REVIEW_BUS_GUIDANCE_FILE -u REVIEW_BUS_REMOTE \
     REVIEW_BUS_WATCHER="$IMPL/scripts/review-bus-codex-watcher.sh" \
     REVIEW_BUS_MONITOR="$IMPL/scripts/review-bus-response-monitor.sh" \
     CODEX_REVIEW_MAX_ITERATIONS=7 \
+    CODEX_REVIEW_PROGRESS_DETAIL=summary \
     SSH_AUTH_SOCK="/tmp/watch-pr-skill-launch-context-auth.sock" \
     bash "$START" >/dev/null 2>&1 || true
 sleep 0.5
@@ -112,6 +120,17 @@ grep -qx "CODEX_REVIEW_MAX_ITERATIONS=7" "$ENVOUT" \
 grep -qx "SSH_AUTH_SOCK=/tmp/watch-pr-skill-launch-context-auth.sock" "$ENVOUT" \
     && pass "forwards the auth whitelist (SSH_AUTH_SOCK) into the daemon" \
     || die "SSH_AUTH_SOCK not forwarded: $(grep '^SSH_AUTH_SOCK=' "$ENVOUT" 2>/dev/null)"
+
+# The MONITOR unit must ALSO receive the CODEX_REVIEW_* knobs (it emits the
+# progress lines): a clean --user env would otherwise silently reset progress to
+# the defaults, ignoring an operator override.
+[ -f "$MONENVOUT" ] || die "stub monitor was never launched"
+grep -qx "CODEX_REVIEW_PROGRESS_DETAIL=summary" "$MONENVOUT" \
+    && pass "progress knobs forwarded to the MONITOR unit" \
+    || die "monitor missing CODEX_REVIEW_PROGRESS_DETAIL: $(grep '^CODEX_REVIEW_PROGRESS_DETAIL=' "$MONENVOUT" 2>/dev/null)"
+grep -qx "CODEX_REVIEW_MAX_ITERATIONS=7" "$MONENVOUT" \
+    && pass "monitor unit receives the shared CODEX_REVIEW_* env" \
+    || die "monitor missing CODEX_REVIEW_MAX_ITERATIONS: $(grep '^CODEX_REVIEW_MAX_ITERATIONS=' "$MONENVOUT" 2>/dev/null)"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
