@@ -113,16 +113,20 @@ ${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=posting_commen
 ```
 
 **Where they land (and how each runtime consumes them).** The `systemd --user`
-monitor daemon writes these lines to its stdout, which is appended to
-`$BUS/.codex-logs/response-monitor.log` — the SAME log the terminal
-`${PREFIX}_REVIEW` handoff is written to. So the log is the runtime-agnostic
-source of truth:
+`review-bus-response-monitor.sh` emits these lines to its stdout — both the
+session-attached Monitor (Claude Code) and the always-running daemon run the same
+script over the same responses/progress dirs. The daemon's copy is appended to
+`$BUS/.codex-logs/response-monitor.log` (the SAME log the terminal
+`${PREFIX}_REVIEW` handoff lands in), so that log is the runtime-agnostic audit
+trail. How each runtime consumes the lines (consistent with **Surface reviews**
+above):
 
-- **Claude Code:** a background watch (the `Monitor` tool tailing that log for
-  `${PREFIX}_REVIEW*`) surfaces both progress and the final handoff into the
-  session automatically — no polling.
+- **Claude Code:** the `Monitor` tool runs `review-bus-response-monitor.sh` (the
+  session monitor from **Surface reviews** — it reads the responses/progress dirs
+  directly, it does *not* tail the log), and its stdout surfaces both progress and
+  the final handoff into the session automatically — no polling.
 - **Codex (no `Monitor` tool):** there is no automatic in-chat push; **poll the
-  log** for the newest progress while you wait, e.g.
+  daemon log** for the newest progress while you wait, e.g.
   `grep "${PREFIX}_REVIEW_PROGRESS" "$BUS/.codex-logs/response-monitor.log" | tail -n 3`
   (and `grep "${PREFIX}_REVIEW " …` for the terminal handoff). Or run the monitor
   in the FOREGROUND (`review-bus-response-monitor.sh`, not the daemon) so the lines

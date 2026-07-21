@@ -130,7 +130,11 @@
   line — which wrongly showed `state=started phase=preparing_context` — is
   corrected to `phase=queued`, so a consumer keying off the documented phase set
   isn't surprised. Covered in `test-review-bus-progress.sh` (low-res-clock
-  uniqueness + a doc-consistency guard).
+  uniqueness + a doc-consistency guard). Also corrected SKILL's progress-consumer
+  description: the Claude Code `Monitor` **runs `review-bus-response-monitor.sh`**
+  (which reads the responses/progress dirs directly) rather than "tailing the log"
+  — the log is the daemon's audit copy that **Codex** polls; the two bullets now
+  match the **Surface reviews** section.
 
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
