@@ -17,8 +17,13 @@ set -Eeuo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 START="$SELF_DIR/review-bus-codex-start.sh"
 
-if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "ok   - systemd --user unavailable; skipping cgroup-escape assertions"
+# `systemctl --user show-environment` can succeed on an environment (e.g. a CI
+# runner) whose user manager cannot actually START a transient unit — the unit
+# hangs in "activating" with no MainPID. So also probe a real, trivial, bounded
+# launch and skip (as PASS) when it does not complete.
+if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1 \
+   || ! timeout 15 systemd-run --user --quiet --collect --wait --unit="rb-probe-$$-$RANDOM.service" /bin/true >/dev/null 2>&1; then
+    echo "ok   - systemd --user cannot launch transient units; skipping cgroup-escape assertions"
     echo "RESULT: PASS"
     exit 0
 fi

@@ -17,8 +17,12 @@ set -Eeuo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 START="$SELF_DIR/review-bus-codex-start.sh"
 
-if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "ok   - systemd --user unavailable; skipping health/group-kill assertions"
+# Also probe a real transient-unit launch (bounded): a CI runner can answer
+# show-environment yet be unable to START a unit, which would fail these
+# real-daemon assertions spuriously. Skip (as PASS) when it cannot.
+if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1 \
+   || ! timeout 15 systemd-run --user --quiet --collect --wait --unit="rb-probe-$$-$RANDOM.service" /bin/true >/dev/null 2>&1; then
+    echo "ok   - systemd --user cannot launch transient units; skipping health/group-kill assertions"
     echo "RESULT: PASS"
     exit 0
 fi
