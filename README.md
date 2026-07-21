@@ -146,8 +146,8 @@ While Codex reviews, the watcher writes lifecycle state under `$BUS/progress/`
 (one atomic file per run, keyed by a unique `run_id` so same-SHA re-reviews stay
 distinct), and the response monitor surfaces it as throttled
 `${PREFIX}_REVIEW_PROGRESS` lines — a review start, phase changes
-(`preparing_worktree` → `preparing_context` → `reviewing` → `validating_result`
-→ `posting_comments`), and a periodic heartbeat — so the attached session sees a
+(`queued` → `preparing_worktree` → `preparing_context` → `reviewing` →
+`validating_result` → `posting_comments`), and a periodic heartbeat — so the attached session sees a
 review begin and advance instead of waiting silently for the terminal
 `${PREFIX}_REVIEW` handoff. When the installed Codex supports `exec --json`, the
 watcher taps its structured event stream for live event/command counters (and

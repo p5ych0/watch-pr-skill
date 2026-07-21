@@ -119,6 +119,19 @@
   propagates. Both regressions covered in `test-review-bus-auto-threshold.sh`
   (empty-file single-`0`; a failing body under `set -e` still removes the lock).
 
+- **Robust progress `run_id` + documented `queued` phase.** Two review-time
+  progress refinements: (1) the per-review `run_id` (extracted to
+  `_progress_new_run_id`) now appends the pid and a random nonce to the timestamp,
+  so two same-SHA re-reviews started within the same second can't collide and
+  overwrite each other's progress file even where `date +%s%N` is unsupported /
+  low-resolution — preserving the "same-SHA re-reviews stay distinct" guarantee;
+  (2) the watcher's initial phase `queued` (carried on the first `state=started`
+  line) is now listed in the README/SKILL phase progression, and SKILL's example
+  line — which wrongly showed `state=started phase=preparing_context` — is
+  corrected to `phase=queued`, so a consumer keying off the documented phase set
+  isn't surprised. Covered in `test-review-bus-progress.sh` (low-res-clock
+  uniqueness + a doc-consistency guard).
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

@@ -105,6 +105,15 @@ codex_supports_json() {
     [ "$_CODEX_JSON_SUPPORT" = yes ]
 }
 
+# Mint a unique run_id for a review: <sha>.<high-res stamp>.<pid>.<random nonce>.
+# The pid + nonce make it robust even where `date +%s%N` is unsupported or
+# low-resolution (whole-second stamp) — two same-SHA re-reviews started in the
+# same second still get distinct ids, so their progress files can't overwrite each
+# other and the "same-SHA re-reviews stay distinct" guarantee holds. args: <sha>.
+_progress_new_run_id() {
+    printf '%s.%s.%s.%s' "$1" "$(date +%s%N 2>/dev/null || date +%s)" "$BASHPID" "$RANDOM"
+}
+
 # Write the current progress state atomically (temp + rename). args: <phase> <state>.
 progress_set() {
     [ "${PROGRESS_ENABLED:-1}" = "1" ] || return 0
@@ -1159,10 +1168,10 @@ handle() {
     : > "$log"
     echo "CODEX_REVIEW_START pr=$pr sha=$sha branch=$branch iter=$iter at=$(date -u +%FT%TZ)" | tee -a "$log"
 
-    # Begin live-progress tracking for THIS review. A unique run_id (sha + a
-    # nanosecond stamp) keeps legitimate same-SHA re-reviews distinct — progress is
-    # never keyed by SHA alone. All PROGRESS_* globals are reset per invocation.
-    PROGRESS_RUN_ID="${sha}.$(date +%s%N 2>/dev/null || date +%s)"
+    # Begin live-progress tracking for THIS review. The run_id keeps legitimate
+    # same-SHA re-reviews distinct (progress is never keyed by SHA alone). All
+    # PROGRESS_* globals are reset per invocation.
+    PROGRESS_RUN_ID="$(_progress_new_run_id "$sha")"
     PROGRESS_PR="$pr"; PROGRESS_SHA="$sha"; PROGRESS_BRANCH="$branch"; PROGRESS_ITER="$iter"
     PROGRESS_STARTED_AT="$(date -u +%FT%TZ)"
     PROGRESS_EVENTS=0; PROGRESS_COMMANDS=0; PROGRESS_LAST_EVENT=""; PROGRESS_FINDINGS=0; PROGRESS_REASON=""

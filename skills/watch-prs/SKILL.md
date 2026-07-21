@@ -107,7 +107,7 @@ While a review is running, the monitor emits throttled progress lines so you
 the terminal handoff:
 
 ```
-${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=started phase=preparing_context iter=9
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=started phase=queued iter=9
 ${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=reviewing elapsed_s=60 events=42 commands=12 last_event=command_completed
 ${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=posting_comments findings=5
 ```
@@ -133,7 +133,7 @@ How to treat them:
 
 - **Tell the user immediately** when the first `state=started` (or `state=resumed`,
   after a monitor restart mid-review) arrives — a review is now in flight.
-- **Relay throttled progress**: phase changes (`preparing_worktree` → `preparing_context`
+- **Relay throttled progress**: phase changes (`queued` → `preparing_worktree` → `preparing_context`
   → `reviewing` → `validating_result` → `posting_comments`) and the periodic
   heartbeat. Don't act on them beyond keeping the user informed.
 - **Keep waiting for the terminal `${PREFIX}_REVIEW`.** A progress line is NEVER a

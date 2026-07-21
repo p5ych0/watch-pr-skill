@@ -89,6 +89,33 @@ fi
 long="$(printf 'x%.0s' {1..500})"; [ "${#long}" -eq 500 ] && [ "$(progress_sanitize "$long" | wc -c)" -le 241 ] \
     && pass "progress_sanitize: truncates to ~240" || die "progress_sanitize: not truncated"
 
+# ── 2b. _progress_new_run_id mints DISTINCT ids for same-SHA re-reviews even when
+#     the clock is low-resolution (no %N). Stub `date` to a FIXED whole second so
+#     the timestamp component can't disambiguate; the pid + random nonce must still
+#     make every id unique (else same-SHA progress files overwrite each other).
+stubdir="$(mktemp -d)"
+printf '#!/usr/bin/env bash\necho 1700000000\n' > "$stubdir/date"; chmod +x "$stubdir/date"
+declare -A _seen=(); dup=0; badfmt=0; _oldpath="$PATH"; PATH="$stubdir:$PATH"
+for _ in $(seq 1 40); do
+    id="$(_progress_new_run_id deadbeef)"
+    printf '%s\n' "$id" | grep -Eq '^deadbeef\.[0-9]+\.[0-9]+\.[0-9]+$' || badfmt=1
+    [ -n "${_seen[$id]:-}" ] && dup=1
+    _seen["$id"]=1
+done
+PATH="$_oldpath"; rm -rf "$stubdir"
+[ "$badfmt" -eq 0 ] && pass "run_id: format is <sha>.<stamp>.<pid>.<nonce>" || die "run_id: bad format"
+[ "$dup" -eq 0 ] \
+    && pass "run_id: 40 same-SHA mints stay unique under a fixed (low-res) clock" \
+    || die "run_id: collided under a low-res clock (pid+nonce did not disambiguate)"
+
+# ── 2c. Doc-consistency: the watcher's INITIAL phase (`progress_set queued …`, the
+#     phase on the first state=started line) must be documented, so a consumer that
+#     keys off the documented phase set isn't surprised by an unlisted first value.
+README_MD="$SELF_DIR/../../../README.md"; SKILL_MD="$SELF_DIR/../SKILL.md"
+{ grep -q '`queued`' "$README_MD" 2>/dev/null && grep -q '`queued`' "$SKILL_MD" 2>/dev/null; } \
+    && pass "docs: README + SKILL document the initial 'queued' phase" \
+    || die "docs: phase list missing 'queued' (the first emitted phase) in README/SKILL"
+
 # ── 3. progress_tap counts events/commands and survives malformed JSONL ─────
 PROGRESS_EVENTS=0; PROGRESS_COMMANDS=0; PROGRESS_LAST_EVENT=""; PROGRESS_RUN_ID="tap.1"; PROGRESS_SHA="tap"
 out="$(printf '%s\n' \
