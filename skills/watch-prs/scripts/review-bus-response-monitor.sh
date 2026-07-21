@@ -42,8 +42,18 @@ ACK_DIR="${MONITOR_ACK_DIR:-$BUS_DIR/.monitor-acked}"
 # for the terminal resp-<sha>.json. Progress lines are NEVER <PREFIX>_REVIEW, so
 # they can't be mistaken for the final findings handoff. Same bus dir only —
 # never cross-project. Safe default detail = counters + phase (no reasoning text).
+# Coerce a knob to a POSITIVE integer, else the default. A non-integer / empty /
+# 0 / negative value would make the numeric `[ -lt/-ge ]` tests (and inotifywait
+# `-t`) below ERROR under `set -Eeuo pipefail` and terminate the monitor — killing
+# both progress AND the final _REVIEW handoff. Coercing keeps a bad env harmless.
+_positive_int_or() {   # <value> <default>
+    case "$1" in
+        ''|*[!0-9]*) printf '%s' "$2" ;;
+        *) { [ "$1" -ge 1 ] 2>/dev/null && printf '%s' "$1"; } || printf '%s' "$2" ;;
+    esac
+}
 PROGRESS_ENABLED="${CODEX_REVIEW_PROGRESS:-1}"
-PROGRESS_INTERVAL="${CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS:-30}"
+PROGRESS_INTERVAL="$(_positive_int_or "${CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS:-30}" 30)"
 PROGRESS_DETAIL="${CODEX_REVIEW_PROGRESS_DETAIL:-status}"   # status|summary|off
 PROGRESS_DIR="$BUS_DIR/progress"
 # In-memory per-run state for the live loop: last emitted "state/phase" signature
@@ -321,7 +331,7 @@ fi
 # MONITOR_POLL_SECONDS, with no reliance on a fixed arming sleep. inotifywait is
 # backgrounded with a captured pid so the trap reaps it on shutdown (no orphaned
 # watch), and -t bounds it as a secondary guard.
-POLL_SECONDS="${MONITOR_POLL_SECONDS:-15}"
+POLL_SECONDS="$(_positive_int_or "${MONITOR_POLL_SECONDS:-15}" 15)"   # also numeric (-lt, inotifywait -t)
 inotify_pid=""
 cleanup() {
     trap - EXIT INT TERM

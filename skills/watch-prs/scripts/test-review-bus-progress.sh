@@ -171,5 +171,24 @@ rm -rf "$PROG"; mk_prog "run.f" "sha_f" running reviewing
 o="$(CODEX_REVIEW_PROGRESS_DETAIL=off run_monitor)"
 printf '%s\n' "$o" | grep -q 'run=run.f' && die "monitor(off): emitted progress despite off" || pass "monitor(off): progress disabled"
 
+# 11. A non-integer heartbeat interval must NOT crash the monitor. The `-lt/-ge`
+#     numeric tests live in the LIVE loop, so drive the monitor live (bounded): a
+#     bad value without coercion errors under set -e and exits fast; coerced, it
+#     enters the loop and `timeout` kills it (exit 124 = stayed up).
+rm -rf "$PROG"; mk_prog "run.g" "sha_g" running reviewing
+if command -v inotifywait >/dev/null 2>&1; then
+    badint_ok=1
+    for bad in abc "" 0 -5 1.5; do
+        ( cd "$REPO_DIR" && PATH="$TMP/bin:$PATH" BUS_DIR="$BUS_DIR" MONITOR_EMITTED_DIR="$(mktemp -d)" \
+            CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS="$bad" timeout 2 "$MONITOR" >/dev/null 2>&1 )
+        [ "$?" -eq 124 ] || badint_ok=0     # 124 = timeout killed a healthy loop; anything else = crashed
+    done
+    [ "$badint_ok" -eq 1 ] \
+        && pass "non-integer/0/negative PROGRESS_INTERVAL is coerced (monitor stays up, does not crash)" \
+        || die "a bad PROGRESS_INTERVAL crashed the monitor (numeric test errored under set -e)"
+else
+    pass "skip live-loop interval check (no inotifywait)"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
