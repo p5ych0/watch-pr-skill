@@ -204,4 +204,23 @@ NOORIGIN="$TMP/noorigin"; git init -q "$NOORIGIN"
 ( cd "$NOORIGIN" && PATH="$BIN:$PATH" env -u REVIEW_BUS_OWNER -u REVIEW_BUS_REPO "$CLOSE" 7 --force >/dev/null 2>"$TMP/e10" ); rc=$?
 { [ "$rc" -ne 0 ] && grep -q 'REVIEW_BUS_OWNER' "$TMP/e10"; } && pass "no-identity: clear owner/repo error naming the env vars" || die "no-identity: unclear error ($(cat "$TMP/e10"))"
 
+# ── 11. Round-count threshold: close-round FORWARDS request.sh's pause ────────
+# Seed 10 closed rounds; the next enqueue hits the check-in (request.sh exit 3).
+# close-round must treat it as a CLEAN stop: round still closed (threads resolved,
+# response acked), next review NOT enqueued, REVIEW_BUS_THRESHOLD_PAUSE reported.
+BUS="$(new_bus 11)"; GHLOG="$TMP/gh11.log"; : > "$GHLOG"
+mkdir -p "$BUS/.rounds"; for n in $(seq 1 10); do printf 'deadbeef%02d\n' "$n"; done > "$BUS/.rounds/pr-7.shas"
+( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --summary "$TMP/sum.md" >"$TMP/o11" 2>&1 ); rc=$?
+[ "$rc" -eq 0 ] && pass "threshold-fwd: pause is a clean stop (exit 0)" || die "threshold-fwd: non-zero (rc=$rc): $(cat "$TMP/o11")"
+grep -q REVIEW_BUS_THRESHOLD_PAUSE "$TMP/o11" && pass "threshold-fwd: reports the pause" || die "threshold-fwd: no pause line ($(cat "$TMP/o11"))"
+[ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "threshold-fwd: round still closed (threads resolved)" || die "threshold-fwd: threads not resolved"
+ls "$BUS/requests"/req-*.json >/dev/null 2>&1 && die "threshold-fwd: must NOT enqueue at the pause" || pass "threshold-fwd: next review not enqueued"
+ls "$BUS/.monitor-acked"/resp-oldsha1.json.* >/dev/null 2>&1 && pass "threshold-fwd: handled response still acked" || die "threshold-fwd: response not acked at pause"
+
+# ── 12. --continue-threshold proceeds past the pause and enqueues ────────────
+BUS="$(new_bus 12)"; GHLOG="$TMP/gh12.log"; : > "$GHLOG"
+mkdir -p "$BUS/.rounds"; for n in $(seq 1 10); do printf 'deadbeef%02d\n' "$n"; done > "$BUS/.rounds/pr-7.shas"
+( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --continue-threshold --summary "$TMP/sum.md" >/dev/null 2>&1 ); rc=$?
+{ [ "$rc" -eq 0 ] && ls "$BUS/requests"/req-*.json >/dev/null 2>&1; } && pass "threshold-fwd: --continue-threshold enqueues past the pause" || die "threshold-fwd: continue did not enqueue (rc=$rc)"
+
 exit $fail

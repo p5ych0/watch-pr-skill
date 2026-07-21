@@ -125,11 +125,34 @@ anytime.)
 | Variable | Default | Meaning |
 |---|---|---|
 | `CODEX_REVIEW_AUTO_OPEN_PRS` | `0` | `1` = watcher auto-discovers open PR heads |
-| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | `0` = unlimited; the skill pauses to ask every 10th round |
+| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | `0` = unlimited; the round-count check-in pauses every 10th round |
+| `CODEX_REVIEW_ROUND_THRESHOLD` | `10` | round check-in cadence; `0` = disable. `review-bus-request.sh` refuses to enqueue the next review (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) every Nth **distinct enqueued SHA** per PR, so the driver pauses to ask. Cross with `--continue-threshold` |
 | `CODEX_REVIEW_ERROR_RETRY_MAX` | `5` | bound on auto-retries after a reviewer error |
 | `CODEX_REVIEW_MODEL` | `gpt-5.6-sol` | reviewer model |
 | `CODEX_REVIEW_REASONING_EFFORT` | `max` | reviewer reasoning effort (`minimal`…`xhigh`, `max`) |
 | `CODEX_REVIEW_COPILOT_TIMEOUT` | `300` | seconds to wait for a Copilot review |
+| `CODEX_REVIEW_PROGRESS` | `1` | `1` = emit live `${PREFIX}_REVIEW_PROGRESS` lines while a review runs; `0` = off |
+| `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` | `30` | heartbeat cadence for an unchanged in-flight review |
+| `CODEX_REVIEW_PROGRESS_DETAIL` | `status` | `status` (counters + phase, safe default) · `summary` (adds a sanitized `note=`) · `off` |
+
+### Live review progress
+
+While Codex reviews, the watcher writes lifecycle state under `$BUS/progress/`
+(one atomic file per run, keyed by a unique `run_id` so same-SHA re-reviews stay
+distinct), and the response monitor surfaces it as throttled
+`${PREFIX}_REVIEW_PROGRESS` lines — a review start, phase changes
+(`preparing_worktree` → `preparing_context` → `reviewing` → `validating_result`
+→ `posting_comments`), and a periodic heartbeat — so the attached session sees a
+review begin and advance instead of waiting silently for the terminal
+`${PREFIX}_REVIEW` handoff. When the installed Codex supports `exec --json`, the
+watcher taps its structured event stream for live event/command counters (and
+falls back to lifecycle phases + elapsed-time heartbeats otherwise), always
+preserving Codex's real exit status. Progress lines are **never** a
+`${PREFIX}_REVIEW` handoff (only that triggers findings handling), are strictly
+repository-scoped, and — at the default `status` detail — carry only counters and
+phase, never raw chain-of-thought, command output, or secrets. A monitor that
+starts or restarts mid-review replays only the **currently active** run as
+`state=resumed`; completed history is never replayed.
 
 ## Updating
 

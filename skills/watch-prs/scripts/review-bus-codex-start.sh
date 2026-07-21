@@ -123,7 +123,16 @@ if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environme
 fi
 
 # Kill any LEGACY setsid'd daemons (pre-systemd launches of the same script), so
-# we never double-run. Full-path match keeps a sibling repo's daemons safe.
+# we never double-run.
+#
+# CROSS-REPO SAFETY: since the plugin extraction, every repo's daemons exec the
+# IDENTICAL installed script path, so `pgrep -f -- "$script"` matches a SIBLING
+# repo's healthy systemd daemons too. A full-path match is therefore NOT enough to
+# keep them safe (it used to be, when each repo had its own local script path).
+# Skip any PID already owned by a `review-bus-*.service` systemd cgroup: systemd
+# owns its lifecycle — OUR repo's units are handled by stop_unit above, and a
+# sibling repo's units must never be swept just because they share this path. Only
+# genuinely-legacy setsid strays (no review-bus systemd cgroup) are swept here.
 #
 # Terminate the whole process GROUP, not just the matched shell: a setsid daemon
 # is its own group leader and its in-flight `codex exec` / git children share its
@@ -138,6 +147,8 @@ kill_legacy() {
     mypgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d ' ')"
     for pid in $(pgrep -f -- "$script" 2>/dev/null || true); do
         ps -p "$pid" -o args= 2>/dev/null | grep -Fq -- "$script" || continue
+        # systemd-managed (any repo) → leave it to its own unit; never cross-kill.
+        grep -q 'review-bus-' "/proc/$pid/cgroup" 2>/dev/null && continue
         pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
         if [ -n "$pgid" ] && [ "$pgid" = "$pid" ] && [ "$pgid" != "$mypgid" ]; then
             target="-$pgid"   # setsid daemon → terminate its whole group

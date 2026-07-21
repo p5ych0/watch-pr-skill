@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.0.10] — 2026-07-21
+
+- **Fix: cross-repo monitor/watcher kill (the "kill bug").** Since the plugin
+  extraction, every repo's daemons exec the identical installed script path, so
+  `kill_legacy`'s `pgrep -f -- "$script"` matched a *sibling* repo's healthy
+  systemd daemons and TERMed them — only the last-started repo's monitor
+  survived. `kill_legacy` now skips any PID already owned by a
+  `review-bus-*.service` systemd cgroup (read from `/proc/$pid/cgroup`); systemd
+  owns those lifecycles, so only genuinely-legacy setsid strays are swept. Two
+  repos' daemons can now coexist.
+
+- **Fix: the round-count check-in never fired.** The pause-every-10-rounds safety
+  stop lived only in `SKILL.md` step 0 (bypassed by a manually-driven loop) and
+  counted `fix(review):`-prefixed commits (round-fix commits use a module scope
+  like `fix(shipment): … (review r7)`, so the count was always 0). It now lives
+  in `review-bus-request.sh` — the chokepoint every next-round enqueue passes
+  through, manual or via `review-bus-close-round.sh` — and counts **distinct
+  enqueued HEAD SHAs** per PR (a same-SHA retry never double-counts). At a
+  non-zero multiple of `CODEX_REVIEW_ROUND_THRESHOLD` (default 10) it refuses to
+  enqueue (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) so the driver pauses to ask the
+  operator; cross a single pause with `--continue-threshold`, or disable with
+  `CODEX_REVIEW_ROUND_THRESHOLD=0`. `close-round` forwards the pause as a clean
+  stop (round still closed + acked; next review withheld).
+
+- **New: live review-progress notifications.** While Codex reviews, the watcher
+  writes lifecycle state under `$BUS/progress/` (atomic per-run files keyed by a
+  unique `run_id`, so same-SHA re-reviews stay distinct), and the monitor
+  surfaces it as throttled `${PREFIX}_REVIEW_PROGRESS` lines — start, phase
+  changes, and a heartbeat — so the session sees a review begin and advance
+  instead of waiting for the terminal handoff. When the installed Codex supports
+  `exec --json`, the watcher taps its event stream for live event/command
+  counters (falling back to lifecycle phases + elapsed heartbeats otherwise),
+  always preserving Codex's real exit status. Progress is repository-scoped, is
+  never a `${PREFIX}_REVIEW` handoff, and — at the default `status` detail —
+  carries only counters + phase (never raw chain-of-thought, command output, or
+  secrets; the optional `summary` detail relays a sanitized, truncated note). A
+  monitor that (re)starts mid-review replays only the active run as
+  `state=resumed`; completed history is never replayed. Knobs:
+  `CODEX_REVIEW_PROGRESS`, `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS`,
+  `CODEX_REVIEW_PROGRESS_DETAIL`. New `test-review-bus-progress.sh` (suite: 18).
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

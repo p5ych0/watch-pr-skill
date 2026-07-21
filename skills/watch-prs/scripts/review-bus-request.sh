@@ -48,10 +48,12 @@ REQ_DIR="$BUS_DIR/requests"
 mkdir -p "$REQ_DIR"
 
 FORCE=0
+CONTINUE_THRESHOLD=0
 PR=""
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=1 ;;
+        --continue-threshold) CONTINUE_THRESHOLD=1 ;;
         --help|-h)
             sed -n '2,30p' "$0"
             exit 0
@@ -179,6 +181,40 @@ if [ "$FORCE" -eq 0 ]; then
     fi
 fi
 
+# ── Round-count threshold pause ──────────────────────────────────────────────
+# A safety check-in that fires every N closed rounds (default 10) regardless of
+# WHO drives the loop. This is the chokepoint every next-round enqueue passes
+# through — manual OR via review-bus-close-round.sh — so, unlike a skill-only
+# step, it cannot be bypassed by a driver that never re-enters the skill.
+#
+# Rounds are counted the ROBUST way: distinct HEAD SHAs already enqueued for this
+# PR (a same-SHA retry never double-counts), recorded below — NOT a fragile
+# commit-message prefix (round-fix commits use a module scope like
+# `fix(shipment): … (review r7)`, so a `fix(review):` count is always 0 and never
+# fires). At a non-zero multiple of the threshold the request is REFUSED with a
+# distinct exit (3) so the DRIVER pauses to ask the operator: continue / stop &
+# merge / stop & leave open / abandon. This is INDEPENDENT of --force: --force
+# bypasses the correctness gates above (for debugging the bus), but the round
+# check-in is an operator-safety feature that must be crossed deliberately — pass
+# --continue-threshold, or set CODEX_REVIEW_ROUND_THRESHOLD=0 to disable it.
+THRESHOLD="${CODEX_REVIEW_ROUND_THRESHOLD:-10}"
+ROUNDS_DIR="$BUS_DIR/.rounds"
+ROUNDS_FILE="$ROUNDS_DIR/pr-${PR}.shas"
+FULL_SHA=$(git rev-parse HEAD)
+rounds_done=0
+[ -f "$ROUNDS_FILE" ] && rounds_done=$(grep -c . "$ROUNDS_FILE" 2>/dev/null || echo 0)
+
+if [ "$THRESHOLD" -gt 0 ] && [ "$CONTINUE_THRESHOLD" -eq 0 ] \
+   && [ "$rounds_done" -gt 0 ] && [ $((rounds_done % THRESHOLD)) -eq 0 ] \
+   && ! grep -qxF "$FULL_SHA" "$ROUNDS_FILE" 2>/dev/null; then
+    echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
+    echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
+    echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+    echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
+    echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
+    exit 3
+fi
+
 REQ_FILE="$REQ_DIR/req-${SHA}.json"
 TMP_FILE="${REQ_FILE}.tmp.$$"
 
@@ -209,5 +245,10 @@ jq -n \
     }
   }' > "$TMP_FILE"
 mv "$TMP_FILE" "$REQ_FILE"
+
+# Record this SHA as an enqueued round (deduped) so the threshold counter above
+# advances by one per DISTINCT round, immune to same-SHA retries.
+mkdir -p "$ROUNDS_DIR"
+grep -qxF "$FULL_SHA" "$ROUNDS_FILE" 2>/dev/null || printf '%s\n' "$FULL_SHA" >> "$ROUNDS_FILE"
 
 echo "review request written: ${REQ_FILE}"

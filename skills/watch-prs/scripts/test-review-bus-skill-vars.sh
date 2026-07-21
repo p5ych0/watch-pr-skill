@@ -46,11 +46,12 @@ else
     pass "thread-fetch loop uses a non-colliding page variable"
 fi
 
-# The iteration cap is opt-in (0=unlimited); the stale "default 30" / "Hard-cap
-# at 30" text must not drift back — it contradicts the watcher and the step-0
-# threshold pause, and would misguide an agent using the skill as control flow.
-if grep -qE 'Hard-cap iterations at 30|, default 30\)' "$SKILL"; then
-    die "stale hard-cap-30 text present (cap is now 0=unlimited + step-0 pause)"
+# The iteration cap is opt-in (0=unlimited); the stale "Hard-cap at 30" /
+# MAX_ITERATIONS-default-30 text must not drift back — it contradicts the watcher
+# and the round-count check-in. (Narrow to the iteration cap: the progress
+# heartbeat legitimately defaults to 30s.)
+if grep -qE 'Hard-cap iterations at 30|MAX_ITERATIONS[^0-9]{0,20}30' "$SKILL"; then
+    die "stale hard-cap-30 text present (cap is now 0=unlimited + round-count pause)"
 else
     pass "no stale hard-cap-30 text"
 fi
@@ -104,16 +105,16 @@ grep -qE 'review-bus-request\.sh --force' "$SKILL" \
     && pass "moved-head recovery documents review-bus-request.sh --force" \
     || die "moved-head recovery does not document the --force escape hatch"
 
-# The round-count is the safety stop that replaced the hard cap, so it must FAIL
-# CLOSED: a gh error must not silently become 0 and skip the pause.
-if grep -qE '(--json commits|messageHeadline)[^`]*\|\| echo 0' "$SKILL"; then
-    die "round-count fails open to 0 on gh error (must fail closed / ask the user)"
-else
-    pass "round-count does not fail open to 0"
-fi
-grep -qE 'ROUNDS=unknown|round count could not be verified' "$SKILL" \
-    && pass "round-count failure is surfaced (fail-closed, not silent 0)" \
-    || die "round-count failure is not surfaced (should fail closed, ROUNDS=unknown)"
+# The round-count check-in is now enforced by the SCRIPTS (review-bus-request.sh
+# refuses to enqueue at every Nth SHA), not counted in the skill — so the skill
+# must document the script-emitted pause + how to cross it, not a fragile
+# in-skill commit count that a manual driver bypasses.
+grep -qE 'REVIEW_BUS_THRESHOLD_PAUSE' "$SKILL" \
+    && pass "round-count check-in documents the script-emitted pause" \
+    || die "SKILL does not mention REVIEW_BUS_THRESHOLD_PAUSE (the script-enforced check-in)"
+grep -qE '\-\-continue-threshold|CODEX_REVIEW_ROUND_THRESHOLD' "$SKILL" \
+    && pass "round-count pause documents how to continue / disable" \
+    || die "SKILL does not document --continue-threshold / CODEX_REVIEW_ROUND_THRESHOLD"
 
 # ── Optional Copilot pass (Phase D): the skill must document the ask, the
 #    hold-on-no-answer, the iterate-to-clean loop, merge-on-Copilot-clean, and

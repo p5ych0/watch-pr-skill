@@ -100,6 +100,36 @@ The daemon monitor keeps running as a persistent audit log at `response-monitor.
 
 Tell user in one sentence: "Review-bus armed for $OWNER/$REPO — Codex review passes will trigger auto-response."
 
+## Live progress notifications (`${PREFIX}_REVIEW_PROGRESS`)
+
+While a review is running, the monitor emits throttled progress lines so you
+(and the user) see the review start and advance instead of waiting silently for
+the terminal handoff:
+
+```
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=started phase=preparing_context iter=9
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=reviewing elapsed_s=60 events=42 commands=12 last_event=command_completed
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=posting_comments findings=5
+```
+
+How to treat them:
+
+- **Tell the user immediately** when the first `state=started` (or `state=resumed`,
+  after a monitor restart mid-review) arrives — a review is now in flight.
+- **Relay throttled progress**: phase changes (`preparing_worktree` → `preparing_context`
+  → `reviewing` → `validating_result` → `posting_comments`) and the periodic
+  heartbeat. Don't act on them beyond keeping the user informed.
+- **Keep waiting for the terminal `${PREFIX}_REVIEW`.** A progress line is NEVER a
+  findings handoff — only `${PREFIX}_REVIEW pr=… status=…` triggers findings
+  handling (steps below). Do not resolve threads, fix, or merge off a progress line.
+- Progress is **repository-scoped** (this bus only) and, at the default detail,
+  carries **only counters + phase** — never raw chain-of-thought, command output,
+  or secrets. A `note="…"` appears only under `CODEX_REVIEW_PROGRESS_DETAIL=summary`
+  and is a sanitized, truncated summary Codex explicitly exposes — not internal
+  reasoning. Configure with `CODEX_REVIEW_PROGRESS` (1/0),
+  `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` (heartbeat, default 30), and
+  `CODEX_REVIEW_PROGRESS_DETAIL` (`status`|`summary`|`off`, default `status`).
+
 ## Handling a `${PREFIX}_REVIEW` notification
 
 When `${PREFIX}_REVIEW pr=N sha=X status=Y findings=K ... resp=<path>` arrives, first capture the response-file path — you ack it after close-out/merge, and it MUST be a **distinct** variable from the GraphQL page vars used below (`PAGE_JSON` / `PAGE`), or the ack silently fails and the response re-fires next session:
@@ -108,29 +138,24 @@ When `${PREFIX}_REVIEW pr=N sha=X status=Y findings=K ... resp=<path>` arrives, 
 RESP_PATH="<the resp=… path from the notification>"   # e.g. $BUS/responses/resp-X.json
 ```
 
-### 0. Round-count threshold check (before anything else)
+### 0. Round-count check-in (enforced at close-out — no manual count)
 
-There is NO hard iteration cap — the watcher reviews indefinitely. Count the
-closed-out fix rounds on this PR:
+There is NO hard iteration cap. A safety check-in fires every 10 closed rounds,
+enforced by the bus SCRIPTS themselves (not this skill's flow, which a manual
+driver can bypass). `review-bus-request.sh` — the chokepoint every next-round
+enqueue passes through, whether you run it directly or via
+`review-bus-close-round.sh` — counts **distinct enqueued HEAD SHAs** per PR and,
+at a non-zero multiple of `CODEX_REVIEW_ROUND_THRESHOLD` (default 10), REFUSES to
+enqueue the next review (exit 3) and prints:
 
-```bash
-PR=<the pr= number from the notification>
-# Count fix(review): rounds from the PR's OWN commits via the API — independent
-# of the current shell's HEAD, cwd, base branch, and fetch state (a resumed
-# session may sit on main or another worktree at this point).
-if ! ROUNDS=$(gh pr view "$PR" --repo "$OWNER/$REPO" --json commits \
-                --jq '[.commits[] | select(.messageHeadline | startswith("fix(review):"))] | length' 2>/dev/null) \
-     || ! [[ "$ROUNDS" =~ ^[0-9]+$ ]]; then
-    ROUNDS=unknown   # gh failed (auth/outage/rate-limit/lost access) — count UNVERIFIED; do NOT treat as 0
-fi
+```
+REVIEW_BUS_THRESHOLD_PAUSE pr=N rounds=<M> …
 ```
 
-When `ROUNDS` is a non-zero multiple of 10 (10, 20, 30, …), PAUSE before handling
-this notification and ask the user (AskUserQuestion), with **escalating** framing.
-**Fail closed:** if `ROUNDS` is `unknown` (the `gh` count failed — auth, outage,
-rate-limit, lost access), ALSO pause and tell the user the round count could not
-be verified — never proceed as if it were 0, since this pause is the safety stop
-that replaced the hard cap.
+When you see this line (it surfaces from the close-out in step 7), the round is
+FULLY closed — threads resolved, summary posted, response acked — but the next
+review is withheld. PAUSE and ask the user (AskUserQuestion), with **escalating**
+framing:
 
 - **10** — FYI: *"PR #N is at 10 review rounds — still converging?"*
 - **20** — *"Unusual: PR #N is at 20 rounds."*
@@ -138,11 +163,16 @@ that replaced the hard cap.
 
 Options each time: **continue** · **stop & merge if clean** · **stop & leave PR open** · **abandon**.
 
-The just-arrived findings keep their review threads unresolved during the pause,
-so the watcher's own `CODEX_AUTO_SKIP … unresolved_threads` holds auto-enqueue —
-nothing re-reviews until you choose **continue** (which resumes the normal
-fix → resolve → re-request flow). This same check applies to Copilot rounds
-(count them the same way once Phase D lands).
+On **continue**, enqueue the next review past the pause:
+
+```bash
+"$RB_SCRIPTS"/review-bus-request.sh N --continue-threshold
+```
+
+(or export `CODEX_REVIEW_ROUND_THRESHOLD=0` to disable the check-ins entirely).
+This replaces the old, unreliable `fix(review):`-commit count: round-fix commits
+use a module scope (`fix(shipment): … (review r7)`), so that prefix count was
+always 0 and the pause never fired. The same check-in applies to Copilot rounds.
 
 ### 1. Branch off `status`
 - `status=approved` (clean signoff, no findings) → **merge gate** (see step 8).

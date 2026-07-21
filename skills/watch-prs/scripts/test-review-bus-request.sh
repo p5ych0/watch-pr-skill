@@ -66,5 +66,48 @@ else
     die "NOT fail-closed: rc=$rc, request written=$(ls "$TMP/bus"/requests/ 2>/dev/null || echo none)"
 fi
 
+# ── (c) round-count threshold: 10 rounds done → the 11th enqueue PAUSES ──────
+# Pre-seed 10 distinct enqueued SHAs; the next (HEAD) sha is new, so request.sh
+# must refuse with exit 3 and write NO request.
+seed_rounds() {
+    rm -rf "$TMP/bus"; mkdir -p "$TMP/bus/.rounds"
+    local n; for n in $(seq 1 "$1"); do printf 'deadbeef%02d\n' "$n"; done > "$TMP/bus/.rounds/pr-42.shas"
+}
+seed_rounds 10
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 ) >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 3 ] && ! req_written; then
+    pass "threshold: 10 rounds → 11th enqueue pauses (exit 3, no request)"
+else
+    die "threshold pause did not fire (rc=$rc, req_written=$(req_written && echo y || echo n))"
+fi
+
+# ── (d) --continue-threshold proceeds past the pause and records the round ───
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 --continue-threshold ) >/dev/null 2>&1
+rc=$?
+lines=$(grep -c . "$TMP/bus/.rounds/pr-42.shas" 2>/dev/null || echo 0)
+if [ "$rc" -eq 0 ] && req_written && [ "$lines" -eq 11 ]; then
+    pass "threshold: --continue-threshold enqueues past the pause (count 10→11)"
+else
+    die "--continue-threshold did not enqueue/record (rc=$rc, count=$lines)"
+fi
+
+# ── (e) CODEX_REVIEW_ROUND_THRESHOLD=0 disables the pause ────────────────────
+seed_rounds 10
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" CODEX_REVIEW_ROUND_THRESHOLD=0 bash "$REQUEST" 42 ) >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 0 ] && req_written; then
+    pass "threshold: CODEX_REVIEW_ROUND_THRESHOLD=0 disables the pause"
+else
+    die "threshold disable did not enqueue (rc=$rc)"
+fi
+
+# ── (f) a same-SHA retry is counted once (robust round count) ────────────────
+rm -rf "$TMP/bus"
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 ) >/dev/null 2>&1
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 ) >/dev/null 2>&1
+lines=$(grep -c . "$TMP/bus/.rounds/pr-42.shas" 2>/dev/null || echo 0)
+[ "$lines" -eq 1 ] && pass "threshold: same-SHA retry counted once (count=1)" || die "same-SHA retry double-counted (count=$lines)"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

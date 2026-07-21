@@ -52,9 +52,106 @@ fi
 CODEX_REVIEW_MODEL="${CODEX_REVIEW_MODEL:-gpt-5.6-sol}"
 CODEX_REVIEW_REASONING_EFFORT="${CODEX_REVIEW_REASONING_EFFORT:-max}"
 
-mkdir -p "$REQ_DIR" "$RESP_DIR" "$SEEN_DIR" "$LOG_DIR" "$WORKTREE_ROOT"
+# ── Live review progress (repository-scoped) ────────────────────────────────
+# The watcher writes structured lifecycle state under $BUS/progress/ as a review
+# advances; review-bus-response-monitor.sh turns those files into throttled
+# <PREFIX>_REVIEW_PROGRESS notifications for the attached chat. Progress is
+# per-repo (same bus dir), never cross-project. Safe default = counters + phase
+# only (no reasoning text). See the progress helpers + the monitor.
+PROGRESS_ENABLED="${CODEX_REVIEW_PROGRESS:-1}"
+PROGRESS_DETAIL="${CODEX_REVIEW_PROGRESS_DETAIL:-status}"        # status|summary|off
+PROGRESS_DIR="$BUS_DIR/progress"
+
+mkdir -p "$REQ_DIR" "$RESP_DIR" "$SEEN_DIR" "$LOG_DIR" "$WORKTREE_ROOT" "$PROGRESS_DIR"
 
 SCHEMA_FILE="$LOG_DIR/codex-review-result.schema.json"
+
+# ── Live-progress helpers ───────────────────────────────────────────────────
+# All are NON-FATAL: a progress write must never kill a running review (guarded
+# end-to-end, `|| return 0`). Per-run globals PROGRESS_* carry the context; the
+# monitor turns the emitted files into throttled <PREFIX>_REVIEW_PROGRESS lines.
+PROGRESS_RUN_ID=""; PROGRESS_PR=0; PROGRESS_SHA=""; PROGRESS_BRANCH=""
+PROGRESS_ITER=0; PROGRESS_STARTED_AT=""; PROGRESS_EVENTS=0; PROGRESS_COMMANDS=0
+PROGRESS_LAST_EVENT=""; PROGRESS_FINDINGS=0; PROGRESS_REASON=""
+
+# Collapse whitespace, strip ANSI/control chars, truncate ~240 — for the OPTIONAL
+# summary detail ONLY. Never used on raw command output, secrets, env, or
+# chain-of-thought (those are never read into PROGRESS_REASON).
+progress_sanitize() {
+    local esc; esc="$(printf '\033')"
+    printf '%s' "${1:-}" \
+        | tr '\n\r\t' '   ' \
+        | sed "s/${esc}\[[0-9;?]*[A-Za-z]//g" \
+        | tr -d '[:cntrl:]' \
+        | cut -c1-240
+}
+
+# Whether the installed codex exposes `exec --json` (cached once).
+_CODEX_JSON_SUPPORT=""
+codex_supports_json() {
+    [ -n "$CODEX_BIN" ] || return 1
+    if [ -z "$_CODEX_JSON_SUPPORT" ]; then
+        if "$CODEX_BIN" exec --help 2>/dev/null | grep -q -- '--json'; then
+            _CODEX_JSON_SUPPORT=yes
+        else
+            _CODEX_JSON_SUPPORT=no
+        fi
+    fi
+    [ "$_CODEX_JSON_SUPPORT" = yes ]
+}
+
+# Write the current progress state atomically (temp + rename). args: <phase> <state>.
+progress_set() {
+    [ "${PROGRESS_ENABLED:-1}" = "1" ] || return 0
+    [ "${PROGRESS_DETAIL:-status}" != "off" ] || return 0
+    [ -n "${PROGRESS_RUN_ID:-}" ] || return 0
+    local phase="$1" state="$2" now file tmp reason=""
+    now="$(date -u +%FT%TZ)"
+    file="$PROGRESS_DIR/${PROGRESS_RUN_ID}.json"
+    tmp="${file}.tmp.$$"
+    [ "${PROGRESS_DETAIL:-status}" = "summary" ] && reason="${PROGRESS_REASON:-}"
+    jq -n \
+        --arg run_id "$PROGRESS_RUN_ID" --argjson pr "${PROGRESS_PR:-0}" \
+        --arg sha "${PROGRESS_SHA:-}" --arg branch "${PROGRESS_BRANCH:-}" \
+        --arg phase "$phase" --arg state "$state" \
+        --arg started_at "${PROGRESS_STARTED_AT:-$now}" --arg updated_at "$now" \
+        --argjson iter "${PROGRESS_ITER:-0}" --argjson events "${PROGRESS_EVENTS:-0}" \
+        --argjson commands "${PROGRESS_COMMANDS:-0}" --arg last_event "${PROGRESS_LAST_EVENT:-}" \
+        --argjson findings "${PROGRESS_FINDINGS:-0}" --arg reason "$reason" \
+        '{run_id:$run_id, pr:$pr, sha:$sha, branch:$branch, state:$state, phase:$phase,
+          started_at:$started_at, updated_at:$updated_at, iter:$iter,
+          events:$events, commands:$commands, last_event:$last_event, findings:$findings}
+         + (if $reason == "" then {} else {reasoning:$reason} end)' \
+        > "$tmp" 2>/dev/null && mv "$tmp" "$file" 2>/dev/null || { rm -f "$tmp" 2>/dev/null || true; return 0; }
+}
+
+# Tap codex --json stdout: forward every line to the log (stdout) unchanged AND
+# derive SAFE counters into the progress file. No jq in the hot path (a malformed
+# line is forwarded but never aborts the tap). Runs in a pipe subshell, so its
+# counter mutations stay local — it OWNS the progress file for the reviewing phase.
+progress_tap() {
+    local line etype msg
+    while IFS= read -r line; do
+        printf '%s\n' "$line"
+        etype="$(printf '%s' "$line" | sed -n 's/.*"type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+        [ -n "$etype" ] || continue
+        PROGRESS_EVENTS=$(( PROGRESS_EVENTS + 1 ))
+        PROGRESS_LAST_EVENT="$etype"
+        case "$etype" in
+            *command*) PROGRESS_COMMANDS=$(( PROGRESS_COMMANDS + 1 )) ;;
+        esac
+        if [ "${PROGRESS_DETAIL:-status}" = "summary" ]; then
+            case "$etype" in
+                *agent*message*|*message*|*reasoning*)
+                    msg="$(printf '%s' "$line" | sed -n 's/.*"text"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+                    [ -n "$msg" ] && PROGRESS_REASON="$(progress_sanitize "$msg")" ;;
+            esac
+        fi
+        # Keep the file current without thrashing: refresh every few events.
+        [ $(( PROGRESS_EVENTS % 5 )) -eq 0 ] && progress_set reviewing running
+    done
+    progress_set reviewing running
+}
 
 require_tools() {
     local missing=0 tool
@@ -443,11 +540,34 @@ run_codex_review() {
         cmd+=(--add-dir "$WIKI_DIR")
     fi
 
-    cmd+=(--output-schema "$SCHEMA_FILE" --output-last-message "$result_file" -)
+    cmd+=(--output-schema "$SCHEMA_FILE" --output-last-message "$result_file")
+
+    # Tap the structured JSONL event stream for live progress WHEN the installed
+    # codex supports `exec --json`; otherwise fall back to plain output (lifecycle
+    # phases + elapsed heartbeats still work from the progress file). --json does
+    # not affect --output-last-message / --output-schema (a FILE write), so the
+    # final result parsing is unchanged.
+    local use_json=0
+    if [ "${PROGRESS_ENABLED:-1}" = "1" ] && [ "${PROGRESS_DETAIL:-status}" != "off" ] && codex_supports_json; then
+        cmd+=(--json)
+        use_json=1
+    fi
+    cmd+=(-)
 
     printf 'CODEX_CMD:'
     printf ' %q' "${cmd[@]}"
     printf ' < %q\n' "$prompt_file"
+
+    if [ "$use_json" -eq 1 ]; then
+        # Preserve CODEX's exit status through the tap pipe (PIPESTATUS[0]), not the
+        # tap's. pipefail is disabled locally only so a codex non-zero doesn't abort
+        # under set -e before we read + return its real status to the caller.
+        set +o pipefail
+        "${cmd[@]}" < "$prompt_file" 2>&1 | progress_tap
+        local rc=${PIPESTATUS[0]}
+        set -o pipefail
+        return "$rc"
+    fi
     "${cmd[@]}" < "$prompt_file"
 }
 
@@ -820,17 +940,21 @@ process_review() {
     export CUID="${CUID:-$(id -u)}"
     export CGID="${CGID:-$(id -g)}"
 
+    progress_set preparing_worktree running
     full_sha="$(resolve_requested_commit "$pr" "$sha" "$branch")" || return 1
     review_dir="$(prepare_review_worktree "$pr" "$sha" "$full_sha")" || return 1
     echo "CODEX_RESOLVED_SHA full_sha=$full_sha review_worktree=$review_dir review_head=$(git -C "$review_dir" rev-parse HEAD)"
 
+    progress_set preparing_context running
     fetch_review_context "$pr" "$sha" "$full_sha" "$snapshot_dir" "$review_dir" || return 1
     build_prompt "$prompt" "$pr" "$sha" "$branch" "$full_sha" "$snapshot_dir" "$review_dir" || return 1
 
     before="$(max_comment_id "$pr")"
     echo "CODEX_COMMENT_BEFORE max_id=$before"
 
+    progress_set reviewing running
     run_codex_review "$prompt" "$result" "$review_dir" || return 1
+    progress_set validating_result running
     if [ ! -s "$result" ]; then
         echo "CODEX_RESULT_MISSING path=$result"
         return 1
@@ -847,6 +971,8 @@ process_review() {
         return 0
     fi
 
+    PROGRESS_FINDINGS="$produced"
+    progress_set posting_comments running
     post_stats="$(post_findings "$pr" "$full_sha" "$result" "$sha")" || return 1
     read -r posted failed attempted <<< "$post_stats"
     posted="${posted:-0}"
@@ -1010,12 +1136,22 @@ handle() {
     : > "$log"
     echo "CODEX_REVIEW_START pr=$pr sha=$sha branch=$branch iter=$iter at=$(date -u +%FT%TZ)" | tee -a "$log"
 
+    # Begin live-progress tracking for THIS review. A unique run_id (sha + a
+    # nanosecond stamp) keeps legitimate same-SHA re-reviews distinct — progress is
+    # never keyed by SHA alone. All PROGRESS_* globals are reset per invocation.
+    PROGRESS_RUN_ID="${sha}.$(date +%s%N 2>/dev/null || date +%s)"
+    PROGRESS_PR="$pr"; PROGRESS_SHA="$sha"; PROGRESS_BRANCH="$branch"; PROGRESS_ITER="$iter"
+    PROGRESS_STARTED_AT="$(date -u +%FT%TZ)"
+    PROGRESS_EVENTS=0; PROGRESS_COMMANDS=0; PROGRESS_LAST_EVENT=""; PROGRESS_FINDINGS=0; PROGRESS_REASON=""
+    progress_set queued started
+
     if [ "$MAX_ITERATIONS" -gt 0 ] && [ "$iter" -gt "$MAX_ITERATIONS" ]; then
         status="error"
         findings=0
         summary="codex review cap exceeded for PR #$pr ($iter > $MAX_ITERATIONS); no review run."
         write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log"
         finish_seen "$base"
+        progress_set error error
         echo "CODEX_REVIEW_DONE pr=$pr sha=$sha status=$status findings=$findings" | tee -a "$log"
         return
     fi
@@ -1033,6 +1169,16 @@ handle() {
     # A successful (non-error) review resets the error-retry counter so a later
     # transient error series gets its own fresh bound.
     [ "$status" = "error" ] || rm -f "$BUS_DIR/.codex-error-${pr}-${sha}"
+    # Terminal progress state (the monitor also stops heartbeats once resp-<sha>
+    # exists). A superseded run left an error status with a "superseded" summary.
+    PROGRESS_FINDINGS="$([[ "$findings" =~ ^[0-9]+$ ]] && echo "$findings" || echo 0)"
+    if [ "$status" = "error" ] && jq -e '.summary // "" | test("superseded")' "$resp" >/dev/null 2>&1; then
+        progress_set superseded superseded
+    elif [ "$status" = "error" ]; then
+        progress_set error error
+    else
+        progress_set completed completed
+    fi
     echo "CODEX_REVIEW_DONE pr=$pr sha=$sha status=$status findings=$findings" | tee -a "$log"
 }
 
