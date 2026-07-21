@@ -74,13 +74,19 @@ seed_rounds() {
     local n; for n in $(seq 1 "$1"); do printf 'deadbeef%02d\n' "$n"; done > "$TMP/bus/.rounds/pr-42.shas"
 }
 seed_rounds 10
-( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 ) >/dev/null 2>&1
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 ) >/dev/null 2>"$TMP/pauseerr"
 rc=$?
 if [ "$rc" -eq 3 ] && ! req_written; then
     pass "threshold: 10 rounds → 11th enqueue pauses (exit 3, no request)"
 else
     die "threshold pause did not fire (rc=$rc, req_written=$(req_written && echo y || echo n))"
 fi
+# The pause line must print the FULL HEAD sha (the gate/lock key), not the 7-char
+# short — so operators debugging a pause / copy-pasting for triage see the real key.
+FULL="$(git -C "$REPO" rev-parse HEAD)"
+grep -q "next_sha=$FULL" "$TMP/pauseerr" \
+    && pass "threshold: pause line prints the full HEAD sha (not the short)" \
+    || die "threshold: pause line missing the full sha ($(grep THRESHOLD_PAUSE "$TMP/pauseerr"))"
 
 # ── (d) --continue-threshold proceeds past the pause and records the round ───
 ( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" bash "$REQUEST" 42 --continue-threshold ) >/dev/null 2>&1

@@ -166,6 +166,22 @@ printf '%s\n' "$o_status" | grep -q 'note=' && die "monitor(status): leaked a no
 o_sum="$(CODEX_REVIEW_PROGRESS_DETAIL=summary run_monitor)"
 printf '%s\n' "$o_sum" | grep -q 'note="clean summary"' && pass "monitor(summary): relays the sanitized note" || die "monitor(summary): no note ($o_sum)"
 
+# 9b. Terminal/log-injection defense: a reasoning carrying an ANSI escape + BEL +
+#     tab must emit a line with NO control bytes at all — the whole assembled line
+#     is stripped of control chars before it reaches the log/terminal — while the
+#     printable text survives. (The watcher sanitizes on write; this hardens the
+#     monitor's own emission against a crafted local-state file.)
+rm -rf "$PROG"; mk_prog "run.g" "sha_g" running reviewing "$(printf 'red\033[31mALERT\007\tmore')"
+o_ansi="$(CODEX_REVIEW_PROGRESS_DETAIL=summary run_monitor)"
+if printf '%s' "$o_ansi" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    die "monitor(summary): control bytes reached the emitted line (injection): $(printf '%s' "$o_ansi" | cat -v)"
+else
+    pass "monitor(summary): control bytes stripped from the emitted line (no ANSI/BEL/tab injection)"
+fi
+{ printf '%s\n' "$o_ansi" | grep -q 'run=run.g' && printf '%s\n' "$o_ansi" | grep -q 'ALERT'; } \
+    && pass "monitor(summary): printable note text survives sanitization" \
+    || die "monitor(summary): sanitization dropped the note text ($(printf '%s' "$o_ansi" | cat -v))"
+
 # 10. off disables progress entirely.
 rm -rf "$PROG"; mk_prog "run.f" "sha_f" running reviewing
 o="$(CODEX_REVIEW_PROGRESS_DETAIL=off run_monitor)"

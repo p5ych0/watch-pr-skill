@@ -91,6 +91,20 @@
   invokes it by) instead of a bare `review-bus-request.sh` that only runs if the
   scripts dir happens to be on `PATH`. Asserted in `test-review-bus-close-round.sh`.
 
+- **Threshold-pause line prints the full HEAD sha.** `REVIEW_BUS_THRESHOLD_PAUSE`
+  labelled `next_sha=` but printed the 7-char short sha, while the round gate/lock
+  is keyed on the full HEAD sha — misleading when triaging a pause. It now prints
+  the full sha (asserted in `test-review-bus-request.sh`).
+
+- **Strip control bytes from every emitted progress line (log-injection defense).**
+  `$BUS/progress/*.json` is local state the watcher already sanitizes on write, but
+  the monitor's `emit_progress` now also strips ALL control bytes from the fully
+  assembled `${PREFIX}_REVIEW_PROGRESS` line (not only newlines/quotes in the
+  `note`) before it reaches the log / an operator's terminal — a stray ANSI escape
+  or BEL in any interpolated field (`note`, `last_event`, `phase`) is no longer a
+  terminal/log-injection vector. Mirrors the watcher's `tr -d '[:cntrl:]'`; covered
+  by a crafted-reasoning case in `test-review-bus-progress.sh`.
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

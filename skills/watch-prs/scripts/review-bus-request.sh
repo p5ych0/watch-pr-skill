@@ -222,7 +222,7 @@ else
         claimed|already) ;;   # round claimed → proceed to enqueue
         pause)
             rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
-            echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
+            echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$FULL_SHA" >&2
             echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
             echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
             echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2

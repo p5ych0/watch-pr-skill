@@ -196,6 +196,12 @@ emit_progress() {
         + (if $detail == "summary" and (.reasoning // "") != ""
              then " note=\"\(.reasoning | gsub("[\n\r\"]"; " ") | .[0:240])\"" else "" end)
     ' "$f" 2>/dev/null || true)"
+    # Defense-in-depth: $BUS/progress/*.json is local state (the watcher sanitizes
+    # on write), but strip ALL control bytes from the assembled line before it
+    # reaches the monitor log / an operator's terminal — a stray ANSI escape or BEL
+    # in ANY interpolated field (note, last_event, phase) would otherwise be a
+    # log/terminal-injection vector. Mirrors the watcher's `tr -d '[:cntrl:]'`.
+    line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"
     [ -n "$line" ] && printf '%s\n' "$line"
 }
 
