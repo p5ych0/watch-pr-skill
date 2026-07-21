@@ -109,5 +109,22 @@ rm -rf "$TMP/bus"
 lines=$(grep -c . "$TMP/bus/.rounds/pr-42.shas" 2>/dev/null || echo 0)
 [ "$lines" -eq 1 ] && pass "threshold: same-SHA retry counted once (count=1)" || die "same-SHA retry double-counted (count=$lines)"
 
+# ── (g) Round-lock timeout under the caller's set -e: request.sh must FAIL CLOSED
+#    cleanly (BUS_REQUEST_BLOCKED, exit 2, no request) — NOT abort at the bare
+#    `claim="$(review_bus_claim_round …)"` assignment. Hold the lock with a LIVE
+#    process + a short timeout; --force skips preflight so the claim is reached.
+#    (The unit test can't catch this — it runs `set +e`; this drives the real
+#    script under its own `set -euo pipefail`.)
+rm -rf "$TMP/bus"; mkdir -p "$TMP/bus/.rounds/pr-42.shas.lockd"
+sleep 30 & LP=$!; printf '%s\n' "$LP" > "$TMP/bus/.rounds/pr-42.shas.lockd/pid"
+( cd "$REPO" && PATH="$TMP/bin:$PATH" BUS_DIR="$TMP/bus" REPO_DIR="$REPO" \
+    REVIEW_BUS_LOCK_TIMEOUT_TICKS=15 bash "$REQUEST" 42 --force ) >/dev/null 2>"$TMP/lockerr"; rc=$?
+kill "$LP" 2>/dev/null; wait "$LP" 2>/dev/null
+if [ "$rc" -eq 2 ] && grep -q 'round_lock_unavailable' "$TMP/lockerr" && ! req_written; then
+    pass "lock timeout under set -e fails closed cleanly (BUS_REQUEST_BLOCKED, no request)"
+else
+    die "lock timeout mishandled under set -e (rc=$rc, wrote=$(req_written && echo y || echo n), err=$(cat "$TMP/lockerr" 2>/dev/null))"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

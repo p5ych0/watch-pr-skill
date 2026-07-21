@@ -112,11 +112,16 @@ _review_bus_claim_locked() {
 #    Prints one of: claimed (recorded → enqueue) | already (this sha already
 #    recorded → idempotent, enqueue) | pause (at a threshold multiple → do NOT
 #    enqueue) | locktimeout (lock unavailable → fail closed, do NOT enqueue).
+#
+#    The status is the printed TOKEN and the function ALWAYS returns 0, so a bare
+#    `claim="$(review_bus_claim_round …)"` under `set -e` never aborts the caller
+#    before it can branch on the token (a non-zero here would trip the assignment).
+#    The inner substitution is `|| rc=$?`-guarded for the same reason.
 review_bus_claim_round() {
-    local bus="$1" pr="$2" sha="$3" threshold="$4" f out rc
+    local bus="$1" pr="$2" sha="$3" threshold="$4" f out rc=0
     f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
-    out="$(_review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold")"
-    rc=$?
-    if [ "$rc" -ne 0 ] || [ -z "$out" ]; then echo locktimeout; return 1; fi
+    out="$(_review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold")" || rc=$?
+    if [ "$rc" -ne 0 ] || [ -z "$out" ]; then echo locktimeout; return 0; fi
     printf '%s\n' "$out"
+    return 0
 }

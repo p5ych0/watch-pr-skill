@@ -55,7 +55,11 @@
   **provably dead** (`kill -0` never falses a live/slow PID, so a live holder is
   never evicted; the reclaim atomically renames the exact stale dir); if the lock
   can't be acquired within a bound it **fails closed** (callers do not enqueue)
-  rather than time-stealing a possibly-live holder.
+  rather than time-stealing a possibly-live holder. The fail-closed result is a
+  status **token** (`review_bus_claim_round` always returns 0), so a bare
+  `claim="$(…)"` under `set -e` branches on it instead of aborting the caller
+  (which would have exited the request script — and could crash the watcher —
+  before the handler).
   The Codex-vs-Claude-Code progress-consumer split is applied to the arming
   instructions + README too (Codex polls the monitor log; no auto-notification is
   promised there). Progress `CODEX_REVIEW_*` knobs are now forwarded to
