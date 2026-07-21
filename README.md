@@ -33,6 +33,10 @@ A file-based **review bus**:
 
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
+The daemons are `systemd --user` units scoped per repo
+(`review-bus-<owner>-<repo>-{watcher,monitor}`), so you can run the bus in several
+repos at once and they won't interfere — arming a second repo never stops the
+first repo's reviewer.
 
 ## Prerequisites
 
@@ -106,6 +110,33 @@ surface reviews. Then:
 4. On a clean signoff it re-checks the merge gate (head unchanged, threads
    resolved, required checks green) and admin-merges.
 
+### Round check-in (the every-N-rounds pause)
+
+A review loop can run many rounds. So it stays *your* decision to keep going —
+rather than rubber-stamping an endless back-and-forth — the bus pauses for a
+check-in every **N distinct pushed heads** for a PR (`N =
+CODEX_REVIEW_ROUND_THRESHOLD`, default `10`). At the boundary the next enqueue is
+withheld and you'll see:
+
+```
+REVIEW_BUS_THRESHOLD_PAUSE pr=<PR> rounds=<count> next_sha=<full sha>
+```
+
+You then choose:
+
+- **Continue** — cross a single pause with `--continue-threshold`
+  (`review-bus-close-round.sh <PR> --summary <file> --continue-threshold`, or
+  re-run `review-bus-request.sh <PR> --continue-threshold`). The pause re-arms
+  for the *next* N rounds.
+- **Stop** — merge, leave the PR open, or abandon it — whatever the state calls for.
+- **Turn the pauses off** — `export CODEX_REVIEW_ROUND_THRESHOLD=0`.
+
+The count is over *distinct* enqueued head SHAs, so a same-SHA retry never
+double-counts, and the check-in fires on **both** the manual enqueue and the
+auto-discovered one (`CODEX_REVIEW_AUTO_OPEN_PRS=1`) — the polling watcher can't
+slip past the checkpoint. (A malformed threshold value is treated as the default
+`10`, never as "disabled", so a typo can't silently remove the check-in.)
+
 ### Optional Copilot pass
 
 After a clean Codex signoff, the skill asks whether to run an optional GitHub Copilot review pass.
@@ -130,8 +161,8 @@ anytime.)
 | Variable | Default | Meaning |
 |---|---|---|
 | `CODEX_REVIEW_AUTO_OPEN_PRS` | `0` | `1` = watcher auto-discovers open PR heads |
-| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | `0` = unlimited; the round-count check-in pauses every 10th round |
-| `CODEX_REVIEW_ROUND_THRESHOLD` | `10` | round check-in cadence; `0` = disable. `review-bus-request.sh` refuses to enqueue the next review (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) every Nth **distinct enqueued SHA** per PR, so the driver pauses to ask. Cross with `--continue-threshold` |
+| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | hard cap on total review rounds per PR (a runaway backstop); `0` = unlimited. Distinct from the periodic *pause* below — this is a stop, not a check-in |
+| `CODEX_REVIEW_ROUND_THRESHOLD` | `10` | round check-in cadence (see [Round check-in](#round-check-in-the-every-n-rounds-pause)); `0` = disable. `review-bus-request.sh` refuses to enqueue the next review (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) every Nth **distinct enqueued SHA** per PR, so the driver pauses to ask. Cross with `--continue-threshold`. A non-integer value falls back to `10` (never silently disabled) |
 | `CODEX_REVIEW_ERROR_RETRY_MAX` | `5` | bound on auto-retries after a reviewer error |
 | `CODEX_REVIEW_MODEL` | `gpt-5.6-sol` | reviewer model |
 | `CODEX_REVIEW_REASONING_EFFORT` | `max` | reviewer reasoning effort (`minimal`…`xhigh`, `max`) |
