@@ -262,7 +262,7 @@ done
 if [ "$paused" -eq 1 ]; then
     echo "REVIEW_BUS_THRESHOLD_PAUSE round closed for PR #$PR — next review NOT enqueued (round-count check-in)."
     echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon."
-    echo "To continue (enqueue the next review): review-bus-request.sh $PR --continue-threshold"
+    echo "To continue (enqueue the next review): \"$SCRIPT_DIR\"/review-bus-request.sh $PR --continue-threshold"
 else
     echo "round closed for PR #$PR — next Codex pass enqueued for ${SHA}"
 fi

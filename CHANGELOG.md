@@ -85,6 +85,12 @@
     `0` remains a meaningful explicit disable, and a leading-zero value is read
     base-10 (`08` → 8) so it can't trip an octal-parse error in the `%` math.
 
+- **`close-round`'s pause guidance is copy/paste-runnable.** When the round-count
+  check-in pauses, the "To continue" hint now prints the script by its absolute
+  `$SCRIPT_DIR/review-bus-request.sh` path (the same form `close-round` itself
+  invokes it by) instead of a bare `review-bus-request.sh` that only runs if the
+  scripts dir happens to be on `PATH`. Asserted in `test-review-bus-close-round.sh`.
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

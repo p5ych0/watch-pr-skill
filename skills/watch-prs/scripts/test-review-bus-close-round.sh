@@ -213,6 +213,12 @@ mkdir -p "$BUS/.rounds"; for n in $(seq 1 10); do printf 'deadbeef%02d\n' "$n"; 
 ( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --summary "$TMP/sum.md" >"$TMP/o11" 2>&1 ); rc=$?
 [ "$rc" -eq 0 ] && pass "threshold-fwd: pause is a clean stop (exit 0)" || die "threshold-fwd: non-zero (rc=$rc): $(cat "$TMP/o11")"
 grep -q REVIEW_BUS_THRESHOLD_PAUSE "$TMP/o11" && pass "threshold-fwd: reports the pause" || die "threshold-fwd: no pause line ($(cat "$TMP/o11"))"
+# The continue guidance must be copy/paste-runnable: an absolute path to the
+# script (its $SCRIPT_DIR/…), NOT a bare `review-bus-request.sh` that only works
+# if the scripts dir happens to be on PATH.
+grep -Eq 'To continue .*: +"?/.*/review-bus-request\.sh 7 --continue-threshold' "$TMP/o11" \
+    && pass "threshold-fwd: continue guidance uses an absolute script path (copy/paste-runnable)" \
+    || die "threshold-fwd: continue guidance not an absolute path ($(grep 'To continue' "$TMP/o11"))"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "threshold-fwd: round still closed (threads resolved)" || die "threshold-fwd: threads not resolved"
 ls "$BUS/requests"/req-*.json >/dev/null 2>&1 && die "threshold-fwd: must NOT enqueue at the pause" || pass "threshold-fwd: next review not enqueued"
 ls "$BUS/.monitor-acked"/resp-oldsha1.json.* >/dev/null 2>&1 && pass "threshold-fwd: handled response still acked" || die "threshold-fwd: response not acked at pause"
