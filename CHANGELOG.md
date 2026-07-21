@@ -49,6 +49,9 @@
   `CODEX_AUTO_SKIP reason=round_threshold`), and a concurrent manual + passive
   enqueue at the boundary can't both slip past (the threshold decision and the
   round append share one lock; append-only locking left a check-then-claim TOCTOU).
+  Where `flock` is absent the lock falls back to an ATOMIC mkdir mutex (bounded
+  spin + stale-lock steal) rather than running lock-less — so the gate is never
+  silently racy on a `flock`-free system.
   The Codex-vs-Claude-Code progress-consumer split is applied to the arming
   instructions + README too (Codex polls the monitor log; no auto-notification is
   promised there). Progress `CODEX_REVIEW_*` knobs are now forwarded to

@@ -35,19 +35,43 @@ review_bus_threshold_reached() {
         && ! grep -qxF "$sha" "$f" 2>/dev/null
 }
 
-# review_bus_record_round <bus_dir> <pr> <full_sha>
-# -> append the sha as a closed round (deduped; flock-atomic where available).
-# Unconditional record (no pause decision) — used only on the operator's explicit
-# --continue-threshold cross. The normal path uses review_bus_claim_round.
-review_bus_record_round() {
-    local bus="$1" pr="$2" sha="$3" f dir
-    f="$(_review_bus_rounds_file "$bus" "$pr")"; dir="$(dirname "$f")"
-    mkdir -p "$dir"
-    if command -v flock >/dev/null 2>&1; then
-        { flock 9; grep -qxF "$sha" "$f" 2>/dev/null || printf '%s\n' "$sha" >> "$f"; } 9>>"${f}.lock"
+# _review_bus_locked <lock_base> <fn> <args...>
+# -> run "<fn> <args>" holding an EXCLUSIVE lock, so the whole critical section is
+#    serialized. Prefers flock; falls back to an ATOMIC mkdir mutex where flock is
+#    absent — never a lock-less run (that would restore the check-then-claim race).
+#    The mkdir mutex is POSIX-atomic (only one creator wins) with a bounded spin +
+#    stale-lock steal so a crashed holder can't wedge the counter forever. Set
+#    REVIEW_BUS_FORCE_NO_FLOCK=1 to exercise the fallback where flock exists.
+_review_bus_locked() {
+    local base="$1"; shift
+    if [ -z "${REVIEW_BUS_FORCE_NO_FLOCK:-}" ] && command -v flock >/dev/null 2>&1; then
+        ( flock 9; "$@" ) 9>>"${base}.lock"
     else
-        grep -qxF "$sha" "$f" 2>/dev/null || printf '%s\n' "$sha" >> "$f"
+        local lock="${base}.lockd" tries=0 rc
+        until mkdir "$lock" 2>/dev/null; do
+            tries=$((tries + 1))
+            [ "$tries" -ge 500 ] && { rmdir "$lock" 2>/dev/null || true; tries=0; }   # ~5s → steal a dead holder
+            sleep 0.01
+        done
+        "$@"; rc=$?
+        rmdir "$lock" 2>/dev/null || true
+        return "$rc"
     fi
+}
+
+# _review_bus_append_once <file> <sha> — dedup append (the record body; run locked).
+_review_bus_append_once() {
+    grep -qxF "$2" "$1" 2>/dev/null || printf '%s\n' "$2" >> "$1"
+}
+
+# review_bus_record_round <bus_dir> <pr> <full_sha>
+# -> append the sha as a closed round (deduped, atomically). Unconditional record
+#    (no pause decision) — used only on the operator's explicit --continue-threshold
+#    cross. The normal path uses review_bus_claim_round.
+review_bus_record_round() {
+    local bus="$1" pr="$2" sha="$3" f
+    f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
+    _review_bus_locked "$f" _review_bus_append_once "$f" "$sha"
 }
 
 # _review_bus_claim_locked <file> <bus> <pr> <sha> <threshold> — the atomic body.
@@ -72,12 +96,7 @@ _review_bus_claim_locked() {
 #    Prints: pause (at a threshold multiple — do NOT enqueue) | claimed (recorded,
 #    enqueue) | already (this sha was already recorded — idempotent, enqueue).
 review_bus_claim_round() {
-    local bus="$1" pr="$2" sha="$3" threshold="$4" f dir
-    f="$(_review_bus_rounds_file "$bus" "$pr")"; dir="$(dirname "$f")"
-    mkdir -p "$dir"
-    if command -v flock >/dev/null 2>&1; then
-        ( flock 9; _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold" ) 9>>"${f}.lock"
-    else
-        _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold"
-    fi
+    local bus="$1" pr="$2" sha="$3" threshold="$4" f
+    f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
+    _review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold"
 }

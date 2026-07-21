@@ -107,5 +107,22 @@ done
 [ "$races_ok" -eq 1 ] && pass "atomic claim: 5 repeated races all land the counter at 10 (never 11)" \
     || die "atomic claim: a repeated race let the counter reach 11 (pause skipped)"
 
+# ── The flock-LESS fallback (atomic mkdir mutex) must ALSO be race-safe — no
+#    lock-less run that restores the TOCTOU. Force the fallback and re-run the race.
+export REVIEW_BUS_FORCE_NO_FLOCK=1
+nofl_ok=1
+for _ in 1 2 3; do
+    seed_rounds 9
+    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10 > "$TMP/na" ) &
+    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_B" 10 > "$TMP/nb" ) &
+    wait
+    [ "$(review_bus_rounds_done "$BUS_DIR" 7)" -eq 10 ] \
+        && [ "$(printf '%s\n%s\n' "$(cat "$TMP/na")" "$(cat "$TMP/nb")" | sort -u | paste -sd, -)" = "claimed,pause" ] \
+        || nofl_ok=0
+done
+unset REVIEW_BUS_FORCE_NO_FLOCK
+[ "$nofl_ok" -eq 1 ] && pass "no-flock fallback: mkdir mutex is atomic too (one claims, one pauses, count 10)" \
+    || die "no-flock fallback: restored the race (counter reached 11 or double-claim)"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
