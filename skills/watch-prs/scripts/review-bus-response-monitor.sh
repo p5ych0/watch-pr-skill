@@ -34,6 +34,34 @@ RESP_DIR="$BUS_DIR/responses"
 # The daemon audit-log monitor leaves MONITOR_EMITTED_DIR unset (persistent dir).
 EMITTED_DIR="${MONITOR_EMITTED_DIR:-$BUS_DIR/.monitor-emitted}"
 ACK_DIR="${MONITOR_ACK_DIR:-$BUS_DIR/.monitor-acked}"
+
+# ── Live review progress (repository-scoped) ────────────────────────────────
+# The watcher writes structured lifecycle state under $BUS/progress/ as a review
+# advances; here we surface it as THROTTLED <PREFIX>_REVIEW_PROGRESS lines so the
+# attached chat sees a review start + phase changes + heartbeats WITHOUT waiting
+# for the terminal resp-<sha>.json. Progress lines are NEVER <PREFIX>_REVIEW, so
+# they can't be mistaken for the final findings handoff. Same bus dir only —
+# never cross-project. Safe default detail = counters + phase (no reasoning text).
+# Coerce a knob to a POSITIVE integer, else the default. A non-integer / empty /
+# 0 / negative value would make the numeric `[ -lt/-ge ]` tests (and inotifywait
+# `-t`) below ERROR under `set -Eeuo pipefail` and terminate the monitor — killing
+# both progress AND the final _REVIEW handoff. Coercing keeps a bad env harmless.
+_positive_int_or() {   # <value> <default>
+    case "$1" in
+        ''|*[!0-9]*) printf '%s' "$2" ;;
+        *) { [ "$1" -ge 1 ] 2>/dev/null && printf '%s' "$1"; } || printf '%s' "$2" ;;
+    esac
+}
+PROGRESS_ENABLED="${CODEX_REVIEW_PROGRESS:-1}"
+PROGRESS_INTERVAL="$(_positive_int_or "${CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS:-30}" 30)"
+PROGRESS_DETAIL="${CODEX_REVIEW_PROGRESS_DETAIL:-status}"   # status|summary|off
+PROGRESS_DIR="$BUS_DIR/progress"
+# In-memory per-run state for the live loop: last emitted "state/phase" signature
+# and the epoch of the last emit (heartbeat throttle). Reset on daemon restart —
+# which is exactly what drives the "replay the active review as resumed" behavior.
+declare -A PROG_SIG=()
+declare -A PROG_LAST_EMIT=()
+
 ONCE=0
 ACK_MODE=0
 ACK_FILE=""
@@ -84,7 +112,7 @@ require_tools() {
 
 require_tools
 
-mkdir -p "$RESP_DIR" "$EMITTED_DIR" "$ACK_DIR"
+mkdir -p "$RESP_DIR" "$EMITTED_DIR" "$ACK_DIR" "$PROGRESS_DIR"
 
 response_digest() {
     sha256sum "$1" | awk '{print $1}'
@@ -144,6 +172,81 @@ mark_emitted() {
     digest="$(response_digest "$file" 2>/dev/null || true)"
     [ -n "$digest" ] || return 0
     : > "$EMITTED_DIR/${base}.${digest}"
+}
+
+# Emit one <PREFIX>_REVIEW_PROGRESS line from a progress file. $2 overrides the
+# reported state (started / resumed / running). elapsed_s is computed from
+# started_at; the optional sanitized reasoning note appears only in summary detail.
+emit_progress() {
+    local f="$1" estate="$2" now="$3" started elapsed="" line st
+    started="$(jq -r '.started_at // ""' "$f" 2>/dev/null || true)"
+    if [ -n "$started" ]; then
+        st="$(date -d "$started" +%s 2>/dev/null || true)"
+        [ -n "$st" ] && elapsed=$(( now - st ))
+    fi
+    line="$(jq -rc \
+        --arg prefix "$PREFIX" --arg estate "$estate" --arg elapsed "${elapsed:-}" \
+        --arg detail "$PROGRESS_DETAIL" '
+        "\($prefix)_REVIEW_PROGRESS pr=\(.pr) sha=\(.sha) run=\(.run_id) state=\($estate) phase=\(.phase) iter=\(.iter)"
+        + (if ($elapsed | length) > 0 then " elapsed_s=\($elapsed)" else "" end)
+        + (if (.events // 0) > 0 then " events=\(.events)" else "" end)
+        + (if (.commands // 0) > 0 then " commands=\(.commands)" else "" end)
+        + (if (.last_event // "") != "" then " last_event=\(.last_event)" else "" end)
+        + (if (.findings // 0) > 0 then " findings=\(.findings)" else "" end)
+        + (if $detail == "summary" and (.reasoning // "") != ""
+             then " note=\"\(.reasoning | gsub("[\n\r\"]"; " ") | .[0:240])\"" else "" end)
+    ' "$f" 2>/dev/null || true)"
+    # Defense-in-depth: $BUS/progress/*.json is local state (the watcher sanitizes
+    # on write), but strip ALL control bytes from the assembled line before it
+    # reaches the monitor log / an operator's terminal — a stray ANSI escape or BEL
+    # in ANY interpolated field (note, last_event, phase) would otherwise be a
+    # log/terminal-injection vector. Mirrors the watcher's `tr -d '[:cntrl:]'`.
+    line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"
+    [ -n "$line" ] && printf '%s\n' "$line"
+}
+
+# Sweep $BUS/progress: emit start/resumed on first sight, phase changes
+# immediately, and a heartbeat every PROGRESS_INTERVAL seconds while a review is
+# active. A run whose terminal resp-<sha>.json exists (or whose state is terminal)
+# is retired WITHOUT emitting — the <PREFIX>_REVIEW handoff covers completion, and
+# completed historical progress is never replayed. $1 = start | resume (controls
+# the first-sight state for the initial vs. restart pass).
+sweep_progress() {
+    local mode="$1" f run_id sha state phase sig now
+    [ "$PROGRESS_ENABLED" = "1" ] || return 0
+    [ "$PROGRESS_DETAIL" != "off" ] || return 0
+    [ -d "$PROGRESS_DIR" ] || return 0
+    now="$(date +%s)"
+    while IFS= read -r f; do
+        run_id="$(jq -r '.run_id // ""' "$f" 2>/dev/null || true)"
+        [ -n "$run_id" ] || continue
+        sha="$(jq -r '.sha // ""' "$f" 2>/dev/null || true)"
+        state="$(jq -r '.state // ""' "$f" 2>/dev/null || true)"
+        phase="$(jq -r '.phase // ""' "$f" 2>/dev/null || true)"
+
+        # Retire once the review has a terminal response OR a terminal state — no
+        # progress line (completion is delivered by <PREFIX>_REVIEW), and never
+        # replay it again this session.
+        if [ -f "$RESP_DIR/resp-${sha}.json" ] \
+           || [ "$state" = completed ] || [ "$state" = error ] || [ "$state" = superseded ]; then
+            PROG_SIG[$run_id]="__done__"
+            continue
+        fi
+        [ "${PROG_SIG[$run_id]:-}" = "__done__" ] && continue
+
+        sig="$state/$phase"
+        if [ -z "${PROG_SIG[$run_id]:-}" ]; then
+            # First sight of this run: started (initial pass) or resumed (restart).
+            emit_progress "$f" "$([ "$mode" = resume ] && echo resumed || echo started)" "$now"
+            PROG_SIG[$run_id]="$sig"; PROG_LAST_EMIT[$run_id]="$now"
+        elif [ "${PROG_SIG[$run_id]}" != "$sig" ]; then
+            emit_progress "$f" running "$now"       # phase/state change → immediate
+            PROG_SIG[$run_id]="$sig"; PROG_LAST_EMIT[$run_id]="$now"
+        elif [ $(( now - ${PROG_LAST_EMIT[$run_id]:-0} )) -ge "$PROGRESS_INTERVAL" ]; then
+            emit_progress "$f" running "$now"       # unchanged → heartbeat on interval
+            PROG_LAST_EMIT[$run_id]="$now"
+        fi
+    done < <(find "$PROGRESS_DIR" -maxdepth 1 -type f -name '*.json' -print 2>/dev/null)
 }
 
 # On startup, emit only the LATEST response per PR (newest by mtime). Older
@@ -216,6 +319,11 @@ fi
 
 replay_existing
 
+# Surface any review that is STILL in flight as state=resumed (a monitor that
+# started after Codex began, or restarted mid-review). Completed/terminal runs are
+# retired without emitting, so historical progress is never replayed.
+sweep_progress resume
+
 if [ "$ONCE" -eq 1 ]; then
     exit 0
 fi
@@ -229,7 +337,7 @@ fi
 # MONITOR_POLL_SECONDS, with no reliance on a fixed arming sleep. inotifywait is
 # backgrounded with a captured pid so the trap reaps it on shutdown (no orphaned
 # watch), and -t bounds it as a secondary guard.
-POLL_SECONDS="${MONITOR_POLL_SECONDS:-15}"
+POLL_SECONDS="$(_positive_int_or "${MONITOR_POLL_SECONDS:-15}" 15)"   # also numeric (-lt, inotifywait -t)
 inotify_pid=""
 cleanup() {
     trap - EXIT INT TERM
@@ -238,12 +346,24 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# The heartbeat cadence caps the wait so an unchanged in-flight review still gets
+# a periodic progress line even with no filesystem event (inotify would otherwise
+# block up to POLL_SECONDS). Progress emission is throttled inside sweep_progress.
+if [ "$PROGRESS_ENABLED" = "1" ] && [ "$PROGRESS_DETAIL" != "off" ] && [ "$PROGRESS_INTERVAL" -lt "$POLL_SECONDS" ]; then
+    POLL_SECONDS="$PROGRESS_INTERVAL"
+fi
+
 while true; do
     while IFS= read -r file; do
         emit_response "$file"
     done < <(find "$RESP_DIR" -maxdepth 1 -type f -name 'resp-*.json' -print)
 
-    inotifywait -q -e close_write,moved_to -t "$POLL_SECONDS" "$RESP_DIR" >/dev/null 2>&1 &
+    # New runs → started; phase changes → immediate; unchanged → interval heartbeat.
+    sweep_progress start
+
+    # Watch BOTH the responses and the progress dir so a phase-change file write
+    # wakes the loop for a near-immediate progress line (not only on the timeout).
+    inotifywait -q -e close_write,moved_to -t "$POLL_SECONDS" "$RESP_DIR" "$PROGRESS_DIR" >/dev/null 2>&1 &
     inotify_pid=$!
     wait "$inotify_pid" 2>/dev/null || true
     inotify_pid=""

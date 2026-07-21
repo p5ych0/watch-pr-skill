@@ -28,6 +28,10 @@ set -euo pipefail
 
 # Single-domain + universal: repo identity derived from this checkout's origin.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Shared round check-in helpers — the SAME logic the watcher's passive
+# auto-enqueue uses, so neither path can bypass the operator pause.
+# shellcheck source=review-bus-rounds.sh
+. "$SCRIPT_DIR/review-bus-rounds.sh"
 REPO_DIR="${REPO_DIR:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)}"
 REMOTE="${REVIEW_BUS_REMOTE:-$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)}"
 if [ -n "$REMOTE" ]; then
@@ -48,10 +52,12 @@ REQ_DIR="$BUS_DIR/requests"
 mkdir -p "$REQ_DIR"
 
 FORCE=0
+CONTINUE_THRESHOLD=0
 PR=""
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=1 ;;
+        --continue-threshold) CONTINUE_THRESHOLD=1 ;;
         --help|-h)
             sed -n '2,30p' "$0"
             exit 0
@@ -179,6 +185,53 @@ if [ "$FORCE" -eq 0 ]; then
     fi
 fi
 
+# ── Round-count threshold pause ──────────────────────────────────────────────
+# A safety check-in that fires every N closed rounds (default 10) regardless of
+# WHO drives the loop. This is the chokepoint every next-round enqueue passes
+# through — manual OR via review-bus-close-round.sh — so, unlike a skill-only
+# step, it cannot be bypassed by a driver that never re-enters the skill.
+#
+# Rounds are counted the ROBUST way: distinct HEAD SHAs already enqueued for this
+# PR (a same-SHA retry never double-counts), recorded below — NOT a fragile
+# commit-message prefix (round-fix commits use a module scope like
+# `fix(shipment): … (review r7)`, so a `fix(review):` count is always 0 and never
+# fires). At a non-zero multiple of the threshold the request is REFUSED with a
+# distinct exit (3) so the DRIVER pauses to ask the operator: continue / stop &
+# merge / stop & leave open / abandon. This is INDEPENDENT of --force: --force
+# bypasses the correctness gates above (for debugging the bus), but the round
+# check-in is an operator-safety feature that must be crossed deliberately — pass
+# --continue-threshold, or set CODEX_REVIEW_ROUND_THRESHOLD=0 to disable it.
+THRESHOLD="${CODEX_REVIEW_ROUND_THRESHOLD:-10}"
+FULL_SHA=$(git rev-parse HEAD)
+
+# Atomic check-and-claim (one lock spans the threshold decision AND the round
+# record) so a concurrent manual + passive enqueue at the boundary can't both slip
+# past. --continue-threshold is the operator's explicit cross: record without a
+# pause decision.
+round_lock_unavailable() {
+    echo "BUS_REQUEST_BLOCKED reason=round_lock_unavailable" >&2
+    echo "    could not acquire the round-counter lock for PR #$PR — NOT enqueuing (fail closed)." >&2
+    echo "    A crashed holder may have left a stale lock: remove $BUS_DIR/.rounds/pr-${PR}.shas.lockd if no reviewer is running." >&2
+    exit 2
+}
+if [ "$CONTINUE_THRESHOLD" -eq 1 ]; then
+    review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA" || round_lock_unavailable
+else
+    claim="$(review_bus_claim_round "$BUS_DIR" "$PR" "$FULL_SHA" "$THRESHOLD")"
+    case "$claim" in
+        claimed|already) ;;   # round claimed → proceed to enqueue
+        pause)
+            rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
+            echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$FULL_SHA" >&2
+            echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
+            echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+            echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
+            echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
+            exit 3 ;;
+        *)  round_lock_unavailable ;;   # locktimeout / unexpected → fail closed
+    esac
+fi
+
 REQ_FILE="$REQ_DIR/req-${SHA}.json"
 TMP_FILE="${REQ_FILE}.tmp.$$"
 
@@ -210,4 +263,5 @@ jq -n \
   }' > "$TMP_FILE"
 mv "$TMP_FILE" "$REQ_FILE"
 
+# (The round was already recorded atomically by the claim/continue step above.)
 echo "review request written: ${REQ_FILE}"

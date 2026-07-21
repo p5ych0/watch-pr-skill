@@ -17,8 +17,13 @@ set -Eeuo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 START="$SELF_DIR/review-bus-codex-start.sh"
 
-if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "ok   - systemd --user unavailable; skipping cgroup-escape assertions"
+# `systemctl --user show-environment` can succeed on an environment (e.g. a CI
+# runner) whose user manager cannot actually START a transient unit — the unit
+# hangs in "activating" with no MainPID. So also probe a real, trivial, bounded
+# launch and skip (as PASS) when it does not complete.
+if ! command -v systemd-run >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1 \
+   || ! timeout 15 systemd-run --user --quiet --collect --wait --unit="rb-probe-$$-$RANDOM.service" /bin/true >/dev/null 2>&1; then
+    echo "ok   - systemd --user cannot launch transient units; skipping cgroup-escape assertions"
     echo "RESULT: PASS"
     exit 0
 fi
@@ -49,7 +54,7 @@ printf 'GUIDANCE_MARKER\n' > "$IMPL/.review-bus.md"
 # so Restart=on-failure never respawns them; the trap stops the units.
 cat > "$IMPL/scripts/review-bus-codex-watcher.sh" <<'STUB'
 #!/usr/bin/env bash
-sleep 10
+sleep 30
 STUB
 cp "$IMPL/scripts/review-bus-codex-watcher.sh" "$IMPL/scripts/review-bus-response-monitor.sh"
 chmod +x "$IMPL/scripts/"*.sh
@@ -57,9 +62,16 @@ git -C "$IMPL" add -A
 git -C "$IMPL" commit -q -m init
 
 # Pin OWNER so unit names are predictable; strip inherited context overrides.
+# Launch the trivial STUB daemons (REVIEW_BUS_WATCHER/MONITOR overrides) rather
+# than the real watcher: this test asserts cgroup ESCAPE, not review behavior, and
+# the real watcher's tool/identity deps make it crash-loop (stuck "activating")
+# where those aren't set up (e.g. a CI runner) — a sleep stub stays active and
+# lands in its own unit cgroup all the same.
 env -u WIKI_DIR -u REVIEW_BUS_GUIDANCE_FILE -u REVIEW_BUS_REMOTE \
     -u REVIEW_BUS_PREFIX -u REVIEW_BUS_REPO_CLONE -u CODEX_REVIEW_WORKTREE_ROOT \
     REPO_DIR="$IMPL" BUS_DIR="$BUS" REVIEW_BUS_REPO="proj" REVIEW_BUS_OWNER="testowner" \
+    REVIEW_BUS_WATCHER="$IMPL/scripts/review-bus-codex-watcher.sh" \
+    REVIEW_BUS_MONITOR="$IMPL/scripts/review-bus-response-monitor.sh" \
     bash "$START" >/dev/null 2>&1 || true
 sleep 0.6
 
@@ -96,6 +108,8 @@ esac
 env -u WIKI_DIR -u REVIEW_BUS_GUIDANCE_FILE -u REVIEW_BUS_REMOTE \
     -u REVIEW_BUS_PREFIX -u REVIEW_BUS_REPO_CLONE -u CODEX_REVIEW_WORKTREE_ROOT \
     REPO_DIR="$IMPL" BUS_DIR="$BUS" REVIEW_BUS_REPO="proj" REVIEW_BUS_OWNER="testowner" \
+    REVIEW_BUS_WATCHER="$IMPL/scripts/review-bus-codex-watcher.sh" \
+    REVIEW_BUS_MONITOR="$IMPL/scripts/review-bus-response-monitor.sh" \
     bash "$START" >/dev/null 2>&1 || true
 sleep 0.4
 wpid2="$(systemctl --user show "$WUNIT" -p MainPID --value 2>/dev/null || true)"

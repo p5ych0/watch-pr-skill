@@ -81,24 +81,75 @@ tail -5 $BUS/.codex-logs/response-monitor.log
 
 ### Surface reviews into this session
 
-Run the tested `review-bus-response-monitor.sh` as this session's Monitor with a **fresh per-session** `MONITOR_EMITTED_DIR`. It reads the responses dir directly — replaying the latest response per PR on start and watching live — with a **two-marker** delivery model keyed on content digest (`resp-<sha>.json` base + sha256):
+`review-bus-response-monitor.sh` reads the responses dir directly — replaying the latest response per PR on start and watching live — with a **two-marker** delivery model keyed on content digest (`resp-<sha>.json` base + sha256):
 
-- **Emit markers** (the fresh `MONITOR_EMITTED_DIR`) dedup *within* a session. Because the dir is fresh each session, a response that was printed but not yet acted on — the session died mid-handling — **re-surfaces** next session instead of being suppressed forever.
+- **Emit markers** (a fresh per-session `MONITOR_EMITTED_DIR`) dedup *within* a session. Because the dir is fresh each session, a response that was printed but not yet acted on — the session died mid-handling — **re-surfaces** next session instead of being suppressed forever.
 - **Ack markers** (persistent, `.monitor-acked`) mark a response *handled*. You write one via `--ack <resp>` after closing a round out (resolve + re-request) or merging (see the handling steps). Replay skips an acked response regardless of emit state, so handled/merged responses are **never re-fired** even though the emit dir is fresh. A same-SHA re-request rewrites the file → new digest → not acked → correctly re-emitted.
 
-Call the Monitor tool with:
-- `command`:
-  ```bash
-  MONITOR_EMITTED_DIR="$(mktemp -d)" \
-    "$RB_SCRIPTS"/review-bus-response-monitor.sh
-  ```
-- `description`: `Codex reviews for $OWNER/$REPO`
-- `persistent`: `true`
-- `timeout_ms`: `3600000`
+**How you attach — and what to tell the user — depends on the runtime:**
 
-The daemon monitor keeps running as a persistent audit log at `response-monitor.log`; this session reads the responses dir directly, so it can die and respawn without touching the persistent daemons. Reuses tested behavior (`test-review-bus-monitor.sh`).
+- **Claude Code** — run the monitor as this session's **Monitor** so review handoffs (and live `${PREFIX}_REVIEW_PROGRESS` lines) surface into the chat automatically. Call the Monitor tool with:
+  - `command`: `MONITOR_EMITTED_DIR="$(mktemp -d)" "$RB_SCRIPTS"/review-bus-response-monitor.sh`
+  - `description`: `Codex reviews for $OWNER/$REPO` · `persistent`: `true` · `timeout_ms`: `3600000`
+  - Tell the user: *"Review-bus armed for $OWNER/$REPO — Codex review passes surface here automatically."*
 
-Tell user in one sentence: "Review-bus armed for $OWNER/$REPO — Codex review passes will trigger auto-response."
+- **Codex (no `Monitor` tool)** — there is **no** background-watch tool, so nothing pushes reviews into the chat; **poll** instead. The daemon monitor already appends every `${PREFIX}_REVIEW` handoff (and `${PREFIX}_REVIEW_PROGRESS` line) to `$BUS/.codex-logs/response-monitor.log`, so:
+  - Poll it while you wait: `grep "${PREFIX}_REVIEW" "$BUS/.codex-logs/response-monitor.log" | tail`.
+  - Or run `"$RB_SCRIPTS"/review-bus-response-monitor.sh --once` on demand to replay the latest unacked response per PR to stdout, then act on it.
+  - Tell the user: *"Review-bus armed for $OWNER/$REPO — poll the monitor log (or run the monitor once) to pick up each Codex review pass."*
+
+Either way the persistent daemon monitor keeps running as an audit log at `response-monitor.log`; a session-attached Monitor reads the responses dir directly, so it can die and respawn without touching the daemons. Reuses tested behavior (`test-review-bus-monitor.sh`).
+
+## Live progress notifications (`${PREFIX}_REVIEW_PROGRESS`)
+
+While a review is running, the monitor emits throttled progress lines so you
+(and the user) see the review start and advance instead of waiting silently for
+the terminal handoff:
+
+```
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=started phase=queued iter=9
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=reviewing elapsed_s=60 events=42 commands=12 last_event=command_completed
+${PREFIX}_REVIEW_PROGRESS pr=N sha=X run=<id> state=running phase=posting_comments findings=5
+```
+
+**Where they land (and how each runtime consumes them).** The `systemd --user`
+`review-bus-response-monitor.sh` emits these lines to its stdout — both the
+session-attached Monitor (Claude Code) and the always-running daemon run the same
+script over the same responses/progress dirs. The daemon's copy is appended to
+`$BUS/.codex-logs/response-monitor.log` (the SAME log the terminal
+`${PREFIX}_REVIEW` handoff lands in), so that log is the runtime-agnostic audit
+trail. How each runtime consumes the lines (consistent with **Surface reviews**
+above):
+
+- **Claude Code:** the `Monitor` tool runs `review-bus-response-monitor.sh` (the
+  session monitor from **Surface reviews** — it reads the responses/progress dirs
+  directly, it does *not* tail the log), and its stdout surfaces both progress and
+  the final handoff into the session automatically — no polling.
+- **Codex (no `Monitor` tool):** there is no automatic in-chat push; **poll the
+  daemon log** for the newest progress while you wait, e.g.
+  `grep "${PREFIX}_REVIEW_PROGRESS" "$BUS/.codex-logs/response-monitor.log" | tail -n 3`
+  (and `grep "${PREFIX}_REVIEW " …` for the terminal handoff). Or run the monitor
+  in the FOREGROUND (`review-bus-response-monitor.sh`, not the daemon) so the lines
+  print to your terminal directly. Progress is a convenience — the loop's
+  correctness never depends on seeing it, only on the terminal `${PREFIX}_REVIEW`.
+
+How to treat them:
+
+- **Tell the user immediately** when the first `state=started` (or `state=resumed`,
+  after a monitor restart mid-review) arrives — a review is now in flight.
+- **Relay throttled progress**: phase changes (`queued` → `preparing_worktree` → `preparing_context`
+  → `reviewing` → `validating_result` → `posting_comments`) and the periodic
+  heartbeat. Don't act on them beyond keeping the user informed.
+- **Keep waiting for the terminal `${PREFIX}_REVIEW`.** A progress line is NEVER a
+  findings handoff — only `${PREFIX}_REVIEW pr=… status=…` triggers findings
+  handling (steps below). Do not resolve threads, fix, or merge off a progress line.
+- Progress is **repository-scoped** (this bus only) and, at the default detail,
+  carries **only counters + phase** — never raw chain-of-thought, command output,
+  or secrets. A `note="…"` appears only under `CODEX_REVIEW_PROGRESS_DETAIL=summary`
+  and is a sanitized, truncated summary Codex explicitly exposes — not internal
+  reasoning. Configure with `CODEX_REVIEW_PROGRESS` (1/0),
+  `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` (heartbeat, default 30), and
+  `CODEX_REVIEW_PROGRESS_DETAIL` (`status`|`summary`|`off`, default `status`).
 
 ## Handling a `${PREFIX}_REVIEW` notification
 
@@ -108,29 +159,24 @@ When `${PREFIX}_REVIEW pr=N sha=X status=Y findings=K ... resp=<path>` arrives, 
 RESP_PATH="<the resp=… path from the notification>"   # e.g. $BUS/responses/resp-X.json
 ```
 
-### 0. Round-count threshold check (before anything else)
+### 0. Round-count check-in (enforced at close-out — no manual count)
 
-There is NO hard iteration cap — the watcher reviews indefinitely. Count the
-closed-out fix rounds on this PR:
+There is NO hard iteration cap. A safety check-in fires every 10 closed rounds,
+enforced by the bus SCRIPTS themselves (not this skill's flow, which a manual
+driver can bypass). `review-bus-request.sh` — the chokepoint every next-round
+enqueue passes through, whether you run it directly or via
+`review-bus-close-round.sh` — counts **distinct enqueued HEAD SHAs** per PR and,
+at a non-zero multiple of `CODEX_REVIEW_ROUND_THRESHOLD` (default 10), REFUSES to
+enqueue the next review (exit 3) and prints:
 
-```bash
-PR=<the pr= number from the notification>
-# Count fix(review): rounds from the PR's OWN commits via the API — independent
-# of the current shell's HEAD, cwd, base branch, and fetch state (a resumed
-# session may sit on main or another worktree at this point).
-if ! ROUNDS=$(gh pr view "$PR" --repo "$OWNER/$REPO" --json commits \
-                --jq '[.commits[] | select(.messageHeadline | startswith("fix(review):"))] | length' 2>/dev/null) \
-     || ! [[ "$ROUNDS" =~ ^[0-9]+$ ]]; then
-    ROUNDS=unknown   # gh failed (auth/outage/rate-limit/lost access) — count UNVERIFIED; do NOT treat as 0
-fi
+```
+REVIEW_BUS_THRESHOLD_PAUSE pr=N rounds=<M> …
 ```
 
-When `ROUNDS` is a non-zero multiple of 10 (10, 20, 30, …), PAUSE before handling
-this notification and ask the user (AskUserQuestion), with **escalating** framing.
-**Fail closed:** if `ROUNDS` is `unknown` (the `gh` count failed — auth, outage,
-rate-limit, lost access), ALSO pause and tell the user the round count could not
-be verified — never proceed as if it were 0, since this pause is the safety stop
-that replaced the hard cap.
+When you see this line (it surfaces from the close-out in step 7), the round is
+FULLY closed — threads resolved, summary posted, response acked — but the next
+review is withheld. PAUSE and ask the user (AskUserQuestion), with **escalating**
+framing:
 
 - **10** — FYI: *"PR #N is at 10 review rounds — still converging?"*
 - **20** — *"Unusual: PR #N is at 20 rounds."*
@@ -138,11 +184,16 @@ that replaced the hard cap.
 
 Options each time: **continue** · **stop & merge if clean** · **stop & leave PR open** · **abandon**.
 
-The just-arrived findings keep their review threads unresolved during the pause,
-so the watcher's own `CODEX_AUTO_SKIP … unresolved_threads` holds auto-enqueue —
-nothing re-reviews until you choose **continue** (which resumes the normal
-fix → resolve → re-request flow). This same check applies to Copilot rounds
-(count them the same way once Phase D lands).
+On **continue**, enqueue the next review past the pause:
+
+```bash
+"$RB_SCRIPTS"/review-bus-request.sh N --continue-threshold
+```
+
+(or export `CODEX_REVIEW_ROUND_THRESHOLD=0` to disable the check-ins entirely).
+This replaces the old, unreliable `fix(review):`-commit count: round-fix commits
+use a module scope (`fix(shipment): … (review r7)`), so that prefix count was
+always 0 and the pause never fired. The same check-in applies to Copilot rounds.
 
 ### 1. Branch off `status`
 - `status=approved` (clean signoff, no findings) → **merge gate** (see step 8).

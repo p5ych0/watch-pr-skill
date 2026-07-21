@@ -1,0 +1,55 @@
+name: review-bus tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The suite stubs gh + codex, so no network/credentials are needed. It does
+      # use jq and inotifywait (inotify-tools); jq is preinstalled on the runner
+      # but installed here too for portability.
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends inotify-tools jq
+
+      # Tests that create throwaway git repos + commit need an identity; runners
+      # have none by default. Individual tests set a per-repo identity, but a
+      # global fallback keeps any that don't from failing.
+      - name: Configure git identity
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+
+      # The three systemd tests self-skip (as PASS) when no `systemd --user`
+      # manager is present, which is the case on the runner — so the suite runs
+      # cleanly here without one.
+      - name: Run review-bus test suite
+        working-directory: skills/watch-prs/scripts
+        run: |
+          set -uo pipefail
+          fail=0 total=0
+          for t in test-review-bus-*.sh; do
+            total=$((total + 1))
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "PASS $t"
+            else
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          echo "----"
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more of $total test files failed"
+            exit 1
+          fi
+          echo "all $total test files passed"

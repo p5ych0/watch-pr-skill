@@ -22,14 +22,21 @@ A file-based **review bus**:
 
 - A detached **watcher** reviews each pushed PR head with `codex exec` (in a
   dedicated clone, on a per-SHA worktree) and writes a response file.
-- A **response monitor** turns each response into a `<PREFIX>_REVIEW` notification.
-- Your session (Claude Code or Codex) surfaces the notification, reads the
-  findings, fixes them, commits, pushes, replies + resolves the threads, posts a
-  round summary, and re-requests — looping to a clean signoff, then merging.
+- A **response monitor** emits a `<PREFIX>_REVIEW` line per response (plus live
+  `<PREFIX>_REVIEW_PROGRESS` lines while a review runs) to its log/stdout.
+- Your session consumes them and works the loop — reads the findings, fixes them,
+  commits, pushes, replies + resolves the threads, posts a round summary, and
+  re-requests — looping to a clean signoff, then merging. **Claude Code** surfaces
+  the lines into the chat automatically (a background Monitor); **Codex** (no such
+  tool) polls the monitor log.
 - Optional: a **GitHub Copilot** review pass after the Codex signoff.
 
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
+The daemons are `systemd --user` units scoped per repo
+(`review-bus-<owner>-<repo>-{watcher,monitor}`), so you can run the bus in several
+repos at once and they won't interfere — arming a second repo never stops the
+first repo's reviewer.
 
 ## Prerequisites
 
@@ -90,7 +97,9 @@ surface reviews. Then:
 1. Push your PR branch; request a review — the skill runs `review-bus-request.sh`
    once its preflight gates pass (clean tree, head pushed, no unresolved threads,
    a fresh round-summary comment).
-2. When Codex finishes, a `<PREFIX>_REVIEW` notification arrives.
+2. When Codex finishes, the monitor emits a `<PREFIX>_REVIEW` line. In **Claude
+   Code** it surfaces into the session automatically; in **Codex** (no watch tool),
+   poll the monitor log — `grep "<PREFIX>_REVIEW" "$BUS/.codex-logs/response-monitor.log" | tail` — to pick it up.
 3. The skill reads the findings, fixes them, commits `fix(review): …`, pushes,
    then **closes the round in one command** —
    `review-bus-close-round.sh N --summary <file>` resolves every open thread
@@ -100,6 +109,33 @@ surface reviews. Then:
    or the loop stalls on the unresolved-threads gate.)
 4. On a clean signoff it re-checks the merge gate (head unchanged, threads
    resolved, required checks green) and admin-merges.
+
+### Round check-in (the every-N-rounds pause)
+
+A review loop can run many rounds. So it stays *your* decision to keep going —
+rather than rubber-stamping an endless back-and-forth — the bus pauses for a
+check-in every **N distinct pushed heads** for a PR (`N =
+CODEX_REVIEW_ROUND_THRESHOLD`, default `10`). At the boundary the next enqueue is
+withheld and you'll see:
+
+```
+REVIEW_BUS_THRESHOLD_PAUSE pr=<PR> rounds=<count> next_sha=<full sha>
+```
+
+You then choose:
+
+- **Continue** — cross a single pause with `--continue-threshold`
+  (`review-bus-close-round.sh <PR> --summary <file> --continue-threshold`, or
+  re-run `review-bus-request.sh <PR> --continue-threshold`). The pause re-arms
+  for the *next* N rounds.
+- **Stop** — merge, leave the PR open, or abandon it — whatever the state calls for.
+- **Turn the pauses off** — `export CODEX_REVIEW_ROUND_THRESHOLD=0`.
+
+The count is over *distinct* enqueued head SHAs, so a same-SHA retry never
+double-counts, and the check-in fires on **both** the manual enqueue and the
+auto-discovered one (`CODEX_REVIEW_AUTO_OPEN_PRS=1`) — the polling watcher can't
+slip past the checkpoint. (A malformed threshold value is treated as the default
+`10`, never as "disabled", so a typo can't silently remove the check-in.)
 
 ### Optional Copilot pass
 
@@ -125,11 +161,34 @@ anytime.)
 | Variable | Default | Meaning |
 |---|---|---|
 | `CODEX_REVIEW_AUTO_OPEN_PRS` | `0` | `1` = watcher auto-discovers open PR heads |
-| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | `0` = unlimited; the skill pauses to ask every 10th round |
+| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | hard cap on total review rounds per PR (a runaway backstop); `0` = unlimited. Distinct from the periodic *pause* below — this is a stop, not a check-in |
+| `CODEX_REVIEW_ROUND_THRESHOLD` | `10` | round check-in cadence (see [Round check-in](#round-check-in-the-every-n-rounds-pause)); `0` = disable. `review-bus-request.sh` refuses to enqueue the next review (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) every Nth **distinct enqueued SHA** per PR, so the driver pauses to ask. Cross with `--continue-threshold`. A non-integer value falls back to `10` (never silently disabled) |
 | `CODEX_REVIEW_ERROR_RETRY_MAX` | `5` | bound on auto-retries after a reviewer error |
 | `CODEX_REVIEW_MODEL` | `gpt-5.6-sol` | reviewer model |
 | `CODEX_REVIEW_REASONING_EFFORT` | `max` | reviewer reasoning effort (`minimal`…`xhigh`, `max`) |
 | `CODEX_REVIEW_COPILOT_TIMEOUT` | `300` | seconds to wait for a Copilot review |
+| `CODEX_REVIEW_PROGRESS` | `1` | `1` = emit live `${PREFIX}_REVIEW_PROGRESS` lines while a review runs; `0` = off |
+| `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` | `30` | heartbeat cadence for an unchanged in-flight review |
+| `CODEX_REVIEW_PROGRESS_DETAIL` | `status` | `status` (counters + phase, safe default) · `summary` (adds a sanitized `note=`) · `off` |
+
+### Live review progress
+
+While Codex reviews, the watcher writes lifecycle state under `$BUS/progress/`
+(one atomic file per run, keyed by a unique `run_id` so same-SHA re-reviews stay
+distinct), and the response monitor surfaces it as throttled
+`${PREFIX}_REVIEW_PROGRESS` lines — a review start, phase changes
+(`queued` → `preparing_worktree` → `preparing_context` → `reviewing` →
+`validating_result` → `posting_comments`), and a periodic heartbeat — so the attached session sees a
+review begin and advance instead of waiting silently for the terminal
+`${PREFIX}_REVIEW` handoff. When the installed Codex supports `exec --json`, the
+watcher taps its structured event stream for live event/command counters (and
+falls back to lifecycle phases + elapsed-time heartbeats otherwise), always
+preserving Codex's real exit status. Progress lines are **never** a
+`${PREFIX}_REVIEW` handoff (only that triggers findings handling), are strictly
+repository-scoped, and — at the default `status` detail — carry only counters and
+phase, never raw chain-of-thought, command output, or secrets. A monitor that
+starts or restarts mid-review replays only the **currently active** run as
+`state=resumed`; completed history is never replayed.
 
 ## Updating
 

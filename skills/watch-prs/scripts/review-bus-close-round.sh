@@ -72,8 +72,10 @@ RESP_DIR="$BUS_DIR/responses"
 PR=""
 SUMMARY_FILE=""
 FORCE=0
+CONTINUE_THRESHOLD=0
 while [ $# -gt 0 ]; do
     case "$1" in
+        --continue-threshold) CONTINUE_THRESHOLD=1; shift ;;
         --summary)
             # Require a value BEFORE shifting: a bare `--summary` (or one followed
             # by another flag) would otherwise `shift 2` past the end — a cryptic
@@ -222,10 +224,24 @@ else
 fi
 echo "summary posted"
 
-# ── 4. Re-enqueue the next review pass ───────────────────────────────────────
+# ── 4. Re-enqueue the next review pass (or PAUSE at the round threshold) ──────
+# request.sh exits 3 at a non-zero multiple of CODEX_REVIEW_ROUND_THRESHOLD (the
+# driver-agnostic round check-in). That is a CLEAN pause — the round is fully
+# closed (threads resolved, summary posted); only the NEXT review is withheld —
+# so it is NOT a failure. Ack still runs below; the conclusion reports the pause.
 req_args=("$PR")
 [ "$FORCE" -eq 1 ] && req_args+=(--force)
+[ "$CONTINUE_THRESHOLD" -eq 1 ] && req_args+=(--continue-threshold)
+paused=0
+set +e
 "$SCRIPT_DIR"/review-bus-request.sh "${req_args[@]}"
+req_rc=$?
+set -e
+if [ "$req_rc" -eq 3 ]; then
+    paused=1
+elif [ "$req_rc" -ne 0 ]; then
+    fail "review-bus-request.sh failed (exit $req_rc)" "$req_rc"
+fi
 
 # ── 5. Ack each snapshot response by its CAPTURED digest (one call per response) ─
 # One `--ack-if-digest` call per snapshot file — independent writes, not a single
@@ -243,4 +259,10 @@ for i in "${!snap_files[@]}"; do
 done
 [ "$ack_failures" -eq 0 ] || fail "$ack_failures response ack(s) failed — the round is enqueued but a handled response may re-surface." 7
 
-echo "round closed for PR #$PR — next Codex pass enqueued for ${SHA}"
+if [ "$paused" -eq 1 ]; then
+    echo "REVIEW_BUS_THRESHOLD_PAUSE round closed for PR #$PR — next review NOT enqueued (round-count check-in)."
+    echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon."
+    echo "To continue (enqueue the next review): \"$SCRIPT_DIR\"/review-bus-request.sh $PR --continue-threshold"
+else
+    echo "round closed for PR #$PR — next Codex pass enqueued for ${SHA}"
+fi
