@@ -105,6 +105,20 @@
   terminal/log-injection vector. Mirrors the watcher's `tr -d '[:cntrl:]'`; covered
   by a crafted-reasoning case in `test-review-bus-progress.sh`.
 
+- **`review_bus_rounds_done` always echoes a single integer.** `grep -c .` prints
+  `0` but *exits 1* on an empty rounds file, so the old `grep -c … || echo 0`
+  emitted TWO lines (`0\n0`) — which then broke every downstream `[ "$done" -gt 0 ]`
+  numeric test (the pause logic). It now captures the count and falls back to `0`
+  only when the output is empty, never on grep's no-match exit code.
+
+- **`_review_bus_locked` never leaks its lock on a failing body.** The critical
+  section ran as a bare `"$@"; rc=$?`; sourced into a caller with `set -e`, a
+  non-zero body triggered an ERR exit *before* the `rm -rf "$lock"`, leaving a
+  stale `.lockd` that wedged every future enqueue. The body now runs as
+  `rc=0; "$@" || rc=$?`, so cleanup always executes and the real status still
+  propagates. Both regressions covered in `test-review-bus-auto-threshold.sh`
+  (empty-file single-`0`; a failing body under `set -e` still removes the lock).
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

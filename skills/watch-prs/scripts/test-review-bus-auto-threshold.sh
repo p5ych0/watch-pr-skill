@@ -78,6 +78,28 @@ claim="$(review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 0)"
     && pass "coerce: threshold=0 still explicitly disables (claim proceeds)" \
     || die "coerce: threshold=0 no longer disables (claim=$claim)"
 
+# ── review_bus_rounds_done on an EMPTY rounds file must echo a SINGLE `0`, not two
+#    lines. `grep -c .` prints 0 but EXITS 1 on an empty file; a bare `|| echo 0`
+#    would emit `0\n0` and break every downstream `[ "$done" -gt 0 ]`.
+rm -rf "$BUS_DIR/.rounds"; mkdir -p "$BUS_DIR/.rounds"; : > "$BUS_DIR/.rounds/pr-99.shas"
+out="$(review_bus_rounds_done "$BUS_DIR" 99)"
+[ "$out" = 0 ] \
+    && pass "rounds_done: empty file → a single '0' (not 0\\n0)" \
+    || die "rounds_done: empty file emitted multi-line/garbage (got: $(printf '%q' "$out"))"
+# …and the result must be usable as an integer under set -e (the failure mode).
+( set -e; d="$(review_bus_rounds_done "$BUS_DIR" 99)"; [ "$d" -eq 0 ] ) \
+    && pass "rounds_done: empty-file count is a usable integer under set -e" \
+    || die "rounds_done: empty-file count not an integer ([ -eq ] errored)"
+
+# ── _review_bus_locked must ALWAYS remove its .lockd, even when the critical body
+#    fails under a caller's set -e — otherwise a leaked lock wedges every future
+#    enqueue. Drive a failing body inside a set -e subshell and assert cleanup.
+rm -rf "$BUS_DIR/lktest.lockd"
+( set -e; _review_bus_locked "$BUS_DIR/lktest" bash -c 'exit 4' ); rc=$?
+{ [ "$rc" -eq 4 ] && [ ! -e "$BUS_DIR/lktest.lockd" ]; } \
+    && pass "locked: a failing body under set -e still cleans up the lock (rc propagated, no leak)" \
+    || die "locked: lock leaked / rc lost on a failing body (rc=$rc, lockd exists=$([ -e "$BUS_DIR/lktest.lockd" ] && echo y || echo n))"
+
 # ── Passive path: at the threshold it HOLDS (skip, no write, counter unchanged) ─
 seed_rounds 10
 out="$(write_auto_request 7 feat "$SHA_A" 2>&1)"

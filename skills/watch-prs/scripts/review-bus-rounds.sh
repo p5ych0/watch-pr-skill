@@ -32,10 +32,16 @@ _review_bus_norm_threshold() {
 # _review_bus_rounds_file <bus_dir> <pr>
 _review_bus_rounds_file() { printf '%s/.rounds/pr-%s.shas' "$1" "$2"; }
 
-# review_bus_rounds_done <bus_dir> <pr> -> echoes the count of distinct enqueued SHAs.
+# review_bus_rounds_done <bus_dir> <pr> -> echoes the count of distinct enqueued
+# SHAs, always as a SINGLE integer line. `grep -c .` prints `0` but exits 1 on an
+# empty file — a bare `grep -c … || echo 0` would then emit TWO lines (`0\n0`) and
+# break every downstream `[ "$done" -gt 0 ]`. Capture the count and fall back to 0
+# only when it is EMPTY (unreadable / missing), never on grep's no-match exit code.
 review_bus_rounds_done() {
-    local f; f="$(_review_bus_rounds_file "$1" "$2")"
-    if [ -f "$f" ]; then grep -c . "$f" 2>/dev/null || echo 0; else echo 0; fi
+    local f n; f="$(_review_bus_rounds_file "$1" "$2")"
+    [ -f "$f" ] || { echo 0; return 0; }
+    n="$(grep -c . "$f" 2>/dev/null || true)"
+    printf '%s\n' "${n:-0}"
 }
 
 # review_bus_threshold_reached <bus_dir> <pr> <full_sha> <threshold>
@@ -85,7 +91,11 @@ _review_bus_locked() {
         sleep 0.01
     done
     printf '%s\n' "$BASHPID" > "$pidf" 2>/dev/null || true
-    "$@"; rc=$?
+    # Guard the body with `|| rc=$?` (NOT a bare `"$@"; rc=$?`): the lib is sourced
+    # into callers running `set -e`, where a non-zero body would trigger an ERR
+    # exit BEFORE the `rm` below — leaking the .lockd and wedging every future
+    # enqueue. The `|| …` suppresses errexit for the body so cleanup always runs.
+    rc=0; "$@" || rc=$?
     rm -rf "$lock" 2>/dev/null || true
     return "$rc"
 }
