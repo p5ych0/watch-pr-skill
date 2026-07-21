@@ -8,9 +8,10 @@
 #
 # A "round" is a DISTINCT enqueued full SHA for a PR, recorded one-per-line in
 # $BUS/.rounds/pr-<PR>.shas. Counting distinct SHAs (not commit-message prefixes)
-# is driver-agnostic and a same-SHA retry never double-counts. Recording is
-# flock-serialized so a manual + passive enqueue racing the same boundary cannot
-# write a duplicate line (which would inflate the count).
+# is driver-agnostic and a same-SHA retry never double-counts. The threshold check
+# and the round record run in ONE critical section, serialized by a single atomic
+# mkdir mutex (_review_bus_locked) shared by every process, so a manual + passive
+# enqueue racing the same boundary cannot both cross it or write a duplicate line.
 #
 # Pure functions, no global state — safe to source anywhere; all inputs are args.
 
