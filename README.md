@@ -22,10 +22,13 @@ A file-based **review bus**:
 
 - A detached **watcher** reviews each pushed PR head with `codex exec` (in a
   dedicated clone, on a per-SHA worktree) and writes a response file.
-- A **response monitor** turns each response into a `<PREFIX>_REVIEW` notification.
-- Your session (Claude Code or Codex) surfaces the notification, reads the
-  findings, fixes them, commits, pushes, replies + resolves the threads, posts a
-  round summary, and re-requests — looping to a clean signoff, then merging.
+- A **response monitor** emits a `<PREFIX>_REVIEW` line per response (plus live
+  `<PREFIX>_REVIEW_PROGRESS` lines while a review runs) to its log/stdout.
+- Your session consumes them and works the loop — reads the findings, fixes them,
+  commits, pushes, replies + resolves the threads, posts a round summary, and
+  re-requests — looping to a clean signoff, then merging. **Claude Code** surfaces
+  the lines into the chat automatically (a background Monitor); **Codex** (no such
+  tool) polls the monitor log.
 - Optional: a **GitHub Copilot** review pass after the Codex signoff.
 
 Everything is derived from the repo's git `origin`, so it works in any project
@@ -90,7 +93,9 @@ surface reviews. Then:
 1. Push your PR branch; request a review — the skill runs `review-bus-request.sh`
    once its preflight gates pass (clean tree, head pushed, no unresolved threads,
    a fresh round-summary comment).
-2. When Codex finishes, a `<PREFIX>_REVIEW` notification arrives.
+2. When Codex finishes, the monitor emits a `<PREFIX>_REVIEW` line. In **Claude
+   Code** it surfaces into the session automatically; in **Codex** (no watch tool),
+   poll the monitor log — `grep "<PREFIX>_REVIEW" "$BUS/.codex-logs/response-monitor.log" | tail` — to pick it up.
 3. The skill reads the findings, fixes them, commits `fix(review): …`, pushes,
    then **closes the round in one command** —
    `review-bus-close-round.sh N --summary <file>` resolves every open thread

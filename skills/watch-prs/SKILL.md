@@ -81,24 +81,24 @@ tail -5 $BUS/.codex-logs/response-monitor.log
 
 ### Surface reviews into this session
 
-Run the tested `review-bus-response-monitor.sh` as this session's Monitor with a **fresh per-session** `MONITOR_EMITTED_DIR`. It reads the responses dir directly — replaying the latest response per PR on start and watching live — with a **two-marker** delivery model keyed on content digest (`resp-<sha>.json` base + sha256):
+`review-bus-response-monitor.sh` reads the responses dir directly — replaying the latest response per PR on start and watching live — with a **two-marker** delivery model keyed on content digest (`resp-<sha>.json` base + sha256):
 
-- **Emit markers** (the fresh `MONITOR_EMITTED_DIR`) dedup *within* a session. Because the dir is fresh each session, a response that was printed but not yet acted on — the session died mid-handling — **re-surfaces** next session instead of being suppressed forever.
+- **Emit markers** (a fresh per-session `MONITOR_EMITTED_DIR`) dedup *within* a session. Because the dir is fresh each session, a response that was printed but not yet acted on — the session died mid-handling — **re-surfaces** next session instead of being suppressed forever.
 - **Ack markers** (persistent, `.monitor-acked`) mark a response *handled*. You write one via `--ack <resp>` after closing a round out (resolve + re-request) or merging (see the handling steps). Replay skips an acked response regardless of emit state, so handled/merged responses are **never re-fired** even though the emit dir is fresh. A same-SHA re-request rewrites the file → new digest → not acked → correctly re-emitted.
 
-Call the Monitor tool with:
-- `command`:
-  ```bash
-  MONITOR_EMITTED_DIR="$(mktemp -d)" \
-    "$RB_SCRIPTS"/review-bus-response-monitor.sh
-  ```
-- `description`: `Codex reviews for $OWNER/$REPO`
-- `persistent`: `true`
-- `timeout_ms`: `3600000`
+**How you attach — and what to tell the user — depends on the runtime:**
 
-The daemon monitor keeps running as a persistent audit log at `response-monitor.log`; this session reads the responses dir directly, so it can die and respawn without touching the persistent daemons. Reuses tested behavior (`test-review-bus-monitor.sh`).
+- **Claude Code** — run the monitor as this session's **Monitor** so review handoffs (and live `${PREFIX}_REVIEW_PROGRESS` lines) surface into the chat automatically. Call the Monitor tool with:
+  - `command`: `MONITOR_EMITTED_DIR="$(mktemp -d)" "$RB_SCRIPTS"/review-bus-response-monitor.sh`
+  - `description`: `Codex reviews for $OWNER/$REPO` · `persistent`: `true` · `timeout_ms`: `3600000`
+  - Tell the user: *"Review-bus armed for $OWNER/$REPO — Codex review passes surface here automatically."*
 
-Tell user in one sentence: "Review-bus armed for $OWNER/$REPO — Codex review passes will trigger auto-response."
+- **Codex (no `Monitor` tool)** — there is **no** background-watch tool, so nothing pushes reviews into the chat; **poll** instead. The daemon monitor already appends every `${PREFIX}_REVIEW` handoff (and `${PREFIX}_REVIEW_PROGRESS` line) to `$BUS/.codex-logs/response-monitor.log`, so:
+  - Poll it while you wait: `grep "${PREFIX}_REVIEW" "$BUS/.codex-logs/response-monitor.log" | tail`.
+  - Or run `"$RB_SCRIPTS"/review-bus-response-monitor.sh --once` on demand to replay the latest unacked response per PR to stdout, then act on it.
+  - Tell the user: *"Review-bus armed for $OWNER/$REPO — poll the monitor log (or run the monitor once) to pick up each Codex review pass."*
+
+Either way the persistent daemon monitor keeps running as an audit log at `response-monitor.log`; a session-attached Monitor reads the responses dir directly, so it can die and respawn without touching the daemons. Reuses tested behavior (`test-review-bus-monitor.sh`).
 
 ## Live progress notifications (`${PREFIX}_REVIEW_PROGRESS`)
 

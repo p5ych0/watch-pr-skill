@@ -204,14 +204,23 @@ fi
 THRESHOLD="${CODEX_REVIEW_ROUND_THRESHOLD:-10}"
 FULL_SHA=$(git rev-parse HEAD)
 
-if [ "$CONTINUE_THRESHOLD" -eq 0 ] && review_bus_threshold_reached "$BUS_DIR" "$PR" "$FULL_SHA" "$THRESHOLD"; then
-    rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
-    echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
-    echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
-    echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
-    echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
-    echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
-    exit 3
+# Atomic check-and-claim (one lock spans the threshold decision AND the round
+# record) so a concurrent manual + passive enqueue at the boundary can't both slip
+# past. --continue-threshold is the operator's explicit cross: record without a
+# pause decision.
+if [ "$CONTINUE_THRESHOLD" -eq 1 ]; then
+    review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA"
+else
+    claim="$(review_bus_claim_round "$BUS_DIR" "$PR" "$FULL_SHA" "$THRESHOLD")"
+    if [ "$claim" = "pause" ]; then
+        rounds_done="$(review_bus_rounds_done "$BUS_DIR" "$PR")"
+        echo "REVIEW_BUS_THRESHOLD_PAUSE pr=$PR rounds=$rounds_done next_sha=$SHA" >&2
+        echo "    $rounds_done review round(s) closed on PR #$PR — a check-in before the next." >&2
+        echo "    Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+        echo "    To continue (enqueue the next review): re-run with --continue-threshold." >&2
+        echo "    To disable these pauses entirely: export CODEX_REVIEW_ROUND_THRESHOLD=0." >&2
+        exit 3
+    fi
 fi
 
 REQ_FILE="$REQ_DIR/req-${SHA}.json"
@@ -245,8 +254,5 @@ jq -n \
   }' > "$TMP_FILE"
 mv "$TMP_FILE" "$REQ_FILE"
 
-# Record this SHA as an enqueued round (deduped, flock-atomic) so the threshold
-# counter advances by one per DISTINCT round, immune to same-SHA retries.
-review_bus_record_round "$BUS_DIR" "$PR" "$FULL_SHA"
-
+# (The round was already recorded atomically by the claim/continue step above.)
 echo "review request written: ${REQ_FILE}"

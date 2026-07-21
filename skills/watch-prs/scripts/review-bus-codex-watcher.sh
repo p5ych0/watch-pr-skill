@@ -875,11 +875,14 @@ write_auto_request() {
         return
     fi
 
-    # Round check-in — the SAME gate as the manual path (shared logic). The
-    # passive path has no operator to answer, so at a threshold multiple it HOLDS
-    # (emits CODEX_AUTO_SKIP, writes nothing) until the operator explicitly crosses
-    # the pause with `review-bus-request.sh <PR> --continue-threshold`.
-    if review_bus_threshold_reached "$BUS_DIR" "$pr" "$head_oid" "${CODEX_REVIEW_ROUND_THRESHOLD:-10}"; then
+    # Round check-in — the SAME atomic check-and-claim as the manual path (shared
+    # logic). Claiming the round here (not just checking) closes the TOCTOU with a
+    # concurrent manual enqueue at the boundary. The passive path has no operator to
+    # answer, so at a threshold multiple it HOLDS (emits CODEX_AUTO_SKIP, writes
+    # nothing) until the operator crosses via `review-bus-request.sh --continue-threshold`.
+    local claim
+    claim="$(review_bus_claim_round "$BUS_DIR" "$pr" "$head_oid" "${CODEX_REVIEW_ROUND_THRESHOLD:-10}")"
+    if [ "$claim" = "pause" ]; then
         echo "CODEX_AUTO_SKIP pr=$pr reason=round_threshold rounds=$(review_bus_rounds_done "$BUS_DIR" "$pr")"
         return
     fi
@@ -909,9 +912,7 @@ write_auto_request() {
           }
         }' > "$tmp"
     mv "$tmp" "$req"
-    # Record this SHA as an enqueued round (shared, flock-atomic) so the manual and
-    # passive paths share ONE monotonic per-PR counter.
-    review_bus_record_round "$BUS_DIR" "$pr" "$head_oid"
+    # (The round was already claimed+recorded atomically above.)
     echo "CODEX_AUTO_REQUEST pr=$pr sha=$short_sha branch=$branch"
 }
 

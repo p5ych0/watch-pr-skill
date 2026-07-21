@@ -44,9 +44,14 @@
 - **Round check-in covers the PASSIVE auto-enqueue too.** The threshold logic is
   now a shared library (`review-bus-rounds.sh`) sourced by BOTH the manual
   `review-bus-request.sh` and the watcher's `write_auto_request`, with
-  flock-atomic round recording — so the polling watcher's auto-enqueue can no
-  longer bypass the operator pause (it HOLDS with `CODEX_AUTO_SKIP
-  reason=round_threshold`). Progress `CODEX_REVIEW_*` knobs are now forwarded to
+  a single lock-scoped check-and-claim (`review_bus_claim_round`) — so the polling
+  watcher's auto-enqueue can no longer bypass the operator pause (it HOLDS with
+  `CODEX_AUTO_SKIP reason=round_threshold`), and a concurrent manual + passive
+  enqueue at the boundary can't both slip past (the threshold decision and the
+  round append share one lock; append-only locking left a check-then-claim TOCTOU).
+  The Codex-vs-Claude-Code progress-consumer split is applied to the arming
+  instructions + README too (Codex polls the monitor log; no auto-notification is
+  promised there). Progress `CODEX_REVIEW_*` knobs are now forwarded to
   the MONITOR systemd unit too (not only the watcher), so an operator override
   isn't silently reset to defaults. SKILL documents the runtime-agnostic progress
   consumer (the monitor log; auto-surfaced via a watch tool in Claude Code, polled

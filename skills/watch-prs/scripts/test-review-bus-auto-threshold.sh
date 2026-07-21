@@ -80,5 +80,32 @@ review_bus_threshold_reached "$BUS_DIR" 7 "$SHA_B" 10 \
     && pass "shared counter: a manual round makes the passive path pause next" \
     || die "shared counter: manual record did not advance the passive gate"
 
+# ── TOCTOU: two CONCURRENT distinct-SHA claims at the 9→10 boundary. The atomic
+#    check-and-claim must let exactly ONE cross (records round 10) and the other
+#    PAUSE (sees 10) — the counter advances by exactly one (10, never 11). This is
+#    the interleaving the append-only lock did NOT close.
+seed_rounds 9
+( review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10 > "$TMP/ra" ) &
+( review_bus_claim_round "$BUS_DIR" 7 "$SHA_B" 10 > "$TMP/rb" ) &
+wait
+ra="$(cat "$TMP/ra")"; rb="$(cat "$TMP/rb")"
+cnt="$(review_bus_rounds_done "$BUS_DIR" 7)"
+if [ "$cnt" -eq 10 ] && [ "$(printf '%s\n%s\n' "$ra" "$rb" | sort -u | paste -sd, -)" = "claimed,pause" ]; then
+    pass "atomic claim: concurrent boundary enqueue → one claims, one pauses (count 10, not 11)"
+else
+    die "atomic claim: TOCTOU not closed (ra=$ra rb=$rb count=$cnt)"
+fi
+# Run it a few more times: the interleaving must ALWAYS resolve to one-claim-one-pause.
+races_ok=1
+for _ in 1 2 3 4 5; do
+    seed_rounds 9
+    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 10 >/dev/null ) &
+    ( review_bus_claim_round "$BUS_DIR" 7 "$SHA_B" 10 >/dev/null ) &
+    wait
+    [ "$(review_bus_rounds_done "$BUS_DIR" 7)" -eq 10 ] || races_ok=0
+done
+[ "$races_ok" -eq 1 ] && pass "atomic claim: 5 repeated races all land the counter at 10 (never 11)" \
+    || die "atomic claim: a repeated race let the counter reach 11 (pause skipped)"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
