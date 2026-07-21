@@ -15,6 +15,20 @@
 #
 # Pure functions, no global state — safe to source anywhere; all inputs are args.
 
+# _review_bus_norm_threshold <value> -> echoes a SAFE threshold. A threshold is a
+# non-negative integer: N>0 pauses every N rounds, 0 explicitly disables the pause
+# (a MEANINGFUL setting, kept as-is). Anything else — a typo like `abc`, a float
+# `1.5`, a negative `-5`, or empty — is coerced to the default 10 rather than left
+# to make the `[ … -gt 0 ]` numeric test error out to "disabled", which would
+# SILENTLY bypass the operator check-in. `10#` forces base-10 so a leading-zero
+# value (`008`) can't trip an octal-parse error in the later `%` arithmetic.
+_review_bus_norm_threshold() {
+    case "$1" in
+        ''|*[!0-9]*) echo 10 ;;
+        *) echo "$((10#$1))" ;;
+    esac
+}
+
 # _review_bus_rounds_file <bus_dir> <pr>
 _review_bus_rounds_file() { printf '%s/.rounds/pr-%s.shas' "$1" "$2"; }
 
@@ -28,8 +42,9 @@ review_bus_rounds_done() {
 # -> exit 0 iff enqueuing this NEW sha would cross a non-zero multiple of the
 #    threshold (threshold<=0 disables; an already-recorded sha never re-triggers).
 review_bus_threshold_reached() {
-    local bus="$1" pr="$2" sha="$3" threshold="$4" f done
-    [ "${threshold:-0}" -gt 0 ] 2>/dev/null || return 1
+    local bus="$1" pr="$2" sha="$3" threshold f done
+    threshold="$(_review_bus_norm_threshold "$4")"
+    [ "$threshold" -gt 0 ] || return 1
     f="$(_review_bus_rounds_file "$bus" "$pr")"
     done="$(review_bus_rounds_done "$bus" "$pr")"
     [ "$done" -gt 0 ] && [ $((done % threshold)) -eq 0 ] \
@@ -119,7 +134,8 @@ _review_bus_claim_locked() {
 #    before it can branch on the token (a non-zero here would trip the assignment).
 #    The inner substitution is `|| rc=$?`-guarded for the same reason.
 review_bus_claim_round() {
-    local bus="$1" pr="$2" sha="$3" threshold="$4" f out rc=0
+    local bus="$1" pr="$2" sha="$3" threshold f out rc=0
+    threshold="$(_review_bus_norm_threshold "$4")"
     f="$(_review_bus_rounds_file "$bus" "$pr")"; mkdir -p "$(dirname "$f")"
     out="$(_review_bus_locked "$f" _review_bus_claim_locked "$f" "$bus" "$pr" "$sha" "$threshold")" || rc=$?
     if [ "$rc" -ne 0 ] || [ -z "$out" ]; then echo locktimeout; return 0; fi

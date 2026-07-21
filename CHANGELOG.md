@@ -69,6 +69,22 @@
   in Codex). New `test-review-bus-auto-threshold.sh`; launch-context test extended
   to the monitor env (suite: 19).
 
+- **Harden every numeric operator knob against a typo.** All operator-supplied
+  numeric env knobs are coerced at their boundary so a bad value can't crash or
+  silently mis-configure a long-lived daemon under `set -Eeuo pipefail`:
+  - `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` and `MONITOR_POLL_SECONDS` feed
+    `-lt`/`-ge`/inotifywait `-t` in the monitor's live loop — a non-integer /
+    empty / 0 / negative value would error the test and terminate the monitor
+    (stopping progress AND the terminal `${PREFIX}_REVIEW` handoff). Now coerced
+    to a positive integer (else the default) via `_positive_int_or`.
+  - `CODEX_REVIEW_ROUND_THRESHOLD` is coerced to a non-negative integer inside
+    the shared `review-bus-rounds.sh` (covering BOTH the manual and passive
+    enqueue paths): a typo like `abc` / `1.5` / `-5` / empty used to make the
+    `[ … -gt 0 ]` test error out to "disabled", silently bypassing the operator
+    pause and allowing unlimited enqueues. It now falls back to the default 10;
+    `0` remains a meaningful explicit disable, and a leading-zero value is read
+    base-10 (`08` → 8) so it can't trip an octal-parse error in the `%` math.
+
 ## [1.0.9] — 2026-07-19
 - **New `review-bus-close-round.sh` — one-command round close-out.** The bus
   handoff after addressing a Codex round is not "push + comment": the loop only

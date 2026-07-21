@@ -48,6 +48,36 @@ printf '%s\n' "$SHA_A" >> "$BUS_DIR/.rounds/pr-7.shas"
 review_bus_threshold_reached "$BUS_DIR" 7 "$SHA_A" 10 \
     && die "helper: an already-recorded sha re-triggered" || pass "helper: recorded sha does not re-trigger"
 
+# ── A garbage threshold must NOT silently DISABLE the check-in. A typo (`abc`,
+#    empty, float, negative) coerces to the default 10 — otherwise `[ … -gt 0 ]`
+#    errors to "disabled" and lets unlimited enqueues through. 0 still disables.
+for bad in abc "" 1.5 -5 " 10 "; do
+    seed_rounds 10   # a fresh 10 distinct SHAs; SHA_A is new → at a 10-multiple
+    if review_bus_threshold_reached "$BUS_DIR" 7 "$SHA_A" "$bad"; then
+        pass "coerce: threshold='$bad' → default 10, pause still fires (not disabled)"
+    else
+        die "coerce: threshold='$bad' silently DISABLED the check-in (bypass)"
+    fi
+done
+# A leading-zero threshold must be read base-10 (08 → 8), never octal-parse-crash
+# in the later `%` arithmetic. 8 rounds IS a multiple of 8 → the pause fires.
+seed_rounds 8
+review_bus_threshold_reached "$BUS_DIR" 7 "$SHA_A" 08 \
+    && pass "coerce: threshold='08' read base-10 as 8, pause fires at 8 rounds (no octal crash)" \
+    || die "coerce: leading-zero threshold mishandled (octal parse or wrong multiple)"
+# The same coercion holds on the atomic claim path: garbage → pause at a multiple.
+seed_rounds 10
+claim="$(review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" abc)"
+[ "$claim" = pause ] \
+    && pass "coerce: claim path with threshold='abc' pauses at the multiple (not claimed)" \
+    || die "coerce: garbage threshold bypassed the claim-path pause (claim=$claim)"
+# 0 remains a MEANINGFUL explicit disable on the claim path (must proceed).
+seed_rounds 10
+claim="$(review_bus_claim_round "$BUS_DIR" 7 "$SHA_A" 0)"
+[ "$claim" = claimed ] \
+    && pass "coerce: threshold=0 still explicitly disables (claim proceeds)" \
+    || die "coerce: threshold=0 no longer disables (claim=$claim)"
+
 # ── Passive path: at the threshold it HOLDS (skip, no write, counter unchanged) ─
 seed_rounds 10
 out="$(write_auto_request 7 feat "$SHA_A" 2>&1)"
