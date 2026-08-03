@@ -53,6 +53,20 @@ else
     die "worktree not created at requested SHA"
 fi
 
+# 1b. The worker marker is stamped into the worktree's GIT DIR. The SessionStart
+#     hook's env-free fallback reads exactly this file, so if the producer here
+#     regresses the hook silently arms the bus from inside a review again — and
+#     the hook's own suite would stay green, because it creates the marker by
+#     hand. It must live in the git dir, never the working tree, or it would show
+#     up as an untracked file in the reviewed diff.
+WT_GIT_DIR="$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)"
+[ -n "$WT_GIT_DIR" ] && [ -f "$WT_GIT_DIR/review-bus-worker" ] \
+    && pass "worker marker stamped in the worktree git dir" \
+    || die "worker marker missing at $WT_GIT_DIR/review-bus-worker"
+[ -z "$(git -C "$WT" status --porcelain)" ] \
+    && pass "marker does not dirty the worktree (git dir, not working tree)" \
+    || die "marker leaked into the working tree: $(git -C "$WT" status --porcelain | tr '\n' ';')"
+
 # 2. Simulate workspace-write residue from a prior pass: a tracked edit plus an
 #    untracked stray file.
 printf 'DIRTY tracked edit\n' >> "$WT/file.txt"
@@ -79,6 +93,13 @@ fi
 # 4. HEAD is still the requested SHA after cleaning.
 [ "$(git -C "$WT2" rev-parse HEAD)" = "$SHA" ] && pass "reused worktree HEAD still at requested SHA" \
     || die "reused worktree HEAD drifted"
+
+# 4b. The marker survives the reuse path too. `git clean -ffdx` runs against the
+#     working tree, so it must not remove it — but the reuse branch is a separate
+#     code path from the create branch and could stop stamping independently.
+[ -f "$WT_GIT_DIR/review-bus-worker" ] \
+    && pass "worker marker still present after same-SHA reuse" \
+    || die "worker marker lost on reuse"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

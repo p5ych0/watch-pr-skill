@@ -40,6 +40,9 @@ if [ "${1:-}" = "exec" ] && printf '%s\n' "$@" | grep -q -- '--help'; then
 fi
 result=""; prev=""
 for a in "$@"; do [ "$prev" = "--output-last-message" ] && result="$a"; prev="$a"; done
+# Record the environment the watcher handed us, so a test can assert the worker
+# marker actually reaches the review process.
+printf 'REVIEW_BUS_WORKER=%s\n' "${REVIEW_BUS_WORKER:-unset}" > "$0.env"
 # JSONL event stream (with a malformed line the tap must survive).
 printf '%s\n' '{"type":"thread.started"}'
 printf '%s\n' '{"type":"item.started","item":{"type":"command_execution"}}'
@@ -145,6 +148,15 @@ run_codex_review "$TMP/prompt.txt" "$TMP/result.json" "$REPO_DIR" >/dev/null 2>&
     && pass "run_codex_review: --output-last-message still written under the tap" || die "run_codex_review: no result file"
 # The secret printed to stdout must never appear in any progress file.
 grep -rqi 'hunter2\|SECRET_TOKEN' "$PROG" 2>/dev/null && die "SECRET leaked into a progress file" || pass "no secret/raw stdout relayed into progress state"
+
+# The review process must receive REVIEW_BUS_WORKER=1. It is the PRIMARY signal
+# the SessionStart hook uses to stay a no-op inside a review; without it the
+# hook falls back to the git-dir marker, and if both producers regress the bus
+# arms itself from inside the review again. The hook's own suite passes the
+# variable in by hand, so only this assertion covers the watcher exporting it.
+grep -qx 'REVIEW_BUS_WORKER=1' "$CODEX_BIN.env" 2>/dev/null \
+    && pass "run_codex_review: exports REVIEW_BUS_WORKER=1 to the review process" \
+    || die "run_codex_review: review process got '$(cat "$CODEX_BIN.env" 2>/dev/null)'"
 
 # ── Monitor emission (crafted progress files + --once) ──────────────────────
 mk_prog() {   # <run_id> <sha> <state> <phase> [reasoning]

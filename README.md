@@ -175,8 +175,13 @@ anytime.)
 The hook never arms the bus **inside a review**. The reviewer works in a
 detached worktree of the PR head, which carries your `.review-bus.md` — so the
 opt-in gate would otherwise pass for the reviewer itself and spend the pass on
-bus setup. It exits silently when `REVIEW_BUS_WORKER=1` is set (the watcher
-exports it) or when the project path sits under `.codex-worktrees/`.
+bus setup. It exits silently on either of two signals: `REVIEW_BUS_WORKER=1`,
+which the watcher exports into the review, or a `review-bus-worker` marker the
+watcher writes into the worktree's **git dir** (never the working tree, so it
+cannot reach the diff). The second signal covers a tool that does not forward
+environment variables to hook commands. Neither is a path test, so a custom
+`CODEX_REVIEW_WORKTREE_ROOT` is still recognised and an ordinary checkout that
+happens to sit under such a directory still arms normally.
 
 ## Configuration (environment variables, all optional)
 
