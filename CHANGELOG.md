@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.11] — 2026-08-03
+
+- **Reviewers now read what the PR set out to do.** The watcher already
+  snapshotted `pr.json` and `issue_comments.jsonl`, but the prompt never told
+  the reviewer to use them, so every project re-authored the same relevance rule
+  by hand in its own `.review-bus.md`. `build_prompt` now directs the reviewer to
+  establish intended scope from those files and use it for **relevance only** —
+  work the PR never claimed to do is a non-blocking note, while a defect in what
+  it did change stays a finding — and marks that context as intent, never
+  permission, so it cannot waive a finding.
+
+- **The plugin now reviews itself.** Adds `.review-bus.md` (review policy, read
+  from the base ref, which also opts this repo into the SessionStart hook),
+  `CLAUDE.md` (canonical authoring rules), `.github/copilot-instructions.md` (the
+  one deliberate restatement, because Copilot follows no pointers), an
+  `AGENTS.md` pointer above claude-mem's generated block, and a committed
+  `.claude/settings.json` so a fresh clone arms itself. Changes to the review bus
+  were previously reviewed with less rigor than the projects it serves.
+
 ## [1.0.10] — 2026-07-21
 
 - **Fix: cross-repo monitor/watcher kill (the "kill bug").** Since the plugin

@@ -78,8 +78,10 @@ change with no `README.md` update is incomplete, not merely undocumented.
 
 ## Release
 
-Bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry in
-the same PR. Entries explain the failure that was fixed and how it manifested,
+Bump `version` in **both** `.claude-plugin/plugin.json` and
+`.codex-plugin/plugin.json` — they are separate manifests for the two plugin
+systems and drift silently if only one is touched — and add a `CHANGELOG.md`
+entry in the same PR. Entries explain the failure that was fixed and how it manifested,
 not just what changed — the existing entries are the standard to match.
 
 ## Stating the task

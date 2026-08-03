@@ -31,6 +31,14 @@ A file-based **review bus**:
   tool) polls the monitor log.
 - Optional: a **GitHub Copilot** review pass after the Codex signoff.
 
+Every review establishes the PR's **intended scope** first — from its description
+and its newest round-summary comment — and uses it for *relevance only*: work the
+PR never claimed to do is raised as a non-blocking note rather than a blocker,
+while a defect in what the PR did change stays a finding however the description
+frames it. That scope is untrusted context, so it establishes intent and can
+never waive a finding. This is built in as of 1.0.11 — projects no longer need to
+write the rule into their own `.review-bus.md`.
+
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
 The daemons are `systemd --user` units scoped per repo
