@@ -133,7 +133,11 @@ drive_process_review() {   # <result-json-file> ; echoes the response path
         count_comments_after() { printf '0\n'; }
         newer_request_for_same_pr() { return 1; }   # not superseded
         run_codex_review() { :; }                   # result.json is pre-placed
-        post_findings() { printf '1 0 1\n'; }       # posted failed attempted
+        # Faithful: post exactly what the snapshot it is handed contains. A stub
+        # that always claimed "1 posted" tripped the posted>produced consistency
+        # guard on every zero-finding fixture, so those cases passed for the
+        # wrong reason and could not detect their own guard regressing.
+        post_findings() { local n; n="$(jq '.findings | length' "$3" 2>/dev/null || echo 0)"; printf '%s 0 %s\n' "$n" "$n"; }
         post_clean_signoff() { printf 'COMMENT\n'; }
         process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
                        "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
@@ -215,6 +219,78 @@ if [ -f "$toctou_resp" ]; then
         || die "TOCTOU: model_summary came from the swapped result"
 else
     die "TOCTOU fixture produced no response file"
+fi
+
+# ── 8. Two concatenated top-level objects must not approve ─────────────────
+# jq reads a STREAM, so `{...}{...}` parses happily and `.findings | length`
+# emits "0\n0" — satisfying no numeric test, falling through to the zero-findings
+# branch, and posting a clean APPROVE. Only slurping and requiring exactly one
+# object rejects this.
+printf '{"summary":"a","findings":[]}{"summary":"b","findings":[]}\n' > "$TMP/two-objects.json"
+two_resp="$(drive_process_review "$TMP/two-objects.json")"
+if [ -f "$two_resp" ] && [ "$(jq -r '.status' "$two_resp" 2>/dev/null)" = "approved" ]; then
+    die "two concatenated JSON objects produced a clean APPROVE"
+else
+    pass "two concatenated JSON objects earn no approval"
+fi
+
+# ── 9. A whitespace-only summary is not a signoff ──────────────────────────
+printf '{"summary":" \\t ","findings":[]}\n' > "$TMP/ws-summary.json"
+ws_resp="$(drive_process_review "$TMP/ws-summary.json")"
+if [ -f "$ws_resp" ] && [ "$(jq -r '.status' "$ws_resp" 2>/dev/null)" = "approved" ]; then
+    die "whitespace-only summary produced a clean APPROVE"
+else
+    pass "whitespace-only summary earns no approval"
+fi
+
+# The stored text must keep the reviewer's exact formatting — the whitespace
+# check is a test, not a transformation.
+SPACED="  leading and trailing spaces matter  "
+resp_sp="$TMP/spaced.json"
+write_response "$resp_sp" 4 abc1234 comments_posted 1 "1 finding." "/dev/null" "$SPACED"
+[ "$(jq -r '.model_summary' "$resp_sp")" = "$SPACED" ] \
+    && pass "stored note keeps its exact formatting (validation does not rewrite it)" \
+    || die "stored note was altered by validation"
+
+# ── 10. Reverse swap: more posted than the validated result held ───────────
+# The mirror of case 7. If post_findings reports posting more comments than the
+# snapshot contained, the count about to be recorded disagrees with what reached
+# the PR — which is how a PR with posted comments gets marked approved with
+# findings_count 0. That disagreement must fail closed, never sign off.
+reverse_swap() {
+    local out="$TMP/pr-reverse"
+    rm -rf "$out"; mkdir -p "$out/snap"
+    jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: []}' > "$out/result.json"
+    (
+        set +eu
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }
+        run_codex_review() { :; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        # Claims a comment was posted although the validated result held none.
+        post_findings() { printf '1 0 1\n'; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+rev_resp="$(reverse_swap)"
+if [ -f "$rev_resp" ]; then
+    [ "$(jq -r '.status' "$rev_resp")" != "approved" ] \
+        && pass "posted > validated findings does not approve" \
+        || die "posted-more-than-validated still produced a clean APPROVE"
+    [ "$(jq -r '.findings_count' "$rev_resp")" != "0" ] \
+        && pass "the recorded count reflects what was posted, not the stale 0" \
+        || die "recorded findings_count=0 while a comment was posted"
+else
+    die "reverse-swap fixture produced no response file"
 fi
 
 if [ "$fail" -ne 0 ]; then

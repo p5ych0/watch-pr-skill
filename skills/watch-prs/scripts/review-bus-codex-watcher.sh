@@ -362,7 +362,9 @@ require_model_summary() {
     # returns "123" for a numeric summary, which is non-empty and would pass a
     # bare emptiness check while being schema-invalid.
     out="$(jq -er 'select((.summary | type) == "string") | .summary' "$result" 2>/dev/null)" || return 1
-    [ -n "$out" ] || return 1
+    # Whitespace is not a merge signoff. Tested on a stripped copy so the STORED
+    # text keeps the reviewer's exact formatting.
+    [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ] || return 1
     printf '%s' "$out"
 }
 
@@ -1028,7 +1030,7 @@ process_review() {
     local resp="$7"
     local log="$8"
     local requested_at="$9"
-    local full_sha review_dir before after findings status summary posted produced newer_sha delta failed attempted post_stats clean_event model_summary
+    local full_sha review_dir before after findings status summary posted produced newer_sha delta failed attempted post_stats clean_event model_summary result_snapshot
 
     export CUID="${CUID:-$(id -u)}"
     export CGID="${CGID:-$(id -g)}"
@@ -1052,25 +1054,38 @@ process_review() {
         echo "CODEX_RESULT_MISSING path=$result"
         return 1
     fi
-    jq -e '.findings | type == "array"' "$result" >/dev/null || return 1
-    # `summary` is required by the output schema on EVERY review, and until now
-    # nothing checked it. A schema-invalid result such as {"findings":[]} took the
-    # zero-findings branch, picked up a default "no actionable issues" string, and
-    # earned a clean APPROVAL — a malformed reviewer output approving the PR,
-    # which is the worst direction this code can fail in. Non-empty is required
-    # too: the prompt asks for an explicit merge signoff, and "" is not one.
-    #
-    # CAPTURE IT HERE, once, and use the captured value everywhere below. Reading
-    # the file again later would be a TOCTOU: validation happens before any side
-    # effect, but the second read landed AFTER the comments were posted, so a
-    # result replaced in between yielded an empty summary — which then fell into
-    # the zero-findings default and produced a clean approval. Validate-then-reuse
-    # closes that; there is no second read to disagree with the first.
-    if ! model_summary="$(require_model_summary "$result")"; then
+    # SNAPSHOT the result, then validate and consume only the snapshot. Capturing
+    # `.summary` alone was not enough: `.findings` was still re-read for its
+    # length and again by post_findings, so a result replaced mid-run could post
+    # a finding while `produced` stayed 0 — the comments and the recorded verdict
+    # disagreeing, ending in a clean APPROVE with findings_count 0. One immutable
+    # copy removes every window rather than the one most recently demonstrated.
+    result_snapshot="${result}.validated"
+    cp -- "$result" "$result_snapshot" 2>/dev/null || {
+        echo "CODEX_RESULT_INVALID path=$result reason=snapshot_failed"
+        return 1
+    }
+
+    # `jq` reads a STREAM, so two concatenated top-level objects both parse:
+    # `.findings | length` then emits "0\n0", which satisfies no numeric test and
+    # falls through to the zero-findings branch and a clean approval. Slurping and
+    # requiring exactly one object is the only check that rejects that shape.
+    if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$result_snapshot" >/dev/null 2>&1; then
+        echo "CODEX_RESULT_INVALID path=$result reason=not_a_single_json_object"
+        return 1
+    fi
+    jq -e '.findings | type == "array"' "$result_snapshot" >/dev/null || return 1
+
+    # `summary` is required by the output schema on EVERY review, and nothing
+    # checked it until this branch existed: {"findings":[]} took the zero-findings
+    # path, picked up a default "no actionable issues" string, and earned a clean
+    # APPROVAL — a malformed reviewer output approving the PR. Validating and
+    # extracting are one operation so no later read can disagree with this one.
+    if ! model_summary="$(require_model_summary "$result_snapshot")"; then
         echo "CODEX_RESULT_INVALID path=$result reason=summary_missing_empty_or_not_string"
         return 1
     fi
-    produced="$(jq '.findings | length' "$result")"
+    produced="$(jq '.findings | length' "$result_snapshot")"
 
     if [ -n "$requested_at" ] && newer_sha="$(newer_request_for_same_pr "$pr" "$sha" "$requested_at")"; then
         status="error"
@@ -1083,12 +1098,26 @@ process_review() {
 
     PROGRESS_FINDINGS="$produced"
     progress_set posting_comments running
-    post_stats="$(post_findings "$pr" "$full_sha" "$result" "$sha")" || return 1
+    post_stats="$(post_findings "$pr" "$full_sha" "$result_snapshot" "$sha")" || return 1
     read -r posted failed attempted <<< "$post_stats"
     posted="${posted:-0}"
     failed="${failed:-0}"
     attempted="${attempted:-0}"
     echo "CODEX_COMMENT_POST_ATTEMPTS produced=$produced attempted=$attempted posted=$posted failed=$failed"
+
+    # Belt to the snapshot's braces. post_findings consumes the same snapshot, so
+    # it cannot legitimately post more than the snapshot contains — if it reports
+    # otherwise, the count this function is about to record disagrees with what
+    # actually reached the PR. Recording a verdict over that disagreement is how
+    # a PR with posted comments ends up marked approved with findings_count 0.
+    if [ "$posted" -gt "$produced" ] 2>/dev/null; then
+        echo "CODEX_RESULT_INCONSISTENT pr=$pr sha=$sha produced=$produced posted=$posted"
+        status="error"
+        findings="$posted"
+        summary="internal inconsistency: $posted comment(s) posted but the validated result held $produced finding(s); no signoff on sha=$sha. See $log"
+        write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log" "$model_summary"
+        return 0
+    fi
 
     after="$(max_comment_id "$pr")"
     echo "CODEX_COMMENT_AFTER max_id=$after"
