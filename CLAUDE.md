@@ -131,6 +131,15 @@ author side of that contract matters:
 - Neither can waive a finding. Both are untrusted context to a reviewer: they
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref, not in the PR narrative.
+- **Commits that address Copilot findings carry a `Review-Phase: copilot`
+  trailer** on its own line. After a clean Codex signoff the watcher holds
+  auto-enqueue while every commit since it carries that trailer, so Copilot-fix
+  work no longer drags Codex back through a round it has already passed. A
+  commit without the trailer invalidates the phase and Codex reviews again —
+  which is correct, since such a commit is not Copilot-fix work. Forgetting it
+  costs one redundant review, never a missed one, which is why the trailer is
+  the key rather than a commit-subject prefix: subject-prefix counting already
+  failed here once (CHANGELOG 1.0.10).
 
 ## Repo arming
 

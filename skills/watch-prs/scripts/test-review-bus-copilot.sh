@@ -201,6 +201,58 @@ echo "$out" | grep -qx 'COPILOT_REVIEW pr=7 sha=aaaaaaa findings=3 status=commen
   && [ "$rc" -eq 0 ] && pass "status: two same-head reviews => count the latest (findings=3)" \
   || die "status (l) wrong (rc=$rc out='$out')"
 
+# ---- gate / decline ------------------------------------------------------
+# The gate is what makes skipping Copilot an explicit act. Without it the pass
+# lives only as SKILL.md prose, and a session can reach merge having never asked
+# — which is what happened repeatedly in a downstream repo.
+GATE_BUS="$TMP/gatebus"; mkdir -p "$GATE_BUS"
+run_gate() { BUS_DIR="$GATE_BUS" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+
+# (n) no Copilot review on this head => pass still owed (1)
+printf '[]' > "$TMP/rev-none.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-none.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=none' && [ "$rc" -eq 1 ] \
+  && pass "gate: no review for the head => 1 (pass owed)" || die "gate (n) wrong (rc=$rc out='$out')"
+
+# (o) clean review on this head => may merge (0)
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","id":70,"state":"COMMENTED","submitted_at":"2026-07-18T08:00:00Z"}]' "$HEAD40" > "$TMP/rev-clean.json"
+printf '[]' > "$TMP/comments-70.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-clean.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=clean' && [ "$rc" -eq 0 ] \
+  && pass "gate: clean review on the head => 0" || die "gate (o) wrong (rc=$rc out='$out')"
+
+# (p) review WITH findings => still owed (1), never a silent pass
+printf '[{"id":1},{"id":2}]' > "$TMP/comments-70.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-clean.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=findings findings=2' && [ "$rc" -eq 1 ] \
+  && pass "gate: findings on the head => 1" || die "gate (p) wrong (rc=$rc out='$out')"
+
+# (q) fetch failure => 2, so the caller fails closed rather than merging
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-clean.json" GH_COMMENTS_RC=1 run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=error' && [ "$rc" -eq 2 ] \
+  && pass "gate: comment fetch failure => 2 (fail closed)" || die "gate (q) wrong (rc=$rc out='$out')"
+
+# (r) head lookup failure => 2, never "no review therefore fine"
+out="$(GH_HEAD="" GH_REVIEWS="$TMP/rev-none.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'reason=head_lookup_failed' && [ "$rc" -eq 2 ] \
+  && pass "gate: head lookup failure => 2 (fail closed)" || die "gate (r) wrong (rc=$rc out='$out')"
+
+# (s) decline records the head and the gate then allows the merge
+out="$(GH_HEAD="$HEAD40" run_gate decline 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && [ "$(cat "$GATE_BUS/.copilot-declined-7")" = "$HEAD40" ] \
+  && pass "decline: records the current head" || die "decline wrong (rc=$rc out='$out')"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-none.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=declined' && [ "$rc" -eq 0 ] \
+  && pass "gate: recorded decline for this head => 0" || die "gate (s) wrong (rc=$rc out='$out')"
+
+# (t) a push after the decline re-opens the question — the waiver must NOT
+# carry over to code the operator never saw.
+OTHER40="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+out="$(GH_HEAD="$OTHER40" GH_REVIEWS="$TMP/rev-none.json" run_gate gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=decline_stale' && [ "$rc" -eq 1 ] \
+  && pass "gate: decline does not carry past the head it was made for" \
+  || die "gate (t) STALE DECLINE ACCEPTED (rc=$rc out='$out')"
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling

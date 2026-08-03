@@ -161,6 +161,19 @@ After a clean Codex signoff, the skill asks whether to run an optional GitHub Co
 - **If you explicitly decline (skip Copilot)**, it merges on the clean Codex signoff (after final merge-gate checks).
 - **If you do not answer**, it holds and does not merge unattended.
 
+As of 1.0.12 this is enforced rather than merely instructed. `review-bus-copilot.sh gate <PR>`
+is a hard gate in the merge block: it exits 0 only when Copilot has a clean review on the
+**current head** or you declined for that head (`review-bus-copilot.sh decline <PR>`), 1 when
+the pass is still owed, and 2 when it cannot tell — which fails closed. So skipping Copilot
+is now an explicit recorded decision instead of something that can happen by simply never
+asking. A decline does not survive a later push: new code re-opens the question.
+
+Codex also stops re-reviewing during the Copilot loop. A clean signoff records the signed-off
+SHA, and auto-enqueue holds while **every** commit since it carries a `Review-Phase: copilot`
+trailer — so Copilot-fix commits no longer burn a Codex review, a round against the check-in
+threshold, and a notification each. Any commit without the trailer invalidates the phase and
+Codex reviews normally, so forgetting it costs one redundant review rather than a missed one.
+
 ## Automatic arming (opt-in per repo)
 
 The plugin ships a `SessionStart` hook (both tools). In any repo that has a

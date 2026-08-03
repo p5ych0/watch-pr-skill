@@ -9,6 +9,12 @@
 #                   (0 commented+findings, 1 none, 2 error/fail-closed)
 #   poll      <PR>  poll until Copilot reviews the current head, emit one
 #                   COPILOT_REVIEW line (0), status=timeout (1), status=error (2)
+#   gate      <PR>  MERGE GATE — may this PR merge as far as Copilot is concerned?
+#                   (0 clean review on the current head OR a decline recorded for
+#                    it, 1 pass still owed, 2 cannot tell → caller fails closed)
+#   decline   <PR>  record an operator decision to skip the pass for the CURRENT
+#                   head (0 recorded, 2 could not record). Head-scoped: a later
+#                   push re-opens the question rather than inheriting the waiver.
 #
 # Repo identity is derived from this checkout's origin (repo-agnostic), same as
 # review-bus-request.sh. Sourcing with REVIEW_BUS_LIB_ONLY=1 exposes the helper
@@ -34,6 +40,10 @@ else
     REPO="${REVIEW_BUS_REPO:-}"
 fi
 REPO_SLUG="$OWNER/$REPO"
+# Same derivation as the watcher, so `gate`/`decline` read and write the markers
+# in this project's own bus. Identity comes from origin — never hard-coded.
+BUS_SLUG="$(printf '%s' "${OWNER:+${OWNER}-}${REPO}" | tr -c 'A-Za-z0-9._-' '-')"
+BUS_DIR="${BUS_DIR:-/tmp/${BUS_SLUG:-review}-review-bus}"
 
 # Prints Copilot's reviews on a PR (JSON array) and returns 0 on success.
 # Returns 2 if the reviews endpoint cannot be fetched/parsed — callers MUST fail
@@ -176,6 +186,72 @@ cmd_poll() {
     return 1
 }
 
+# Record an operator decision to SKIP the Copilot pass. Head-scoped on purpose:
+# a decline is a judgement about the code as it stood, so a later push must
+# re-open the question rather than inherit the waiver — otherwise declining once
+# would silently authorise merging everything pushed afterwards.
+#   0 recorded · 2 could not record (caller fails closed)
+cmd_decline() {
+    local pr="$1" head marker
+    head=$(pr_head_oid "$pr")
+    if [ -z "$head" ]; then
+        echo "COPILOT_DECLINE pr=$pr sha=unknown status=error reason=head_lookup_failed"
+        return 2
+    fi
+    marker="$BUS_DIR/.copilot-declined-${pr}"
+    mkdir -p "$BUS_DIR" 2>/dev/null
+    if ! printf '%s\n' "$head" > "${marker}.tmp" 2>/dev/null || ! mv "${marker}.tmp" "$marker" 2>/dev/null; then
+        rm -f "${marker}.tmp" 2>/dev/null
+        echo "COPILOT_DECLINE pr=$pr sha=${head:0:7} status=error reason=write_failed"
+        return 2
+    fi
+    echo "COPILOT_DECLINE pr=$pr sha=${head:0:7} status=recorded"
+    return 0
+}
+
+# Merge gate for the Copilot pass. The skill's merge block must pass this, so
+# skipping Copilot becomes an explicit recorded act (`decline`) instead of
+# something a session can do by simply not asking.
+#
+# Unresolved Copilot THREADS are not re-checked here: the caller's merge gate
+# already refuses to merge with any unresolved thread, whatever its author.
+#   0 may merge (clean review on this head, or a decline for this head)
+#   1 Copilot pass still owed
+#   2 cannot tell — caller MUST fail closed
+cmd_gate() {
+    local pr="$1" head short findings rc marker recorded
+    head=$(pr_head_oid "$pr")
+    if [ -z "$head" ]; then
+        echo "COPILOT_GATE pr=$pr sha=unknown status=error reason=head_lookup_failed"
+        return 2
+    fi
+    short="${head:0:7}"
+
+    marker="$BUS_DIR/.copilot-declined-${pr}"
+    if [ -f "$marker" ]; then
+        recorded="$(tr -cd '0-9a-f' < "$marker" 2>/dev/null)"
+        if [ "$recorded" = "$head" ]; then
+            echo "COPILOT_GATE pr=$pr sha=$short status=declined"
+            return 0
+        fi
+        echo "COPILOT_GATE pr=$pr sha=$short status=decline_stale recorded=${recorded:0:7}"
+    fi
+
+    findings=$(head_review_findings "$pr" "$head"); rc=$?
+    case "$rc" in
+        0)  if [ "${findings:-1}" -eq 0 ] 2>/dev/null; then
+                echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0"
+                return 0
+            fi
+            echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings"
+            return 1 ;;
+        2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=fetch_failed"
+            return 2 ;;
+        *)  echo "COPILOT_GATE pr=$pr sha=$short status=none"
+            return 1 ;;
+    esac
+}
+
 main() {
     local sub="${1:-}"; shift || true
     case "$sub" in
@@ -183,6 +259,8 @@ main() {
         request)   cmd_request "$@" ;;
         status)    cmd_status "$@" ;;
         poll)      cmd_poll "$@" ;;
+        gate)      cmd_gate "$@" ;;
+        decline)   cmd_decline "$@" ;;
         --help|-h|"") sed -n '2,12p' "$0"; exit 0 ;;
         *) echo "ERR: unknown subcommand: $sub" >&2; exit 64 ;;
     esac

@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.12] — 2026-08-03
+
+- **Codex no longer re-reviews during the Copilot pass.** `SKILL.md` already
+  said Codex is not re-run on Copilot-fix commits, but the watcher had no way to
+  honour it: auto-enqueue saw each fix commit as a fresh head, so every one burned
+  a review, consumed a round against the check-in threshold, and fired a
+  notification. A clean signoff now records the signed-off SHA in
+  `.codex-clean-<pr>`, and auto-enqueue holds while **every** commit since it
+  carries a `Review-Phase: copilot` trailer. The key is a trailer, not a
+  commit-subject prefix, because subject-prefix counting already failed here
+  (see 1.0.10). Any untagged commit invalidates the phase and is reviewed
+  normally, and every uncertainty — unreadable marker, failed compare, empty
+  commit list — falls through to a review, since a wrong hold means a commit is
+  never reviewed while a wrong review costs one redundant pass.
+
+- **The Copilot pass can no longer be skipped by omission.** It previously
+  existed only as `SKILL.md` prose with no bus state behind it, so a session
+  could reach merge having never asked — which happened repeatedly downstream.
+  `review-bus-copilot.sh` gains `gate <PR>` (0 = clean review on the current head
+  or a decline recorded for it, 1 = pass owed, 2 = cannot tell → caller fails
+  closed) and `decline <PR>`, and `SKILL.md`'s merge block runs the gate first.
+  Declines are scoped to the head they were made for, so a later push re-opens
+  the question instead of inheriting the waiver.
+
+- **The clean-signoff response carries `next_phase: "copilot"`,** which the
+  response monitor surfaces in its handoff line. A session told only `approved`
+  had nothing pointing it at the Copilot pass.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With
