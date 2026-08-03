@@ -31,8 +31,13 @@ PROJECT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
 # the env-stripped case this fallback exists for — while falsely silencing an
 # ordinary opted-in checkout that happens to live under such a directory.
 [ -z "${REVIEW_BUS_WORKER:-}" ] || exit 0
+# Fail CLOSED on a failed probe. PROJECT already resolved as a git toplevel
+# above, so --absolute-git-dir failing here is anomalous — and the one thing
+# worse than not arming is arming inside a review. Treat "cannot tell" as
+# "worker", and stay the silent no-op this hook is contractually required to be.
 GIT_DIR_PATH="$(git -C "$PROJECT" rev-parse --absolute-git-dir 2>/dev/null || true)"
-[ -z "$GIT_DIR_PATH" ] || [ ! -f "$GIT_DIR_PATH/review-bus-worker" ] || exit 0
+[ -n "$GIT_DIR_PATH" ] || exit 0
+[ ! -f "$GIT_DIR_PATH/review-bus-worker" ] || exit 0
 
 # Locate the plugin. Both tools set CLAUDE_PLUGIN_ROOT for hook commands (Codex
 # also sets PLUGIN_ROOT); self-locate from this script's dir as a last resort in

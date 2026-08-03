@@ -67,6 +67,23 @@ echo "$out" | grep -q 'watch-pr-skill' \
   && pass "ordinary checkout under a .codex-worktrees path still arms" \
   || die "non-worker was falsely silenced by its path: '$out'"
 
+# (d3) FAILURE PATH: the git-dir probe itself fails. PROJECT already resolved as
+# a git toplevel, so this is anomalous — and "cannot tell" must mean "worker",
+# not "arm". Failing open here would arm the bus inside a review precisely when
+# the environment marker is also unavailable, which is the case this fallback
+# exists to cover. A stub git fails ONLY --absolute-git-dir and delegates the
+# rest to the real binary.
+REALGIT="$(command -v git)"
+STUBBIN="$TMP/stubbin"; mkdir -p "$STUBBIN"
+cat > "$STUBBIN/git" <<STUBGIT
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "--absolute-git-dir" ] && exit 1; done
+exec "$REALGIT" "\$@"
+STUBGIT
+chmod +x "$STUBBIN/git"
+out="$(cd "$REPO" && PATH="$STUBBIN:$PATH" CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
+[ -z "$out" ] && pass "git-dir probe failure => no-op (fails closed)" || die "probe failure armed the bus: '$out'"
+
 # (e) always exits 0 even when the start script is missing (must never block session)
 rm -f "$STUB/skills/watch-prs/scripts/review-bus-codex-start.sh"
 ( cd "$REPO" && CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" >/dev/null 2>&1 )

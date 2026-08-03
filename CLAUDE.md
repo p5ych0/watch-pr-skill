@@ -23,10 +23,15 @@ Everything else is documentation.
 
 ## Bash conventions
 
-- Daemons and one-shot scripts run `set -Eeuo pipefail`.
-- `review-bus-copilot.sh` deliberately omits `-e`, documented at its head: its
-  subcommands use exit codes as control flow, and several `gh` probes "fail" as
-  normal operation. Do not add `-e` to it.
+Strict mode is chosen per script category, not applied uniformly. Match the
+category; do not "fix" a script into a stricter mode.
+
+| Mode | Scripts | Why |
+| --- | --- | --- |
+| `set -Eeuo pipefail` | `review-bus-codex-watcher.sh`, `review-bus-codex-start.sh`, `review-bus-response-monitor.sh` | Long-running daemons and their launcher. `-E` so `ERR` traps survive into functions and subshells. |
+| `set -euo pipefail` | `review-bus-request.sh`, `review-bus-close-round.sh` | One-shot commands that abort on the first failed step. No `ERR` trap to propagate, so no `-E`. |
+| `set -uo pipefail` | `review-bus-copilot.sh`, `hooks/session-start.sh` | **`-e` is forbidden here.** `copilot.sh` subcommands use exit codes as control flow and several `gh` probes "fail" as normal operation. `session-start.sh` is a SessionStart hook: it must never block or fail a session, so it always reaches `exit 0`. |
+| none | `review-bus-rounds.sh` | A sourced library — it inherits whatever mode its caller set. |
 - **Intentional no-op branches use an explicit `return 0`.** A bare `return`
   after a failed test inherits that test's exit status 1; under strict mode with
   an unguarded caller, that terminates the daemon and systemd restarts it into a

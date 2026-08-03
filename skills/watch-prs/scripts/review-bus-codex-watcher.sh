@@ -394,9 +394,17 @@ prepare_review_worktree() {
     # and the clone path are all operator-overridable, so a path-shaped test
     # would both miss a custom root and falsely silence an ordinary checkout
     # that happened to sit under a similarly-named directory.
+    # FAIL CLOSED. A missing marker is not cosmetic: if the runtime also drops
+    # REVIEW_BUS_WORKER before hook commands, the SessionStart hook arms the bus
+    # from inside this review. Refusing to hand back a worktree we could not
+    # stamp is the safe direction — the request is retried, rather than reviewed
+    # with the recursion guard silently absent.
     local wt_git_dir
-    if wt_git_dir="$(git -C "$worktree_dir" rev-parse --git-dir 2>/dev/null)"; then
-        [ -d "$wt_git_dir" ] && : > "$wt_git_dir/review-bus-worker" 2>/dev/null || true
+    if ! wt_git_dir="$(git -C "$worktree_dir" rev-parse --absolute-git-dir 2>/dev/null)" \
+       || [ ! -d "$wt_git_dir" ] \
+       || ! : > "$wt_git_dir/review-bus-worker" 2>/dev/null; then
+        echo "CODEX_WORKTREE_MARKER_FAILED path=$worktree_dir git_dir=${wt_git_dir:-unresolved}" >&2
+        return 1
     fi
 
     printf '%s\n' "$worktree_dir"

@@ -94,6 +94,24 @@ fi
 [ "$(git -C "$WT2" rev-parse HEAD)" = "$SHA" ] && pass "reused worktree HEAD still at requested SHA" \
     || die "reused worktree HEAD drifted"
 
+# 4a. FAILURE PATH: if the marker cannot be resolved or written,
+#     prepare_review_worktree must FAIL rather than hand back an unstamped
+#     worktree. Reviewing without the marker means the SessionStart hook can arm
+#     the bus from inside the review whenever the environment marker is also
+#     missing — so a swallowed failure here reintroduces the recursion. A stub
+#     git fails ONLY --absolute-git-dir and delegates everything else.
+REALGIT="$(command -v git)"
+STUBBIN="$TMP/stubbin"; mkdir -p "$STUBBIN"
+cat > "$STUBBIN/git" <<STUBGIT
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = "--absolute-git-dir" ] && exit 1; done
+exec "$REALGIT" "\$@"
+STUBGIT
+chmod +x "$STUBBIN/git"
+( PATH="$STUBBIN:$PATH" prepare_review_worktree 8 "$SHORT" "$SHA" >/dev/null 2>&1 )
+[ "$?" -ne 0 ] && pass "marker failure fails the worktree prep (fails closed)" \
+    || die "prepare_review_worktree succeeded without a marker (fails open)"
+
 # 4b. The marker survives the reuse path too. `git clean -ffdx` runs against the
 #     working tree, so it must not remove it — but the reuse branch is a separate
 #     code path from the create branch and could stop stamping independently.
