@@ -110,47 +110,83 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
 # `return $rc`, `return 1` and similar are untouched — only a naked `return`,
 # whose value is whatever the previous command happened to leave behind.
 #
-# The detector matches `return` followed by end-of-line, `;` or `}`, because a
-# first version anchored only on end-of-line silently passed over the
-# `|| { printf ...; return; }` form used in the GraphQL failure handlers — the
-# test then advertised an invariant that was already false. Leading `[^#]*`
-# keeps prose in comments (". . . a bare return") from registering as code.
-# `#` is a terminator too: `[ x ] || return # why` is a bare return with a
-# trailing comment, and Bash returns the failed test's status from it. The
-# leading `[^#]*` still excludes whole-line comments, since any `#` before the
-# keyword disqualifies the line.
+# HOW, and why not a regex over the source. Three successive regex versions were
+# defeated by legal Bash: one anchored on end-of-line missed `{ ...; return; }`;
+# adding `;`/`}` missed `|| return # why`; adding `#` was still defeated by a
+# `#` inside a quoted string (which disqualified the line) and by `return
+# >/dev/null`. Each time the suite reported PASS while the invariant was false.
+# A regex cannot tell a comment from a `#` in a string, so the tool was wrong.
+#
+# Bash itself is the oracle. Sourcing the script defines its functions (the
+# source guard keeps main() from running), and `declare -f` re-renders each one
+# from the PARSED form: comments are gone entirely, quoting is normalised, and
+# each command sits on its own line. Scanning that output cannot be fooled by
+# quoting or comments, because neither survives the parse.
+#
+# A `return` is bare when the next token is a command terminator, a redirection,
+# or a control operator — never an argument.
+BARE_RETURN_RE='(^|[[:space:]]|[;{&|])return[[:space:]]*($|[;}<>&|])'
+
+# Prints "<function>: <line>" for every bare return. Sourcing happens in a
+# subshell so the watcher's globals and traps cannot leak into the test.
 detect_bare_returns() {
-    grep -nE '^[^#]*(^|[[:space:]]|\{|;|\|\|)return[[:space:]]*($|;|\}|#)' "$1" || true
+    local target="$1"
+    (
+        set +eu
+        REPO_DIR="$REPO_DIR" BUS_DIR="$BUS_DIR" \
+        REVIEW_BUS_REMOTE="${REVIEW_BUS_REMOTE:-git@github.com:test/demo.git}"
+        # shellcheck disable=SC1090
+        source "$target" >/dev/null 2>&1
+        while read -r _ _ fn; do
+            declare -f "$fn" 2>/dev/null \
+                | grep -E "$BARE_RETURN_RE" \
+                | sed "s/^[[:space:]]*/$fn: /"
+        done < <(declare -F)
+    ) || true
 }
 
 # Negative control FIRST: a detector that cannot fail is worse than no detector,
 # and this one already shipped once with a hole in it. Every form below must be
 # caught before the real scan is allowed to mean anything.
+# Every BAD form is named bad_*, every GOOD form good_*, so the assertion is
+# "exactly the bad ones, and nothing else" rather than a count that drifts as
+# forms are added. bad_quoted_hash and bad_redirect are the two that defeated
+# the final regex version; the rest defeated earlier ones.
 probe="$TMP/bare-return-forms.sh"
 cat > "$probe" <<'PROBE'
-f1() { [ -f x ] || return
+bad_eol()         { [ -f x ] || return
 }
-f2() { cmd || { printf 'x'; return; }
+bad_brace()       { cmd || { printf 'x'; return; }
 }
-f3() { if x; then return; fi
+bad_if()          { if x; then return; fi
 }
-f4() { [ -f x ] || return # trailing comment still leaves a bare return
+bad_comment()     { [ -f x ] || return # trailing comment still leaves it bare
 }
-f5() { return $rc; }
-f6() { return 0; }
-f7() { return 1; }
-# a comment mentioning a bare return
+bad_quoted_hash() { printf 'PR #4' || return
+}
+bad_redirect()    { false || return >/dev/null
+}
+good_var()        { return $rc; }
+good_zero()       { return 0; }
+good_one()        { return 1; }
+good_prose()      {
+    # a comment mentioning a bare return
+    printf 'x #4 return'
+    return 0
+}
 PROBE
 probe_hits="$(detect_bare_returns "$probe")"
-probe_lines="$(printf '%s\n' "$probe_hits" | grep -c . || true)"
-if [ "$probe_lines" -eq 4 ] \
-   && printf '%s' "$probe_hits" | grep -q '^1:' \
-   && printf '%s' "$probe_hits" | grep -q '^3:' \
-   && printf '%s' "$probe_hits" | grep -q '^5:' \
-   && printf '%s' "$probe_hits" | grep -q '^7:'; then
-    pass "detector catches bare return at EOL, before '}', after ';', and before '#' — sparing return 0/1/\$rc and comments"
+missed=""; spurious=""
+for f in bad_eol bad_brace bad_if bad_comment bad_quoted_hash bad_redirect; do
+    printf '%s' "$probe_hits" | grep -q "^$f:" || missed="$missed $f"
+done
+for f in good_var good_zero good_one good_prose; do
+    printf '%s' "$probe_hits" | grep -q "^$f:" && spurious="$spurious $f"
+done
+if [ -z "$missed" ] && [ -z "$spurious" ]; then
+    pass "detector flags every bare form (incl. quoted '#' and redirection) and spares every valued return"
 else
-    die "detector is unsound (expected lines 1,3,5,7; got: $(printf '%s' "$probe_hits" | tr '\n' ' '))"
+    die "detector is unsound — missed:${missed:- none} spurious:${spurious:- none}"
 fi
 
 # And prove the comment form is genuinely dangerous, not merely untidy: under
@@ -169,6 +205,27 @@ danger="$( set -Eeuo pipefail
 [ "$danger" != "survived" ] \
     && pass "'|| return # comment' does abort a set -e caller (the form is a real defect)" \
     || die  "fixture no longer reproduces the hazard — the assertion above proves nothing"
+
+# Same proof for the two forms that defeated the final regex. Detecting them is
+# only worth doing if they are genuinely fatal, and a reader should not have to
+# take that on trust for any form the detector claims to catch.
+danger2="$( set -Eeuo pipefail
+            noop() { printf 'PR #4' >/dev/null; [ -f /nonexistent ] || return
+            }
+            noop
+            echo survived )" 2>/dev/null
+[ "$danger2" != "survived" ] \
+    && pass "quoted-'#' form aborts a set -e caller" \
+    || die  "quoted-'#' fixture does not reproduce the hazard"
+
+danger3="$( set -Eeuo pipefail
+            noop() { [ -f /nonexistent ] || return >/dev/null
+            }
+            noop
+            echo survived )" 2>/dev/null
+[ "$danger3" != "survived" ] \
+    && pass "redirected form ('return >/dev/null') aborts a set -e caller" \
+    || die  "redirect fixture does not reproduce the hazard"
 
 strays="$(detect_bare_returns "$WATCHER")"
 if [ -z "$strays" ]; then
