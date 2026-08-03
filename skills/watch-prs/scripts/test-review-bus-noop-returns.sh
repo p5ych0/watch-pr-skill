@@ -115,8 +115,12 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
 # `|| { printf ...; return; }` form used in the GraphQL failure handlers — the
 # test then advertised an invariant that was already false. Leading `[^#]*`
 # keeps prose in comments (". . . a bare return") from registering as code.
+# `#` is a terminator too: `[ x ] || return # why` is a bare return with a
+# trailing comment, and Bash returns the failed test's status from it. The
+# leading `[^#]*` still excludes whole-line comments, since any `#` before the
+# keyword disqualifies the line.
 detect_bare_returns() {
-    grep -nE '^[^#]*(^|[[:space:]]|\{|;|\|\|)return[[:space:]]*($|;|\})' "$1" || true
+    grep -nE '^[^#]*(^|[[:space:]]|\{|;|\|\|)return[[:space:]]*($|;|\}|#)' "$1" || true
 }
 
 # Negative control FIRST: a detector that cannot fail is worse than no detector,
@@ -130,21 +134,41 @@ f2() { cmd || { printf 'x'; return; }
 }
 f3() { if x; then return; fi
 }
-f4() { return $rc; }
-f5() { return 0; }
-f6() { return 1; }
+f4() { [ -f x ] || return # trailing comment still leaves a bare return
+}
+f5() { return $rc; }
+f6() { return 0; }
+f7() { return 1; }
 # a comment mentioning a bare return
 PROBE
 probe_hits="$(detect_bare_returns "$probe")"
 probe_lines="$(printf '%s\n' "$probe_hits" | grep -c . || true)"
-if [ "$probe_lines" -eq 3 ] \
+if [ "$probe_lines" -eq 4 ] \
    && printf '%s' "$probe_hits" | grep -q '^1:' \
    && printf '%s' "$probe_hits" | grep -q '^3:' \
-   && printf '%s' "$probe_hits" | grep -q '^5:'; then
-    pass "detector catches bare return at EOL, before '}', and after ';' — and spares return 0/1/\$rc and comments"
+   && printf '%s' "$probe_hits" | grep -q '^5:' \
+   && printf '%s' "$probe_hits" | grep -q '^7:'; then
+    pass "detector catches bare return at EOL, before '}', after ';', and before '#' — sparing return 0/1/\$rc and comments"
 else
-    die "detector is unsound (expected lines 1,3,5; got: $(printf '%s' "$probe_hits" | tr '\n' ' '))"
+    die "detector is unsound (expected lines 1,3,5,7; got: $(printf '%s' "$probe_hits" | tr '\n' ' '))"
 fi
+
+# And prove the comment form is genuinely dangerous, not merely untidy: under
+# `set -e` an unguarded caller dies on it, which is issue #3 exactly.
+#
+# No `|| fallback` on this assignment. Putting it in an `||` list disables
+# errexit for the whole command, and that suppression reaches INTO the command
+# substitution — the first version of this fixture printed "survived" and proved
+# the opposite of what it claimed. `set +e` is already active here, so a non-zero
+# substitution is harmless.
+danger="$( set -Eeuo pipefail
+           noop() { [ -f /nonexistent ] || return # intentional no-op
+           }
+           noop
+           echo survived )" 2>/dev/null
+[ "$danger" != "survived" ] \
+    && pass "'|| return # comment' does abort a set -e caller (the form is a real defect)" \
+    || die  "fixture no longer reproduces the hazard — the assertion above proves nothing"
 
 strays="$(detect_bare_returns "$WATCHER")"
 if [ -z "$strays" ]; then

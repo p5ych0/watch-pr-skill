@@ -36,11 +36,21 @@ category; do not "fix" a script into a stricter mode.
   after a failed test inherits that test's exit status 1; under strict mode with
   an unguarded caller, that terminates the daemon and systemd restarts it into a
   crash-loop. This is issue #3.
-- **Every fetch, parse, and diff step guards with `|| return 1`.** A failure
-  must never be indistinguishable from "no findings", "clean", or "zero
-  unresolved". Preflight helpers return a distinguished error sentinel rather
-  than an empty string, because an empty string is a *valid* answer that callers
-  would act on.
+- **Every fetch, parse, and diff step must fail closed.** The invariant is about
+  the *outcome*, not one idiom: a failure must never be indistinguishable from
+  "no findings", "clean", or "zero unresolved". Two mechanisms satisfy it, and
+  which one applies depends on how the caller consumes the result:
+  - **Propagate non-zero** — `|| return 1` — where the caller branches on exit
+    status. Most fetch and diff steps.
+  - **Emit a distinguished sentinel and return 0** — where the caller consumes
+    *stdout*, so a non-zero exit would be swallowed while the empty output looked
+    like a valid answer. `latest_pull_comment_at`, `latest_issue_comment_at` and
+    `unresolved_review_threads_count` print `$PREFLIGHT_ERR` this way, and every
+    caller compares against it before using the value.
+
+  Emitting the sentinel is not a violation of the rule; changing a sentinel
+  helper to `return 1` would break its data contract with those callers. What
+  *is* a violation is any path where a failure yields an ordinary-looking value.
 
 ## Repo-agnostic invariant
 

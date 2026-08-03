@@ -26,13 +26,20 @@ serves every project at once.
 
 ## Review policy
 
-**Fail-closed is a review criterion.** Every fetch, parse, and probe guards with
-`|| return 1`, and preflight helpers return a distinguished error sentinel rather
-than an empty string. An unguarded failure is indistinguishable from a good
-answer: an errored `gh` call that falls through as `[]` reads as "no findings",
-"clean", or "zero unresolved threads", and the bus then merges or enqueues on it.
-Every such path must fail closed. Flag any new or changed path where a failure
-could be read as a benign result.
+**Fail-closed is a review criterion.** Every fetch, parse, and probe must either
+propagate a non-zero status or emit a distinguished sentinel that every caller
+rejects. An unguarded failure is indistinguishable from a good answer: an errored
+`gh` call that falls through as `[]` reads as "no findings", "clean", or "zero
+unresolved threads", and the bus then merges or enqueues on it. Every such path
+must fail closed. Flag any new or changed path where a failure could be read as a
+benign result.
+
+Judge that by outcome, not by idiom. `|| return 1` fits callers that branch on
+exit status; a `$PREFLIGHT_ERR` sentinel returning 0 fits callers that consume
+stdout, where a non-zero exit would be swallowed while empty output passed for a
+real answer. Both satisfy the rule — demanding `|| return 1` from a sentinel
+helper would break its data contract with those callers, so that is not a
+finding.
 
 **A bare `return` in a no-op branch is a defect.** Under `set -Eeuo pipefail` a
 bare `return` after a failed test inherits that test's exit status 1, and an
