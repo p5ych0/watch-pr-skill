@@ -123,9 +123,18 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
 # each command sits on its own line. Scanning that output cannot be fooled by
 # quoting or comments, because neither survives the parse.
 #
-# A `return` is bare when the next token is a command terminator, a redirection,
-# or a control operator — never an argument.
-BARE_RETURN_RE='(^|[[:space:]]|[;{&|])return[[:space:]]*($|[;}<>&|])'
+# Normalising the source is necessary but NOT sufficient, and a grep over the
+# normalised text was still wrong in both directions:
+#   - `false || return 2>/dev/null` renders as `return 2> /dev/null`. The `2` is
+#     an IO number belonging to the redirection, not an argument to return, so
+#     the statement is bare — but a regex reads the digit as an argument.
+#   - `printf '%s\n' ' return; '` keeps its quoted literal through `declare -f`,
+#     and a regex flags the text inside the string as code.
+# So the classification is done by lib-bare-return-scan.awk, which blanks quoted
+# spans before looking for the keyword and treats an IO-number redirection as a
+# redirection. That is the tokenizer the regex versions were pretending to be.
+SCANNER="$SELF_DIR/lib-bare-return-scan.awk"
+[ -f "$SCANNER" ] || { echo "FAIL - scanner not found: $SCANNER"; echo "RESULT: FAIL"; exit 1; }
 
 # Prints "<function>: <line>" for every bare return. Sourcing happens in a
 # subshell so the watcher's globals and traps cannot leak into the test.
@@ -139,8 +148,8 @@ detect_bare_returns() {
         source "$target" >/dev/null 2>&1
         while read -r _ _ fn; do
             declare -f "$fn" 2>/dev/null \
-                | grep -E "$BARE_RETURN_RE" \
-                | sed "s/^[[:space:]]*/$fn: /"
+                | awk -f "$SCANNER" \
+                | sed "s/^/$fn: /"
         done < <(declare -F)
     ) || true
 }
@@ -166,6 +175,8 @@ bad_quoted_hash() { printf 'PR #4' || return
 }
 bad_redirect()    { false || return >/dev/null
 }
+bad_fd()          { false || return 2>/dev/null
+}
 good_var()        { return $rc; }
 good_zero()       { return 0; }
 good_one()        { return 1; }
@@ -174,17 +185,21 @@ good_prose()      {
     printf 'x #4 return'
     return 0
 }
+good_literal()    {
+    printf '%s\n' ' return; '
+    return 0
+}
 PROBE
 probe_hits="$(detect_bare_returns "$probe")"
 missed=""; spurious=""
-for f in bad_eol bad_brace bad_if bad_comment bad_quoted_hash bad_redirect; do
+for f in bad_eol bad_brace bad_if bad_comment bad_quoted_hash bad_redirect bad_fd; do
     printf '%s' "$probe_hits" | grep -q "^$f:" || missed="$missed $f"
 done
-for f in good_var good_zero good_one good_prose; do
+for f in good_var good_zero good_one good_prose good_literal; do
     printf '%s' "$probe_hits" | grep -q "^$f:" && spurious="$spurious $f"
 done
 if [ -z "$missed" ] && [ -z "$spurious" ]; then
-    pass "detector flags every bare form (incl. quoted '#' and redirection) and spares every valued return"
+    pass "detector flags every bare form (incl. quoted '#', redirection, IO number) and spares every valued return and quoted literal"
 else
     die "detector is unsound — missed:${missed:- none} spurious:${spurious:- none}"
 fi
@@ -226,6 +241,18 @@ danger3="$( set -Eeuo pipefail
 [ "$danger3" != "survived" ] \
     && pass "redirected form ('return >/dev/null') aborts a set -e caller" \
     || die  "redirect fixture does not reproduce the hazard"
+
+# IO-number form. The `2` binds to the redirection, not to return, so this is
+# bare despite looking like `return <number>` — the case a regex over the
+# normalised source read as an argument and passed.
+danger4="$( set -Eeuo pipefail
+            noop() { [ -f /nonexistent ] || return 2>/dev/null
+            }
+            noop
+            echo survived )" 2>/dev/null
+[ "$danger4" != "survived" ] \
+    && pass "IO-number form ('return 2>/dev/null') aborts a set -e caller" \
+    || die  "IO-number fixture does not reproduce the hazard"
 
 strays="$(detect_bare_returns "$WATCHER")"
 if [ -z "$strays" ]; then
