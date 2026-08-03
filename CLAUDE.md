@@ -36,6 +36,19 @@ category; do not "fix" a script into a stricter mode.
   after a failed test inherits that test's exit status 1; under strict mode with
   an unguarded caller, that terminates the daemon and systemd restarts it into a
   crash-loop. This is issue #3.
+
+  **This one is enforced by review, not by a test, and deliberately so.** A
+  structural "no bare returns anywhere" check was built and removed: six
+  successive versions were each defeated by legal Bash — `{ ...; return; }`,
+  `|| return # why`, a `#` inside a quoted string, `return >/dev/null`,
+  `return 2>/dev/null` (the `2` is an IO number, not an argument),
+  `return {fd}>/dev/null`, and a `return` inside a `$( )`, which executes even
+  within double quotes. Each version reported PASS while its stated invariant was
+  false, which is worse than no check: it converts an unverified assumption into a
+  green tick. Sound detection needs a real Bash parser, and shellcheck has no rule
+  for it. So when reviewing a diff here, read every `return` and check it states a
+  value. The behavioural consequences are covered by
+  `test-review-bus-noop-returns.sh`.
 - **Every fetch, parse, and diff step must fail closed.** The invariant is about
   the *outcome*, not one idiom: a failure must never be indistinguishable from
   "no findings", "clean", or "zero unresolved". Two mechanisms satisfy it, and

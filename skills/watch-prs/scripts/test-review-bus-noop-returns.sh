@@ -16,6 +16,18 @@
 # a request file that vanishes between detection and handling would kill the
 # daemon the same way — so it is covered here too.
 #
+# Scope: this covers the BEHAVIOUR — the no-op paths that actually exist. It
+# deliberately does NOT try to prove "no bare return anywhere" by scanning the
+# source. That structural check was attempted and removed: six successive
+# versions (three regexes, a declare -f regex, and a hand-written awk tokenizer)
+# were each defeated by legal Bash — `{ ...; return; }`, `|| return # why`, a `#`
+# inside a quoted string, `return >/dev/null`, `return 2>/dev/null` where the 2
+# is an IO number, `return {fd}>/dev/null`, and a `return` inside a `$( )` that
+# is executable even within double quotes. Every version reported PASS while its
+# advertised invariant was false, which is worse than no check at all. Sound
+# detection needs a real Bash parser; shellcheck has no such rule. The invariant
+# is enforced by review instead — see CLAUDE.md § Bash conventions.
+#
 # Self-contained: throwaway git repo + BUS_DIR under a temp dir. No network, no
 # gh, no codex.
 
@@ -99,168 +111,6 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
 [ -f "$BUS_DIR/requests/req-${SHORT}.json" ] \
     && pass "error response is still re-requested (no-op did not over-apply)" \
     || die  "error response was treated as terminal — transient failures would stall"
-
-# ── 5. STRUCTURAL: no bare no-op returns anywhere in the watcher ─────────────
-# Behavioural cases can only cover the branches someone thought to enumerate.
-# Two rounds of this review found bare returns that a hand-built list had missed,
-# so the durable guard is structural: every `return` in the daemon states its
-# status. This catches the next one at the point it is written, in any function,
-# without needing a fixture that reaches that branch.
-#
-# `return $rc`, `return 1` and similar are untouched — only a naked `return`,
-# whose value is whatever the previous command happened to leave behind.
-#
-# HOW, and why not a regex over the source. Three successive regex versions were
-# defeated by legal Bash: one anchored on end-of-line missed `{ ...; return; }`;
-# adding `;`/`}` missed `|| return # why`; adding `#` was still defeated by a
-# `#` inside a quoted string (which disqualified the line) and by `return
-# >/dev/null`. Each time the suite reported PASS while the invariant was false.
-# A regex cannot tell a comment from a `#` in a string, so the tool was wrong.
-#
-# Bash itself is the oracle. Sourcing the script defines its functions (the
-# source guard keeps main() from running), and `declare -f` re-renders each one
-# from the PARSED form: comments are gone entirely, quoting is normalised, and
-# each command sits on its own line. Scanning that output cannot be fooled by
-# quoting or comments, because neither survives the parse.
-#
-# Normalising the source is necessary but NOT sufficient, and a grep over the
-# normalised text was still wrong in both directions:
-#   - `false || return 2>/dev/null` renders as `return 2> /dev/null`. The `2` is
-#     an IO number belonging to the redirection, not an argument to return, so
-#     the statement is bare — but a regex reads the digit as an argument.
-#   - `printf '%s\n' ' return; '` keeps its quoted literal through `declare -f`,
-#     and a regex flags the text inside the string as code.
-# So the classification is done by lib-bare-return-scan.awk, which blanks quoted
-# spans before looking for the keyword and treats an IO-number redirection as a
-# redirection. That is the tokenizer the regex versions were pretending to be.
-SCANNER="$SELF_DIR/lib-bare-return-scan.awk"
-[ -f "$SCANNER" ] || { echo "FAIL - scanner not found: $SCANNER"; echo "RESULT: FAIL"; exit 1; }
-
-# Prints "<function>: <line>" for every bare return. Sourcing happens in a
-# subshell so the watcher's globals and traps cannot leak into the test.
-detect_bare_returns() {
-    local target="$1"
-    (
-        set +eu
-        REPO_DIR="$REPO_DIR" BUS_DIR="$BUS_DIR" \
-        REVIEW_BUS_REMOTE="${REVIEW_BUS_REMOTE:-git@github.com:test/demo.git}"
-        # shellcheck disable=SC1090
-        source "$target" >/dev/null 2>&1
-        while read -r _ _ fn; do
-            declare -f "$fn" 2>/dev/null \
-                | awk -f "$SCANNER" \
-                | sed "s/^/$fn: /"
-        done < <(declare -F)
-    ) || true
-}
-
-# Negative control FIRST: a detector that cannot fail is worse than no detector,
-# and this one already shipped once with a hole in it. Every form below must be
-# caught before the real scan is allowed to mean anything.
-# Every BAD form is named bad_*, every GOOD form good_*, so the assertion is
-# "exactly the bad ones, and nothing else" rather than a count that drifts as
-# forms are added. bad_quoted_hash and bad_redirect are the two that defeated
-# the final regex version; the rest defeated earlier ones.
-probe="$TMP/bare-return-forms.sh"
-cat > "$probe" <<'PROBE'
-bad_eol()         { [ -f x ] || return
-}
-bad_brace()       { cmd || { printf 'x'; return; }
-}
-bad_if()          { if x; then return; fi
-}
-bad_comment()     { [ -f x ] || return # trailing comment still leaves it bare
-}
-bad_quoted_hash() { printf 'PR #4' || return
-}
-bad_redirect()    { false || return >/dev/null
-}
-bad_fd()          { false || return 2>/dev/null
-}
-good_var()        { return $rc; }
-good_zero()       { return 0; }
-good_one()        { return 1; }
-good_prose()      {
-    # a comment mentioning a bare return
-    printf 'x #4 return'
-    return 0
-}
-good_literal()    {
-    printf '%s\n' ' return; '
-    return 0
-}
-PROBE
-probe_hits="$(detect_bare_returns "$probe")"
-missed=""; spurious=""
-for f in bad_eol bad_brace bad_if bad_comment bad_quoted_hash bad_redirect bad_fd; do
-    printf '%s' "$probe_hits" | grep -q "^$f:" || missed="$missed $f"
-done
-for f in good_var good_zero good_one good_prose good_literal; do
-    printf '%s' "$probe_hits" | grep -q "^$f:" && spurious="$spurious $f"
-done
-if [ -z "$missed" ] && [ -z "$spurious" ]; then
-    pass "detector flags every bare form (incl. quoted '#', redirection, IO number) and spares every valued return and quoted literal"
-else
-    die "detector is unsound — missed:${missed:- none} spurious:${spurious:- none}"
-fi
-
-# And prove the comment form is genuinely dangerous, not merely untidy: under
-# `set -e` an unguarded caller dies on it, which is issue #3 exactly.
-#
-# No `|| fallback` on this assignment. Putting it in an `||` list disables
-# errexit for the whole command, and that suppression reaches INTO the command
-# substitution — the first version of this fixture printed "survived" and proved
-# the opposite of what it claimed. `set +e` is already active here, so a non-zero
-# substitution is harmless.
-danger="$( set -Eeuo pipefail
-           noop() { [ -f /nonexistent ] || return # intentional no-op
-           }
-           noop
-           echo survived )" 2>/dev/null
-[ "$danger" != "survived" ] \
-    && pass "'|| return # comment' does abort a set -e caller (the form is a real defect)" \
-    || die  "fixture no longer reproduces the hazard — the assertion above proves nothing"
-
-# Same proof for the two forms that defeated the final regex. Detecting them is
-# only worth doing if they are genuinely fatal, and a reader should not have to
-# take that on trust for any form the detector claims to catch.
-danger2="$( set -Eeuo pipefail
-            noop() { printf 'PR #4' >/dev/null; [ -f /nonexistent ] || return
-            }
-            noop
-            echo survived )" 2>/dev/null
-[ "$danger2" != "survived" ] \
-    && pass "quoted-'#' form aborts a set -e caller" \
-    || die  "quoted-'#' fixture does not reproduce the hazard"
-
-danger3="$( set -Eeuo pipefail
-            noop() { [ -f /nonexistent ] || return >/dev/null
-            }
-            noop
-            echo survived )" 2>/dev/null
-[ "$danger3" != "survived" ] \
-    && pass "redirected form ('return >/dev/null') aborts a set -e caller" \
-    || die  "redirect fixture does not reproduce the hazard"
-
-# IO-number form. The `2` binds to the redirection, not to return, so this is
-# bare despite looking like `return <number>` — the case a regex over the
-# normalised source read as an argument and passed.
-danger4="$( set -Eeuo pipefail
-            noop() { [ -f /nonexistent ] || return 2>/dev/null
-            }
-            noop
-            echo survived )" 2>/dev/null
-[ "$danger4" != "survived" ] \
-    && pass "IO-number form ('return 2>/dev/null') aborts a set -e caller" \
-    || die  "IO-number fixture does not reproduce the hazard"
-
-strays="$(detect_bare_returns "$WATCHER")"
-if [ -z "$strays" ]; then
-    pass "watcher contains no bare returns (every no-op states its status)"
-else
-    die "bare return(s) inherit the previous command's status:"
-    printf '        %s\n' "$strays"
-fi
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

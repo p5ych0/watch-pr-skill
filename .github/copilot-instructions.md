@@ -47,6 +47,10 @@ unguarded caller then terminates the daemon — which systemd restarts, producin
 crash-loop. Intentional no-ops must `return 0` explicitly. Issue #3 is the
 precedent.
 
+No automated check covers this — a structural scanner was built and removed after
+six versions were each defeated by legal Bash — so read every `return` in the diff
+and confirm it states a value.
+
 **Tests are required for behaviour changes.** A change to script behaviour with
 no matching `skills/watch-prs/scripts/test-review-bus-*.sh` coverage is a
 finding. Tests stay self-contained — throwaway git repos, stubbed `gh` and
