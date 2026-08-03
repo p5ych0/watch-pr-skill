@@ -315,6 +315,10 @@ write_response() {
     local findings="$5"
     local summary="$6"
     local log="$7"
+    # Optional. Set to "copilot" on a clean signoff so the monitor's handoff line
+    # states the obligation — a session that is told only "approved" can drift
+    # past the Copilot pass without ever deciding to skip it.
+    local next_phase="${8:-}"
 
     jq -n \
         --argjson pr "$pr" \
@@ -324,6 +328,7 @@ write_response() {
         --argjson findings_count "$findings" \
         --arg summary "$summary" \
         --arg log "$log" \
+        --arg next_phase "$next_phase" \
         '{
           pr: $pr,
           sha: $sha,
@@ -333,8 +338,24 @@ write_response() {
           findings_count: $findings_count,
           summary: $summary,
           log: $log
-        }' > "${resp}.tmp"
+        } + (if $next_phase == "" then {} else {next_phase: $next_phase} end)' > "${resp}.tmp"
     mv "${resp}.tmp" "$resp"
+}
+
+# Remember WHICH sha earned a clean Codex signoff. write_auto_request measures
+# the Copilot phase from here.
+#
+# Always returns 0. A marker that cannot be written costs the memory — the next
+# head is then reviewed normally — which is the safe direction. Failing the
+# review over it would trade a redundant pass for a lost one.
+record_clean_signoff() {
+    local pr="$1" full_sha="$2" marker="$BUS_DIR/.codex-clean-${1}"
+    if ! printf '%s\n' "$full_sha" > "${marker}.tmp" 2>/dev/null \
+       || ! mv "${marker}.tmp" "$marker" 2>/dev/null; then
+        echo "CODEX_CLEAN_MARKER_FAILED pr=$pr sha=${full_sha:0:7}" >&2
+        rm -f "${marker}.tmp" 2>/dev/null || true
+    fi
+    return 0
 }
 
 resolve_requested_commit() {
@@ -916,6 +937,38 @@ write_auto_request() {
         return 0
     fi
 
+    # Copilot phase. Once Codex has signed off clean, commits that exist ONLY to
+    # address Copilot findings must not pull it back in: SKILL.md already says
+    # they do not gate, but without this the watcher re-reviewed every one of
+    # them, burning a review, a round against the threshold, and a notification.
+    #
+    # Keyed on a `Review-Phase: copilot` TRAILER, never a commit-subject prefix —
+    # subject-prefix counting already failed here (CHANGELOG 1.0.10: round-fix
+    # commits use module scopes, so the count was permanently zero).
+    #
+    # Every uncertainty falls through to a REVIEW: an unreadable marker, a failed
+    # compare, or an empty commit list. A wrong hold means a commit is never
+    # reviewed; a wrong review costs one redundant pass.
+    local clean_marker clean_sha cmp_json total tagged
+    clean_marker="$BUS_DIR/.codex-clean-${pr}"
+    if [ -f "$clean_marker" ]; then
+        clean_sha="$(tr -cd '0-9a-f' < "$clean_marker" 2>/dev/null || true)"
+        if [ "${#clean_sha}" -eq 40 ] && [ "$clean_sha" != "$head_oid" ]; then
+            if cmp_json="$(gh api "repos/$REPO_SLUG/compare/${clean_sha}...${head_oid}" 2>/dev/null)"; then
+                # Anchor the trailer to its own line so the phrase appearing in
+                # prose (a doc commit describing the convention) cannot pass.
+                total="$(jq '.commits | length' <<< "$cmp_json" 2>/dev/null || echo "")"
+                tagged="$(jq '[.commits[] | select(.commit.message | test("(^|\n)Review-Phase: copilot[[:space:]]*($|\n)"))] | length' <<< "$cmp_json" 2>/dev/null || echo "")"
+                if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
+                   && [ "$total" -gt 0 ] && [ "$total" -eq "$tagged" ]; then
+                    echo "CODEX_AUTO_SKIP pr=$pr reason=copilot_phase clean_sha=${clean_sha:0:7} commits=$total"
+                    return 0
+                fi
+            fi
+            rm -f "$clean_marker"
+        fi
+    fi
+
     # Round check-in — the SAME atomic check-and-claim as the manual path (shared
     # logic). Claiming the round here (not just checking) closes the TOCTOU with a
     # concurrent manual enqueue at the boundary. The passive path has no operator to
@@ -999,7 +1052,8 @@ process_review() {
     local resp="$7"
     local log="$8"
     local requested_at="$9"
-    local full_sha review_dir before after findings status summary posted produced newer_sha delta failed attempted post_stats clean_event
+    local full_sha review_dir before after findings status summary posted produced newer_sha delta failed attempted post_stats clean_event next_phase
+    next_phase=""
 
     export CUID="${CUID:-$(id -u)}"
     export CGID="${CGID:-$(id -g)}"
@@ -1069,6 +1123,8 @@ process_review() {
         if clean_event="$(post_clean_signoff "$pr" "$full_sha" "$sha" "$summary")"; then
             status="approved"
             summary="No actionable findings on sha=$sha; clean review signoff posted as $clean_event."
+            next_phase="copilot"
+            record_clean_signoff "$pr" "$full_sha"
         else
             status="error"
             summary="codex found no actionable issues on sha=$sha, but failed to post the clean review signoff; see $log"
@@ -1076,7 +1132,7 @@ process_review() {
     fi
 
     echo "CODEX_RESPONSE_READY pr=$pr sha=$sha status=$status findings=$findings"
-    write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log"
+    write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log" "$next_phase"
 }
 
 # Every early return here is an intentional, SUCCESSFUL no-op (rejected or

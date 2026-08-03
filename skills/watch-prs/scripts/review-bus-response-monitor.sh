@@ -151,7 +151,7 @@ emit_response() {
 
     line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if .next_phase then " next_phase=\(.next_phase)" else "" end) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
         ' "$file" 2>/dev/null || true
     )"
 
