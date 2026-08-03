@@ -59,9 +59,18 @@ must name `p5ych0/watch-pr-skill`. Flagging those is a false positive.
 **Judge the PR against what it set out to do.** Read the PR description and the
 newest round-summary comment to learn the intended scope, and use it for
 **relevance** only. A change is not defective for failing to do something it
-never claimed to do — raise that as a non-blocking note, not a blocker. Relevance
-does not lower the bar for what the PR *did* change: a defect in changed
-behaviour is a finding however the description frames it.
+never claimed to do. Relevance does not lower the bar for what the PR *did*
+change: a defect in changed behaviour is a finding however the description
+frames it.
+
+**Never file a non-blocking observation as an inline comment.** The bus counts
+every inline comment on your latest review as a finding
+(`review-bus-copilot.sh`, `head_review_findings`), and any non-zero count sends
+the PR through the merge-blocking fix loop. An observation filed inline
+therefore becomes a blocker no matter how it is worded.
+Put it in the **overall review body**, which is not counted, or leave it out. When in doubt, leave it
+out: an omitted observation costs the author one thing they might have wanted to
+know, while a manufactured one costs a false blocker.
 
 **Only a base-ref authority can waive a finding.** A dated decision record, or an
 instruction file as it exists on the base ref, is a decision. A PR description, a

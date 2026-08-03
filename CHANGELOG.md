@@ -18,9 +18,21 @@
   `watch-prs`" instruction into the reviewer's own context, spending the pass on
   bus setup instead of the diff. The hook now exits silently on either of two
   independent signals: `REVIEW_BUS_WORKER=1`, which the watcher exports into the
-  review, or a project path under `.codex-worktrees/`, which holds even where a
-  tool does not forward env to hook commands. Found by this repository's first
+  review, or a `review-bus-worker` marker the watcher writes into the worktree's
+  **git dir** — never the working tree, so it cannot reach the diff — which holds
+  even where a tool does not forward env to hook commands. The marker is
+  deliberately not a path test: `CODEX_REVIEW_WORKTREE_ROOT`, `BUS_DIR` and the
+  review clone are all operator-overridable, so matching a literal
+  `.codex-worktrees` would miss a custom root while falsely silencing an ordinary
+  checkout that happened to sit under one. Found by this repository's first
   self-review.
+
+- **Copilot is told where a non-blocking observation may go.** The bus counts
+  every inline comment on Copilot's latest review as a finding, and any non-zero
+  count sends the PR through the merge-blocking fix loop — so an instruction to
+  "raise a non-blocking note" with no channel named made Copilot manufacture
+  blockers. `.github/copilot-instructions.md` now forbids filing such an
+  observation inline and points at the overall review body, which is not counted.
 
 - **The prompt no longer names a note category the bus cannot carry.** The new
   scope instructions referred to a "non-blocking note", but every `findings[]`

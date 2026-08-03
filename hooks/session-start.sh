@@ -20,14 +20,19 @@ PROJECT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
 # worse, injects the "invoke watch-prs" instruction into the reviewer's own
 # context, spending the review pass on bus setup instead of the diff.
 #
-# Two independent signals, because either alone can be defeated: the watcher
-# exports REVIEW_BUS_WORKER=1, but a tool that does not forward env to hooks
-# would drop it — and every review worktree lives under .codex-worktrees/
-# regardless.
+# Two independent signals, because either alone can be defeated. The watcher
+# exports REVIEW_BUS_WORKER=1, but a tool that does not forward env to hook
+# commands would drop it. The fallback is a marker the watcher writes into the
+# worktree's GIT DIR (not the working tree, so it never reaches the diff).
+#
+# The marker is deliberately NOT a path test: WORKTREE_ROOT, BUS_DIR and the
+# review clone are all operator-overridable, so matching a literal
+# ".codex-worktrees" would miss a custom CODEX_REVIEW_WORKTREE_ROOT — exactly
+# the env-stripped case this fallback exists for — while falsely silencing an
+# ordinary opted-in checkout that happens to live under such a directory.
 [ -z "${REVIEW_BUS_WORKER:-}" ] || exit 0
-case "$PROJECT" in
-    */.codex-worktrees/*) exit 0 ;;
-esac
+GIT_DIR_PATH="$(git -C "$PROJECT" rev-parse --absolute-git-dir 2>/dev/null || true)"
+[ -z "$GIT_DIR_PATH" ] || [ ! -f "$GIT_DIR_PATH/review-bus-worker" ] || exit 0
 
 # Locate the plugin. Both tools set CLAUDE_PLUGIN_ROOT for hook commands (Codex
 # also sets PLUGIN_ROOT); self-locate from this script's dir as a last resort in

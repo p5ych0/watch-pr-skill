@@ -388,6 +388,17 @@ prepare_review_worktree() {
         git -C "$REPO_DIR" worktree add --quiet --detach "$worktree_dir" "$full_sha" || return 1
     fi
 
+    # Stamp the worktree's GIT DIR (never the working tree — it must not reach
+    # the diff) so the SessionStart hook can recognise a review worker without
+    # depending on the environment or on any path name. WORKTREE_ROOT, BUS_DIR
+    # and the clone path are all operator-overridable, so a path-shaped test
+    # would both miss a custom root and falsely silence an ordinary checkout
+    # that happened to sit under a similarly-named directory.
+    local wt_git_dir
+    if wt_git_dir="$(git -C "$worktree_dir" rev-parse --git-dir 2>/dev/null)"; then
+        [ -d "$wt_git_dir" ] && : > "$wt_git_dir/review-bus-worker" 2>/dev/null || true
+    fi
+
     printf '%s\n' "$worktree_dir"
 }
 

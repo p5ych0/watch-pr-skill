@@ -46,12 +46,26 @@ echo "$out" | grep -q 'watch-pr-skill' \
 out="$(cd "$REPO" && REVIEW_BUS_WORKER=1 CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
 [ -z "$out" ] && pass "opted-in repo + REVIEW_BUS_WORKER => no-op" || die "worker marker ignored, emitted: '$out'"
 
-# Path signal, for a tool that does not forward env to hook commands: every
-# review worktree lives under .codex-worktrees/ whatever the environment says.
-WT="$TMP/bus/.codex-worktrees/pr-9-abc1234"; mkdir -p "$WT"; git -C "$WT" init -q
+# Git-dir marker, for a tool that does not forward env to hook commands. The
+# watcher stamps it into the worktree's git dir. It is NOT a path test:
+# CODEX_REVIEW_WORKTREE_ROOT, BUS_DIR and the review clone are all overridable,
+# so a literal ".codex-worktrees" match would miss a custom root — the very
+# env-stripped case this fallback covers — and falsely silence an ordinary
+# checkout living under such a directory. Custom root, no env marker:
+WT="$TMP/custom-root/pr-9-abc1234"; mkdir -p "$WT"; git -C "$WT" init -q
 : > "$WT/.review-bus.md"
+: > "$(git -C "$WT" rev-parse --absolute-git-dir)/review-bus-worker"
 out="$(cd "$WT" && CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
-[ -z "$out" ] && pass "review worktree path => no-op even without the marker" || die "worktree path armed the bus: '$out'"
+[ -z "$out" ] && pass "worker git-dir marker => no-op under ANY worktree root" || die "custom-root worker armed the bus: '$out'"
+
+# The mirror case: an ordinary opted-in checkout that merely SITS under a
+# .codex-worktrees path is not a worker and must still arm.
+ORD="$TMP/bus/.codex-worktrees/my-feature"; mkdir -p "$ORD"; git -C "$ORD" init -q
+: > "$ORD/.review-bus.md"
+out="$(cd "$ORD" && CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
+echo "$out" | grep -q 'watch-pr-skill' \
+  && pass "ordinary checkout under a .codex-worktrees path still arms" \
+  || die "non-worker was falsely silenced by its path: '$out'"
 
 # (e) always exits 0 even when the start script is missing (must never block session)
 rm -f "$STUB/skills/watch-prs/scripts/review-bus-codex-start.sh"

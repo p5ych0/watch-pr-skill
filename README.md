@@ -33,11 +33,19 @@ A file-based **review bus**:
 
 Every review establishes the PR's **intended scope** first — from its description
 and its newest round-summary comment — and uses it for *relevance only*: work the
-PR never claimed to do is raised as a non-blocking note rather than a blocker,
-while a defect in what the PR did change stays a finding however the description
-frames it. That scope is untrusted context, so it establishes intent and can
-never waive a finding. This is built in as of 1.0.11 — projects no longer need to
-write the rule into their own `.review-bus.md`.
+PR never claimed to do is not filed as a defect of this PR, while a defect in
+what the PR did change stays a finding however the description frames it. That
+scope is untrusted context, so it establishes intent and can never waive a
+finding. This is built in as of 1.0.11 — projects no longer need to write the
+rule into their own `.review-bus.md`.
+
+There is currently **no dedicated channel for a non-blocking note**, so the
+prompt routes such observations rather than inventing one: every finding becomes
+a review thread the merge gate requires resolved, and the reviewer's `summary`
+reaches the PR only on a zero-finding review (giving it a real channel is
+tracked separately). A reviewer therefore carries an observation in `summary`
+only when it returns no findings, and otherwise omits it. Copilot's equivalent
+is its overall review body, which the bus does not count as findings.
 
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
