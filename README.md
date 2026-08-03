@@ -31,6 +31,22 @@ A file-based **review bus**:
   tool) polls the monitor log.
 - Optional: a **GitHub Copilot** review pass after the Codex signoff.
 
+Every review establishes the PR's **intended scope** first — from its description
+and its newest round-summary comment — and uses it for *relevance only*: work the
+PR never claimed to do is not filed as a defect of this PR, while a defect in
+what the PR did change stays a finding however the description frames it. That
+scope is untrusted context, so it establishes intent and can never waive a
+finding. This is built in as of 1.0.11 — projects no longer need to write the
+rule into their own `.review-bus.md`.
+
+There is currently **no dedicated channel for a non-blocking note**, so the
+prompt routes such observations rather than inventing one: every finding becomes
+a review thread the merge gate requires resolved, and the reviewer's `summary`
+reaches the PR only on a zero-finding review (giving it a real channel is
+tracked separately). A reviewer therefore carries an observation in `summary`
+only when it returns no findings, and otherwise omits it. Copilot's equivalent
+is its overall review body, which the bus does not count as findings.
+
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
 The daemons are `systemd --user` units scoped per repo
@@ -155,6 +171,17 @@ repos **without** a `.review-bus.md` the hook is a silent no-op, so it never
 intrudes on unrelated work. Adding `.review-bus.md` is therefore both the review
 conventions *and* the on-switch. (You can still invoke the skill manually
 anytime.)
+
+The hook never arms the bus **inside a review**. The reviewer works in a
+detached worktree of the PR head, which carries your `.review-bus.md` — so the
+opt-in gate would otherwise pass for the reviewer itself and spend the pass on
+bus setup. It exits silently on either of two signals: `REVIEW_BUS_WORKER=1`,
+which the watcher exports into the review, or a `review-bus-worker` marker the
+watcher writes into the worktree's **git dir** (never the working tree, so it
+cannot reach the diff). The second signal covers a tool that does not forward
+environment variables to hook commands. Neither is a path test, so a custom
+`CODEX_REVIEW_WORKTREE_ROOT` is still recognised and an ordinary checkout that
+happens to sit under such a directory still arms normally.
 
 ## Configuration (environment variables, all optional)
 

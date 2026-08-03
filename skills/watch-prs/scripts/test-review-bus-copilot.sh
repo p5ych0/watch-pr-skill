@@ -201,6 +201,24 @@ echo "$out" | grep -qx 'COPILOT_REVIEW pr=7 sha=aaaaaaa findings=3 status=commen
   && [ "$rc" -eq 0 ] && pass "status: two same-head reviews => count the latest (findings=3)" \
   || die "status (l) wrong (rc=$rc out='$out')"
 
+# (m) The instructions shipped to Copilot must match the counting proved above.
+# Case (l) shows every INLINE comment on the latest review is counted, and any
+# non-zero count sends the PR through the merge-blocking fix loop — so telling
+# Copilot to "raise a non-blocking note" without naming a channel makes it
+# manufacture blockers. The only uncounted channel is the overall review body.
+# Skipped when the doc is absent (the scripts are also vendored without it).
+DOC="$SELF_DIR/../../../.github/copilot-instructions.md"
+if [ -f "$DOC" ]; then
+    grep -qi 'never file a non-blocking observation as an inline comment' "$DOC" \
+      && pass "copilot doc: forbids filing observations inline" \
+      || die "copilot doc does not forbid inline non-blocking observations"
+    grep -qi 'overall review body' "$DOC" \
+      && pass "copilot doc: names the uncounted review-body channel" \
+      || die "copilot doc does not name the review-body channel"
+else
+    pass "copilot doc not present (vendored scripts); routing assertions skipped"
+fi
+
 # ---- final ---------------------------------------------------------------
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

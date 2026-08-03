@@ -1,5 +1,72 @@
 # Changelog
 
+## [1.0.11] — 2026-08-03
+
+- **Fix: the watcher crash-looped after a final response (issue #3).** With
+  `CODEX_REVIEW_AUTO_OPEN_PRS=1`, once a PR's current head had a terminal
+  non-error response (`approved`, `comments_posted`), `write_auto_request`'s
+  intentional no-op ran `[ "$prev_status" = "error" ] || return`. A bare `return`
+  inherits the failed test's exit status 1, and the function is called unguarded
+  under `set -Eeuo pipefail` — so the no-op killed the daemon and systemd
+  restarted it every few seconds. Reproduced live on this repository's own PR #4
+  (`NRestarts=6`) the moment Codex posted its clean signoff.
+
+  Every intentional no-op in `write_auto_request` and `handle` now returns 0
+  explicitly. `handle` carried the same defect at its `[ -f "$req" ] || return`
+  guard, where a request file vanishing between detection and handling would have
+  killed the daemon identically. `test-review-bus-noop-returns.sh` covers both
+  terminal statuses, the unguarded `set -e` call site, the vanished-request case,
+  and asserts that an `error` response is still retried — so the obvious wrong
+  fix, returning 0 unconditionally, cannot pass.
+
+- **Reviewers now read what the PR set out to do.** The watcher already
+  snapshotted `pr.json` and `issue_comments.jsonl`, but the prompt never told
+  the reviewer to use them, so every project re-authored the same relevance rule
+  by hand in its own `.review-bus.md`. `build_prompt` now directs the reviewer to
+  establish intended scope from those files and use it for **relevance only** —
+  work the PR never claimed to do is a non-blocking note, while a defect in what
+  it did change stays a finding — and marks that context as intent, never
+  permission, so it cannot waive a finding.
+
+- **The SessionStart hook no longer arms the bus from inside a review.** The
+  reviewer runs `codex exec` in a detached worktree of the PR head, which carries
+  the project's own `.review-bus.md` — so in an opted-in repo the hook's gate
+  passed for the reviewer too, re-ensuring the daemons and injecting the "invoke
+  `watch-prs`" instruction into the reviewer's own context, spending the pass on
+  bus setup instead of the diff. The hook now exits silently on either of two
+  independent signals: `REVIEW_BUS_WORKER=1`, which the watcher exports into the
+  review, or a `review-bus-worker` marker the watcher writes into the worktree's
+  **git dir** — never the working tree, so it cannot reach the diff — which holds
+  even where a tool does not forward env to hook commands. The marker is
+  deliberately not a path test: `CODEX_REVIEW_WORKTREE_ROOT`, `BUS_DIR` and the
+  review clone are all operator-overridable, so matching a literal
+  `.codex-worktrees` would miss a custom root while falsely silencing an ordinary
+  checkout that happened to sit under one. Found by this repository's first
+  self-review.
+
+- **Copilot is told where a non-blocking observation may go.** The bus counts
+  every inline comment on Copilot's latest review as a finding, and any non-zero
+  count sends the PR through the merge-blocking fix loop — so an instruction to
+  "raise a non-blocking note" with no channel named made Copilot manufacture
+  blockers. `.github/copilot-instructions.md` now forbids filing such an
+  observation inline and points at the overall review body, which is not counted.
+
+- **The prompt no longer names a note category the bus cannot carry.** The new
+  scope instructions referred to a "non-blocking note", but every `findings[]`
+  entry becomes a merge-blocking thread and `summary` survives only on a
+  zero-finding review, so such an observation became either a false blocker or
+  silently discarded text. The prompt now routes it explicitly: carry it in
+  `summary` only when returning zero findings, otherwise omit it. Issue #212
+  tracks giving it a real channel.
+
+- **The plugin now reviews itself.** Adds `.review-bus.md` (review policy, read
+  from the base ref, which also opts this repo into the SessionStart hook),
+  `CLAUDE.md` (canonical authoring rules), `.github/copilot-instructions.md` (the
+  one deliberate restatement, because Copilot follows no pointers), an
+  `AGENTS.md` pointer above claude-mem's generated block, and a committed
+  `.claude/settings.json` so a fresh clone arms itself. Changes to the review bus
+  were previously reviewed with less rigor than the projects it serves.
+
 ## [1.0.10] — 2026-07-21
 
 - **Fix: cross-repo monitor/watcher kill (the "kill bug").** Since the plugin
