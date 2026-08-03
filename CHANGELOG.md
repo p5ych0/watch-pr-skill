@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.0.12] — 2026-08-03
+
+- **Fix: the reviewer's own summary was discarded whenever a review reported
+  findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
+  model result only in the zero-findings branch; with one or more findings it was
+  overwritten by a status line and never reached the PR or the bus response. The
+  prompt asks for a summary on *every* review — including the verification
+  limitations a reviewer cannot attach to a diff line — so the bus was discarding
+  exactly the text it requested. A reviewer that correctly declined to force a
+  concern into a line-attached finding lost the concern entirely.
+
+  The model's text is now read once, before the status line is composed, and
+  preserved as `model_summary` in the response; the monitor surfaces it as
+  `reviewer_note=…` in the handoff line. It is **not** posted as an issue
+  comment: `latest_issue_comment_at` applies no author filter and
+  `auto_preflight_ready` uses it as the "round was closed out" gate, so a
+  watcher-authored comment would satisfy that gate by itself and let
+  auto-enqueue fire without the author ever closing the round.
+
+  With a real channel available, the prompt now routes non-blocking observations
+  to `summary` on every review instead of telling reviewers to drop them when
+  findings exist, and `.review-bus.md` loses the workaround paragraph it carried
+  for exactly this bug.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

@@ -39,13 +39,15 @@ scope is untrusted context, so it establishes intent and can never waive a
 finding. This is built in as of 1.0.11 — projects no longer need to write the
 rule into their own `.review-bus.md`.
 
-There is currently **no dedicated channel for a non-blocking note**, so the
-prompt routes such observations rather than inventing one: every finding becomes
-a review thread the merge gate requires resolved, and the reviewer's `summary`
-reaches the PR only on a zero-finding review (giving it a real channel is
-tracked separately). A reviewer therefore carries an observation in `summary`
-only when it returns no findings, and otherwise omits it. Copilot's equivalent
-is its overall review body, which the bus does not count as findings.
+A **non-blocking observation** has its own channel: the reviewer's `summary`.
+Every finding becomes a review thread the merge gate requires resolved, so a note
+filed there would block the merge however it is labelled — but `summary` is
+preserved on **every** review, including one that reports findings, and reaches
+the handoff line as `reviewer_note=…`. So a concern the reviewer declines to
+force into a line-attached finding is not lost. (Before 1.0.12 the summary was
+overwritten by a status line whenever a review had findings, and the prompt had
+to tell reviewers to drop such observations entirely.) Copilot's equivalent is
+its overall review body, which the bus does not count as findings.
 
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.

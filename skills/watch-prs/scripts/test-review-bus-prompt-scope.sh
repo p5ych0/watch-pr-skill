@@ -65,20 +65,23 @@ grep -qi 'non-blocking' "$PROMPT" \
   && pass "prompt addresses the non-blocking observation case" \
   || die "prompt does not mention non-blocking observations"
 
-# The bus has no channel for a non-blocking note: every findings[] entry becomes
-# a merge-blocking review thread, and summary reaches the PR only on a review
-# that returns zero findings (process_review overwrites it otherwise). A prompt
-# that names the category without routing it produces either a false blocker or
-# a silently discarded observation. Issue #212 tracks the underlying fix.
-grep -qi 'zero findings' "$PROMPT" \
-  && pass "observations route to summary only on a zero-finding review" \
-  || die "prompt does not restrict the observation channel to zero-finding reviews"
+# Routing, now that strumok#212 is fixed and `summary` survives a review that
+# reports findings. The prompt must send the observation to summary and keep it
+# OUT of findings[], where every entry becomes a merge-blocking thread. Before
+# the fix the prompt had to say "omit it when there are findings", which cost
+# the author the observation entirely; asserting the old wording here would now
+# lock in the workaround.
+grep -qi 'observation in summary' "$PROMPT" \
+  && pass "observations route to summary" \
+  || die "prompt does not route observations to summary"
 
-# Deliberately specific: a bare 'omit it' also matches the pre-existing
-# unattachable-finding instruction, which is a different rule.
-grep -qi 'WITH findings, omit' "$PROMPT" \
-  && pass "observations are omitted on a review WITH findings" \
-  || die "prompt does not say to omit the observation when findings exist"
+grep -qi 'not in findings' "$PROMPT" \
+  && pass "observations are kept out of findings[] (which would block the merge)" \
+  || die "prompt does not keep observations out of findings[]"
+
+grep -qi 'EVERY review' "$PROMPT" \
+  && pass "prompt states summary survives every review, including one with findings" \
+  || die "prompt still implies summary is lost when findings exist"
 
 grep -qi 'intent, never permission' "$PROMPT" \
   && pass "scope context is marked untrusted" \
