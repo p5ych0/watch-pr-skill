@@ -293,6 +293,70 @@ else
     die "reverse-swap fixture produced no response file"
 fi
 
+# ── 11. An NBSP-only summary is not a signoff either ───────────────────────
+# The emptiness test must be UNICODE-AWARE. `tr -d '[:space:]'` under C/C.UTF-8
+# leaves U+00A0 (c2 a0) intact, so an NBSP-only summary passed a shell-side
+# check and could earn a clean approval with no substantive signoff.
+printf '{"summary":"\\u00a0","findings":[]}\n' > "$TMP/nbsp.json"
+nbsp_resp="$(drive_process_review "$TMP/nbsp.json")"
+if [ -f "$nbsp_resp" ] && [ "$(jq -r '.status' "$nbsp_resp" 2>/dev/null)" = "approved" ]; then
+    die "NBSP-only summary produced a clean APPROVE"
+else
+    pass "NBSP-only summary earns no approval (unicode-aware emptiness)"
+fi
+
+# Text that merely CONTAINS an NBSP is perfectly valid and must still pass.
+printf '{"summary":"real\\u00a0signoff text","findings":[]}\n' > "$TMP/nbsp-ok.json"
+nbsp_ok="$(require_model_summary "$TMP/nbsp-ok.json")" && rc=0 || rc=1
+[ "$rc" -eq 0 ] \
+    && pass "a summary containing NBSP among real words is accepted" \
+    || die "over-strict: rejected a substantive summary that contains an NBSP"
+
+# ── 12. An unreadable findings count must not approve ──────────────────────
+# process_review runs beneath `if !`, so errexit does not stop it: an unguarded
+# jq failure left `produced` empty, every numeric test evaluated false, and
+# execution dropped into the zero-findings branch and a clean signoff.
+count_jq_fails() {
+    local out="$TMP/pr-countfail"
+    rm -rf "$out"; mkdir -p "$out/snap" "$out/bin"
+    jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: []}' > "$out/result.json"
+    # A jq that answers validation normally but fails the `.findings | length`
+    # query specifically — the exact invocation the finding names.
+    cat > "$out/bin/jq" <<'JQSTUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  [ "$a" = ".findings | length" ] && exit 3
+done
+exec /usr/bin/jq "$@"
+JQSTUB
+    chmod +x "$out/bin/jq"
+    (
+        set +eu
+        PATH="$out/bin:$PATH"
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }
+        run_codex_review() { :; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        post_findings() { printf '0 0 0\n'; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+cnt_resp="$(count_jq_fails)"
+if [ -f "$cnt_resp" ] && [ "$(jq -r '.status' "$cnt_resp" 2>/dev/null)" = "approved" ]; then
+    die "an unreadable findings count produced a clean APPROVE"
+else
+    pass "unreadable findings count earns no approval (guarded, not silently empty)"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

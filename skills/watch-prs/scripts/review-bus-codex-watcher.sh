@@ -361,10 +361,20 @@ require_model_summary() {
     # `select` on the TYPE, not just truthiness: `jq -er '.summary'` happily
     # returns "123" for a numeric summary, which is non-empty and would pass a
     # bare emptiness check while being schema-invalid.
-    out="$(jq -er 'select((.summary | type) == "string") | .summary' "$result" 2>/dev/null)" || return 1
-    # Whitespace is not a merge signoff. Tested on a stripped copy so the STORED
-    # text keeps the reviewer's exact formatting.
-    [ -n "$(printf '%s' "$out" | tr -d '[:space:]')" ] || return 1
+    # Whitespace is not a merge signoff, and the emptiness test must be
+    # UNICODE-AWARE: `tr -d '[:space:]'` under C/C.UTF-8 leaves U+00A0 intact, so
+    # an NBSP-only summary passed and could earn a clean approval. jq's
+    # `test("\\S")` treats NBSP as whitespace, so the predicate lives in the same
+    # jq pass that extracts — one read, and no shell locale in the decision.
+    #
+    # `select` on the TYPE too: `jq -er '.summary'` happily returns "123" for a
+    # numeric summary, which is non-empty and would pass a bare emptiness check
+    # while being schema-invalid.
+    #
+    # The text is only TESTED here; what is returned is the reviewer's original,
+    # so the stored note keeps its exact formatting.
+    out="$(jq -er 'select((.summary | type) == "string") | select(.summary | test("\\S")) | .summary' "$result" 2>/dev/null)" || return 1
+    [ -n "$out" ] || return 1
     printf '%s' "$out"
 }
 
@@ -1085,7 +1095,16 @@ process_review() {
         echo "CODEX_RESULT_INVALID path=$result reason=summary_missing_empty_or_not_string"
         return 1
     fi
-    produced="$(jq '.findings | length' "$result_snapshot")"
+    # Guarded, and checked for shape. process_review runs beneath `if !` in
+    # handle(), so errexit does NOT stop it here: an unguarded failure would
+    # leave `produced` empty, every numeric test below would evaluate false, and
+    # execution would drop into the zero-findings branch and a clean signoff —
+    # even if post_findings went on to post comments.
+    if ! produced="$(jq '.findings | length' "$result_snapshot" 2>/dev/null)" \
+       || ! [[ "$produced" =~ ^[0-9]+$ ]]; then
+        echo "CODEX_RESULT_INVALID path=$result reason=findings_count_unreadable value=${produced:-}"
+        return 1
+    fi
 
     if [ -n "$requested_at" ] && newer_sha="$(newer_request_for_same_pr "$pr" "$sha" "$requested_at")"; then
         status="error"
