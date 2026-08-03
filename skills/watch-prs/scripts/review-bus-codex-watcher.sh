@@ -246,11 +246,11 @@ latest_pull_comment_at() {
     local raw out
     raw="$(gh api "repos/$REPO_SLUG/pulls/$pr/comments?per_page=100" --paginate 2>/dev/null)" || {
         printf '%s\n' "$PREFLIGHT_ERR"
-        return
+        return 0
     }
     out="$(jq -rs '[.[][] | .created_at] | sort | last // ""' <<< "$raw" 2>/dev/null)" || {
         printf '%s\n' "$PREFLIGHT_ERR"
-        return
+        return 0
     }
     printf '%s\n' "$out"
 }
@@ -260,11 +260,11 @@ latest_issue_comment_at() {
     local raw out
     raw="$(gh api "repos/$REPO_SLUG/issues/$pr/comments?per_page=100" --paginate 2>/dev/null)" || {
         printf '%s\n' "$PREFLIGHT_ERR"
-        return
+        return 0
     }
     out="$(jq -rs '[.[][] | .created_at] | sort | last // ""' <<< "$raw" 2>/dev/null)" || {
         printf '%s\n' "$PREFLIGHT_ERR"
-        return
+        return 0
     }
     printf '%s\n' "$out"
 }
@@ -291,12 +291,12 @@ unresolved_review_threads_count() {
         # with no `data` key) rather than silently defaulting count to 0.
         if ! jq -e '.data.repository.pullRequest.reviewThreads' <<< "$page" >/dev/null 2>&1; then
             printf '%s\n' "$PREFLIGHT_ERR"
-            return
+            return 0
         fi
 
         count="$(jq '[.data.repository.pullRequest.reviewThreads.nodes[]? | select(.isResolved == false)] | length' <<< "$page" 2>/dev/null)" || {
             printf '%s\n' "$PREFLIGHT_ERR"
-            return
+            return 0
         }
         unresolved=$((unresolved + count))
         has_next="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' <<< "$page" 2>/dev/null)"
@@ -1148,7 +1148,7 @@ handle() {
         if ! gate_detail="$(verify_request_gates "$pr" "$sha")"; then
             echo "CODEX_REQ_REJECTED req=$req reason=gates_failed detail=$gate_detail"
             touch "$SEEN_DIR/$base"
-            return
+            return 0
         fi
     fi
 
@@ -1178,7 +1178,7 @@ handle() {
             echo "CODEX_RESP_REPROCESS pr=$pr sha=$sha prev_status=$prev_status force=$preflight_force req_newer=$([ "$req" -nt "$archived" ] && echo 1 || echo 0) archived=$archived"
         else
             finish_seen "$base"
-            return
+            return 0
         fi
     fi
 

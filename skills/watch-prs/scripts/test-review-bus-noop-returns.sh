@@ -100,6 +100,23 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
     && pass "error response is still re-requested (no-op did not over-apply)" \
     || die  "error response was treated as terminal — transient failures would stall"
 
+# ── 5. STRUCTURAL: no bare no-op returns anywhere in the watcher ─────────────
+# Behavioural cases can only cover the branches someone thought to enumerate.
+# Two rounds of this review found bare returns that a hand-built list had missed,
+# so the durable guard is structural: every `return` in the daemon states its
+# status. This catches the next one at the point it is written, in any function,
+# without needing a fixture that reaches that branch.
+#
+# `return $rc`, `return 1` and similar are untouched — only a naked `return`,
+# whose value is whatever the previous command happened to leave behind.
+strays="$(grep -nE '^[[:space:]]*return[[:space:]]*$|\|\|[[:space:]]*return[[:space:]]*$' "$WATCHER" || true)"
+if [ -z "$strays" ]; then
+    pass "watcher contains no bare returns (every no-op states its status)"
+else
+    die "bare return(s) inherit the previous command's status:"
+    printf '        %s\n' "$strays"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
