@@ -1041,6 +1041,16 @@ process_review() {
         return 1
     fi
     jq -e '.findings | type == "array"' "$result" >/dev/null || return 1
+    # `summary` is required by the output schema on EVERY review, and until now
+    # nothing checked it. A schema-invalid result such as {"findings":[]} took the
+    # zero-findings branch, picked up a default "no actionable issues" string, and
+    # earned a clean APPROVAL — a malformed reviewer output approving the PR,
+    # which is the worst direction this code can fail in. Non-empty is required
+    # too: the prompt asks for an explicit merge signoff, and "" is not one.
+    if ! jq -e '(.summary | type == "string") and (.summary | length > 0)' "$result" >/dev/null 2>&1; then
+        echo "CODEX_RESULT_INVALID path=$result reason=summary_missing_empty_or_not_string"
+        return 1
+    fi
     produced="$(jq '.findings | length' "$result")"
 
     if [ -n "$requested_at" ] && newer_sha="$(newer_request_for_same_pr "$pr" "$sha" "$requested_at")"; then

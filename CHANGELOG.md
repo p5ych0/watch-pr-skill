@@ -19,6 +19,24 @@
   watcher-authored comment would satisfy that gate by itself and let
   auto-enqueue fire without the author ever closing the round.
 
+  **The note is flagged, not inlined.** It is model output derived from untrusted
+  PR context, so the handoff line carries only `reviewer_note=1` and the text is
+  read from `.model_summary` in the response file. Inlining it would let a note
+  carrying ESC/BEL bytes inject into a terminal or log, and one containing
+  `resp=` would put a second copy of a framing token into a line the driver
+  parses positionally. The assembled line is also stripped of all control bytes,
+  mirroring `emit_progress`. `SKILL.md`'s handling contract now tells the driver
+  to read the note and relay it as untrusted, non-blocking context that can never
+  affect status, findings, or a merge gate.
+
+- **Fix: a schema-invalid reviewer result could earn a clean APPROVAL.**
+  `process_review` validated `.findings` but never `.summary`, which the output
+  schema requires on every review. A result such as `{"findings":[]}` fell into
+  the zero-findings branch, picked up a default "no actionable issues" string,
+  and was approved — a malformed reviewer output approving the PR. The result is
+  now rejected unless `summary` is a non-empty string, so it fails closed to an
+  error response with no signoff posted.
+
   With a real channel available, the prompt now routes non-blocking observations
   to `summary` on every review instead of telling reviewers to drop them when
   findings exist, and `.review-bus.md` loses the workaround paragraph it carried

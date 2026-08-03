@@ -94,6 +94,67 @@ printf 'not json at all\n' > "$TMP/bad.json"
     && pass "malformed result => empty, not an error string" \
     || die "malformed result produced non-empty model summary"
 
+# ── 5. process_review end-to-end on the FINDINGS path ──────────────────────
+# The units above prove the pieces. They do NOT prove the pieces are wired
+# together: deleting either plumbing line in process_review (the read, or the
+# 8th argument to write_response) would reproduce #212 with every assertion
+# above still green. So drive the real process_review, stubbing only its
+# external edges — worktree, GitHub, and the codex run.
+drive_process_review() {   # <result-json-file> ; echoes the response path
+    local result_src="$1" out="$TMP/pr-run"
+    rm -rf "$out"; mkdir -p "$out/snap"
+    cp "$result_src" "$out/result.json"
+    (
+        set +eu
+        # External edges only. Everything between them is the code under test.
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }   # not superseded
+        run_codex_review() { :; }                   # result.json is pre-placed
+        post_findings() { printf '1 0 1\n'; }       # posted failed attempted
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+jq -n --arg s "$MODEL_SUMMARY" \
+   '{summary: $s, findings: [{path: "a.sh", line: 1, side: "RIGHT", body: "x"}]}' > "$TMP/mixed.json"
+run_resp="$(drive_process_review "$TMP/mixed.json")"
+
+if [ -f "$run_resp" ]; then
+    [ "$(jq -r '.status' "$run_resp")" = "comments_posted" ] \
+        && pass "process_review: took the findings-posting path" \
+        || die "process_review: wrong path (status=$(jq -r '.status' "$run_resp"))"
+
+    [ "$(jq -r '.model_summary // "ABSENT"' "$run_resp")" = "$MODEL_SUMMARY" ] \
+        && pass "process_review: model_summary reaches the response on a review WITH findings" \
+        || die "process_review: model_summary absent — the #212 plumbing is not wired"
+else
+    die "process_review produced no response file"
+fi
+
+# ── 6. A schema-invalid result must NOT earn a clean approval ──────────────
+# `summary` is required on every review. Without this check a result such as
+# {"findings":[]} fell into the zero-findings branch, picked up a default
+# "no actionable issues" string, and was APPROVED — a malformed reviewer output
+# approving the PR, which is the worst direction this code can fail in.
+for bad in '{"findings":[]}' '{"findings":[],"summary":null}' '{"findings":[],"summary":123}' '{"findings":[],"summary":""}'; do
+    printf '%s\n' "$bad" > "$TMP/bad-result.json"
+    bad_resp="$(drive_process_review "$TMP/bad-result.json")"
+    if [ -f "$bad_resp" ] && [ "$(jq -r '.status' "$bad_resp")" = "approved" ]; then
+        die "schema-invalid result APPROVED the PR: $bad"
+    else
+        pass "schema-invalid result earns no approval: $bad"
+    fi
+done
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

@@ -149,11 +149,25 @@ emit_response() {
         return 0
     fi
 
+    # The reviewer's own note is FLAGGED here, never inlined. Its text is model
+    # output derived from untrusted PR context, so interpolating it would let a
+    # note carrying ESC/BEL bytes inject into a terminal or log, and one
+    # containing `resp=` would put a second copy of a framing token into a line
+    # the driver parses positionally. The flag costs nothing to parse and the
+    # full text is read from `.model_summary` in the response file, where
+    # quoting is the JSON parser's problem rather than ours. SKILL.md's handling
+    # contract tells the driver to read it there and treat it as untrusted,
+    # non-blocking context that cannot affect status or any merge gate.
     line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200])\(if (.model_summary // "") != "" then " reviewer_note=\(.model_summary | gsub("[\n\r]"; " ") | .[0:400])" else "" end) resp=" + $path
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
         ' "$file" 2>/dev/null || true
     )"
+
+    # Defense-in-depth, mirroring emit_progress: strip ALL control bytes from the
+    # assembled line. `summary` is composed by the watcher, but a stray escape in
+    # any interpolated field would otherwise be a log/terminal-injection vector.
+    line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"
 
     if [ -z "$line" ]; then
         printf '%s_REVIEW_PARSE_ERROR resp=%s\n' "$PREFIX" "$file"
