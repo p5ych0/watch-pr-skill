@@ -38,7 +38,22 @@ echo "$out" | grep -q 'watch-pr-skill' \
   && pass "opt-in repo => arm instruction injected on stdout" \
   || die "opt-in produced no/incomplete context: '$out'"
 
-# (d) always exits 0 even when the start script is missing (must never block session)
+# (d) review WORKER inside an opted-in repo → no-op, by either signal.
+# The reviewer runs `codex exec` in a detached worktree of the PR head, which
+# carries the repo's own .review-bus.md — so case (c)'s gate passes there too.
+# Arming from inside a review re-ensures the daemons and injects the
+# "invoke watch-prs" instruction into the reviewer's own context.
+out="$(cd "$REPO" && REVIEW_BUS_WORKER=1 CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
+[ -z "$out" ] && pass "opted-in repo + REVIEW_BUS_WORKER => no-op" || die "worker marker ignored, emitted: '$out'"
+
+# Path signal, for a tool that does not forward env to hook commands: every
+# review worktree lives under .codex-worktrees/ whatever the environment says.
+WT="$TMP/bus/.codex-worktrees/pr-9-abc1234"; mkdir -p "$WT"; git -C "$WT" init -q
+: > "$WT/.review-bus.md"
+out="$(cd "$WT" && CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" 2>/dev/null)"
+[ -z "$out" ] && pass "review worktree path => no-op even without the marker" || die "worktree path armed the bus: '$out'"
+
+# (e) always exits 0 even when the start script is missing (must never block session)
 rm -f "$STUB/skills/watch-prs/scripts/review-bus-codex-start.sh"
 ( cd "$REPO" && CLAUDE_PLUGIN_ROOT="$STUB" bash "$HOOK" >/dev/null 2>&1 )
 [ "$?" -eq 0 ] && pass "missing start script => still exits 0 (never blocks)" || die "hook exited non-zero when start script absent"

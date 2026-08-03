@@ -39,8 +39,15 @@ Everything else is documentation.
 
 ## Repo-agnostic invariant
 
-- No hard-coded owner, repo, bus path, or branch name anywhere — including in
-  `SKILL.md`. The same installed scripts serve every project simultaneously.
+- The invariant covers **runtime bus identity**: no hard-coded owner, repo, bus
+  path, or branch name in the scripts, in `hooks/`, or in `SKILL.md`. The same
+  installed copy serves every project simultaneously, so a literal identity
+  there would leak one project's bus into another's.
+- It does **not** cover this repository's own metadata or its installation
+  documentation. `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+  `.codex-plugin/plugin.json`, and the install and update commands in
+  `README.md` necessarily name `p5ych0/watch-pr-skill` — that is this plugin's
+  own identity, not a consumer project's, and changing it there is not a defect.
 - Identity derives from `git remote get-url origin` at the top of each script.
   `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, and `REVIEW_BUS_REPO` override it so
   tests can supply an identity without a real remote.

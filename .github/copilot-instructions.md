@@ -45,9 +45,16 @@ no matching `skills/watch-prs/scripts/test-review-bus-*.sh` coverage is a
 finding. Tests stay self-contained — throwaway git repos, stubbed `gh` and
 `codex`, no network — because CI runs them without credentials.
 
-**No hard-coded identity.** Owner, repo, bus paths, and unit names all derive
-from `git remote get-url origin`. A literal owner or repository name anywhere,
-including in `SKILL.md`, is a finding.
+**No hard-coded runtime identity.** Owner, repo, bus paths, and unit names all
+derive from `git remote get-url origin`, because one installed copy serves every
+project at once. A literal owner or repository name in the scripts, in `hooks/`,
+or in `SKILL.md` is a finding — that is the scope `test-review-bus-identity.sh`
+enforces.
+
+This does **not** extend to the plugin's own metadata or install documentation.
+`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+`.codex-plugin/plugin.json`, and the install and update commands in `README.md`
+must name `p5ych0/watch-pr-skill`. Flagging those is a false positive.
 
 **Judge the PR against what it set out to do.** Read the PR description and the
 newest round-summary comment to learn the intended scope, and use it for

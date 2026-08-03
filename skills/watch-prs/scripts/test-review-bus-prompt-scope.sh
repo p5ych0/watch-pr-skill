@@ -62,8 +62,23 @@ grep -qi 'relevance' "$PROMPT" \
   || die "prompt does not limit scope use to relevance"
 
 grep -qi 'non-blocking' "$PROMPT" \
-  && pass "out-of-scope work routes to a non-blocking note" \
-  || die "prompt does not route out-of-scope work to a non-blocking note"
+  && pass "prompt addresses the non-blocking observation case" \
+  || die "prompt does not mention non-blocking observations"
+
+# The bus has no channel for a non-blocking note: every findings[] entry becomes
+# a merge-blocking review thread, and summary reaches the PR only on a review
+# that returns zero findings (process_review overwrites it otherwise). A prompt
+# that names the category without routing it produces either a false blocker or
+# a silently discarded observation. Issue #212 tracks the underlying fix.
+grep -qi 'zero findings' "$PROMPT" \
+  && pass "observations route to summary only on a zero-finding review" \
+  || die "prompt does not restrict the observation channel to zero-finding reviews"
+
+# Deliberately specific: a bare 'omit it' also matches the pre-existing
+# unattachable-finding instruction, which is a different rule.
+grep -qi 'WITH findings, omit' "$PROMPT" \
+  && pass "observations are omitted on a review WITH findings" \
+  || die "prompt does not say to omit the observation when findings exist"
 
 grep -qi 'intent, never permission' "$PROMPT" \
   && pass "scope context is marked untrusted" \

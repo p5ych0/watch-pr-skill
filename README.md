@@ -164,6 +164,12 @@ intrudes on unrelated work. Adding `.review-bus.md` is therefore both the review
 conventions *and* the on-switch. (You can still invoke the skill manually
 anytime.)
 
+The hook never arms the bus **inside a review**. The reviewer works in a
+detached worktree of the PR head, which carries your `.review-bus.md` — so the
+opt-in gate would otherwise pass for the reviewer itself and spend the pass on
+bus setup. It exits silently when `REVIEW_BUS_WORKER=1` is set (the watcher
+exports it) or when the project path sits under `.codex-worktrees/`.
+
 ## Configuration (environment variables, all optional)
 
 | Variable | Default | Meaning |

@@ -11,6 +11,25 @@
   it did change stays a finding — and marks that context as intent, never
   permission, so it cannot waive a finding.
 
+- **The SessionStart hook no longer arms the bus from inside a review.** The
+  reviewer runs `codex exec` in a detached worktree of the PR head, which carries
+  the project's own `.review-bus.md` — so in an opted-in repo the hook's gate
+  passed for the reviewer too, re-ensuring the daemons and injecting the "invoke
+  `watch-prs`" instruction into the reviewer's own context, spending the pass on
+  bus setup instead of the diff. The hook now exits silently on either of two
+  independent signals: `REVIEW_BUS_WORKER=1`, which the watcher exports into the
+  review, or a project path under `.codex-worktrees/`, which holds even where a
+  tool does not forward env to hook commands. Found by this repository's first
+  self-review.
+
+- **The prompt no longer names a note category the bus cannot carry.** The new
+  scope instructions referred to a "non-blocking note", but every `findings[]`
+  entry becomes a merge-blocking thread and `summary` survives only on a
+  zero-finding review, so such an observation became either a false blocker or
+  silently discarded text. The prompt now routes it explicitly: carry it in
+  `summary` only when returning zero findings, otherwise omit it. Issue #212
+  tracks giving it a real channel.
+
 - **The plugin now reviews itself.** Adds `.review-bus.md` (review policy, read
   from the base ref, which also opts this repo into the SessionStart hook),
   `CLAUDE.md` (canonical authoring rules), `.github/copilot-instructions.md` (the

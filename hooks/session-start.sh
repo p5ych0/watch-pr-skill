@@ -13,6 +13,22 @@ PROJECT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$PROJECT" ] || exit 0
 [ -f "$PROJECT/.review-bus.md" ] || exit 0
 
+# NEVER arm the bus inside a review worker. The reviewer runs `codex exec` in a
+# detached worktree of the PR head, which carries the project's own
+# .review-bus.md — so in a repo that opted in, the gate above passes for the
+# reviewer too. Without this guard a self-review re-ensures the daemons and, far
+# worse, injects the "invoke watch-prs" instruction into the reviewer's own
+# context, spending the review pass on bus setup instead of the diff.
+#
+# Two independent signals, because either alone can be defeated: the watcher
+# exports REVIEW_BUS_WORKER=1, but a tool that does not forward env to hooks
+# would drop it — and every review worktree lives under .codex-worktrees/
+# regardless.
+[ -z "${REVIEW_BUS_WORKER:-}" ] || exit 0
+case "$PROJECT" in
+    */.codex-worktrees/*) exit 0 ;;
+esac
+
 # Locate the plugin. Both tools set CLAUDE_PLUGIN_ROOT for hook commands (Codex
 # also sets PLUGIN_ROOT); self-locate from this script's dir as a last resort in
 # case a build leaves the var empty during SessionStart.
