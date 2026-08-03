@@ -879,7 +879,11 @@ write_auto_request() {
         # unlimited by default) so a persistently failing SHA stops instead of
         # retrying forever.
         prev_status="$(jq -r '.status // "error"' "$resp" 2>/dev/null || echo error)"
-        [ "$prev_status" = "error" ] || return
+        # `return 0`, never a bare `return`: the failed test above leaves $? = 1,
+        # which a bare `return` inherits. Under `set -Eeuo pipefail` with an
+        # unguarded caller that kills the daemon (issue #3) — a terminal response
+        # for the current head is a SUCCESSFUL no-op, not an error.
+        [ "$prev_status" = "error" ] || return 0
         # A cap-exceeded response (a positive review cap was reached) is terminal,
         # NOT transient — never retry it, or the explicit cap just keeps producing
         # repeated error handoffs. Only the unlimited case (cap 0) relies solely on
@@ -890,7 +894,7 @@ write_auto_request() {
                 iter="$(tr -cd '0-9' < "$BUS_DIR/.codex-iter-${pr}" || true)"
                 iter="${iter:-0}"
             fi
-            [ "$iter" -lt "$MAX_ITERATIONS" ] || return
+            [ "$iter" -lt "$MAX_ITERATIONS" ] || return 0
         fi
         # Error-retry counter is SEPARATE from the review-round counter: the
         # review cap is unlimited by default (skill drives the pause), but a
@@ -904,12 +908,12 @@ write_auto_request() {
             err_iter="$(tr -cd '0-9' < "$err_file" || true)"
             err_iter="${err_iter:-0}"
         fi
-        [ "$err_iter" -lt "${CODEX_REVIEW_ERROR_RETRY_MAX:-5}" ] || return
+        [ "$err_iter" -lt "${CODEX_REVIEW_ERROR_RETRY_MAX:-5}" ] || return 0
         err_iter=$((err_iter + 1))
         printf '%s\n' "$err_iter" > "${err_file}.tmp" && mv "${err_file}.tmp" "$err_file"
     fi
     if [ -f "$req" ] && [ ! -f "$SEEN_DIR/$base" ]; then
-        return
+        return 0
     fi
 
     # Round check-in — the SAME atomic check-and-claim as the manual path (shared
@@ -923,10 +927,10 @@ write_auto_request() {
         claimed|already) ;;   # round claimed → proceed to write the request
         pause)
             echo "CODEX_AUTO_SKIP pr=$pr reason=round_threshold rounds=$(review_bus_rounds_done "$BUS_DIR" "$pr")"
-            return ;;
+            return 0 ;;
         *)  # locktimeout / unexpected → HOLD (fail closed, never bypass the gate)
             echo "CODEX_AUTO_SKIP pr=$pr reason=round_lock_unavailable"
-            return ;;
+            return 0 ;;
     esac
 
     now="$(date -u +%FT%TZ)"
@@ -1075,12 +1079,18 @@ process_review() {
     write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log"
 }
 
+# Every early return here is an intentional, SUCCESSFUL no-op (rejected or
+# vanished request, superseded SHA, terminal error already recorded). Each one
+# must say `return 0`: a bare `return` inherits the preceding command's status
+# — a failed `[ -f ]` test, or a `touch`/`finish_seen` that errored — and this
+# function is called unguarded from the main loop under `set -Eeuo pipefail`,
+# so inheriting 1 kills the daemon. Same defect class as issue #3.
 handle() {
     local req="$1"
     local base pr sha branch requested_at log resp iter_file iter prompt result snapshot_dir findings status summary newer_sha req_json
 
     base="$(basename "$req")"
-    [ -f "$req" ] || return
+    [ -f "$req" ] || return 0
     sleep 0.1
 
     # Parse the request ONCE, guarded. A malformed/truncated req-*.json makes
@@ -1089,7 +1099,7 @@ handle() {
     if ! req_json="$(jq -e '.' "$req" 2>/dev/null)"; then
         echo "CODEX_REQ_REJECTED req=$req reason=invalid_json"
         touch "$SEEN_DIR/$base"
-        return
+        return 0
     fi
 
     pr="$(jq -r '.pr // "?"' <<< "$req_json")"
@@ -1100,17 +1110,17 @@ handle() {
     if ! [[ "$pr" =~ ^[0-9]+$ ]]; then
         echo "CODEX_REQ_REJECTED req=$req reason=bad_pr value=$pr"
         touch "$SEEN_DIR/$base"
-        return
+        return 0
     fi
     if ! [[ "$sha" =~ ^[0-9a-f]{7,64}$ ]]; then
         echo "CODEX_REQ_REJECTED req=$req reason=bad_sha value=$sha"
         touch "$SEEN_DIR/$base"
-        return
+        return 0
     fi
     if ! [[ "$branch" =~ ^[A-Za-z0-9._/-]+$ ]] || [[ "$branch" == *..* ]]; then
         echo "CODEX_REQ_REJECTED req=$req reason=bad_branch value=$branch"
         touch "$SEEN_DIR/$base"
-        return
+        return 0
     fi
 
     # Preflight gate contract: every legitimate request carries a
@@ -1126,7 +1136,7 @@ handle() {
     if [ -z "$preflight_present" ] || [ "$preflight_present" = "0" ]; then
         echo "CODEX_REQ_REJECTED req=$req reason=missing_preflight"
         touch "$SEEN_DIR/$base"
-        return
+        return 0
     fi
     if [ "$preflight_force" = "true" ]; then
         echo "CODEX_REQ_FORCED req=$req warning=preflight_bypassed"
@@ -1180,7 +1190,7 @@ handle() {
         echo "CODEX_REVIEW_SUPERSEDED pr=$pr sha=$sha newer_sha=$newer_sha" | tee -a "$log"
         write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log"
         finish_seen "$base"
-        return
+        return 0
     fi
 
     iter_file="$BUS_DIR/.codex-iter-${pr}"
@@ -1213,7 +1223,7 @@ handle() {
         finish_seen "$base"
         progress_set error error
         echo "CODEX_REVIEW_DONE pr=$pr sha=$sha status=$status findings=$findings" | tee -a "$log"
-        return
+        return 0
     fi
 
     if ! process_review "$pr" "$sha" "$branch" "$prompt" "$result" "$snapshot_dir" "$resp" "$log" "$requested_at" >> "$log" 2>&1; then

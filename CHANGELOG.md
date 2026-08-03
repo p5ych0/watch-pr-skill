@@ -2,6 +2,23 @@
 
 ## [1.0.11] — 2026-08-03
 
+- **Fix: the watcher crash-looped after a final response (issue #3).** With
+  `CODEX_REVIEW_AUTO_OPEN_PRS=1`, once a PR's current head had a terminal
+  non-error response (`approved`, `comments_posted`), `write_auto_request`'s
+  intentional no-op ran `[ "$prev_status" = "error" ] || return`. A bare `return`
+  inherits the failed test's exit status 1, and the function is called unguarded
+  under `set -Eeuo pipefail` — so the no-op killed the daemon and systemd
+  restarted it every few seconds. Reproduced live on this repository's own PR #4
+  (`NRestarts=6`) the moment Codex posted its clean signoff.
+
+  Every intentional no-op in `write_auto_request` and `handle` now returns 0
+  explicitly. `handle` carried the same defect at its `[ -f "$req" ] || return`
+  guard, where a request file vanishing between detection and handling would have
+  killed the daemon identically. `test-review-bus-noop-returns.sh` covers both
+  terminal statuses, the unguarded `set -e` call site, the vanished-request case,
+  and asserts that an `error` response is still retried — so the obvious wrong
+  fix, returning 0 unconditionally, cannot pass.
+
 - **Reviewers now read what the PR set out to do.** The watcher already
   snapshotted `pr.json` and `issue_comments.jsonl`, but the prompt never told
   the reviewer to use them, so every project re-authored the same relevance rule
