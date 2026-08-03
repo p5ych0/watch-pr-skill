@@ -73,26 +73,43 @@ write_response "$resp3" 4 abc1234 approved 0 "clean" "/dev/null"
 [ "$(jq -r 'has("model_summary")' "$resp3")" = "false" ] \
     && pass "7-arg callers unchanged" || die "7-arg call grew a model_summary key"
 
-# ── 4. process_review carries it through on the findings path ──────────────
-# The unit above proves write_response stores it; this proves the value is
-# actually READ from the model result on the path where it used to be dropped.
+# ── 4. require_model_summary validates AND extracts in one operation ───────
+# Separate validate/extract steps were a TOCTOU: validation ran before any side
+# effect, extraction ran after the comments were posted, and a result that
+# changed in between yielded an empty summary that the zero-findings branch
+# turned into a clean approval. One read, one verdict.
 result="$TMP/result.json"
 jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: [{path: "a.sh", line: 1, side: "RIGHT", body: "x"}]}' > "$result"
-extracted="$(read_model_summary "$result")"
-[ "$extracted" = "$MODEL_SUMMARY" ] \
-    && pass "read_model_summary extracts the model's text from a result WITH findings" \
-    || die "read_model_summary did not extract the summary (got: '$extracted')"
+extracted="$(require_model_summary "$result")" && rc=0 || rc=1
+{ [ "$rc" -eq 0 ] && [ "$extracted" = "$MODEL_SUMMARY" ]; } \
+    && pass "require_model_summary: extracts from a result WITH findings" \
+    || die "require_model_summary failed on a valid result (rc=$rc got: '$extracted')"
 
-# Malformed / missing result must yield empty, never a jq error string that
-# would then be written into the response as if the reviewer had said it.
-[ -z "$(read_model_summary "$TMP/does-not-exist.json")" ] \
-    && pass "missing result file => empty, not an error string" \
-    || die "missing result produced non-empty model summary"
+# Every invalid shape must FAIL, not return empty — an empty return is what the
+# caller would have turned into "no note", and then into an approval.
+for bad_desc in 'missing:{"findings":[]}' 'null:{"findings":[],"summary":null}' \
+                'number:{"findings":[],"summary":123}' 'empty:{"findings":[],"summary":""}'; do
+    desc="${bad_desc%%:*}"; body="${bad_desc#*:}"
+    printf '%s\n' "$body" > "$TMP/bad.json"
+    if require_model_summary "$TMP/bad.json" >/dev/null 2>&1; then
+        die "require_model_summary accepted an invalid summary ($desc)"
+    else
+        pass "require_model_summary rejects $desc summary"
+    fi
+done
 
-printf 'not json at all\n' > "$TMP/bad.json"
-[ -z "$(read_model_summary "$TMP/bad.json")" ] \
-    && pass "malformed result => empty, not an error string" \
-    || die "malformed result produced non-empty model summary"
+if require_model_summary "$TMP/does-not-exist.json" >/dev/null 2>&1; then
+    die "require_model_summary accepted a missing result file"
+else
+    pass "require_model_summary rejects a missing result file"
+fi
+
+printf 'not json at all\n' > "$TMP/malformed.json"
+if require_model_summary "$TMP/malformed.json" >/dev/null 2>&1; then
+    die "require_model_summary accepted a malformed result"
+else
+    pass "require_model_summary rejects a malformed result"
+fi
 
 # ── 5. process_review end-to-end on the FINDINGS path ──────────────────────
 # The units above prove the pieces. They do NOT prove the pieces are wired
@@ -154,6 +171,51 @@ for bad in '{"findings":[]}' '{"findings":[],"summary":null}' '{"findings":[],"s
         pass "schema-invalid result earns no approval: $bad"
     fi
 done
+
+# ── 7. TOCTOU: a result replaced AFTER validation must not change the verdict ──
+# The reproduction from the review: validation runs before any side effect, but
+# the extraction used to run after the comments were posted. Swapping the result
+# in between produced status=approved with no model_summary and synthesized
+# "no actionable issues" text. Because the summary is now captured at validation
+# time, the later swap cannot influence anything.
+swap_after_validation() {
+    local out="$TMP/pr-toctou"
+    rm -rf "$out"; mkdir -p "$out/snap"
+    jq -n --arg s "$MODEL_SUMMARY" \
+       '{summary: $s, findings: [{path: "a.sh", line: 1, side: "RIGHT", body: "x"}]}' > "$out/result.json"
+    (
+        set +eu
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }
+        run_codex_review() { :; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        # The swap happens exactly where the second read used to be: after
+        # validation, during the GitHub-posting step.
+        post_findings() { printf '{"findings":[]}\n' > "$out/result.json"; printf '1 0 1\n'; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+toctou_resp="$(swap_after_validation)"
+if [ -f "$toctou_resp" ]; then
+    [ "$(jq -r '.status' "$toctou_resp")" != "approved" ] \
+        && pass "result swapped after validation does not become an approval" \
+        || die "TOCTOU: a post-validation swap produced status=approved"
+
+    [ "$(jq -r '.model_summary // "ABSENT"' "$toctou_resp")" = "$MODEL_SUMMARY" ] \
+        && pass "the VALIDATED summary is the one recorded, not a later re-read" \
+        || die "TOCTOU: model_summary came from the swapped result"
+else
+    die "TOCTOU fixture produced no response file"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

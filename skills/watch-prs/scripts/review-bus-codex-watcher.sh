@@ -343,15 +343,27 @@ write_response() {
     mv "${resp}.tmp" "$resp"
 }
 
-# The model's own summary text from a codex result file, or empty.
+# Print the model's own summary from a codex result, or FAIL.
 #
-# Empty on a missing or malformed result rather than a jq error string: that
-# text is written into the response and read as the reviewer's words, so a
-# parser message masquerading as review commentary would be worse than silence.
-read_model_summary() {
-    local result="$1"
-    [ -f "$result" ] || return 0
-    jq -r '.summary // empty' "$result" 2>/dev/null || true
+# Validating and extracting are the same operation on purpose. When they were
+# separate, validation ran before any side effect but extraction ran after the
+# comments were posted, so a result that changed in between produced an empty
+# summary — which the zero-findings branch then turned into a clean approval.
+# One read, one verdict: the caller either gets a usable summary or a non-zero.
+#
+# Non-empty string is required, not merely present. The output schema mandates
+# `summary` on EVERY review and the prompt asks for an explicit merge signoff,
+# so "" is not a valid answer — and treating it as one is what let a malformed
+# result approve a PR.
+require_model_summary() {
+    local result="$1" out
+    [ -f "$result" ] || return 1
+    # `select` on the TYPE, not just truthiness: `jq -er '.summary'` happily
+    # returns "123" for a numeric summary, which is non-empty and would pass a
+    # bare emptiness check while being schema-invalid.
+    out="$(jq -er 'select((.summary | type) == "string") | .summary' "$result" 2>/dev/null)" || return 1
+    [ -n "$out" ] || return 1
+    printf '%s' "$out"
 }
 
 resolve_requested_commit() {
@@ -1047,7 +1059,14 @@ process_review() {
     # earned a clean APPROVAL — a malformed reviewer output approving the PR,
     # which is the worst direction this code can fail in. Non-empty is required
     # too: the prompt asks for an explicit merge signoff, and "" is not one.
-    if ! jq -e '(.summary | type == "string") and (.summary | length > 0)' "$result" >/dev/null 2>&1; then
+    #
+    # CAPTURE IT HERE, once, and use the captured value everywhere below. Reading
+    # the file again later would be a TOCTOU: validation happens before any side
+    # effect, but the second read landed AFTER the comments were posted, so a
+    # result replaced in between yielded an empty summary — which then fell into
+    # the zero-findings default and produced a clean approval. Validate-then-reuse
+    # closes that; there is no second read to disagree with the first.
+    if ! model_summary="$(require_model_summary "$result")"; then
         echo "CODEX_RESULT_INVALID path=$result reason=summary_missing_empty_or_not_string"
         return 1
     fi
@@ -1081,12 +1100,6 @@ process_review() {
     # replies the claude implementer made on prior threads between
     # BEFORE and AFTER (codex shares the p5ych0 token so author-filtering
     # the delta is not enough).
-    # Read the model's own summary ONCE, before the status line overwrites
-    # `summary`. It used to be read only in the zero-findings branch below, so
-    # any review that reported findings discarded it — including the verification
-    # limitations the prompt explicitly asks for (strumok#212).
-    model_summary="$(read_model_summary "$result")"
-
     if [ "$produced" -gt 0 ] && [ "$posted" -eq "$produced" ] && [ "$failed" -eq 0 ]; then
         findings="$posted"
         status="comments_posted"
@@ -1097,7 +1110,7 @@ process_review() {
         summary="codex produced $produced finding(s), but only $posted/$produced inline PR review comments were confirmed on GitHub; see $log"
     else
         findings=0
-        summary="${model_summary:-codex review on sha=$sha found no actionable issues.}"
+        summary="$model_summary"
         if clean_event="$(post_clean_signoff "$pr" "$full_sha" "$sha" "$summary")"; then
             status="approved"
             summary="No actionable findings on sha=$sha; clean review signoff posted as $clean_event."
