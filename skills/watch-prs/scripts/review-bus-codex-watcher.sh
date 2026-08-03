@@ -279,11 +279,11 @@ unresolved_review_threads_count() {
         if [ -z "$cursor" ]; then
             page="$(gh api graphql -F pr="$pr" -F owner="$OWNER" -F name="$REPO" \
                 -f query='query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved} pageInfo{endCursor hasNextPage}}}}}' \
-                2>/dev/null)" || { printf '%s\n' "$PREFLIGHT_ERR"; return; }
+                2>/dev/null)" || { printf '%s\n' "$PREFLIGHT_ERR"; return 0; }
         else
             page="$(gh api graphql -F pr="$pr" -F owner="$OWNER" -F name="$REPO" -F c="$cursor" \
                 -f query='query($owner:String!,$name:String!,$pr:Int!,$c:String!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100, after:$c){nodes{isResolved} pageInfo{endCursor hasNextPage}}}}}' \
-                2>/dev/null)" || { printf '%s\n' "$PREFLIGHT_ERR"; return; }
+                2>/dev/null)" || { printf '%s\n' "$PREFLIGHT_ERR"; return 0; }
         fi
 
         # `jq -e` (exit non-zero on null/false/empty) lets us detect a

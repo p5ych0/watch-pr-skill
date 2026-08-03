@@ -109,7 +109,44 @@ rm -f "$BUS_DIR/requests/req-${SHORT}.json"
 #
 # `return $rc`, `return 1` and similar are untouched — only a naked `return`,
 # whose value is whatever the previous command happened to leave behind.
-strays="$(grep -nE '^[[:space:]]*return[[:space:]]*$|\|\|[[:space:]]*return[[:space:]]*$' "$WATCHER" || true)"
+#
+# The detector matches `return` followed by end-of-line, `;` or `}`, because a
+# first version anchored only on end-of-line silently passed over the
+# `|| { printf ...; return; }` form used in the GraphQL failure handlers — the
+# test then advertised an invariant that was already false. Leading `[^#]*`
+# keeps prose in comments (". . . a bare return") from registering as code.
+detect_bare_returns() {
+    grep -nE '^[^#]*(^|[[:space:]]|\{|;|\|\|)return[[:space:]]*($|;|\})' "$1" || true
+}
+
+# Negative control FIRST: a detector that cannot fail is worse than no detector,
+# and this one already shipped once with a hole in it. Every form below must be
+# caught before the real scan is allowed to mean anything.
+probe="$TMP/bare-return-forms.sh"
+cat > "$probe" <<'PROBE'
+f1() { [ -f x ] || return
+}
+f2() { cmd || { printf 'x'; return; }
+}
+f3() { if x; then return; fi
+}
+f4() { return $rc; }
+f5() { return 0; }
+f6() { return 1; }
+# a comment mentioning a bare return
+PROBE
+probe_hits="$(detect_bare_returns "$probe")"
+probe_lines="$(printf '%s\n' "$probe_hits" | grep -c . || true)"
+if [ "$probe_lines" -eq 3 ] \
+   && printf '%s' "$probe_hits" | grep -q '^1:' \
+   && printf '%s' "$probe_hits" | grep -q '^3:' \
+   && printf '%s' "$probe_hits" | grep -q '^5:'; then
+    pass "detector catches bare return at EOL, before '}', and after ';' — and spares return 0/1/\$rc and comments"
+else
+    die "detector is unsound (expected lines 1,3,5; got: $(printf '%s' "$probe_hits" | tr '\n' ' '))"
+fi
+
+strays="$(detect_bare_returns "$WATCHER")"
 if [ -z "$strays" ]; then
     pass "watcher contains no bare returns (every no-op states its status)"
 else
