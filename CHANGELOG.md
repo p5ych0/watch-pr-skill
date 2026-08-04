@@ -2,6 +2,32 @@
 
 ## [1.0.12] — 2026-08-03
 
+- **The Copilot-phase hold now proves the range before trusting it.** The hold
+  counted the commits in one `compare` response, which is unsafe twice over: the
+  endpoint describes BASE..HEAD, so a force-pushed `diverged` range can return a
+  fully tagged list none of which is reachable from the signed-off SHA; and its
+  unpaginated list is capped at 250, so a longer range comes back truncated and
+  an untagged commit beyond the cap is invisible. It now requires
+  `status` to be `ahead`/`identical`, `total_commits` to equal the returned list
+  length, and every listed commit to carry the trailer - otherwise it reviews.
+  Marker cleanup is best-effort and logged: an unguarded `rm` failure under
+  `set -Eeuo pipefail` would have exited `write_auto_request` and taken the
+  watcher down with it.
+
+- **The merge gate classifies by trailer and checks ancestry.** It previously
+  accepted any commit whose subject began `fix(review):`, so unrelated work with
+  that subject could merge without Codex ever seeing it, and a force-pushed
+  divergent range passed the count check. It now requires
+  `git merge-base --is-ancestor` and a real `Review-Phase: copilot` trailer on
+  every intervening commit, read via `%(trailers:...)` so a mention in a subject
+  or body cannot pass.
+
+- **`request` records Copilot unavailability head-scoped.** The documented rc 3
+  path was unreachable: the skill says to merge on the Codex signoff when Copilot
+  is positively unavailable, but with no review and no decline the gate returned
+  1 and the merge always aborted. `request` now records the fact for that head
+  and `gate` reports `status=unavailable`; a later push re-opens the question.
+
 - **Codex no longer re-reviews during the Copilot pass.** `SKILL.md` already
   said Codex is not re-run on Copilot-fix commits, but the watcher had no way to
   honour it: auto-enqueue saw each fix commit as a fresh head, so every one burned

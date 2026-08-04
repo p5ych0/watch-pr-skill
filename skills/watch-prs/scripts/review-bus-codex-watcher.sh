@@ -949,23 +949,49 @@ write_auto_request() {
     # Every uncertainty falls through to a REVIEW: an unreadable marker, a failed
     # compare, or an empty commit list. A wrong hold means a commit is never
     # reviewed; a wrong review costs one redundant pass.
-    local clean_marker clean_sha cmp_json total tagged
+    local clean_marker clean_sha cmp_json cmp_status total reported tagged
     clean_marker="$BUS_DIR/.codex-clean-${pr}"
     if [ -f "$clean_marker" ]; then
         clean_sha="$(tr -cd '0-9a-f' < "$clean_marker" 2>/dev/null || true)"
         if [ "${#clean_sha}" -eq 40 ] && [ "$clean_sha" != "$head_oid" ]; then
             if cmp_json="$(gh api "repos/$REPO_SLUG/compare/${clean_sha}...${head_oid}" 2>/dev/null)"; then
+                # The compare endpoint describes BASE..HEAD, and three of its
+                # properties have to hold before a hold is safe:
+                #
+                #  1. `status` must be `ahead` (or `identical`). After a
+                #     force-push the range can be `diverged` and STILL return a
+                #     fully tagged commit list - none of which is reachable from
+                #     the signed-off SHA, so the signoff does not cover this head.
+                #  2. `total_commits` must equal the returned list length. The
+                #     unpaginated list is capped at 250, so a longer range comes
+                #     back truncated and an untagged commit beyond the cap would
+                #     be invisible to the count below.
+                #  3. every returned commit must carry the trailer.
+                #
+                # Any of these unproven means REVIEW, not hold: a wrong hold means
+                # a commit is never reviewed, a wrong review costs one pass.
+                cmp_status="$(jq -r '.status // empty' <<< "$cmp_json" 2>/dev/null || echo "")"
+                reported="$(jq -r '.total_commits // empty' <<< "$cmp_json" 2>/dev/null || echo "")"
+                total="$(jq '.commits | length' <<< "$cmp_json" 2>/dev/null || echo "")"
                 # Anchor the trailer to its own line so the phrase appearing in
                 # prose (a doc commit describing the convention) cannot pass.
-                total="$(jq '.commits | length' <<< "$cmp_json" 2>/dev/null || echo "")"
                 tagged="$(jq '[.commits[] | select(.commit.message | test("(^|\n)Review-Phase: copilot[[:space:]]*($|\n)"))] | length' <<< "$cmp_json" 2>/dev/null || echo "")"
-                if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
+                if { [ "$cmp_status" = "ahead" ] || [ "$cmp_status" = "identical" ]; } \
+                   && [[ "$reported" =~ ^[0-9]+$ ]] && [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
+                   && [ "$reported" -eq "$total" ] \
                    && [ "$total" -gt 0 ] && [ "$total" -eq "$tagged" ]; then
                     echo "CODEX_AUTO_SKIP pr=$pr reason=copilot_phase clean_sha=${clean_sha:0:7} commits=$total"
                     return 0
                 fi
+                echo "CODEX_PHASE_INVALIDATED pr=$pr clean_sha=${clean_sha:0:7} status=${cmp_status:-unknown} reported=${reported:-?} listed=${total:-?} tagged=${tagged:-?}"
             fi
-            rm -f "$clean_marker"
+            # Best-effort, and NEVER fatal. Under `set -Eeuo pipefail` an
+            # unguarded failure here would exit write_auto_request, and its
+            # unguarded caller would take the watcher down - restarting into the
+            # same failure instead of falling through to the review this branch
+            # exists to allow. A stale marker only costs a later re-evaluation.
+            rm -f "$clean_marker" 2>/dev/null \
+                || echo "CODEX_CLEAN_MARKER_STALE pr=$pr path=$clean_marker (continuing to enqueue)" >&2
         fi
     fi
 

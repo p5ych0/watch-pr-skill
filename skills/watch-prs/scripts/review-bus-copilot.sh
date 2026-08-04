@@ -10,8 +10,9 @@
 #   poll      <PR>  poll until Copilot reviews the current head, emit one
 #                   COPILOT_REVIEW line (0), status=timeout (1), status=error (2)
 #   gate      <PR>  MERGE GATE — may this PR merge as far as Copilot is concerned?
-#                   (0 clean review on the current head OR a decline recorded for
-#                    it, 1 pass still owed, 2 cannot tell → caller fails closed)
+#                   (0 clean review on the current head, a decline recorded for
+#                    it, or Copilot positively unavailable for it; 1 pass still
+#                    owed; 2 cannot tell → caller fails closed)
 #   decline   <PR>  record an operator decision to skip the pass for the CURRENT
 #                   head (0 recorded, 2 could not record). Head-scoped: a later
 #                   push re-opens the question rather than inheriting the waiver.
@@ -111,7 +112,20 @@ cmd_request() {
         return 0
     fi
     if printf '%s' "$err" | grep -qiE 'not a collaborator|could not resolve to a user|reviews may only be requested|no such (user|reviewer)|not a valid reviewer'; then
-        echo "COPILOT_REQUEST pr=$pr status=unavailable sha=${head:0:7}" >&2
+        # Record it HEAD-SCOPED so `gate` has a legitimate success state for this
+        # path. Without the marker the documented flow was unreachable: the skill
+        # says to merge on the Codex signoff when Copilot is positively
+        # unavailable, but no review and no decline exist, so the gate returned 1
+        # and the merge always aborted. Head-scoped like a decline, because
+        # availability is a fact about this repo now, not a permanent waiver.
+        local marker="$BUS_DIR/.copilot-unavailable-${pr}"
+        mkdir -p "$BUS_DIR" 2>/dev/null
+        if ! printf '%s\n' "$head" > "${marker}.tmp" 2>/dev/null || ! mv "${marker}.tmp" "$marker" 2>/dev/null; then
+            rm -f "${marker}.tmp" 2>/dev/null
+            echo "COPILOT_REQUEST pr=$pr status=unavailable sha=${head:0:7} warn=marker_write_failed" >&2
+            return 3
+        fi
+        echo "COPILOT_REQUEST pr=$pr status=unavailable sha=${head:0:7} recorded=1" >&2
         return 3
     fi
     echo "COPILOT_REQUEST pr=$pr status=error sha=${head:0:7} detail=$(printf '%s' "$err" | tr '\n' ' ' | cut -c1-160)" >&2
@@ -226,6 +240,13 @@ cmd_gate() {
         return 2
     fi
     short="${head:0:7}"
+
+    # Copilot positively unavailable for THIS head, recorded by `request` rc 3.
+    marker="$BUS_DIR/.copilot-unavailable-${pr}"
+    if [ -f "$marker" ] && [ "$(tr -cd '0-9a-f' < "$marker" 2>/dev/null)" = "$head" ]; then
+        echo "COPILOT_GATE pr=$pr sha=$short status=unavailable"
+        return 0
+    fi
 
     marker="$BUS_DIR/.copilot-declined-${pr}"
     if [ -f "$marker" ]; then

@@ -403,7 +403,12 @@ gate (a post-Copilot push must be reviewed again, not merged on the old pass):
 ```bash
 ( cd "$WT" && "$RB_SCRIPTS"/review-bus-copilot.sh request N ); REQ=$?
 # REQ=3 → Copilot POSITIVELY unavailable (not a valid reviewer / not enabled):
-#          inform the user and MERGE on the Codex signoff.
+#          inform the user and MERGE on the Codex signoff. `request` records the
+#          unavailability HEAD-SCOPED, which is what lets the merge gate below
+#          pass on this path (it reports status=unavailable). If that marker
+#          could not be written the warning says so — then either retry or record
+#          an explicit `decline`, because the gate will otherwise block, which is
+#          the correct fail-closed outcome rather than a bug to work around.
 # REQ=2 → transient/unknown request failure → FAIL CLOSED: do NOT merge and do NOT
 #          skip Copilot; surface to the user (retry `request`, or merge on Codex
 #          only on explicit confirmation). A flaky gh/network error must never be
@@ -457,14 +462,27 @@ if ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]] || [ "${HEAD_OID:0:7}" != "$MERGE_SHA" 
 fi
 
 # (2) Copilot path: the head may sit past the Codex-reviewed SHA ONLY via the
-# loop's own fix(review): commits (Codex is not re-run on those). ANY other commit
+# loop's own Copilot-fix commits (Codex is not re-run on those). ANY other commit
 # in REVIEWED_SHA..HEAD means an unreviewed change slipped in → Codex never vetted
 # this head → block. Fail closed if the range can't be inspected.
+#
+# Classify by the `Review-Phase: copilot` TRAILER, never by a `fix(review):`
+# subject: any commit can carry that subject, so a subject test lets unrelated
+# work merge unreviewed. And check ANCESTRY first — after a force-push the range
+# can be divergent, where a commit count says nothing about whether the reviewed
+# SHA is even reachable from this head. This mirrors the watcher's own hold
+# conditions; if the two disagree, the merge gate is the one that must be strict.
 if [ "$MERGE_SHA" != "$REVIEWED_SHA" ]; then
+    if ! git -C "$WT" merge-base --is-ancestor "$REVIEWED_SHA" "$HEAD_OID" 2>/dev/null; then
+        echo "merge blocked: Codex-reviewed $REVIEWED_SHA is not an ancestor of $HEAD_OID (force-push / divergent history) — the signoff does not cover this head."; exit 0
+    fi
     TOTAL=$(git -C "$WT" rev-list --count "${REVIEWED_SHA}..${HEAD_OID}" 2>/dev/null)
-    FIXES=$(git -C "$WT" log --format='%s' "${REVIEWED_SHA}..${HEAD_OID}" 2>/dev/null | grep -c '^fix(review):')
-    if [ -z "$TOTAL" ] || [ "$TOTAL" != "$FIXES" ]; then
-        echo "merge blocked: head advanced past Codex-reviewed $REVIEWED_SHA via a non-fix(review) commit (or range check failed) — Codex never vetted this head. Post a fresh summary + re-request Codex."; exit 0
+    # %(trailers:key=Review-Phase,valueonly) prints the trailer VALUE per commit,
+    # so a mention in the body or subject cannot be mistaken for one.
+    TAGGED=$(git -C "$WT" log --format='%(trailers:key=Review-Phase,valueonly,separator=%x2C)' \
+                 "${REVIEWED_SHA}..${HEAD_OID}" 2>/dev/null | grep -c '^copilot$')
+    if [ -z "$TOTAL" ] || ! [[ "$TOTAL" =~ ^[0-9]+$ ]] || [ "$TOTAL" != "$TAGGED" ]; then
+        echo "merge blocked: head advanced past Codex-reviewed $REVIEWED_SHA via a commit without a 'Review-Phase: copilot' trailer (or the range could not be inspected) — Codex never vetted this head. Post a fresh summary + re-request Codex."; exit 0
     fi
 fi
 

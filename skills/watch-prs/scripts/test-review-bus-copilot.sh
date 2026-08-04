@@ -253,6 +253,33 @@ echo "$out" | grep -q 'status=decline_stale' && [ "$rc" -eq 1 ] \
   && pass "gate: decline does not carry past the head it was made for" \
   || die "gate (t) STALE DECLINE ACCEPTED (rc=$rc out='$out')"
 
+
+# (u) request rc 3 (positively unavailable) must leave the gate a way through.
+# Previously the documented flow was unreachable: the skill says to merge on the
+# Codex signoff when Copilot is positively unavailable, but with no review and no
+# decline the gate returned 1 and the merge always aborted.
+UNAVAIL_BUS="$TMP/unavailbus"; mkdir -p "$UNAVAIL_BUS"
+run_unavail() { BUS_DIR="$UNAVAIL_BUS" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+
+GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_EDIT_RC=1 \
+  GH_EDIT_STDERR="422 Reviews may only be requested from collaborators. copilot is not a collaborator" \
+  run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 3 ] && pass "request: unavailable still returns 3" || die "request rc changed (got $rc)"
+[ "$(cat "$UNAVAIL_BUS/.copilot-unavailable-7" 2>/dev/null)" = "$HEAD40" ] \
+  && pass "request: records unavailability head-scoped" || die "request: no unavailable marker written"
+
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+echo "$out" | grep -q 'status=unavailable' && [ "$rc" -eq 0 ] \
+  && pass "gate: recorded unavailability for this head => 0 (rc 3 path reaches merge)" \
+  || die "gate: unavailable path still blocks (rc=$rc out='$out')"
+
+# A later push re-opens the question - availability was recorded for one head.
+out="$(GH_HEAD="$OTHER40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+  && pass "gate: unavailability does not carry past the head it was recorded for" \
+  || die "gate: stale unavailable marker accepted (rc=$rc)"
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling

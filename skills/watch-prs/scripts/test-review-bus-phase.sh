@@ -70,9 +70,14 @@ set +e
 # Helper: what does the gh compare stub return for a given set of messages?
 # `--jq` is applied by the real gh; the stub ignores it, so the watcher must not
 # depend on gh-side filtering. Emit the raw shape and let the watcher parse.
-compare_with() {
+# $1 = compare status, $2 = total_commits GitHub reports, rest = commit messages.
+# status and total_commits are load-bearing: a `diverged` range can still list
+# fully tagged commits that the signoff does not cover, and a total_commits
+# larger than the returned list means the 250-commit cap truncated it.
+compare_full() {
+    local status="$1" reported="$2"; shift 2
     local msgs=("$@") first=1
-    { printf '{"commits":['
+    { printf '{"status":"%s","total_commits":%s,"commits":[' "$status" "$reported"
       for m in "${msgs[@]}"; do
           [ "$first" -eq 1 ] || printf ','
           first=0
@@ -80,6 +85,11 @@ compare_with() {
       done
       printf ']}\n'
     } > "$GH_COMPARE_OUT"
+}
+
+# The ordinary case: a clean fast-forward whose list is complete.
+compare_with() {
+    compare_full ahead "$#" "$@"
 }
 
 # ── 1. write_response carries next_phase only when given one ────────────────
@@ -178,6 +188,53 @@ enqueue
 requested \
     && pass "no marker => normal auto-enqueue" \
     || die "auto-enqueue broke when no clean marker exists"
+
+
+# ── 8. A DIVERGED range must not hold, however well tagged ─────────────────
+# After a force-push the compare can report every commit as tagged while none of
+# them is reachable from the signed-off SHA - so the signoff does not cover this
+# head and Codex must look at it.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_full diverged 2 "fix(review): a
+
+Review-Phase: copilot" "fix(review): b
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "diverged range => reviewed (signoff does not cover this head)" \
+    || die "a diverged range was held on the strength of its trailers"
+
+# ── 9. A TRUNCATED range must not hold ────────────────────────────────────
+# The unpaginated compare list is capped at 250. If GitHub reports more commits
+# than it returned, an untagged commit may sit beyond the cap, invisible to the
+# count.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_full ahead 300 "fix(review): only one listed
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "truncated range (total_commits > listed) => reviewed" \
+    || die "a truncated compare was held on a partial commit list"
+
+# ── 10. Marker removal failure must not kill the watcher ──────────────────
+# The cleanup runs under production strict mode. An unguarded failure would exit
+# write_auto_request, and its unguarded caller would take the daemon down -
+# restarting into the same failure instead of falling through to a review.
+# NOTE: run under `set -Eeuo pipefail` explicitly; the assertions above run with
+# -e disabled, so they could not catch this.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "feat: untagged work"          # invalidates -> takes the rm path
+chmod 500 "$BUS_DIR"                        # make the unlink fail
+rm -f "$BUS_DIR/requests/req-${HEAD_OID:0:7}.json" 2>/dev/null
+out_strict="$( set -Eeuo pipefail
+               write_auto_request 4 main "$HEAD_OID" >/dev/null 2>&1
+               echo survived )"
+chmod 700 "$BUS_DIR"
+[ "$out_strict" = "survived" ] \
+    && pass "marker removal failure is non-fatal under set -e (daemon survives)" \
+    || die "unguarded rm killed write_auto_request under strict mode"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

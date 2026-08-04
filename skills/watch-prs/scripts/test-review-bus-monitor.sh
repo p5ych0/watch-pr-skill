@@ -175,6 +175,30 @@ else
     pass "slow-arm test skipped (inotifywait not found)"
 fi
 
+
+# ── next_phase reaches the handoff line ────────────────────────────────────
+# The watcher sets next_phase=copilot on a clean signoff so the notification
+# states the obligation; a session told only "approved" can drift past the
+# Copilot pass. test-review-bus-phase.sh proves write_response STORES the field,
+# which says nothing about the monitor EMITTING it - this branch had no coverage,
+# so the suite passed whether or not the token survived.
+cat > "$RESP/resp-9999999.json" <<'JSON'
+{"pr":90,"sha":"9999999","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean","next_phase":"copilot"}
+JSON
+out_np="$(MONITOR_EMITTED_DIR="$TMP/sess-np" "$MONITOR" --once 2>/dev/null || true)"
+np_line="$(printf '%s\n' "$out_np" | grep 'sha=9999999' || true)"
+printf '%s' "$np_line" | grep -q 'next_phase=copilot' \
+    && pass "next_phase=copilot is emitted on the handoff line" \
+    || die "next_phase missing from the handoff: $np_line"
+
+# A legacy response without the field must not grow the token - a driver keying
+# on its presence would otherwise see an obligation that was never recorded.
+resp 8888888 91 8888888 approved 0
+out_legacy="$(MONITOR_EMITTED_DIR="$TMP/sess-np2" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s\n' "$out_legacy" | grep 'sha=8888888' | grep -q 'next_phase' \
+    && die "legacy response (no next_phase) still emitted the token" \
+    || pass "legacy response omits next_phase"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
