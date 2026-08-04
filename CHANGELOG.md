@@ -25,7 +25,7 @@
   a driver compensating with a raw `jq -r` would decode ESC/BEL straight into
   whatever renders its tool output - reintroducing at the last hop the injection
   the handoff line was hardened against. `review-bus-response-monitor.sh --note
-  <response>` now prints the note **JSON-escaped** (0 = emitted, 1 = no note,
+  <response> <sha256>` now prints the note **JSON-escaped** (0 = emitted, 1 = no note,
   2 = unreadable or malformed), so a hostile note is legible as data and inert as
   bytes, and a flagged-but-broken response is distinguishable from an absent one.
 

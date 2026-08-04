@@ -896,6 +896,92 @@ out_f2="$(BUS_DIR="$FMT_BUS" MONITOR_EMITTED_DIR="$FMT_EMIT" "$MONITOR" --once 2
 printf '%s' "$out_f2" | grep -q 'BUSTEST_REVIEW pr=7 ' \
     && pass "after the formatter recovers the same session delivers the response" \
     || die "the valid response stayed suppressed after the formatter recovered: $out_f2"
+# ── The hash and the parse must describe the SAME bytes ───────────────────
+# Both paths used to read the mutable path twice - hash one open, parse another.
+# A same-SHA replacement landing between them made the digest describe a
+# different revision from the emitted note. The earlier fixture only replaced the
+# file BEFORE the call, which cannot catch that; this one replaces it DURING the
+# call, from a stub `sha256sum` that fires the moment the hash is taken.
+INCALL="$TMP/incall"; mkdir -p "$INCALL/bin"
+python3 - "$INCALL/resp.json" <<'PYA'
+import json, sys
+json.dump({"pr":95,"sha":"aaaaaaa","status":"comments_posted","findings_count":1,
+           "reviewer":"codex","summary":"s","model_summary":"note A"}, open(sys.argv[1],"w"))
+PYA
+DIG_A_INCALL="$(sha256sum "$INCALL/resp.json" | awk '{print $1}')"
+cat > "$INCALL/bin/sha256sum" <<SWAP
+#!/usr/bin/env bash
+# Swap the response the instant its hash is taken - the exact TOCTOU window.
+python3 - "$INCALL/resp.json" <<'PYB'
+import json, sys
+json.dump({"pr":95,"sha":"aaaaaaa","status":"approved","findings_count":0,
+           "reviewer":"codex","summary":"s","model_summary":"note B"}, open(sys.argv[1],"w"))
+PYB
+exec /usr/bin/sha256sum "\$@"
+SWAP
+chmod +x "$INCALL/bin/sha256sum"
+rc_ic=0; out_ic="$(PATH="$INCALL/bin:$PATH" "$MONITOR" --note "$INCALL/resp.json" "$DIG_A_INCALL" 2>/dev/null)" || rc_ic=$?
+# Either the note that matches the advertised digest, or a refusal - never note B
+# under note A's digest.
+if [ "$rc_ic" -eq 0 ]; then
+    printf '%s' "$out_ic" | grep -q 'note B' \
+        && die "in-call replacement: emitted note B while accepting note A's digest" \
+        || pass "in-call replacement: emitted note matches the advertised digest"
+else
+    pass "in-call replacement: refused rather than emitting a mismatched note (rc=$rc_ic)"
+fi
+
+# ── A failing jq PROBE must not read as "no note" or a clean handoff ──────
+# `jq -e` exits non-zero both when the filter is false and when jq fails, so a
+# probe failure used to become MONITOR_NOTE_NONE / a normal handoff.
+PROBE="$TMP/probe"; mkdir -p "$PROBE/bin"
+cp "$NOTE_TMP/hostile.json" "$PROBE/resp.json"
+DIG_P="$(sha256sum "$PROBE/resp.json" | awk '{print $1}')"
+cat > "$PROBE/bin/jq" <<'JQF'
+#!/usr/bin/env bash
+# Fail ONLY the has() probe; everything else behaves normally.
+for a in "$@"; do
+  case "$a" in *'has("model_summary")'*) exit 3 ;; esac
+done
+exec /usr/bin/jq "$@"
+JQF
+chmod +x "$PROBE/bin/jq"
+rc_p=0; out_p="$(PATH="$PROBE/bin:$PATH" "$MONITOR" --note "$PROBE/resp.json" "$DIG_P" 2>/dev/null)" || rc_p=$?
+[ "$rc_p" -eq 2 ] && pass "--note: probe failure => 2, not 'no note'" \
+    || die "--note: probe failure returned $rc_p (must be 2)"
+
+# Same probe failure on the emit path must yield the parse-error sentinel, not a
+# normal handoff for a response that was never successfully inspected.
+EMITP="$TMP/emitprobe"; mkdir -p "$EMITP/responses"
+cp "$NOTE_TMP/hostile.json" "$EMITP/responses/resp-7777777.json"
+out_ep="$(PATH="$PROBE/bin:$PATH" BUS_DIR="$EMITP" MONITOR_EMITTED_DIR="$TMP/sess-ep" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_ep" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+    && pass "emit: probe failure => PARSE_ERROR sentinel" \
+    || die "emit: probe failure produced: $out_ep"
+printf '%s' "$out_ep" | grep -qE 'BUSTEST_REVIEW .*status=' \
+    && die "emit: probe failure still produced a normal handoff" \
+    || pass "emit: no handoff line from a failed probe"
+
+
+# ── Every documented --note invocation must match the required CLI ────────
+# The digest argument is REQUIRED; a doc advertising the one-argument form sends
+# a reader to a command that always exits 2. Check every layer that describes it,
+# not just the one that happened to be wrong.
+REPO_ROOT="$SCRIPT_DIR/../../.."
+for doc in "$SCRIPT_DIR/../SKILL.md" "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/README.md"; do
+    [ -f "$doc" ] || continue
+    docname="$(basename "$doc")"
+    # Normalise wrapped lines so a signature split across a line break is still
+    # seen as one invocation.
+    flat="$(tr '\n' ' ' < "$doc" | tr -s ' ')"
+    bad=0
+    # Any "--note <something>" that is not followed by a digest placeholder.
+    printf '%s' "$flat" | grep -qE -- '--note <response>`' && bad=1
+    printf '%s' "$flat" | grep -qE -- '--note "\$RESP_PATH"`' && bad=1
+    [ "$bad" -eq 0 ] \
+        && pass "$docname documents --note with its required digest argument" \
+        || die "$docname advertises a --note form that omits the required <sha256>"
+done
 
 
 # ── a faulting jq is a READ failure, not a verdict on the content ──────────

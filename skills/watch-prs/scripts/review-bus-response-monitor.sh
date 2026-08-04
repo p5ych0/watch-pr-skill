@@ -69,6 +69,8 @@ ACK_EXPECT=""
 NOTE_MODE=0
 NOTE_FILE=""
 NOTE_EXPECT=""
+NOTE_SNAP=""
+probe_rc=0
 
 case "${1:-}" in
     --once)
@@ -113,6 +115,35 @@ case "${1:-}" in
         ;;
 esac
 
+# Copy a response to a private snapshot, so a hash and a parse describe the SAME
+# bytes. Reading the path twice is a TOCTOU: resp-<sha>.json is mutable, and a
+# same-SHA re-review landing between the two reads made the digest describe one
+# revision while the emitted note came from another.
+snapshot_response() {   # <file> ; prints the snapshot path
+    local src="$1" dst
+    dst="$(mktemp "${TMPDIR:-/tmp}/review-bus-resp.XXXXXX")" || return 1
+    if ! cp -- "$src" "$dst" 2>/dev/null; then
+        rm -f "$dst" 2>/dev/null
+        return 1
+    fi
+    printf '%s' "$dst"
+}
+
+# `jq -e` exits non-zero BOTH when the filter is false and when jq itself fails,
+# so a probe failure was indistinguishable from "the key is absent" - turning an
+# execution error into a benign "no note" or a normal handoff. Capture the
+# boolean as text under an explicit status guard instead.
+#   0 = true · 1 = false · 2 = the probe itself failed
+jq_probe() {   # <filter> <json>
+    local out
+    out="$(jq -r "$1" <<< "$2" 2>/dev/null)" || return 2
+    case "$out" in
+        true)  return 0 ;;
+        false) return 1 ;;
+        *)     return 2 ;;
+    esac
+}
+
 if [ "$NOTE_MODE" -eq 1 ]; then
     if [ -z "$NOTE_FILE" ] || [ ! -f "$NOTE_FILE" ]; then
         printf 'MONITOR_NOTE_ERROR reason=missing_response file=%s\n' "${NOTE_FILE:-<none>}" >&2
@@ -124,7 +155,12 @@ if [ "$NOTE_MODE" -eq 1 ]; then
     # `length == 1` guard for. Requiring exactly one top-level object is the only
     # check that rejects that shape, and reusing the captured object afterwards
     # means no later read can disagree with the one that was validated.
-    if ! NOTE_JSON="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$NOTE_FILE" 2>/dev/null)"; then
+    if ! NOTE_SNAP="$(snapshot_response "$NOTE_FILE")"; then
+        printf 'MONITOR_NOTE_ERROR reason=snapshot_failed file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    trap 'rm -f "$NOTE_SNAP" 2>/dev/null || true' EXIT
+    if ! NOTE_JSON="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$NOTE_SNAP" 2>/dev/null)"; then
         printf 'MONITOR_NOTE_ERROR reason=malformed_response file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
@@ -151,20 +187,29 @@ if [ "$NOTE_MODE" -eq 1 ]; then
             printf 'MONITOR_NOTE_ERROR reason=bad_expected_digest file=%s\n' "$NOTE_FILE" >&2
             exit 2
         fi
-        NOTE_ACTUAL="$(sha256sum "$NOTE_FILE" 2>/dev/null | awk '{print $1}')"
+        # Hash the SNAPSHOT, the same bytes that were parsed above.
+        NOTE_ACTUAL="$(sha256sum "$NOTE_SNAP" 2>/dev/null | awk '{print $1}')"
         if [ "$NOTE_ACTUAL" != "$NOTE_EXPECT" ]; then
             printf 'MONITOR_NOTE_ERROR reason=digest_mismatch file=%s expected=%s actual=%s\n' \
                 "$NOTE_FILE" "$NOTE_EXPECT" "${NOTE_ACTUAL:-<unreadable>}" >&2
             exit 2
         fi
     fi
-    if ! jq -e 'has("model_summary")' <<< "$NOTE_JSON" >/dev/null 2>&1; then
+    # `|| probe_rc=$?`, never a bare call: jq_probe returns 1 for a legitimate
+    # "false", and a bare command returning non-zero terminates the script under
+    # `set -e` before the status can be inspected.
+    probe_rc=0; jq_probe 'has("model_summary")' "$NOTE_JSON" || probe_rc=$?
+    if [ "$probe_rc" -eq 2 ]; then
+        printf 'MONITOR_NOTE_ERROR reason=probe_failed file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    if [ "$probe_rc" -eq 1 ]; then
         printf 'MONITOR_NOTE_NONE file=%s\n' "$NOTE_FILE" >&2
         exit 1
     fi
     # A present-but-wrong-typed note is malformed, not absent - saying "no note"
     # there would let a broken response read as a clean review with nothing to add.
-    if ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$NOTE_JSON" >/dev/null 2>&1; then
+    if ! jq_probe '(.model_summary | type) == "string" and (.model_summary | length) > 0' "$NOTE_JSON"; then
         printf 'MONITOR_NOTE_ERROR reason=note_not_a_nonempty_string file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
@@ -260,13 +305,24 @@ emit_response() {
     [ -f "$file" ] || return 0
 
     base="$(basename "$file")"
+    # Snapshot FIRST, then hash and parse that one copy. Hashing the path and
+    # parsing it separately is a TOCTOU: a same-SHA re-review landing between the
+    # two reads made the advertised digest describe a different revision from the
+    # line it was advertised on - and `--note` verifies against that digest.
+    local snapf
+    if ! snapf="$(snapshot_response "$file")"; then
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=snapshot_failed\n' "$PREFIX" "$file"
+        return 0
+    fi
+
     # A digest failure is not "nothing to emit". Returning silently here made an
     # unreadable response (mode 000, a bad block, a hasher fault) exit `--once`
     # with zero output - byte-identical to an empty responses dir, which is
     # exactly the reading a polling driver takes. The one case that IS a no-op is
-    # the file having genuinely disappeared between the find and this read, so
-    # that is verified before staying quiet.
-    if ! digest="$(response_digest "$file" 2>/dev/null)" || [ -z "$digest" ]; then
+    # the response having genuinely disappeared, so that is verified before
+    # staying quiet.
+    if ! digest="$(response_digest "$snapf" 2>/dev/null)" || [ -z "$digest" ]; then
+        rm -f "$snapf" 2>/dev/null || true
         if [ ! -e "$file" ]; then
             return 0            # vanished mid-sweep: a real no-op, not a failure
         fi
@@ -277,7 +333,10 @@ emit_response() {
     # Cross-session ACK gate: a response the Claude session already handled
     # (marker written via --ack after resolve + re-request, or merge) is never
     # re-emitted, even under a fresh per-session EMITTED_DIR.
-    [ -e "$ACK_DIR/${base}.${digest}" ] && return 0
+    if [ -e "$ACK_DIR/${base}.${digest}" ]; then
+        rm -f "$snapf" 2>/dev/null || true
+        return 0
+    fi
 
     # Parse the response ONCE, slurped, and require exactly one top-level object.
     # jq reads a STREAM: a file holding two objects produced one handoff line per
@@ -337,7 +396,7 @@ emit_response() {
                    or ($r.status == "approved" and $r.findings_count != 0)
                    or ($r.status == "comments_posted" and $r.findings_count < 1)
                 then empty else $r end
-            end' "$file" 2>/dev/null)" \
+            end' "$snapf" 2>/dev/null)" \
        ; then
         # A jq that FAILED is a read failure, not a verdict on the content: it
         # went through the deduplicating `invalid_response_shape` sentinel, which
@@ -353,13 +412,24 @@ emit_response() {
         # verdict, and repeating it every sweep is the flood this helper exists to
         # prevent.
         emit_sentinel "$file" "$digest" invalid_response_shape
+        rm -f "$snapf" 2>/dev/null || true
         return 0
     fi
+    rm -f "$snapf" 2>/dev/null || true
     # An optional note must be a non-empty string if present at all. A malformed
     # one must not raise the reviewer_note flag, or the driver would be told to
     # fetch a note that --note will refuse.
-    if jq -e 'has("model_summary")' <<< "$snap" >/dev/null 2>&1 \
-       && ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$snap" >/dev/null 2>&1; then
+    # Guarded probes: `jq -e` alone cannot distinguish "key absent" from "jq
+    # failed", so a probe failure would slip past this validation and produce a
+    # normal handoff for a response that was never successfully inspected.
+    local has_note
+    has_note=0; jq_probe 'has("model_summary")' "$snap" || has_note=$?
+    if [ "$has_note" -eq 2 ]; then
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=probe_failed\n' "$PREFIX" "$file"
+        return 0
+    fi
+    if [ "$has_note" -eq 0 ] \
+       && ! jq_probe '(.model_summary | type) == "string" and (.model_summary | length) > 0' "$snap"; then
         printf '%s_REVIEW_PARSE_ERROR resp=%s reason=note_not_a_nonempty_string\n' "$PREFIX" "$file"
         return 0
     fi
