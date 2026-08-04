@@ -45,6 +45,17 @@
   findings exist, and `.review-bus.md` loses the workaround paragraph it carried
   for exactly this bug.
 
+- **A response the monitor cannot group is reported, not dropped.**
+  `emit_response` validates a response and emits a `_REVIEW_PARSE_ERROR`
+  sentinel when it is malformed — but `replay_existing` never got that far: it
+  pulled `.pr` first and silently `continue`d on any file that produced none.
+  A truncated `resp-*.json`, a top-level array, or a bare string therefore made
+  `--once` exit 0 printing nothing, byte-identical to "no pending review", so a
+  polling driver read a lost review as "nothing to do". Ungroupable responses
+  now go through `emit_response`, and the shape check additionally requires a
+  numeric `.pr` — the field the handoff line names and the replay groups on —
+  so a well-formed object missing it surfaces the sentinel instead of `pr=null`.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

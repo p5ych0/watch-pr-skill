@@ -145,10 +145,17 @@ emit_response() {
     # two `resp=` tokens. A driver parsing positionally could read an ambiguous
     # clean status instead of a fail-closed sentinel. Validate BEFORE claiming the
     # emit marker so an invalid response is not silently marked as delivered.
+    #
+    # `.pr` is part of the shape, not an extra: the handoff line names the PR the
+    # driver acts on, and `replay_existing` groups by it. A response whose `.pr`
+    # is missing or non-numeric cannot be grouped OR acted on, so it must reach
+    # the driver as the sentinel rather than as `pr=null`.
     local snap
-    if ! snap="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$file" 2>/dev/null)" \
+    if ! snap="$(jq -s '
+            if length == 1 and (.[0] | type) == "object" and (.[0].pr | type) == "number"
+            then .[0] else empty end' "$file" 2>/dev/null)" \
        || [ -z "$snap" ]; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=not_a_single_json_object\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=not_a_single_json_object_with_numeric_pr\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -300,7 +307,16 @@ replay_existing() {
 
     for file in "${snapshot[@]}"; do
         pr="$(jq -r '.pr // empty' "$file" 2>/dev/null || true)"
-        [ -n "$pr" ] || continue
+        # A response we cannot group is NOT a response we can drop. Skipping it
+        # here bypassed emit_response's fail-closed guard entirely: a truncated or
+        # top-level-non-object `resp-*.json` produced no PR, was silently
+        # `continue`d, and `--once` exited 0 with no output - indistinguishable
+        # from "no pending review". Hand it to emit_response so the driver gets
+        # the _REVIEW_PARSE_ERROR sentinel instead of silence.
+        if [ -z "$pr" ]; then
+            emit_response "$file"
+            continue
+        fi
         if [ "$file" = "${latest_for_pr[$pr]:-}" ]; then
             emit_response "$file"
         else

@@ -97,6 +97,64 @@ grep -qi 'intent, never permission' "$PROMPT" \
   && pass "scope context is marked untrusted" \
   || die "prompt does not mark scope context as untrusted"
 
+
+# ── base-ref .review-bus.md: project guidance must not contradict the built-in ──
+# The guidance block is appended AFTER the built-in observation rule, and it is
+# trusted (it loads from the PR's BASE ref, so a PR cannot edit it). A project
+# file claiming the note is "surfaced to the author" therefore overrides the
+# built-in "RECORDED" statement with a promise no code keeps - reviewers would
+# file a mixed-review note believing it reached the author. This fixture proves
+# the guidance branch is actually reached, and that the built-in rule survives it.
+REPO2="$TMP/repo2"; mkdir -p "$REPO2"
+git -C "$REPO2" init -q
+git -C "$REPO2" config user.email t@example.com
+git -C "$REPO2" config user.name test
+cat > "$REPO2/.review-bus.md" <<'GUIDE'
+PROJECT_GUIDANCE_MARKER: enforce the house style.
+GUIDE
+echo seed > "$REPO2/seed.txt"
+git -C "$REPO2" add -A; git -C "$REPO2" commit -qm base
+git -C "$REPO2" branch -M main
+FULL2="$(git -C "$REPO2" rev-parse HEAD)"
+
+PROMPT2="$TMP/prompt2.txt"
+( export REPO_DIR="$REPO2" BUS_DIR="$TMP/bus2" \
+         REVIEW_BUS_REMOTE="git@github.com:test/demo.git"
+  # shellcheck disable=SC1090
+  source "$WATCHER" >/dev/null 2>&1
+  build_prompt "$PROMPT2" 9 "${FULL2:0:7}" pr-branch "$FULL2" "$SNAP" "$REPO2" )
+
+grep -q 'PROJECT_GUIDANCE_MARKER' "$PROMPT2" \
+  && pass "base-ref .review-bus.md guidance reaches the prompt" \
+  || die "base-ref guidance branch not exercised (marker absent)"
+
+grep -qi 'EVERY review' "$PROMPT2" \
+  && pass "the built-in observation rule survives alongside project guidance" \
+  || die "project guidance displaced the built-in observation rule"
+
+if grep -qi 'surfaced to the author\|delivered to the author' "$PROMPT2"; then
+    die "the assembled prompt promises surfacing that no code in this branch does"
+else
+    pass "the assembled prompt (guidance included) promises recording, not surfacing"
+fi
+
+# This repository's OWN .review-bus.md is loaded verbatim into the prompt when
+# reviewing this plugin, so the same contradiction has to be excluded at source.
+# Skipped where the file is absent (vendored scripts / a checkout without it).
+OWN_GUIDE="$SCRIPT_DIR/../../../.review-bus.md"
+if [ -f "$OWN_GUIDE" ]; then
+    if grep -qi 'surfaced to the author\|delivered to the author' "$OWN_GUIDE"; then
+        die "this repo's .review-bus.md claims the summary is surfaced, which no shipped code does"
+    else
+        pass "this repo's .review-bus.md does not claim the summary is surfaced"
+    fi
+    grep -qi 'not yet surfaced\|recorded' "$OWN_GUIDE" \
+      && pass "this repo's .review-bus.md states the note is recorded" \
+      || die "this repo's .review-bus.md does not state the recorded-only status"
+else
+    pass ".review-bus.md not present in this checkout; own-guidance assertions skipped"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

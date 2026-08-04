@@ -196,6 +196,47 @@ printf '%s' "$out_multi" | grep -qE 'BUSTEST_REVIEW (pr|.*status=)' \
     && pass "emit: no line carries two status= tokens" \
     || die "emit: a line carried multiple status= tokens"
 
+# ── replay path: a response that cannot be GROUPED must still be reported ────
+# The concatenated case above reaches emit_response only because `.pr` happens to
+# parse (twice). Anything jq cannot pull a `.pr` from - a truncated write, a
+# top-level array, a bare string - was `continue`d in replay_existing BEFORE the
+# fail-closed guard ran, so `--once` exited 0 printing nothing: byte-identical to
+# "no pending review". A driver polling the monitor reads that as "nothing to do"
+# and the review is lost. Each of these must surface the sentinel instead.
+i=0
+for bad in \
+    '{"pr":81,"sha":"2222222","status":"comments_posted","findings_c' \
+    '[{"pr":82,"sha":"3333333","status":"approved","findings_count":0}]' \
+    '"just a string"' \
+    '{"sha":"4444444","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":"85","sha":"5555555","status":"approved","findings_count":0,"reviewer":"codex"}'
+do
+    i=$((i + 1))
+    BAD_BUS="$TMP/badbus$i"; mkdir -p "$BAD_BUS/responses"
+    printf '%s' "$bad" > "$BAD_BUS/responses/resp-999999$i.json"
+    out_bad="$(BUS_DIR="$BAD_BUS" MONITOR_EMITTED_DIR="$TMP/embad$i" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_bad" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "replay: ungroupable response #$i surfaces the PARSE_ERROR sentinel" \
+        || die "replay: ungroupable response #$i produced silence (out='$out_bad')"
+    printf '%s' "$out_bad" | grep -qE 'BUSTEST_REVIEW pr=' \
+        && die "replay: ungroupable response #$i produced a handoff line: $out_bad" \
+        || pass "replay: ungroupable response #$i produced no handoff line"
+done
+
+# A well-formed response in the SAME dir as an ungroupable one must still be
+# delivered - the sentinel reports the broken file, it does not suppress the bus.
+MIX_BUS="$TMP/mixbus"; mkdir -p "$MIX_BUS/responses"
+printf '{"pr":86,"sha":"6666666","status":"approved","findings_count":0,"reviewer":"codex","summary":"ok"}' \
+    > "$MIX_BUS/responses/resp-6666666.json"
+printf '{"pr":87,"sha":"777' > "$MIX_BUS/responses/resp-7777777.json"
+out_mix="$(BUS_DIR="$MIX_BUS" MONITOR_EMITTED_DIR="$TMP/emmix" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_mix" | grep -q 'BUSTEST_REVIEW pr=86 ' \
+    && pass "replay: a good response is still delivered alongside a broken one" \
+    || die "replay: the good response was suppressed: $out_mix"
+printf '%s' "$out_mix" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+    && pass "replay: the broken sibling still reports the sentinel" \
+    || die "replay: the broken sibling was silent: $out_mix"
+
 
 # ── Control bytes must never reach the handoff line ───────────────────────
 # The strip is defence-in-depth for every interpolated field. The concatenated-
