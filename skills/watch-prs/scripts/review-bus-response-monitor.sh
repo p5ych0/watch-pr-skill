@@ -66,11 +66,29 @@ ONCE=0
 ACK_MODE=0
 ACK_FILE=""
 ACK_EXPECT=""
+NOTE_MODE=0
+NOTE_FILE=""
 
 case "${1:-}" in
     --once)
         ONCE=1
         shift
+        ;;
+    --note)
+        # Read the reviewer's own note out of a response, for a driver that saw
+        # `reviewer_note=1` on the handoff line.
+        #
+        # The note is model text derived from untrusted PR content, so it is
+        # emitted JSON-ESCAPED: a raw `jq -r` decode would hand ESC/BEL straight
+        # to whatever renders the driver's tool output, reintroducing at the last
+        # hop exactly the terminal/log injection the handoff line was hardened
+        # against. Escaped, a hostile note is legible as data and inert as bytes.
+        #
+        # Fail closed: 0 = note emitted · 1 = response carries no note · 2 =
+        # unreadable or malformed. A driver that saw the flag and gets 1 or 2 has
+        # a broken response, NOT an absent note.
+        NOTE_MODE=1
+        NOTE_FILE="${2:-}"
         ;;
     --ack)
         ACK_MODE=1
@@ -88,10 +106,35 @@ case "${1:-}" in
         ACK_EXPECT="${3:-}"
         ;;
     --help|-h)
-        echo "Usage: $0 [--once | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
+        echo "Usage: $0 [--once | --note <response-file> | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
         exit 0
         ;;
 esac
+
+if [ "$NOTE_MODE" -eq 1 ]; then
+    if [ -z "$NOTE_FILE" ] || [ ! -f "$NOTE_FILE" ]; then
+        printf 'MONITOR_NOTE_ERROR reason=missing_response file=%s\n' "${NOTE_FILE:-<none>}" >&2
+        exit 2
+    fi
+    if ! jq -e 'type == "object"' "$NOTE_FILE" >/dev/null 2>&1; then
+        printf 'MONITOR_NOTE_ERROR reason=malformed_response file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    if ! jq -e 'has("model_summary")' "$NOTE_FILE" >/dev/null 2>&1; then
+        printf 'MONITOR_NOTE_NONE file=%s\n' "$NOTE_FILE" >&2
+        exit 1
+    fi
+    # A present-but-wrong-typed note is malformed, not absent — saying "no note"
+    # there would let a broken response read as a clean review with nothing to add.
+    if ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' "$NOTE_FILE" >/dev/null 2>&1; then
+        printf 'MONITOR_NOTE_ERROR reason=note_not_a_nonempty_string file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    # No -r: emit the JSON string literal, so an ESC byte stays as the four
+    # characters \u001b instead of becoming an escape the terminal acts on.
+    jq '.model_summary' "$NOTE_FILE"
+    exit 0
+fi
 
 # Preflight external tools (mirrors review-bus-codex-watcher.sh's require_tools)
 # so a missing dependency fails with a machine-parseable line + exit 127 instead

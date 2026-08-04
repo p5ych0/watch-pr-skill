@@ -29,6 +29,17 @@
   to read the note and relay it as untrusted, non-blocking context that can never
   affect status, findings, or a merge gate.
 
+- **The reviewer's note is read through a fail-closed helper, not by hand.**
+  `SKILL.md` previously told the driver to run
+  `REVIEWER_NOTE="$(jq -r '.model_summary' ...)"`, which is broken twice over: a
+  one-shot shell assignment emits nothing, so the note was silently dropped, and
+  a driver compensating with a raw `jq -r` would decode ESC/BEL straight into
+  whatever renders its tool output - reintroducing at the last hop the injection
+  the handoff line was hardened against. `review-bus-response-monitor.sh --note
+  <response>` now prints the note **JSON-escaped** (0 = emitted, 1 = no note,
+  2 = unreadable or malformed), so a hostile note is legible as data and inert as
+  bytes, and a flagged-but-broken response is distinguishable from an absent one.
+
 - **Fix: a schema-invalid reviewer result could earn a clean APPROVAL.**
   `process_review` validated `.findings` but never `.summary`, which the output
   schema requires on every review. A result such as `{"findings":[]}` fell into
