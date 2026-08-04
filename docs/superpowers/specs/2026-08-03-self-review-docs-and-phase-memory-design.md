@@ -25,8 +25,9 @@ No bus state records that a PR owes a Copilot pass, and the response the monitor
 surfaces says nothing about one, so a session can reach merge without ever
 asking. This has happened repeatedly in `p5ych0/strumok`.
 
-**Watcher crash-loop (issue #3).** In `write_auto_request()`, three intentional
-no-op branches use a bare `return` after a failed test, inheriting exit status 1.
+**Watcher crash-loop (issue #3).** *Shipped in 1.0.11, ahead of this sequencing.*
+In `write_auto_request()`, three intentional no-op branches use a bare `return`
+after a failed test, inheriting exit status 1.
 Under `set -Eeuo pipefail` with an unguarded caller, the daemon exits and systemd
 restarts it every few seconds.
 
@@ -45,12 +46,17 @@ acknowledged below where it bears on a decision, and fixed in separate work.
 
 ## Sequencing
 
-Three sub-projects, landed in this order, each its own PR:
+Three sub-projects, landed in this order. S3 and S1 are one PR each; **S2 is two**
+(see *Split into two deliveries* under Issue #212):
 
 1. **S3 — self-review docs** (this spec's first deliverable), including the
    watcher prompt change for task awareness.
 2. **S1 — reviewer-phase memory** and Copilot enforcement.
-3. **S2 — watcher fixes** for #3 and #212.
+3. **S2 — issue #212**, delivered in two PRs:
+   - **S2a — preservation**: the reviewer's summary is kept in the bus response
+     as `model_summary` on every review, including one with findings.
+   - **S2b — surfacing**: the handoff flag and the reader that delivers the note
+     to the driving session. S2 is not complete until S2b lands.
 
 Docs first was chosen deliberately: every later PR in this repo is then reviewed
 against written conventions.
@@ -120,7 +126,20 @@ Until #212 lands, `.review-bus.md` must carry strumok's "there is no channel for
 a non-blocking note" paragraph: with one or more findings the model's `summary`
 is discarded, and `findings[]` is not an alternative because every entry becomes
 a thread the merge gate requires resolved. The paragraph is marked as tied to
-issue #212 and is deleted by the S2 PR, so it cannot outlive the bug.
+issue #212 so it cannot outlive the bug.
+
+Because S2 ships in two parts, its retirement does too, and each part owns one
+half:
+
+- **S2a rewrites it.** Preservation lands, so the "summary is discarded"
+  statement becomes false and must go — but the note is recorded and not yet
+  delivered, so the paragraph is replaced by one saying exactly that. What it
+  must not say is that the author has seen the note.
+- **S2b deletes it.** Once the reader lands the note is delivered, and no caveat
+  remains to state.
+
+A worker who removes the paragraph outright at S2a has replaced a true warning
+with silence, which is the failure this split is most likely to cause.
 
 ## S1 — Reviewer-phase memory
 
@@ -167,7 +186,13 @@ available; skipping it by omission stops being possible.
 
 ## S2 — Watcher fixes
 
-### Issue #3
+### Issue #3 — DONE in 1.0.11
+
+Landed with S3 rather than S2: the crash-loop was reproducing live in this
+repository, so it was fixed as soon as the bus was armed here. `CHANGELOG.md`
+1.0.11 records it and `test-review-bus-noop-returns.sh` covers it. Nothing below
+is outstanding work — it is kept as the record of what the fix was and why the
+issue's own audit list was wider than the defect.
 
 `return 0` at `review-bus-codex-watcher.sh:854`, `:865`, `:879`. These are the
 defect: each follows a failed `[` test whose status the bare `return` inherits.
@@ -183,8 +208,41 @@ for the current head, assert no request is written, `write_auto_request` returns
 
 ### Issue #212
 
-The model's summary is preserved in the bus response as `model_summary`, and the
-monitor surfaces it in the handoff line alongside the findings count.
+The model's summary is preserved in the bus response as `model_summary` (**S2a**),
+and the driving session is told a note exists so it can read it (**S2b**). The two
+land separately; between them the note is recorded and not yet delivered, as the
+split record below sets out.
+
+**The handoff line carries a FLAG, never the text — S2b.** It emits `reviewer_note=1`
+alongside the findings count; the text itself is returned by a separate reader
+(`--note`), which the driver calls and treats as untrusted, non-blocking context.
+Inlining the note into the handoff is prohibited, and not as a style preference:
+the line is framed (`status=`, `findings=`, `resp=`) and parsed positionally, so
+note text containing a framing token would put a second copy of it on the line,
+and note text containing control bytes would be a log- and terminal-injection
+vector. The reader escapes both, which a bare interpolation cannot.
+
+An end-to-end assertion holds the line: raw note text must never appear in the
+handoff.
+
+**Split into two deliveries — decided 2026-08-04.** Preservation and surfacing
+ship as separate pull requests: the response gains `model_summary` in one, and
+the handoff flag plus the reader that hands the text to the driver land in the
+next. This paragraph is the accepted record of that split, on the base ref, so
+that a reviewer of the preservation PR is not reading its own narrative as
+permission — the split is authorised here or it is not authorised at all.
+
+What the split does **not** waive:
+
+- Between the two merges the note is *recorded and not delivered*. Any prompt,
+  `.review-bus.md`, or `README.md` text describing that window must say so, and
+  must not tell a reviewer the author has seen the note. A reviewer routing a
+  mixed-review observation into `summary` during that window is making a record,
+  not a handoff.
+- The surfacing obligation above is unchanged and undeferred in substance. It is
+  owed by the second PR, and the second PR is not optional: preservation without
+  delivery is an accepted *interim* state, never the end state.
+- Neither PR may merge with a description claiming the other's work.
 
 It is **not** posted as an issue-level comment. `latest_issue_comment_at()`
 (`:258-270`) takes any issue comment with no author filter, and
@@ -205,8 +263,12 @@ GitHub.
 
 New coverage:
 
-- `write_auto_request` no-op returns 0 with a terminal response present (#3).
-- A review with findings preserves `model_summary` (#212).
+- `write_auto_request` no-op returns 0 with a terminal response present (#3 —
+  already shipped in 1.0.11, listed for completeness).
+- A review with findings preserves `model_summary`, byte-exact (#212, S2a).
+- The handoff line flags a present note, and the reader returns its text safely
+  to the driver; an end-to-end mixed review (findings *and* a note) reaches the
+  session with both (#212, S2b). S2b does not merge without this.
 - Clean signoff writes `.codex-clean-<pr>` and `next_phase` in the response.
 - Auto-enqueue holds when all commits since the clean SHA carry the trailer.
 - Auto-enqueue invalidates and enqueues when any commit lacks it.
@@ -214,12 +276,17 @@ New coverage:
 
 ## Release
 
-Each PR bumps `.claude-plugin/plugin.json` and adds a CHANGELOG entry: S3 as
-1.0.11, S1 as 1.0.12, S2 as 1.0.13. Version numbers are assigned at merge, since
-the order can change.
+Each PR bumps `.claude-plugin/plugin.json` **and** `.codex-plugin/plugin.json`
+and adds a CHANGELOG entry: S3 as 1.0.11, S1 as 1.0.12, S2a as 1.0.13, S2b as
+1.0.14. Every PR gets its own version — S2's two parts are two releases, not one
+release split across two merges, because each changes observable behaviour on its
+own. Version numbers are assigned at merge, since the order can change.
 
 ## Consequences accepted
 
+- Between the S2a and S2b merges the reviewer's note is *recorded and not
+  delivered*. Every layer describing that window says so; no layer claims the
+  author has read it.
 - Issue #207 stays open through this work. The documents added by S3 are read
   from the PR head, so a PR editing them steers its own review until #207 lands.
 - The `Review-Phase: copilot` trailer is a convention the skill must apply. A
