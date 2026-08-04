@@ -2,6 +2,66 @@
 
 ## [1.0.13] — 2026-08-04
 
+- **The driver can read the reviewer's note.** 1.0.12 preserved the note in the
+  bus response; this makes it reachable. The handoff line gains
+  `reviewer_note=1` and `digest=`, and `review-bus-response-monitor.sh --note
+  <response> <sha256>` prints the note **JSON-escaped** so a hostile note is
+  legible as data and inert as bytes.
+
+**The note is flagged, not inlined.** It is model output derived from untrusted
+  PR context, so the handoff line carries only `reviewer_note=1` and the text is
+  read from `.model_summary` in the response file. Inlining it would let a note
+  carrying ESC/BEL bytes inject into a terminal or log, and one containing
+  `resp=` would put a second copy of a framing token into a line the driver
+  parses positionally. The assembled line is also stripped of all control bytes,
+  mirroring `emit_progress`. `SKILL.md`'s handling contract now tells the driver
+  to read the note and relay it as untrusted, non-blocking context that can never
+  affect status, findings, or a merge gate.
+
+- **The reviewer's note is read through a fail-closed helper, not by hand.**
+  `SKILL.md` previously told the driver to run
+  `REVIEWER_NOTE="$(jq -r '.model_summary' ...)"`, which is broken twice over: a
+  one-shot shell assignment emits nothing, so the note was silently dropped, and
+  a driver compensating with a raw `jq -r` would decode ESC/BEL straight into
+  whatever renders its tool output - reintroducing at the last hop the injection
+  the handoff line was hardened against. `review-bus-response-monitor.sh --note
+  <response>` now prints the note **JSON-escaped** (0 = emitted, 1 = no note,
+  2 = unreadable or malformed), so a hostile note is legible as data and inert as
+  bytes, and a flagged-but-broken response is distinguishable from an absent one.
+
+  The helper validates the response with a slurped `length == 1` guard and reuses
+  that captured object, because `jq` reads a stream: two concatenated objects
+  passed every per-object check and would have emitted two notes at exit 0.
+  `SKILL.md` runs the helper as the final command in the call so its exit status
+  survives - an earlier revision appended `; NOTE_RC=$?`, which made the call
+  report success whatever the helper returned. A test extracts that command from
+  `SKILL.md` and executes it, so the documented contract and the behaviour cannot
+  drift apart.
+
+- **The handoff line is validated and digest-bound.** `emit_response` also read
+  the response as a jq STREAM, so a file holding two objects produced two handoff
+  lines and the control-byte strip then removed the newline between them -
+  collapsing them into one line carrying two `status=` and two `resp=` tokens,
+  which a positional driver could read as an ambiguous clean status. It now
+  slurp-validates a single top-level object BEFORE claiming the emit marker, and
+  emits only a `_REVIEW_PARSE_ERROR` sentinel for anything invalid, including a
+  present-but-malformed note (which must never raise `reviewer_note=1`). The line
+  now carries `digest=`, and `--note` takes that digest and refuses to emit on
+  mismatch: `resp-<sha>.json` is mutable, so a same-SHA re-review could otherwise
+  hand the driver a newer note it would attribute to the earlier review - the
+  same binding `--ack-if-digest` already uses. The digest argument is
+  **required**: an optional one is not a binding at all, since an unset or
+  misparsed value would skip the check and emit whatever occupied the path.
+
+- **The note is emitted ASCII-only and monochrome (`jq -aM`).** Default jq output
+  is not terminal-inert: it leaves non-ASCII raw, so a U+202E bidi override
+  reached the renderer as bytes and could reorder surrounding text, and it adds
+  ANSI colour on a TTY when `NO_COLOR` is unset. The ESC/BEL test missed both
+  because it captured output rather than running on a terminal. Coverage now
+  includes a bidi/C1 payload and a TTY-style run.
+
+## [1.0.12] — 2026-08-03
+
 - **Fix: the reviewer's own summary was discarded whenever a review reported
   findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
   model result only in the zero-findings branch; with one or more findings it was

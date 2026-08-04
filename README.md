@@ -41,16 +41,15 @@ rule into their own `.review-bus.md`.
 
 A **non-blocking observation** has its own channel: the reviewer's `summary`.
 Every finding becomes a review thread the merge gate requires resolved, so a note
-filed there would block the merge however it is labelled - but `summary` is
-preserved on **every** review, including one that reports findings, and kept in
-the bus response as `model_summary`. So a concern the reviewer declines to force
-into a line-attached finding survives in the review record rather than being
-discarded. (Surfacing it to the driving session — a `reviewer_note=1` flag on the
-handoff line plus a helper that reads the text back safely — ships separately;
-the note is *recorded* here, not yet delivered.) (Before 1.0.13 it was overwritten by a
-status line whenever a review had findings, and the prompt had to tell reviewers
-to drop such observations entirely.) Copilot's equivalent is its overall review
-body, which the bus does not count as findings.
+filed there would block the merge however it is labelled — but `summary` is
+preserved on **every** review, including one that reports findings. The handoff
+line flags it as `reviewer_note=1` and the text is read from `.model_summary` in
+the response file — it is model output derived from untrusted PR content, so it
+is never inlined into a line the driver parses. So a concern the reviewer declines to
+force into a line-attached finding is not lost. (Before 1.0.13 the summary was
+overwritten by a status line whenever a review had findings, and the prompt had
+to tell reviewers to drop such observations entirely.) Copilot's equivalent is
+its overall review body, which the bus does not count as findings.
 
 Everything is derived from the repo's git `origin`, so it works in any project
 unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
