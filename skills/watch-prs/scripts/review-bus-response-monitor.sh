@@ -144,6 +144,24 @@ jq_probe() {   # <filter> <json>
     esac
 }
 
+# Print the sha256 of $1, or return 1. NEVER prints anything else.
+#
+# `sha256sum ... | awk ... || true` masked the pipeline's status, and a command
+# substitution keeps whatever was written BEFORE a failure - so partial output
+# could be advertised as a digest, and a clean failure produced an empty string
+# the callers could not tell apart from "nothing to do". The status is checked
+# and the result must be exactly 64 lowercase hex characters; anything else is a
+# failure the caller has to handle.
+response_digest() {
+    local out
+    out="$(sha256sum "$1" 2>/dev/null | awk '{print $1}')" || return 1
+    case "$out" in
+        *[!0-9a-f]*|"") return 1 ;;
+    esac
+    [ "${#out}" -eq 64 ] || return 1
+    printf '%s' "$out"
+}
+
 if [ "$NOTE_MODE" -eq 1 ]; then
     if [ -z "$NOTE_FILE" ] || [ ! -f "$NOTE_FILE" ]; then
         printf 'MONITOR_NOTE_ERROR reason=missing_response file=%s\n' "${NOTE_FILE:-<none>}" >&2
@@ -187,8 +205,14 @@ if [ "$NOTE_MODE" -eq 1 ]; then
             printf 'MONITOR_NOTE_ERROR reason=bad_expected_digest file=%s\n' "$NOTE_FILE" >&2
             exit 2
         fi
-        # Hash the SNAPSHOT, the same bytes that were parsed above.
-        NOTE_ACTUAL="$(sha256sum "$NOTE_SNAP" 2>/dev/null | awk '{print $1}')"
+        # Hash the SNAPSHOT, the same bytes that were parsed above. Unguarded,
+        # a faulting hasher took the whole script down under `set -e` carrying
+        # the TOOL's exit code (7), not the documented 2 - and with no
+        # MONITOR_NOTE_ERROR line, so the caller saw an unexplained status.
+        if ! NOTE_ACTUAL="$(response_digest "$NOTE_SNAP")"; then
+            printf 'MONITOR_NOTE_ERROR reason=digest_failed file=%s\n' "$NOTE_FILE" >&2
+            exit 2
+        fi
         if [ "$NOTE_ACTUAL" != "$NOTE_EXPECT" ]; then
             printf 'MONITOR_NOTE_ERROR reason=digest_mismatch file=%s expected=%s actual=%s\n' \
                 "$NOTE_FILE" "$NOTE_EXPECT" "${NOTE_ACTUAL:-<unreadable>}" >&2
@@ -243,9 +267,6 @@ require_tools
 
 mkdir -p "$RESP_DIR" "$EMITTED_DIR" "$ACK_DIR" "$PROGRESS_DIR"
 
-response_digest() {
-    sha256sum "$1" | awk '{print $1}'
-}
 
 # Claim an emit marker atomically.
 #   0 = claimed by us · 1 = someone already holds it · 2 = it could not be written
@@ -315,13 +336,13 @@ emit_response() {
         return 0
     fi
 
-    # A digest failure is not "nothing to emit". Returning silently here made an
-    # unreadable response (mode 000, a bad block, a hasher fault) exit `--once`
-    # with zero output - byte-identical to an empty responses dir, which is
-    # exactly the reading a polling driver takes. The one case that IS a no-op is
-    # the response having genuinely disappeared, so that is verified before
-    # staying quiet.
-    if ! digest="$(response_digest "$snapf" 2>/dev/null)" || [ -z "$digest" ]; then
+    # A digest failure is NOT "nothing to emit". Returning silently here made a
+    # faulting hasher indistinguishable from an empty responses dir, and the
+    # digest is load-bearing: the ack gate, the emit marker and `--note`'s
+    # verification are all keyed on it, so a partial or absent value must stop
+    # the emit loudly. The ONE genuine no-op is the response having disappeared,
+    # which is verified rather than assumed.
+    if ! digest="$(response_digest "$snapf")"; then
         rm -f "$snapf" 2>/dev/null || true
         if [ ! -e "$file" ]; then
             return 0            # vanished mid-sweep: a real no-op, not a failure
@@ -490,6 +511,7 @@ emit_response() {
     # unlike the content reasons. Claiming the digest here retired a valid
     # response for the whole session.
     if [ -z "$line" ]; then
+        rm -f "$marker" 2>/dev/null || true
         printf '%s_REVIEW_PARSE_ERROR reason=empty_line resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
@@ -532,8 +554,7 @@ mark_emitted() {
     local file="$1" base digest
     [ -f "$file" ] || return 0
     base="$(basename "$file")"
-    digest="$(response_digest "$file" 2>/dev/null || true)"
-    [ -n "$digest" ] || return 0
+    digest="$(response_digest "$file")" || return 0
     : > "$EMITTED_DIR/${base}.${digest}"
 }
 
@@ -663,7 +684,7 @@ replay_existing() {
 if [ "$ACK_MODE" -eq 1 ]; then
     { [ -n "$ACK_FILE" ] && [ -f "$ACK_FILE" ]; } || { echo "MONITOR_ACK_FATAL no_such_response=${ACK_FILE:-<none>}" >&2; exit 1; }
     _ack_base="$(basename "$ACK_FILE")"
-    _ack_digest="$(response_digest "$ACK_FILE" 2>/dev/null || true)"
+    _ack_digest="$(response_digest "$ACK_FILE")" || _ack_digest=""
     [ -n "$_ack_digest" ] || { echo "MONITOR_ACK_FATAL cannot_digest=$ACK_FILE" >&2; exit 1; }
     : > "$ACK_DIR/${_ack_base}.${_ack_digest}"
     echo "MONITOR_ACKED resp=$_ack_base digest=${_ack_digest:0:12}"

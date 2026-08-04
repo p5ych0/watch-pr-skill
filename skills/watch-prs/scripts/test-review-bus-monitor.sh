@@ -996,6 +996,28 @@ cat > "$TMP/jqfbin/jq" <<'SH'
 #!/usr/bin/env bash
 # Fault ONLY the slurped shape check.
 if [ -n "${FAULT_SHAPE:-}" ] && printf '%s' "$*" | grep -q 'invalid_response_shape_probe\|length != 1 or'; then
+# ── the hasher and the formatter must fail CLOSED, not quietly ──────────────
+# Both were `... || true`, which keeps whatever bytes the tool wrote before it
+# failed. So a faulting hasher produced an empty digest that returned silently -
+# byte-identical to "nothing to emit" - and a faulting formatter could write a
+# plausible `status=approved findings=0` line and still be accepted. These stubs
+# fail exactly one tool, leaving everything else real.
+FAULT_BIN="$TMP/faultbin"; mkdir -p "$FAULT_BIN"
+cat > "$FAULT_BIN/sha256sum" <<'SH'
+#!/usr/bin/env bash
+# Fault injection: emit plausible partial output, then fail.
+if [ -n "${FAULT_SHA:-}" ]; then
+    printf 'deadbeef  %s\n' "${1:-}"
+    exit 7
+fi
+exec /usr/bin/sha256sum "$@"
+SH
+cat > "$FAULT_BIN/jq" <<'SH'
+#!/usr/bin/env bash
+# Fault injection scoped to the HANDOFF formatter only (its filter is the one
+# that builds a "<PREFIX>_REVIEW pr=" line); every other jq call runs for real.
+if [ -n "${FAULT_JQ:-}" ] && printf '%s' "$*" | grep -q '_REVIEW pr='; then
+    printf 'BUSTEST_REVIEW pr=90 sha=aaaaaaa status=approved findings=0 reviewer=codex summary= digest=x resp=/x\n'
     exit 7
 fi
 exec /usr/bin/jq "$@"
@@ -1036,6 +1058,65 @@ if [ -w /dev/full ]; then
 else
     pass "/dev/full not writable here; failed-delivery rollback check skipped"
 fi
+chmod +x "$FAULT_BIN/sha256sum" "$FAULT_BIN/jq"
+
+FAULT_BUS="$TMP/faultbus"; mkdir -p "$FAULT_BUS/responses"
+printf '{"pr":90,"sha":"aaaaaaa","status":"approved","findings_count":0,"reviewer":"codex","summary":"ok","model_summary":"note"}' \
+    > "$FAULT_BUS/responses/resp-aaaaaaa.json"
+
+# (a) A faulting hasher: sentinel, no handoff, and nothing marked as delivered.
+FAULT_EMIT="$TMP/em-fault-sha"
+out_fs="$(PATH="$FAULT_BIN:$PATH" FAULT_SHA=1 BUS_DIR="$FAULT_BUS" \
+          MONITOR_EMITTED_DIR="$FAULT_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_fs" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+    && pass "hash failure => PARSE_ERROR sentinel (not silence)" \
+    || die "hash failure produced no sentinel (out='$out_fs')"
+printf '%s' "$out_fs" | grep -q 'BUSTEST_REVIEW pr=' \
+    && die "hash failure still produced a handoff line: $out_fs" \
+    || pass "hash failure produced no handoff line"
+printf '%s' "$out_fs" | grep -q 'deadbeef' \
+    && die "partial hasher output was advertised as a digest: $out_fs" \
+    || pass "partial hasher output is not advertised as a digest"
+
+# (b) A faulting formatter: only the sentinel, and the emit marker is RELEASED so
+# a later sweep can retry - the response was never delivered.
+FAULT_EMIT2="$TMP/em-fault-jq"
+out_fj="$(PATH="$FAULT_BIN:$PATH" FAULT_JQ=1 BUS_DIR="$FAULT_BUS" \
+          MONITOR_EMITTED_DIR="$FAULT_EMIT2" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_fj" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+    && pass "formatter failure => PARSE_ERROR sentinel" \
+    || die "formatter failure produced no sentinel (out='$out_fj')"
+printf '%s' "$out_fj" | grep -q 'status=approved' \
+    && die "the formatter's pre-failure output was emitted as a handoff: $out_fj" \
+    || pass "pre-failure formatter output is not emitted"
+[ -z "$(ls -A "$FAULT_EMIT2" 2>/dev/null)" ] \
+    && pass "formatter failure leaves no emit marker claimed" \
+    || die "a failed emit still claimed its marker (would suppress the retry)"
+
+# (c) Once the fault clears, the SAME response is delivered normally - proof the
+# failure path did not permanently retire it.
+out_ok="$(BUS_DIR="$FAULT_BUS" MONITOR_EMITTED_DIR="$TMP/em-fault-ok" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_ok" | grep -q 'BUSTEST_REVIEW pr=90 ' \
+    && pass "after the fault clears the response is delivered" \
+    || die "the response was lost after a transient failure: $out_ok"
+
+# (d) --note must report the DOCUMENTED exit 2 when the hasher faults, with its
+# MONITOR_NOTE_ERROR line - not the tool's raw code (7) and silence.
+NOTE_RESP="$FAULT_BUS/responses/resp-aaaaaaa.json"
+NOTE_DIGEST="$(sha256sum "$NOTE_RESP" | awk '{print $1}')"
+err_note="$(PATH="$FAULT_BIN:$PATH" FAULT_SHA=1 BUS_DIR="$FAULT_BUS" \
+            "$MONITOR" --note "$NOTE_RESP" "$NOTE_DIGEST" 2>&1 >/dev/null || true)"
+# `|| rc_note=$?`, never a bare call: a failing command under `set -e` kills the
+# suite before the status can be read - the very trap this fix is about.
+rc_note=0
+PATH="$FAULT_BIN:$PATH" FAULT_SHA=1 BUS_DIR="$FAULT_BUS" \
+    "$MONITOR" --note "$NOTE_RESP" "$NOTE_DIGEST" >/dev/null 2>&1 || rc_note=$?
+[ "$rc_note" -eq 2 ] \
+    && pass "--note: hash failure exits 2 (documented), not the tool's code" \
+    || die "--note: hash failure exited $rc_note (want 2)"
+printf '%s' "$err_note" | grep -q 'MONITOR_NOTE_ERROR' \
+    && pass "--note: hash failure emits MONITOR_NOTE_ERROR" \
+    || die "--note: hash failure was silent (err='$err_note')"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

@@ -60,6 +60,24 @@
   because it captured output rather than running on a terminal. Coverage now
   includes a bidi/C1 payload and a TTY-style run.
 
+- **The digest and the handoff formatter fail closed.** Both ran under
+  `... || true`, and a command substitution keeps whatever the tool wrote before
+  it failed — so the two fail-closed boundaries the monitor depends on could be
+  crossed by a faulting tool rather than a malicious one. A failing `sha256sum`
+  produced an empty digest and returned *silently*, indistinguishable from
+  "nothing to emit", while its partial output could instead be advertised as a
+  valid digest — the value the ack gate, the emit marker and `--note`'s
+  verification are all keyed on. A failing `jq` in the formatter was worse: it
+  could write a plausible `status=approved findings=0` line, have its exit code
+  discarded, and see that line emitted as a normal handoff. Hashing now goes
+  through one helper that checks the status and requires exactly 64 lowercase hex
+  characters; the formatter's status is checked before its output is accepted;
+  both failures emit `_REVIEW_PARSE_ERROR` instead of silence or a handoff; and a
+  failed emit releases its marker so a later sweep retries rather than treating
+  the response as delivered. On the `--note` side the unguarded hash took the
+  script down under `set -e` carrying the tool's own exit code (7) with no
+  `MONITOR_NOTE_ERROR` line; it now reports the documented exit 2.
+
 ## [1.0.12] — 2026-08-03
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
