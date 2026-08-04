@@ -186,6 +186,25 @@ for the current head, assert no request is written, `write_auto_request` returns
 The model's summary is preserved in the bus response as `model_summary`, and the
 monitor surfaces it in the handoff line alongside the findings count.
 
+**Split into two deliveries — decided 2026-08-04.** Preservation and surfacing
+ship as separate pull requests: the response gains `model_summary` in one, and
+the handoff flag plus the reader that hands the text to the driver land in the
+next. This paragraph is the accepted record of that split, on the base ref, so
+that a reviewer of the preservation PR is not reading its own narrative as
+permission — the split is authorised here or it is not authorised at all.
+
+What the split does **not** waive:
+
+- Between the two merges the note is *recorded and not delivered*. Any prompt,
+  `.review-bus.md`, or `README.md` text describing that window must say so, and
+  must not tell a reviewer the author has seen the note. A reviewer routing a
+  mixed-review observation into `summary` during that window is making a record,
+  not a handoff.
+- The surfacing obligation above is unchanged and undeferred in substance. It is
+  owed by the second PR, and the second PR is not optional: preservation without
+  delivery is an accepted *interim* state, never the end state.
+- Neither PR may merge with a description claiming the other's work.
+
 It is **not** posted as an issue-level comment. `latest_issue_comment_at()`
 (`:258-270`) takes any issue comment with no author filter, and
 `auto_preflight_ready()` (`:818-826`) uses it as the "round was closed out" gate.
