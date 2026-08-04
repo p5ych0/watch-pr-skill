@@ -43,7 +43,14 @@ chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH"
 export GH_FIXTURE_DIR="$TMP"   # lets the fake gh return per-review-id comment fixtures
 
-run_copilot() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+# EVERY invocation gets a bus under $TMP. `request` is stateful - it records an
+# unavailability marker - and the default bus path is derived from the fake
+# origin, so an un-overridden call wrote /tmp/acme-widget-review-bus/... : state
+# that outlived the trap and could be read by the next run of this suite, or by a
+# concurrent one. The later blocks still point BUS_DIR at their own directories;
+# this is the floor, not a replacement for them.
+DEFAULT_BUS="$TMP/defaultbus"; mkdir -p "$DEFAULT_BUS"
+run_copilot() { BUS_DIR="$DEFAULT_BUS" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
 
 # ---- Task 1: scaffold ----------------------------------------------------
 # Identity derives from a fake origin, repo-agnostic, no side effects on source.
@@ -350,6 +357,46 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)";
   && pass "gate: after the revocation the gate waits for the requested pass" \
   || die "gate: still merged on the revoked unavailability (rc=$rc out='$out')"
 
+# (z) The rc 4 path (Copilot ALREADY reviewed the current head) is proof of
+# availability too, and it returns BEFORE the `gh pr edit` that owned the
+# revocation - so the stale marker survived, and the gate answered
+# `status=unavailable` (merge) from it without ever reading that review's
+# findings.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":9}]' \
+    "$HEAD40" > "$TMP/reviews-head.json"
+GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 4 ] && pass "request: already-reviewed current head still returns 4" \
+  || die "request: already-reviewed-head rc changed (got $rc)"
+[ ! -e "$UNAVAIL_BUS/.copilot-unavailable-7" ] \
+  && pass "request: the already-reviewed-head path revokes the stale marker too" \
+  || die "request: stale unavailable marker survived the rc 4 path"
+# With the marker gone the gate must read the REVIEW, findings and all.
+printf '[{"path":"a.sh","line":1,"body":"x"}]' > "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=1' \
+  && pass "gate: after revocation it reads the review's findings, not the marker" \
+  || die "gate: did not fall through to the live review (rc=$rc out='$out')"
+rm -f "$TMP/comments-9.json"
+
+# (aa) A paginated page that is not an ARRAY must fail closed. `jq -s` slurps
+# pages into an array of pages, and `.[][]` over an OBJECT iterates its values -
+# so a `{}` page (a 200-with-error body, or a truncated write) made
+# `[.[][]] | length` return 0 with status 0. A real current-head review plus one
+# such page therefore reported findings=0 and the gate reported status=clean.
+printf '{}' > "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'status=error' \
+  && pass "gate: object-shaped comments page => 2 (no false clean signoff)" \
+  || die "gate: malformed comments page read as zero findings (rc=$rc out='$out')"
+printf '{"message":"Not Found"}' > "$TMP/reviews-bad.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-bad.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] \
+  && pass "gate: object-shaped reviews page never yields a clean signoff" \
+  || die "gate: malformed reviews page produced a pass (out='$out')"
+rm -f "$TMP/comments-9.json"
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling
@@ -367,6 +414,15 @@ if [ -f "$DOC" ]; then
 else
     pass "copilot doc not present (vendored scripts); routing assertions skipped"
 fi
+
+# ---- no state outside $TMP ------------------------------------------------
+# The bus path is derived from the fake origin, so a missed BUS_DIR override
+# writes to a FIXED /tmp path shared by every run of this suite.
+for stray in /tmp/acme-widget-review-bus; do
+    [ -e "$stray" ] \
+      && die "suite left state at the fixed path $stray (a BUS_DIR override is missing)" \
+      || pass "no state left at the fixed path $stray"
+done
 
 # ---- final ---------------------------------------------------------------
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi

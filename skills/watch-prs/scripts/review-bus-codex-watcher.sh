@@ -994,13 +994,27 @@ write_auto_request() {
                 # block is not all trailers - yet that message passed the regex
                 # and suppressed Codex for an untagged commit. Messages are
                 # base64'd out of jq so newlines survive the hand-off intact.
+                # The shape check must reach the fields it reads, not stop at the
+                # top level. `.commits` as an OBJECT still answers `length` and
+                # still iterates under `.commits[]`, so a payload with
+                # status=ahead, total_commits=1 and one trailer-bearing value
+                # produced tagged=1 and took CODEX_AUTO_SKIP - suppressing Codex
+                # on a response whose shape proves nothing. Require the array,
+                # the numeric count, and a string message on every element.
                 if cmp_eval="$(jq -e -sr '
                         if length != 1 or (.[0] | type) != "object" then empty
                         else .[0] as $c
-                          | [ ($c.status // "?"),
-                              ($c.total_commits // -1),
-                              ($c.commits | length) ] | @tsv,
-                            ($c.commits[] | .commit.message | @base64)
+                          | if ($c.status | type) != "string"
+                               or ($c.total_commits | type) != "number"
+                               or ($c.commits | type) != "array"
+                               or any($c.commits[];
+                                      type != "object"
+                                      or (.commit | type) != "object"
+                                      or (.commit.message | type) != "string")
+                            then empty
+                            else [ $c.status, $c.total_commits, ($c.commits | length) ] | @tsv,
+                                 ($c.commits[] | .commit.message | @base64)
+                            end
                         end' <<< "$cmp_json" 2>/dev/null)"; then
                     IFS=$'\t' read -r cmp_status reported total <<< "$(head -1 <<< "$cmp_eval")"
                     tagged=0

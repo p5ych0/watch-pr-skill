@@ -56,7 +56,32 @@ copilot_reviews() {
     if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews" --paginate 2>/dev/null); then
         return 2
     fi
-    printf '%s' "$raw" | jq -s --arg bot "$COPILOT_BOT" '[.[][] | select(.user.login==$bot)]' 2>/dev/null || return 2
+    # `jq -s` slurps the paginated stream into an ARRAY OF PAGES, and nothing
+    # guaranteed each page is itself an array. `.[][]` over an object iterates its
+    # VALUES, so a `{"message":"Not Found"}` page (a 200-with-error body, or a
+    # truncated write) flowed through as data instead of failing. Reject any page
+    # that is not an array before reading a single field.
+    printf '%s' "$raw" | jq -s --arg bot "$COPILOT_BOT" '
+        if any(.[]; type != "array") then error("non-array page")
+        else [.[][] | select(.user.login==$bot)] end' 2>/dev/null || return 2
+}
+
+# Drop a recorded unavailability for this PR. 0 = no marker, or removed; 1 = it
+# is still there.
+#
+# ANY proof that Copilot is reachable makes the marker false, and the gate
+# consults it BEFORE live review state — so a marker left behind short-circuits
+# to `status=unavailable` and merges, even when the review that proved
+# availability carries findings. Both of `cmd_request`'s availability-proving
+# exits therefore revoke: the accepted `gh pr edit`, AND the earlier
+# already-reviewed-current-head path, which returns before ever reaching the
+# edit. Callers treat a failed revocation as fail-closed, never as success.
+revoke_unavailable() {
+    local umark="$BUS_DIR/.copilot-unavailable-${1}"
+    [ -e "$umark" ] || return 0
+    rm -f "$umark" 2>/dev/null || return 1
+    [ -e "$umark" ] && return 1
+    return 0
 }
 
 # 0 available (a prior Copilot review exists here) · 2 unknown → ASK.
@@ -128,6 +153,15 @@ cmd_request() {
     reviewed_head=$(printf '%s' "$reviews" | jq -r --arg h "$head" \
         'any(.[]; .commit_id==$h and .state!="PENDING" and .submitted_at!=null)' 2>/dev/null || echo false)
     if [ "$reviewed_head" = "true" ]; then
+        # A submitted review ON THIS HEAD is proof of availability, and this exit
+        # is taken BEFORE the `gh pr edit` that used to own the revocation - so
+        # without this the marker survived, and the gate answered
+        # `status=unavailable` (merge) from it instead of reading that very
+        # review, whose findings it never looked at.
+        if ! revoke_unavailable "$pr"; then
+            echo "COPILOT_REQUEST pr=$pr status=error sha=${head:0:7} detail=stale_unavailable_marker_not_revoked" >&2
+            return 2
+        fi
         echo "COPILOT_REQUEST pr=$pr status=already_reviewed_head sha=${head:0:7}"
         return 4
     fi
@@ -140,15 +174,7 @@ cmd_request() {
     # silently skip the Copilot pass the user opted into).
     local err
     if err=$(gh pr edit "$pr" --repo "$REPO_SLUG" --add-reviewer "@copilot" 2>&1); then
-        # Copilot just accepted the request, so any recorded unavailability for
-        # this head is stale. The gate checks that marker BEFORE live review
-        # state, so leaving it would let an unavailable->available retry merge
-        # immediately while the pass it just requested is still running.
-        # Revocation failing is fail-closed-relevant: the gate would keep
-        # honouring a marker that is now false, so say so loudly and report the
-        # transient code rather than a clean "requested".
-        local umark="$BUS_DIR/.copilot-unavailable-${pr}"
-        if [ -e "$umark" ] && ! rm -f "$umark" 2>/dev/null; then
+        if ! revoke_unavailable "$pr"; then
             echo "COPILOT_REQUEST pr=$pr status=error sha=${head:0:7} detail=stale_unavailable_marker_not_revoked" >&2
             return 2
         fi
@@ -196,7 +222,16 @@ head_review_findings() {
     if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews/$found/comments" --paginate 2>/dev/null); then
         return 2
     fi
-    n=$(printf '%s' "$raw" | jq -s '[.[][]] | length' 2>/dev/null) || return 2
+    # Same page-shape trap, and here it is a merge-gate input: a successful
+    # response whose page is `{}` made `[.[][]] | length` return 0 with status 0,
+    # so a real current-head review plus one malformed page reported findings=0
+    # and the gate reported `status=clean`. Any non-array page fails closed (2).
+    n=$(printf '%s' "$raw" | jq -s '
+        if any(.[]; type != "array") then error("non-array page")
+        else [.[][]] | length end' 2>/dev/null) || return 2
+    case "$n" in
+        ""|*[!0-9]*) return 2 ;;
+    esac
     printf '%s' "$n"
     return 0
 }

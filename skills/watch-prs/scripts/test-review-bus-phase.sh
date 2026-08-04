@@ -312,6 +312,41 @@ requested \
     && pass "multiline-corrupted clean marker => reviewed" \
     || die "a marker with trailing junk authorised a hold"
 
+
+# ── 16. A malformed `.commits` must not be read as a tagged range ───────────
+# Validating only the TOP-LEVEL object left the fields it reads unchecked: an
+# OBJECT-shaped `.commits` still answers `length` and still iterates under
+# `.commits[]`, so status=ahead + total_commits=1 + one trailer-bearing value
+# produced tagged=1 and took CODEX_AUTO_SKIP - suppressing Codex on a payload
+# whose shape proves nothing about the range.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+cat > "$GH_COMPARE_OUT" <<'JSON'
+{"status":"ahead","total_commits":1,"commits":{"a":{"commit":{"message":"fix(review): tagged\n\nReview-Phase: copilot"}}}}
+JSON
+enqueue
+requested \
+    && pass "object-shaped .commits => reviewed (shape proves nothing)" \
+    || die "an object-shaped .commits authorised a phase hold"
+
+# The same for the individual fields the parse reads back.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+cat > "$GH_COMPARE_OUT" <<'JSON'
+{"status":"ahead","total_commits":"1","commits":[{"commit":{"message":"fix(review): tagged\n\nReview-Phase: copilot"}}]}
+JSON
+enqueue
+requested \
+    && pass "string total_commits => reviewed" \
+    || die "a non-numeric total_commits was accepted"
+
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+cat > "$GH_COMPARE_OUT" <<'JSON'
+{"status":"ahead","total_commits":1,"commits":[{"commit":{"message":["fix(review): tagged","Review-Phase: copilot"]}}]}
+JSON
+enqueue
+requested \
+    && pass "non-string commit message => reviewed" \
+    || die "a non-string commit message was accepted"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

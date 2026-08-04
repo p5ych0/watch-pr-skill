@@ -123,6 +123,27 @@
   detection now runs each commit message through `git interpret-trailers
   --parse`, and the compare response is shape-checked in a single guarded `jq`.
 
+- **Shape checks reach the fields that are read.** Three parses validated only
+  their outer container. The `compare` parse checked the top-level object, but an
+  OBJECT-shaped `.commits` still answers `length` and still iterates under
+  `.commits[]`, so `status=ahead` + `total_commits=1` + one trailer-bearing value
+  produced `tagged=1` and suppressed Codex on a payload that proved nothing about
+  the range; it now requires the array, a numeric count, and a string message on
+  every element. Both paginated Copilot readers slurp with `jq -s` into an array
+  of PAGES and then flattened with `.[][]`, which over an object iterates its
+  VALUES — so a single `{}` page (a 200-with-error body, or a truncated write)
+  made the comment count return 0 with a success status, and a genuine
+  current-head review plus that page reported `findings=0` and let the merge gate
+  answer `status=clean`. Any non-array page now fails closed.
+
+- **Every proof of Copilot's availability revokes the recorded unavailability.**
+  The revocation ran only after `gh pr edit` succeeded, but `request` returns
+  earlier — rc 4 — when Copilot has already submitted a review on the current
+  head. That exit left the marker in place, and the gate reads it *before* live
+  review state, so it answered `status=unavailable` (merge) without ever looking
+  at that review's findings. Both paths now revoke, and a failed revocation is
+  reported as an error rather than a clean result.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With
