@@ -150,10 +150,17 @@ grep -qE 'MERGE_SHA' "$SKILL" \
     && pass "merge rechecks head after the Copilot pass (MERGE_SHA gate)" \
     || die "merge does not recheck head after the Copilot pass (TOCTOU)"
 # The merge block must also confirm the head only advanced past the Codex-reviewed
-# SHA via the loop's own fix(review): commits (no unreviewed change slipped in).
-grep -qE 'non-fix\(review\)|rev-list --count' "$SKILL" \
-    && pass "merge verifies head advanced only via fix(review) commits (Codex-vetted)" \
+# SHA through the loop's own Copilot-fix commits (no unreviewed change slipped
+# in). The check now lives in review-bus-merge-range.sh — classifying by the
+# `Review-Phase` trailer and proving ancestry — because the inline version
+# classified by a `fix(review):` subject, which any commit can carry, and no test
+# executed it. Assert the delegation, and that the range result is acted on.
+grep -q 'review-bus-merge-range.sh' "$SKILL" \
+    && pass "merge delegates the REVIEWED_SHA..HEAD check to review-bus-merge-range.sh" \
     || die "merge does not verify the REVIEWED_SHA..HEAD delta is Codex-vetted"
+grep -qE 'RANGE=\$\?' "$SKILL" && grep -qE '\[ "\$RANGE" -ne 0 \]' "$SKILL" \
+    && pass "merge blocks on a non-zero range result (inspection failure fails closed)" \
+    || die "merge does not act on the range check's exit status"
 # The unresolved-thread gate must be RE-RUN inside the final merge block (the
 # ask/poll window can open a new thread after step 8's check).
 [ "$(grep -c 'reviewThreads(first:100, after:' "$SKILL")" -ge 2 ] \

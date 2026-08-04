@@ -14,6 +14,36 @@
   `set -Eeuo pipefail` would have exited `write_auto_request` and taken the
   watcher down with it.
 
+- **The merge-range check is a script, not inline prose.** It lived in
+  `SKILL.md`, where nothing executed it, so two defects survived review: it
+  classified intervening commits by a `fix(review):` SUBJECT (any commit can
+  carry one, so unrelated work could merge unreviewed), and `git log | grep -c`
+  masked a failing `git log` behind a successful `grep` while the commit count
+  was checked for text but not exit status. `review-bus-merge-range.sh` now owns
+  it — ancestry first, classification by git's own trailer parser, both git calls
+  captured and guarded separately, and inspection failures returning 2 so the
+  caller fails closed. `test-review-bus-merge-range.sh` covers the subject-only
+  commit, a marker-shaped body line, divergent history, and every inspection
+  failure.
+
+- **Markers are validated, not repaired.** Both the watcher and
+  `review-bus-copilot.sh` read SHA markers with `tr -cd '0-9a-f'`, which
+  sanitises corrupt content into something valid-looking: a marker holding
+  `x<40-hex>x` became a usable SHA, so damaged state could authorise a phase hold
+  or satisfy the merge gate with no signoff, decline, or unavailability ever
+  recorded. Each marker must now match `^[0-9a-f]{40}$` exactly, or it is treated
+  as absent.
+
+- **The compare response is parsed once, and only trusted when the parse
+  succeeds.** Four separate `jq ... || echo ""` substitutions accepted a PARTIAL
+  parse as evidence: with valid JSON followed by trailing garbage, jq emits the
+  values and then exits non-zero, and the fallback appended only a blank line
+  that command substitution strips. The trailer test also matched any line in the
+  message, so `subject / Review-Phase: copilot / ordinary body` — which git
+  reports as having no trailer — suppressed Codex for an untagged commit. Both
+  are fixed: one guarded `jq` whose output is discarded unless it exits zero, and
+  a trailer test scoped to the final block of the message.
+
 - **The merge gate classifies by trailer and checks ancestry.** It previously
   accepted any commit whose subject began `fix(review):`, so unrelated work with
   that subject could merge without Codex ever seeing it, and a force-pushed

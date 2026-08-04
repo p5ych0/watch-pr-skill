@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# review-bus-merge-range.sh — may a head be merged on a signoff given earlier?
+#
+# This logic used to live inline in SKILL.md, where nothing executed it, so both
+# of its defects survived review: it classified intervening commits by a
+# `^fix(review):` SUBJECT (any commit can carry one, so unrelated work could
+# merge unreviewed), and `git log | grep -c` masked a failing `git log` behind a
+# successful `grep`. Extracting it is what makes these cases testable at all.
+#
+# Self-contained: throwaway git repos under mktemp -d. No network, no gh.
+
+set -Eeuo pipefail
+
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SELF_DIR/review-bus-merge-range.sh"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
+
+fail=0
+pass() { printf 'ok   - %s\n' "$1"; }
+die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
+
+REPO="$TMP/repo"; mkdir -p "$REPO"
+git -C "$REPO" init -q
+git -C "$REPO" config user.email t@example.com
+git -C "$REPO" config user.name test
+
+commit() {  # <message>
+    echo "$RANDOM$RANDOM" > "$REPO/f.txt"
+    git -C "$REPO" add -A
+    git -C "$REPO" commit -q -m "$1"
+}
+
+run() { rc=0; out="$("$SCRIPT" "$@" "$REPO" 2>&1)" || rc=$?; }
+
+commit "base"
+BASE="$(git -C "$REPO" rev-parse HEAD)"
+
+# ── Identical heads: nothing intervened ────────────────────────────────────
+run "$BASE" "$BASE"
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'commits=0'; } \
+    && pass "identical reviewed/head => 0" || die "identical heads: rc=$rc out=$out"
+
+# ── Every intervening commit properly tagged ───────────────────────────────
+commit "fix(review): first Copilot fix
+
+Review-Phase: copilot"
+commit "fix(review): second Copilot fix
+
+Review-Phase: copilot"
+TAGGED_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run "$BASE" "$TAGGED_HEAD"
+[ "$rc" -eq 0 ] && pass "all intervening commits tagged => 0 (safe to merge past)" \
+    || die "fully tagged range blocked: rc=$rc out=$out"
+
+# ── A `fix(review):` SUBJECT without the trailer must NOT pass ─────────────
+# This is the defect the old inline gate had: subject-matching let any commit
+# with that subject through, so unrelated work could merge unreviewed.
+commit "fix(review): looks like a Copilot fix but carries no trailer"
+SUBJ_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run "$BASE" "$SUBJ_HEAD"
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untagged_commit'; } \
+    && pass "fix(review): subject without the trailer => 1 (blocked)" \
+    || die "a bare fix(review): subject passed the gate: rc=$rc out=$out"
+
+# ── A marker-shaped BODY line is not a trailer ────────────────────────────
+# git looks for trailers in the final block; this message has none.
+git -C "$REPO" reset -q --hard "$TAGGED_HEAD"
+commit "subject line
+
+Review-Phase: copilot
+
+ordinary body paragraph"
+BODY_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run "$BASE" "$BODY_HEAD"
+[ "$rc" -eq 1 ] \
+    && pass "marker-shaped body line is not a trailer => 1 (blocked)" \
+    || die "a body line counted as a trailer: rc=$rc out=$out"
+
+# ── Divergent history: the signoff does not cover this head ───────────────
+git -C "$REPO" checkout -q -b side "$BASE"
+commit "fix(review): on a divergent branch
+
+Review-Phase: copilot"
+SIDE="$(git -C "$REPO" rev-parse HEAD)"
+run "$TAGGED_HEAD" "$SIDE"
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'not_an_ancestor'; } \
+    && pass "divergent history => 1, even fully tagged" \
+    || die "divergent range was not blocked: rc=$rc out=$out"
+
+# ── Inspection failures fail CLOSED (2), never 0 ──────────────────────────
+run "$BASE" "0000000000000000000000000000000000000000"
+[ "$rc" -eq 2 ] && pass "unresolvable head => 2 (caller fails closed)" \
+    || die "unresolvable head did not return 2: rc=$rc out=$out"
+
+run "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "$TAGGED_HEAD"
+[ "$rc" -eq 2 ] && pass "unresolvable reviewed sha => 2" \
+    || die "unresolvable reviewed sha did not return 2: rc=$rc out=$out"
+
+rc=0; out="$("$SCRIPT" "$BASE" "$TAGGED_HEAD" "$TMP/not-a-repo" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] && pass "non-repo directory => 2" || die "non-repo did not return 2: rc=$rc"
+
+rc=0; out="$("$SCRIPT" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] && pass "missing arguments => 2" || die "missing args did not return 2: rc=$rc"
+
+# ── SKILL.md must call the script, not re-implement the range check ───────
+# The inline version is what escaped review; a copy drifting back in would
+# reintroduce both defects with this suite still green.
+SKILL_MD="$SELF_DIR/../SKILL.md"
+if [ -f "$SKILL_MD" ]; then
+    grep -q 'review-bus-merge-range.sh' "$SKILL_MD" \
+        && pass "SKILL.md delegates the range check to the script" \
+        || die "SKILL.md no longer calls review-bus-merge-range.sh"
+    grep -q "grep -c '\^fix(review):'" "$SKILL_MD" \
+        && die "SKILL.md still classifies intervening commits by subject" \
+        || pass "SKILL.md no longer classifies by fix(review): subject"
+else
+    pass "SKILL.md not present beside the scripts; delegation check skipped"
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "RESULT: FAIL"
+    exit 1
+fi
+echo "RESULT: PASS"

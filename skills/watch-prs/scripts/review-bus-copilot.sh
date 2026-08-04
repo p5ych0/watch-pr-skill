@@ -78,6 +78,23 @@ cmd_available() {
     return 2       # no evidence either way → ASK (empty search ≠ unavailable)
 }
 
+# Read a marker that must hold exactly one 40-hex SHA. Prints it, or fails.
+#
+# Deliberately NOT `tr -cd '0-9a-f'`: that REPAIRS corrupt content instead of
+# rejecting it - a marker containing `x<40-hex>x` would sanitise to a
+# valid-looking SHA, so damaged state could satisfy the merge gate without any
+# decline or unavailability having been recorded.
+read_sha_marker() {
+    local v
+    v="$(cat "$1" 2>/dev/null)" || return 1
+    v="${v%%$'\n'*}"
+    case "$v" in
+        *[!0-9a-f]*|"") return 1 ;;
+    esac
+    [ "${#v}" -eq 40 ] || return 1
+    printf '%s' "$v"
+}
+
 # 40-hex head OID of a PR (empty on failure).
 pr_head_oid() {
     gh pr view "$1" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null || true
@@ -243,14 +260,14 @@ cmd_gate() {
 
     # Copilot positively unavailable for THIS head, recorded by `request` rc 3.
     marker="$BUS_DIR/.copilot-unavailable-${pr}"
-    if [ -f "$marker" ] && [ "$(tr -cd '0-9a-f' < "$marker" 2>/dev/null)" = "$head" ]; then
+    if [ -f "$marker" ] && [ "$(read_sha_marker "$marker" || true)" = "$head" ]; then
         echo "COPILOT_GATE pr=$pr sha=$short status=unavailable"
         return 0
     fi
 
     marker="$BUS_DIR/.copilot-declined-${pr}"
     if [ -f "$marker" ]; then
-        recorded="$(tr -cd '0-9a-f' < "$marker" 2>/dev/null)"
+        recorded="$(read_sha_marker "$marker" || true)"
         if [ "$recorded" = "$head" ]; then
             echo "COPILOT_GATE pr=$pr sha=$short status=declined"
             return 0

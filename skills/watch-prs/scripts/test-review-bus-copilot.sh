@@ -280,6 +280,22 @@ out="$(GH_HEAD="$OTHER40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"
   && pass "gate: unavailability does not carry past the head it was recorded for" \
   || die "gate: stale unavailable marker accepted (rc=$rc)"
 
+
+# (v) A malformed marker must not satisfy the gate. `tr -cd` would have repaired
+# `x<40-hex>x` into a valid-looking SHA, so corrupt state could authorise a merge
+# with no decline and no unavailability ever recorded.
+printf 'x%sx\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && pass "gate: malformed unavailable marker is not repaired into a pass" \
+  || die "gate: malformed unavailable marker accepted (rc=$rc out='$out')"
+
+printf 'x%sx\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-declined-7"
+rm -f "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && pass "gate: malformed decline marker is not repaired into a pass" \
+  || die "gate: malformed decline marker accepted (rc=$rc out='$out')"
+rm -f "$UNAVAIL_BUS/.copilot-declined-7"
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling

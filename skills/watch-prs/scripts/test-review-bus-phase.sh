@@ -236,6 +236,55 @@ chmod 700 "$BUS_DIR"
     && pass "marker removal failure is non-fatal under set -e (daemon survives)" \
     || die "unguarded rm killed write_auto_request under strict mode"
 
+
+# ── 11. A partially-parsed compare must not authorise a hold ──────────────
+# Valid JSON followed by trailing garbage: jq emits the values and THEN exits
+# non-zero. With four separate `jq ... || echo ""` substitutions the fallback
+# appended only a blank line, which $( ) strips - so the checks ran on data from
+# a failed parse. One guarded jq discards everything when the parse fails.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+printf '{"status":"ahead","total_commits":1,"commits":[{"commit":{"message":"x\n\nReview-Phase: copilot"}}]} TRAILING-GARBAGE\n' > "$GH_COMPARE_OUT"
+enqueue
+requested \
+    && pass "compare with trailing garbage => reviewed (partial parse is not evidence)" \
+    || die "a partially-parsed compare authorised a hold"
+
+# ── 12. A marker-shaped BODY line is not a git trailer ────────────────────
+# git looks for trailers in the FINAL block. "subject / Review-Phase: copilot /
+# ordinary body" has no trailer, so holding on it would suppress Codex for an
+# untagged commit - the unsafe direction this feature exists to prevent.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "subject line
+
+Review-Phase: copilot
+
+ordinary body paragraph"
+enqueue
+requested \
+    && pass "marker-shaped body line (not a trailer) => reviewed" \
+    || die "a body line was treated as a Review-Phase trailer"
+
+# The real footer form must still hold.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): a real one
+
+Review-Phase: copilot"
+enqueue
+{ ! requested; } \
+    && pass "genuine trailer in the final block still holds" \
+    || die "a genuine trailer stopped holding (over-strict)"
+
+# ── 13. A malformed clean marker must not authorise a hold ────────────────
+# `tr -cd` would REPAIR this into a valid-looking SHA.
+printf 'x%sx\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "malformed clean marker => reviewed (not repaired into a hold)" \
+    || die "a malformed marker was sanitised into a valid hold"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

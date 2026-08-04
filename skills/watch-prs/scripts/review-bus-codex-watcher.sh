@@ -348,6 +348,19 @@ write_response() {
 # Always returns 0. A marker that cannot be written costs the memory — the next
 # head is then reviewed normally — which is the safe direction. Failing the
 # review over it would trade a redundant pass for a lost one.
+# Read a marker that must hold exactly one 40-hex SHA. Prints it, or fails.
+#
+# Deliberately NOT `tr -cd '0-9a-f'`: that REPAIRS corrupt content rather than
+# rejecting it - `x<40-hex>x` would sanitise to a valid-looking SHA - so a
+# damaged marker could authorise a phase hold that no clean signoff earned.
+read_sha_marker() {
+    local v
+    v="$(cat "$1" 2>/dev/null)" || return 1
+    v="${v%%$'\n'*}"
+    [[ "$v" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s' "$v"
+}
+
 record_clean_signoff() {
     local pr="$1" full_sha="$2" marker="$BUS_DIR/.codex-clean-${1}"
     if ! printf '%s\n' "$full_sha" > "${marker}.tmp" 2>/dev/null \
@@ -949,41 +962,55 @@ write_auto_request() {
     # Every uncertainty falls through to a REVIEW: an unreadable marker, a failed
     # compare, or an empty commit list. A wrong hold means a commit is never
     # reviewed; a wrong review costs one redundant pass.
-    local clean_marker clean_sha cmp_json cmp_status total reported tagged
+    local clean_marker clean_sha cmp_json cmp_eval cmp_status reported total tagged
     clean_marker="$BUS_DIR/.codex-clean-${pr}"
     if [ -f "$clean_marker" ]; then
-        clean_sha="$(tr -cd '0-9a-f' < "$clean_marker" 2>/dev/null || true)"
-        if [ "${#clean_sha}" -eq 40 ] && [ "$clean_sha" != "$head_oid" ]; then
+        # STRICT: the marker must contain exactly one 40-hex SHA. Sanitising it
+        # with `tr -cd` would REPAIR a malformed marker - `x<40-hex>x` normalises
+        # to a valid-looking SHA - so corrupt state could authorise a hold.
+        clean_sha="$(read_sha_marker "$clean_marker")" || clean_sha=""
+        if [ -n "$clean_sha" ] && [ "$clean_sha" != "$head_oid" ]; then
             if cmp_json="$(gh api "repos/$REPO_SLUG/compare/${clean_sha}...${head_oid}" 2>/dev/null)"; then
-                # The compare endpoint describes BASE..HEAD, and three of its
-                # properties have to hold before a hold is safe:
+                # ONE guarded jq. Splitting this into four `jq ... || echo ""`
+                # substitutions accepted a PARTIAL parse as evidence: on a
+                # response with valid JSON followed by trailing garbage, jq emits
+                # the values and THEN exits non-zero, and the `|| echo ""`
+                # fallback only appended a blank line that `$( )` strips - so the
+                # checks below ran on data from a failed parse. Here a non-zero
+                # jq discards everything.
                 #
-                #  1. `status` must be `ahead` (or `identical`). After a
-                #     force-push the range can be `diverged` and STILL return a
-                #     fully tagged commit list - none of which is reachable from
-                #     the signed-off SHA, so the signoff does not cover this head.
-                #  2. `total_commits` must equal the returned list length. The
-                #     unpaginated list is capped at 250, so a longer range comes
-                #     back truncated and an untagged commit beyond the cap would
-                #     be invisible to the count below.
-                #  3. every returned commit must carry the trailer.
-                #
-                # Any of these unproven means REVIEW, not hold: a wrong hold means
-                # a commit is never reviewed, a wrong review costs one pass.
-                cmp_status="$(jq -r '.status // empty' <<< "$cmp_json" 2>/dev/null || echo "")"
-                reported="$(jq -r '.total_commits // empty' <<< "$cmp_json" 2>/dev/null || echo "")"
-                total="$(jq '.commits | length' <<< "$cmp_json" 2>/dev/null || echo "")"
-                # Anchor the trailer to its own line so the phrase appearing in
-                # prose (a doc commit describing the convention) cannot pass.
-                tagged="$(jq '[.commits[] | select(.commit.message | test("(^|\n)Review-Phase: copilot[[:space:]]*($|\n)"))] | length' <<< "$cmp_json" 2>/dev/null || echo "")"
-                if { [ "$cmp_status" = "ahead" ] || [ "$cmp_status" = "identical" ]; } \
-                   && [[ "$reported" =~ ^[0-9]+$ ]] && [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
-                   && [ "$reported" -eq "$total" ] \
-                   && [ "$total" -gt 0 ] && [ "$total" -eq "$tagged" ]; then
-                    echo "CODEX_AUTO_SKIP pr=$pr reason=copilot_phase clean_sha=${clean_sha:0:7} commits=$total"
-                    return 0
+                # The trailer test uses the FINAL block of the message, which is
+                # where git looks for trailers. A bare line test matched
+                # "subject / Review-Phase: copilot / ordinary body", which git
+                # reports as having NO trailer - suppressing Codex for an
+                # untagged commit, the unsafe direction.
+                if cmp_eval="$(jq -e -sr '
+                        if length != 1 or (.[0] | type) != "object" then empty
+                        else .[0] as $c
+                          | [ ($c.status // "?"),
+                              ($c.total_commits // -1),
+                              ($c.commits | length),
+                              ([ $c.commits[]
+                                 | select((.commit.message | split("\n\n") | last // "")
+                                          | test("(^|\n)Review-Phase:[ \t]*copilot[ \t]*(\n|$)")) ] | length) ]
+                          | @tsv
+                        end' <<< "$cmp_json" 2>/dev/null)"; then
+                    IFS=$'\t' read -r cmp_status reported total tagged <<< "$cmp_eval"
+                    # `ahead`/`identical` proves the signed-off SHA is reachable
+                    # from this head (a force-pushed `diverged` range can list
+                    # fully tagged commits it does not cover); total_commits ==
+                    # listed proves the 250-commit cap did not truncate the list.
+                    if { [ "$cmp_status" = "ahead" ] || [ "$cmp_status" = "identical" ]; } \
+                       && [[ "$reported" =~ ^[0-9]+$ ]] && [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
+                       && [ "$reported" -eq "$total" ] \
+                       && [ "$total" -gt 0 ] && [ "$total" -eq "$tagged" ]; then
+                        echo "CODEX_AUTO_SKIP pr=$pr reason=copilot_phase clean_sha=${clean_sha:0:7} commits=$total"
+                        return 0
+                    fi
+                    echo "CODEX_PHASE_INVALIDATED pr=$pr clean_sha=${clean_sha:0:7} status=${cmp_status:-?} reported=${reported:-?} listed=${total:-?} tagged=${tagged:-?}"
+                else
+                    echo "CODEX_PHASE_INVALIDATED pr=$pr clean_sha=${clean_sha:0:7} reason=compare_unparseable"
                 fi
-                echo "CODEX_PHASE_INVALIDATED pr=$pr clean_sha=${clean_sha:0:7} status=${cmp_status:-unknown} reported=${reported:-?} listed=${total:-?} tagged=${tagged:-?}"
             fi
             # Best-effort, and NEVER fatal. Under `set -Eeuo pipefail` an
             # unguarded failure here would exit write_auto_request, and its

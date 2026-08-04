@@ -473,16 +473,9 @@ fi
 # SHA is even reachable from this head. This mirrors the watcher's own hold
 # conditions; if the two disagree, the merge gate is the one that must be strict.
 if [ "$MERGE_SHA" != "$REVIEWED_SHA" ]; then
-    if ! git -C "$WT" merge-base --is-ancestor "$REVIEWED_SHA" "$HEAD_OID" 2>/dev/null; then
-        echo "merge blocked: Codex-reviewed $REVIEWED_SHA is not an ancestor of $HEAD_OID (force-push / divergent history) — the signoff does not cover this head."; exit 0
-    fi
-    TOTAL=$(git -C "$WT" rev-list --count "${REVIEWED_SHA}..${HEAD_OID}" 2>/dev/null)
-    # %(trailers:key=Review-Phase,valueonly) prints the trailer VALUE per commit,
-    # so a mention in the body or subject cannot be mistaken for one.
-    TAGGED=$(git -C "$WT" log --format='%(trailers:key=Review-Phase,valueonly,separator=%x2C)' \
-                 "${REVIEWED_SHA}..${HEAD_OID}" 2>/dev/null | grep -c '^copilot$')
-    if [ -z "$TOTAL" ] || ! [[ "$TOTAL" =~ ^[0-9]+$ ]] || [ "$TOTAL" != "$TAGGED" ]; then
-        echo "merge blocked: head advanced past Codex-reviewed $REVIEWED_SHA via a commit without a 'Review-Phase: copilot' trailer (or the range could not be inspected) — Codex never vetted this head. Post a fresh summary + re-request Codex."; exit 0
+    "$RB_SCRIPTS"/review-bus-merge-range.sh "$REVIEWED_SHA" "$HEAD_OID" "$WT"; RANGE=$?
+    if [ "$RANGE" -ne 0 ]; then
+        echo "merge blocked: range check returned $RANGE (1 = an intervening commit has no 'Review-Phase: copilot' trailer, or the reviewed SHA is not an ancestor of the head; 2 = the range could not be inspected). Codex never vetted this head. Post a fresh summary + re-request Codex."; exit 0
     fi
 fi
 
