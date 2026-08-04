@@ -25,8 +25,9 @@ No bus state records that a PR owes a Copilot pass, and the response the monitor
 surfaces says nothing about one, so a session can reach merge without ever
 asking. This has happened repeatedly in `p5ych0/strumok`.
 
-**Watcher crash-loop (issue #3) — shipped in 1.0.11, ahead of this sequencing.** In `write_auto_request()`, three intentional
-no-op branches use a bare `return` after a failed test, inheriting exit status 1.
+**Watcher crash-loop (issue #3).** *Shipped in 1.0.11, ahead of this sequencing.*
+In `write_auto_request()`, three intentional no-op branches use a bare `return`
+after a failed test, inheriting exit status 1.
 Under `set -Eeuo pipefail` with an unguarded caller, the daemon exits and systemd
 restarts it every few seconds.
 
@@ -51,10 +52,11 @@ Three sub-projects, landed in this order. S3 and S1 are one PR each; **S2 is two
 1. **S3 — self-review docs** (this spec's first deliverable), including the
    watcher prompt change for task awareness.
 2. **S1 — reviewer-phase memory** and Copilot enforcement.
-3. **S2a — preservation**: the reviewer's summary is kept in the bus response as
-   `model_summary` on every review, including one with findings (#212).
-4. **S2b — surfacing**: the handoff flag and the reader that delivers the note to
-   the driving session (#212). S2 is not complete until S2b lands.
+3. **S2 — issue #212**, delivered in two PRs:
+   - **S2a — preservation**: the reviewer's summary is kept in the bus response
+     as `model_summary` on every review, including one with findings.
+   - **S2b — surfacing**: the handoff flag and the reader that delivers the note
+     to the driving session. S2 is not complete until S2b lands.
 
 Docs first was chosen deliberately: every later PR in this repo is then reviewed
 against written conventions.
@@ -206,10 +208,12 @@ for the current head, assert no request is written, `write_auto_request` returns
 
 ### Issue #212
 
-The model's summary is preserved in the bus response as `model_summary`, and the
-driving session is told a note exists so it can read it.
+The model's summary is preserved in the bus response as `model_summary` (**S2a**),
+and the driving session is told a note exists so it can read it (**S2b**). The two
+land separately; between them the note is recorded and not yet delivered, as the
+split record below sets out.
 
-**The handoff line carries a FLAG, never the text.** It emits `reviewer_note=1`
+**The handoff line carries a FLAG, never the text — S2b.** It emits `reviewer_note=1`
 alongside the findings count; the text itself is returned by a separate reader
 (`--note`), which the driver calls and treats as untrusted, non-blocking context.
 Inlining the note into the handoff is prohibited, and not as a style preference:
