@@ -244,23 +244,6 @@ What the split does **not** waive:
   delivery is an accepted *interim* state, never the end state.
 - Neither PR may merge with a description claiming the other's work.
 
-> **Amended 2026-08-04 — surfacing is split from preservation.** Inlining the
-> note in the handoff line proved unsafe: it is model output derived from
-> untrusted PR content, so interpolating it let a note carrying ESC/BEL inject
-> into a terminal or log, and one containing `resp=` put a second copy of a
-> framing token into a line the driver parses positionally.
->
-> Preservation ships here: `model_summary` is recorded verbatim in the bus
-> response on every review, including one that reports findings. **Surfacing
-> ships separately** — the handoff line gains `reviewer_note=1` and a
-> `digest=<sha256>`, and the text is read with
-> `review-bus-response-monitor.sh --note <response> <sha256>`, which emits it
-> JSON-escaped and refuses on a digest mismatch.
->
-> Until that lands, the reviewer prompt says the note is *recorded*, not
-> surfaced — the review record keeps it, and no driver contract claims to
-> deliver it.
-
 It is **not** posted as an issue-level comment. `latest_issue_comment_at()`
 (`:258-270`) takes any issue comment with no author filter, and
 `auto_preflight_ready()` (`:818-826`) uses it as the "round was closed out" gate.
