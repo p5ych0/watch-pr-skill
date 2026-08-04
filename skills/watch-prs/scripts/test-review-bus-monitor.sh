@@ -614,23 +614,56 @@ printf '%s' "$out_tty" | LC_ALL=C grep -q "$(printf '\033')\[" \
 # cannot drift apart.
 SKILL_MD="$SCRIPT_DIR/../SKILL.md"
 if [ -f "$SKILL_MD" ]; then
-    snippet="$(grep -m1 -- '--note "\$RESP_PATH"' "$SKILL_MD" || true)"
+    # Extract the WHOLE fenced block, not just the helper line. The block is the
+    # contract: a driver runs it in one Bash call, so anything it fails to derive
+    # for itself is a broken instruction. Injecting RESP_PATH/RESP_DIGEST from
+    # the test would hide exactly that - and did, while the block relied on a
+    # RESP_DIGEST no step ever assigned.
+    snippet="$(awk '/^LINE=.*_REVIEW line here/{f=1} f{print} f&&/--note "\$RESP_PATH"/{exit}' "$SKILL_MD")"
     if [ -n "$snippet" ]; then
         printf '%s' "$snippet" | grep -q 'NOTE_RC=\$?' \
             && die "SKILL.md still appends a trailing assignment (exit status would be masked)" \
             || pass "SKILL.md runs the helper as the final command (status propagates)"
+        printf '%s' "$snippet" | grep -q 'RESP_PATH=' \
+            && printf '%s' "$snippet" | grep -q 'RESP_DIGEST=' \
+            && pass "the documented block derives both values itself" \
+            || die "the documented block does not assign RESP_PATH and RESP_DIGEST"
 
-        # Execute the documented line verbatim against each failing shape.
+        # Run the block from a CLEAN environment: only RB_SCRIPTS is provided,
+        # exactly as a real driver would have it. LINE is filled with a real
+        # notification line for each shape.
         for shape in none:1 bad:2 two:2; do
             f="${shape%%:*}"; want="${shape##*:}"
+            d="$(sha256sum "$NOTE_TMP/$f.json" 2>/dev/null | awk '{print $1}')"
+            real_line="BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d resp=$NOTE_TMP/$f.json"
+            block="LINE='$real_line'
+${snippet#*$'\n'}"
             rc_doc=0
-            RB_SCRIPTS="$SCRIPT_DIR" RESP_PATH="$NOTE_TMP/$f.json" \
-                RESP_DIGEST="$(sha256sum "$NOTE_TMP/$f.json" 2>/dev/null | awk '{print $1}')" \
-                bash -c "$snippet" >/dev/null 2>&1 || rc_doc=$?
+            env -u RESP_PATH -u RESP_DIGEST -u LINE \
+                RB_SCRIPTS="$SCRIPT_DIR" PATH="$PATH" HOME="$HOME" \
+                bash -c "$block" >/dev/null 2>&1 || rc_doc=$?
             [ "$rc_doc" -eq "$want" ] \
-                && pass "documented snippet propagates exit $want for a $f response" \
-                || die "documented snippet returned $rc_doc for a $f response (want $want)"
+                && pass "documented block propagates exit $want for a $f response (clean env)" \
+                || die "documented block returned $rc_doc for a $f response (want $want)"
         done
+
+        # And the happy path: a valid note must actually come back. Without it
+        # the block could "pass" every case by always failing.
+        printf '{"pr":70,"sha":"eeeeeee","status":"approved","findings_count":0,"reviewer":"codex","summary":"s","model_summary":"a real note"}\n' \
+            > "$NOTE_TMP/ok.json"
+        d_ok=""
+        d_ok="$(sha256sum "$NOTE_TMP/ok.json" | awk '{print $1}')" || d_ok=""
+        if [ -n "$d_ok" ]; then
+            real_line="BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d_ok resp=$NOTE_TMP/ok.json"
+            block="LINE='$real_line'
+${snippet#*$'\n'}"
+            out_doc="$(env -u RESP_PATH -u RESP_DIGEST -u LINE \
+                RB_SCRIPTS="$SCRIPT_DIR" PATH="$PATH" HOME="$HOME" \
+                bash -c "$block" 2>/dev/null || true)"
+            printf '%s' "$out_doc" | grep -q '"' \
+                && pass "documented block returns the note on the happy path (clean env)" \
+                || die "documented block returned no note for a valid response: $out_doc"
+        fi
     else
         die "SKILL.md no longer contains the --note driver command (contract drifted)"
     fi
@@ -920,15 +953,67 @@ PYB
 exec /usr/bin/sha256sum "\$@"
 SWAP
 chmod +x "$INCALL/bin/sha256sum"
-rc_ic=0; out_ic="$(PATH="$INCALL/bin:$PATH" "$MONITOR" --note "$INCALL/resp.json" "$DIG_A_INCALL" 2>/dev/null)" || rc_ic=$?
-# Either the note that matches the advertised digest, or a refusal - never note B
-# under note A's digest.
-if [ "$rc_ic" -eq 0 ]; then
-    printf '%s' "$out_ic" | grep -q 'note B' \
-        && die "in-call replacement: emitted note B while accepting note A's digest" \
-        || pass "in-call replacement: emitted note matches the advertised digest"
+# Advertise B's digest, not A's. With A's digest the pre-fix helper ALSO exits 2
+# - it read A, the swap made the file B, hashing B mismatched A - so the fixture
+# passed on the strength of the wrong failure and a revert stayed green. With B's
+# digest the pre-fix ordering succeeds and emits note A under B's digest, which
+# is precisely the defect; the snapshot version reads and hashes the same bytes
+# (A) and therefore refuses.
+DIG_B_INCALL="$(python3 - <<'PYD'
+import hashlib, json
+print(hashlib.sha256(json.dumps({"pr":95,"sha":"aaaaaaa","status":"approved","findings_count":0,
+      "reviewer":"codex","summary":"s","model_summary":"note B"}).encode()).hexdigest())
+PYD
+)"
+rc_ic=0; out_ic="$(PATH="$INCALL/bin:$PATH" "$MONITOR" --note "$INCALL/resp.json" "$DIG_B_INCALL" 2>/dev/null)" || rc_ic=$?
+printf '%s' "$out_ic" | grep -q 'note A' \
+    && die "in-call replacement: emitted note A under note B's advertised digest" \
+    || pass "in-call replacement: no note emitted under a digest describing other bytes"
+[ "$rc_ic" -ne 0 ] \
+    && pass "in-call replacement: refused (hash and parse describe the same bytes)" \
+    || die "in-call replacement: accepted a response swapped mid-call (rc=0)"
+
+# ── The same race on the EMIT path: the handoff's fields and its advertised
+#    digest must describe ONE revision. Here the stub hashes FIRST and swaps
+#    after, so a hash-then-parse-the-path implementation advertises A's digest
+#    beside B's status and findings.
+EMITRACE="$TMP/emitrace"; mkdir -p "$EMITRACE/bin" "$EMITRACE/responses"
+python3 - "$EMITRACE/responses/resp-aaaaaaa.json" <<'PYA'
+import json, sys
+json.dump({"pr":96,"sha":"aaaaaaa","status":"comments_posted","findings_count":1,
+           "reviewer":"codex","summary":"s","model_summary":"note A"}, open(sys.argv[1],"w"))
+PYA
+DIG_A_EMIT="$(sha256sum "$EMITRACE/responses/resp-aaaaaaa.json" | awk '{print $1}')"
+cat > "$EMITRACE/bin/sha256sum" <<SWAP2
+#!/usr/bin/env bash
+# Hash first, THEN swap: the window between the hash and the parse.
+out="\$(/usr/bin/sha256sum "\$@")" || exit \$?
+python3 - "$EMITRACE/responses/resp-aaaaaaa.json" <<'PYB2'
+import json, sys
+json.dump({"pr":96,"sha":"aaaaaaa","status":"approved","findings_count":0,
+           "reviewer":"codex","summary":"s","model_summary":"note B"}, open(sys.argv[1],"w"))
+PYB2
+printf '%s\n' "\$out"
+SWAP2
+chmod +x "$EMITRACE/bin/sha256sum"
+out_er="$(PATH="$EMITRACE/bin:$PATH" BUS_DIR="$EMITRACE" MONITOR_EMITTED_DIR="$TMP/emrace" \
+          "$MONITOR" --once 2>/dev/null || true)"
+er_line="$(printf '%s\n' "$out_er" | grep -m1 'BUSTEST_REVIEW pr=96' || true)"
+if [ -n "$er_line" ]; then
+    er_digest="$(printf '%s' "$er_line" | sed -n 's/.*[[:space:]]digest=\([0-9a-f]\{64\}\).*/\1/p')"
+    if [ "$er_digest" = "$DIG_A_EMIT" ]; then
+        printf '%s' "$er_line" | grep -q 'status=comments_posted findings=1' \
+            && pass "emit race: the handoff fields match the revision its digest names" \
+            || die "emit race: fields came from the swapped revision under the old digest: $er_line"
+    else
+        printf '%s' "$er_line" | grep -q 'status=approved findings=0' \
+            && pass "emit race: fields and digest both describe the swapped revision" \
+            || die "emit race: digest and fields describe different revisions: $er_line"
+    fi
 else
-    pass "in-call replacement: refused rather than emitting a mismatched note (rc=$rc_ic)"
+    printf '%s' "$out_er" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "emit race: refused rather than emitting a mixed-revision handoff" \
+        || die "emit race: produced neither a handoff nor a sentinel: $out_er"
 fi
 
 # ── A failing jq PROBE must not read as "no note" or a clean handoff ──────

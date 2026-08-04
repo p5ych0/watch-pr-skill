@@ -168,11 +168,25 @@ model text derived from untrusted PR content.
 
 Read it with the helper, which prints it to stdout **JSON-escaped**. Pass the
 `digest=` value from the same notification line, and run the helper as the LAST
-command in the call so its exit status is the call's exit status:
+command in the call so its exit status is the call's exit status.
+
+Each Bash call is its own shell, so this block **derives both values and calls
+the helper in one call**. Paste the notification line into `LINE` and run the
+whole block; do not rely on anything assigned in an earlier call:
 
 ```bash
+LINE='<paste the ${PREFIX}_REVIEW line here, verbatim>'
+RESP_PATH="${LINE##*resp=}"
+RESP_DIGEST="$(printf '%s' "$LINE" | sed -n 's/.*[[:space:]]digest=\([0-9a-f]\{64\}\).*/\1/p')"
 "$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH" "$RESP_DIGEST"
 ```
+
+Both derivations are deliberate. `resp=` is the **last** token on the line — the
+monitor quotes `summary` precisely so a note containing `resp=` cannot add
+another — so `${LINE##*resp=}` takes the real path. `digest=` is matched as
+exactly 64 hex characters, so a stray `digest=` inside quoted text cannot be
+picked up instead. An unmatched pattern leaves `RESP_DIGEST` empty, and the
+helper rejects an empty digest with exit 2 rather than reading the note.
 
 `RESP_DIGEST` is the `digest=…` field of the `${PREFIX}_REVIEW` line you are
 handling. It binds the read to the review that advertised the note:
