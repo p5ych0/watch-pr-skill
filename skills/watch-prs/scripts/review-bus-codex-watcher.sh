@@ -662,8 +662,22 @@ post_findings() {
     local posted=0
     local failed=0
     local index=0
-    local finding path line side body payload response comment_id
+    local finding path line side body payload response comment_id findings_json
 
+    # Materialize the findings with a GUARDED parse before iterating. Feeding the
+    # loop from `< <(jq …)` hides the iterator's exit status: the function always
+    # reaches its final printf, so the caller's `|| return 1` could never see a
+    # parse failure. A failed iterator then looked exactly like "zero findings",
+    # and on a zero-finding result that produced a clean approval.
+    if ! findings_json="$(jq -c '.findings[]' "$result_file" 2>/dev/null)"; then
+        echo "CODEX_COMMENT_PARSE_FAILED result=$result_file" >&2
+        return 1
+    fi
+
+    # An empty parse is legitimately zero findings. Skip the loop rather than
+    # feeding it an empty line, which `<<<` would turn into one bogus iteration
+    # and report as an attempted-but-skipped finding.
+    if [ -n "$findings_json" ]; then
     while IFS= read -r finding; do
         index=$((index + 1))
         path="$(jq -r '.path // empty' <<< "$finding")"
@@ -710,7 +724,8 @@ post_findings() {
             failed=$((failed + 1))
             echo "CODEX_COMMENT_FAILED index=$index path=$path line=$line response=$response" >&2
         fi
-    done < <(jq -c '.findings[]' "$result_file")
+    done <<< "$findings_json"
+    fi
 
     printf '%s %s %s\n' "$posted" "$failed" "$index"
 }

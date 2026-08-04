@@ -357,6 +357,60 @@ else
     pass "unreadable findings count earns no approval (guarded, not silently empty)"
 fi
 
+# ── 13. A failed findings ITERATOR must not read as "zero findings" ────────
+# post_findings fed its loop from `< <(jq …)`, which hides the iterator's exit
+# status: the function always reached its final printf, so the caller's
+# `|| return 1` could never see a parse failure. A failed iterator then looked
+# exactly like an empty findings array, and on a zero-finding result that
+# produced a clean approval. Uses the REAL post_findings — stubbing it would
+# test nothing here.
+findings_iter_fails() {
+    local out="$TMP/pr-iterfail"
+    rm -rf "$out"; mkdir -p "$out/snap" "$out/bin"
+    jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: []}' > "$out/result.json"
+    cat > "$out/bin/jq" <<'JQSTUB'
+#!/usr/bin/env bash
+for a in "$@"; do
+  [ "$a" = ".findings[]" ] && exit 3
+done
+exec /usr/bin/jq "$@"
+JQSTUB
+    chmod +x "$out/bin/jq"
+    (
+        set +eu
+        PATH="$out/bin:$PATH"
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }
+        run_codex_review() { :; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        # post_findings is deliberately REAL.
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+iter_resp="$(findings_iter_fails)"
+if [ -f "$iter_resp" ] && [ "$(jq -r '.status' "$iter_resp" 2>/dev/null)" = "approved" ]; then
+    die "a failed .findings[] iterator produced a clean APPROVE"
+else
+    pass "failed findings iterator earns no approval (parse guarded, not silently empty)"
+fi
+
+# The guard must not mistake a legitimately EMPTY findings array for a failure:
+# an empty parse is zero findings, and `<<<` on an empty string would otherwise
+# feed the loop one bogus iteration and report a phantom attempt.
+zero_stats="$(post_findings 4 ffffffffffffffffffffffffffffffffffffffff "$TMP/pr-iterfail/result.json" abc1234 2>/dev/null)"
+[ "$zero_stats" = "0 0 0" ] \
+    && pass "empty findings array reports 0 0 0 (no phantom attempt)" \
+    || die "empty findings array reported '$zero_stats'"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
