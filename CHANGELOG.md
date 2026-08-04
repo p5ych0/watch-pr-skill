@@ -7,9 +7,11 @@
   endpoint describes BASE..HEAD, so a force-pushed `diverged` range can return a
   fully tagged list none of which is reachable from the signed-off SHA; and its
   unpaginated list is capped at 250, so a longer range comes back truncated and
-  an untagged commit beyond the cap is invisible. It now requires
-  `status` to be `ahead`/`identical`, `total_commits` to equal the returned list
-  length, and every listed commit to carry the trailer - otherwise it reviews.
+  an untagged commit beyond the cap is invisible. It now requires `status` to be
+  `ahead`, `total_commits` to equal the returned list length, and every listed
+  commit to carry the trailer - otherwise it reviews. (`identical` was accepted
+  here at first and is not: this branch is reached only when the signed-off SHA
+  differs from the head, so the pair is a contradiction. See the later entry.)
   Marker cleanup is best-effort and logged: an unguarded `rm` failure under
   `set -Eeuo pipefail` would have exited `write_auto_request` and taken the
   watcher down with it.
@@ -202,6 +204,28 @@
   listed at all. Review records must now carry the fields their callers read, the
   probe parses raw JSON and requires a well-formed array, and a current-head
   draft revokes the marker and holds the gate.
+
+- **The Copilot gate reads review STATE, not an inline-comment count.** A count
+  cannot tell a clean signoff from a review that was dismissed, one that
+  requested changes with no inline comments, or a re-review that is still a
+  draft - and `head_review_findings` discards PENDING records, so an older clean
+  review beside a new same-head draft read as clean and merged while that
+  re-review was running. The verdict is now derived from the current-head review
+  set: a draft or a dismissed review means the pass is owed, changes-requested
+  blocks, and only an accepted submitted review with zero findings is clean.
+
+- **Markers are validated as raw bytes.** Command substitution silently drops
+  NUL, so a marker of `<40-hex>\0` arrived at the validator as a clean SHA and
+  satisfied the exact-contents contract the merge gate depends on - the same hole
+  as the earlier newline truncation, one layer down. The file's size and an
+  anchored match on its bytes are checked before any substitution sees them.
+
+- **Two more reads stopped answering "nothing here" when they failed.** The
+  review selector masked its own status with `|| true`, so an id printed before a
+  failure survived and an empty comments page turned it into `findings=0`; and
+  the requested-reviewer validator accepted an empty or whitespace-only login as
+  a readable "no request pending", which with a matching marker was merge
+  permission. Both fail closed now.
 
 ## [1.0.11] — 2026-08-03
 

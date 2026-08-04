@@ -165,9 +165,13 @@ After a clean Codex signoff, the skill asks whether to run an optional GitHub Co
 - **If you do not answer**, it holds and does not merge unattended.
 
 As of 1.0.12 this is enforced rather than merely instructed. `review-bus-copilot.sh gate <PR>`
-is a hard gate in the merge block: it exits 0 only when Copilot has a clean review on the
-**current head** or you declined for that head (`review-bus-copilot.sh decline <PR>`), 1 when
-the pass is still owed, and 2 when it cannot tell — which fails closed. So skipping Copilot
+is a hard gate in the merge block. It exits 0 on exactly three states, all scoped to the
+**current head**: an accepted Copilot review with no findings, a decline you recorded
+(`review-bus-copilot.sh decline <PR>`), or a recorded unavailability that still holds. It
+exits 1 when the pass is owed — including a review that is still a draft, one that was
+dismissed, and one that requested changes — and 2 when it cannot tell, which fails closed.
+A review's *state* decides, not its inline-comment count: a dismissed or changes-requested
+review with no inline comments is not a clean signoff. So skipping Copilot
 is now an explicit recorded decision instead of something that can happen by simply never
 asking. A decline does not survive a later push: new code re-opens the question.
 

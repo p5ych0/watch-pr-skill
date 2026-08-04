@@ -572,6 +572,97 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-pending-old.json" GH_PENDING_R
   || die "gate: an unrelated draft invalidated the marker (rc=$rc out='$out')"
 rm -f "$UNAVAIL_BUS/.copilot-unavailable-7"
 
+# (ii) The gate must read review STATE, not an inline-comment count. Each of
+# these has zero inline comments on the current head, and each used to read as a
+# clean signoff.
+mk_review() {  # <state> <submitted_at-or-null> <id>
+    printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"%s","submitted_at":%s,"id":%s}]' \
+        "$HEAD40" "$1" "$2" "$3" > "$TMP/reviews-state.json"
+}
+rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+# `|` delimits, not `:` - the ISO timestamps contain colons.
+for case in 'DISMISSED|"2026-01-01T00:00:00Z"|review_dismissed' \
+            'CHANGES_REQUESTED|"2026-01-01T00:00:00Z"|changes_requested' \
+            'PENDING|null|review_in_progress'
+do
+    st="${case%%|*}"; rest="${case#*|}"; sub="${rest%%|*}"; why="${rest##*|}"
+    mk_review "$st" "$sub" 21
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "$why"; } \
+        && pass "gate: a $st review on this head is not a clean signoff" \
+        || die "gate: $st read as mergeable (rc=$rc out='$out')"
+done
+
+# An older clean review PLUS a new same-head draft must not merge: the draft is
+# a re-review in progress, and the count-based gate answered from the old one.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":22},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":23}]' \
+    "$HEAD40" "$HEAD40" > "$TMP/reviews-state.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_in_progress'; } \
+    && pass "gate: an in-flight re-review outranks the earlier clean one" \
+    || die "gate: merged while a same-head re-review was running (rc=$rc out='$out')"
+
+# The control: an accepted submitted review with no findings IS clean.
+mk_review "APPROVED" '"2026-01-01T00:00:00Z"' 24
+printf '[]' > "$TMP/comments-24.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "gate: an accepted review with zero findings is still clean" \
+    || die "gate: the state check rejected a genuine clean signoff (rc=$rc out='$out')"
+rm -f "$TMP/comments-24.json"
+
+# (jj) The review SELECTOR must not survive its own failure: it printed an id and
+# then died, and an empty comments page turned that into findings=0.
+SEL_BIN="$TMP/selbin"; mkdir -p "$SEL_BIN"
+cat > "$SEL_BIN/jq" <<'SH'
+#!/usr/bin/env bash
+# Faults ONLY the review-selection filter (the one ending in `.id // empty`).
+if [ -n "${FAULT_SEL:-}" ] && printf '%s' "$*" | grep -q 'id // empty'; then
+    printf '24
+'
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$SEL_BIN/jq"
+mk_review "APPROVED" '"2026-01-01T00:00:00Z"' 24
+# A VALID empty comments page, so the masked selector's surviving id would turn
+# into findings=0 => status=clean. Without this the case fails for an unrelated
+# reason (no pages at all) and the fixture proves nothing.
+printf '[]' > "$TMP/comments-24.json"
+out="$(PATH="$SEL_BIN:$PATH" FAULT_SEL=1 GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" \
+       run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "gate: a selector that prints then fails => 2 (fail closed)" \
+    || die "gate: stdout-plus-failure selector produced rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "gate: a failed selector still reported a clean signoff: $out" \
+    || pass "gate: no clean signoff from a failed selector"
+rm -f "$TMP/comments-24.json"
+
+# (kk) A reviewer identity must be non-empty, not merely a string.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+printf '[]' > "$TMP/reviews-state.json"
+for ident in '{"reviewRequests":[{"login":""}]}' '{"reviewRequests":[{"login":"   "}]}' '{"reviewRequests":[{"login":null}]}'; do
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" GH_PENDING_RAW="$ident" \
+           run_unavail gate 7 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "gate: blank reviewer identity is unreadable, not 'no request'" \
+        || die "gate: blank identity accepted as a readable no (rc=$rc out='$out')"
+done
+
+# (ll) A NUL byte in a marker. Command substitution silently DROPS NUL, so
+# `<40-hex>\0` reached the validator as a clean SHA and satisfied the gate.
+for m in unavailable declined clean; do
+    rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+    printf '%s\0' "$HEAD40" > "$UNAVAIL_BUS/.copilot-$m-7"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] \
+        && pass "gate: NUL-corrupted $m marker is rejected" \
+        || die "gate: NUL-corrupted $m marker accepted (rc=$rc out='$out')"
+done
+rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling

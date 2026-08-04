@@ -115,6 +115,40 @@ head_review_verdict() {
     esac
 }
 
+# Print the state of Copilot's review of THIS head, or fail (2).
+#   pending  - an unsubmitted draft exists (review owed, not finished)
+#   blocked  - a submitted review asks for changes
+#   dismissed- the only submitted review on this head was dismissed (no signoff)
+#   reviewed - an accepted submitted review exists (APPROVED / COMMENTED)
+#   none     - no review on this head at all
+#
+# The gate used to collapse all of this into an inline-comment COUNT, which is
+# not a verdict: `head_review_findings` discards PENDING records, so an older
+# clean review plus a new same-head PENDING re-review read as clean and merged
+# while that re-review was still running; and a DISMISSED or CHANGES_REQUESTED
+# review with no inline comments read as clean too, because zero comments is what
+# it counted. The state has to be derived from the review records themselves.
+head_review_state() {
+    local pr="$1" head="$2" reviews out
+    reviews=$(copilot_reviews "$pr") || return 2
+    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
+        if type != "array" then error("bad shape")
+        else
+          [ .[] | select(.commit_id == $h) ] as $mine
+          | if ($mine | length) == 0 then "none"
+            elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "pending"
+            elif any($mine[]; .state == "CHANGES_REQUESTED") then "blocked"
+            else
+              [ $mine[] | select(.state == "APPROVED" or .state == "COMMENTED") ] as $ok
+              | if ($ok | length) > 0 then "reviewed" else "dismissed" end
+            end
+        end' 2>/dev/null)" || return 2
+    case "$out" in
+        none|pending|blocked|dismissed|reviewed) printf '%s' "$out" ;;
+        *) return 2 ;;
+    esac
+}
+
 # Does Copilot have a review on THIS head that has not been submitted yet?
 #   0 = yes (a PENDING draft) · 1 = no · 2 = cannot tell.
 #
@@ -164,7 +198,8 @@ copilot_request_pending() {
         else
           if any(.reviewRequests[];
                  type != "object"
-                 or (((.login // .name // .slug) | type) != "string"))
+                 or (((.login // .name // .slug) | type) != "string")
+                 or (((.login // .name // .slug) | test("\\S")) | not))
           then error("bad entry")
           else (if any(.reviewRequests[];
                        ((.login // .name // .slug) | ascii_downcase | test("copilot")))
@@ -221,12 +256,21 @@ cmd_available() {
 # valid-looking SHA, so damaged state could satisfy the merge gate without any
 # decline or unavailability having been recorded.
 read_sha_marker() {
-    local v
-    v="$(cat "$1" 2>/dev/null)" || return 1
-    # Validate the WHOLE file. Truncating at the first newline accepted
-    # `<valid-sha>\njunk`, so a corrupt marker still satisfied the exact-contents
-    # contract and could carry the merge gate. `$( )` strips trailing newlines,
-    # so a well-formed marker is unaffected.
+    local f="$1" v sz
+    [ -f "$f" ] || return 1
+    # The RAW BYTES are validated first, before any command substitution sees
+    # them. `$( )` silently DROPS NUL, so a marker of `<40-hex>\0` arrived here as
+    # a clean 40-character SHA and satisfied the exact-contents contract the merge
+    # gate depends on - the same class of hole as the earlier newline truncation,
+    # one layer down. Size plus an anchored line match rejects any trailing byte,
+    # NUL included: 40 bytes bare, or 41 with a trailing newline, and nothing else.
+    sz="$(wc -c < "$f" 2>/dev/null)" || return 1
+    case "$sz" in
+        40|41) ;;
+        *) return 1 ;;
+    esac
+    LC_ALL=C grep -qaxE '[0-9a-f]{40}' "$f" 2>/dev/null || return 1
+    v="$(cat "$f" 2>/dev/null)" || return 1
     case "$v" in
         *[!0-9a-f]*|"") return 1 ;;
     esac
@@ -338,9 +382,16 @@ head_review_findings() {
     # several on the same head take the LATEST by submitted_at — a PENDING draft
     # must not read as findings=0, and a same-SHA re-review must not leave us
     # counting the older review's comments.
+    # `|| true` here masked the selector's own status, and command substitution
+    # keeps what jq printed before failing - so a selector that emitted a review
+    # ID and then died left that ID in place, and an empty comments page turned it
+    # into findings=0, i.e. a clean signoff off a read that failed.
     found=$(printf '%s' "$reviews" | jq -r --arg h "$head" \
-        '[.[] | select(.commit_id==$h and .state!="PENDING" and .submitted_at!=null)] | sort_by(.submitted_at) | last | .id // empty' 2>/dev/null || true)
+        '[.[] | select(.commit_id==$h and .state!="PENDING" and .submitted_at!=null)] | sort_by(.submitted_at) | last | .id // empty' 2>/dev/null) || return 2
     [ -n "$found" ] || return 1
+    case "$found" in
+        *[!0-9]*) return 2 ;;   # an id is a number; anything else is a failed read
+    esac
     if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews/$found/comments" --paginate 2>/dev/null); then
         return 2
     fi
@@ -515,6 +566,21 @@ cmd_gate() {
         fi
         echo "COPILOT_GATE pr=$pr sha=$short status=decline_stale recorded=${recorded:0:7}"
     fi
+
+    # STATE first, count second. A count alone cannot tell a clean signoff from a
+    # dismissed review, a changes-requested review with no inline comments, or a
+    # re-review that is still a draft.
+    local state
+    if ! state="$(head_review_state "$pr" "$head")"; then
+        echo "COPILOT_GATE pr=$pr sha=$short status=error reason=review_state_unreadable"
+        return 2
+    fi
+    case "$state" in
+        none)      echo "COPILOT_GATE pr=$pr sha=$short status=none"; return 1 ;;
+        pending)   echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_in_progress"; return 1 ;;
+        blocked)   echo "COPILOT_GATE pr=$pr sha=$short status=findings reason=changes_requested"; return 1 ;;
+        dismissed) echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_dismissed"; return 1 ;;
+    esac
 
     findings=$(head_review_findings "$pr" "$head"); rc=$?
     case "$rc" in
