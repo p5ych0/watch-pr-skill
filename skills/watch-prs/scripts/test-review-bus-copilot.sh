@@ -19,7 +19,8 @@ cat > "$TMP/bin/gh" <<'SH'
 #   GH_REVIEW_COMMENTS  file: JSON array for  api repos/*/pulls/*/reviews/*/comments
 #   GH_HEAD             string: headRefOid for pr view --json headRefOid --jq
 #   GH_HEAD_RC          int:  exit code for   pr view (stdout is still emitted)
-#   GH_PENDING          string: requested reviewers for pr view --json reviewRequests
+#   GH_PENDING          string: a requested reviewer login (empty => none)
+#   GH_PENDING_RAW      string: verbatim body for the reviewRequests read
 #   GH_PENDING_RC       int:  exit code for that read
 #   GH_SEARCH           file: JSON array for  search prs (unset => exit 1 = error)
 #   GH_EDIT_RC          int:  exit code for   pr edit
@@ -39,7 +40,14 @@ case "$1 ${2:-}" in
     # reviewRequests is a separate query from headRefOid; GH_PENDING lists the
     # requested reviewers (empty/unset => none), GH_PENDING_RC faults the read.
     case "$*" in
-      *reviewRequests*) [ -n "${GH_PENDING_RC:-}" ] && exit "$GH_PENDING_RC"; printf '%s' "${GH_PENDING:-}" ;;
+      *reviewRequests*)
+        [ -n "${GH_PENDING_RC:-}" ] && exit "$GH_PENDING_RC"
+        # GH_PENDING_RAW injects a body verbatim (malformed-shape cases);
+        # otherwise GH_PENDING is a login to list, empty meaning none requested.
+        if [ -n "${GH_PENDING_RAW+x}" ]; then printf '%s' "$GH_PENDING_RAW"
+        elif [ -n "${GH_PENDING:-}" ]; then printf '{"reviewRequests":[{"login":"%s"}]}' "$GH_PENDING"
+        else printf '{"reviewRequests":[]}'
+        fi ;;
       *)                printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
     esac ;;
   "pr edit"*)    [ -n "${GH_EDIT_STDERR:-}" ] && printf '%s\n' "$GH_EDIT_STDERR" >&2; exit "${GH_EDIT_RC:-0}" ;;
@@ -504,6 +512,65 @@ else
       || die "gate honoured the marker with unreadable request state (rc=$rc out=$out)"
 fi
 rm -rf "$LOCK_BUS"
+
+# (ff) A page of EMPTY review records is not "no review". `[{}]` passed the
+# array-container check and produced [], which every caller reads as "no live
+# review" - so with a matching marker the gate answered status=unavailable off a
+# payload that told us nothing.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+printf '[{}]' > "$TMP/reviews-empty-records.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-empty-records.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: empty review records => 2 (marker gets no free pass)" \
+  || die "gate: [{}] review records read as no-review (rc=$rc out='$out')"
+# Records missing only the fields the callers read are equally unusable.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"}}]' > "$TMP/reviews-partial.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-partial.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: review record missing id/commit_id => 2" \
+  || die "gate: partial review record accepted (rc=$rc out='$out')"
+
+# (gg) The requested-reviewer probe must not turn unreadable data into
+# "no pending request". A flattened string collapsed a missing field, a null, an
+# object and a zero-output call into "", which returned 1 - handing the stale
+# marker its merge permission.
+for raw_case in '' 'null' '{}' '{"reviewRequests":null}' '{"reviewRequests":{}}' '{"reviewRequests":[{}]}' 'not json'; do
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_PENDING_RAW="$raw_case" run_unavail gate 7 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+      && pass "gate: unreadable reviewRequests body '${raw_case:-<empty>}' => 2" \
+      || die "gate: reviewRequests body '${raw_case:-<empty>}' accepted (rc=$rc out='$out')"
+done
+# A genuinely EMPTY list is readable and means no request - the marker stands.
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_PENDING_RAW='{"reviewRequests":[]}' run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=unavailable' \
+  && pass "gate: a valid empty reviewRequests list still honours the marker" \
+  || die "gate: a valid empty list was treated as unreadable (rc=$rc out='$out')"
+
+# (hh) A current-head PENDING draft proves the marker stale too, and it can exist
+# with NO reviewer request listed - an automatic pickup, or a request already
+# consumed. head_review_findings deliberately ignores PENDING, so the
+# requested-reviewer probe alone left this open.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":11}]' \
+    "$HEAD40" > "$TMP/reviews-pending.json"
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-pending.json" GH_PENDING_RAW='{"reviewRequests":[]}' \
+       run_unavail gate 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'stale_unavailable_review_pending'; } \
+  && pass "gate: a current-head PENDING draft overrides the marker (no request listed)" \
+  || die "gate: PENDING draft plus marker still permitted the merge (rc=$rc out='$out')"
+[ ! -e "$UNAVAIL_BUS/.copilot-unavailable-7" ] \
+  && pass "gate: the stale marker is revoked once a draft proves availability" \
+  || die "gate: the marker survived a proving draft"
+# A PENDING draft on an OLDER head says nothing about this one.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":12}]' \
+    "$OTHER40" > "$TMP/reviews-pending-old.json"
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-pending-old.json" GH_PENDING_RAW='{"reviewRequests":[]}' \
+       run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=unavailable' \
+  && pass "gate: a draft on another head does not invalidate the marker" \
+  || die "gate: an unrelated draft invalidated the marker (rc=$rc out='$out')"
+rm -f "$UNAVAIL_BUS/.copilot-unavailable-7"
 
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any

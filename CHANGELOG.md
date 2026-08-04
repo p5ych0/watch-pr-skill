@@ -187,6 +187,22 @@
   taken explicitly: 0 is a count, 1 is a real zero, anything else is a failed
   inspection and returns 2.
 
+- **Every input to the Copilot merge gate is validated, not just its
+  container.** Three separate reads turned unusable data into merge permission,
+  each by looking like an ordinary "nothing here" answer. A successful `[{}]`
+  review page passed the array-shape check and produced an empty list, which
+  every caller reads as "no live review", so a matching unavailability marker
+  carried the merge. The requested-reviewer probe flattened its result to a
+  string, collapsing a missing field, a null, an object and a zero-output call
+  all into `""` = "no request pending" - again handing the stale marker its
+  permission. And a current-head PENDING draft, which `head_review_findings`
+  deliberately ignores because a draft is not a completed review, is decisive for
+  the marker question in the other direction: Copilot cannot be drafting a review
+  where it is unavailable, and the draft can arrive with no reviewer request
+  listed at all. Review records must now carry the fields their callers read, the
+  probe parses raw JSON and requires a well-formed array, and a current-head
+  draft revokes the marker and holds the gate.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

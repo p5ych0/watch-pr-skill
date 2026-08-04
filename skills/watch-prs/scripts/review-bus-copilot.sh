@@ -61,10 +61,28 @@ copilot_reviews() {
     # VALUES, so a `{"message":"Not Found"}` page (a 200-with-error body, or a
     # truncated write) flowed through as data instead of failing. Reject any page
     # that is not an array before reading a single field.
+    #
+    # And the RECORDS matter as much as the containers: a successful `[{}]` page
+    # passed the array check and produced `[]`, which every caller reads as "no
+    # live review" - so with a matching unavailable marker the gate answered
+    # `status=unavailable` off a payload that told us nothing. Each record must
+    # carry the fields the callers go on to read.
     printf '%s' "$raw" | jq -s --arg bot "$COPILOT_BOT" '
         if length == 0 then error("no pages")
         elif any(.[]; type != "array") then error("non-array page")
-        else [.[][] | select(.user.login==$bot)] end' 2>/dev/null || return 2
+        else [ .[][] ] as $all
+          | if any($all[];
+                   type != "object"
+                   or (.user | type) != "object"
+                   or (.user.login | type) != "string"
+                   or (.id | type) != "number"
+                   or (.commit_id | type) != "string"
+                   or ((.state | type) != "string" and .state != null)
+                   or ((.submitted_at | type) != "string" and .submitted_at != null))
+            then error("malformed review record")
+            else [ $all[] | select(.user.login==$bot) ]
+            end
+        end' 2>/dev/null || return 2
 }
 
 # Drop a recorded unavailability for this PR. 0 = no marker, or removed; 1 = it
@@ -97,6 +115,30 @@ head_review_verdict() {
     esac
 }
 
+# Does Copilot have a review on THIS head that has not been submitted yet?
+#   0 = yes (a PENDING draft) · 1 = no · 2 = cannot tell.
+#
+# `head_review_findings` deliberately ignores PENDING - a draft is not a
+# completed review and must not read as findings=0. But for the MARKER question
+# a draft is decisive in the other direction: Copilot cannot be drafting a review
+# on a repository where it is unavailable. And the draft can arrive without a
+# reviewer request still being listed (an automatic pickup, or the request
+# consumed), so the requested-reviewer probe alone leaves that hole open.
+head_review_pending() {
+    local pr="$1" head="$2" reviews out
+    reviews=$(copilot_reviews "$pr") || return 2
+    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
+        if type != "array" then error("bad shape")
+        else (if any(.[]; .commit_id == $h and (.state == "PENDING" or .submitted_at == null))
+              then "yes" else "no" end)
+        end' 2>/dev/null)" || return 2
+    case "$out" in
+        yes) return 0 ;;
+        no)  return 1 ;;
+        *)   return 2 ;;
+    esac
+}
+
 # Is Copilot currently a REQUESTED reviewer on this PR?
 #   0 = yes · 1 = no · 2 = cannot tell.
 #
@@ -107,13 +149,33 @@ head_review_verdict() {
 # treat it as cached permission - it re-derives from live state instead. A pure
 # read, no side effect.
 copilot_request_pending() {
-    local pr="$1" out
-    out="$(gh pr view "$pr" --repo "$REPO_SLUG" --json reviewRequests \
-             --jq '[.reviewRequests[]? | (.login // .name // "")] | join(" ")' 2>/dev/null)" || return 2
+    local pr="$1" raw out
+    # RAW json, not a pre-flattened string. `.reviewRequests[]?` plus `join`
+    # collapsed a missing field, a null, an object, and a zero-output call all
+    # into the empty string, which then returned 1 = "no pending request" - so an
+    # UNREADABLE probe handed the stale marker its merge permission. The field
+    # must be an array, and every entry an object naming a reviewer; anything
+    # else is 2.
+    raw="$(gh pr view "$pr" --repo "$REPO_SLUG" --json reviewRequests 2>/dev/null)" || return 2
+    [ -n "$raw" ] || return 2
+    out="$(printf '%s' "$raw" | jq -r --arg bot "$COPILOT_BOT" '
+        if (type != "object") or (has("reviewRequests") | not)
+           or ((.reviewRequests | type) != "array") then error("bad shape")
+        else
+          if any(.reviewRequests[];
+                 type != "object"
+                 or (((.login // .name // .slug) | type) != "string"))
+          then error("bad entry")
+          else (if any(.reviewRequests[];
+                       ((.login // .name // .slug) | ascii_downcase | test("copilot")))
+                then "yes" else "no" end)
+          end
+        end' 2>/dev/null)" || return 2
     case "$out" in
-        *"$COPILOT_BOT"*|*copilot*|*Copilot*) return 0 ;;
+        yes) return 0 ;;
+        no)  return 1 ;;
+        *)   return 2 ;;
     esac
-    return 1
 }
 
 revoke_unavailable() {
@@ -419,6 +481,18 @@ cmd_gate() {
     # that check cannot be made.
     marker="$BUS_DIR/.copilot-unavailable-${pr}"
     if [ -f "$marker" ] && [ "$(read_sha_marker "$marker" || true)" = "$head" ]; then
+        # A current-head PENDING draft is proof too, and it is reachable without
+        # any reviewer request being listed - so check it FIRST.
+        local draft_rc=0
+        head_review_pending "$pr" "$head" || draft_rc=$?
+        case "$draft_rc" in
+            0)  revoke_unavailable "$pr" || true
+                echo "COPILOT_GATE pr=$pr sha=$short status=none reason=stale_unavailable_review_pending"
+                return 1 ;;
+            2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=review_state_unreadable"
+                return 2 ;;
+        esac
+
         local pending_rc=0
         copilot_request_pending "$pr" || pending_rc=$?
         case "$pending_rc" in
