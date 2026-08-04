@@ -242,7 +242,16 @@ if [ "$NOTE_MODE" -eq 1 ]; then
     #     rendered text around it. -M: never add ANSI colour, which jq does on a
     #     TTY when NO_COLOR is unset. No -r, so the value stays a JSON string
     #     literal and an ESC keeps its escaped spelling. Together: terminal-inert.
-    jq -aM '.model_summary' <<< "$NOTE_JSON"
+    # Captured under an explicit status guard, like every other formatter here.
+    # Left bare, a jq that printed a plausible JSON string and then exited 7 sent
+    # that partial text to stdout and returned 7 - a status outside the documented
+    # 0/1/2 contract, with no MONITOR_NOTE_ERROR to explain it, and a caller
+    # reading stdout would have taken the fragment for the note.
+    if ! NOTE_OUT="$(jq -aM '.model_summary' <<< "$NOTE_JSON" 2>/dev/null)"; then
+        printf 'MONITOR_NOTE_ERROR reason=format_failed file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    printf '%s\n' "$NOTE_OUT"
     exit 0
 fi
 
@@ -550,12 +559,21 @@ emit_response() {
 
 # Mark a response handled WITHOUT emitting — used to suppress stale prior-
 # iteration responses on startup so they never drive a fix loop.
+# Claim the emit marker for a response WITHOUT emitting it — the startup replay
+# uses this to retire a stale prior-iteration response so the live sweep does not
+# surface it after the newer one.
+#
+# Returns non-zero when the marker could not be claimed. That matters: swallowing
+# a digest failure here left the stale response unmarked, and the live sweep then
+# hashed it successfully and emitted the OLD handoff after the newest response
+# had already gone out — the driver acting on a superseded review. Suppression
+# that silently did not happen is worse than a loud failure.
 mark_emitted() {
     local file="$1" base digest
     [ -f "$file" ] || return 0
     base="$(basename "$file")"
-    digest="$(response_digest "$file")" || return 0
-    : > "$EMITTED_DIR/${base}.${digest}"
+    digest="$(response_digest "$file")" || return 1
+    : > "$EMITTED_DIR/${base}.${digest}" || return 1
 }
 
 # Emit one <PREFIX>_REVIEW_PROGRESS line from a progress file. $2 overrides the
@@ -638,7 +656,7 @@ sweep_progress() {
 # monitor doesn't replay them and re-trigger duplicate/out-of-order fix loops.
 # Live responses arriving after startup always emit via the inotify loop.
 replay_existing() {
-    local file pr
+    local file pr rc=0
     local -a snapshot=()
     declare -A latest_for_pr=()
 
@@ -671,10 +689,15 @@ replay_existing() {
         fi
         if [ "$file" = "${latest_for_pr[$pr]:-}" ]; then
             emit_response "$file"
-        else
-            mark_emitted "$file"
+        elif ! mark_emitted "$file"; then
+            # Stale suppression FAILED for this file. Say so, and tell the caller,
+            # because the live sweep would otherwise emit this superseded response
+            # as if it were news.
+            printf '%s_REVIEW_PARSE_ERROR resp=%s reason=stale_suppression_failed\n' "$PREFIX" "$file"
+            rc=1
         fi
     done
+    return "$rc"
 }
 
 # --ack <response-file>: record that the session has fully handled this response
@@ -710,7 +733,22 @@ if [ "$ACK_MODE" -eq 2 ]; then
     exit 0
 fi
 
-replay_existing
+# `|| replay_rc=$?`, never bare: replay_existing now reports a failure to suppress
+# a stale response, and under `set -e` a bare call would take the monitor down
+# with no line saying why.
+replay_rc=0
+replay_existing || replay_rc=$?
+
+# The live loop must NOT start when stale suppression failed. Its per-iteration
+# sweep would hash the unmarked stale response successfully and emit that
+# superseded handoff after the newest one — the driver acting on an old review.
+# Exiting non-zero puts the failure in front of the operator (systemd restarts
+# the unit, and a restart re-attempts the suppression) instead of running on in a
+# state where the next thing emitted is known-wrong.
+if [ "$replay_rc" -ne 0 ]; then
+    echo "MONITOR_FATAL reason=stale_suppression_failed; not entering the live watch" >&2
+    exit 1
+fi
 
 # Surface any review that is STILL in flight as state=resumed (a monitor that
 # started after Codex began, or restarted mid-review). Completed/terminal runs are

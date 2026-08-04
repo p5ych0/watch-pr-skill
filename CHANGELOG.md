@@ -78,6 +78,23 @@
   script down under `set -e` carrying the tool's own exit code (7) with no
   `MONITOR_NOTE_ERROR` line; it now reports the documented exit 2.
 
+- **A stale response that cannot be retired stops the monitor.** `mark_emitted`
+  is what suppresses a superseded prior-iteration response, and it turned a
+  digest failure into a successful no-op — so when the stale file's hash failed
+  during startup, no marker was written, the live sweep hashed it successfully on
+  its next pass, and the OLD handoff went out after the newest one. The driver
+  then acts on a superseded review. Suppression failure is now reported as
+  `reason=stale_suppression_failed` and the monitor exits instead of entering the
+  live watch, where the next thing emitted would be known-wrong; a restart
+  re-attempts it.
+
+- **`--note`'s own formatter fails closed.** It was the last bare
+  stdout-producing command in the file: a jq that printed a plausible JSON string
+  and then failed sent that fragment to stdout and returned the tool's exit code,
+  outside the documented 0/1/2 contract and with no `MONITOR_NOTE_ERROR` to
+  explain it — so a caller reading stdout would have taken the fragment for the
+  reviewer's note. Partial output is discarded and the failure exits 2.
+
 ## [1.0.12] — 2026-08-03
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported

@@ -1118,6 +1118,99 @@ printf '%s' "$err_note" | grep -q 'MONITOR_NOTE_ERROR' \
     && pass "--note: hash failure emits MONITOR_NOTE_ERROR" \
     || die "--note: hash failure was silent (err='$err_note')"
 
+
+# ── the note formatter, and stale suppression, must fail closed too ─────────
+# (e) A stubbed jq that prints a plausible note and THEN fails: `--note` must not
+# expose the fragment, must not return the tool's code, and must say why.
+cat > "$FAULT_BIN/jq" <<'SH'
+#!/usr/bin/env bash
+# Faults the NOTE formatter (its filter is exactly .model_summary) when armed;
+# faults the HANDOFF formatter when FAULT_JQ is set; otherwise runs for real.
+if [ -n "${FAULT_JQ_NOTE:-}" ] && printf '%s' "$*" | grep -q '^-aM \.model_summary'; then
+    printf '"a plausible fragment"\n'
+    exit 7
+fi
+if [ -n "${FAULT_JQ:-}" ] && printf '%s' "$*" | grep -q '_REVIEW pr='; then
+    printf 'BUSTEST_REVIEW pr=90 sha=aaaaaaa status=approved findings=0 reviewer=codex summary= digest=x resp=/x\n'
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$FAULT_BIN/jq"
+
+NOTE_DIGEST2="$(sha256sum "$NOTE_RESP" | awk '{print $1}')"
+note_out="$(PATH="$FAULT_BIN:$PATH" FAULT_JQ_NOTE=1 BUS_DIR="$FAULT_BUS" \
+            "$MONITOR" --note "$NOTE_RESP" "$NOTE_DIGEST2" 2>/dev/null || true)"
+note_err="$(PATH="$FAULT_BIN:$PATH" FAULT_JQ_NOTE=1 BUS_DIR="$FAULT_BUS" \
+            "$MONITOR" --note "$NOTE_RESP" "$NOTE_DIGEST2" 2>&1 >/dev/null || true)"
+rc_nf=0
+PATH="$FAULT_BIN:$PATH" FAULT_JQ_NOTE=1 BUS_DIR="$FAULT_BUS" \
+    "$MONITOR" --note "$NOTE_RESP" "$NOTE_DIGEST2" >/dev/null 2>&1 || rc_nf=$?
+[ "$rc_nf" -eq 2 ] \
+    && pass "--note: formatter failure exits 2 (documented), not the tool's code" \
+    || die "--note: formatter failure exited $rc_nf (want 2)"
+printf '%s' "$note_out" | grep -q 'plausible fragment' \
+    && die "--note: partial formatter output was exposed as the note: $note_out" \
+    || pass "--note: partial formatter output is discarded"
+printf '%s' "$note_err" | grep -q 'MONITOR_NOTE_ERROR' \
+    && pass "--note: formatter failure emits MONITOR_NOTE_ERROR" \
+    || die "--note: formatter failure was silent"
+
+# (f) Stale suppression that FAILS must stop the sweep. Two responses for one PR:
+# the older must be retired without emitting, and if that retirement cannot
+# happen, the live loop must not run - it would hash the stale file successfully
+# and emit the superseded handoff after the newest one.
+STALE_BUS="$TMP/stalebus"; mkdir -p "$STALE_BUS/responses"
+printf '{"pr":91,"sha":"6b8ffa2","status":"comments_posted","findings_count":2,"reviewer":"codex","summary":"old"}' \
+    > "$STALE_BUS/responses/resp-6b8ffa2.json"
+sleep 1.1
+printf '{"pr":91,"sha":"d37e80e","status":"approved","findings_count":0,"reviewer":"codex","summary":"new"}' \
+    > "$STALE_BUS/responses/resp-d37e80e.json"
+
+# Baseline: the stale one is retired silently, the newest is emitted.
+out_st="$(BUS_DIR="$STALE_BUS" MONITOR_EMITTED_DIR="$TMP/emstale" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_st" | grep -q 'sha=d37e80e' && ! printf '%s' "$out_st" | grep -q 'sha=6b8ffa2' \
+    && pass "stale response retired, newest emitted" \
+    || die "stale-response baseline wrong: $out_st"
+
+# Fault the hasher for the STALE file only, so its suppression cannot be recorded.
+cat > "$FAULT_BIN/sha256sum" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${FAULT_SHA_FILE:-}" ]; then
+    for a in "$@"; do
+        case "$a" in *"$FAULT_SHA_FILE"*) exit 7 ;; esac
+    done
+fi
+if [ -n "${FAULT_SHA:-}" ]; then
+    printf 'deadbeef  %s\n' "${1:-}"
+    exit 7
+fi
+exec /usr/bin/sha256sum "$@"
+SH
+chmod +x "$FAULT_BIN/sha256sum"
+
+rc_st=0
+out_st2="$(PATH="$FAULT_BIN:$PATH" FAULT_SHA_FILE="resp-6b8ffa2.json" \
+           BUS_DIR="$STALE_BUS" MONITOR_EMITTED_DIR="$TMP/emstale2" \
+           "$MONITOR" --once 2>/dev/null)" || rc_st=$?
+[ "$rc_st" -ne 0 ] \
+    && pass "a failed stale suppression exits non-zero (the live loop must not run)" \
+    || die "a failed stale suppression was reported as success"
+printf '%s' "$out_st2" | grep -q 'stale_suppression_failed' \
+    && pass "the failure names itself (stale_suppression_failed)" \
+    || die "the failed suppression emitted no distinguished error: $out_st2"
+
+# Restore the plain hasher stub for anything after this block.
+cat > "$FAULT_BIN/sha256sum" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${FAULT_SHA:-}" ]; then
+    printf 'deadbeef  %s\n' "${1:-}"
+    exit 7
+fi
+exec /usr/bin/sha256sum "$@"
+SH
+chmod +x "$FAULT_BIN/sha256sum"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
