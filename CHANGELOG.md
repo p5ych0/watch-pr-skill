@@ -95,7 +95,7 @@
   explain it — so a caller reading stdout would have taken the fragment for the
   reviewer's note. Partial output is discarded and the failure exits 2.
 
-## [1.0.12] — 2026-08-03
+## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
   findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
