@@ -392,7 +392,16 @@ require_model_summary() {
     # loses every trailing newline to command substitution and cannot carry a NUL
     # byte at all, and both losses were invisible - validation still succeeded and
     # the altered text was recorded as the reviewer's own words.
-    out="$(jq -ec 'select((.summary | type) == "string") | select(.summary | test("\\S")) | .summary' "$result" 2>/dev/null)" || return 1
+    #
+    # `\S` is not enough: it matches control and format code points, so a summary
+    # of nothing but NUL (or a bidi override) passed validation and then decoded
+    # to an EMPTY shell string - at which point the clean-signoff branch fell back
+    # to its built-in "no actionable issues" text and posted an APPROVE. Require
+    # at least one character that is neither whitespace nor a control (`\p{Cc}`)
+    # nor a format (`\p{Cf}`) code point.
+    out="$(jq -ec 'select((.summary | type) == "string")
+                   | select(.summary | test("[^\\p{Cc}\\p{Cf}\\s]"))
+                   | .summary' "$result" 2>/dev/null)" || return 1
     [ -n "$out" ] || return 1
     printf '%s' "$out"
 }
@@ -1194,8 +1203,24 @@ process_review() {
         findings=0
         # Decoded for the COMMENT BODY only. The stored `model_summary` stays
         # encoded all the way into write_response; this copy is a shell string
-        # bound for `gh`, and `summary` is overwritten below either way.
-        summary="$(jq -r . <<< "$model_summary" 2>/dev/null)" || summary=""
+        # bound for `gh`.
+        #
+        # `|| summary=""` was an approval path, not a fallback: process_review
+        # runs beneath `if !` in handle(), so errexit does not stop it here, and
+        # an empty summary made post_clean_signoff substitute its built-in
+        # no-findings text and post an APPROVE on a result we had failed to read.
+        # A decode that fails, or that yields nothing visible once the shell has
+        # dropped what it cannot carry, is a failed read - record the error and
+        # sign nothing off.
+        if ! summary="$(jq -r . <<< "$model_summary" 2>/dev/null)" \
+           || ! printf '%s' "$summary" | grep -q '[^[:space:][:cntrl:]]'; then
+            echo "CODEX_RESULT_INVALID path=$result reason=summary_undecodable_or_invisible"
+            status="error"
+            findings=0
+            summary="the reviewer's summary could not be read as text on sha=$sha; no signoff. See $log"
+            write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log" "$model_summary"
+            return 0
+        fi
         if clean_event="$(post_clean_signoff "$pr" "$full_sha" "$sha" "$summary")"; then
             status="approved"
             summary="No actionable findings on sha=$sha; clean review signoff posted as $clean_event."

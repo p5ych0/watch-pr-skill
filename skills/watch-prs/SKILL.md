@@ -200,6 +200,37 @@ always 0 and the pause never fired. The same check-in applies to Copilot rounds.
 - `status=comments_posted` (`findings>0`) → enter fix loop (steps 2-7).
 - `status=error` → read `summary` + the `log` field; if transient (rate limit, fetch fail), wait and let the implementer re-request via `$RB_SCRIPTS/review-bus-request.sh --force` after fixing the cause; if structural (codex crash, prompt issue), surface to user.
 
+**A line beginning `${PREFIX}_REVIEW_PARSE_ERROR` is not a review, and it is not
+nothing.** The monitor emits it, with a `reason=…`, when a response file exists
+but cannot be trusted — unreadable, malformed, or failing its shape checks:
+
+```
+${PREFIX}_REVIEW_PARSE_ERROR reason=<why> resp=<path>
+```
+
+It carries no `status`, so the branches above do not apply. It is a **fail-closed
+stop**, not a retryable review outcome:
+
+- Do **not** merge the PR it refers to, and do not treat the absence of a
+  `${PREFIX}_REVIEW` line for that response as "no findings".
+- Do **not** ack it. Acking marks a response handled and it will never be
+  re-emitted; the response is unread, not dealt with.
+- Surface it to the user with the `reason` and the path. `reason=digest_failed`
+  and `reason=snapshot_failed` point at the file or the filesystem;
+  `reason=invalid_response_shape` and `reason=not_a_single_json_object` point at
+  the writer. Recovery is normally to re-request the review
+  (`$RB_SCRIPTS/review-bus-request.sh <PR> --force`) once the cause is fixed.
+- `--once` still exits **0** after printing it. The exit status reports whether
+  the sweep ran, not whether every response was usable, so a polling driver must
+  branch on the LINES, never on the exit code alone.
+
+**Parsing the line: take the LAST `resp=` token.** `summary` is quoted and
+reduced to printable ASCII precisely so it cannot introduce a framing token, but
+it is free text in a line the driver reads positionally, so the rule is stated
+rather than assumed: `resp=` is the final field on **both** line types — the
+handoff and the sentinel — and `${LINE##*resp=}` is the response path. (The
+sentinel therefore reads `reason=<why> resp=<path>`, reason first.) Read `digest=` as exactly 64 hex characters for the same reason.
+
 ### 2. Sync or create the PR worktree
 
 Use one worktree per PR so multiple PR branches can stay checked out at once. Reuse an existing worktree if that branch is already checked out elsewhere.

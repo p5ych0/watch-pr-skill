@@ -480,6 +480,62 @@ fi
     && pass "awkward notes still produce a normal clean signoff" \
     || die "an awkward note broke the signoff path"
 
+
+# ── An unreadable summary must not become an APPROVAL ──────────────────────
+# process_review runs beneath `if !` in handle(), so errexit does not stop it,
+# and `|| summary=""` turned a failed decode into an empty string - at which
+# point post_clean_signoff substituted its built-in no-findings text and posted
+# an APPROVE for a result we had failed to read.
+
+# (a) the decode itself fails. The stub faults ONLY `jq -r .`, the decode call;
+# every other jq in the watcher runs for real, so the review reaches that point
+# normally.
+DEC_BIN="$TMP/decbin"; mkdir -p "$DEC_BIN"
+cat > "$DEC_BIN/jq" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${FAULT_DECODE:-}" ] && [ "$1" = "-r" ] && [ "$2" = "." ] && [ "$#" -eq 2 ]; then
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$DEC_BIN/jq"
+
+dec_resp="$(PATH="$DEC_BIN:$PATH" FAULT_DECODE=1 run_with_summary decodefail '"a real note"')"
+if [ -f "$dec_resp" ]; then
+    [ "$(jq -r '.status' "$dec_resp")" != "approved" ] \
+        && pass "a failed summary decode earns no approval" \
+        || die "a failed decode still produced a clean APPROVE"
+    [ "$(jq -r '.status' "$dec_resp")" = "error" ] \
+        && pass "the failed decode is recorded as an error" \
+        || die "the failed decode was not recorded as an error: $(jq -r '.status' "$dec_resp")"
+else
+    die "decode-failure fixture produced no response"
+fi
+
+# (b) a summary with nothing VISIBLE in it. `\S` matches control and format code
+# points, so a NUL-only (or bidi-only) summary passed validation and then decoded
+# to an empty shell string - the same approval path by a different route.
+for invisible in '"\u0000"' '"\u0000\u0000"' '"\u202e"'; do
+    inv_resp="$(run_with_summary "invisible$(printf '%s' "$invisible" | tr -cd '0-9a-z')" "$invisible")"
+    # No response at all is the CORRECT outcome here: require_model_summary now
+    # rejects the result before any signoff, so process_review returns without
+    # recording a verdict. What must never happen is an approval.
+    if [ -f "$inv_resp" ]; then
+        [ "$(jq -r '.status' "$inv_resp")" != "approved" ] \
+            && pass "an invisible-only summary ($invisible) earns no approval" \
+            || die "an invisible-only summary ($invisible) produced a clean APPROVE"
+    else
+        pass "an invisible-only summary ($invisible) is rejected before any verdict"
+    fi
+done
+
+# And the control: a summary with visible content around an invisible byte is
+# still a valid signoff - the guard rejects the unreadable, not the awkward.
+vis_resp="$(run_with_summary visible '"a\u0000b"')"
+[ "$(jq -r '.status' "$vis_resp")" = "approved" ] \
+    && pass "visible content around a NUL still signs off" \
+    || die "the guard rejected a summary that does have visible content"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

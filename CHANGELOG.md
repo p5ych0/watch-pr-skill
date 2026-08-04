@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.12] — 2026-08-03
+## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
   findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
@@ -93,6 +93,36 @@
   response permanently. The claim now happens immediately before the line is
   printed, still atomically, so the startup replay and the inotify loop still
   cannot both emit the same response.
+
+- **An unreadable summary can no longer become an approval.** `process_review`
+  runs beneath `if !`, so errexit does not stop it, and `|| summary=""` turned a
+  failed decode of the reviewer's note into an empty string - at which point the
+  clean-signoff branch substituted its built-in no-findings text and posted an
+  APPROVE for a result that had not been read. The same state was reachable
+  through validation: `\S` matches control and format code points, so a summary
+  of nothing but NUL passed and then decoded to nothing in the shell. The note
+  must now contain a character that is neither whitespace nor a control nor a
+  format code point, and a decode failure records an error instead of signing
+  anything off.
+
+- **`summary` is a control field, and the handoff is inert for Unicode
+  controls.** The response guard did not check `summary`, so a response carrying
+  valid `pr`/`sha`/`status`/`count`/`reviewer` and nothing else emitted
+  `status=approved summary=""` - a terminal result the driver acts on. And the
+  "all control bytes stripped" guarantee was false: `tr -d '[:cntrl:]'` is
+  byte-oriented, so UTF-8-encoded C1 controls (U+009B) and bidi overrides
+  (U+202E) passed through untouched - exactly the code points that reorder or
+  hijack terminal and log rendering. `summary` must now be a non-blank string,
+  and it is reduced to printable ASCII inside jq before the line is assembled.
+
+- **The parse-error sentinel has a driver contract.** The monitor emitted
+  `_REVIEW_PARSE_ERROR` with nothing in `SKILL.md` or `README.md` telling a
+  driver what it means, while `--once` still exits 0 - so a polling driver had no
+  defined action and could stall, or read the silence as "no findings". Both
+  documents now state it: never merge on it, never ack it, surface it with its
+  reason, and branch on the lines rather than the exit status. `resp=` is now the
+  final field on the sentinel as well as the handoff, so the documented
+  last-token parsing rule is true of every line the driver reads.
 
 ## [1.0.11] — 2026-08-03
 

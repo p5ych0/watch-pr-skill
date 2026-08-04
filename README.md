@@ -47,7 +47,7 @@ the bus response as `model_summary`. So a concern the reviewer declines to force
 into a line-attached finding survives in the review record rather than being
 discarded. (Surfacing it to the driving session — a `reviewer_note=1` flag on the
 handoff line plus a helper that reads the text back safely — ships separately;
-the note is *recorded* here, not yet delivered.) (Before 1.0.12 it was overwritten by a
+the note is *recorded* here, not yet delivered.) (Before 1.0.13 it was overwritten by a
 status line whenever a review had findings, and the prompt had to tell reviewers
 to drop such observations entirely.) Copilot's equivalent is its overall review
 body, which the bus does not count as findings.
@@ -128,6 +128,11 @@ surface reviews. Then:
    and acks the handled response.
    (Push + comment alone does **not** re-trigger Codex — the round must be closed,
    or the loop stalls on the unresolved-threads gate.)
+   If a response cannot be trusted — unreadable, malformed, or failing its shape
+   checks — the monitor emits `<PREFIX>_REVIEW_PARSE_ERROR reason=… resp=…`
+   instead of a review line. That is a stop, not a review: nothing merges on it,
+   it is never acked, and it is surfaced to you with the reason. A failed
+   response is never silently indistinguishable from "no findings".
 4. On a clean signoff it re-checks the merge gate (head unchanged, threads
    resolved, required checks green) and admin-merges.
 

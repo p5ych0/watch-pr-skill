@@ -404,6 +404,119 @@ printf '%s' "$out_tr" | grep -q 'BUSTEST_REVIEW pr=93 ' \
     || die "the response was permanently suppressed by the failed run: $out_tr"
 rm -f "$TR_BIN/tr"
 
+
+# ── `.summary` is a control field too ──────────────────────────────────────
+# A response with valid pr/sha/status/count/reviewer but NO summary passed the
+# shape guard and emitted `status=approved summary=""` - a terminal result the
+# driver branches on, assembled from a response that was missing a field every
+# writer supplies.
+k=0
+for nosum in \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":null}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":false}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":""}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"   "}'
+do
+    k=$((k + 1))
+    SUM_BUS="$TMP/sumbus$k"; mkdir -p "$SUM_BUS/responses"
+    printf '%s' "$nosum" > "$SUM_BUS/responses/resp-ba600de.json"
+    out_sum="$(BUS_DIR="$SUM_BUS" MONITOR_EMITTED_DIR="$TMP/emsum$k" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_sum" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "summary case #$k reaches the sentinel" \
+        || die "summary case #$k was accepted (out='$out_sum')"
+    printf '%s' "$out_sum" | grep -q 'status=approved' \
+        && die "summary case #$k emitted a clean terminal handoff: $out_sum" \
+        || pass "summary case #$k emitted no approved handoff"
+done
+
+# ── The handoff must be inert for UNICODE controls, not just C0 bytes ───────
+# `tr -d '[:cntrl:]'` is byte-oriented: under C and C.UTF-8 it passes UTF-8
+# encoded C1 (U+009B = c2 9b) and bidi (U+202E = e2 80 ae) straight through, so
+# the "all control bytes stripped" guarantee was false for exactly the code
+# points that reorder or hijack rendering. Asserted at the BYTE level - the
+# earlier ESC/BEL check greps a byte class that misses both.
+UNI_BUS="$TMP/unibus"; mkdir -p "$UNI_BUS/responses"
+python3 - "$UNI_BUS/responses/resp-ba600de.json" <<'PYU'
+import json, sys
+json.dump({"pr": 7, "sha": "ba600de", "status": "approved", "findings_count": 0,
+           "reviewer": "codex",
+           "summary": "start\u009bmiddle\u202eend\u200bzw"}, open(sys.argv[1], "w"))
+PYU
+out_uni="$(BUS_DIR="$UNI_BUS" MONITOR_EMITTED_DIR="$TMP/emuni" "$MONITOR" --once 2>/dev/null || true)"
+uni_line="$(printf '%s\n' "$out_uni" | grep -m1 'BUSTEST_REVIEW pr=7' || true)"
+[ -n "$uni_line" ] \
+    && pass "a response carrying Unicode controls still emits its handoff" \
+    || die "the Unicode-control response produced no handoff: $out_uni"
+uni_hex="$(printf '%s' "$uni_line" | od -An -tx1 | tr -d ' \n')"
+printf '%s' "$uni_hex" | grep -q 'c29b' \
+    && die "C1 U+009B (c2 9b) reached the handoff line" \
+    || pass "C1 U+009B is not in the emitted bytes"
+printf '%s' "$uni_hex" | grep -q 'e280ae' \
+    && die "bidi U+202E (e2 80 ae) reached the handoff line" \
+    || pass "bidi U+202E is not in the emitted bytes"
+printf '%s' "$uni_hex" | grep -q 'e2808b' \
+    && die "zero-width U+200B reached the handoff line" \
+    || pass "zero-width U+200B is not in the emitted bytes"
+printf '%s' "$uni_line" | grep -q 'start' && printf '%s' "$uni_line" | grep -q 'end' \
+    && pass "the printable parts of the summary survive" \
+    || die "the summary was destroyed rather than reduced: $uni_line"
+
+
+# ── The sentinel needs a shipping DRIVER CONTRACT, not just an implementation ─
+# `--once` deliberately exits 0 after printing _REVIEW_PARSE_ERROR, and SKILL.md
+# branched only on status=approved|comments_posted|error - so a polling driver
+# had no defined action for it and could stall or, worse, read the silence as
+# "no findings". The behaviour and the documents must move together.
+SKILL_DOC="$SCRIPT_DIR/../SKILL.md"
+README_DOC="$SCRIPT_DIR/../../../README.md"
+if [ -f "$SKILL_DOC" ]; then
+    grep -q '_REVIEW_PARSE_ERROR' "$SKILL_DOC" \
+        && pass "SKILL.md documents the parse-error sentinel" \
+        || die "SKILL.md never mentions _REVIEW_PARSE_ERROR (no driver contract)"
+    grep -qi 'do \*\*not\*\* ack\|do not ack' "$SKILL_DOC" \
+        && pass "SKILL.md forbids acking a sentinel" \
+        || die "SKILL.md does not say a sentinel must not be acked"
+    grep -qi 'exits \*\*0\*\*\|still exits' "$SKILL_DOC" \
+        && pass "SKILL.md states --once exits 0 despite the sentinel" \
+        || die "SKILL.md does not warn that the exit status is not the signal"
+    grep -q 'LAST `resp=`\|last `resp=`' "$SKILL_DOC" \
+        && pass "SKILL.md states the last-resp= parsing rule" \
+        || die "SKILL.md does not state which resp= token to take"
+else
+    pass "SKILL.md not present beside the scripts; sentinel-contract checks skipped"
+fi
+if [ -f "$README_DOC" ]; then
+    grep -q 'REVIEW_PARSE_ERROR' "$README_DOC" \
+        && pass "README documents the user-visible sentinel outcome" \
+        || die "README does not describe what a failed response looks like"
+else
+    pass "README not present; sentinel-outcome check skipped"
+fi
+
+# And the exact driver-facing flow: a bad response yields the sentinel, exit 0,
+# no handoff, and a path that survives taking the LAST resp= token.
+FLOW_BUS="$TMP/flowbus"; mkdir -p "$FLOW_BUS/responses"
+printf '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$FLOW_BUS/responses/resp-ba600de.json"
+flow_rc=0
+out_flow="$(BUS_DIR="$FLOW_BUS" MONITOR_EMITTED_DIR="$TMP/emflow" "$MONITOR" --once 2>/dev/null)" || flow_rc=$?
+[ "$flow_rc" -eq 0 ] \
+    && pass "driver flow: --once exits 0 even when it emitted only a sentinel" \
+    || die "driver flow: --once exited $flow_rc (the docs promise 0)"
+sent_line="$(printf '%s\n' "$out_flow" | grep -m1 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+[ -n "$sent_line" ] && pass "driver flow: the sentinel line is present" \
+    || die "driver flow: no sentinel emitted"
+printf '%s' "$sent_line" | grep -q 'reason=' \
+    && pass "driver flow: the sentinel names a reason" \
+    || die "driver flow: sentinel carries no reason=: $sent_line"
+[ "${sent_line##*resp=}" = "$FLOW_BUS/responses/resp-ba600de.json" ] \
+    && pass "driver flow: the last resp= token is the response path" \
+    || die "driver flow: last-resp= parsing gave '${sent_line##*resp=}'"
+printf '%s' "$out_flow" | grep -q 'BUSTEST_REVIEW pr=' \
+    && die "driver flow: a handoff was emitted alongside the sentinel: $out_flow" \
+    || pass "driver flow: no handoff line accompanies the sentinel"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

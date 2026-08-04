@@ -140,7 +140,7 @@ emit_response() {
         if [ ! -e "$file" ]; then
             return 0            # vanished mid-sweep: a real no-op, not a failure
         fi
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=digest_failed\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=digest_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -167,7 +167,11 @@ emit_response() {
     # findings=null reviewer=null` - and the driver branches on `status=approved`
     # to merge. So the check covers: a positive integer PR, a 7-40 hex SHA, a
     # status from the writer's own enum, a non-negative integer findings count, a
-    # reviewer equal to the ONE value any writer emits, and the consistency
+    # reviewer equal to the ONE value any writer emits, a non-blank string
+    # summary - every writer composes one, and without the check a response
+    # carrying only pr/sha/status/count/reviewer emitted `status=approved
+    # summary=""`, which the driver reads as a clean terminal result - and the
+    # consistency
     # between status and count that makes
     # `approved` mean what the driver reads it to mean.
     #
@@ -192,12 +196,14 @@ emit_response() {
                    or ($r.findings_count | floor) != $r.findings_count
                    or $r.findings_count < 0
                    or $r.reviewer != "codex"
+                   or ($r.summary | type) != "string"
+                   or ($r.summary | test("\\S") | not)
                    or ($r.status == "approved" and $r.findings_count != 0)
                    or ($r.status == "comments_posted" and $r.findings_count < 1)
                 then empty else $r end
             end' "$file" 2>/dev/null)" \
        || [ -z "$snap" ]; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=invalid_response_shape\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=invalid_response_shape resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -211,7 +217,7 @@ emit_response() {
 
     line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\"\(.summary // "" | gsub("[\n\r\"]"; " ") | .[0:200])\" resp=" + $path
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\"\(.summary // "" | gsub("[^\\u0020-\\u007e]"; " ") | gsub("\""; " ") | .[0:200])\" resp=" + $path
         ' <<< "$snap" 2>/dev/null || true
     )"
 
@@ -221,16 +227,21 @@ emit_response() {
     # (with `"` stripped from the content) bounds it, and the real `resp=` stays
     # the LAST token on the line - so a parser must take the last one.
     #
-    # Defense-in-depth, mirroring emit_progress: strip ALL control bytes from the
-    # assembled line. `summary` is composed by the watcher, but a stray escape in
-    # any interpolated field would otherwise be a log/terminal-injection vector.
+    # `summary` is reduced to PRINTABLE ASCII inside jq, not merely stripped of C0
+    # control bytes afterwards. `tr -d '[:cntrl:]'` is byte-oriented: under both
+    # C and C.UTF-8 it passes UTF-8-encoded C1 controls (U+009B, `c2 9b`) and bidi
+    # overrides (U+202E, `e2 80 ae`) through untouched, so the "all control bytes
+    # stripped" guarantee was false for exactly the code points that reorder or
+    # hijack terminal and log rendering. Everything outside U+0020..U+007E becomes
+    # a space; the `tr` below stays as a second line of defence over the whole
+    # assembled line.
     if ! line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=sanitize_failed\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=sanitize_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
     if [ -z "$line" ]; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=empty_line resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
