@@ -319,7 +319,22 @@ write_response() {
     # line this script composes. Optional; omitted entirely when empty, because
     # an empty key would read as "the reviewer said nothing of note" — a
     # different claim from "the reviewer gave no summary".
-    local model_summary="${8:-}"
+    #
+    # Passed JSON-ENCODED (`"alpha\nbeta\n\n"`, quotes included), never raw.
+    # A raw shell value cannot round-trip an arbitrary JSON string: command
+    # substitution strips EVERY trailing newline and the shell cannot hold a NUL
+    # at all, so `"alpha\nbeta\n\n"` was recorded as `"alpha\nbeta"` and
+    # `"a\u0000b"` as `"ab"` — silently, with validation still reporting success.
+    # Encoded, the value crosses the shell as ordinary printable text and
+    # `--argjson` decodes it back to the reviewer's exact string.
+    local model_summary_json="${8:-}"
+
+    local -a ms_args=()
+    if [ -n "$model_summary_json" ]; then
+        ms_args=(--argjson model_summary "$model_summary_json")
+    else
+        ms_args=(--argjson model_summary null)
+    fi
 
     jq -n \
         --argjson pr "$pr" \
@@ -329,7 +344,7 @@ write_response() {
         --argjson findings_count "$findings" \
         --arg summary "$summary" \
         --arg log "$log" \
-        --arg model_summary "$model_summary" \
+        "${ms_args[@]}" \
         '{
           pr: $pr,
           sha: $sha,
@@ -339,7 +354,7 @@ write_response() {
           findings_count: $findings_count,
           summary: $summary,
           log: $log
-        } + (if $model_summary == "" then {} else {model_summary: $model_summary} end)' > "${resp}.tmp"
+        } + (if ($model_summary // "") == "" then {} else {model_summary: $model_summary} end)' > "${resp}.tmp"
     mv "${resp}.tmp" "$resp"
 }
 
@@ -372,8 +387,12 @@ require_model_summary() {
     # while being schema-invalid.
     #
     # The text is only TESTED here; what is returned is the reviewer's original,
-    # so the stored note keeps its exact formatting.
-    out="$(jq -er 'select((.summary | type) == "string") | select(.summary | test("\\S")) | .summary' "$result" 2>/dev/null)" || return 1
+    # so the stored note keeps its exact formatting. It is returned JSON-ENCODED
+    # (`-c`, no `-r`) precisely so that "exact" survives the trip: a raw value
+    # loses every trailing newline to command substitution and cannot carry a NUL
+    # byte at all, and both losses were invisible - validation still succeeded and
+    # the altered text was recorded as the reviewer's own words.
+    out="$(jq -ec 'select((.summary | type) == "string") | select(.summary | test("\\S")) | .summary' "$result" 2>/dev/null)" || return 1
     [ -n "$out" ] || return 1
     printf '%s' "$out"
 }
@@ -1173,7 +1192,10 @@ process_review() {
         summary="codex produced $produced finding(s), but only $posted/$produced inline PR review comments were confirmed on GitHub; see $log"
     else
         findings=0
-        summary="$model_summary"
+        # Decoded for the COMMENT BODY only. The stored `model_summary` stays
+        # encoded all the way into write_response; this copy is a shell string
+        # bound for `gh`, and `summary` is overwritten below either way.
+        summary="$(jq -r . <<< "$model_summary" 2>/dev/null)" || summary=""
         if clean_event="$(post_clean_signoff "$pr" "$full_sha" "$sha" "$summary")"; then
             status="approved"
             summary="No actionable findings on sha=$sha; clean review signoff posted as $clean_event."

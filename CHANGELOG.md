@@ -56,6 +56,28 @@
   numeric `.pr` — the field the handoff line names and the replay groups on —
   so a well-formed object missing it surfaces the sentinel instead of `pr=null`.
 
+- **The reviewer's note is stored byte-exact.** It crossed the shell as a raw
+  value, and a raw shell value cannot round-trip an arbitrary JSON string:
+  command substitution strips every trailing newline, and the shell cannot hold
+  a NUL byte at all. A summary ending in two newlines was recorded with none,
+  and one carrying an escaped NUL was recorded without it - silently, with
+  validation still reporting success, so the *altered* text was recorded as the
+  reviewer's own words. The note now travels JSON-encoded from the one jq pass
+  that validates it to the one that writes the response, and `--argjson` decodes
+  it back unchanged.
+
+- **The monitor validates every control field it hands the driver.** The shape
+  guard checked only that the response was one object with a numeric `.pr`, so
+  an object carrying just `pr`/`sha`/`status` emitted a handoff reading
+  `status=approved findings=null reviewer=null` - and the driver branches on
+  `status=approved` to merge, meaning malformed bus data could be read as a
+  clean terminal result. A positive integer PR, a hex SHA, a status from the
+  writer's own enum, a non-negative integer findings count, a string reviewer,
+  and the consistency between status and count are all required before the emit
+  marker is claimed. An unreadable response (mode 000, a hasher fault) now
+  reports `reason=digest_failed` instead of exiting silently; a response that
+  genuinely vanished mid-sweep stays the quiet no-op it should be.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

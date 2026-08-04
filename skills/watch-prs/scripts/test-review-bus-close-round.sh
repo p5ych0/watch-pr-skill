@@ -72,7 +72,7 @@ case "\$args" in
                                         # snapshot but BEFORE its ack — to prove
                                         # the ack keys on the captured digest and
                                         # cannot regress to a re-hash.
-                                        [ "\${STUB_SWAP_RESP:-0}" = "1" ] && printf '%s' '{"pr":7,"sha":"oldsha1","status":"changes","findings_count":9}' > "\$BUS_DIR/responses/resp-oldsha1.json";
+                                        [ "\${STUB_SWAP_RESP:-0}" = "1" ] && printf '%s' '{"pr":7,"sha":"0d5a1c7","status":"comments_posted","findings_count":9,"reviewer":"codex","summary":"swapped"}' > "\$BUS_DIR/responses/resp-0d5a1c7.json";
                                         echo "https://x/comment" ;;
   *)                                    printf '{}' ;;
 esac
@@ -81,7 +81,7 @@ chmod +x "$BIN/gh"
 
 new_bus() {   # fresh bus with one pre-existing round-1 response
   local b="$TMP/bus.$1"; mkdir -p "$b/responses" "$b/requests"
-  printf '{"pr":7,"sha":"oldsha1","status":"changes","findings_count":2}' > "$b/responses/resp-oldsha1.json"
+  printf '{"pr":7,"sha":"0d5a1c7","status":"comments_posted","findings_count":2,"reviewer":"codex","summary":"round 1"}' > "$b/responses/resp-0d5a1c7.json"
   echo "$b"
 }
 
@@ -96,7 +96,7 @@ BUS="$(new_bus 1)"; GHLOG="$TMP/gh1.log"; : > "$GHLOG"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "happy: resolved both threads" || die "happy: expected 2 RESOLVE got $(grep -c RESOLVE "$GHLOG")"
 grep -q SUMMARY "$GHLOG" && pass "happy: posted summary" || die "happy: no summary"
 ls "$BUS/requests"/req-*.json >/dev/null 2>&1 && pass "happy: enqueued request" || die "happy: no request file"
-ls "$BUS/.monitor-acked"/resp-oldsha1.json.* >/dev/null 2>&1 && pass "happy: acked unchanged round-1 response" || die "happy: not acked"
+ls "$BUS/.monitor-acked"/resp-0d5a1c7.json.* >/dev/null 2>&1 && pass "happy: acked unchanged round-1 response" || die "happy: not acked"
 
 # ── 2. Missing --summary file: stop before any mutation ──────────────────────
 BUS="$(new_bus 2)"; GHLOG="$TMP/gh2.log"; : > "$GHLOG"
@@ -142,14 +142,14 @@ grep -q "headRefOid" "$GHLOG" && pass "head-mismatch: reached the PR-head gate (
 #     mismatches, it SKIPS the ack, and the handled digest is left UNMARKED — so
 #     "handled digest marked" fails, catching the regression.
 BUS="$(new_bus 6)"; GHLOG="$TMP/gh6.log"; : > "$GHLOG"
-RESP="$BUS/responses/resp-oldsha1.json"
+RESP="$BUS/responses/resp-0d5a1c7.json"
 OLD_DIGEST="$(sha256sum "$RESP" | awk '{print $1}')"
 ( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" STUB_SWAP_RESP=1 "$CLOSE" 7 --force --summary "$TMP/sum.md" >/dev/null 2>/dev/null ); rc=$?
 [ "$rc" -eq 0 ] || die "swap-during: close-out failed (rc=$rc)"
 NEW_DIGEST="$(sha256sum "$RESP" | awk '{print $1}')"
 [ "$OLD_DIGEST" != "$NEW_DIGEST" ] || die "swap-during: response was not actually swapped mid-close (test setup broken)"
-[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$OLD_DIGEST" ] && pass "swap-during: HANDLED (captured) digest marked — no regression to re-hash" || die "swap-during: handled digest NOT marked (regressed to compare-then-ack)"
-[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$NEW_DIGEST" ] && die "swap-during: mid-close replacement digest wrongly marked (would suppress a fresh review)" || pass "swap-during: replacement digest unmarked"
+[ -e "$BUS/.monitor-acked/resp-0d5a1c7.json.$OLD_DIGEST" ] && pass "swap-during: HANDLED (captured) digest marked — no regression to re-hash" || die "swap-during: handled digest NOT marked (regressed to compare-then-ack)"
+[ -e "$BUS/.monitor-acked/resp-0d5a1c7.json.$NEW_DIGEST" ] && die "swap-during: mid-close replacement digest wrongly marked (would suppress a fresh review)" || pass "swap-during: replacement digest unmarked"
 OUT="$( MONITOR_EMITTED_DIR="$TMP/em6" BUS_DIR="$BUS" "$MONITOR" --once 2>/dev/null )"
 echo "$OUT" | grep -q "findings=9" && pass "swap-during: monitor emits the mid-close replacement" || die "swap-during: replacement suppressed"
 
@@ -159,13 +159,13 @@ echo "$OUT" | grep -q "findings=9" && pass "swap-during: monitor emits the mid-c
 # whole close-out before it mutates anything. The snapshot must skip the junk
 # file, still process the good one, and never ack the junk.
 BUS="$(new_bus 7)"; GHLOG="$TMP/gh7.log"; : > "$GHLOG"
-GOOD_DIGEST="$(sha256sum "$BUS/responses/resp-oldsha1.json" | awk '{print $1}')"
+GOOD_DIGEST="$(sha256sum "$BUS/responses/resp-0d5a1c7.json" | awk '{print $1}')"
 printf 'this is not json{' > "$BUS/responses/resp-junk.json"     # unparsable
 : > "$BUS/responses/resp-empty.json"                             # empty (jq → no pr)
 ( cd "$REPO" && PATH="$BIN:$PATH" BUS_DIR="$BUS" GHLOG="$GHLOG" "$CLOSE" 7 --force --summary "$TMP/sum.md" >/dev/null 2>/dev/null ); rc=$?
 [ "$rc" -eq 0 ] && pass "junk-response: close-out still succeeds (snapshot tolerant)" || die "junk-response: aborted (rc=$rc)"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "junk-response: threads still resolved" || die "junk-response: threads not resolved ($(grep -c RESOLVE "$GHLOG"))"
-[ -e "$BUS/.monitor-acked/resp-oldsha1.json.$GOOD_DIGEST" ] && pass "junk-response: good response acked" || die "junk-response: good response not acked"
+[ -e "$BUS/.monitor-acked/resp-0d5a1c7.json.$GOOD_DIGEST" ] && pass "junk-response: good response acked" || die "junk-response: good response not acked"
 ls "$BUS/.monitor-acked"/resp-junk.json.* >/dev/null 2>&1 && die "junk-response: junk file wrongly acked" || pass "junk-response: junk file skipped (not acked)"
 
 # ── 8. A dirty INDEX (staged change, worktree reverted to HEAD) blocks too ───
@@ -221,7 +221,7 @@ grep -Eq 'To continue .*: +"?/.*/review-bus-request\.sh 7 --continue-threshold' 
     || die "threshold-fwd: continue guidance not an absolute path ($(grep 'To continue' "$TMP/o11"))"
 [ "$(grep -c RESOLVE "$GHLOG")" -eq 2 ] && pass "threshold-fwd: round still closed (threads resolved)" || die "threshold-fwd: threads not resolved"
 ls "$BUS/requests"/req-*.json >/dev/null 2>&1 && die "threshold-fwd: must NOT enqueue at the pause" || pass "threshold-fwd: next review not enqueued"
-ls "$BUS/.monitor-acked"/resp-oldsha1.json.* >/dev/null 2>&1 && pass "threshold-fwd: handled response still acked" || die "threshold-fwd: response not acked at pause"
+ls "$BUS/.monitor-acked"/resp-0d5a1c7.json.* >/dev/null 2>&1 && pass "threshold-fwd: handled response still acked" || die "threshold-fwd: response not acked at pause"
 
 # ── 12. --continue-threshold proceeds past the pause and enqueues ────────────
 BUS="$(new_bus 12)"; GHLOG="$TMP/gh12.log"; : > "$GHLOG"

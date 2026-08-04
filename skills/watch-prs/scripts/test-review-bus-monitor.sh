@@ -86,7 +86,7 @@ out6="$(MONITOR_EMITTED_DIR="$TMP/sess6" "$MONITOR" --once 2>/dev/null || true)"
 echo "$out6" | grep -q "sha=bbbbbbb" && die "acked response re-emitted under a fresh session (must be suppressed)" || pass "acked response stays suppressed across a fresh session"
 
 # ── Test 2e: ack is digest-specific — a same-path NEW-content response re-emits
-resp bbbb 50 bbbbbbb approved 9    # rewrite resp-bbbb.json: same path, new content
+resp bbbb 50 bbbbbbb comments_posted 9    # rewrite resp-bbbb.json: same path, new content
 out7="$(MONITOR_EMITTED_DIR="$TMP/sess7" "$MONITOR" --once 2>/dev/null || true)"
 echo "$out7" | grep -q "findings=9" && pass "same-path new content re-emits despite prior ack (digest-keyed)" || die "new content wrongly suppressed by a stale ack"
 
@@ -96,7 +96,7 @@ echo "$out7" | grep -q "findings=9" && pass "same-path new content re-emits desp
 # digest is rejected without writing a marker; (b) acking captured digest D
 # suppresses the D-content response; (c) a same-path swap to different content
 # (digest D') is NOT suppressed — its notification still fires.
-resp dddd 60 ddddddd approved 4
+resp dddd 60 ddddddd comments_posted 4
 DIG_D="$(sha256sum "$RESP/resp-dddd.json" | awk '{print $1}')"
 "$MONITOR" --ack-if-digest "$RESP/resp-dddd.json" "not-a-sha" >/dev/null 2>&1 \
     && die "ack-if-digest: accepted a malformed digest" || pass "ack-if-digest: rejects a malformed digest"
@@ -105,7 +105,7 @@ ls "$BUS_DIR/.monitor-acked"/resp-dddd.json.* >/dev/null 2>&1 && die "ack-if-dig
 out8="$(MONITOR_EMITTED_DIR="$TMP/sess8" "$MONITOR" --once 2>/dev/null || true)"
 echo "$out8" | grep -q "sha=ddddddd" && die "ack-if-digest: captured-digest response re-emitted (must be suppressed)" || pass "ack-if-digest: captured-digest response suppressed"
 # Swap same path to NEW content — the captured-digest marker must not cover it.
-resp dddd 60 ddddddd approved 7
+resp dddd 60 ddddddd comments_posted 7
 DIG_DPRIME="$(sha256sum "$RESP/resp-dddd.json" | awk '{print $1}')"
 [ -e "$BUS_DIR/.monitor-acked/resp-dddd.json.$DIG_DPRIME" ] && die "ack-if-digest: fresh content's digest wrongly marked" || pass "ack-if-digest: fresh content not pre-suppressed"
 out9="$(MONITOR_EMITTED_DIR="$TMP/sess9" "$MONITOR" --once 2>/dev/null || true)"
@@ -274,6 +274,74 @@ printf '%s' "$ctrl_line" | grep -q 'summary="' \
 [ "${ctrl_line##*resp=}" = "$CTRL_BUS/responses/resp-6666666.json" ] \
     && pass "the LAST resp= token is the real response path" \
     || die "forged resp= won the parse: got '${ctrl_line##*resp=}'"
+
+
+# ── an INCOMPLETE object is not a clean terminal result ─────────────────────
+# Validating "one object with a numeric .pr" left every field the driver acts on
+# unchecked: `{"pr":7,"sha":"ba600de","status":"approved"}` emitted a handoff
+# reading `status=approved findings=null reviewer=null`, and the driver branches
+# on `status=approved` to MERGE. Each of these must reach the sentinel instead.
+j=0
+for badobj in \
+    '{"pr":7,"sha":"ba600de","status":"approved"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0}' \
+    '{"pr":0,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":7.5,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"zzzzzzz","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"ba600de","status":"merged","findings_count":0,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":-1,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":3,"reviewer":"codex"}' \
+    '{"pr":7,"sha":"ba600de","status":"comments_posted","findings_count":0,"reviewer":"codex"}'
+do
+    j=$((j + 1))
+    OBJ_BUS="$TMP/objbus$j"; mkdir -p "$OBJ_BUS/responses"
+    printf '%s' "$badobj" > "$OBJ_BUS/responses/resp-888888$j.json"
+    out_obj="$(BUS_DIR="$OBJ_BUS" MONITOR_EMITTED_DIR="$TMP/emobj$j" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_obj" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "invalid response #$j reaches the sentinel" \
+        || die "invalid response #$j was accepted (out='$out_obj')"
+    printf '%s' "$out_obj" | grep -q 'status=approved' \
+        && die "invalid response #$j emitted a clean terminal handoff: $out_obj" \
+        || pass "invalid response #$j emitted no approved handoff"
+done
+
+# The complete, consistent object still goes through - the guard rejects what is
+# malformed, not what is merely terse.
+GOOD_BUS="$TMP/goodbus"; mkdir -p "$GOOD_BUS/responses"
+printf '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$GOOD_BUS/responses/resp-ba600de.json"
+out_good="$(BUS_DIR="$GOOD_BUS" MONITOR_EMITTED_DIR="$TMP/emgood" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_good" | grep -q 'BUSTEST_REVIEW pr=7 .*status=approved' \
+    && pass "a complete, consistent response still emits its handoff" \
+    || die "the guard rejected a valid response: $out_good"
+
+# ── an UNREADABLE response is reported, not passed over ─────────────────────
+# Delegating an ungroupable file to emit_response is not enough: it hashes before
+# it parses, and a digest failure returned 0 silently - so a mode-000 response
+# made `--once` exit successfully with zero output, still indistinguishable from
+# "no pending review".
+UNREAD_BUS="$TMP/unreadbus"; mkdir -p "$UNREAD_BUS/responses"
+printf '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$UNREAD_BUS/responses/resp-ba600de.json"
+chmod 000 "$UNREAD_BUS/responses/resp-ba600de.json"
+if [ -r "$UNREAD_BUS/responses/resp-ba600de.json" ]; then
+    # running as root (CI containers): mode 000 is not a read barrier there
+    pass "unreadable-response check skipped (this user can read mode-000 files)"
+else
+    out_un="$(BUS_DIR="$UNREAD_BUS" MONITOR_EMITTED_DIR="$TMP/emunread" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_un" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "an unreadable response reports the sentinel, not silence" \
+        || die "an unreadable response produced no output (out='$out_un')"
+fi
+chmod 644 "$UNREAD_BUS/responses/resp-ba600de.json"
+
+# A response that genuinely VANISHED mid-sweep is a real no-op and must stay
+# quiet - the distinction the fix turns on.
+VAN_BUS="$TMP/vanbus"; mkdir -p "$VAN_BUS/responses"
+out_van="$(BUS_DIR="$VAN_BUS" MONITOR_EMITTED_DIR="$TMP/emvan" "$MONITOR" --once 2>/dev/null || true)"
+[ -z "$(printf '%s' "$out_van" | grep 'BUSTEST_REVIEW' || true)" ] \
+    && pass "an empty responses dir stays silent (no false sentinel)" \
+    || die "an empty responses dir produced output: $out_van"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

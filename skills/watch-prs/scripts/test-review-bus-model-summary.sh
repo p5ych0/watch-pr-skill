@@ -39,11 +39,17 @@ set +e
 
 MODEL_SUMMARY="Two blockers below. Also: the retry cap could not be verified because the suite needs credentials this worktree lacks."
 
+# write_response now takes the note JSON-ENCODED, because a raw shell value
+# cannot round-trip an arbitrary JSON string (trailing newlines are stripped by
+# command substitution, NUL cannot be held at all). Tests that supply a note
+# encode it the same way the watcher does.
+enc() { jq -Rs . <<< "$1" | jq -c '.[:-1]'; }   # -Rs adds one \n; drop it back off
+
 # ── 1. A review WITH findings keeps the model's summary ─────────────────────
 resp="$TMP/with-findings.json"
 write_response "$resp" 4 abc1234 comments_posted 2 \
     "2 findings posted as inline PR review comments on sha=abc1234." \
-    "/dev/null" "$MODEL_SUMMARY"
+    "/dev/null" "$(enc "$MODEL_SUMMARY")"
 
 [ "$(jq -r '.model_summary // "ABSENT"' "$resp")" = "$MODEL_SUMMARY" ] \
     && pass "model_summary survives a review that posted findings" \
@@ -81,7 +87,7 @@ write_response "$resp3" 4 abc1234 approved 0 "clean" "/dev/null"
 result="$TMP/result.json"
 jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: [{path: "a.sh", line: 1, side: "RIGHT", body: "x"}]}' > "$result"
 extracted="$(require_model_summary "$result")" && rc=0 || rc=1
-{ [ "$rc" -eq 0 ] && [ "$extracted" = "$MODEL_SUMMARY" ]; } \
+{ [ "$rc" -eq 0 ] && [ "$extracted" = "$(enc "$MODEL_SUMMARY")" ]; } \
     && pass "require_model_summary: extracts from a result WITH findings" \
     || die "require_model_summary failed on a valid result (rc=$rc got: '$extracted')"
 
@@ -247,7 +253,7 @@ fi
 # check is a test, not a transformation.
 SPACED="  leading and trailing spaces matter  "
 resp_sp="$TMP/spaced.json"
-write_response "$resp_sp" 4 abc1234 comments_posted 1 "1 finding." "/dev/null" "$SPACED"
+write_response "$resp_sp" 4 abc1234 comments_posted 1 "1 finding." "/dev/null" "$(enc "$SPACED")"
 [ "$(jq -r '.model_summary' "$resp_sp")" = "$SPACED" ] \
     && pass "stored note keeps its exact formatting (validation does not rewrite it)" \
     || die "stored note was altered by validation"
@@ -410,6 +416,69 @@ zero_stats="$(post_findings 4 ffffffffffffffffffffffffffffffffffffffff "$TMP/pr-
 [ "$zero_stats" = "0 0 0" ] \
     && pass "empty findings array reports 0 0 0 (no phantom attempt)" \
     || die "empty findings array reported '$zero_stats'"
+
+
+# ── Byte-exactness end to end: trailing newlines and NUL ────────────────────
+# The note crossed the shell as a RAW value, and a raw shell value cannot
+# round-trip an arbitrary JSON string: command substitution strips EVERY trailing
+# newline, and the shell cannot hold a NUL byte at all. Both losses were silent -
+# validation reported success and the ALTERED text was recorded as the
+# reviewer's own words. These run the real process_review, so they cover the
+# whole path (require_model_summary -> process_review -> write_response), not
+# just the writer.
+run_with_summary() {
+    local tag="$1"
+    local out="$TMP/pr-$tag"
+    rm -rf "$out"; mkdir -p "$out/snap"
+    # The fixture is built by jq from a JSON literal, so the awkward bytes never
+    # pass through the shell on the way IN either.
+    jq -n --argjson s "$2" '{summary: $s, findings: []}' > "$out/result.json"
+    (
+        set +eu
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        newer_request_for_same_pr() { return 1; }
+        run_codex_review() { :; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        post_findings() { printf '0 0 0\n'; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+
+# (a) trailing newlines: "alpha\nbeta\n\n" was recorded as "alpha\nbeta".
+nl_json='"alpha\nbeta\n\n"'
+nl_resp="$(run_with_summary trailnl "$nl_json")"
+if [ -f "$nl_resp" ]; then
+    [ "$(jq -c '.model_summary' "$nl_resp")" = "$nl_json" ] \
+        && pass "trailing newlines survive end to end" \
+        || die "trailing newlines were stripped: $(jq -c '.model_summary' "$nl_resp")"
+else
+    die "trailing-newline fixture produced no response"
+fi
+
+# (b) NUL: "a\u0000b" was recorded as "ab".
+nul_json='"a\u0000b"'
+nul_resp="$(run_with_summary nul "$nul_json")"
+if [ -f "$nul_resp" ]; then
+    [ "$(jq -c '.model_summary' "$nul_resp")" = "$nul_json" ] \
+        && pass "an embedded NUL survives end to end" \
+        || die "the embedded NUL was dropped: $(jq -c '.model_summary' "$nul_resp")"
+else
+    die "NUL fixture produced no response"
+fi
+
+# (c) The clean signoff must still happen for both - byte-exact storage must not
+# come at the cost of the review completing.
+[ "$(jq -r '.status' "$nl_resp")" = "approved" ] && [ "$(jq -r '.status' "$nul_resp")" = "approved" ] \
+    && pass "awkward notes still produce a normal clean signoff" \
+    || die "an awkward note broke the signoff path"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

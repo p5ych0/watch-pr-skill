@@ -130,8 +130,19 @@ emit_response() {
     [ -f "$file" ] || return 0
 
     base="$(basename "$file")"
-    digest="$(response_digest "$file" 2>/dev/null || true)"
-    [ -n "$digest" ] || return 0
+    # A digest failure is not "nothing to emit". Returning silently here made an
+    # unreadable response (mode 000, a bad block, a hasher fault) exit `--once`
+    # with zero output - byte-identical to an empty responses dir, which is
+    # exactly the reading a polling driver takes. The one case that IS a no-op is
+    # the file having genuinely disappeared between the find and this read, so
+    # that is verified before staying quiet.
+    if ! digest="$(response_digest "$file" 2>/dev/null)" || [ -z "$digest" ]; then
+        if [ ! -e "$file" ]; then
+            return 0            # vanished mid-sweep: a real no-op, not a failure
+        fi
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=digest_failed\n' "$PREFIX" "$file"
+        return 0
+    fi
 
     # Cross-session ACK gate: a response the Claude session already handled
     # (marker written via --ack after resolve + re-request, or merge) is never
@@ -150,12 +161,33 @@ emit_response() {
     # driver acts on, and `replay_existing` groups by it. A response whose `.pr`
     # is missing or non-numeric cannot be grouped OR acted on, so it must reach
     # the driver as the sentinel rather than as `pr=null`.
+    # EVERY control field the handoff line carries is validated, not just the
+    # container. `{"pr":7,"sha":"ba600de","status":"approved"}` is one object with
+    # a numeric `.pr`, and it emitted a handoff reading `status=approved
+    # findings=null reviewer=null` - and the driver branches on `status=approved`
+    # to merge. So the check covers: a positive integer PR, a 7-40 hex SHA, a
+    # status from the writer's own enum, a non-negative integer findings count, a
+    # string reviewer, and the consistency between status and count that makes
+    # `approved` mean what the driver reads it to mean.
     local snap
     if ! snap="$(jq -s '
-            if length == 1 and (.[0] | type) == "object" and (.[0].pr | type) == "number"
-            then .[0] else empty end' "$file" 2>/dev/null)" \
+            if length != 1 or (.[0] | type) != "object" then empty
+            else .[0] as $r
+              | if ($r.pr | type) != "number" or ($r.pr | floor) != $r.pr or $r.pr < 1
+                   or ($r.sha | type) != "string"
+                   or ($r.sha | test("^[0-9a-f]{7,40}$") | not)
+                   or ($r.status | type) != "string"
+                   or (["approved","comments_posted","error"] | index($r.status)) == null
+                   or ($r.findings_count | type) != "number"
+                   or ($r.findings_count | floor) != $r.findings_count
+                   or $r.findings_count < 0
+                   or ($r.reviewer | type) != "string"
+                   or ($r.status == "approved" and $r.findings_count != 0)
+                   or ($r.status == "comments_posted" and $r.findings_count < 1)
+                then empty else $r end
+            end' "$file" 2>/dev/null)" \
        || [ -z "$snap" ]; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=not_a_single_json_object_with_numeric_pr\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=invalid_response_shape\n' "$PREFIX" "$file"
         return 0
     fi
 
