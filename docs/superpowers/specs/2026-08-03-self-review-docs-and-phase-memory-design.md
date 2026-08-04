@@ -25,7 +25,7 @@ No bus state records that a PR owes a Copilot pass, and the response the monitor
 surfaces says nothing about one, so a session can reach merge without ever
 asking. This has happened repeatedly in `p5ych0/strumok`.
 
-**Watcher crash-loop (issue #3).** In `write_auto_request()`, three intentional
+**Watcher crash-loop (issue #3) — shipped in 1.0.11, ahead of this sequencing.** In `write_auto_request()`, three intentional
 no-op branches use a bare `return` after a failed test, inheriting exit status 1.
 Under `set -Eeuo pipefail` with an unguarded caller, the daemon exits and systemd
 restarts it every few seconds.
@@ -51,8 +51,8 @@ Three sub-projects, landed in this order. S3 and S1 are one PR each; **S2 is two
 1. **S3 — self-review docs** (this spec's first deliverable), including the
    watcher prompt change for task awareness.
 2. **S1 — reviewer-phase memory** and Copilot enforcement.
-3. **S2a — watcher fixes** for #3, plus *preservation* of the reviewer's summary
-   in the bus response (#212).
+3. **S2a — preservation**: the reviewer's summary is kept in the bus response as
+   `model_summary` on every review, including one with findings (#212).
 4. **S2b — surfacing**: the handoff flag and the reader that delivers the note to
    the driving session (#212). S2 is not complete until S2b lands.
 
@@ -184,7 +184,13 @@ available; skipping it by omission stops being possible.
 
 ## S2 — Watcher fixes
 
-### Issue #3
+### Issue #3 — DONE in 1.0.11
+
+Landed with S3 rather than S2: the crash-loop was reproducing live in this
+repository, so it was fixed as soon as the bus was armed here. `CHANGELOG.md`
+1.0.11 records it and `test-review-bus-noop-returns.sh` covers it. Nothing below
+is outstanding work — it is kept as the record of what the fix was and why the
+issue's own audit list was wider than the defect.
 
 `return 0` at `review-bus-codex-watcher.sh:854`, `:865`, `:879`. These are the
 defect: each follows a failed `[` test whose status the bare `return` inherits.
@@ -201,7 +207,19 @@ for the current head, assert no request is written, `write_auto_request` returns
 ### Issue #212
 
 The model's summary is preserved in the bus response as `model_summary`, and the
-monitor surfaces it in the handoff line alongside the findings count.
+driving session is told a note exists so it can read it.
+
+**The handoff line carries a FLAG, never the text.** It emits `reviewer_note=1`
+alongside the findings count; the text itself is returned by a separate reader
+(`--note`), which the driver calls and treats as untrusted, non-blocking context.
+Inlining the note into the handoff is prohibited, and not as a style preference:
+the line is framed (`status=`, `findings=`, `resp=`) and parsed positionally, so
+note text containing a framing token would put a second copy of it on the line,
+and note text containing control bytes would be a log- and terminal-injection
+vector. The reader escapes both, which a bare interpolation cannot.
+
+An end-to-end assertion holds the line: raw note text must never appear in the
+handoff.
 
 **Split into two deliveries — decided 2026-08-04.** Preservation and surfacing
 ship as separate pull requests: the response gains `model_summary` in one, and
@@ -241,7 +259,8 @@ GitHub.
 
 New coverage:
 
-- `write_auto_request` no-op returns 0 with a terminal response present (#3).
+- `write_auto_request` no-op returns 0 with a terminal response present (#3 —
+  already shipped in 1.0.11, listed for completeness).
 - A review with findings preserves `model_summary`, byte-exact (#212, S2a).
 - The handoff line flags a present note, and the reader returns its text safely
   to the driver; an end-to-end mixed review (findings *and* a note) reaches the
