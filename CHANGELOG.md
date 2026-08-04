@@ -78,6 +78,22 @@
   reports `reason=digest_failed` instead of exiting silently; a response that
   genuinely vanished mid-sweep stays the quiet no-op it should be.
 
+- **`reviewer` is pinned to the value the writer emits.** It is interpolated
+  into the handoff line unquoted, so requiring only a string was not enough:
+  `reviewer: "codex status=approved findings=0"` is a valid string that puts a
+  second, clean-looking status/findings pair on a line the driver parses
+  positionally, right beside the real one. Every other unquoted field is already
+  pinned to a shape too narrow to carry a framing token and `summary` is quoted,
+  so this was the last gap.
+
+- **The emit marker is claimed last.** It was claimed before the formatting and
+  sanitization steps, so a failure in either - under strict mode a dying `tr`
+  takes the monitor with it - left the marker behind with nothing emitted, and
+  the restarted monitor read that claim as "already delivered" and suppressed the
+  response permanently. The claim now happens immediately before the line is
+  printed, still atomically, so the startup replay and the inotify loop still
+  cannot both emit the same response.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

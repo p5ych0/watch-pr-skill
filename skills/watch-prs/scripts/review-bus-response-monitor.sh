@@ -167,8 +167,18 @@ emit_response() {
     # findings=null reviewer=null` - and the driver branches on `status=approved`
     # to merge. So the check covers: a positive integer PR, a 7-40 hex SHA, a
     # status from the writer's own enum, a non-negative integer findings count, a
-    # string reviewer, and the consistency between status and count that makes
+    # reviewer equal to the ONE value any writer emits, and the consistency
+    # between status and count that makes
     # `approved` mean what the driver reads it to mean.
+    #
+    # `reviewer` is checked by VALUE, not type, because it is interpolated into
+    # the handoff line UNQUOTED: `reviewer: "codex status=approved findings=0"` is
+    # a perfectly good string that puts a second, clean-looking `status=`/
+    # `findings=` pair on a line the driver parses positionally. Every other
+    # unquoted field is already pinned to a shape too narrow to carry one - hex
+    # SHA, status enum, numeric counts - and `summary`, the only free-text field,
+    # is quoted. An allowlist of exactly the value the writer produces closes the
+    # last gap.
     local snap
     if ! snap="$(jq -s '
             if length != 1 or (.[0] | type) != "object" then empty
@@ -181,7 +191,7 @@ emit_response() {
                    or ($r.findings_count | type) != "number"
                    or ($r.findings_count | floor) != $r.findings_count
                    or $r.findings_count < 0
-                   or ($r.reviewer | type) != "string"
+                   or $r.reviewer != "codex"
                    or ($r.status == "approved" and $r.findings_count != 0)
                    or ($r.status == "comments_posted" and $r.findings_count < 1)
                 then empty else $r end
@@ -198,9 +208,6 @@ emit_response() {
     # both see a response created during startup, never double-print it — exactly
     # one caller wins the marker and emits.
     marker="$EMITTED_DIR/${base}.${digest}"
-    if ! ( set -o noclobber; : > "$marker" ) 2>/dev/null; then
-        return 0
-    fi
 
     line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
@@ -217,10 +224,29 @@ emit_response() {
     # Defense-in-depth, mirroring emit_progress: strip ALL control bytes from the
     # assembled line. `summary` is composed by the watcher, but a stray escape in
     # any interpolated field would otherwise be a log/terminal-injection vector.
-    line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"
+    if ! line="$(printf '%s' "$line" | tr -d '[:cntrl:]')"; then
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=sanitize_failed\n' "$PREFIX" "$file"
+        return 0
+    fi
 
     if [ -z "$line" ]; then
         printf '%s_REVIEW_PARSE_ERROR resp=%s\n' "$PREFIX" "$file"
+        return 0
+    fi
+
+    # The emit marker is claimed HERE — after the line is fully formatted and
+    # sanitized, immediately before it is printed. Claiming it earlier meant a
+    # failure in the formatting or sanitization step (under strict mode, a `tr`
+    # that dies takes the whole monitor with it) left the marker behind with
+    # nothing emitted: the restarted monitor saw the claim and suppressed that
+    # response permanently. The claim is still ATOMIC (noclobber), so the startup
+    # replay and the inotify loop cannot both print the same response — exactly
+    # one wins the marker, and the loser returns without printing.
+    #
+    # Within-session dedup keyed by base + content digest. A fresh per-session
+    # EMITTED_DIR means a crash-after-emit response re-surfaces next session; the
+    # ACK gate above is what stops handled ones from re-firing.
+    if ! ( set -o noclobber; : > "$marker" ) 2>/dev/null; then
         return 0
     fi
 
