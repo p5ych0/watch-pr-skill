@@ -175,11 +175,28 @@ the helper in one call**. Paste the notification line into `LINE` and run the
 whole block; do not rely on anything assigned in an earlier call:
 
 ```bash
-LINE='<paste the ${PREFIX}_REVIEW line here, verbatim>'
+# Resolve the installed scripts here too — a fresh shell has no $RB_SCRIPTS, and
+# an unset one makes this call `/review-bus-response-monitor.sh` and exit 127.
+RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
+[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -d "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts "$HOME"/.codex/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | sort -V | tail -1)"
+
+# The notification line is DATA, never source. A QUOTED here-doc delimiter
+# (`<<'NOTIFICATION'`) suppresses every expansion, so an apostrophe or a `$( )`
+# in the reviewer's summary cannot close a quote or run.
+IFS= read -r LINE <<'NOTIFICATION'
+<paste the ${PREFIX}_REVIEW line here, verbatim>
+NOTIFICATION
+
 RESP_PATH="${LINE##*resp=}"
 RESP_DIGEST="$(printf '%s' "$LINE" | sed -n 's/.*[[:space:]]digest=\([0-9a-f]\{64\}\).*/\1/p')"
 "$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH" "$RESP_DIGEST"
 ```
+
+**Never paste the line into a single-quoted assignment.** `summary` keeps
+apostrophes and shell metacharacters — it is quoted and reduced to printable
+ASCII so it cannot forge a *framing token*, which is a different problem — so
+`LINE='…reviewer'"'"'s note…'` ends the quote, and anything after it is executed
+by your shell before `--note` ever runs.
 
 Both derivations are deliberate. `resp=` is the **last** token on the line — the
 monitor quotes `summary` precisely so a note containing `resp=` cannot add

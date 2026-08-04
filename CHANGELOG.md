@@ -95,6 +95,25 @@
   explain it — so a caller reading stdout would have taken the fragment for the
   reviewer's note. Partial output is discarded and the failure exits 2.
 
+- **The documented note-reader block is data-safe and self-contained.** It told
+  the driver to paste the notification line into a single-quoted assignment, and
+  `summary` keeps apostrophes and shell metacharacters - it is quoted and reduced
+  to printable ASCII so it cannot forge a *framing token*, which is a different
+  problem - so a summary shaped like `reviewer'$(…)'s note` closed the quote and
+  ran the substitution in the driver's own shell before `--note` was reached. The
+  line is now read through a QUOTED here-doc, which suppresses every expansion.
+  The same block also relied on an `$RB_SCRIPTS` from an earlier, separate shell,
+  so as written it invoked `/review-bus-response-monitor.sh` and exited 127; it
+  resolves the installed scripts itself now, and the test runs it with
+  `RB_SCRIPTS` unset instead of injecting one.
+
+- **The trusted review guidance no longer contradicts the release.** With the
+  reader shipping here, `.review-bus.md` still said the note was "recorded, not
+  yet surfaced" - and that file is loaded verbatim into every future review
+  prompt from the base ref, so the release would have told reviewers the opposite
+  of what ships. The base-ref design requires S2b to retire that interim
+  paragraph; it does, and the prompt-scope assertions invert with it.
+
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported

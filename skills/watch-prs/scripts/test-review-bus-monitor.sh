@@ -616,10 +616,15 @@ SKILL_MD="$SCRIPT_DIR/../SKILL.md"
 if [ -f "$SKILL_MD" ]; then
     # Extract the WHOLE fenced block, not just the helper line. The block is the
     # contract: a driver runs it in one Bash call, so anything it fails to derive
-    # for itself is a broken instruction. Injecting RESP_PATH/RESP_DIGEST from
-    # the test would hide exactly that - and did, while the block relied on a
-    # RESP_DIGEST no step ever assigned.
-    snippet="$(awk '/^LINE=.*_REVIEW line here/{f=1} f{print} f&&/--note "\$RESP_PATH"/{exit}' "$SKILL_MD")"
+    # for itself is a broken instruction. Injecting RESP_PATH/RESP_DIGEST/
+    # RB_SCRIPTS from the test would hide exactly that - and did.
+    # Extract by the FENCE around the --note call, not by a comment inside the
+    # block: anchoring on the block's own wording made any rewrite read as "the
+    # command is gone" instead of exercising the assertions below.
+    snippet="$(awk '
+        /^```bash$/ { buf=""; inblk=1; next }
+        inblk && /^```$/ { if (buf ~ /--note "\$RESP_PATH"/) { printf "%s", buf; exit } inblk=0; next }
+        inblk { buf = buf $0 "\n" }' "$SKILL_MD")"
     if [ -n "$snippet" ]; then
         printf '%s' "$snippet" | grep -q 'NOTE_RC=\$?' \
             && die "SKILL.md still appends a trailing assignment (exit status would be masked)" \
@@ -628,42 +633,62 @@ if [ -f "$SKILL_MD" ]; then
             && printf '%s' "$snippet" | grep -q 'RESP_DIGEST=' \
             && pass "the documented block derives both values itself" \
             || die "the documented block does not assign RESP_PATH and RESP_DIGEST"
+        printf '%s' "$snippet" | grep -q 'RB_SCRIPTS=' \
+            && pass "the documented block resolves RB_SCRIPTS itself" \
+            || die "the documented block relies on an RB_SCRIPTS from another shell"
+        printf '%s' "$snippet" | grep -q "^LINE='" \
+            && die "the documented block still pastes the line into a quoted assignment (injectable)" \
+            || pass "the documented block does not reparse the line as shell source"
+        printf '%s' "$snippet" | grep -qF "<<'NOTIFICATION'" \
+            && pass "the line is read through a QUOTED here-doc (no expansion)" \
+            || die "the line is not read through a quoted here-doc"
 
-        # Run the block from a CLEAN environment: only RB_SCRIPTS is provided,
-        # exactly as a real driver would have it. LINE is filled with a real
-        # notification line for each shape.
+        # Build a runnable copy: replace the placeholder INSIDE the here-doc.
+        # CLAUDE_PLUGIN_ROOT is a documented resolution path, so pointing it at
+        # this checkout exercises the block's own lookup - RB_SCRIPTS stays unset.
+        run_doc_block() {   # <notification-line> ; prints stdout, returns the block's status
+            local payload="$1" blk
+            blk="$(printf '%s\n' "$snippet" | awk -v p="$payload" '
+                /_REVIEW line here, verbatim/ { print p; next } { print }')"
+            env -u RESP_PATH -u RESP_DIGEST -u LINE -u RB_SCRIPTS \
+                CLAUDE_PLUGIN_ROOT="$SCRIPT_DIR/../../.." PATH="$PATH" HOME="$HOME" \
+                bash -c "$blk" 2>/dev/null
+        }
+
         for shape in none:1 bad:2 two:2; do
             f="${shape%%:*}"; want="${shape##*:}"
             d="$(sha256sum "$NOTE_TMP/$f.json" 2>/dev/null | awk '{print $1}')"
-            real_line="BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d resp=$NOTE_TMP/$f.json"
-            block="LINE='$real_line'
-${snippet#*$'\n'}"
             rc_doc=0
-            env -u RESP_PATH -u RESP_DIGEST -u LINE \
-                RB_SCRIPTS="$SCRIPT_DIR" PATH="$PATH" HOME="$HOME" \
-                bash -c "$block" >/dev/null 2>&1 || rc_doc=$?
+            run_doc_block "BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d resp=$NOTE_TMP/$f.json" >/dev/null || rc_doc=$?
             [ "$rc_doc" -eq "$want" ] \
-                && pass "documented block propagates exit $want for a $f response (clean env)" \
+                && pass "documented block propagates exit $want for a $f response (clean env, RB_SCRIPTS unset)" \
                 || die "documented block returned $rc_doc for a $f response (want $want)"
         done
 
-        # And the happy path: a valid note must actually come back. Without it
-        # the block could "pass" every case by always failing.
+        # Happy path, so the block cannot satisfy every case by always failing.
         printf '{"pr":70,"sha":"eeeeeee","status":"approved","findings_count":0,"reviewer":"codex","summary":"s","model_summary":"a real note"}\n' \
             > "$NOTE_TMP/ok.json"
         d_ok=""
         d_ok="$(sha256sum "$NOTE_TMP/ok.json" | awk '{print $1}')" || d_ok=""
         if [ -n "$d_ok" ]; then
-            real_line="BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d_ok resp=$NOTE_TMP/ok.json"
-            block="LINE='$real_line'
-${snippet#*$'\n'}"
-            out_doc="$(env -u RESP_PATH -u RESP_DIGEST -u LINE \
-                RB_SCRIPTS="$SCRIPT_DIR" PATH="$PATH" HOME="$HOME" \
-                bash -c "$block" 2>/dev/null || true)"
-            printf '%s' "$out_doc" | grep -q '"' \
+            out_doc="$(run_doc_block "BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"x\" digest=$d_ok resp=$NOTE_TMP/ok.json" || true)"
+            printf '%s' "$out_doc" | grep -q 'a real note' \
                 && pass "documented block returns the note on the happy path (clean env)" \
                 || die "documented block returned no note for a valid response: $out_doc"
         fi
+
+        # THE INJECTION CASE. A summary carrying an apostrophe and a command
+        # substitution must be inert: the payload writes a marker file if it ever
+        # executes, and that file must not exist afterwards.
+        INJ_MARK="$TMP/injection-executed"
+        rm -f "$INJ_MARK"
+        # `\$(` so the TEST shell does not run it while building the string - the
+        # payload must reach the block as literal text, which is the whole point.
+        inj_summary="reviewer'\$(touch $INJ_MARK)'s note"
+        run_doc_block "BUSTEST_REVIEW pr=1 sha=aaaaaaa status=approved findings=0 reviewer=codex reviewer_note=1 summary=\"$inj_summary\" digest=$d_ok resp=$NOTE_TMP/ok.json" >/dev/null 2>&1 || true
+        [ -e "$INJ_MARK" ] \
+            && die "the documented block EXECUTED a command substitution from the notification line" \
+            || pass "an apostrophe + \$( ) payload in summary is never executed"
     else
         die "SKILL.md no longer contains the --note driver command (contract drifted)"
     fi

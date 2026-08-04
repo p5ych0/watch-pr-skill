@@ -87,11 +87,12 @@ grep -qi 'EVERY review' "$PROMPT" \
 # RECORDED in the response here; nothing surfaces it to the driver until the
 # reader lands, so claiming it reaches the author would send reviewers into the
 # findings loop believing an observation was delivered when it was not.
-if grep -qi 'surfaced to the author' "$PROMPT"; then
-    die "prompt claims the note is surfaced, which no code in this branch does"
-else
-    pass "prompt claims recording, not surfacing (matches what ships here)"
-fi
+# The built-in prompt text still says RECORDED, which stays true - the reviewer's
+# words are kept verbatim in the response. What must NOT survive on this branch is
+# the interim claim that nothing delivers them, because the reader ships here.
+grep -qi 'RECORDED on EVERY review' "$PROMPT" \
+  && pass "prompt states the note is recorded on every review" \
+  || die "prompt no longer states the note is recorded"
 
 grep -qi 'intent, never permission' "$PROMPT" \
   && pass "scope context is marked untrusted" \
@@ -132,25 +133,26 @@ grep -qi 'EVERY review' "$PROMPT2" \
   && pass "the built-in observation rule survives alongside project guidance" \
   || die "project guidance displaced the built-in observation rule"
 
-if grep -qi 'surfaced to the author\|delivered to the author' "$PROMPT2"; then
-    die "the assembled prompt promises surfacing that no code in this branch does"
-else
-    pass "the assembled prompt (guidance included) promises recording, not surfacing"
-fi
+grep -qi 'not yet surfaced' "$PROMPT2" \
+  && die "the assembled prompt still carries the interim recorded-only caveat" \
+  || pass "the assembled prompt has no stale recorded-only caveat"
 
 # This repository's OWN .review-bus.md is loaded verbatim into the prompt when
 # reviewing this plugin, so the same contradiction has to be excluded at source.
 # Skipped where the file is absent (vendored scripts / a checkout without it).
 OWN_GUIDE="$SCRIPT_DIR/../../../.review-bus.md"
 if [ -f "$OWN_GUIDE" ]; then
-    if grep -qi 'surfaced to the author\|delivered to the author' "$OWN_GUIDE"; then
-        die "this repo's .review-bus.md claims the summary is surfaced, which no shipped code does"
+    # This branch SHIPS the reader, so the base-ref design requires the interim
+    # caveat to be gone: a trusted guidance file that still says the note is not
+    # delivered would tell future reviewers the opposite of what ships.
+    if grep -qi 'not yet[[:space:]]*surfaced' "$OWN_GUIDE"; then
+        die "this repo's .review-bus.md still carries the interim recorded-only caveat"
     else
-        pass "this repo's .review-bus.md does not claim the summary is surfaced"
+        pass "this repo's .review-bus.md no longer says the note is undelivered"
     fi
-    grep -qi 'not yet surfaced\|recorded' "$OWN_GUIDE" \
-      && pass "this repo's .review-bus.md states the note is recorded" \
-      || die "this repo's .review-bus.md does not state the recorded-only status"
+    grep -qi 'reviewer_note=1\|--note' "$OWN_GUIDE" \
+      && pass "this repo's .review-bus.md names the delivery channel" \
+      || die "this repo's .review-bus.md does not describe how the note reaches the author"
 else
     pass ".review-bus.md not present in this checkout; own-guidance assertions skipped"
 fi
