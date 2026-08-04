@@ -97,10 +97,38 @@ head_review_verdict() {
     esac
 }
 
+# Is Copilot currently a REQUESTED reviewer on this PR?
+#   0 = yes · 1 = no · 2 = cannot tell.
+#
+# This is the fact that outranks a recorded unavailability: a pending request
+# exists only because `gh pr edit --add-reviewer` succeeded, which is proof
+# Copilot is reachable here. The marker can survive a failed revocation (an
+# unsearchable BUS_DIR at the moment we tried to remove it), so the gate must not
+# treat it as cached permission - it re-derives from live state instead. A pure
+# read, no side effect.
+copilot_request_pending() {
+    local pr="$1" out
+    out="$(gh pr view "$pr" --repo "$REPO_SLUG" --json reviewRequests \
+             --jq '[.reviewRequests[]? | (.login // .name // "")] | join(" ")' 2>/dev/null)" || return 2
+    case "$out" in
+        *"$COPILOT_BOT"*|*copilot*|*Copilot*) return 0 ;;
+    esac
+    return 1
+}
+
 revoke_unavailable() {
     local umark="$BUS_DIR/.copilot-unavailable-${1}"
-    [ -e "$umark" ] || return 0
+    # No `[ -e ]` precondition: a test cannot tell an absent marker from a probe
+    # that failed (an unsearchable BUS_DIR, a transient mount error). Reading
+    # "false" as "nothing to revoke" reported success while the marker survived,
+    # and once access recovered the gate honoured it as `status=unavailable`
+    # while the requested review was still pending. `rm -f` is already a no-op on
+    # an absent file, so attempt it unconditionally and trust its status.
     rm -f "$umark" 2>/dev/null || return 1
+    # And confirm the removal: `rm -f` succeeds on an unlink it never had to do,
+    # so the post-condition is what proves the marker is gone. An existence probe
+    # that itself fails leaves the file readable as present, which is the
+    # fail-closed direction here.
     [ -e "$umark" ] && return 1
     return 0
 }
@@ -381,8 +409,25 @@ cmd_gate() {
     fi
 
     # Copilot positively unavailable for THIS head, recorded by `request` rc 3.
+    #
+    # Re-derived, not trusted. The marker is the one PERMISSIVE piece of state
+    # here, and it can outlive its truth: if the bus directory was briefly
+    # unsearchable when a successful request tried to revoke it, the request
+    # correctly failed closed but the marker survived - and honouring it later
+    # would merge while the requested review was still pending. A pending request
+    # is proof the marker is stale, so check for one first, and fail closed when
+    # that check cannot be made.
     marker="$BUS_DIR/.copilot-unavailable-${pr}"
     if [ -f "$marker" ] && [ "$(read_sha_marker "$marker" || true)" = "$head" ]; then
+        local pending_rc=0
+        copilot_request_pending "$pr" || pending_rc=$?
+        case "$pending_rc" in
+            0)  revoke_unavailable "$pr" || true   # best effort; the verdict below does not depend on it
+                echo "COPILOT_GATE pr=$pr sha=$short status=none reason=stale_unavailable_request_pending"
+                return 1 ;;
+            2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=request_state_unreadable"
+                return 2 ;;
+        esac
         echo "COPILOT_GATE pr=$pr sha=$short status=unavailable"
         return 0
     fi

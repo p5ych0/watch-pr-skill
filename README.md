@@ -176,6 +176,12 @@ and is equally head-scoped. It is also revoked the moment a later request on tha
 succeeds, so a repository that gains Copilot mid-loop does not merge on a stale "unavailable"
 while the pass it has just requested is still running.
 
+The gate does not simply trust that marker, either: it is the one permissive piece of bus
+state, so before honouring it the gate checks whether Copilot is currently a *requested
+reviewer* on the PR. A pending request can only exist because the request succeeded, which
+proves the marker stale — and if that check cannot be made, the gate fails closed rather than
+giving the marker the benefit of the doubt.
+
 Codex also stops re-reviewing during the Copilot loop. A clean signoff records the signed-off
 SHA, and auto-enqueue holds while **every** commit since it carries a `Review-Phase: copilot`
 trailer — so Copilot-fix commits no longer burn a Codex review, a round against the check-in

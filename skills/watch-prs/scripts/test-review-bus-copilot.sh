@@ -19,6 +19,8 @@ cat > "$TMP/bin/gh" <<'SH'
 #   GH_REVIEW_COMMENTS  file: JSON array for  api repos/*/pulls/*/reviews/*/comments
 #   GH_HEAD             string: headRefOid for pr view --json headRefOid --jq
 #   GH_HEAD_RC          int:  exit code for   pr view (stdout is still emitted)
+#   GH_PENDING          string: requested reviewers for pr view --json reviewRequests
+#   GH_PENDING_RC       int:  exit code for that read
 #   GH_SEARCH           file: JSON array for  search prs (unset => exit 1 = error)
 #   GH_EDIT_RC          int:  exit code for   pr edit
 case "$1 ${2:-}" in
@@ -33,7 +35,13 @@ case "$1 ${2:-}" in
       *"/reviews"*)              [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
       *) printf '{}' ;;
     esac ;;
-  "pr view"*)    printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
+  "pr view"*)
+    # reviewRequests is a separate query from headRefOid; GH_PENDING lists the
+    # requested reviewers (empty/unset => none), GH_PENDING_RC faults the read.
+    case "$*" in
+      *reviewRequests*) [ -n "${GH_PENDING_RC:-}" ] && exit "$GH_PENDING_RC"; printf '%s' "${GH_PENDING:-}" ;;
+      *)                printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
+    esac ;;
   "pr edit"*)    [ -n "${GH_EDIT_STDERR:-}" ] && printf '%s\n' "$GH_EDIT_STDERR" >&2; exit "${GH_EDIT_RC:-0}" ;;
   "search prs"*) if [ -n "${GH_SEARCH:-}" ]; then cat "$GH_SEARCH"; else exit 1; fi ;;
   *) printf '{}' ;;
@@ -455,6 +463,47 @@ rc=$?
 [ ! -e "$UNAVAIL_BUS/.copilot-unavailable-7" ] \
   && pass "request: no marker recorded off an unreadable reviews fetch" \
   || die "request: recorded unavailability without being able to read the review state"
+
+# (ee) Revocation must not read a FAILED probe as "nothing to revoke". `[ -e ]`
+# is false both when the marker is absent and when BUS_DIR is unsearchable, so
+# the guard reported success while the marker survived - and once access
+# recovered, the gate honoured it as status=unavailable while the review it had
+# just requested was still pending.
+LOCK_BUS="$TMP/lockbus"; mkdir -p "$LOCK_BUS"
+run_lock() { BUS_DIR="$LOCK_BUS" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+printf '%s\n' "$HEAD40" > "$LOCK_BUS/.copilot-unavailable-7"
+chmod 000 "$LOCK_BUS"
+if [ -r "$LOCK_BUS" ] && [ -x "$LOCK_BUS" ]; then
+    chmod 755 "$LOCK_BUS"
+    pass "revocation probe check skipped (this user can traverse mode-000 dirs)"
+else
+    GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_EDIT_RC=0 run_lock request 7 >/dev/null 2>&1
+    rc=$?
+    [ "$rc" -eq 2 ] \
+      && pass "request: an unsearchable bus fails closed instead of claiming success" \
+      || die "request: reported success while the marker could not be revoked (rc=$rc)"
+    chmod 755 "$LOCK_BUS"
+    # Access recovered: the marker survived, so it must NOT now carry the gate.
+    [ -e "$LOCK_BUS/.copilot-unavailable-7" ] \
+      && pass "the marker did indeed survive (the scenario is real)" \
+      || die "test setup wrong: the marker was removed after all"
+    # The request SUCCEEDED (`gh pr edit` rc 0), so on a real GitHub Copilot is
+    # now a requested reviewer - which is exactly the live fact that proves the
+    # surviving marker stale.
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" \
+           GH_PENDING="copilot-pull-request-reviewer[bot]" run_lock gate 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'stale_unavailable_request_pending'; } \
+      && pass "a pending request overrides the surviving unavailable marker" \
+      || die "the surviving marker satisfied the gate after recovery: rc=$rc out=$out"
+    # And if the pending-request state cannot be read, the marker does not get
+    # the benefit of the doubt.
+    printf '%s\n' "$HEAD40" > "$LOCK_BUS/.copilot-unavailable-7"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_PENDING_RC=1 run_lock gate 7 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+      && pass "unreadable request state blocks rather than honouring the marker" \
+      || die "gate honoured the marker with unreadable request state (rc=$rc out=$out)"
+fi
+rm -rf "$LOCK_BUS"
 
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any

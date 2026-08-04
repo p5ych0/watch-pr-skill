@@ -167,6 +167,26 @@
   cannot report `identical` there. The pair is a contradiction, and the only
   payloads producing it were malformed ones that then suppressed Codex.
 
+- **The unavailability marker is re-derived, not trusted.** It is the one
+  permissive piece of bus state, and it can outlive its truth: if the bus
+  directory was briefly unsearchable when a successful request tried to revoke
+  it, the request correctly failed closed but the marker survived - and the gate
+  later honoured it, merging while the requested review was still pending.
+  `[ -e ]` was part of the problem, since it cannot tell an absent marker from a
+  failed probe and so reported "nothing to revoke" for a marker that was still
+  there. Revocation now attempts the unlink unconditionally and proves the
+  result, and the gate checks whether Copilot is currently a requested reviewer
+  before honouring the marker - a pending request exists only because the
+  request succeeded. An unreadable check fails closed.
+
+- **The merge-range trailer count fails closed.** `|| true` masked every
+  non-zero status from the counting pipeline, not only grep's rc 1 for "no
+  matches", and command substitution keeps output written before a failure - so
+  a counter that printed the expected number and then failed still satisfied
+  `TAGGED == TOTAL` and the range was declared Codex-vetted. The status is now
+  taken explicitly: 0 is a count, 1 is a real zero, anything else is a failed
+  inspection and returns 2.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

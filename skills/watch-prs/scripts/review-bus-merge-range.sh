@@ -76,8 +76,23 @@ if ! TRAILERS="$(git -C "$REPO_DIR" log --format='%(trailers:key=Review-Phase,va
     exit 2
 fi
 
-TAGGED="$(printf '%s\n' "$TRAILERS" | grep -c '^copilot$' || true)"
-[[ "$TAGGED" =~ ^[0-9]+$ ]] || TAGGED=0
+# `|| true` masked EVERY non-zero status, not just grep's rc 1 for "no matches" -
+# and command substitution keeps whatever was printed before a failure, so a
+# counter that printed the expected number and then exited 2 still satisfied
+# TAGGED == TOTAL and this returned status=ok. Take the status explicitly: 0 is a
+# real count, 1 is a real zero, anything else is a failed inspection and must
+# fail closed.
+grep_rc=0
+TAGGED="$(printf '%s\n' "$TRAILERS" | grep -c '^copilot$')" || grep_rc=$?
+case "$grep_rc" in
+    0) ;;
+    1) TAGGED=0 ;;
+    *) echo "MERGE_RANGE status=error reason=count_failed rc=$grep_rc" >&2; exit 2 ;;
+esac
+if ! [[ "$TAGGED" =~ ^[0-9]+$ ]]; then
+    echo "MERGE_RANGE status=error reason=count_unreadable" >&2
+    exit 2
+fi
 
 if [ "$TOTAL" -eq "$TAGGED" ]; then
     echo "MERGE_RANGE status=ok commits=$TOTAL tagged=$TAGGED"

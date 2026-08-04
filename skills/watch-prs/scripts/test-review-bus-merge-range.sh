@@ -119,6 +119,60 @@ else
     pass "SKILL.md not present beside the scripts; delegation check skipped"
 fi
 
+
+# ── A counter that PRINTS and then fails is a failed inspection ────────────
+# `|| true` masked every non-zero status from the counting pipeline, not just
+# grep's rc 1 for "no matches" - and command substitution keeps whatever was
+# written before the failure. So a counter printing the expected number and then
+# exiting 2 still satisfied TAGGED == TOTAL and this returned status=ok, letting
+# a range be declared Codex-vetted on the strength of a count that failed.
+COUNT_BIN="$TMP/countbin"; mkdir -p "$COUNT_BIN"
+cat > "$COUNT_BIN/grep" <<'SH'
+#!/usr/bin/env bash
+# Faults ONLY the trailer count (-c '^copilot$'); every other grep is real, so
+# the script still reaches the counting step normally.
+if [ -n "${FAULT_COUNT:-}" ] && [ "$1" = "-c" ] && [ "$2" = '^copilot$' ]; then
+    printf '%s\n' "${FAULT_COUNT_VALUE:-1}"
+    exit 2
+fi
+exec /usr/bin/grep "$@"
+SH
+chmod +x "$COUNT_BIN/grep"
+
+# One tagged commit past the base: the honest count is 1, and the shim prints 1
+# too - so only the STATUS distinguishes them.
+git -C "$REPO" checkout -q -B countcase "$BASE"
+commit "fix(review): tagged
+
+Review-Phase: copilot"
+COUNT_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+
+rc=0
+out="$(PATH="$COUNT_BIN:$PATH" FAULT_COUNT=1 FAULT_COUNT_VALUE=1 "$SCRIPT" "$BASE" "$COUNT_HEAD" "$REPO" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "counter that prints then fails => 2 (inspection failed)" \
+    || die "stdout-plus-failure count accepted: rc=$rc out=$out"
+printf '%s' "$out" | grep -q 'status=ok' \
+    && die "a failed count still reported status=ok: $out" \
+    || pass "no status=ok from a failed count"
+
+# The same range without the fault is genuinely ok - so the assertion above
+# cannot pass by the range being blocked for an unrelated reason.
+run "$BASE" "$COUNT_HEAD"
+[ "$rc" -eq 0 ] \
+    && pass "the same range passes when the count actually succeeds" \
+    || die "control failed: rc=$rc out=$out"
+
+# grep's rc 1 (no matches) is still an honest ZERO, not a failure - an untagged
+# range must block with status=blocked, never error.
+git -C "$REPO" checkout -q -B zerocase "$BASE"
+commit "chore: no trailer here"
+ZERO_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+run "$BASE" "$ZERO_HEAD"
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'tagged=0'; } \
+    && pass "no matches is a real zero (blocked, not error)" \
+    || die "zero-match count did not block cleanly: rc=$rc out=$out"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
