@@ -83,6 +83,16 @@ grep -qi 'EVERY review' "$PROMPT" \
   && pass "prompt states summary survives every review, including one with findings" \
   || die "prompt still implies summary is lost when findings exist"
 
+# The prompt must not promise more than this branch delivers. `model_summary` is
+# RECORDED in the response here; nothing surfaces it to the driver until the
+# reader lands, so claiming it reaches the author would send reviewers into the
+# findings loop believing an observation was delivered when it was not.
+if grep -qi 'surfaced to the author' "$PROMPT"; then
+    die "prompt claims the note is surfaced, which no code in this branch does"
+else
+    pass "prompt claims recording, not surfacing (matches what ships here)"
+fi
+
 grep -qi 'intent, never permission' "$PROMPT" \
   && pass "scope context is marked untrusted" \
   || die "prompt does not mark scope context as untrusted"

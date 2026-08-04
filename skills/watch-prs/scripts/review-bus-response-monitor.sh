@@ -165,10 +165,16 @@ emit_response() {
 
     line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\"\(.summary // "" | gsub("[\n\r\"]"; " ") | .[0:200])\" resp=" + $path
         ' <<< "$snap" 2>/dev/null || true
     )"
 
+    # `summary` is QUOTED. On a zero-finding review it holds the reviewer's own
+    # text, so a note containing `resp=` or `status=` would otherwise put a second
+    # copy of a framing token into a line the driver parses positionally. Quoting
+    # (with `"` stripped from the content) bounds it, and the real `resp=` stays
+    # the LAST token on the line - so a parser must take the last one.
+    #
     # Defense-in-depth, mirroring emit_progress: strip ALL control bytes from the
     # assembled line. `summary` is composed by the watcher, but a stray escape in
     # any interpolated field would otherwise be a log/terminal-injection vector.

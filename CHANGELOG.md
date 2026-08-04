@@ -18,6 +18,12 @@
   watcher-authored comment would satisfy that gate by itself and let
   auto-enqueue fire without the author ever closing the round.
 
+- **The handoff `summary` field is quoted.** On a zero-finding review that field
+  holds the reviewer's own text, so a note containing `resp=` or `status=` put a
+  second copy of a framing token into a line the driver parses positionally. It
+  is now quoted (with `"` stripped from the content) and the real `resp=` remains
+  the last token, so the parse rule is unambiguous: take the last one.
+
 - **The handoff line is validated before it is emitted.** `emit_response` read
   the response as a jq STREAM, so a file holding two objects produced two handoff
   lines and the control-byte strip then removed the newline between them -

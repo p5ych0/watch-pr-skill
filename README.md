@@ -44,7 +44,10 @@ Every finding becomes a review thread the merge gate requires resolved, so a not
 filed there would block the merge however it is labelled - but `summary` is
 preserved on **every** review, including one that reports findings, and kept in
 the bus response as `model_summary`. So a concern the reviewer declines to force
-into a line-attached finding is not lost. (Before 1.0.12 it was overwritten by a
+into a line-attached finding survives in the review record rather than being
+discarded. (Surfacing it to the driving session — a `reviewer_note=1` flag on the
+handoff line plus a helper that reads the text back safely — ships separately;
+the note is *recorded* here, not yet delivered.) (Before 1.0.12 it was overwritten by a
 status line whenever a review had findings, and the prompt had to tell reviewers
 to drop such observations entirely.) Copilot's equivalent is its overall review
 body, which the bus does not count as findings.
