@@ -393,14 +393,19 @@ require_model_summary() {
     # byte at all, and both losses were invisible - validation still succeeded and
     # the altered text was recorded as the reviewer's own words.
     #
-    # `\S` is not enough: it matches control and format code points, so a summary
-    # of nothing but NUL (or a bidi override) passed validation and then decoded
-    # to an EMPTY shell string - at which point the clean-signoff branch fell back
-    # to its built-in "no actionable issues" text and posted an APPROVE. Require
-    # at least one character that is neither whitespace nor a control (`\p{Cc}`)
-    # nor a format (`\p{Cf}`) code point.
+    # Require a RENDERED BASE character, not merely "not a control".
+    #
+    # `\S` was the first attempt and matched control and format code points, so a
+    # NUL-only summary passed and then decoded to nothing. Excluding `\p{Cc}` and
+    # `\p{Cf}` was the second, and still accepted a summary of nothing but marks:
+    # U+FE0F (VARIATION SELECTOR-16) is category `Mn`, so it is neither whitespace
+    # nor a control nor a format character, yet it renders as nothing on its own -
+    # and a `{"summary":"\uFE0F","findings":[]}` result earned a clean APPROVE.
+    # The positive test is the one that holds: at least one letter, number,
+    # punctuation mark or symbol, which is what "the reviewer wrote something"
+    # actually means.
     out="$(jq -ec 'select((.summary | type) == "string")
-                   | select(.summary | test("[^\\p{Cc}\\p{Cf}\\s]"))
+                   | select(.summary | test("[\\p{L}\\p{N}\\p{P}\\p{S}]"))
                    | .summary' "$result" 2>/dev/null)" || return 1
     [ -n "$out" ] || return 1
     printf '%s' "$out"
@@ -1212,8 +1217,12 @@ process_review() {
         # A decode that fails, or that yields nothing visible once the shell has
         # dropped what it cannot carry, is a failed read - record the error and
         # sign nothing off.
+        # The SAME rule as the validator above, not a POSIX class approximation:
+        # `[^[:space:][:cntrl:]]` accepts the UTF-8 bytes of a variation selector,
+        # which is exactly the case the validator now rejects, and the two must not
+        # disagree about what counts as text.
         if ! summary="$(jq -r . <<< "$model_summary" 2>/dev/null)" \
-           || ! printf '%s' "$summary" | grep -q '[^[:space:][:cntrl:]]'; then
+           || ! printf '%s' "$summary" | grep -Pq '[\p{L}\p{N}\p{P}\p{S}]'; then
             echo "CODEX_RESULT_INVALID path=$result reason=summary_undecodable_or_invisible"
             status="error"
             findings=0

@@ -215,11 +215,18 @@ stop**, not a retryable review outcome:
   `${PREFIX}_REVIEW` line for that response as "no findings".
 - Do **not** ack it. Acking marks a response handled and it will never be
   re-emitted; the response is unread, not dealt with.
-- Surface it to the user with the `reason` and the path. `reason=digest_failed`
-  and `reason=snapshot_failed` point at the file or the filesystem;
-  `reason=invalid_response_shape` and `reason=not_a_single_json_object` point at
-  the writer. Recovery is normally to re-request the review
-  (`$RB_SCRIPTS/review-bus-request.sh <PR> --force`) once the cause is fixed.
+- Surface it to the user with the `reason` and the path. They fall into two
+  groups, and the group decides what to do:
+  - **The response is bad** — `invalid_response_shape`,
+    `not_a_single_json_object`, `note_not_a_nonempty_string`. Re-request the
+    review (`$RB_SCRIPTS/review-bus-request.sh <PR> --force`); the existing
+    response cannot be repaired. Reported once per session per response.
+  - **A tool or the filesystem failed** — `digest_failed`, `snapshot_failed`,
+    `format_failed`, `sanitize_failed`, `empty_line`, `probe_failed`,
+    `emit_marker_failed`. The response may be perfectly good, so these are
+    reported on every sweep and are NOT deduplicated: fix the cause (disk,
+    permissions, a broken `jq`/`sha256sum` on PATH) and the same response is
+    delivered normally, with no re-request needed.
 - `--once` still exits **0** after printing it. The exit status reports whether
   the sweep ran, not whether every response was usable, so a polling driver must
   branch on the LINES, never on the exit code alone.

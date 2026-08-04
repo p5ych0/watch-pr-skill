@@ -515,7 +515,11 @@ fi
 # (b) a summary with nothing VISIBLE in it. `\S` matches control and format code
 # points, so a NUL-only (or bidi-only) summary passed validation and then decoded
 # to an empty shell string - the same approval path by a different route.
-for invisible in '"\u0000"' '"\u0000\u0000"' '"\u202e"'; do
+# U+FE0F (VARIATION SELECTOR-16) and U+0301 (COMBINING ACUTE) are category Mn:
+# neither whitespace nor control nor format, so the earlier `[^\p{Cc}\p{Cf}\s]`
+# rule accepted them - and a summary of nothing but a variation selector earned
+# a clean APPROVE. A mark with no base character renders as nothing.
+for invisible in '"\u0000"' '"\u0000\u0000"' '"\u202e"' '"\ufe0f"' '"\ufe0f\ufe0f"' '"\u0301"' '"\u200b\ufe0f"'; do
     inv_resp="$(run_with_summary "invisible$(printf '%s' "$invisible" | tr -cd '0-9a-z')" "$invisible")"
     # No response at all is the CORRECT outcome here: require_model_summary now
     # rejects the result before any signoff, so process_review returns without
@@ -535,6 +539,20 @@ vis_resp="$(run_with_summary visible '"a\u0000b"')"
 [ "$(jq -r '.status' "$vis_resp")" = "approved" ] \
     && pass "visible content around a NUL still signs off" \
     || die "the guard rejected a summary that does have visible content"
+
+
+# A mark ATTACHED to a base character is ordinary text and must still sign off -
+# the rule rejects mark-only strings, not accented ones.
+acc_resp="$(run_with_summary accented '"e\u0301 looks fine"')"
+[ "$(jq -r '.status' "$acc_resp")" = "approved" ] \
+    && pass "an accented (base + combining mark) summary still signs off" \
+    || die "the base-character rule rejected ordinary accented text"
+
+# Punctuation alone is a rendered character, so it counts as text.
+sym_resp="$(run_with_summary symbolonly '"!"')"
+[ "$(jq -r '.status' "$sym_resp")" = "approved" ] \
+    && pass "a punctuation-only summary is text (renders), so it signs off" \
+    || die "the rule rejected a rendered punctuation character"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

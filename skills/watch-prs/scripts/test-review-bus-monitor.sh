@@ -586,6 +586,83 @@ c5="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$REPEAT_EMIT" "$MONITOR" --once
     && pass "a changed response re-surfaces the sentinel in the same session" \
     || die "a changed malformed response did not re-surface ($c5)"
 
+
+# ── an unwritable emit dir is not "already emitted" ────────────────────────
+# `( set -o noclobber; : > "$m" ) || return 0` collapsed "someone holds it" and
+# "it could not be written" into the same branch - so an existing but UNWRITABLE
+# MONITOR_EMITTED_DIR made `--once` exit 0 with no output and no marker, which is
+# byte-identical to an empty responses dir.
+UNW_BUS="$TMP/unwbus"; mkdir -p "$UNW_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$UNW_BUS/responses/resp-ba600de.json"
+UNW_EMIT="$TMP/unwemit"; mkdir -p "$UNW_EMIT"; chmod 500 "$UNW_EMIT"
+if [ -w "$UNW_EMIT" ]; then
+    chmod 700 "$UNW_EMIT"
+    pass "unwritable-emit-dir check skipped (this user can write mode-500 dirs)"
+else
+    out_unw="$(BUS_DIR="$UNW_BUS" MONITOR_EMITTED_DIR="$UNW_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_unw" | grep -q 'reason=emit_marker_failed' \
+        && pass "an unwritable emit dir reports emit_marker_failed" \
+        || die "an unwritable emit dir produced no marker-failure sentinel (out='$out_unw')"
+    printf '%s' "$out_unw" | grep -q 'reason=invalid_response_shape' \
+        && pass "the underlying reason is still reported alongside it" \
+        || die "the underlying reason was lost: $out_unw"
+    chmod 700 "$UNW_EMIT"
+fi
+
+# A VALID response with an unwritable emit dir must still be delivered - losing
+# the ability to record delivery is not a reason to withhold the review.
+UNW2_BUS="$TMP/unw2bus"; mkdir -p "$UNW2_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$UNW2_BUS/responses/resp-ba600de.json"
+UNW2_EMIT="$TMP/unw2emit"; mkdir -p "$UNW2_EMIT"; chmod 500 "$UNW2_EMIT"
+if [ -w "$UNW2_EMIT" ]; then
+    chmod 700 "$UNW2_EMIT"
+    pass "valid-response-unwritable-dir check skipped (writable as this user)"
+else
+    out_unw2="$(BUS_DIR="$UNW2_BUS" MONITOR_EMITTED_DIR="$UNW2_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_unw2" | grep -q 'BUSTEST_REVIEW pr=7 ' \
+        && pass "a valid response is still delivered when the marker cannot be written" \
+        || die "the review was withheld because delivery could not be recorded: $out_unw2"
+    printf '%s' "$out_unw2" | grep -q 'reason=emit_marker_failed' \
+        && pass "and the marker failure is reported alongside it" \
+        || die "the marker failure was silent: $out_unw2"
+    chmod 700 "$UNW2_EMIT"
+fi
+
+# ── a formatter failure must not retire a VALID response ───────────────────
+# `|| true` erased the formatter's status, so a failure surfaced only as an empty
+# line and was reported as `empty_line` - a CONTENT reason - through the
+# deduplicating helper. That claimed the digest, and the perfectly good response
+# was suppressed for the rest of the session.
+FMT_BUS="$TMP/fmtbus"; mkdir -p "$FMT_BUS/responses" "$TMP/fmtbin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$FMT_BUS/responses/resp-ba600de.json"
+cat > "$TMP/fmtbin/jq" <<'SH'
+#!/usr/bin/env bash
+# Faults ONLY the handoff formatter; every other jq call is real.
+if [ -n "${FAULT_FMT:-}" ] && printf '%s' "$*" | grep -q '_REVIEW pr='; then
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$TMP/fmtbin/jq"
+
+FMT_EMIT="$TMP/fmtemit"
+out_f1="$(PATH="$TMP/fmtbin:$PATH" FAULT_FMT=1 BUS_DIR="$FMT_BUS" MONITOR_EMITTED_DIR="$FMT_EMIT" \
+          "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_f1" | grep -q 'reason=format_failed' \
+    && pass "a formatter failure reports format_failed, not empty_line" \
+    || die "the formatter failure was misreported: $out_f1"
+[ -z "$(ls -A "$FMT_EMIT" 2>/dev/null)" ] \
+    && pass "a formatter failure claims no marker" \
+    || die "a formatter failure claimed the response digest (would retire it)"
+# Same session dir, fault cleared: the response must now be delivered.
+out_f2="$(BUS_DIR="$FMT_BUS" MONITOR_EMITTED_DIR="$FMT_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_f2" | grep -q 'BUSTEST_REVIEW pr=7 ' \
+    && pass "after the formatter recovers the same session delivers the response" \
+    || die "the valid response stayed suppressed after the formatter recovered: $out_f2"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

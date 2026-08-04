@@ -18,11 +18,15 @@
   watcher-authored comment would satisfy that gate by itself and let
   auto-enqueue fire without the author ever closing the round.
 
-- **The handoff `summary` field is quoted.** On a zero-finding review that field
-  holds the reviewer's own text, so a note containing `resp=` or `status=` put a
-  second copy of a framing token into a line the driver parses positionally. It
-  is now quoted (with `"` stripped from the content) and the real `resp=` remains
-  the last token, so the parse rule is unambiguous: take the last one.
+- **The handoff `summary` field is quoted.** That field is the *synthesized
+  status line* the watcher composes - a findings count, or a signoff-posted
+  notice - never the reviewer's own words: the reviewer text lives only in
+  `model_summary`, which this release records and deliberately does not deliver.
+  The quoting is malformed-response hardening rather than note handling: a
+  response whose `summary` carried `resp=` or `status=` put a second copy of a
+  framing token into a line the driver parses positionally. It is now quoted
+  (with `"` stripped from the content) and the real `resp=` remains the last
+  token, so the parse rule is unambiguous: take the last one.
 
 - **The handoff line is validated before it is emitted.** `emit_response` read
   the response as a jq STREAM, so a file holding two objects produced two handoff
@@ -141,6 +145,32 @@
   re-surfaces it. Tool-failure sentinels (a failed sanitize) stay undeduplicated
   on purpose: the response is fine and must still be deliverable once the fault
   clears.
+
+- **A summary must contain a RENDERED character.** Two earlier rules were both
+  too weak: `\S` matched control and format code points, and excluding `\p{Cc}`
+  and `\p{Cf}` still accepted a summary of nothing but marks - U+FE0F is
+  category `Mn`, so a `{"summary":"\uFE0F"}` result earned a clean APPROVE. The
+  test is positive now: at least one letter, number, punctuation mark or symbol,
+  which is what "the reviewer wrote something" means. The shell-side guard uses
+  the same rule rather than a POSIX approximation, so the two cannot disagree.
+
+- **A failed marker write is not "already delivered".** The atomic claim
+  collapsed "another sweep holds it" and "it could not be written" into one
+  branch, so an existing but unwritable emit dir made `--once` exit 0 with no
+  output - the silence this file exists to prevent. The two are distinguished:
+  an unwritable marker reports `emit_marker_failed` and the response is still
+  delivered, because losing the ability to record delivery is not a reason to
+  withhold a review.
+
+- **A formatter failure no longer retires a good response.** With the
+  formatter's status erased, a failure surfaced only as an empty line and was
+  reported as `empty_line` - a CONTENT reason - through the deduplicating helper,
+  which claimed the digest and suppressed a perfectly valid response for the rest
+  of the session. The formatter is guarded explicitly, and both it and
+  `empty_line` are reported undeduplicated like `sanitize_failed`: the response
+  is fine, so it must stay deliverable once the tool recovers. `SKILL.md` now
+  groups the reasons by which of the two they are, since the group decides
+  whether the driver re-requests the review or fixes its own environment.
 
 ## [1.0.11] — 2026-08-03
 

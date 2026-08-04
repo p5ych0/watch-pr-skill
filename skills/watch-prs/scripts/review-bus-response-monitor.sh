@@ -118,6 +118,22 @@ response_digest() {
     sha256sum "$1" | awk '{print $1}'
 }
 
+# Claim an emit marker atomically.
+#   0 = claimed by us · 1 = someone already holds it · 2 = it could not be written
+#
+# `( set -o noclobber; : > "$m" ) || return 0` collapsed 1 and 2 into "already
+# emitted", so an existing but UNWRITABLE MONITOR_EMITTED_DIR made `--once` exit 0
+# with no output and no marker - indistinguishable from an empty responses dir,
+# which is the one outcome this whole file exists to prevent.
+claim_emit_marker() {
+    local m="$1"
+    if ( set -o noclobber; : > "$m" ) 2>/dev/null; then
+        return 0
+    fi
+    [ -e "$m" ] && return 1
+    return 2
+}
+
 # Emit a parse-error sentinel AT MOST ONCE per session per response content.
 #
 # The sentinel paths returned before claiming the per-digest emit marker, so the
@@ -131,9 +147,15 @@ response_digest() {
 # $2 is the content key: the digest when we have one, and a fixed marker when the
 # failure is that we could not compute it (a persistent condition on one file).
 emit_sentinel() {
-    local file="$1" key="$2" reason="$3" marker
+    local file="$1" key="$2" reason="$3" marker rc=0
     marker="$EMITTED_DIR/$(basename "$file").${key}"
-    ( set -o noclobber; : > "$marker" ) 2>/dev/null || return 0
+    claim_emit_marker "$marker" || rc=$?
+    case "$rc" in
+        1) return 0 ;;   # already delivered this session; stay quiet
+        2) # Cannot dedup, so do not suppress: report BOTH the failure to record
+           # delivery and the underlying reason, undeduplicated by definition.
+           printf '%s_REVIEW_PARSE_ERROR reason=emit_marker_failed resp=%s\n' "$PREFIX" "$file" ;;
+    esac
     printf '%s_REVIEW_PARSE_ERROR reason=%s resp=%s\n' "$PREFIX" "$reason" "$file"
 }
 
@@ -240,17 +262,28 @@ emit_response() {
     # one caller wins the marker and emits.
     marker="$EMITTED_DIR/${base}.${digest}"
 
-    line="$(
+    # The formatter's STATUS decides. `|| true` erased it, so a failure showed up
+    # only as an empty `line` further down - and that was reported as
+    # `empty_line`, a CONTENT reason, through the deduplicating helper. The digest
+    # was then claimed and the perfectly valid response was suppressed for the
+    # rest of the session. `snap` has already validated at this point, so nothing
+    # here can be the response's fault.
+    if ! line="$(
         jq -rc --arg path "$file" --arg prefix "$PREFIX" '
           "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\"\(.summary // "" | gsub("[^\\u0020-\\u007e]"; " ") | gsub("\""; " ") | .[0:200])\" resp=" + $path
-        ' <<< "$snap" 2>/dev/null || true
-    )"
+        ' <<< "$snap" 2>/dev/null
+    )"; then
+        printf '%s_REVIEW_PARSE_ERROR reason=format_failed resp=%s\n' "$PREFIX" "$file"
+        return 0
+    fi
 
-    # `summary` is QUOTED. On a zero-finding review it holds the reviewer's own
-    # text, so a note containing `resp=` or `status=` would otherwise put a second
-    # copy of a framing token into a line the driver parses positionally. Quoting
-    # (with `"` stripped from the content) bounds it, and the real `resp=` stays
-    # the LAST token on the line - so a parser must take the last one.
+    # `summary` is QUOTED. It is the SYNTHESIZED status line the watcher composes,
+    # not the reviewer's words - those live in `model_summary` and are not
+    # surfaced here - so this is hardening against a malformed response, not note
+    # handling: a `summary` carrying `resp=` or `status=` would otherwise put a
+    # second copy of a framing token into a line the driver parses positionally.
+    # Quoting (with `"` stripped from the content) bounds it, and the real `resp=`
+    # stays the LAST token on the line - so a parser must take the last one.
     #
     # `summary` is reduced to PRINTABLE ASCII inside jq, not merely stripped of C0
     # control bytes afterwards. `tr -d '[:cntrl:]'` is byte-oriented: under both
@@ -265,8 +298,12 @@ emit_response() {
         return 0
     fi
 
+    # An empty line after a SUCCESSFUL format and a validated `snap` is a tool
+    # failure too, so it is reported undeduplicated - like sanitize_failed, and
+    # unlike the content reasons. Claiming the digest here retired a valid
+    # response for the whole session.
     if [ -z "$line" ]; then
-        emit_sentinel "$file" "$digest" empty_line
+        printf '%s_REVIEW_PARSE_ERROR reason=empty_line resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -282,9 +319,15 @@ emit_response() {
     # Within-session dedup keyed by base + content digest. A fresh per-session
     # EMITTED_DIR means a crash-after-emit response re-surfaces next session; the
     # ACK gate above is what stops handled ones from re-firing.
-    if ! ( set -o noclobber; : > "$marker" ) 2>/dev/null; then
-        return 0
-    fi
+    local claim_rc=0
+    claim_emit_marker "$marker" || claim_rc=$?
+    case "$claim_rc" in
+        1) return 0 ;;   # another sweep won the claim and printed it
+        2) # The line is good but delivery cannot be recorded. Emitting it without
+           # a marker would repeat it every sweep; suppressing it silently is the
+           # failure mode this file exists to prevent. Say so, and emit it.
+           printf '%s_REVIEW_PARSE_ERROR reason=emit_marker_failed resp=%s\n' "$PREFIX" "$file" ;;
+    esac
 
     printf '%s\n' "$line"
 }
