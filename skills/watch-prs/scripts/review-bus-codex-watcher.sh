@@ -1026,11 +1026,20 @@ write_auto_request() {
                             tagged=$((tagged + 1))
                         fi
                     done < <(tail -n +2 <<< "$cmp_eval")
-                    # `ahead`/`identical` proves the signed-off SHA is reachable
-                    # from this head (a force-pushed `diverged` range can list
-                    # fully tagged commits it does not cover); total_commits ==
-                    # listed proves the 250-commit cap did not truncate the list.
-                    if { [ "$cmp_status" = "ahead" ] || [ "$cmp_status" = "identical" ]; } \
+                    # `ahead` proves the signed-off SHA is reachable from this
+                    # head (a force-pushed `diverged` range can list fully tagged
+                    # commits it does not cover); total_commits == listed proves
+                    # the 250-commit cap did not truncate the list.
+                    #
+                    # `identical` is NOT accepted here, and accepting it was a
+                    # hole rather than a convenience: the caller only reaches this
+                    # block when clean_sha != head_oid, and the test below also
+                    # requires total > 0, so a truthful compare of two different
+                    # commits cannot report `identical`. The pair is a
+                    # contradiction, and the only payload that produced it was a
+                    # malformed one - which then suppressed Codex. A contradictory
+                    # tuple is invalid, so it falls through and the review runs.
+                    if [ "$cmp_status" = "ahead" ] \
                        && [[ "$reported" =~ ^[0-9]+$ ]] && [[ "$total" =~ ^[0-9]+$ ]] && [[ "$tagged" =~ ^[0-9]+$ ]] \
                        && [ "$reported" -eq "$total" ] \
                        && [ "$total" -gt 0 ] && [ "$total" -eq "$tagged" ]; then

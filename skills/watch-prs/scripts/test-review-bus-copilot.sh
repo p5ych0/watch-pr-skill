@@ -397,6 +397,65 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-bad.json" run_unavail gate 7 2
   || die "gate: malformed reviews page produced a pass (out='$out')"
 rm -f "$TMP/comments-9.json"
 
+# (bb) `jq -s` turns empty or whitespace-only input into ZERO pages, and
+# `any([]; ...)` is FALSE - so a comments command that exited 0 emitting no JSON
+# passed the array guard and returned a count of 0, which the gate reads as a
+# clean signoff. No pages is not "no comments"; it is a fetch that said nothing.
+: > "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: empty comments output => 2 (zero pages is not zero comments)" \
+  || die "gate: empty comments output read as a clean signoff (rc=$rc out='$out')"
+printf '   \n' > "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: whitespace-only comments output => 2" \
+  || die "gate: whitespace-only comments output accepted (rc=$rc out='$out')"
+rm -f "$TMP/comments-9.json"
+: > "$TMP/reviews-empty-out.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-empty-out.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] \
+  && pass "gate: empty reviews output never yields a pass" \
+  || die "gate: empty reviews output produced a pass (out='$out')"
+
+# (cc) A marker must never outrank a LIVE review on the current head. Copilot can
+# reach a head without cmd_request ever running - it picks PRs up itself, a human
+# re-requests, an automation does - so the marker is stale the moment a review
+# lands, and the gate consulted it first.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+printf '[{"path":"a.sh","line":1,"body":"x"}]' > "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=1' \
+  && pass "gate: a live review with findings overrides the unavailable marker" \
+  || die "gate: the stale marker outranked a live review (rc=$rc out='$out')"
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-declined-7"
+rm -f "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+  && pass "gate: a live review with findings overrides the decline marker too" \
+  || die "gate: the decline marker outranked a live review (rc=$rc out='$out')"
+# And if the live state cannot be read at all, the marker does not rescue it.
+rm -f "$TMP/comments-9.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-head.json" GH_COMMENTS_RC=1 run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: unreadable live state blocks rather than falling back on a marker" \
+  || die "gate: fell back on the marker when live state was unreadable (rc=$rc out='$out')"
+rm -f "$UNAVAIL_BUS/.copilot-declined-7"
+
+# (dd) Unavailability must not be recorded off a reviews fetch that FAILED - the
+# marker asserts "Copilot has done nothing here" on a question we never got an
+# answer to, and it short-circuits the gate.
+rm -f "$UNAVAIL_BUS/.copilot-unavailable-7"
+GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 GH_EDIT_RC=1 \
+  GH_EDIT_STDERR="422 Reviews may only be requested from collaborators. copilot is not a collaborator" \
+  run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 3 ] && pass "request: unavailability still reported when the reviews fetch failed" \
+  || die "request: rc changed on a failed reviews fetch (got $rc)"
+[ ! -e "$UNAVAIL_BUS/.copilot-unavailable-7" ] \
+  && pass "request: no marker recorded off an unreadable reviews fetch" \
+  || die "request: recorded unavailability without being able to read the review state"
+
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
 # non-zero count sends the PR through the merge-blocking fix loop — so telling

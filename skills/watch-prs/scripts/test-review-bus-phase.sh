@@ -347,6 +347,31 @@ requested \
     && pass "non-string commit message => reviewed" \
     || die "a non-string commit message was accepted"
 
+
+# ── 17. `identical` with commits is a contradiction, not a hold ─────────────
+# This block is reached only when clean_sha != head_oid, and the hold also
+# requires total > 0 - so a truthful compare of two different commits cannot say
+# `identical`. Accepting it let a malformed payload suppress Codex.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_full identical 1 "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "identical + one tagged commit => reviewed (contradictory tuple)" \
+    || die "an identical-with-commits payload authorised a phase hold"
+
+# `ahead` with the same shape still holds - the fix narrows the accepted status,
+# it does not break the real case.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && die "the ordinary ahead+tagged hold stopped working" \
+    || pass "ahead + fully tagged still holds"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

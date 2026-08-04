@@ -62,7 +62,8 @@ copilot_reviews() {
     # truncated write) flowed through as data instead of failing. Reject any page
     # that is not an array before reading a single field.
     printf '%s' "$raw" | jq -s --arg bot "$COPILOT_BOT" '
-        if any(.[]; type != "array") then error("non-array page")
+        if length == 0 then error("no pages")
+        elif any(.[]; type != "array") then error("non-array page")
         else [.[][] | select(.user.login==$bot)] end' 2>/dev/null || return 2
 }
 
@@ -76,6 +77,26 @@ copilot_reviews() {
 # exits therefore revoke: the accepted `gh pr edit`, AND the earlier
 # already-reviewed-current-head path, which returns before ever reaching the
 # edit. Callers treat a failed revocation as fail-closed, never as success.
+# 0 = a submitted review exists on this head and it is CLEAN (zero comments)
+# 1 = no submitted review on this head · 2 = cannot tell → fail closed.
+#
+# The gate consults the decline/unavailable markers, and a marker is a statement
+# about the PAST. A review can reach this head without `cmd_request` ever running
+# (Copilot picking the PR up on its own, a human re-requesting, an automation),
+# and `cmd_request` can record unavailability off a reviews fetch that FAILED. In
+# both cases the marker is stale the moment a real review lands, so the live
+# state has to be consulted before a marker is honoured — and a failure to
+# consult it is a reason to block, not to fall back on the marker.
+head_review_verdict() {
+    local pr="$1" head="$2" n rc
+    n=$(head_review_findings "$pr" "$head"); rc=$?
+    case "$rc" in
+        0) [ "$n" -eq 0 ] && return 0 || return 3 ;;   # 3 = reviewed, has findings
+        1) return 1 ;;
+        *) return 2 ;;
+    esac
+}
+
 revoke_unavailable() {
     local umark="$BUS_DIR/.copilot-unavailable-${1}"
     [ -e "$umark" ] || return 0
@@ -147,7 +168,8 @@ cmd_request() {
     if [ -z "$head" ]; then   # head lookup failed (transient) → fail closed, not "unavailable"
         echo "COPILOT_REQUEST pr=$pr status=error detail=head_unresolved" >&2; return 2
     fi
-    reviews=$(copilot_reviews "$pr")
+    local reviews_rc=0
+    reviews=$(copilot_reviews "$pr") || reviews_rc=$?
     # "Already reviewed the current head" means a SUBMITTED review on it — a
     # PENDING draft is not a completed review, so it must not suppress a request.
     reviewed_head=$(printf '%s' "$reviews" | jq -r --arg h "$head" \
@@ -188,6 +210,16 @@ cmd_request() {
         # unavailable, but no review and no decline exist, so the gate returned 1
         # and the merge always aborted. Head-scoped like a decline, because
         # availability is a fact about this repo now, not a permanent waiver.
+        # Only record unavailability if we could actually READ the review state.
+        # The marker short-circuits the gate ahead of any live lookup, so writing
+        # one off a failed fetch asserts "Copilot has done nothing here" on the
+        # strength of a question we never got an answer to - and a real review on
+        # this head, findings and all, would then be skipped. Without the marker
+        # the gate falls through to the live lookup and fails closed on its own.
+        if [ "$reviews_rc" -ne 0 ]; then
+            echo "COPILOT_REQUEST pr=$pr status=unavailable sha=${head:0:7} warn=reviews_unreadable_marker_not_recorded" >&2
+            return 3
+        fi
         local marker="$BUS_DIR/.copilot-unavailable-${pr}"
         mkdir -p "$BUS_DIR" 2>/dev/null
         if ! printf '%s\n' "$head" > "${marker}.tmp" 2>/dev/null || ! mv "${marker}.tmp" "$marker" 2>/dev/null; then
@@ -226,8 +258,14 @@ head_review_findings() {
     # response whose page is `{}` made `[.[][]] | length` return 0 with status 0,
     # so a real current-head review plus one malformed page reported findings=0
     # and the gate reported `status=clean`. Any non-array page fails closed (2).
+    # `jq -s` turns empty or whitespace-only input into ZERO pages, and
+    # `any([]; ...)` is false - so a comments command that exited 0 emitting no
+    # JSON slipped through the array guard and returned a count of 0, which the
+    # gate reads as a clean signoff. No pages is not "no comments"; it is a fetch
+    # that told us nothing.
     n=$(printf '%s' "$raw" | jq -s '
-        if any(.[]; type != "array") then error("non-array page")
+        if length == 0 then error("no pages")
+        elif any(.[]; type != "array") then error("non-array page")
         else [.[][]] | length end' 2>/dev/null) || return 2
     case "$n" in
         ""|*[!0-9]*) return 2 ;;
@@ -319,6 +357,28 @@ cmd_gate() {
         return 2
     fi
     short="${head:0:7}"
+
+    # A marker is a statement about the PAST, and it used to short-circuit the
+    # gate ahead of any live lookup. But a review can reach this head without
+    # `cmd_request` ever running - Copilot picking the PR up itself, a human
+    # re-requesting, an automation - so a marker plus a current-head review
+    # carrying findings returned "may merge" without that review ever being read.
+    # Consult the live state FIRST; a failure to read it blocks rather than
+    # falling back on the marker.
+    local live_rc=0
+    if [ -f "$BUS_DIR/.copilot-unavailable-${pr}" ] || [ -f "$BUS_DIR/.copilot-declined-${pr}" ]; then
+        head_review_verdict "$pr" "$head" || live_rc=$?
+        case "$live_rc" in
+            3)  findings=$(head_review_findings "$pr" "$head") || findings="?"
+                echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings source=live_review_overrides_marker"
+                return 1 ;;
+            2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
+                return 2 ;;
+            0)  echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0 source=live_review"
+                return 0 ;;
+        esac
+        # live_rc 1 = no submitted review on this head; the markers may speak.
+    fi
 
     # Copilot positively unavailable for THIS head, recorded by `request` rc 3.
     marker="$BUS_DIR/.copilot-unavailable-${pr}"

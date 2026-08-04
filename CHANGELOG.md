@@ -144,6 +144,29 @@
   at that review's findings. Both paths now revoke, and a failed revocation is
   reported as an error rather than a clean result.
 
+- **A live Copilot review outranks any recorded marker.** The merge gate read
+  the decline and unavailability markers before consulting live review state, but
+  a review can reach a head without `request` ever running - Copilot picking the
+  PR up itself, a human re-requesting, an automation - so a marker plus a
+  current-head review carrying findings returned "may merge" without that review
+  ever being read. The live state is now consulted first and overrides the
+  marker, and an unreadable live state blocks instead of falling back on it.
+  `request` also stopped recording unavailability when the reviews fetch failed:
+  the marker asserts "Copilot has done nothing here" on a question it never got
+  an answer to.
+
+- **Zero pages is not zero comments.** `jq -s` turns empty or whitespace-only
+  input into an empty array of pages, and `any([]; ...)` is false - so a comments
+  fetch that exited 0 emitting no JSON passed the page-shape guard and returned a
+  count of 0, which the gate reads as a clean signoff. Both paginated readers now
+  require at least one page.
+
+- **The phase hold accepts only `ahead`.** It also accepted `identical`, but the
+  branch is reached only when the signed-off SHA differs from the head and the
+  hold additionally requires a non-empty commit list - so a truthful compare
+  cannot report `identical` there. The pair is a contradiction, and the only
+  payloads producing it were malformed ones that then suppressed Codex.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With
