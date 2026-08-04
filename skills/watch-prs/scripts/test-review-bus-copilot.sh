@@ -18,6 +18,7 @@ cat > "$TMP/bin/gh" <<'SH'
 #   GH_REVIEWS          file: JSON array for  api repos/*/pulls/*/reviews
 #   GH_REVIEW_COMMENTS  file: JSON array for  api repos/*/pulls/*/reviews/*/comments
 #   GH_HEAD             string: headRefOid for pr view --json headRefOid --jq
+#   GH_HEAD_RC          int:  exit code for   pr view (stdout is still emitted)
 #   GH_SEARCH           file: JSON array for  search prs (unset => exit 1 = error)
 #   GH_EDIT_RC          int:  exit code for   pr edit
 case "$1 ${2:-}" in
@@ -32,7 +33,7 @@ case "$1 ${2:-}" in
       *"/reviews"*)              [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
       *) printf '{}' ;;
     esac ;;
-  "pr view"*)    printf '%s' "${GH_HEAD:-}" ;;
+  "pr view"*)    printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
   "pr edit"*)    [ -n "${GH_EDIT_STDERR:-}" ] && printf '%s\n' "$GH_EDIT_STDERR" >&2; exit "${GH_EDIT_RC:-0}" ;;
   "search prs"*) if [ -n "${GH_SEARCH:-}" ]; then cat "$GH_SEARCH"; else exit 1; fi ;;
   *) printf '{}' ;;
@@ -295,6 +296,59 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)";
 [ "$rc" -eq 1 ] && pass "gate: malformed decline marker is not repaired into a pass" \
   || die "gate: malformed decline marker accepted (rc=$rc out='$out')"
 rm -f "$UNAVAIL_BUS/.copilot-declined-7"
+
+
+# (w) A marker with trailing junk must not satisfy the gate. Reading only the
+# first line accepted `<valid-sha>\njunk`, so a partially-overwritten or
+# concatenated marker still looked like an exact head match and carried the
+# merge. The marker's contract is its EXACT contents, not its first line.
+for m in unavailable declined clean; do
+    rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+    printf '%s\njunk\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-$m-7"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+    [ "$rc" -eq 1 ] \
+      && pass "gate: multiline-corrupted $m marker is rejected" \
+      || die "gate: multiline $m marker accepted (rc=$rc out='$out')"
+done
+rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+
+# (x) `gh pr view` that PRINTS a plausible SHA and THEN exits non-zero must be
+# treated as a failure. `pr_head_oid` masked the status with `|| true`, keeping
+# the stdout emitted before the error - so a failed lookup was indistinguishable
+# from success, and with a matching marker the gate returned 0 (merge) instead of
+# its documented fail-closed 2.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+out="$(GH_HEAD="$HEAD40" GH_HEAD_RC=1 GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: head lookup that prints then fails => 2 (fail closed)" \
+  || die "gate: stdout-plus-failure head lookup treated as success (rc=$rc out='$out')"
+out="$(GH_HEAD="$HEAD40" GH_HEAD_RC=1 GH_REVIEWS="$TMP/empty.json" GH_EDIT_RC=0 run_unavail request 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "request: head lookup that prints then fails => 2 (fail closed)" \
+  || die "request: stdout-plus-failure head lookup treated as success (rc=$rc)"
+# A truncated SHA on a successful call is equally not a head.
+out="$(GH_HEAD="abc123" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+  && pass "gate: non-40-hex head lookup => 2 (fail closed)" \
+  || die "gate: malformed head accepted (rc=$rc out='$out')"
+
+# (y) unavailable -> available transition. Copilot declining once is not a
+# permanent state: when a later `request` on the SAME head succeeds, the recorded
+# unavailability is now false. Leaving it let the gate short-circuit to
+# `status=unavailable` and merge while the pass it had just requested was still
+# running.
+printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-unavailable-7"
+GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" GH_EDIT_RC=0 run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 0 ] && pass "request: rc3 -> rc0 retry on the same head succeeds" \
+  || die "request: same-head retry after unavailability did not succeed (rc=$rc)"
+[ ! -e "$UNAVAIL_BUS/.copilot-unavailable-7" ] \
+  && pass "request: a successful request revokes the stale unavailable marker" \
+  || die "request: stale unavailable marker survived a successful request"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/empty.json" run_unavail gate 7 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+  && pass "gate: after the revocation the gate waits for the requested pass" \
+  || die "gate: still merged on the revoked unavailability (rc=$rc out='$out')"
 
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any

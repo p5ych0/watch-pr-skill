@@ -87,7 +87,10 @@ cmd_available() {
 read_sha_marker() {
     local v
     v="$(cat "$1" 2>/dev/null)" || return 1
-    v="${v%%$'\n'*}"
+    # Validate the WHOLE file. Truncating at the first newline accepted
+    # `<valid-sha>\njunk`, so a corrupt marker still satisfied the exact-contents
+    # contract and could carry the merge gate. `$( )` strips trailing newlines,
+    # so a well-formed marker is unaffected.
     case "$v" in
         *[!0-9a-f]*|"") return 1 ;;
     esac
@@ -95,15 +98,27 @@ read_sha_marker() {
     printf '%s' "$v"
 }
 
-# 40-hex head OID of a PR (empty on failure).
+# 40-hex head OID of a PR. Prints nothing and returns non-zero on failure.
+#
+# `|| true` used to preserve whatever stdout `gh` had emitted BEFORE exiting
+# non-zero, so a call that printed a plausible SHA and then failed was
+# indistinguishable from success — and with a matching decline/unavailable marker
+# the merge gate returned 0 instead of its documented fail-closed 2. Capture,
+# check the status, and validate the shape before handing anything back.
 pr_head_oid() {
-    gh pr view "$1" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null || true
+    local out
+    out="$(gh pr view "$1" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null)" || return 1
+    case "$out" in
+        *[!0-9a-f]*|"") return 1 ;;
+    esac
+    [ "${#out}" -eq 40 ] || return 1
+    printf '%s' "$out"
 }
 
 # 0 requested · 4 already-reviewed-current-head · 3 unavailable
 cmd_request() {
     local pr="$1" head reviews reviewed_head
-    head=$(pr_head_oid "$pr")
+    head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then   # head lookup failed (transient) → fail closed, not "unavailable"
         echo "COPILOT_REQUEST pr=$pr status=error detail=head_unresolved" >&2; return 2
     fi
@@ -125,6 +140,18 @@ cmd_request() {
     # silently skip the Copilot pass the user opted into).
     local err
     if err=$(gh pr edit "$pr" --repo "$REPO_SLUG" --add-reviewer "@copilot" 2>&1); then
+        # Copilot just accepted the request, so any recorded unavailability for
+        # this head is stale. The gate checks that marker BEFORE live review
+        # state, so leaving it would let an unavailable->available retry merge
+        # immediately while the pass it just requested is still running.
+        # Revocation failing is fail-closed-relevant: the gate would keep
+        # honouring a marker that is now false, so say so loudly and report the
+        # transient code rather than a clean "requested".
+        local umark="$BUS_DIR/.copilot-unavailable-${pr}"
+        if [ -e "$umark" ] && ! rm -f "$umark" 2>/dev/null; then
+            echo "COPILOT_REQUEST pr=$pr status=error sha=${head:0:7} detail=stale_unavailable_marker_not_revoked" >&2
+            return 2
+        fi
         echo "COPILOT_REQUEST pr=$pr status=requested sha=${head:0:7}"
         return 0
     fi
@@ -179,7 +206,7 @@ head_review_findings() {
 #   (status=none) · 2 → found but comment fetch failed (status=error, fail closed).
 cmd_status() {
     local pr="$1" head short findings rc
-    head=$(pr_head_oid "$pr")
+    head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then   # head lookup failed (transient) → fail closed, not "none"
         echo "COPILOT_REVIEW pr=$pr sha=unknown findings=0 status=error reviewer=copilot"; return 2
     fi
@@ -196,7 +223,7 @@ cmd_status() {
 #   0 = found · 1 = timed out · 2 = review found but comment fetch failed (fail closed).
 cmd_poll() {
     local pr="$1" waited=0 head short findings rc
-    head=$(pr_head_oid "$pr")
+    head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then   # head lookup failed (transient) → fail closed, not "timeout"
         echo "COPILOT_REVIEW pr=$pr sha=unknown findings=0 status=error reviewer=copilot"; return 2
     fi
@@ -224,7 +251,7 @@ cmd_poll() {
 #   0 recorded · 2 could not record (caller fails closed)
 cmd_decline() {
     local pr="$1" head marker
-    head=$(pr_head_oid "$pr")
+    head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then
         echo "COPILOT_DECLINE pr=$pr sha=unknown status=error reason=head_lookup_failed"
         return 2
@@ -251,7 +278,7 @@ cmd_decline() {
 #   2 cannot tell — caller MUST fail closed
 cmd_gate() {
     local pr="$1" head short findings rc marker recorded
-    head=$(pr_head_oid "$pr")
+    head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then
         echo "COPILOT_GATE pr=$pr sha=unknown status=error reason=head_lookup_failed"
         return 2

@@ -84,6 +84,45 @@
   response monitor surfaces in its handoff line. A session told only `approved`
   had nothing pointing it at the Copilot pass.
 
+- **The merge is pinned to the head the gates were evaluated against.** Every
+  check in the merge block — Copilot gate, head match, reviewed-range,
+  unresolved threads, required checks — was a SNAPSHOT, and `gh pr merge` then
+  took whatever the head was at execution time. A push landing in that window
+  merged unreviewed. The merge now passes `--match-head-commit "$HEAD_OID"`, so
+  GitHub rejects a moved head instead of the window merely being narrow, and the
+  response is acked only after the merge actually succeeds — acking a rejected
+  merge marked the round handled, so it never re-emitted and the PR was silently
+  stranded.
+
+- **A head lookup that prints and then fails is a failure.** `pr_head_oid`
+  masked `gh pr view`'s exit status with `|| true`, which preserved whatever
+  stdout had already been emitted — so a call that printed a plausible SHA
+  before erroring was indistinguishable from success. With a matching decline or
+  unavailability marker the merge gate returned 0 instead of its documented
+  fail-closed 2. The status is now checked, the result must be exactly 40 hex
+  characters, and every caller branches on it.
+
+- **A recorded unavailability is revoked when Copilot becomes available.** The
+  marker was written on a positively-unavailable request and never cleared, and
+  the gate consults it BEFORE live review state. So on a repository that gained
+  Copilot mid-loop, a successful retry on the same head left the stale marker in
+  place and the very next gate returned `status=unavailable` and merged while the
+  pass it had just requested was still running. A successful request now revokes
+  it, and failing to revoke fails closed rather than reporting a clean request.
+
+- **Markers are validated whole, not by their first line.** Both marker readers
+  truncated at the first newline, so `<valid-sha>\njunk` satisfied the exact-
+  contents contract that the phase hold and the merge gate depend on. A
+  partially-overwritten or concatenated marker could therefore authorise a hold
+  or carry a merge. The whole file must now match `^[0-9a-f]{40}$`.
+
+- **Phase classification uses git's trailer parser, not a last-paragraph
+  regex.** `git interpret-trailers` reports NO trailer for a final block that
+  mixes prose with a trailer-shaped line, while the regex matched it — so a
+  commit git considers untagged suppressed the Codex review it was owed. Trailer
+  detection now runs each commit message through `git interpret-trailers
+  --parse`, and the compare response is shape-checked in a single guarded `jq`.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

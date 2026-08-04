@@ -124,7 +124,10 @@ surface reviews. Then:
    (Push + comment alone does **not** re-trigger Codex — the round must be closed,
    or the loop stalls on the unresolved-threads gate.)
 4. On a clean signoff it re-checks the merge gate (head unchanged, threads
-   resolved, required checks green) and admin-merges.
+   resolved, required checks green) and admin-merges. The merge itself is pinned
+   to the head those checks ran against (`--match-head-commit`), so a push that
+   lands after the last gate is rejected by GitHub rather than merged unreviewed,
+   and the round is only marked handled once the merge actually succeeds.
 
 ### Round check-in (the every-N-rounds pause)
 
@@ -167,6 +170,11 @@ is a hard gate in the merge block: it exits 0 only when Copilot has a clean revi
 the pass is still owed, and 2 when it cannot tell — which fails closed. So skipping Copilot
 is now an explicit recorded decision instead of something that can happen by simply never
 asking. A decline does not survive a later push: new code re-opens the question.
+
+Copilot being *unavailable* — the repository cannot request it — is recorded the same way,
+and is equally head-scoped. It is also revoked the moment a later request on that same head
+succeeds, so a repository that gains Copilot mid-loop does not merge on a stale "unavailable"
+while the pass it has just requested is still running.
 
 Codex also stops re-reviewing during the Copilot loop. A clean signoff records the signed-off
 SHA, and auto-enqueue holds while **every** commit since it carries a `Review-Phase: copilot`

@@ -285,6 +285,33 @@ requested \
     && pass "malformed clean marker => reviewed (not repaired into a hold)" \
     || die "a malformed marker was sanitised into a valid hold"
 
+
+# ── 14. A trailer-shaped line in a MIXED final paragraph is not a trailer ──
+# git reports no trailer for "subject / ordinary body / Review-Phase: copilot" -
+# the block is not all trailers - yet a last-paragraph regex matched it, holding
+# on an untagged commit. Classification now uses git interpret-trailers --parse.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "subject
+
+ordinary body
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "trailer line in a mixed final paragraph => reviewed (git says no trailer)" \
+    || die "a mixed final paragraph was treated as carrying a trailer"
+
+# ── 15. A marker with trailing junk must not authorise a hold ─────────────
+# Reading only the first line accepted `<valid-sha>\njunk`, defeating the exact
+# contents contract the marker is supposed to enforce.
+printf '%s\njunk\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "multiline-corrupted clean marker => reviewed" \
+    || die "a marker with trailing junk authorised a hold"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

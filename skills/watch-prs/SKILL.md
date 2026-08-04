@@ -500,8 +500,20 @@ if [ "$(gh pr checks N --repo $OWNER/$REPO --required --json bucket --jq 'all(.[
     echo "merge blocked: required checks not all green (or fetch failed)."; exit 0
 fi
 
-gh pr merge N --repo $OWNER/$REPO --squash --delete-branch --admin
-"$RB_SCRIPTS"/review-bus-response-monitor.sh --ack "$RESP_PATH"
+# (5) Merge, PINNED to the head every gate above was evaluated against. Gates
+# (1)-(4) are a SNAPSHOT: a push landing between the last gate and this command
+# would be merged unreviewed, because `gh pr merge` otherwise takes whatever the
+# head is at execution time. `--match-head-commit` makes the server reject the
+# merge if the head has moved, closing that window atomically instead of
+# narrowing it. Ack ONLY after the merge succeeds — acking a merge that was
+# rejected marks the response handled, so the round is never re-emitted and the
+# PR is silently stranded.
+if gh pr merge N --repo $OWNER/$REPO --squash --delete-branch --admin \
+       --match-head-commit "$HEAD_OID"; then
+    "$RB_SCRIPTS"/review-bus-response-monitor.sh --ack "$RESP_PATH"
+else
+    echo "merge blocked: head moved after the gates ran (or the merge failed); do NOT ack — the round stays open."; exit 0
+fi
 ```
 
 Post a final PR comment summarising what merged.

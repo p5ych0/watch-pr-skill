@@ -176,6 +176,28 @@ grep -qE 'REQ=2' "$SKILL" \
     && pass "transient request failure (REQ=2) fails closed (no silent Copilot skip)" \
     || die "skill missing the REQ=2 fail-closed branch for a transient request failure"
 
+# Every gate in the merge block is a SNAPSHOT of the head at the moment it ran.
+# A push landing between the last gate and `gh pr merge` was merged unreviewed,
+# because the merge takes whatever the head is at execution time. The merge must
+# be PINNED with --match-head-commit to the same $HEAD_OID the gates validated,
+# so the server rejects a moved head instead of the window merely being narrow.
+if grep -qE 'gh pr merge .*--match-head-commit' "$SKILL" \
+   || grep -A3 -E '^[[:space:]]*(if )?gh pr merge' "$SKILL" | grep -q -- '--match-head-commit'; then
+    pass "merge is pinned with --match-head-commit (no post-gate push window)"
+else
+    die "merge is not pinned to the gated head (--match-head-commit missing)"
+fi
+grep -qE -- '--match-head-commit "\$HEAD_OID"' "$SKILL" \
+    && pass "merge pins the SAME head the gates validated (\$HEAD_OID)" \
+    || die "merge pin does not use \$HEAD_OID (the gated head)"
+# The ack must be CONDITIONAL on the merge succeeding: acking a rejected merge
+# marks the response handled, so the round never re-emits and the PR is stranded.
+if grep -qE '^[[:space:]]*if gh pr merge' "$SKILL"; then
+    pass "merge result is branched on (ack is conditional)"
+else
+    die "merge result is not branched on — ack would run even when the merge is rejected"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

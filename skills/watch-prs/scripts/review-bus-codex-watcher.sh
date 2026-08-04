@@ -356,7 +356,10 @@ write_response() {
 read_sha_marker() {
     local v
     v="$(cat "$1" 2>/dev/null)" || return 1
-    v="${v%%$'\n'*}"
+    # Validate the WHOLE file, not its first line. Truncating at the first
+    # newline accepted `<valid-sha>\njunk`, so a corrupt marker still satisfied
+    # the "exact contents" contract it is supposed to enforce. `$( )` already
+    # strips trailing newlines, so a well-formed marker survives this unchanged.
     [[ "$v" =~ ^[0-9a-f]{40}$ ]] || return 1
     printf '%s' "$v"
 }
@@ -984,18 +987,31 @@ write_auto_request() {
                 # "subject / Review-Phase: copilot / ordinary body", which git
                 # reports as having NO trailer - suppressing Codex for an
                 # untagged commit, the unsafe direction.
+                # One guarded jq for the SHAPE, then git's own parser for the
+                # trailers. A "line in the final paragraph" test is not the same
+                # thing as a trailer: git reports NO trailer for
+                # "subject / ordinary body / Review-Phase: copilot", because the
+                # block is not all trailers - yet that message passed the regex
+                # and suppressed Codex for an untagged commit. Messages are
+                # base64'd out of jq so newlines survive the hand-off intact.
                 if cmp_eval="$(jq -e -sr '
                         if length != 1 or (.[0] | type) != "object" then empty
                         else .[0] as $c
                           | [ ($c.status // "?"),
                               ($c.total_commits // -1),
-                              ($c.commits | length),
-                              ([ $c.commits[]
-                                 | select((.commit.message | split("\n\n") | last // "")
-                                          | test("(^|\n)Review-Phase:[ \t]*copilot[ \t]*(\n|$)")) ] | length) ]
-                          | @tsv
+                              ($c.commits | length) ] | @tsv,
+                            ($c.commits[] | .commit.message | @base64)
                         end' <<< "$cmp_json" 2>/dev/null)"; then
-                    IFS=$'\t' read -r cmp_status reported total tagged <<< "$cmp_eval"
+                    IFS=$'\t' read -r cmp_status reported total <<< "$(head -1 <<< "$cmp_eval")"
+                    tagged=0
+                    while IFS= read -r b64; do
+                        [ -n "$b64" ] || continue
+                        if printf '%s' "$b64" | base64 -d 2>/dev/null \
+                             | git interpret-trailers --parse 2>/dev/null \
+                             | grep -qx 'Review-Phase: copilot'; then
+                            tagged=$((tagged + 1))
+                        fi
+                    done < <(tail -n +2 <<< "$cmp_eval")
                     # `ahead`/`identical` proves the signed-off SHA is reachable
                     # from this head (a force-pushed `diverged` range can list
                     # fully tagged commits it does not cover); total_commits ==
