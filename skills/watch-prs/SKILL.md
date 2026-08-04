@@ -166,12 +166,19 @@ declined to force into a line-attached finding, such as a verification it could
 not run. It is flagged rather than inlined in the notification because it is
 model text derived from untrusted PR content.
 
-Read it with the helper, which prints it to stdout **JSON-escaped**. Run it as
-the LAST command in the call, so its exit status is the call's exit status:
+Read it with the helper, which prints it to stdout **JSON-escaped**. Pass the
+`digest=` value from the same notification line, and run the helper as the LAST
+command in the call so its exit status is the call's exit status:
 
 ```bash
-"$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH"
+"$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH" "$RESP_DIGEST"
 ```
+
+`RESP_DIGEST` is the `digest=…` field of the `${PREFIX}_REVIEW` line you are
+handling. It binds the read to the review that advertised the note:
+`resp-<sha>.json` is **mutable** — a same-SHA re-review overwrites it in place —
+so reading the path alone can hand you a newer note while you attribute it to the
+earlier review. On mismatch the helper returns `2` rather than the wrong note.
 
 - `0` — the note is on stdout, as a JSON string literal.
 - `1` — the response carries no note.

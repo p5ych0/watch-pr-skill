@@ -68,6 +68,7 @@ ACK_FILE=""
 ACK_EXPECT=""
 NOTE_MODE=0
 NOTE_FILE=""
+NOTE_EXPECT=""
 
 case "${1:-}" in
     --once)
@@ -89,6 +90,7 @@ case "${1:-}" in
         # a broken response, NOT an absent note.
         NOTE_MODE=1
         NOTE_FILE="${2:-}"
+        NOTE_EXPECT="${3:-}"
         ;;
     --ack)
         ACK_MODE=1
@@ -106,7 +108,7 @@ case "${1:-}" in
         ACK_EXPECT="${3:-}"
         ;;
     --help|-h)
-        echo "Usage: $0 [--once | --note <response-file> | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
+        echo "Usage: $0 [--once | --note <response-file> [sha256] | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
         exit 0
         ;;
 esac
@@ -130,6 +132,23 @@ if [ "$NOTE_MODE" -eq 1 ]; then
         printf 'MONITOR_NOTE_ERROR reason=not_a_single_json_object file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
+    # Bind the read to the response the handoff actually advertised. resp-<sha>
+    # is MUTABLE - a same-SHA re-review overwrites it in place - so reading the
+    # path alone can return note B while the driver attributes it to the review
+    # that advertised note A. The handoff line carries `digest=`; requiring the
+    # caller to pass it back is the same defence --ack-if-digest already uses.
+    if [ -n "$NOTE_EXPECT" ]; then
+        if ! printf '%s' "$NOTE_EXPECT" | grep -Eq '^[0-9a-f]{64}$'; then
+            printf 'MONITOR_NOTE_ERROR reason=bad_expected_digest file=%s\n' "$NOTE_FILE" >&2
+            exit 2
+        fi
+        NOTE_ACTUAL="$(sha256sum "$NOTE_FILE" 2>/dev/null | awk '{print $1}')"
+        if [ "$NOTE_ACTUAL" != "$NOTE_EXPECT" ]; then
+            printf 'MONITOR_NOTE_ERROR reason=digest_mismatch file=%s expected=%s actual=%s\n' \
+                "$NOTE_FILE" "$NOTE_EXPECT" "${NOTE_ACTUAL:-<unreadable>}" >&2
+            exit 2
+        fi
+    fi
     if ! jq -e 'has("model_summary")' <<< "$NOTE_JSON" >/dev/null 2>&1; then
         printf 'MONITOR_NOTE_NONE file=%s\n' "$NOTE_FILE" >&2
         exit 1
@@ -140,9 +159,12 @@ if [ "$NOTE_MODE" -eq 1 ]; then
         printf 'MONITOR_NOTE_ERROR reason=note_not_a_nonempty_string file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
-    # No -r: emit the JSON string literal, so an ESC byte stays as the six
-    # characters of its escaped spelling, not an escape the terminal acts on.
-    jq '.model_summary' <<< "$NOTE_JSON"
+    # -a: ASCII output, so every non-ASCII codepoint is escaped - a bidi override
+    #     such as U+202E would otherwise be emitted as raw bytes and reorder the
+    #     rendered text around it. -M: never add ANSI colour, which jq does on a
+    #     TTY when NO_COLOR is unset. No -r, so the value stays a JSON string
+    #     literal and an ESC keeps its escaped spelling. Together: terminal-inert.
+    jq -aM '.model_summary' <<< "$NOTE_JSON"
     exit 0
 fi
 
@@ -191,6 +213,28 @@ emit_response() {
     # re-emitted, even under a fresh per-session EMITTED_DIR.
     [ -e "$ACK_DIR/${base}.${digest}" ] && return 0
 
+    # Parse the response ONCE, slurped, and require exactly one top-level object.
+    # jq reads a STREAM: a file holding two objects produced one handoff line per
+    # object, and the control-byte strip below then removed the newline between
+    # them - collapsing two reviews into a single line carrying two `status=` and
+    # two `resp=` tokens. A driver parsing positionally could read an ambiguous
+    # clean status instead of a fail-closed sentinel. Validate BEFORE claiming the
+    # emit marker so an invalid response is not silently marked as delivered.
+    local snap
+    if ! snap="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$file" 2>/dev/null)" \
+       || [ -z "$snap" ]; then
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=not_a_single_json_object\n' "$PREFIX" "$file"
+        return 0
+    fi
+    # An optional note must be a non-empty string if present at all. A malformed
+    # one must not raise the reviewer_note flag, or the driver would be told to
+    # fetch a note that --note will refuse.
+    if jq -e 'has("model_summary")' <<< "$snap" >/dev/null 2>&1 \
+       && ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$snap" >/dev/null 2>&1; then
+        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=note_not_a_nonempty_string\n' "$PREFIX" "$file"
+        return 0
+    fi
+
     # Within-session dedup keyed by base + content digest. A fresh per-session
     # EMITTED_DIR means a crash-after-emit response re-surfaces next session (the
     # ACK gate above is what stops handled ones from re-firing). The claim is
@@ -212,9 +256,9 @@ emit_response() {
     # contract tells the driver to read it there and treat it as untrusted,
     # non-blocking context that cannot affect status or any merge gate.
     line="$(
-        jq -rc --arg path "$file" --arg prefix "$PREFIX" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
-        ' "$file" 2>/dev/null || true
+        jq -rc --arg path "$file" --arg prefix "$PREFIX" --arg digest "$digest" '
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) digest=\($digest) resp=" + $path
+        ' <<< "$snap" 2>/dev/null || true
     )"
 
     # Defense-in-depth, mirroring emit_progress: strip ALL control bytes from the

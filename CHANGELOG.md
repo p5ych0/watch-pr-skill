@@ -49,6 +49,26 @@
   `SKILL.md` and executes it, so the documented contract and the behaviour cannot
   drift apart.
 
+- **The handoff line is validated and digest-bound.** `emit_response` also read
+  the response as a jq STREAM, so a file holding two objects produced two handoff
+  lines and the control-byte strip then removed the newline between them -
+  collapsing them into one line carrying two `status=` and two `resp=` tokens,
+  which a positional driver could read as an ambiguous clean status. It now
+  slurp-validates a single top-level object BEFORE claiming the emit marker, and
+  emits only a `_REVIEW_PARSE_ERROR` sentinel for anything invalid, including a
+  present-but-malformed note (which must never raise `reviewer_note=1`). The line
+  now carries `digest=`, and `--note` takes that digest and refuses to emit on
+  mismatch: `resp-<sha>.json` is mutable, so a same-SHA re-review could otherwise
+  hand the driver a newer note it would attribute to the earlier review - the
+  same binding `--ack-if-digest` already uses.
+
+- **The note is emitted ASCII-only and monochrome (`jq -aM`).** Default jq output
+  is not terminal-inert: it leaves non-ASCII raw, so a U+202E bidi override
+  reached the renderer as bytes and could reorder surrounding text, and it adds
+  ANSI colour on a TTY when `NO_COLOR` is unset. The ESC/BEL test missed both
+  because it captured output rather than running on a terminal. Coverage now
+  includes a bidi/C1 payload and a TTY-style run.
+
 - **Fix: a schema-invalid reviewer result could earn a clean APPROVAL.**
   `process_review` validated `.findings` but never `.summary`, which the output
   schema requires on every review. A result such as `{"findings":[]}` fell into

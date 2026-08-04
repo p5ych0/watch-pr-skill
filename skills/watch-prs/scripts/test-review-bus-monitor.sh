@@ -285,6 +285,106 @@ rc_two=0; two_out="$("$MONITOR" --note "$NOTE_TMP/two.json" 2>/dev/null)" || rc_
 [ "$rc_two" -eq 2 ] && pass "--note: two concatenated objects => 2" || die "--note: concatenated objects returned $rc_two"
 [ -z "$two_out" ] && pass "--note: concatenated objects emit no note" || die "--note: emitted a note from a multi-object file: $two_out"
 
+
+
+# ── emit path: a multi-object or malformed response must not become a handoff ─
+# jq reads a STREAM, so a two-object file produced one _REVIEW line per object,
+# and the control-byte strip then removed the newline between them - collapsing
+# them into a single line with two `status=` and two `resp=` tokens. A driver
+# parsing positionally could read an ambiguous clean status instead of a
+# fail-closed sentinel.
+EMIT_BUS="$TMP/emitbus"; mkdir -p "$EMIT_BUS/responses"
+printf '{"pr":80,"sha":"1111111","status":"comments_posted","findings_count":2,"reviewer":"codex","summary":"a"}{"pr":80,"sha":"1111111","status":"approved","findings_count":0,"reviewer":"codex","summary":"b"}\n' \
+    > "$EMIT_BUS/responses/resp-1111111.json"
+out_multi="$(BUS_DIR="$EMIT_BUS" MONITOR_EMITTED_DIR="$TMP/em1" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_multi" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+    && pass "emit: concatenated objects => PARSE_ERROR sentinel" \
+    || die "emit: multi-object response did not produce a parse error: $out_multi"
+printf '%s' "$out_multi" | grep -qE 'BUSTEST_REVIEW (pr|.*status=)' \
+    && die "emit: multi-object response still produced a handoff line: $out_multi" \
+    || pass "emit: no handoff line from a multi-object response"
+[ "$(printf '%s' "$out_multi" | grep -c 'status=')" -le 1 ] \
+    && pass "emit: no line carries two status= tokens" \
+    || die "emit: a line carried multiple status= tokens"
+
+# A present-but-malformed note must not raise reviewer_note=1 - the driver would
+# be told to fetch a note that --note will refuse.
+printf '{"pr":81,"sha":"2222222","status":"approved","findings_count":0,"reviewer":"codex","summary":"s","model_summary":123}\n' \
+    > "$EMIT_BUS/responses/resp-2222222.json"
+out_badnote="$(BUS_DIR="$EMIT_BUS" MONITOR_EMITTED_DIR="$TMP/em2" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_badnote" | grep -q 'reason=note_not_a_nonempty_string' \
+    && pass "emit: malformed note => PARSE_ERROR, not a flagged handoff" \
+    || die "emit: malformed note produced: $out_badnote"
+
+# A valid response still carries the digest the driver must pass back to --note.
+printf '{"pr":82,"sha":"3333333","status":"comments_posted","findings_count":1,"reviewer":"codex","summary":"s","model_summary":"a note"}\n' \
+    > "$EMIT_BUS/responses/resp-3333333.json"
+out_good="$(BUS_DIR="$EMIT_BUS" MONITOR_EMITTED_DIR="$TMP/em3" "$MONITOR" --once 2>/dev/null || true)"
+line_good="$(printf '%s\n' "$out_good" | grep 'sha=3333333' || true)"
+printf '%s' "$line_good" | grep -qE 'digest=[0-9a-f]{64}' \
+    && pass "emit: handoff carries the response digest" || die "emit: no digest in the handoff: $line_good"
+emit_dig="$(printf '%s' "$line_good" | grep -oE 'digest=[0-9a-f]{64}' | cut -d= -f2)"
+[ "$emit_dig" = "$(sha256sum "$EMIT_BUS/responses/resp-3333333.json" | awk '{print $1}')" ] \
+    && pass "emit: advertised digest matches the response content" \
+    || die "emit: advertised digest does not match the file"
+
+# ── Digest binding: the note read is tied to the advertised response ────────
+# resp-<sha>.json is mutable (same-SHA re-review overwrites it), so reading the
+# path alone can return a newer note that the driver attributes to the earlier
+# review. The handoff carries digest=; --note must verify it.
+python3 - "$NOTE_TMP/bind.json" <<'PYB'
+import json, sys
+json.dump({"pr": 71, "sha": "fffffff", "status": "comments_posted", "findings_count": 1,
+           "reviewer": "codex", "summary": "s", "model_summary": "note A"}, open(sys.argv[1], "w"))
+PYB
+DIG_A="$(sha256sum "$NOTE_TMP/bind.json" | awk '{print $1}')"
+rc_ok=0; out_ok="$("$MONITOR" --note "$NOTE_TMP/bind.json" "$DIG_A" 2>/dev/null)" || rc_ok=$?
+{ [ "$rc_ok" -eq 0 ] && printf '%s' "$out_ok" | grep -q 'note A'; } \
+    && pass "--note: matching digest returns the advertised note" \
+    || die "--note: matching digest failed (rc=$rc_ok)"
+
+python3 - "$NOTE_TMP/bind.json" <<'PYB'
+import json, sys
+json.dump({"pr": 71, "sha": "fffffff", "status": "approved", "findings_count": 0,
+           "reviewer": "codex", "summary": "s", "model_summary": "note B"}, open(sys.argv[1], "w"))
+PYB
+rc_sw=0; out_sw="$("$MONITOR" --note "$NOTE_TMP/bind.json" "$DIG_A" 2>/dev/null)" || rc_sw=$?
+[ "$rc_sw" -eq 2 ] && pass "--note: same-path replacement after the digest => 2" \
+    || die "--note: stale digest accepted (rc=$rc_sw)"
+[ -z "$out_sw" ] && pass "--note: no note emitted on digest mismatch" \
+    || die "--note: emitted the WRONG note on mismatch: $out_sw"
+
+rc_bd=0; "$MONITOR" --note "$NOTE_TMP/bind.json" "not-a-digest" >/dev/null 2>&1 || rc_bd=$?
+[ "$rc_bd" -eq 2 ] && pass "--note: malformed expected digest => 2" || die "--note: bad digest not rejected"
+
+# ── Terminal-inert output: bidi/C1, not just ESC/BEL ────────────────────────
+# Default jq leaves non-ASCII raw, so U+202E (RIGHT-TO-LEFT OVERRIDE) would be
+# emitted as bytes and reorder rendered text; jq also colours its output on a
+# TTY unless NO_COLOR is set. -aM covers both.
+python3 - "$NOTE_TMP/bidi.json" <<'PYB'
+import json, sys
+json.dump({"pr": 72, "sha": "ggggggg", "status": "comments_posted", "findings_count": 1,
+           "reviewer": "codex", "summary": "s",
+           "model_summary": "safe\u202eDESREVER\u0085 tail"}, open(sys.argv[1], "w"))
+PYB
+DIG_B="$(sha256sum "$NOTE_TMP/bidi.json" | awk '{print $1}')"
+rc_bi=0; out_bi="$("$MONITOR" --note "$NOTE_TMP/bidi.json" "$DIG_B" 2>/dev/null)" || rc_bi=$?
+[ "$rc_bi" -eq 0 ] && pass "--note: bidi/C1 note is readable" || die "--note: bidi note rejected"
+printf '%s' "$out_bi" | LC_ALL=C grep -qP '[\x80-\xff]' \
+    && die "--note: emitted raw non-ASCII bytes (bidi override reaches the renderer)" \
+    || pass "--note: output is pure ASCII (bidi/C1 escaped)"
+printf '%s' "$out_bi" | grep -q 'u202e' \
+    && pass "--note: U+202E survives as an escape, not a reordering byte" \
+    || die "--note: U+202E not escaped"
+printf '%s' "$out_bi" | grep -q 'u0085' \
+    && pass "--note: C1 NEL escaped too" || die "--note: C1 control not escaped"
+
+# Simulate jq's TTY behaviour: colour must not appear even with NO_COLOR unset.
+rc_tty=0; out_tty="$(env -u NO_COLOR script -qec "\"$MONITOR\" --note \"$NOTE_TMP/bidi.json\" \"$DIG_B\"" /dev/null 2>/dev/null)" || rc_tty=$?
+printf '%s' "$out_tty" | LC_ALL=C grep -q "$(printf '\033')\[" \
+    && die "--note: ANSI colour emitted on a TTY (jq -M missing)" \
+    || pass "--note: no ANSI colour on a TTY"
+
 # ── The DOCUMENTED driver snippet must propagate the helper's status ────────
 # SKILL.md tells the driver to run the helper as the last command in the call.
 # An earlier revision appended `; NOTE_RC=$?`, which made the call exit 0 no
@@ -304,6 +404,7 @@ if [ -f "$SKILL_MD" ]; then
             f="${shape%%:*}"; want="${shape##*:}"
             rc_doc=0
             RB_SCRIPTS="$SCRIPT_DIR" RESP_PATH="$NOTE_TMP/$f.json" \
+                RESP_DIGEST="$(sha256sum "$NOTE_TMP/$f.json" 2>/dev/null | awk '{print $1}')" \
                 bash -c "$snippet" >/dev/null 2>&1 || rc_doc=$?
             [ "$rc_doc" -eq "$want" ] \
                 && pass "documented snippet propagates exit $want for a $f response" \
