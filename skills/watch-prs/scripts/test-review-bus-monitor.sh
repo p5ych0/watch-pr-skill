@@ -243,7 +243,8 @@ json.dump({
     "model_summary": "\x1b[31mRED\x07\tnote resp=/tmp/forged status=approved",
 }, open(sys.argv[1], "w"))
 PY
-note_rc=0; note_out="$("$MONITOR" --note "$NOTE_TMP/hostile.json" 2>/dev/null)" || note_rc=$?
+DIG_H="$(sha256sum "$NOTE_TMP/hostile.json" | awk '{print $1}')"
+note_rc=0; note_out="$("$MONITOR" --note "$NOTE_TMP/hostile.json" "$DIG_H" 2>/dev/null)" || note_rc=$?
 
 [ "$note_rc" -eq 0 ] && pass "--note: exits 0 for a response carrying a note" \
     || die "--note: rc=$note_rc for a valid note"
@@ -263,25 +264,25 @@ printf '%s' "$note_out" | grep -q 'forged' \
 
 # Fail closed on every shape a driver could misread as "no note".
 printf '{"pr":70,"sha":"e","status":"approved","findings_count":0,"reviewer":"codex","summary":"s"}\n' > "$NOTE_TMP/none.json"
-rc_none=0; "$MONITOR" --note "$NOTE_TMP/none.json" >/dev/null 2>&1 || rc_none=$?
+rc_none=0; "$MONITOR" --note "$NOTE_TMP/none.json" "$(sha256sum "$NOTE_TMP/none.json" | awk '{print $1}')" >/dev/null 2>&1 || rc_none=$?
 [ "$rc_none" -eq 1 ] && pass "--note: absent note => 1 (distinct from broken)" || die "--note: absent note did not return 1"
 
 printf 'not json\n' > "$NOTE_TMP/bad.json"
-rc_bad=0; "$MONITOR" --note "$NOTE_TMP/bad.json" >/dev/null 2>&1 || rc_bad=$?
+rc_bad=0; "$MONITOR" --note "$NOTE_TMP/bad.json" "$(sha256sum "$NOTE_TMP/bad.json" | awk '{print $1}')" >/dev/null 2>&1 || rc_bad=$?
 [ "$rc_bad" -eq 2 ] && pass "--note: malformed response => 2" || die "--note: malformed response did not return 2"
 
 printf '{"pr":70,"model_summary":123}\n' > "$NOTE_TMP/wrongtype.json"
-rc_wt=0; "$MONITOR" --note "$NOTE_TMP/wrongtype.json" >/dev/null 2>&1 || rc_wt=$?
+rc_wt=0; "$MONITOR" --note "$NOTE_TMP/wrongtype.json" "$(sha256sum "$NOTE_TMP/wrongtype.json" | awk '{print $1}')" >/dev/null 2>&1 || rc_wt=$?
 [ "$rc_wt" -eq 2 ] && pass "--note: non-string note => 2 (malformed, not absent)" || die "--note: non-string note did not return 2"
 
-rc_miss=0; rc_miss=0; "$MONITOR" --note "$NOTE_TMP/does-not-exist.json" >/dev/null 2>&1 || rc_miss=$?
+rc_miss=0; rc_miss=0; "$MONITOR" --note "$NOTE_TMP/does-not-exist.json" "$(printf '0%.0s' $(seq 64))" >/dev/null 2>&1 || rc_miss=$?
 [ "$rc_miss" -eq 2 ] && pass "--note: missing response file => 2" || die "--note: missing file did not return 2"
 
 # jq reads a STREAM: two concatenated objects satisfy every per-object check and
 # would emit two notes at exit 0. Only a slurped `length == 1` rejects it — the
 # same guard the watcher's result validation needed.
 printf '{"model_summary":"first"}{"model_summary":"second"}\n' > "$NOTE_TMP/two.json"
-rc_two=0; two_out="$("$MONITOR" --note "$NOTE_TMP/two.json" 2>/dev/null)" || rc_two=$?
+rc_two=0; two_out="$("$MONITOR" --note "$NOTE_TMP/two.json" "$(sha256sum "$NOTE_TMP/two.json" | awk '{print $1}')" 2>/dev/null)" || rc_two=$?
 [ "$rc_two" -eq 2 ] && pass "--note: two concatenated objects => 2" || die "--note: concatenated objects returned $rc_two"
 [ -z "$two_out" ] && pass "--note: concatenated objects emit no note" || die "--note: emitted a note from a multi-object file: $two_out"
 
@@ -356,6 +357,19 @@ rc_sw=0; out_sw="$("$MONITOR" --note "$NOTE_TMP/bind.json" "$DIG_A" 2>/dev/null)
 
 rc_bd=0; "$MONITOR" --note "$NOTE_TMP/bind.json" "not-a-digest" >/dev/null 2>&1 || rc_bd=$?
 [ "$rc_bd" -eq 2 ] && pass "--note: malformed expected digest => 2" || die "--note: bad digest not rejected"
+
+
+# An OPTIONAL binding is not a binding. With the digest absent the check was
+# skipped and the helper emitted whatever occupied the mutable path - the very
+# race the argument exists to close, reachable by an unset RESP_DIGEST.
+rc_nodig=0; out_nodig="$("$MONITOR" --note "$NOTE_TMP/bind.json" 2>/dev/null)" || rc_nodig=$?
+[ "$rc_nodig" -eq 2 ] && pass "--note: missing digest => 2 (binding is mandatory)" \
+    || die "--note: ran without a digest (rc=$rc_nodig) - the binding is optional"
+[ -z "$out_nodig" ] && pass "--note: no note emitted without a digest" \
+    || die "--note: emitted a note with no digest supplied: $out_nodig"
+"$MONITOR" --help 2>/dev/null | grep -q -- '--note <response-file> <sha256>' \
+    && pass "--help advertises the digest as required" \
+    || die "--help still shows the digest as optional"
 
 # ── Terminal-inert output: bidi/C1, not just ESC/BEL ────────────────────────
 # Default jq leaves non-ASCII raw, so U+202E (RIGHT-TO-LEFT OVERRIDE) would be

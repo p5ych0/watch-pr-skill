@@ -108,7 +108,7 @@ case "${1:-}" in
         ACK_EXPECT="${3:-}"
         ;;
     --help|-h)
-        echo "Usage: $0 [--once | --note <response-file> [sha256] | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
+        echo "Usage: $0 [--once | --note <response-file> <sha256> | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
         exit 0
         ;;
 esac
@@ -137,7 +137,16 @@ if [ "$NOTE_MODE" -eq 1 ]; then
     # path alone can return note B while the driver attributes it to the review
     # that advertised note A. The handoff line carries `digest=`; requiring the
     # caller to pass it back is the same defence --ack-if-digest already uses.
-    if [ -n "$NOTE_EXPECT" ]; then
+    # REQUIRED, not optional. An optional binding is not a binding: with the
+    # argument absent the check was skipped entirely and the helper emitted
+    # whatever currently occupied the mutable path - exactly the attribution race
+    # the digest exists to close, reachable by nothing more than an unset or
+    # misparsed RESP_DIGEST in the caller.
+    if [ -z "$NOTE_EXPECT" ]; then
+        printf 'MONITOR_NOTE_ERROR reason=missing_expected_digest file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    if true; then
         if ! printf '%s' "$NOTE_EXPECT" | grep -Eq '^[0-9a-f]{64}$'; then
             printf 'MONITOR_NOTE_ERROR reason=bad_expected_digest file=%s\n' "$NOTE_FILE" >&2
             exit 2

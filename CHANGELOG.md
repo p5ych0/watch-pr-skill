@@ -60,7 +60,9 @@
   now carries `digest=`, and `--note` takes that digest and refuses to emit on
   mismatch: `resp-<sha>.json` is mutable, so a same-SHA re-review could otherwise
   hand the driver a newer note it would attribute to the earlier review - the
-  same binding `--ack-if-digest` already uses.
+  same binding `--ack-if-digest` already uses. The digest argument is
+  **required**: an optional one is not a binding at all, since an unset or
+  misparsed value would skip the check and emit whatever occupied the path.
 
 - **The note is emitted ASCII-only and monochrome (`jq -aM`).** Default jq output
   is not terminal-inert: it leaves non-ASCII raw, so a U+202E bidi override
