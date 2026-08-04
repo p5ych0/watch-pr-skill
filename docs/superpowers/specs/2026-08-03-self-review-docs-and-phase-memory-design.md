@@ -45,12 +45,16 @@ acknowledged below where it bears on a decision, and fixed in separate work.
 
 ## Sequencing
 
-Three sub-projects, landed in this order, each its own PR:
+Three sub-projects, landed in this order. S3 and S1 are one PR each; **S2 is two**
+(see *Split into two deliveries* under Issue #212):
 
 1. **S3 — self-review docs** (this spec's first deliverable), including the
    watcher prompt change for task awareness.
 2. **S1 — reviewer-phase memory** and Copilot enforcement.
-3. **S2 — watcher fixes** for #3 and #212.
+3. **S2a — watcher fixes** for #3, plus *preservation* of the reviewer's summary
+   in the bus response (#212).
+4. **S2b — surfacing**: the handoff flag and the reader that delivers the note to
+   the driving session (#212). S2 is not complete until S2b lands.
 
 Docs first was chosen deliberately: every later PR in this repo is then reviewed
 against written conventions.
@@ -120,7 +124,20 @@ Until #212 lands, `.review-bus.md` must carry strumok's "there is no channel for
 a non-blocking note" paragraph: with one or more findings the model's `summary`
 is discarded, and `findings[]` is not an alternative because every entry becomes
 a thread the merge gate requires resolved. The paragraph is marked as tied to
-issue #212 and is deleted by the S2 PR, so it cannot outlive the bug.
+issue #212 so it cannot outlive the bug.
+
+Because S2 ships in two parts, its retirement does too, and each part owns one
+half:
+
+- **S2a rewrites it.** Preservation lands, so the "summary is discarded"
+  statement becomes false and must go — but the note is recorded and not yet
+  delivered, so the paragraph is replaced by one saying exactly that. What it
+  must not say is that the author has seen the note.
+- **S2b deletes it.** Once the reader lands the note is delivered, and no caveat
+  remains to state.
+
+A worker who removes the paragraph outright at S2a has replaced a true warning
+with silence, which is the failure this split is most likely to cause.
 
 ## S1 — Reviewer-phase memory
 
@@ -225,7 +242,10 @@ GitHub.
 New coverage:
 
 - `write_auto_request` no-op returns 0 with a terminal response present (#3).
-- A review with findings preserves `model_summary` (#212).
+- A review with findings preserves `model_summary`, byte-exact (#212, S2a).
+- The handoff line flags a present note, and the reader returns its text safely
+  to the driver; an end-to-end mixed review (findings *and* a note) reaches the
+  session with both (#212, S2b). S2b does not merge without this.
 - Clean signoff writes `.codex-clean-<pr>` and `next_phase` in the response.
 - Auto-enqueue holds when all commits since the clean SHA carry the trailer.
 - Auto-enqueue invalidates and enqueues when any commit lacks it.
@@ -233,12 +253,17 @@ New coverage:
 
 ## Release
 
-Each PR bumps `.claude-plugin/plugin.json` and adds a CHANGELOG entry: S3 as
-1.0.11, S1 as 1.0.12, S2 as 1.0.13. Version numbers are assigned at merge, since
-the order can change.
+Each PR bumps `.claude-plugin/plugin.json` **and** `.codex-plugin/plugin.json`
+and adds a CHANGELOG entry: S3 as 1.0.11, S1 as 1.0.12, S2a as 1.0.13, S2b as
+1.0.14. Every PR gets its own version — S2's two parts are two releases, not one
+release split across two merges, because each changes observable behaviour on its
+own. Version numbers are assigned at merge, since the order can change.
 
 ## Consequences accepted
 
+- Between the S2a and S2b merges the reviewer's note is *recorded and not
+  delivered*. Every layer describing that window says so; no layer claims the
+  author has read it.
 - Issue #207 stays open through this work. The documents added by S3 are read
   from the PR head, so a PR editing them steers its own review until #207 lands.
 - The `Review-Phase: copilot` trailer is a convention the skill must apply. A
