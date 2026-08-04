@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.0.13] — 2026-08-04
+## [1.0.14] — 2026-08-04
 
 - **The driver can read the reviewer's note.** 1.0.12 preserved the note in the
   bus response; this makes it reachable. The handoff line gains
