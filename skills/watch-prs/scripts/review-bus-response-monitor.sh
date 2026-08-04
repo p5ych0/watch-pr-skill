@@ -341,7 +341,7 @@ emit_response() {
     # line it was advertised on - and `--note` verifies against that digest.
     local snapf
     if ! snapf="$(snapshot_response "$file")"; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=snapshot_failed\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=snapshot_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -455,12 +455,12 @@ emit_response() {
     local has_note
     has_note=0; jq_probe 'has("model_summary")' "$snap" || has_note=$?
     if [ "$has_note" -eq 2 ]; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=probe_failed\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=probe_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
     if [ "$has_note" -eq 0 ] \
        && ! jq_probe '(.model_summary | type) == "string" and (.model_summary | length) > 0' "$snap"; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=note_not_a_nonempty_string\n' "$PREFIX" "$file"
+        printf '%s_REVIEW_PARSE_ERROR reason=note_not_a_nonempty_string resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
 
@@ -693,7 +693,7 @@ replay_existing() {
             # Stale suppression FAILED for this file. Say so, and tell the caller,
             # because the live sweep would otherwise emit this superseded response
             # as if it were news.
-            printf '%s_REVIEW_PARSE_ERROR resp=%s reason=stale_suppression_failed\n' "$PREFIX" "$file"
+            printf '%s_REVIEW_PARSE_ERROR reason=stale_suppression_failed resp=%s\n' "$PREFIX" "$file"
             rc=1
         fi
     done

@@ -1106,6 +1106,40 @@ cat > "$TMP/jqfbin/jq" <<'SH'
 #!/usr/bin/env bash
 # Fault ONLY the slurped shape check.
 if [ -n "${FAULT_SHAPE:-}" ] && printf '%s' "$*" | grep -q 'invalid_response_shape_probe\|length != 1 or'; then
+# ── Release-history consistency: the prerequisite version must be real ──────
+# This release's opening entry names the version that PRESERVED the note. During
+# a rebase/renumber that number drifts silently, and the result claims a release
+# wrote a field it never provided - the reader would be documented as depending
+# on a version that does not supply `model_summary`.
+if [ -f "$REPO_ROOT/CHANGELOG.md" ] && [ -f "$REPO_ROOT/.claude-plugin/plugin.json" ]; then
+    CHLOG="$REPO_ROOT/CHANGELOG.md"
+    top_ver="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' "$CHLOG" | tr -d '#[] ')"
+    man_ver="$(grep -m1 -oE '"version": "[0-9]+\.[0-9]+\.[0-9]+"' "$REPO_ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    cdx_ver="$(grep -m1 -oE '"version": "[0-9]+\.[0-9]+\.[0-9]+"' "$REPO_ROOT/.codex-plugin/plugin.json" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+    [ -n "$top_ver" ] && [ "$top_ver" = "$man_ver" ] \
+        && pass "CHANGELOG's newest release matches .claude-plugin/plugin.json ($top_ver)" \
+        || die "CHANGELOG top is '$top_ver' but the manifest says '$man_ver'"
+    [ "$man_ver" = "$cdx_ver" ] \
+        && pass "both plugin manifests agree on the version ($man_ver)" \
+        || die "manifest versions differ: claude=$man_ver codex=$cdx_ver"
+    # The version this entry names as the preserving release must be a release
+    # that EXISTS in this file and actually introduces model_summary.
+    prereq="$(sed -n '1,20p' "$CHLOG" | grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+ preserved the note' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    if [ -n "$prereq" ]; then
+        grep -q "^## \[$prereq\]" "$CHLOG" \
+            && pass "the named preserving release ($prereq) exists in the CHANGELOG" \
+            || die "the entry names $prereq as the preserving release, but no such section exists"
+        awk -v v="$prereq" '
+            $0 ~ "^## \\[" v "\\]" { inblk=1; next }
+            inblk && /^## \[/ { exit }
+            inblk { print }' "$CHLOG" | grep -q 'model_summary' \
+            && pass "the named preserving release ($prereq) is the one that introduces model_summary" \
+            || die "$prereq is named as preserving the note but its section never mentions model_summary"
+    else
+        pass "no explicit preserving-release reference to check"
+    fi
+fi
+
 # ── the hasher and the formatter must fail CLOSED, not quietly ──────────────
 # Both were `... || true`, which keeps whatever bytes the tool wrote before it
 # failed. So a faulting hasher produced an empty digest that returned silently -
@@ -1320,6 +1354,57 @@ fi
 exec /usr/bin/sha256sum "$@"
 SH
 chmod +x "$FAULT_BIN/sha256sum"
+
+
+# ── `resp=` is the LAST framing token on EVERY sentinel ────────────────────
+# SKILL.md tells the driver to take `${LINE##*resp=}` as the response path, so a
+# sentinel emitting `resp=<path> reason=<why>` hands back the path PLUS the
+# reason. Checked structurally, over every emission site, because a runtime
+# fixture only covers the reasons a test happens to trigger - and these drift in
+# one at a time.
+MON_SRC="$SCRIPT_DIR/review-bus-response-monitor.sh"
+bad_order=0
+while IFS= read -r emit; do
+    printf '%s' "$emit" | grep -q "resp=%s\\\\n'" || { bad_order=1; echo "    $emit"; }
+done < <(grep -h '_REVIEW_PARSE_ERROR' "$MON_SRC" | grep 'printf')
+[ "$bad_order" -eq 0 ] \
+    && pass "every sentinel emission ends with resp= (last-token rule holds)" \
+    || die "a sentinel puts something after resp= (listed above)"
+
+# Every sentinel also has to NAME a reason - an unexplained stop is not actionable.
+noreason=0
+while IFS= read -r emit; do
+    printf '%s' "$emit" | grep -q 'reason=' || { noreason=1; echo "    $emit"; }
+done < <(grep -h '_REVIEW_PARSE_ERROR' "$MON_SRC" | grep 'printf')
+[ "$noreason" -eq 0 ] \
+    && pass "every sentinel names a reason" \
+    || die "a sentinel carries no reason= (listed above)"
+
+# Runtime confirmation on the reasons this suite can actually provoke: the last
+# resp= token must equal the response path exactly.
+assert_last_resp() {   # <label> <bus-dir> <expected-path> [env assignments...]
+    local label="$1" bus="$2" want="$3"; shift 3
+    local line out
+    out="$(env "$@" BUS_DIR="$bus" MONITOR_EMITTED_DIR="$(mktemp -d)" "$MONITOR" --once 2>/dev/null || true)"
+    line="$(printf '%s\n' "$out" | grep -m1 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+    [ -n "$line" ] || { die "$label: no sentinel emitted"; return; }
+    [ "${line##*resp=}" = "$want" ] \
+        && pass "$label: the last resp= token is exactly the response path" \
+        || die "$label: last-resp= gave '${line##*resp=}' (want '$want')"
+}
+SHAPE_BUS="$TMP/lastrespshape"; mkdir -p "$SHAPE_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$SHAPE_BUS/responses/resp-ba600de.json"
+assert_last_resp "invalid_response_shape" "$SHAPE_BUS" "$SHAPE_BUS/responses/resp-ba600de.json"
+
+NOTE_BAD_BUS="$TMP/lastrespnote"; mkdir -p "$NOTE_BAD_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"s","model_summary":123}' \
+    > "$NOTE_BAD_BUS/responses/resp-ba600de.json"
+assert_last_resp "note_not_a_nonempty_string" "$NOTE_BAD_BUS" "$NOTE_BAD_BUS/responses/resp-ba600de.json"
+
+TRUNC_BUS="$TMP/lastresptrunc"; mkdir -p "$TRUNC_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"appro' > "$TRUNC_BUS/responses/resp-ba600de.json"
+assert_last_resp "truncated response" "$TRUNC_BUS" "$TRUNC_BUS/responses/resp-ba600de.json"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

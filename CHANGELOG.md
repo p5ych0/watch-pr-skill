@@ -2,7 +2,23 @@
 
 ## [1.0.14] — 2026-08-04
 
-- **The driver can read the reviewer's note.** 1.0.12 preserved the note in the
+- **`resp=` is the last token on every sentinel, and that is now enforced.**
+  `SKILL.md` tells the driver to take `${LINE##*resp=}` as the response path, but
+  four sentinel branches still emitted `resp=<path> reason=<why>`, so the
+  documented parser handed back the path with the reason glued to it. The order
+  is fixed everywhere, and a structural check now walks every emission site in
+  the monitor - a runtime fixture only covers the reasons a test happens to
+  trigger, and these drifted in one at a time.
+
+- **Release history cannot drift silently.** This release's opening entry names
+  the version that preserved the note, and a renumber left it pointing at 1.0.12,
+  a release that never provided `model_summary` - so the reader was documented as
+  depending on a version that does not supply what it reads. The check now
+  requires the named release to exist in the CHANGELOG *and* to be the section
+  that introduces the field, and both plugin manifests to agree with the newest
+  heading.
+
+- **The driver can read the reviewer's note.** 1.0.13 preserved the note in the
   bus response; this makes it reachable. The handoff line gains
   `reviewer_note=1` and `digest=`, and `review-bus-response-monitor.sh --note
   <response> <sha256>` prints the note **JSON-escaped** so a hostile note is
