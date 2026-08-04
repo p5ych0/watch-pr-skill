@@ -124,6 +124,24 @@
   final field on the sentinel as well as the handoff, so the documented
   last-token parsing rule is true of every line the driver reads.
 
+- **A summary that normalises to nothing is not a verdict.** The shape guard
+  tested the RAW summary with `\S`, which matches control and format code
+  points, while the formatter then replaced exactly those with spaces - so a
+  summary of NUL plus a bidi override passed validation and went out as
+  `status=approved summary="  "`, a terminal result the driver acts on, built
+  from a response that says nothing. The guard now applies the formatter's own
+  normalisation first and requires a visible ASCII character to survive it.
+
+- **The parse-error sentinel no longer floods.** It was emitted before the
+  per-digest emit marker was claimed, so the live loop re-emitted the same
+  malformed response on every sweep - forever, since the driver contract forbids
+  acking it to make it stop. Sentinels now claim that session-scoped marker, so
+  each is delivered once per session per response content; no ack is written, so
+  the response stays unhandled, and a fresh session or a changed digest still
+  re-surfaces it. Tool-failure sentinels (a failed sanitize) stay undeduplicated
+  on purpose: the response is fine and must still be deliverable once the fault
+  clears.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

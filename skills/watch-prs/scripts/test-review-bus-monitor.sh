@@ -517,6 +517,75 @@ printf '%s' "$out_flow" | grep -q 'BUSTEST_REVIEW pr=' \
     && die "driver flow: a handoff was emitted alongside the sentinel: $out_flow" \
     || pass "driver flow: no handoff line accompanies the sentinel"
 
+
+# ── a summary that normalises to nothing is not a verdict ──────────────────
+# The guard validated the RAW summary with `\S`, which matches control and format
+# code points - so a summary of NUL plus a bidi override passed, the formatter
+# then replaced both with spaces, and the line went out as
+# `status=approved summary="  "`: a terminal verdict the driver acts on, built
+# from a response that says nothing.
+n=0
+for blank in \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"\u0000\u202e"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"\u202e\u200b"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"\u0000"}' \
+    '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"\u00a0\u00a0"}'
+do
+    n=$((n + 1))
+    BLANK_BUS="$TMP/blankbus$n"; mkdir -p "$BLANK_BUS/responses"
+    printf '%s' "$blank" > "$BLANK_BUS/responses/resp-ba600de.json"
+    out_blank="$(BUS_DIR="$BLANK_BUS" MONITOR_EMITTED_DIR="$TMP/emblank$n" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_blank" | grep -q 'BUSTEST_REVIEW_PARSE_ERROR' \
+        && pass "normalises-to-blank summary #$n reaches the sentinel" \
+        || die "normalises-to-blank summary #$n was accepted (out='$out_blank')"
+    printf '%s' "$out_blank" | grep -q 'status=approved' \
+        && die "normalises-to-blank summary #$n emitted a terminal handoff: $out_blank" \
+        || pass "normalises-to-blank summary #$n emitted no approved handoff"
+done
+# Control: a summary that is non-ASCII but has visible ASCII left is fine.
+MIXOK_BUS="$TMP/mixokbus"; mkdir -p "$MIXOK_BUS/responses"
+# `printf '%s' "<json>"`, never the JSON as printf's FORMAT string: printf
+# interprets \uXXXX itself, which writes a raw NUL and produces a file jq cannot
+# parse - the fixture would then "pass" by failing for the wrong reason.
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"\u202eok\u0000"}' \
+    > "$MIXOK_BUS/responses/resp-ba600de.json"
+out_mixok="$(BUS_DIR="$MIXOK_BUS" MONITOR_EMITTED_DIR="$TMP/emmixok" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_mixok" | grep -q 'BUSTEST_REVIEW pr=7 .*status=approved' \
+    && pass "a summary with visible ASCII left still emits its handoff" \
+    || die "the guard rejected a summary that does normalise to something: $out_mixok"
+
+# ── the sentinel must not repeat on every sweep ────────────────────────────
+# The sentinel paths returned BEFORE claiming the per-digest emit marker, so the
+# live loop re-emitted the same malformed response every MONITOR_POLL_SECONDS -
+# forever, since the contract forbids acking it to make it stop.
+REPEAT_BUS="$TMP/repeatbus"; mkdir -p "$REPEAT_BUS/responses"
+printf '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$REPEAT_BUS/responses/resp-ba600de.json"
+REPEAT_EMIT="$TMP/emrepeat"
+c1="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$REPEAT_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+c2="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$REPEAT_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+c3="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$REPEAT_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+[ "$c1" -eq 1 ] && pass "the sentinel is emitted once" || die "first sweep emitted $c1 sentinels"
+{ [ "$c2" -eq 0 ] && [ "$c3" -eq 0 ]; } \
+    && pass "repeated sweeps do not repeat the sentinel (no flood)" \
+    || die "the sentinel repeated on later sweeps ($c2, $c3)"
+# No ACK may have been written - the response is unhandled, just not repeated.
+ls "$REPEAT_BUS/.monitor-acked"/* >/dev/null 2>&1 \
+    && die "the sentinel wrote an ack (the contract forbids it)" \
+    || pass "the sentinel wrote no ack"
+# A FRESH session still surfaces it.
+c4="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$TMP/emrepeat2" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+[ "$c4" -eq 1 ] \
+    && pass "a fresh session re-surfaces the sentinel" \
+    || die "a fresh session did not re-surface the sentinel ($c4)"
+# And so does a CHANGED response, in the same session.
+printf '{"pr":8,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex"}' \
+    > "$REPEAT_BUS/responses/resp-ba600de.json"
+c5="$(BUS_DIR="$REPEAT_BUS" MONITOR_EMITTED_DIR="$REPEAT_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
+[ "$c5" -eq 1 ] \
+    && pass "a changed response re-surfaces the sentinel in the same session" \
+    || die "a changed malformed response did not re-surface ($c5)"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

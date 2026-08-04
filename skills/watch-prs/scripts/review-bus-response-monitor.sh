@@ -118,6 +118,25 @@ response_digest() {
     sha256sum "$1" | awk '{print $1}'
 }
 
+# Emit a parse-error sentinel AT MOST ONCE per session per response content.
+#
+# The sentinel paths returned before claiming the per-digest emit marker, so the
+# live loop re-emitted the same malformed response on every sweep - one unchanged
+# file produced a sentinel every MONITOR_POLL_SECONDS, flooding the daemon log and
+# any attached session forever, and the driver contract explicitly forbids acking
+# it to make it stop. The claim is the SAME session-scoped marker the handoff
+# uses, so a fresh session or a changed digest still re-surfaces it, and NO ack is
+# written - the response stays unhandled, it just stops repeating itself.
+#
+# $2 is the content key: the digest when we have one, and a fixed marker when the
+# failure is that we could not compute it (a persistent condition on one file).
+emit_sentinel() {
+    local file="$1" key="$2" reason="$3" marker
+    marker="$EMITTED_DIR/$(basename "$file").${key}"
+    ( set -o noclobber; : > "$marker" ) 2>/dev/null || return 0
+    printf '%s_REVIEW_PARSE_ERROR reason=%s resp=%s\n' "$PREFIX" "$reason" "$file"
+}
+
 emit_response() {
     local file="$1"
     local base digest marker line
@@ -140,7 +159,7 @@ emit_response() {
         if [ ! -e "$file" ]; then
             return 0            # vanished mid-sweep: a real no-op, not a failure
         fi
-        printf '%s_REVIEW_PARSE_ERROR reason=digest_failed resp=%s\n' "$PREFIX" "$file"
+        emit_sentinel "$file" "nodigest" digest_failed
         return 0
     fi
 
@@ -167,8 +186,12 @@ emit_response() {
     # findings=null reviewer=null` - and the driver branches on `status=approved`
     # to merge. So the check covers: a positive integer PR, a 7-40 hex SHA, a
     # status from the writer's own enum, a non-negative integer findings count, a
-    # reviewer equal to the ONE value any writer emits, a non-blank string
-    # summary - every writer composes one, and without the check a response
+    # reviewer equal to the ONE value any writer emits, a summary that still has a
+    # visible character AFTER the same normalisation the formatter applies - `\S`
+    # over the raw value accepted control/format-only text such as NUL plus a bidi
+    # override, which the formatter then turned into spaces and emitted as
+    # `status=approved summary="  "`, a terminal verdict assembled from a response
+    # that says nothing - every writer composes one, and without the check a response
     # carrying only pr/sha/status/count/reviewer emitted `status=approved
     # summary=""`, which the driver reads as a clean terminal result - and the
     # consistency
@@ -197,13 +220,15 @@ emit_response() {
                    or $r.findings_count < 0
                    or $r.reviewer != "codex"
                    or ($r.summary | type) != "string"
-                   or ($r.summary | test("\\S") | not)
+                   or ($r.summary
+                       | gsub("[^\\u0020-\\u007e]"; " ")
+                       | test("[!-~]") | not)
                    or ($r.status == "approved" and $r.findings_count != 0)
                    or ($r.status == "comments_posted" and $r.findings_count < 1)
                 then empty else $r end
             end' "$file" 2>/dev/null)" \
        || [ -z "$snap" ]; then
-        printf '%s_REVIEW_PARSE_ERROR reason=invalid_response_shape resp=%s\n' "$PREFIX" "$file"
+        emit_sentinel "$file" "$digest" invalid_response_shape
         return 0
     fi
 
@@ -241,7 +266,7 @@ emit_response() {
     fi
 
     if [ -z "$line" ]; then
-        printf '%s_REVIEW_PARSE_ERROR reason=empty_line resp=%s\n' "$PREFIX" "$file"
+        emit_sentinel "$file" "$digest" empty_line
         return 0
     fi
 
