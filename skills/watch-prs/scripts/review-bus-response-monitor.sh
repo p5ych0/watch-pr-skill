@@ -116,23 +116,33 @@ if [ "$NOTE_MODE" -eq 1 ]; then
         printf 'MONITOR_NOTE_ERROR reason=missing_response file=%s\n' "${NOTE_FILE:-<none>}" >&2
         exit 2
     fi
-    if ! jq -e 'type == "object"' "$NOTE_FILE" >/dev/null 2>&1; then
+    # Parse ONCE, slurped. jq reads a stream, so a file holding two concatenated
+    # objects satisfies every per-object check and would emit two notes while
+    # exiting 0 - the same defect the watcher's result validation now carries a
+    # `length == 1` guard for. Requiring exactly one top-level object is the only
+    # check that rejects that shape, and reusing the captured object afterwards
+    # means no later read can disagree with the one that was validated.
+    if ! NOTE_JSON="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$NOTE_FILE" 2>/dev/null)"; then
         printf 'MONITOR_NOTE_ERROR reason=malformed_response file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
-    if ! jq -e 'has("model_summary")' "$NOTE_FILE" >/dev/null 2>&1; then
+    if [ -z "$NOTE_JSON" ]; then
+        printf 'MONITOR_NOTE_ERROR reason=not_a_single_json_object file=%s\n' "$NOTE_FILE" >&2
+        exit 2
+    fi
+    if ! jq -e 'has("model_summary")' <<< "$NOTE_JSON" >/dev/null 2>&1; then
         printf 'MONITOR_NOTE_NONE file=%s\n' "$NOTE_FILE" >&2
         exit 1
     fi
-    # A present-but-wrong-typed note is malformed, not absent — saying "no note"
+    # A present-but-wrong-typed note is malformed, not absent - saying "no note"
     # there would let a broken response read as a clean review with nothing to add.
-    if ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' "$NOTE_FILE" >/dev/null 2>&1; then
+    if ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$NOTE_JSON" >/dev/null 2>&1; then
         printf 'MONITOR_NOTE_ERROR reason=note_not_a_nonempty_string file=%s\n' "$NOTE_FILE" >&2
         exit 2
     fi
-    # No -r: emit the JSON string literal, so an ESC byte stays as the four
-    # characters \u001b instead of becoming an escape the terminal acts on.
-    jq '.model_summary' "$NOTE_FILE"
+    # No -r: emit the JSON string literal, so an ESC byte stays as the six
+    # characters of its escaped spelling, not an escape the terminal acts on.
+    jq '.model_summary' <<< "$NOTE_JSON"
     exit 0
 fi
 

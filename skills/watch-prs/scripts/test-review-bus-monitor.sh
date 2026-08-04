@@ -274,8 +274,47 @@ printf '{"pr":70,"model_summary":123}\n' > "$NOTE_TMP/wrongtype.json"
 rc_wt=0; "$MONITOR" --note "$NOTE_TMP/wrongtype.json" >/dev/null 2>&1 || rc_wt=$?
 [ "$rc_wt" -eq 2 ] && pass "--note: non-string note => 2 (malformed, not absent)" || die "--note: non-string note did not return 2"
 
-rc_miss=0; "$MONITOR" --note "$NOTE_TMP/does-not-exist.json" >/dev/null 2>&1 || rc_miss=$?
+rc_miss=0; rc_miss=0; "$MONITOR" --note "$NOTE_TMP/does-not-exist.json" >/dev/null 2>&1 || rc_miss=$?
 [ "$rc_miss" -eq 2 ] && pass "--note: missing response file => 2" || die "--note: missing file did not return 2"
+
+# jq reads a STREAM: two concatenated objects satisfy every per-object check and
+# would emit two notes at exit 0. Only a slurped `length == 1` rejects it — the
+# same guard the watcher's result validation needed.
+printf '{"model_summary":"first"}{"model_summary":"second"}\n' > "$NOTE_TMP/two.json"
+rc_two=0; two_out="$("$MONITOR" --note "$NOTE_TMP/two.json" 2>/dev/null)" || rc_two=$?
+[ "$rc_two" -eq 2 ] && pass "--note: two concatenated objects => 2" || die "--note: concatenated objects returned $rc_two"
+[ -z "$two_out" ] && pass "--note: concatenated objects emit no note" || die "--note: emitted a note from a multi-object file: $two_out"
+
+# ── The DOCUMENTED driver snippet must propagate the helper's status ────────
+# SKILL.md tells the driver to run the helper as the last command in the call.
+# An earlier revision appended `; NOTE_RC=$?`, which made the call exit 0 no
+# matter what the helper returned — a broken response would have read as success.
+# Extract the command from SKILL.md and run it, so the doc and the behaviour
+# cannot drift apart.
+SKILL_MD="$SCRIPT_DIR/../SKILL.md"
+if [ -f "$SKILL_MD" ]; then
+    snippet="$(grep -m1 -- '--note "\$RESP_PATH"' "$SKILL_MD" || true)"
+    if [ -n "$snippet" ]; then
+        printf '%s' "$snippet" | grep -q 'NOTE_RC=\$?' \
+            && die "SKILL.md still appends a trailing assignment (exit status would be masked)" \
+            || pass "SKILL.md runs the helper as the final command (status propagates)"
+
+        # Execute the documented line verbatim against each failing shape.
+        for shape in none:1 bad:2 two:2; do
+            f="${shape%%:*}"; want="${shape##*:}"
+            rc_doc=0
+            RB_SCRIPTS="$SCRIPT_DIR" RESP_PATH="$NOTE_TMP/$f.json" \
+                bash -c "$snippet" >/dev/null 2>&1 || rc_doc=$?
+            [ "$rc_doc" -eq "$want" ] \
+                && pass "documented snippet propagates exit $want for a $f response" \
+                || die "documented snippet returned $rc_doc for a $f response (want $want)"
+        done
+    else
+        die "SKILL.md no longer contains the --note driver command (contract drifted)"
+    fi
+else
+    pass "SKILL.md not present beside the scripts; driver-snippet check skipped"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

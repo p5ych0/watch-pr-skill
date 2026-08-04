@@ -166,15 +166,22 @@ declined to force into a line-attached finding, such as a verification it could
 not run. It is flagged rather than inlined in the notification because it is
 model text derived from untrusted PR content.
 
-Read it with the helper, which prints it to stdout **JSON-escaped**:
+Read it with the helper, which prints it to stdout **JSON-escaped**. Run it as
+the LAST command in the call, so its exit status is the call's exit status:
 
 ```bash
-"$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH"; NOTE_RC=$?
+"$RB_SCRIPTS"/review-bus-response-monitor.sh --note "$RESP_PATH"
 ```
 
 - `0` — the note is on stdout, as a JSON string literal.
 - `1` — the response carries no note.
 - `2` — the response is unreadable or the note is malformed.
+
+**Do not append `; NOTE_RC=$?` or any other trailing command.** A trailing
+assignment succeeds, so the call reports exit 0 no matter what the helper
+returned, and the variable is gone the moment that shell exits — you would see
+"success" for a broken response and never learn otherwise. Read the exit status
+of the call itself.
 
 **Do not `jq -r` it yourself.** A raw decode hands ESC/BEL bytes straight to
 whatever renders your tool output, which is the terminal/log injection the

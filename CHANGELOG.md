@@ -40,6 +40,15 @@
   2 = unreadable or malformed), so a hostile note is legible as data and inert as
   bytes, and a flagged-but-broken response is distinguishable from an absent one.
 
+  The helper validates the response with a slurped `length == 1` guard and reuses
+  that captured object, because `jq` reads a stream: two concatenated objects
+  passed every per-object check and would have emitted two notes at exit 0.
+  `SKILL.md` runs the helper as the final command in the call so its exit status
+  survives - an earlier revision appended `; NOTE_RC=$?`, which made the call
+  report success whatever the helper returned. A test extracts that command from
+  `SKILL.md` and executes it, so the documented contract and the behaviour cannot
+  drift apart.
+
 - **Fix: a schema-invalid reviewer result could earn a clean APPROVAL.**
   `process_review` validated `.findings` but never `.summary`, which the output
   schema requires on every review. A result such as `{"findings":[]}` fell into
