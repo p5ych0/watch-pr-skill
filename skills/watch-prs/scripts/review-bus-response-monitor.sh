@@ -66,31 +66,11 @@ ONCE=0
 ACK_MODE=0
 ACK_FILE=""
 ACK_EXPECT=""
-NOTE_MODE=0
-NOTE_FILE=""
-NOTE_EXPECT=""
 
 case "${1:-}" in
     --once)
         ONCE=1
         shift
-        ;;
-    --note)
-        # Read the reviewer's own note out of a response, for a driver that saw
-        # `reviewer_note=1` on the handoff line.
-        #
-        # The note is model text derived from untrusted PR content, so it is
-        # emitted JSON-ESCAPED: a raw `jq -r` decode would hand ESC/BEL straight
-        # to whatever renders the driver's tool output, reintroducing at the last
-        # hop exactly the terminal/log injection the handoff line was hardened
-        # against. Escaped, a hostile note is legible as data and inert as bytes.
-        #
-        # Fail closed: 0 = note emitted · 1 = response carries no note · 2 =
-        # unreadable or malformed. A driver that saw the flag and gets 1 or 2 has
-        # a broken response, NOT an absent note.
-        NOTE_MODE=1
-        NOTE_FILE="${2:-}"
-        NOTE_EXPECT="${3:-}"
         ;;
     --ack)
         ACK_MODE=1
@@ -108,74 +88,10 @@ case "${1:-}" in
         ACK_EXPECT="${3:-}"
         ;;
     --help|-h)
-        echo "Usage: $0 [--once | --note <response-file> <sha256> | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
+        echo "Usage: $0 [--once | --ack <response-file> | --ack-if-digest <response-file> <sha256>]"
         exit 0
         ;;
 esac
-
-if [ "$NOTE_MODE" -eq 1 ]; then
-    if [ -z "$NOTE_FILE" ] || [ ! -f "$NOTE_FILE" ]; then
-        printf 'MONITOR_NOTE_ERROR reason=missing_response file=%s\n' "${NOTE_FILE:-<none>}" >&2
-        exit 2
-    fi
-    # Parse ONCE, slurped. jq reads a stream, so a file holding two concatenated
-    # objects satisfies every per-object check and would emit two notes while
-    # exiting 0 - the same defect the watcher's result validation now carries a
-    # `length == 1` guard for. Requiring exactly one top-level object is the only
-    # check that rejects that shape, and reusing the captured object afterwards
-    # means no later read can disagree with the one that was validated.
-    if ! NOTE_JSON="$(jq -s 'if length == 1 and (.[0] | type) == "object" then .[0] else empty end' "$NOTE_FILE" 2>/dev/null)"; then
-        printf 'MONITOR_NOTE_ERROR reason=malformed_response file=%s\n' "$NOTE_FILE" >&2
-        exit 2
-    fi
-    if [ -z "$NOTE_JSON" ]; then
-        printf 'MONITOR_NOTE_ERROR reason=not_a_single_json_object file=%s\n' "$NOTE_FILE" >&2
-        exit 2
-    fi
-    # Bind the read to the response the handoff actually advertised. resp-<sha>
-    # is MUTABLE - a same-SHA re-review overwrites it in place - so reading the
-    # path alone can return note B while the driver attributes it to the review
-    # that advertised note A. The handoff line carries `digest=`; requiring the
-    # caller to pass it back is the same defence --ack-if-digest already uses.
-    # REQUIRED, not optional. An optional binding is not a binding: with the
-    # argument absent the check was skipped entirely and the helper emitted
-    # whatever currently occupied the mutable path - exactly the attribution race
-    # the digest exists to close, reachable by nothing more than an unset or
-    # misparsed RESP_DIGEST in the caller.
-    if [ -z "$NOTE_EXPECT" ]; then
-        printf 'MONITOR_NOTE_ERROR reason=missing_expected_digest file=%s\n' "$NOTE_FILE" >&2
-        exit 2
-    fi
-    if true; then
-        if ! printf '%s' "$NOTE_EXPECT" | grep -Eq '^[0-9a-f]{64}$'; then
-            printf 'MONITOR_NOTE_ERROR reason=bad_expected_digest file=%s\n' "$NOTE_FILE" >&2
-            exit 2
-        fi
-        NOTE_ACTUAL="$(sha256sum "$NOTE_FILE" 2>/dev/null | awk '{print $1}')"
-        if [ "$NOTE_ACTUAL" != "$NOTE_EXPECT" ]; then
-            printf 'MONITOR_NOTE_ERROR reason=digest_mismatch file=%s expected=%s actual=%s\n' \
-                "$NOTE_FILE" "$NOTE_EXPECT" "${NOTE_ACTUAL:-<unreadable>}" >&2
-            exit 2
-        fi
-    fi
-    if ! jq -e 'has("model_summary")' <<< "$NOTE_JSON" >/dev/null 2>&1; then
-        printf 'MONITOR_NOTE_NONE file=%s\n' "$NOTE_FILE" >&2
-        exit 1
-    fi
-    # A present-but-wrong-typed note is malformed, not absent - saying "no note"
-    # there would let a broken response read as a clean review with nothing to add.
-    if ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$NOTE_JSON" >/dev/null 2>&1; then
-        printf 'MONITOR_NOTE_ERROR reason=note_not_a_nonempty_string file=%s\n' "$NOTE_FILE" >&2
-        exit 2
-    fi
-    # -a: ASCII output, so every non-ASCII codepoint is escaped - a bidi override
-    #     such as U+202E would otherwise be emitted as raw bytes and reorder the
-    #     rendered text around it. -M: never add ANSI colour, which jq does on a
-    #     TTY when NO_COLOR is unset. No -r, so the value stays a JSON string
-    #     literal and an ESC keeps its escaped spelling. Together: terminal-inert.
-    jq -aM '.model_summary' <<< "$NOTE_JSON"
-    exit 0
-fi
 
 # Preflight external tools (mirrors review-bus-codex-watcher.sh's require_tools)
 # so a missing dependency fails with a machine-parseable line + exit 127 instead
@@ -235,14 +151,6 @@ emit_response() {
         printf '%s_REVIEW_PARSE_ERROR resp=%s reason=not_a_single_json_object\n' "$PREFIX" "$file"
         return 0
     fi
-    # An optional note must be a non-empty string if present at all. A malformed
-    # one must not raise the reviewer_note flag, or the driver would be told to
-    # fetch a note that --note will refuse.
-    if jq -e 'has("model_summary")' <<< "$snap" >/dev/null 2>&1 \
-       && ! jq -e '(.model_summary | type) == "string" and (.model_summary | length) > 0' <<< "$snap" >/dev/null 2>&1; then
-        printf '%s_REVIEW_PARSE_ERROR resp=%s reason=note_not_a_nonempty_string\n' "$PREFIX" "$file"
-        return 0
-    fi
 
     # Within-session dedup keyed by base + content digest. A fresh per-session
     # EMITTED_DIR means a crash-after-emit response re-surfaces next session (the
@@ -255,18 +163,9 @@ emit_response() {
         return 0
     fi
 
-    # The reviewer's own note is FLAGGED here, never inlined. Its text is model
-    # output derived from untrusted PR context, so interpolating it would let a
-    # note carrying ESC/BEL bytes inject into a terminal or log, and one
-    # containing `resp=` would put a second copy of a framing token into a line
-    # the driver parses positionally. The flag costs nothing to parse and the
-    # full text is read from `.model_summary` in the response file, where
-    # quoting is the JSON parser's problem rather than ours. SKILL.md's handling
-    # contract tells the driver to read it there and treat it as untrusted,
-    # non-blocking context that cannot affect status or any merge gate.
     line="$(
-        jq -rc --arg path "$file" --arg prefix "$PREFIX" --arg digest "$digest" '
-          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) digest=\($digest) resp=" + $path
+        jq -rc --arg path "$file" --arg prefix "$PREFIX" '
+          "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer) summary=\(.summary // "" | gsub("[\n\r]"; " ") | .[0:200]) resp=" + $path
         ' <<< "$snap" 2>/dev/null || true
     )"
 
