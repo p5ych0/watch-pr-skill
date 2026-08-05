@@ -1,4 +1,4 @@
-name: review-bus tests
+name: tests
 
 on:
   push:
@@ -14,11 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The suite stubs gh + codex, so no network/credentials are needed. It does
-      # use jq and inotifywait (inotify-tools); jq is preinstalled on the runner
-      # but installed here too for portability.
+      # The suite stubs `gh`, so no network or credentials are needed. It uses
+      # jq, which is preinstalled on the runner but installed here for
+      # portability. `inotify-tools` is no longer needed: v2 has no watcher.
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends inotify-tools jq
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
 
       # Tests that create throwaway git repos + commit need an identity; runners
       # have none by default. Individual tests set a per-repo identity, but a
@@ -28,15 +28,12 @@ jobs:
           git config --global user.email ci@example.com
           git config --global user.name ci
 
-      # The three systemd tests self-skip (as PASS) when no `systemd --user`
-      # manager is present, which is the case on the runner — so the suite runs
-      # cleanly here without one.
-      - name: Run review-bus test suite
+      - name: Run test suite
         working-directory: skills/watch-prs/scripts
         run: |
           set -uo pipefail
           fail=0 total=0
-          for t in test-review-bus-*.sh; do
+          for t in test-*.sh; do
             total=$((total + 1))
             echo "::group::$t"
             if bash "$t"; then

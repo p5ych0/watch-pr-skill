@@ -11,11 +11,8 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).
 PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok)-|/home/[^ ]*/(pulse|strumok)\b|owner=.?p5ych0|repo=.?(pulse|strumok)|(PULSE|STRUMOK)_REVIEW'
 
-FILES=( "$ROOT"/review-bus-codex-start.sh
-        "$ROOT"/review-bus-codex-watcher.sh
-        "$ROOT"/review-bus-request.sh
-        "$ROOT"/review-bus-response-monitor.sh
-        "$ROOT"/review-bus-copilot.sh )
+FILES=( "$ROOT"/pr-review-state.sh
+        "$ROOT"/pr-merge-range.sh )
 # In the plugin, the five scripts sit beside this test (skills/watch-prs/scripts/)
 # and SKILL.md is one level up. Guard the skill only when present (robust if a
 # consumer strips it); in the plugin it is always there, so it is always linted.

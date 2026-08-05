@@ -1,5 +1,69 @@
 # Changelog
 
+## [2.0.0] — 2026-08-05
+
+**The local review bus is gone.** Both reviewers are first-party GitHub apps, so
+the plugin no longer runs a reviewer of its own.
+
+- **Why this is a rewrite, not a refactor.** v1 opened by asserting that a Codex
+  review "would never match" a bot filter, because it arrived over a shared token
+  and was authored as the repository owner — and the entire file-based bus, the
+  two `systemd --user` daemons, the `/tmp` bus directory, the request/response
+  files and their digest markers existed to work around that. It is false: an
+  `@codex` mention is answered by `chatgpt-codex-connector[bot]`, a real Bot
+  account, in about seven seconds. Copilot has always been
+  `copilot-pull-request-reviewer[bot]`. With both reviewers reachable through
+  GitHub, the machinery had nothing left to do.
+
+- **Removed**: `review-bus-codex-watcher.sh`, `review-bus-response-monitor.sh`,
+  `review-bus-codex-start.sh`, `review-bus-request.sh`,
+  `review-bus-close-round.sh`, `review-bus-rounds.sh`, `review-bus-copilot.sh`,
+  the SessionStart hook, `.review-bus.md`, and eighteen suites that tested them.
+  Also gone with them: a second credit pool (the `codex exec` CLI, which ran out
+  mid-session), reviews authored as the repository owner instead of a bot, and a
+  daemon that could crash-loop under systemd.
+
+- **Kept, because they answer questions `gh` cannot answer safely.**
+  `pr-review-state.sh` decides whether a named reviewer's review of the *current*
+  head can carry a merge; `pr-merge-range.sh` decides whether every commit since
+  the reviewed SHA is a review-fix commit reachable from it. Both are now
+  reviewer-agnostic — the bot login is an argument — which is what native review
+  makes possible.
+
+- **The review-state logic is salvaged, not rewritten.** It carries every fix
+  found while it lived in the v1 Copilot helper: a state machine that judges the
+  latest submitted review rather than counting inline comments, so a dismissal,
+  a changes-requested review with no comments, and an in-flight re-review are
+  never mistaken for a signoff; a clean verdict re-checked against a second
+  snapshot, so a review that changes mid-decision cannot be judged on one and
+  counted on another; and every unreadable fetch failing closed instead of
+  reading as "no findings".
+
+- **The review policy moved to where the reviewers actually read it.**
+  `AGENTS.md` for Codex, `.github/copilot-instructions.md` for Copilot, both from
+  the base ref. They carry what v1's prompt injection carried — judge the PR
+  against what it set out to do, treat the PR narrative as intent and never as
+  permission, only a base-ref authority waives a finding, a resolved thread is
+  not proof of a fix — plus one thing v1 had no channel for: **an out-of-scope
+  problem should go in the review body or a GitHub issue, never an inline
+  comment**, because every inline comment becomes a thread the merge gate
+  requires resolved.
+
+### Upgrading from 1.x
+
+Stop and disable the daemons, then delete their unit files:
+
+```bash
+systemctl --user disable --now review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
+rm -f ~/.config/systemd/user/review-bus-<owner>-<repo>-*.service
+rm -rf /tmp/<owner>-<repo>-review-bus
+```
+
+Then link the Codex GitHub connector once at
+`chatgpt.com/codex/cloud/settings/connectors`, and set per-repository review
+behaviour on the Codex **Code review** settings page. `.review-bus.md` is no
+longer read; move anything project-specific in it into `AGENTS.md`.
+
 ## [1.0.14] — 2026-08-04
 
 - **`resp=` is the last token on every sentinel, and that is now enforced.**
