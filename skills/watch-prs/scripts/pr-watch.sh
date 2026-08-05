@@ -106,6 +106,16 @@ while :; do
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error detail=%s\n' "$PR" "$WHO" "$verdict"
                 exit 2
             fi
+            # The verdict LINE is validated, not just the exit status. A wrapper
+            # that truncates stdout leaves an rc of 0/1 with no `verdict=` field,
+            # and PR_REVIEW_READY is the actionable signal under Monitor — so an
+            # unreadable verdict would be indistinguishable from a finished review.
+            case "$verdict" in
+                *verdict=clean*|*verdict=findings*|*verdict=none*) ;;
+                *) printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable_verdict detail=%s\n' \
+                       "$PR" "$WHO" "$verdict"
+                   exit 2 ;;
+            esac
             printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s %s\n' \
                 "$PR" "$WHO" "$state" "${verdict##*reviewer=* }"
             printf '%s\n' "$verdict"

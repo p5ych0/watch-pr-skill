@@ -168,14 +168,16 @@ resolving it. Then, in one pass:
    `Review-Phase: copilot` trailer**: it is what tells the merge gate that the
    head advanced only through Copilot fixes, so Codex's earlier signoff still
    covers it and does not have to be re-earned;
-2. push;
+2. **check the round boundary — step 6 — BEFORE pushing**, then push. With Codex
+   automatic review enabled the *push itself* requests the next review, so a
+   boundary check placed after it cannot stop anything: the operator would be
+   asked once round 11 was already running. Checking before the push is the only
+   ordering that works whether auto-review is on or off;
 3. reply to each thread with what changed, and resolve it;
 4. post the round summary (step 1's contract);
-5. **check the round boundary — step 6 — and only then** re-request **`$WHO`**,
-   the same reviewer this round was about. In that order: re-requesting first
-   sends the next review past the boundary the check-in exists to stop at, so the
-   operator is asked after the thing they were meant to decide about has already
-   happened.
+5. re-request **`$WHO`**, the same reviewer this round was about — unless
+   automatic review has already done it. The boundary was checked in step 2,
+   before the push, precisely so this step cannot outrun it.
 
 Re-request **only the active reviewer**. Asking the other one on every round buys
 a review of code that is about to change again, and mixes its findings into a
@@ -216,9 +218,20 @@ When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done
 Ask Copilot:
 
 ```bash
+# Capture the head Codex signed off BEFORE anything moves it. After the first
+# Copilot fix, `gh pr view` reports the new head and nothing else records the old
+# one — the state helper prints a 7-character sha, and the merge gate needs the
+# full 40. Without this the gate cannot be populated correctly at all.
+CODEX_SHA=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
+if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
+fi
+
 gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot
 WHO="$COPILOT_BOT"
 ```
+
+Keep `$CODEX_SHA` for step 8. It is the only record of what Codex approved.
 
 Then run steps 3–6 again with `$WHO` set to Copilot, until its verdict is clean
 too. Every fix commit in this phase carries `Review-Phase: copilot`.
@@ -273,8 +286,12 @@ if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "merge blocked: CODEX_SHA is not a full 40-hex sha"; exit 0
 fi
 CODEX_HEAD_STATE=$("$RB_SCRIPTS"/pr-review-state.sh state N "$CODEX_BOT" "$HEAD_OID"); CODEX_STATE_RC=$?
-if [ "$CODEX_STATE_RC" -eq 2 ]; then
-    echo "merge blocked: could not read Codex's state on the current head"; exit 0
+# ONLY rc 0 is an answer. A wrapper or a replaced helper can print a plausible
+# `state=none` and exit with something other than the documented 2 — and this
+# branch decides whether to fall back to the older signoff, so a bad read here
+# merges on a Codex state that was never trusted.
+if [ "$CODEX_STATE_RC" -ne 0 ]; then
+    echo "merge blocked: could not read Codex's state on the current head (rc=$CODEX_STATE_RC)"; exit 0
 fi
 case "$CODEX_HEAD_STATE" in
     *state=none*)

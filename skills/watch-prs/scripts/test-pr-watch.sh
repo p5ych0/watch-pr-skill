@@ -25,7 +25,7 @@ cmd="$1"; pr="$2"; who="$3"
 seq_file="$SEQ_FILE"; n_file="$SEQ_FILE.n"
 n=$(cat "$n_file" 2>/dev/null || echo 1)
 if [ "$cmd" = "verdict" ]; then
-    printf 'PR_REVIEW_STATE pr=%s sha=abc reviewer=%s %s\n' "$pr" "$who" "${VERDICT:-verdict=findings findings=2}"
+    printf 'PR_REVIEW_STATE pr=%s sha=abc reviewer=%s %s\n' "$pr" "$who" "${VERDICT-verdict=findings findings=2}"
     exit "${VERDICT_RC:-1}"
 fi
 ans=$(sed -n "${n}p" "$seq_file"); [ -n "$ans" ] || ans=$(tail -1 "$seq_file")
@@ -179,6 +179,27 @@ SH
 chmod +x "$TMP/weird.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/weird.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "an unknown state value => 2" || die "unknown state gave rc=$rc"
+
+# A verdict line with no `verdict=` field is not a verdict, whatever the exit
+# status says. PR_REVIEW_READY is the actionable signal under Monitor.
+for vout in 'truncated wrapper output' '' 'PR_REVIEW_STATE pr=7 sha=abc reviewer=x'; do
+    seq_set reviewed
+    out="$(VERDICT="$vout" VERDICT_RC=0 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "an unparseable verdict line ('${vout:-<empty>}') => 2" \
+        || die "unparseable verdict '${vout:-<empty>}' gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "an unparseable verdict still emitted the READY signal" \
+        || pass "no READY signal from an unparseable verdict"
+done
+# The three real verdict shapes are still accepted.
+for vout in 'verdict=clean findings=0' 'verdict=findings findings=3' 'verdict=none reason=pending'; do
+    seq_set reviewed
+    out="$(VERDICT="$vout" VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && pass "a real verdict shape ('$vout') is reported as READY" \
+        || die "valid verdict '$vout' was rejected: $out"
+done
 
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,

@@ -49,6 +49,17 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The round check-in runs before the push, not after it.** With Codex automatic
+  review enabled the *push itself* requests the next review, so a boundary check
+  placed after the push cannot stop anything — the operator would be asked once
+  the next round was already running. Checking first is the only ordering that
+  holds whether auto-review is on or off.
+
+- **The Codex-signed-off head is captured before the Copilot phase begins.** The
+  merge gate needs it, and after the first Copilot fix nothing else records it:
+  `gh pr view` reports the new head and the state helper prints only a
+  seven-character sha. Without the capture the gate could not be populated at all.
+
 - **A superseded request is not an active finding.** `blocked-body` filtered on
   state alone, so a `CHANGES_REQUESTED` the reviewer had already withdrawn by
   approving the same head still printed — sending the driver into another fix

@@ -87,9 +87,20 @@ grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
 grep -qE 'verdict N "\$CODEX_BOT" +"\$HEAD_OID"' "$SKILL" \
     && pass "…and a current-head Codex judgement wins over the older one" \
     || die "a newer Codex review on the current head is never honoured"
-grep -q 'CODEX_STATE_RC' "$SKILL" \
-    && pass "an unreadable Codex head-state blocks the merge" \
-    || die "the current-head state probe's status is not acted on"
+# ONLY rc 0 is an answer: this branch decides whether to fall back to the older
+# signoff, so a bad read merges on a state that was never trusted.
+grep -q 'CODEX_STATE_RC" -ne 0' "$SKILL" \
+    && pass "any non-zero Codex head-state status blocks the merge" \
+    || die "only the documented rc 2 blocks — a wrapper failure would fall through"
+# CODEX_SHA has to be captured before the head moves; nothing else records it.
+grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
+    && pass "the Codex-signed-off head is captured before the Copilot phase" \
+    || die "CODEX_SHA is required by the gate but never assigned"
+# With auto-review on, the PUSH requests the next review — so the boundary check
+# has to precede it, not merely precede the explicit re-request.
+grep -qi 'BEFORE pushing' "$SKILL" \
+    && pass "the round boundary is checked before the push" \
+    || die "the boundary check runs after the push, which auto-review has already acted on"
 grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
     && pass "Copilot is validated on the current head" \
     || die "Copilot's verdict is not pinned to \$HEAD_OID"
@@ -182,8 +193,8 @@ grep -q 'BODY_RC=\$?' "$SKILL" \
 { grep -q 'check the round boundary' "$SKILL" && grep -q 'only then' "$SKILL"; } \
     && pass "the close-round checklist checks the boundary before re-requesting" \
     || die "the checklist does not order the boundary check before the re-request"
-grep -qi 'past the boundary the check-in exists to stop at' "$SKILL" \
-    && pass "and says why that order matters" \
+grep -qi 'push itself' "$SKILL" \
+    && pass "and says why the order matters (auto-review acts on the push)" \
     || die "the ordering is stated without its reason"
 
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
