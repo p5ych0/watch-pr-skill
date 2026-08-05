@@ -47,7 +47,7 @@ cmd_list() {
         page=$(gh api graphql -F number="$pr" -F owner="$OWNER" -F repo="$REPO" -F cursor="$cursor" -f query='
             query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
               reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
-                nodes{id isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null) || {
+                nodes{id isResolved path line comments(first:1){nodes{databaseId author{login} body}}} }}}}' 2>/dev/null) || {
             echo "PR_FINDINGS pr=$pr status=error reason=fetch_failed" >&2
             return 2
         }
@@ -75,14 +75,21 @@ cmd_list() {
                         or (select(.isResolved == false)
                             | (.comments.nodes | length) == 0
                               or (.comments.nodes[0].author.login | type) != "string"
+                              or (.comments.nodes[0].databaseId | type) != "number"
                               or (.comments.nodes[0].body | type) != "string"))
               then error("malformed thread node")
               # The thread ID is printed with every finding. path:line is not an
               # identifier: two unresolved comments can share a line, and a fix
               # commit shifts the lines anyway — so the driver had nothing stable
               # to resolve against and could close the wrong thread.
+              #
+              # The COMMENT id is printed alongside it: resolving takes the
+              # thread id over GraphQL, a reaction takes the REST id of the
+              # comment, and neither substitutes for the other. Codex asks for a
+              # thumbs reaction on every finding, and that is the only signal it
+              # gets about whether a review was worth making.
               else ( [ $n[] | select(.isResolved == false) ]
-                     | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\nthread=\(.id)\n\(.comments.nodes[0].body)\n")
+                     | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\nthread=\(.id) comment=\(.comments.nodes[0].databaseId)\n\(.comments.nodes[0].body)\n")
                      | join("\n") )
               end' 2>/dev/null) || {
             echo "PR_FINDINGS pr=$pr status=error reason=malformed_page" >&2

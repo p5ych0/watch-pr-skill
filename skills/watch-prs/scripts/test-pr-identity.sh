@@ -15,7 +15,8 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh
-        "$ROOT"/pr-watch.sh )
+        "$ROOT"/pr-watch.sh
+        "$ROOT"/pr-selfcheck.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it
 # is always there, so it is always linted.

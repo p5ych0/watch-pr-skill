@@ -202,6 +202,47 @@ while :; do
                     "$PR" "$WHO" "$vrc" "$(q "$verdict")"
                 exit 2
             fi
+            # The verdict must describe the SAME state the terminal branch was
+            # entered on. These are two separate fetches, and the review can move
+            # between them without the head moving at all — a re-review opens and
+            # `reviewed` becomes PENDING, or a CHANGES_REQUESTED is superseded by
+            # an approval. The verdict then legitimately reports the new state
+            # while `$state` still holds the old one, and announcing
+            # PR_REVIEW_READY on that pair reports a finished pass that is not
+            # finished. The reason field is exactly what says so:
+            #
+            #   state=reviewed  -> clean or findings; `none` means it moved
+            #   state=blocked   -> reason=blocked   (terminal, body carries it)
+            #   state=dismissed -> reason=dismissed (terminal, re-request)
+            #   reason=review_state_changed -> the helper's own re-check caught it
+            #
+            # A mismatch is not an error: it means this poll is out of date, so
+            # the loop goes round again and reports whatever is true then.
+            v_reason="${v_tail# reason=}"
+            agree=1
+            case "$state" in
+                reviewed)  [ "$v_field" = "clean" ] || [ "$v_field" = "findings" ] || agree=0 ;;
+                blocked)   { [ "$v_field" = "none" ] && [ "$v_reason" = "blocked" ]; } || agree=0 ;;
+                dismissed) { [ "$v_field" = "none" ] && [ "$v_reason" = "dismissed" ]; } || agree=0 ;;
+                *)         agree=0 ;;
+            esac
+            if [ "$agree" -eq 0 ]; then
+                printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=moved_between_probes observed=%s verdict=%s%s waited_s=%s\n' \
+                    "$PR" "$WHO" "$state" "$v_field" "$v_tail" "$waited"
+                # The next poll's state is about a review that has changed, so the
+                # change-suppression memory must not hide it.
+                last=""
+                if [ "$waited" -ge "$TIMEOUT" ]; then
+                    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
+                    exit 1
+                fi
+                nap="$INTERVAL"
+                remaining=$((TIMEOUT - waited))
+                [ "$nap" -gt "$remaining" ] && nap="$remaining"
+                sleep "$nap"
+                waited=$((waited + nap))
+                continue
+            fi
             # The head is re-resolved AFTER the verdict, and READY is withheld
             # unless it is still the one both probes were pinned to.
             #

@@ -83,7 +83,7 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 
 | Setting | Suggested | Why |
 | --- | --- | --- |
-| Automatic review | your call | On reviews every push; off means you decide each round with `@codex review`, which costs less and keeps rounds deliberate. |
+| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, with its summary already posted. On, the *push* triggers the pass, so the summary has to precede the push and no mention may be sent — a mention as well queues a second review of the same head. Note the per-repository column overrides this default, so check both. |
 | Review trigger | on every push | Only relevant with automatic review on. |
 | Exhaustive review | on | Keeps looking after the first problem. |
 | Credit usage | on, if you want reviews to continue past the rate limit | With it off, review simply stops when the limit is hit. |
@@ -187,6 +187,18 @@ settings.
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
+
+### Self-check before the push
+
+`pr-selfcheck.sh` runs over the plugin's own sources before a round is pushed:
+every variable `SKILL.md` uses is assigned in it, every script parses, every
+helper it drives is shipped, every script has a test, and the suite passes.
+
+It exists because this plugin's own PR took nineteen review rounds, and almost
+none of the findings were subtle. Rounds are the expensive part of the loop —
+each is a review pass, a fix, a summary and a wait — so a finding caught before
+the push is worth several caught after it. `SKILL.md § 5a` pairs it with a short
+list of the judgement checks a script cannot make.
 
 ### `REVIEW_MERGE_STRICT`
 

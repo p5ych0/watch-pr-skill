@@ -71,6 +71,46 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **A self-check runs before the push.** `pr-selfcheck.sh` verifies that every
+  variable `SKILL.md` uses is assigned in it, every script parses, every helper it
+  drives is shipped, every script has a test, and the suite passes. Each of those
+  is a mistake that actually shipped from here — the first one shipped as a P1.
+  `SKILL.md § 5a` pairs it with the judgement checks a script cannot make: fix the
+  class not the instance, recheck consumers when a validator widens, trace every
+  identifier and ordering end to end, and prove each new assertion can fail.
+  This exists because this PR took nineteen review rounds and almost none of the
+  findings were subtle; rounds are the expensive part of the loop.
+
+- **`$SUMMARY_FILE` is assigned.** It was written into two places in `SKILL.md`
+  and defined in none, so on a fresh session the summary post produced an empty
+  body and the guarded comment aborted, while a long-lived session could post a
+  file left from another round or another PR. The Copilot phase now builds its own
+  transition summary rather than inheriting one from the fix-round step, which
+  never runs when Codex approves on the first pass.
+
+- **The round order depends on what triggers the review.** With Codex automatic
+  review on, the *push* starts the pass, so a summary posted after it arrives too
+  late and a following `@codex review` queues a second review of the same head.
+  `SKILL.md` now documents both orderings, and `README.md` recommends automatic
+  review **off** — the mention is then the only trigger, which is what the rest of
+  the loop assumes.
+
+- **The verdict must describe the state the watch acted on.** State and verdict
+  are separate fetches, and a review can move between them without the head
+  moving: a re-review opens, or a `CHANGES_REQUESTED` is superseded. The verdict
+  then legitimately reports the new state while the watch still holds the old one,
+  and `PR_REVIEW_READY` announced a pass that was not finished. A disagreement now
+  re-polls. The previous fixture asserted this backwards — `state=reviewed` with
+  `reason=pending` was accepted as READY.
+
+- **Findings get the reaction the reviewer asks for.** Every Codex finding ends
+  with *"Useful? React with 👍 / 👎"*, and it is the only signal it gets about
+  whether a review was worth making. `pr-findings.sh list` now prints
+  `comment=<id>` beside `thread=<id>` — the thread id resolves over GraphQL, the
+  comment id reacts over REST. 👎 is for a finding that was wrong on the facts,
+  not one that was right and declined: marking a correct finding unhelpful teaches
+  the reviewer to stop reporting that class.
+
 - **Timestamps must be canonical UTC, because the sort is lexical.** The
   validator accepted numeric offsets and fractional seconds — both valid ISO
   8601 — while `sort_by(.submitted_at)` orders them as strings, and neither form

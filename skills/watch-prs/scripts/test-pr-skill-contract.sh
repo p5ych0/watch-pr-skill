@@ -337,6 +337,30 @@ grep -q 'ABORT: could not post the round summary — do not request Copilot yet'
     && pass "…and a failed summary post stops the phase" \
     || die "a failed Copilot-phase summary post does not stop the request"
 
+# ── the self-check runs BEFORE the push ────────────────────────────────────
+# Rounds are the expensive part of the loop, so a finding a script can make in a
+# second must not cost a whole review pass.
+grep -q 'pr-selfcheck.sh' "$SKILL" \
+    && pass "the contract runs the self-check" \
+    || die "nothing runs pr-selfcheck.sh before a round is pushed"
+awk '/pr-selfcheck.sh; SELF_RC=/ {c=NR}
+     /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "…before the push, not after it" \
+    || die "the self-check does not precede the push"
+grep -q 'SELF_RC' "$SKILL" \
+    && pass "…and its exit status is branched on" \
+    || die "the self-check output is not checked"
+
+# ── findings get a reaction ────────────────────────────────────────────────
+# Every Codex finding ends with "Useful? React with thumbs", and that reaction is
+# the only signal the reviewer gets about whether a review was worth making.
+grep -q 'pulls/comments/<comment-id>/reactions' "$SKILL" \
+    && pass "the contract reacts to each finding" \
+    || die "findings are resolved without the reaction the reviewer asks for"
+grep -q 'comment=' "$ROOT/skills/watch-prs/scripts/pr-findings.sh" \
+    && pass "…and list prints the comment id the reaction needs" \
+    || die "pr-findings.sh does not print a comment id to react to"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

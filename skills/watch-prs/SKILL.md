@@ -35,7 +35,13 @@ RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # macOS the fallback would fail before finding the scripts at all.
 [ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
-echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS"
+# Where each round's summary is written before it is posted. A file, not a shell
+# variable: the text is long, contains backticks and quotes, and passing it
+# inline mangles it. Freshly created per PR and per session, because a reused
+# path is how a stale summary from another round — or another PR — gets posted
+# as if it were this one's.
+SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")"
+echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 ```
 
 ## 1. State the task on the PR
@@ -193,30 +199,136 @@ resolving it. Then, in one pass:
    boundary check placed after it cannot stop anything: the operator would be
    asked once round 11 was already running. Checking before the push is the only
    ordering that works whether auto-review is on or off;
-3. reply to each thread with what changed, and resolve it — and **verify the
-   resolve succeeded** rather than assuming it did. `resolveReviewThread` returns
-   `thread{isResolved}`; read it. A round reported as "all threads resolved" when
-   they were not sends the next review over findings that were already answered,
-   and the extra volume reads as regression rather than repetition;
-4. **re-request `$WHO` and post the round summary as ONE comment.** In the Codex
-   phase the mention *is* the request, so `@codex review` opens the comment and
-   the summary follows it. Splitting them into two comments divides the record
-   the reviewer is told to read, and the request half arrives with no account of
-   what changed. In the Copilot phase the request is `gh pr edit --add-reviewer
-   @copilot`, which is not a comment, so there the summary is a separate post —
-   and it goes **first**, branched on, because Copilot can start reading within
-   seconds and would otherwise review against the previous round's summary.
+3. **run the self-check — step 5a — and fix what it finds, before anything is
+   pushed**;
+4. reply to each thread with what changed, **react to it**, and resolve it — and
+   **verify the resolve succeeded** rather than assuming it did.
+   `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
+   as "all threads resolved" when they were not sends the next review over
+   findings that were already answered, and the extra volume reads as regression
+   rather than repetition.
+
+   The reaction is not decoration: every Codex finding ends with *"Useful? React
+   with 👍 / 👎"*, and it is the only signal the reviewer gets about whether a
+   review was worth making. `pr-findings.sh list` prints `comment=<id>` beside
+   `thread=<id>` for exactly this — the thread id resolves over GraphQL, the
+   comment id reacts over REST, and neither substitutes for the other.
+
+   ```bash
+   # 👍 when the finding was acted on, or was correct and recorded as accepted.
+   # 👎 only when it was wrong on the facts — not when it was right but declined
+   # for cost or scope. Marking a correct finding unhelpful teaches the reviewer
+   # to stop reporting that class, which is the opposite of what a decline means.
+   gh api --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" \
+       -f content='+1' || echo "note: reaction failed for <comment-id>"
+   ```
+
+   A failed reaction is a note, not an abort: it is feedback, and losing it must
+   not stop a round from closing;
+4. **post the summary and re-request `$WHO`** — in an order that depends on what
+   actually triggers the next pass. See below: with automatic review on, the
+   *push* is the trigger, so steps 3 and 4 move ahead of it.
+
+### 5a. Self-check before the push
+
+**Review your own diff before a reviewer has to.** PR #10 took nineteen rounds,
+and almost none of the findings were subtle — they were the same few mistakes,
+reaching a reviewer because nothing looked at the change first. Rounds are the
+expensive part of this loop: each one costs a review pass, a fix, a summary and a
+wait, so a finding caught here is worth several caught there.
 
 ```bash
-# Codex phase: one comment carries both. Branch on it — the comment IS the
-# request, so a failed post means no review was queued and the wait step would
-# poll for one until it timed out.
+"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
+```
+
+- `0` — the mechanical checks pass. Continue with the judgement list below.
+- `1` — findings. **Fix them now.** Pushing a change this catches spends a whole
+  round on something a script found in a second.
+- `2` — the check could not run. Fail closed: that is not a clean bill.
+
+It checks what can be checked without judgement: every variable used in this
+file is assigned in it, every script parses, every helper this file drives is
+shipped, every script has a test, and the suite passes. That set is not
+arbitrary — each one is a mistake that actually shipped from this repository.
+
+**Then read your own diff against the list below.** These are the classes that
+produced the rounds, and none of them is mechanical:
+
+- **Did I fix the instance or the class?** A finding names one place. Before
+  fixing it, search for the same shape everywhere else and fix them together. The
+  same fix arrived in three consecutive rounds — head validation, then non-zero
+  statuses, then record identity — because each round closed one site.
+- **Did I widen something without rechecking what consumes it?** Accepting ISO
+  offsets in a timestamp validator reopened a lexical-sort hole an earlier round
+  had closed, because the sort was never revisited. A validator is a contract
+  with its consumers; loosening it is a change to all of them.
+- **Did I trace every identifier and ordering I touched, end to end?** A variable
+  written into two places and assigned in none shipped as a P1. So did an
+  ordering that assumed a push was inert when auto-review makes it the trigger.
+- **Can each new assertion actually fail?** Revert the fix and watch the test
+  fail *for the reason it names*. An assertion matching prose that wrapped across
+  a line, or a token that also appears elsewhere in the file, passes against the
+  unfixed code — which is worse than no test, because it converts an unverified
+  assumption into a green tick.
+- **Did I answer the finding, or just silence it?** Resolving a thread without
+  fixing or arguing is the one move that guarantees it comes back.
+
+Write what this pass changed into the round summary. If it found nothing, say so
+— that is a claim the next review will test.
+
+### The order depends on what triggers the review
+
+The reviewer contract says the newest round summary is read before the diff. That
+only holds if the summary exists before the pass starts — so the ordering is
+decided by **what starts it**, and there are two different answers.
+
+```bash
+# Which mode is this repository in? Automatic review means the PUSH is the
+# trigger; nothing else has to be sent, and sending a mention as well queues a
+# SECOND pass over the same head — two reviews, two sets of findings, one round.
+#
+# This cannot be probed from `gh`: it is a Codex setting, not repository state.
+# Ask the operator once per PR and carry the answer, rather than guessing — the
+# wrong guess is either a duplicate pass or a review nobody requested.
+AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
+```
+
+**Automatic review OFF** — the mention is the trigger, so it can carry the
+summary and the push is inert:
+
+```bash
+git push                                   # inert: nothing reviews on push
+# reply + resolve threads here
+# One comment carries both. Branch on it — the comment IS the request, so a
+# failed post means no review was queued and the wait step would poll for one
+# until it timed out.
 if ! gh pr comment N --body "@codex review
 
 $(cat "$SUMMARY_FILE")"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
 fi
 ```
+
+**Automatic review ON** — the push starts the pass, so everything the reviewer is
+told to read must already be there, and **no mention is sent at all**:
+
+```bash
+# reply + resolve threads FIRST: a pass that starts against threads still open
+# re-reports findings that were already answered, and the volume reads as
+# regression rather than repetition.
+# Then the summary, branched on, and only then the push.
+if ! gh pr comment N --body "$(cat "$SUMMARY_FILE")"; then
+    echo "ABORT: could not post the round summary — do not push yet."; exit 0
+fi
+git push                                   # THIS is the request
+# No `@codex review` comment: the push already asked. Sending one too queues a
+# duplicate pass over the same head.
+```
+
+In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
+which is not a comment and is never triggered by a push, so the summary is a
+separate post that goes **first**, branched on — Copilot can start reading within
+seconds and would otherwise review against the previous round's summary.
 
 Re-request **only the active reviewer** — unless automatic review has already
 done it. The boundary was checked in step 2, before the push, precisely so this
@@ -295,6 +407,26 @@ fi
 # reviews against the PREVIOUS round's account of what changed and what was
 # skipped — and step 1 makes that account a precondition of asking, not a
 # courtesy. If the summary cannot be posted, there is nothing to request against.
+#
+# WRITTEN HERE, not inherited from step 5. Codex can approve the very first
+# request with no fix round at all, and then step 5 has never run: reusing its
+# file would post an empty body in a fresh session, or — worse, in a long-lived
+# one — a summary left over from another round or another PR. This is the
+# phase-transition summary and it is always about the same thing, so it is
+# always constructed at the point it is used.
+cat > "$SUMMARY_FILE" <<EOF
+## Codex phase complete — requesting Copilot
+
+Codex signed off on \`$CODEX_SHA\`. Opening the Copilot phase on the same head.
+
+<what the PR does, and what the Codex phase changed — one paragraph. If Codex
+approved on the first pass with no fix rounds, say that: it is the difference
+between "nothing was found" and "everything found was addressed".>
+
+Fix commits from here carry a \`Review-Phase: copilot\` trailer, which is how the
+merge gate knows the head advanced only through Copilot fixes and that Codex's
+signoff still covers it.
+EOF
 if ! gh pr comment N --body "$(cat "$SUMMARY_FILE")"; then
     echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi

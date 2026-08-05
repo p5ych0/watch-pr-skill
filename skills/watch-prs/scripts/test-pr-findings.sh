@@ -42,7 +42,7 @@ page() {   # <hasNextPage> <cursor> <nodes-json>
     printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":%s,"endCursor":%s},"nodes":%s}}}}}' \
         "$1" "$2" "$3"
 }
-NODE_OK='[{"id":"T_1","isResolved":false,"path":"a.sh","line":1,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding one"}]}},{"id":"T_2","isResolved":true,"path":"b.sh","line":2,"comments":{"nodes":[{"author":{"login":"bot"},"body":"old"}]}}]'
+NODE_OK='[{"id":"T_1","isResolved":false,"path":"a.sh","line":1,"comments":{"nodes":[{"databaseId":11,"author":{"login":"bot"},"body":"finding one"}]}},{"id":"T_2","isResolved":true,"path":"b.sh","line":2,"comments":{"nodes":[{"databaseId":11,"author":{"login":"bot"},"body":"old"}]}}]'
 
 # ── list: the happy path ───────────────────────────────────────────────────
 page false null "$NODE_OK" > "$TMP/p1.json"
@@ -60,7 +60,7 @@ out="$(GH_PAGE1="$TMP/empty.json" run list 7 2>&1)"; rc=$?
 
 # ── list: pagination is followed, and its state validated ──────────────────
 page true '"CUR"' "$NODE_OK" > "$TMP/p1.json"
-page false null '[{"id":"T_3","isResolved":false,"path":"c.sh","line":3,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding two"}]}}]' > "$TMP/p2.json"
+page false null '[{"id":"T_3","isResolved":false,"path":"c.sh","line":3,"comments":{"nodes":[{"databaseId":11,"author":{"login":"bot"},"body":"finding two"}]}}]' > "$TMP/p2.json"
 out="$(GH_PAGE1="$TMP/p1.json" GH_PAGE2="$TMP/p2.json" run list 7 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one' && printf '%s' "$out" | grep -q 'finding two'; } \
     && pass "list: follows the cursor to the next page" || die "pagination (rc=$rc out='$out')"
@@ -80,9 +80,9 @@ out="$(GH_PAGE1="$TMP/badnext.json" run list 7 2>&1)"; rc=$?
 i=0
 for bad in '{}' '[{}]' \
     '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[]}}]' \
-    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":null,"body":"x"}]}}]' \
-    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":null}]}}]' \
-    '[{"id":"T_9","isResolved":"false","path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]'
+    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"databaseId":11,"author":null,"body":"x"}]}}]' \
+    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"databaseId":11,"author":{"login":"b"},"body":null}]}}]' \
+    '[{"id":"T_9","isResolved":"false","path":"a","line":1,"comments":{"nodes":[{"databaseId":11,"author":{"login":"b"},"body":"x"}]}}]'
 do
     i=$((i + 1))
     page false null "$bad" > "$TMP/bad$i.json"
@@ -206,10 +206,19 @@ out="$(GH_PAGE1="$TMP/p1.json" run list 7 2>&1)"
 printf '%s' "$out" | grep -q 'thread=T_1' \
     && pass "list: each finding carries its thread id" \
     || die "no thread id in the findings output: $out"
+# The COMMENT id too: resolving takes the thread id over GraphQL, a reaction
+# takes the comment's REST id, and neither substitutes for the other.
+printf '%s' "$out" | grep -q 'comment=11' \
+    && pass "list: each finding carries its comment id, for the reaction" \
+    || die "no comment id in the findings output: $out"
+# A node with no databaseId cannot be reacted to and is malformed like any other.
+page false null '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/nodbid.json"
+out2="$(GH_PAGE1="$TMP/nodbid.json" run list 7 2>&1)"; rc2=$?
+[ "$rc2" -eq 2 ] && pass "list: a comment with no databaseId => 2" || die "missing databaseId gave rc=$rc2"
 printf '%s' "$out" | grep -q 'thread=T_2' \
     && die "list: printed a resolved thread's id" || pass "list: only unresolved threads are listed"
 # A node without an id is malformed: the driver would have nothing to resolve.
-page false null '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/noid.json"
+page false null '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"databaseId":11,"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/noid.json"
 out="$(GH_PAGE1="$TMP/noid.json" run list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "list: a thread with no id => 2" || die "missing thread id gave rc=$rc"
 

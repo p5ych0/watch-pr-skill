@@ -242,15 +242,45 @@ for vout in 'truncated wrapper output' '' 'PR_REVIEW_STATE pr=7 sha=abc1234 revi
         && die "an unparseable verdict still emitted the READY signal" \
         || pass "no READY signal from an unparseable verdict"
 done
-# The three real verdict shapes are still accepted — each with the exit status
-# the helper actually pairs it with.
-for spec in 'verdict=clean findings=0|0' 'verdict=findings findings=3|1' 'verdict=none reason=pending|1'; do
-    vout="${spec%|*}"; vrc="${spec#*|}"
-    seq_set reviewed
+# The verdict shapes that AGREE with the state are accepted — each with the exit
+# status the helper actually pairs it with.
+for spec in 'verdict=clean findings=0|0|reviewed' 'verdict=findings findings=3|1|reviewed' \
+            'verdict=none reason=blocked|1|blocked' 'verdict=none reason=dismissed|1|dismissed'; do
+    vout="${spec%%|*}"; rest="${spec#*|}"; vrc="${rest%%|*}"; vstate="${rest#*|}"
+    seq_set "$vstate"
     out="$(VERDICT="$vout" VERDICT_RC="$vrc" run 7 "$BOT" --interval 1 --timeout 5 2>&1)"
     printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
-        && pass "a real verdict shape ('$vout', rc $vrc) is reported as READY" \
-        || die "valid verdict '$vout' was rejected: $out"
+        && pass "a verdict agreeing with state=$vstate ('$vout') is reported as READY" \
+        || die "valid verdict '$vout' for state=$vstate was rejected: $out"
+done
+
+# ── the verdict must describe the state the terminal branch was entered on ─
+# State and verdict are two separate fetches, and the review can move between
+# them without the head moving: a re-review opens and `reviewed` becomes
+# PENDING, or a CHANGES_REQUESTED is superseded. The verdict then legitimately
+# reports the NEW state while $state still holds the old one, and announcing
+# PR_REVIEW_READY on that pair reports a pass that is not finished.
+#
+# This case was previously asserted the WRONG WAY ROUND — `state=reviewed` with
+# `reason=pending` was accepted as READY.
+for spec in 'reviewed|verdict=none reason=pending|1' \
+            'reviewed|verdict=none reason=dismissed|1' \
+            'reviewed|verdict=none reason=review_state_changed|1' \
+            'blocked|verdict=clean findings=0|0' \
+            'blocked|verdict=none reason=dismissed|1' \
+            'dismissed|verdict=findings findings=2|1'; do
+    vstate="${spec%%|*}"; rest="${spec#*|}"; vout="${rest%%|*}"; vrc="${rest#*|}"
+    seq_set "$vstate"
+    out="$(VERDICT="$vout" VERDICT_RC="$vrc" run 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "state=$vstate with '$vout' was announced as READY: $out" \
+        || pass "state=$vstate with '$vout' is not READY"
+    printf '%s' "$out" | grep -q 'state=moved_between_probes' \
+        && pass "…and the disagreement is reported rather than swallowed" \
+        || die "no moved_between_probes line for state=$vstate / '$vout': $out"
+    [ "$rc" -eq 1 ] \
+        && pass "…and it keeps polling to the timeout rather than exiting 0" \
+        || die "state=$vstate with '$vout' gave rc=$rc (1 = polled on, which is right)"
 done
 
 # ── the verdict VALUE, its tail field and the exit status must agree ───────
