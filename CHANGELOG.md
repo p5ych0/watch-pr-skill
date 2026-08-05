@@ -49,6 +49,21 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The loop is phased: Codex to clean, then Copilot.** Requesting both every
+  round buys a Copilot pass on every intermediate commit and mixes its findings
+  into a round that was not about them. Codex now reviews to a clean signoff
+  first; only then is Copilot asked, and its fix commits carry a
+  `Review-Phase: copilot` trailer so the merge gate can prove the head advanced
+  only through Copilot fixes and Codex's signoff still covers it. Codex is not
+  re-run during that phase — and if a commit there lacks the trailer, the range
+  check fails and Codex reviews again, which is the correct outcome because
+  unreviewed work reached the head.
+
+- **Rounds are counted per reviewer.** The two phases are separate loops, so a
+  shared counter would let nine Codex rounds plus one Copilot round trip a pause
+  that neither loop had reached. `pr-round-count.sh` takes the reviewer as an
+  argument and the driver passes the active one.
+
 - **The round check-in is enforced, not just promised.** v1 kept the count in a
   `/tmp` file, so the pause silently disappeared whenever a session started on
   another machine or the file was cleaned up — a guarantee that only holds while

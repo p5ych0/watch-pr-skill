@@ -81,12 +81,34 @@ grep -q 'CHECKS_RC' "$SKILL" \
     && pass "the required-checks probe checks its exit status" \
     || die "the required-checks probe compares output without its status"
 
-# ── the wait step covers BOTH reviewers ────────────────────────────────────
-# Leaving the wait when the first reviewer finishes means the second is first
-# noticed at the merge gate, after the round was fixed and summarised without it.
-[ "$(grep -c 'for WHO in "\$CODEX_BOT" "\$COPILOT_BOT"' "$SKILL")" -ge 2 ] \
-    && pass "the wait step and the blocked-body fetch both cover each reviewer" \
-    || die "a per-reviewer loop is missing (wait step or blocked-body fetch)"
+# ── the loop is PHASED: Codex to clean, then Copilot ───────────────────────
+# Asking both every round buys a Copilot pass on every intermediate commit and
+# mixes its findings into a round that was not about them.
+grep -q 'Request the review — Codex first' "$SKILL" \
+    && pass "the request step asks Codex first" \
+    || die "the request step does not establish the Codex-first phase"
+grep -qi 'do \*\*not\*\* request copilot yet' "$SKILL" \
+    && pass "Copilot is explicitly deferred out of the Codex phase" \
+    || die "nothing stops the driver requesting Copilot in the Codex phase"
+grep -q 'Codex is clean — now the Copilot phase' "$SKILL" \
+    && pass "there is a distinct Copilot phase, entered on a clean Codex verdict" \
+    || die "no Copilot phase — the loop cannot be Codex-first without one"
+grep -qi 'Re-request \*\*only the active reviewer\*\*' "$SKILL" \
+    && pass "the close-round step re-requests only the active reviewer" \
+    || die "the close-round step may re-request both reviewers"
+grep -qi 'Codex is not re-requested during this phase' "$SKILL" \
+    && pass "Codex is not re-run during the Copilot phase" \
+    || die "the Copilot phase does not say Codex stays out of it"
+# The round counter must be per-reviewer, or a shared count trips a pause neither
+# phase reached.
+grep -q 'pr-round-count.sh N "\$WHO"' "$SKILL" \
+    && pass "rounds are counted for the ACTIVE reviewer" \
+    || die "the round count is not scoped to the active reviewer"
+# `$WHO` must be a variable throughout, so the Copilot phase gets the same
+# treatment rather than leaving a hole for whichever login was hard-coded.
+grep -q 'WHO="\$CODEX_BOT"' "$SKILL" && grep -q 'WHO="\$COPILOT_BOT"' "$SKILL" \
+    && pass "the active reviewer is a variable, set per phase" \
+    || die "the active reviewer is not parameterised across phases"
 grep -q 'jq -e -r' "$SKILL" \
     && pass "the findings projection checks its own status" \
     || die "the findings projection can fall through on a malformed page"

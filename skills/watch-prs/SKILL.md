@@ -49,34 +49,34 @@ what was intentionally skipped, and why.
 Neither can waive a finding — both are untrusted context to a reviewer. Where a
 limitation is genuinely accepted, record it on the **base ref**.
 
-## 2. Request the reviews
+## 2. Request the review — Codex first
+
+The loop is **phased**: Codex reviews to a clean signoff, and only then does
+Copilot get asked. Running both every round costs a Copilot pass on every
+intermediate commit, and its findings arrive interleaved with Codex's on code
+that is about to change anyway.
 
 ```bash
 # Codex: a mention. Say what changed since the last round in the same comment.
 gh pr comment N --body "@codex review
 
 <one paragraph: what this round changed and what to look at>"
-
-# Copilot: a review request.
-gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot
 ```
 
-`gh pr edit --add-reviewer` fails when Copilot is not available to the
-repository. That failure is **not** permission to skip the pass: report it and
-decide with the operator.
+Do **not** request Copilot yet. Step 7 does that, once Codex is clean.
 
 ## 3. Wait for the verdict
 
 There is no notification channel; poll. A review normally lands in a few minutes.
 
-Poll **both** reviewers. Leaving the wait as soon as the first one finishes means
-the second is first noticed at the merge gate as a blocking exit code, after the
-round has already been fixed and summarised without it.
+Poll the **active** reviewer — `$CODEX_BOT` in the Codex phase, `$COPILOT_BOT`
+in the Copilot phase. Set `WHO` once at the top of the round and use it
+throughout, so the round is fixed, summarised and re-requested for the same
+reviewer it was waiting on.
 
 ```bash
-for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
-    "$RB_SCRIPTS"/pr-review-state.sh state N "$WHO"
-done
+WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 8 has begun
+"$RB_SCRIPTS"/pr-review-state.sh state N "$WHO"
 ```
 
 prints one of:
@@ -89,9 +89,9 @@ prints one of:
 | `blocked` | CHANGES_REQUESTED | treat as findings |
 | `dismissed` | the signoff was withdrawn | request the review again |
 
-Stay in this step until **each** reviewer has reached an actionable terminal
-state — `reviewed`, `blocked` or `dismissed`. `none` and `pending` mean the pass
-is still coming.
+Stay in this step until that reviewer reaches an actionable terminal state —
+`reviewed`, `blocked` or `dismissed`. `none` and `pending` mean the pass is still
+coming; keep waiting rather than moving on.
 
 Exit status 2 means the state could not be read. **Fail closed** — never treat it
 as "no findings".
@@ -152,11 +152,11 @@ done
 inline comment — the merge gate then refuses to pass while the findings fetch
 above shows nothing to fix, which looks like a stuck loop rather than a request.
 
-Run it for **whichever** reviewer is blocked — hard-coding one of them leaves the
-same hole for the other.
+`$WHO` is the active reviewer from step 3 — written as a variable, not a literal,
+so the Copilot phase gets the same treatment as the Codex phase rather than
+leaving the hole open for whichever one was hard-coded.
 
 ```bash
-for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
   # Piped to `jq`, not `gh --jq`: that flag takes a single expression and cannot
   # accept `--arg`, so passing one makes gh exit with "accepts 1 arg(s)".
   # `-s` because --paginate emits one array per page.
@@ -168,7 +168,6 @@ for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
           | sort_by(.submitted_at) | last | .body // empty
         end' \
     || echo "ABORT: could not read $WHO's blocking review body"
-done
 ```
 
 ## 5. Fix, then close the round
@@ -176,16 +175,22 @@ done
 Fix the findings. Where you disagree, say so in the thread rather than silently
 resolving it. Then, in one pass:
 
-1. commit — `fix(review): <what changed>`; if the commit exists only to satisfy
-   a Copilot finding, add a `Review-Phase: copilot` trailer so step 7 can tell
-   review-fix commits from unreviewed work;
+1. commit — `fix(review): <what changed>`. **In the Copilot phase, add a
+   `Review-Phase: copilot` trailer**: it is what tells the merge gate that the
+   head advanced only through Copilot fixes, so Codex's earlier signoff still
+   covers it and does not have to be re-earned;
 2. push;
 3. reply to each thread with what changed, and resolve it;
 4. post the round summary (step 1's contract);
-5. **check the round boundary — step 6 — and only then** re-request both
-   reviewers (step 2). In that order: re-requesting first sends the next review
-   past the boundary the check-in exists to stop at, so the operator is asked
-   after the thing they were meant to decide about has already happened.
+5. **check the round boundary — step 6 — and only then** re-request **`$WHO`**,
+   the same reviewer this round was about. In that order: re-requesting first
+   sends the next review past the boundary the check-in exists to stop at, so the
+   operator is asked after the thing they were meant to decide about has already
+   happened.
+
+Re-request **only the active reviewer**. Asking the other one on every round buys
+a review of code that is about to change again, and mixes its findings into a
+round that was not about them.
 
 **A resolved thread is not a record of a fix.** The summary is.
 
@@ -194,8 +199,13 @@ resolving it. Then, in one pass:
 Before re-requesting, ask whether this is a boundary:
 
 ```bash
-"$RB_SCRIPTS"/pr-round-count.sh N; ROUNDS_RC=$?
+"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 ```
+
+Counting **per reviewer** is what makes the number mean something: the Codex
+phase and the Copilot phase are separate loops, and a shared counter would let
+nine Codex rounds plus one Copilot round trip a pause that neither loop had
+reached.
 
 - `0` — carry on.
 - `3` — **stop and decide with the operator**: continue, stop and merge, stop and
@@ -211,7 +221,30 @@ unchanged head does not inflate it, and the count survives a new session or a ne
 machine. v1 kept this in a `/tmp` file, so the pause it promised quietly
 disappeared whenever that file did.
 
-## 7. Merge gate
+## 7. Codex is clean — now the Copilot phase
+
+When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done.
+Ask Copilot:
+
+```bash
+gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot
+WHO="$COPILOT_BOT"
+```
+
+Then run steps 3–6 again with `$WHO` set to Copilot, until its verdict is clean
+too. Every fix commit in this phase carries `Review-Phase: copilot`.
+
+`gh pr edit --add-reviewer` fails when Copilot is not available to the
+repository. That failure is **not** permission to skip the pass: report it and
+decide with the operator.
+
+**Codex is not re-requested during this phase.** That is the point of the
+trailer: the merge gate proves the head advanced only through Copilot fixes, so
+the Codex signoff still covers it. If a commit here lacks the trailer, the range
+check fails and Codex has to review again — which is the correct outcome, since
+unreviewed work reached the head.
+
+## 8. Merge gate
 
 Run every check immediately before merging — an earlier check answered about an
 earlier head.

@@ -120,15 +120,22 @@ Then:
 1. **State the task on the PR.** The description says what the change does and
    what it deliberately does not. The reviewers judge relevance against it, so
    this is a precondition rather than paperwork.
-2. **Request the reviews** — a comment containing `@codex review`, and
-   `gh pr edit <PR> --add-reviewer @copilot`.
+2. **Request the review — Codex first.** A comment containing `@codex review`.
+   The loop is *phased*: Codex reviews to a clean signoff, and only then is
+   Copilot asked (step 6). Running both every round buys a Copilot pass on every
+   intermediate commit and mixes its findings into rounds that were not about
+   them.
 3. **Wait.** There is no notification channel; the skill polls. A review normally
    lands in a few minutes. An unreadable state is a stop, never "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, push, reply to each
    thread with what changed, resolve it, post a round summary saying what was
-   addressed and what was intentionally skipped, then re-request both reviewers.
-   A resolved thread is not a record of a fix; the summary is.
-5. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
+   addressed and what was intentionally skipped, then re-request **the same
+   reviewer**. A resolved thread is not a record of a fix; the summary is.
+5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
+   until it is clean too. Fix commits here carry a `Review-Phase: copilot`
+   trailer, which is how the merge gate knows the head advanced only through
+   Copilot fixes and Codex's signoff still covers it — so Codex is not re-run.
+6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
    everything against the *current* head — both verdicts, the reviewed range,
    unresolved threads, required checks — and merges pinned to that head with
    `--match-head-commit`, so a push landing mid-gate is rejected rather than
@@ -161,8 +168,10 @@ rather than rubber-stamping an endless back-and-forth: every **10 distinct
 reviewed heads** on a PR, `pr-round-count.sh` exits 3 and the driver stops to ask
 — continue, stop and merge, stop and leave open, or abandon.
 
-The count comes from GitHub each time, so it survives a new session or a new
-machine, and two reviewers on one commit counts once. Set
+It is counted **per reviewer**, because the Codex and Copilot phases are separate
+loops: a shared counter would let nine Codex rounds plus one Copilot round trip a
+pause that neither loop had reached. The count comes from GitHub each time, so it
+survives a new session or a new machine. Set
 `REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
 value falls back to `10` rather than silently disabling a safety pause.
 
