@@ -1094,18 +1094,6 @@ for doc in "$SCRIPT_DIR/../SKILL.md" "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/READM
 done
 
 
-# ── a faulting jq is a READ failure, not a verdict on the content ──────────
-# The shape check treated "jq exited non-zero" and "jq ran and rejected this" as
-# the same thing, and routed both through the DEDUPLICATING invalid_response_shape
-# sentinel - so a transient jq fault claimed the digest and retired a perfectly
-# valid response for the rest of the session.
-JQF_BUS="$TMP/jqfbus"; mkdir -p "$JQF_BUS/responses" "$TMP/jqfbin"
-printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
-    > "$JQF_BUS/responses/resp-ba600de.json"
-cat > "$TMP/jqfbin/jq" <<'SH'
-#!/usr/bin/env bash
-# Fault ONLY the slurped shape check.
-if [ -n "${FAULT_SHAPE:-}" ] && printf '%s' "$*" | grep -q 'invalid_response_shape_probe\|length != 1 or'; then
 # ── Release-history consistency: the prerequisite version must be real ──────
 # This release's opening entry names the version that PRESERVED the note. During
 # a rebase/renumber that number drifts silently, and the result claims a release
@@ -1175,42 +1163,6 @@ if [ -n "${FAULT_JQ:-}" ] && printf '%s' "$*" | grep -q '_REVIEW pr='; then
 fi
 exec /usr/bin/jq "$@"
 SH
-chmod +x "$TMP/jqfbin/jq"
-JQF_EMIT="$TMP/emjqf"
-out_j1="$(PATH="$TMP/jqfbin:$PATH" FAULT_SHAPE=1 BUS_DIR="$JQF_BUS" MONITOR_EMITTED_DIR="$JQF_EMIT" \
-          "$MONITOR" --once 2>/dev/null || true)"
-printf '%s' "$out_j1" | grep -q 'reason=snapshot_failed' \
-    && pass "a faulting shape check reports the tool-failure reason" \
-    || die "a jq fault was reported as invalid content: $out_j1"
-printf '%s' "$out_j1" | grep -q 'reason=invalid_response_shape' \
-    && die "a jq fault was reported as invalid_response_shape: $out_j1" \
-    || pass "no content verdict from a failed read"
-# Same session dir, fault cleared: the valid response must be delivered.
-out_j2="$(BUS_DIR="$JQF_BUS" MONITOR_EMITTED_DIR="$JQF_EMIT" "$MONITOR" --once 2>/dev/null || true)"
-printf '%s' "$out_j2" | grep -q 'BUSTEST_REVIEW pr=7 ' \
-    && pass "after the jq fault clears the same session delivers the response" \
-    || die "the valid response stayed suppressed after a transient jq fault: $out_j2"
-
-# ── a marker must not outlive a failed delivery ────────────────────────────
-# The marker records DELIVERY and was committed BEFORE the final write, so a full
-# disk created the marker and then failed to print - and the next healthy run
-# suppressed the handoff entirely, losing a completed review.
-FULL_BUS="$TMP/fullbus"; mkdir -p "$FULL_BUS/responses"
-printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
-    > "$FULL_BUS/responses/resp-ba600de.json"
-FULL_EMIT="$TMP/emfull"
-if [ -w /dev/full ]; then
-    BUS_DIR="$FULL_BUS" MONITOR_EMITTED_DIR="$FULL_EMIT" "$MONITOR" --once >/dev/full 2>/dev/null || true
-    [ -z "$(ls -A "$FULL_EMIT" 2>/dev/null)" ] \
-        && pass "a failed write leaves no delivery marker behind" \
-        || die "the marker outlived a failed delivery (the review would be lost)"
-    out_full="$(BUS_DIR="$FULL_BUS" MONITOR_EMITTED_DIR="$FULL_EMIT" "$MONITOR" --once 2>/dev/null || true)"
-    printf '%s' "$out_full" | grep -q 'BUSTEST_REVIEW pr=7 ' \
-        && pass "and the response is delivered on the next healthy run" \
-        || die "the response was permanently lost after a failed write: $out_full"
-else
-    pass "/dev/full not writable here; failed-delivery rollback check skipped"
-fi
 chmod +x "$FAULT_BIN/sha256sum" "$FAULT_BIN/jq"
 
 FAULT_BUS="$TMP/faultbus"; mkdir -p "$FAULT_BUS/responses"
@@ -1597,6 +1549,59 @@ out_still="$(PATH="$TMP/stillbin:$PATH" BUS_DIR="$STILL_BUS" MONITOR_EMITTED_DIR
 printf '%s' "$out_still" | grep -q 'stale_suppression_failed' \
     && pass "an unreadable stale response that is still present still fails loudly" \
     || die "the vanished re-check swallowed a genuine suppression failure: $out_still"
+
+# ── a faulting jq is a READ failure, not a verdict on the content ──────────
+# The shape check treated "jq exited non-zero" and "jq ran and rejected this" as
+# the same thing, and routed both through the DEDUPLICATING invalid_response_shape
+# sentinel - so a transient jq fault claimed the digest and retired a perfectly
+# valid response for the rest of the session.
+JQF_BUS="$TMP/jqfbus"; mkdir -p "$JQF_BUS/responses" "$TMP/jqfbin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$JQF_BUS/responses/resp-ba600de.json"
+cat > "$TMP/jqfbin/jq" <<'SH'
+#!/usr/bin/env bash
+# Fault ONLY the slurped shape check.
+if [ -n "${FAULT_SHAPE:-}" ] && printf '%s' "$*" | grep -q 'invalid_response_shape_probe\|length != 1 or'; then
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$TMP/jqfbin/jq"
+JQF_EMIT="$TMP/emjqf"
+out_j1="$(PATH="$TMP/jqfbin:$PATH" FAULT_SHAPE=1 BUS_DIR="$JQF_BUS" MONITOR_EMITTED_DIR="$JQF_EMIT" \
+          "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_j1" | grep -q 'reason=snapshot_failed' \
+    && pass "a faulting shape check reports the tool-failure reason" \
+    || die "a jq fault was reported as invalid content: $out_j1"
+printf '%s' "$out_j1" | grep -q 'reason=invalid_response_shape' \
+    && die "a jq fault was reported as invalid_response_shape: $out_j1" \
+    || pass "no content verdict from a failed read"
+# Same session dir, fault cleared: the valid response must be delivered.
+out_j2="$(BUS_DIR="$JQF_BUS" MONITOR_EMITTED_DIR="$JQF_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_j2" | grep -q 'BUSTEST_REVIEW pr=7 ' \
+    && pass "after the jq fault clears the same session delivers the response" \
+    || die "the valid response stayed suppressed after a transient jq fault: $out_j2"
+
+# ── a marker must not outlive a failed delivery ────────────────────────────
+# The marker records DELIVERY and was committed BEFORE the final write, so a full
+# disk created the marker and then failed to print - and the next healthy run
+# suppressed the handoff entirely, losing a completed review.
+FULL_BUS="$TMP/fullbus"; mkdir -p "$FULL_BUS/responses"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$FULL_BUS/responses/resp-ba600de.json"
+FULL_EMIT="$TMP/emfull"
+if [ -w /dev/full ]; then
+    BUS_DIR="$FULL_BUS" MONITOR_EMITTED_DIR="$FULL_EMIT" "$MONITOR" --once >/dev/full 2>/dev/null || true
+    [ -z "$(ls -A "$FULL_EMIT" 2>/dev/null)" ] \
+        && pass "a failed write leaves no delivery marker behind" \
+        || die "the marker outlived a failed delivery (the review would be lost)"
+    out_full="$(BUS_DIR="$FULL_BUS" MONITOR_EMITTED_DIR="$FULL_EMIT" "$MONITOR" --once 2>/dev/null || true)"
+    printf '%s' "$out_full" | grep -q 'BUSTEST_REVIEW pr=7 ' \
+        && pass "and the response is delivered on the next healthy run" \
+        || die "the response was permanently lost after a failed write: $out_full"
+else
+    pass "/dev/full not writable here; failed-delivery rollback check skipped"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
