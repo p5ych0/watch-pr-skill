@@ -1537,6 +1537,67 @@ printf '%s' "$out_v3" | grep -q 'reason=snapshot_failed' \
     && pass "a copy failure with the source still present is still reported" \
     || die "the vanished no-op swallowed a genuine snapshot failure: $out_v3"
 
+
+# ── a stale response removed DURING hashing is nothing left to suppress ────
+# mark_emitted tests existence and then opens the path again to hash it. A
+# response removed between the two made response_digest fail for a file that is
+# GONE - and a stale response that no longer exists cannot be emitted - yet that
+# was reported as stale_suppression_failed, which takes the live monitor down and
+# restarts it over ordinary cleanup.
+GONE_BUS="$TMP/gonebus"; mkdir -p "$GONE_BUS/responses" "$TMP/gonebin"
+printf '%s' '{"pr":97,"sha":"6b8ffa2","status":"comments_posted","findings_count":2,"reviewer":"codex","summary":"old"}' \
+    > "$GONE_BUS/responses/resp-6b8ffa2.json"
+sleep 1.1
+printf '%s' '{"pr":97,"sha":"d37e80e","status":"approved","findings_count":0,"reviewer":"codex","summary":"new"}' \
+    > "$GONE_BUS/responses/resp-d37e80e.json"
+cat > "$TMP/gonebin/sha256sum" <<SH
+#!/usr/bin/env bash
+# Remove the STALE response at the moment it is hashed, then fail on it.
+for a in "\$@"; do
+    case "\$a" in
+        *resp-6b8ffa2.json)
+            rm -f "$GONE_BUS/responses/resp-6b8ffa2.json" 2>/dev/null || true
+            exit 7 ;;
+    esac
+done
+exec /usr/bin/sha256sum "\$@"
+SH
+chmod +x "$TMP/gonebin/sha256sum"
+rc_gone=0
+out_gone="$(PATH="$TMP/gonebin:$PATH" BUS_DIR="$GONE_BUS" MONITOR_EMITTED_DIR="$TMP/emgone" \
+            "$MONITOR" --once 2>/dev/null)" || rc_gone=$?
+printf '%s' "$out_gone" | grep -q 'stale_suppression_failed' \
+    && die "a stale response that vanished mid-hash was reported as a suppression failure: $out_gone" \
+    || pass "a stale response removed during hashing is nothing left to suppress"
+[ "$rc_gone" -eq 0 ] \
+    && pass "and the sweep succeeds rather than restarting the monitor" \
+    || die "the vanished-stale race exited $rc_gone"
+printf '%s' "$out_gone" | grep -q 'sha=d37e80e' \
+    && pass "the newest response is still delivered" \
+    || die "the newest response was not delivered: $out_gone"
+
+# A still-present but UNREADABLE stale response is a real failure and must keep
+# reporting - the re-check must not swallow it.
+STILL_BUS="$TMP/stillbus"; mkdir -p "$STILL_BUS/responses" "$TMP/stillbin"
+printf '%s' '{"pr":98,"sha":"6b8ffa2","status":"comments_posted","findings_count":2,"reviewer":"codex","summary":"old"}' \
+    > "$STILL_BUS/responses/resp-6b8ffa2.json"
+sleep 1.1
+printf '%s' '{"pr":98,"sha":"d37e80e","status":"approved","findings_count":0,"reviewer":"codex","summary":"new"}' \
+    > "$STILL_BUS/responses/resp-d37e80e.json"
+cat > "$TMP/stillbin/sha256sum" <<'SH'
+#!/usr/bin/env bash
+for a in "$@"; do
+    case "$a" in *resp-6b8ffa2.json) exit 7 ;; esac
+done
+exec /usr/bin/sha256sum "$@"
+SH
+chmod +x "$TMP/stillbin/sha256sum"
+out_still="$(PATH="$TMP/stillbin:$PATH" BUS_DIR="$STILL_BUS" MONITOR_EMITTED_DIR="$TMP/emstill" \
+             "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_still" | grep -q 'stale_suppression_failed' \
+    && pass "an unreadable stale response that is still present still fails loudly" \
+    || die "the vanished re-check swallowed a genuine suppression failure: $out_still"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

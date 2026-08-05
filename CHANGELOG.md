@@ -160,6 +160,14 @@
   source; unreadable and failed-copy cases with the file still present are still
   reported.
 
+- **A stale response removed while it is being hashed is not a suppression
+  failure.** `mark_emitted` tests that the file exists and then opens it again to
+  hash it, so a response cleaned up between the two made the digest fail for a
+  file that is gone - and a stale response that no longer exists cannot be
+  emitted, so there is nothing left to suppress. Reporting it took the live
+  monitor down and restarted it over ordinary cleanup. Existence is re-checked
+  after a digest failure; a still-present unreadable response still fails loudly.
+
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported

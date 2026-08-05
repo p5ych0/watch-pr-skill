@@ -592,7 +592,17 @@ mark_emitted() {
     local file="$1" base digest
     [ -f "$file" ] || return 0
     base="$(basename "$file")"
-    digest="$(response_digest "$file")" || return 1
+    # The existence test and the hash open the mutable path twice, so a response
+    # removed between them made response_digest fail for a file that is GONE -
+    # and a stale response that no longer exists cannot be emitted, so there is
+    # nothing left to suppress. Reporting that as a suppression failure took the
+    # live monitor down and restarted it over ordinary cleanup. Re-check, and
+    # stay quiet only when it really vanished; a still-present unreadable
+    # response is a real failure.
+    if ! digest="$(response_digest "$file")"; then
+        [ -e "$file" ] || return 0
+        return 1
+    fi
     : > "$EMITTED_DIR/${base}.${digest}" || return 1
 }
 
