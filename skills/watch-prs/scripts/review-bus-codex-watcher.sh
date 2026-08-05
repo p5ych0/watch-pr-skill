@@ -354,12 +354,23 @@ write_response() {
 # rejecting it - `x<40-hex>x` would sanitise to a valid-looking SHA - so a
 # damaged marker could authorise a phase hold that no clean signoff earned.
 read_sha_marker() {
-    local v
-    v="$(cat "$1" 2>/dev/null)" || return 1
-    # Validate the WHOLE file, not its first line. Truncating at the first
-    # newline accepted `<valid-sha>\njunk`, so a corrupt marker still satisfied
-    # the "exact contents" contract it is supposed to enforce. `$( )` already
-    # strips trailing newlines, so a well-formed marker survives this unchanged.
+    local f="$1" v sz
+    [ -f "$f" ] || return 1
+    # The RAW BYTES first, before any command substitution sees them - the same
+    # rule review-bus-copilot.sh applies, and for the same reason. `$( )` strips
+    # every trailing newline AND silently drops NUL, so both `<sha>\njunk` and
+    # `<sha>\0` reached the regex as a clean 40-character SHA and satisfied the
+    # "exact contents" contract this marker exists to enforce - here that meant a
+    # fully tagged compare emitting CODEX_AUTO_SKIP off a corrupt marker, with no
+    # review request written at all. 40 bytes bare, or 41 with a trailing
+    # newline, and an anchored match on the file itself.
+    sz="$(wc -c < "$f" 2>/dev/null)" || return 1
+    case "$sz" in
+        40|41) ;;
+        *) return 1 ;;
+    esac
+    LC_ALL=C grep -qaxE '[0-9a-f]{40}' "$f" 2>/dev/null || return 1
+    v="$(cat "$f" 2>/dev/null)" || return 1
     [[ "$v" =~ ^[0-9a-f]{40}$ ]] || return 1
     printf '%s' "$v"
 }

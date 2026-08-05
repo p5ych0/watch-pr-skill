@@ -227,6 +227,32 @@
   a readable "no request pending", which with a matching marker was merge
   permission. Both fail closed now.
 
+- **The marker path judges review STATE too.** The gate's unmarked path was made
+  state-aware, but the branch taken when a decline or unavailability marker
+  exists still went straight to a comment count - so on that path an old
+  zero-comment review beside a new draft, and zero-comment DISMISSED or
+  CHANGES_REQUESTED reviews, still read as clean. Both paths now run the same
+  state machine, and any live review revokes the marker on the way.
+
+- **The LATEST submitted review is authoritative.** The state reducer answered
+  "reviewed" whenever any accepted record existed anywhere in the list, so an
+  old COMMENTED review followed by a later DISMISSED one counted as a signoff -
+  and the comment count then came from the dismissed review, which has none. It
+  now judges the latest submitted review, with an unsubmitted draft dominating.
+
+- **A dismissed review has a way out.** `status` reduced it to a comment count
+  and reported `findings=0` (rc 0), while `request` treated every submitted
+  review including DISMISSED as `already_reviewed_head` - so the driver headed
+  for a merge the gate refused, and re-running `request` never asked Copilot
+  again. Both are state-aware: `status` reports it as unusable with a reason, and
+  `request` re-requests, while an accepted or changes-requested review is still
+  `already_reviewed_head`.
+
+- **The watcher's marker reader validates raw bytes.** It kept the command
+  substitution the Copilot helper had already moved away from, so `<sha>\0`
+  reached its regex as a clean SHA - and a fully tagged compare then emitted
+  `CODEX_AUTO_SKIP` off a corrupt marker, writing no review request at all.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

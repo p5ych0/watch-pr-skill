@@ -212,9 +212,15 @@ echo "$out" | grep -qx 'COPILOT_REVIEW pr=7 sha=unknown findings=0 status=error 
 # (k) only a PENDING current-head review → status=none (1), NOT a false findings=0
 printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","id":50,"state":"PENDING","submitted_at":null}]' "$HEAD40" > "$TMP/rev-pending.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/rev-pending.json" run_copilot status 7 2>&1)"; rc=$?
-echo "$out" | grep -qx 'COPILOT_REVIEW pr=7 sha=aaaaaaa findings=0 status=none reviewer=copilot' \
+# Fields, not the whole line: `status` now also reports WHY it is not usable
+# (review_in_progress vs review_dismissed), and pinning the exact string would
+# make any added diagnostic a test failure.
+echo "$out" | grep -q 'status=none' && echo "$out" | grep -q 'findings=0' \
   && [ "$rc" -eq 1 ] && pass "status: pending-only head review => none (1), not false clean" \
   || die "status (k) wrong (rc=$rc out='$out')"
+echo "$out" | grep -q 'reason=review_in_progress' \
+  && pass "status: names the draft as the reason it is unusable" \
+  || die "status: a pending-only review gives no reason (rc=$rc out='$out')"
 
 # (l) two SUBMITTED reviews on the same head → count the LATEST by submitted_at
 printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","id":60,"state":"COMMENTED","submitted_at":"2026-07-18T08:00:00Z"},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","id":61,"state":"COMMENTED","submitted_at":"2026-07-18T12:00:00Z"}]' "$HEAD40" "$HEAD40" > "$TMP/rev-two.json"
@@ -662,6 +668,74 @@ for m in unavailable declined clean; do
         || die "gate: NUL-corrupted $m marker accepted (rc=$rc out='$out')"
 done
 rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+
+# (mm) The MARKER path must judge state too. It went straight to a comment count,
+# so with a marker present an old zero-comment review beside a new draft, and
+# zero-comment DISMISSED / CHANGES_REQUESTED reviews, all read as clean - the
+# exact defect the state check closes on the unmarked path.
+for mk in unavailable declined; do
+    for case in 'PENDING|null|stale_unavailable_review_pending' \
+                'DISMISSED|"2026-01-01T00:00:00Z"|review_dismissed' \
+                'CHANGES_REQUESTED|"2026-01-01T00:00:00Z"|changes_requested'
+    do
+        st="${case%%|*}"; rest="${case#*|}"; sub="${rest%%|*}"; why="${rest##*|}"
+        rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+        printf '%s\n' "$HEAD40" > "$UNAVAIL_BUS/.copilot-$mk-7"
+        printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"%s","submitted_at":%s,"id":31}]' \
+            "$HEAD40" "$st" "$sub" > "$TMP/reviews-state.json"
+        out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" GH_PENDING_RAW='{"reviewRequests":[]}' \
+               run_unavail gate 7 2>&1)"; rc=$?
+        { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "$why"; } \
+            && pass "gate: $st beside a $mk marker is not a clean signoff" \
+            || die "gate: $st + $mk marker read as mergeable (rc=$rc out='$out')"
+    done
+done
+rm -f "$UNAVAIL_BUS"/.copilot-{unavailable,declined,clean}-7
+
+# (nn) The LATEST submitted review is authoritative. An old COMMENTED review
+# followed by a later DISMISSED one made `any(... accepted ...)` answer "reviewed",
+# head_review_findings then selected the dismissed review, counted zero comments,
+# and the gate returned clean.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":41},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":42}]' \
+    "$HEAD40" "$HEAD40" > "$TMP/reviews-state.json"
+printf '[]' > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_dismissed'; } \
+    && pass "gate: a later DISMISSED review overrides an earlier clean one" \
+    || die "gate: old-clean-plus-later-dismissed read as clean (rc=$rc out='$out')"
+# The mirror: a later ACCEPTED review after an earlier dismissal IS clean.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-01T00:00:00Z","id":43},{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-02T00:00:00Z","id":44}]' \
+    "$HEAD40" "$HEAD40" > "$TMP/reviews-state.json"
+printf '[]' > "$TMP/comments-44.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail gate 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "gate: a later APPROVED review supersedes an earlier dismissal" \
+    || die "gate: the latest-submitted rule blocked a genuine signoff (rc=$rc out='$out')"
+rm -f "$TMP/comments-42.json" "$TMP/comments-44.json"
+
+# (oo) A dismissed review must be RECOVERABLE end to end: `status` must not call
+# it usable, and `request` must ask Copilot again instead of answering
+# already_reviewed_head forever.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-01T00:00:00Z","id":45}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" run_unavail status 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_dismissed'; } \
+    && pass "status: a dismissed review is reported as unusable, with the reason" \
+    || die "status: a dismissed review reported as usable (rc=$rc out='$out')"
+GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" GH_EDIT_RC=0 run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "request: a dismissed review can be re-requested (recovery exists)" \
+    || die "request: dismissal is a dead end (rc=$rc)"
+# An ACCEPTED review on this head is still 'already reviewed' - the recovery path
+# must not turn into re-requesting on every call.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":46}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" GH_EDIT_RC=0 run_unavail request 7 >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 4 ] \
+    && pass "request: an accepted review on this head is still already_reviewed_head" \
+    || die "request: re-requests over an accepted review (rc=$rc)"
 
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any

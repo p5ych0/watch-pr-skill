@@ -85,35 +85,6 @@ copilot_reviews() {
         end' 2>/dev/null || return 2
 }
 
-# Drop a recorded unavailability for this PR. 0 = no marker, or removed; 1 = it
-# is still there.
-#
-# ANY proof that Copilot is reachable makes the marker false, and the gate
-# consults it BEFORE live review state — so a marker left behind short-circuits
-# to `status=unavailable` and merges, even when the review that proved
-# availability carries findings. Both of `cmd_request`'s availability-proving
-# exits therefore revoke: the accepted `gh pr edit`, AND the earlier
-# already-reviewed-current-head path, which returns before ever reaching the
-# edit. Callers treat a failed revocation as fail-closed, never as success.
-# 0 = a submitted review exists on this head and it is CLEAN (zero comments)
-# 1 = no submitted review on this head · 2 = cannot tell → fail closed.
-#
-# The gate consults the decline/unavailable markers, and a marker is a statement
-# about the PAST. A review can reach this head without `cmd_request` ever running
-# (Copilot picking the PR up on its own, a human re-requesting, an automation),
-# and `cmd_request` can record unavailability off a reviews fetch that FAILED. In
-# both cases the marker is stale the moment a real review lands, so the live
-# state has to be consulted before a marker is honoured — and a failure to
-# consult it is a reason to block, not to fall back on the marker.
-head_review_verdict() {
-    local pr="$1" head="$2" n rc
-    n=$(head_review_findings "$pr" "$head"); rc=$?
-    case "$rc" in
-        0) [ "$n" -eq 0 ] && return 0 || return 3 ;;   # 3 = reviewed, has findings
-        1) return 1 ;;
-        *) return 2 ;;
-    esac
-}
 
 # Print the state of Copilot's review of THIS head, or fail (2).
 #   pending  - an unsubmitted draft exists (review owed, not finished)
@@ -137,10 +108,19 @@ head_review_state() {
           [ .[] | select(.commit_id == $h) ] as $mine
           | if ($mine | length) == 0 then "none"
             elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "pending"
-            elif any($mine[]; .state == "CHANGES_REQUESTED") then "blocked"
             else
-              [ $mine[] | select(.state == "APPROVED" or .state == "COMMENTED") ] as $ok
-              | if ($ok | length) > 0 then "reviewed" else "dismissed" end
+              # The AUTHORITATIVE record is the LATEST submitted review, not "any
+              # accepted one anywhere in the list". `any(... APPROVED/COMMENTED)`
+              # called the head reviewed when an older clean review was followed
+              # by a DISMISSED one - and head_review_findings then selected that
+              # dismissed review, counted its zero comments, and the gate merged.
+              ( [ $mine[] | select(.submitted_at != null) ]
+                | sort_by(.submitted_at) | last ) as $latest
+              | if $latest == null then "dismissed"
+                elif $latest.state == "CHANGES_REQUESTED" then "blocked"
+                elif $latest.state == "APPROVED" or $latest.state == "COMMENTED" then "reviewed"
+                else "dismissed"     # DISMISSED, or any state we do not accept
+                end
             end
         end' 2>/dev/null)" || return 2
     case "$out" in
@@ -149,29 +129,6 @@ head_review_state() {
     esac
 }
 
-# Does Copilot have a review on THIS head that has not been submitted yet?
-#   0 = yes (a PENDING draft) · 1 = no · 2 = cannot tell.
-#
-# `head_review_findings` deliberately ignores PENDING - a draft is not a
-# completed review and must not read as findings=0. But for the MARKER question
-# a draft is decisive in the other direction: Copilot cannot be drafting a review
-# on a repository where it is unavailable. And the draft can arrive without a
-# reviewer request still being listed (an automatic pickup, or the request
-# consumed), so the requested-reviewer probe alone leaves that hole open.
-head_review_pending() {
-    local pr="$1" head="$2" reviews out
-    reviews=$(copilot_reviews "$pr") || return 2
-    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
-        if type != "array" then error("bad shape")
-        else (if any(.[]; .commit_id == $h and (.state == "PENDING" or .submitted_at == null))
-              then "yes" else "no" end)
-        end' 2>/dev/null)" || return 2
-    case "$out" in
-        yes) return 0 ;;
-        no)  return 1 ;;
-        *)   return 2 ;;
-    esac
-}
 
 # Is Copilot currently a REQUESTED reviewer on this PR?
 #   0 = yes · 1 = no · 2 = cannot tell.
@@ -306,8 +263,17 @@ cmd_request() {
     reviews=$(copilot_reviews "$pr") || reviews_rc=$?
     # "Already reviewed the current head" means a SUBMITTED review on it — a
     # PENDING draft is not a completed review, so it must not suppress a request.
-    reviewed_head=$(printf '%s' "$reviews" | jq -r --arg h "$head" \
-        'any(.[]; .commit_id==$h and .state!="PENDING" and .submitted_at!=null)' 2>/dev/null || echo false)
+    # A DISMISSED review is NOT "already reviewed": dismissal is what removes the
+    # signoff, so treating it as one left the state with no way out - the gate
+    # blocked, and re-running `request` answered rc 4 forever. Ask the state
+    # machine, which judges the latest submitted review, instead of "any submitted
+    # review exists".
+    local head_state=""
+    head_state="$(head_review_state "$pr" "$head")" || head_state=""
+    case "$head_state" in
+        reviewed|blocked) reviewed_head=true ;;
+        *)                reviewed_head=false ;;
+    esac
     if [ "$reviewed_head" = "true" ]; then
         # A submitted review ON THIS HEAD is proof of availability, and this exit
         # is taken BEFORE the `gh pr edit` that used to own the revocation - so
@@ -419,12 +385,25 @@ head_review_findings() {
 #   0 → yes (status=commented, findings=K) · 1 → no review for this head
 #   (status=none) · 2 → found but comment fetch failed (status=error, fail closed).
 cmd_status() {
-    local pr="$1" head short findings rc
+    local pr="$1" head short findings rc state
     head=$(pr_head_oid "$pr") || head=""
     if [ -z "$head" ]; then   # head lookup failed (transient) → fail closed, not "none"
         echo "COPILOT_REVIEW pr=$pr sha=unknown findings=0 status=error reviewer=copilot"; return 2
     fi
     short="${head:0:7}"
+    # STATE first, like the gate. Reducing this to a comment count reported a
+    # zero-comment DISMISSED review as `status=commented findings=0` (rc 0), which
+    # sends the driver toward a merge the gate then refuses - with no signal
+    # anywhere that the way out is to request Copilot again.
+    if ! state="$(head_review_state "$pr" "$head")"; then
+        echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=error reviewer=copilot"; return 2
+    fi
+    case "$state" in
+        none)      echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=none reviewer=copilot"; return 1 ;;
+        pending)   echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=none reason=review_in_progress reviewer=copilot"; return 1 ;;
+        dismissed) echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=none reason=review_dismissed reviewer=copilot"; return 1 ;;
+        blocked)   echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=commented reason=changes_requested reviewer=copilot"; return 0 ;;
+    esac
     findings=$(head_review_findings "$pr" "$head"); rc=$?
     case "$rc" in
         0) echo "COPILOT_REVIEW pr=$pr sha=$short findings=${findings:-0} status=commented reviewer=copilot"; return 0 ;;
@@ -506,19 +485,46 @@ cmd_gate() {
     # carrying findings returned "may merge" without that review ever being read.
     # Consult the live state FIRST; a failure to read it blocks rather than
     # falling back on the marker.
-    local live_rc=0
+    local live_state
     if [ -f "$BUS_DIR/.copilot-unavailable-${pr}" ] || [ -f "$BUS_DIR/.copilot-declined-${pr}" ]; then
-        head_review_verdict "$pr" "$head" || live_rc=$?
-        case "$live_rc" in
-            3)  findings=$(head_review_findings "$pr" "$head") || findings="?"
-                echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings source=live_review_overrides_marker"
+        # The SAME state machine the unmarked path uses. Deciding this branch on a
+        # bare comment count re-introduced, on the marker path only, exactly what
+        # the state check exists to close: an old zero-comment review beside a new
+        # draft, and zero-comment DISMISSED or CHANGES_REQUESTED reviews, all read
+        # as clean. Any live review at all also proves the marker stale, so each
+        # branch revokes best-effort before answering.
+        if ! live_state="$(head_review_state "$pr" "$head")"; then
+            echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
+            return 2
+        fi
+        case "$live_state" in
+            pending)
+                revoke_unavailable "$pr" || true
+                echo "COPILOT_GATE pr=$pr sha=$short status=none reason=stale_unavailable_review_pending"
                 return 1 ;;
-            2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
-                return 2 ;;
-            0)  echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0 source=live_review"
-                return 0 ;;
+            blocked)
+                revoke_unavailable "$pr" || true
+                echo "COPILOT_GATE pr=$pr sha=$short status=findings reason=changes_requested source=live_review_overrides_marker"
+                return 1 ;;
+            dismissed)
+                revoke_unavailable "$pr" || true
+                echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_dismissed source=live_review_overrides_marker"
+                return 1 ;;
+            reviewed)
+                revoke_unavailable "$pr" || true
+                findings=$(head_review_findings "$pr" "$head"); rc=$?
+                case "$rc" in
+                    0) if [ "${findings:-1}" -eq 0 ] 2>/dev/null; then
+                           echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0 source=live_review"
+                           return 0
+                       fi
+                       echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings source=live_review_overrides_marker"
+                       return 1 ;;
+                    *) echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
+                       return 2 ;;
+                esac ;;
         esac
-        # live_rc 1 = no submitted review on this head; the markers may speak.
+        # `none` = no review on this head at all; the markers may speak.
     fi
 
     # Copilot positively unavailable for THIS head, recorded by `request` rc 3.
@@ -532,18 +538,8 @@ cmd_gate() {
     # that check cannot be made.
     marker="$BUS_DIR/.copilot-unavailable-${pr}"
     if [ -f "$marker" ] && [ "$(read_sha_marker "$marker" || true)" = "$head" ]; then
-        # A current-head PENDING draft is proof too, and it is reachable without
-        # any reviewer request being listed - so check it FIRST.
-        local draft_rc=0
-        head_review_pending "$pr" "$head" || draft_rc=$?
-        case "$draft_rc" in
-            0)  revoke_unavailable "$pr" || true
-                echo "COPILOT_GATE pr=$pr sha=$short status=none reason=stale_unavailable_review_pending"
-                return 1 ;;
-            2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=review_state_unreadable"
-                return 2 ;;
-        esac
-
+        # A current-head draft was handled by the state machine above, which runs
+        # for every marker; what remains here is the case with NO review at all.
         local pending_rc=0
         copilot_request_pending "$pr" || pending_rc=$?
         case "$pending_rc" in

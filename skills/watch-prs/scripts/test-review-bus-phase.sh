@@ -372,6 +372,31 @@ requested \
     && die "the ordinary ahead+tagged hold stopped working" \
     || pass "ahead + fully tagged still holds"
 
+
+# ── 18. A NUL byte in the clean marker must not authorise a hold ───────────
+# Command substitution silently DROPS NUL, so `<valid-sha>\0` reached the regex
+# as a clean 40-character SHA - and a fully tagged compare then emitted
+# CODEX_AUTO_SKIP off a corrupt marker, with no review request written at all.
+printf '%s\0' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && pass "NUL-corrupted clean marker => reviewed" \
+    || die "a NUL-corrupted marker authorised a phase hold"
+
+# The well-formed marker must still hold - the byte check rejects corruption,
+# not the ordinary trailing newline record_clean_signoff writes.
+printf '%s\n' "$CLEAN_SHA" > "$BUS_DIR/.codex-clean-4"
+compare_with "fix(review): tagged
+
+Review-Phase: copilot"
+enqueue
+requested \
+    && die "the byte-level marker check broke the ordinary hold" \
+    || pass "a well-formed marker still holds (trailing newline accepted)"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
