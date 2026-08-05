@@ -169,6 +169,36 @@ printf '%s' "$out" | grep -q 'state=timeout' \
     && die "an unparseable state was reported as a timeout" \
     || pass "an unparseable state is not reported as a timeout"
 
+# rc-0 NOISE around a valid state token. Taking "the last state= token" accepted
+# `warning: cached state=reviewed` and drove the watch into the terminal path on
+# a line the helper never produced.
+for noisy in 'warning: cached state=reviewed' 'note: fallback state=none' 'PR_REVIEW_STATE pr=7 state=reviewed'; do
+    cat > "$TMP/noisy.sh" <<SH
+#!/usr/bin/env bash
+[ "\$1" = "verdict" ] && { echo "PR_REVIEW_STATE pr=7 sha=abc reviewer=x verdict=clean findings=0"; exit 0; }
+echo "$noisy"
+exit 0
+SH
+    chmod +x "$TMP/noisy.sh"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/noisy.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "rc-0 noise around a state token ('$noisy') => 2" \
+        || die "noisy state line '$noisy' gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "noisy state line '$noisy' reached the READY path" \
+        || pass "noisy state line '$noisy' never reaches READY"
+done
+
+# The same for the verdict line: a glob accepted `verdict=cleaned` and any line
+# merely quoting the word.
+for badv in "note='cached verdict=clean'" 'verdict=cleaned findings=0' 'PR_REVIEW_STATE verdict=clean'; do
+    seq_set reviewed
+    out="$(VERDICT="$badv" VERDICT_RC=0 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a near-miss verdict line ('$badv') => 2" \
+        || die "near-miss verdict '$badv' gave rc=$rc out='$out'"
+done
+
 # An unknown-but-well-formed state is equally not something to poll on.
 cat > "$TMP/weird.sh" <<'SH'
 #!/usr/bin/env bash

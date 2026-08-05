@@ -49,6 +49,25 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **Helper output is matched as a whole record, not by substring.** The state and
+  verdict lines were parsed by taking the last `state=` token, or by globbing for
+  `*verdict=clean*` — so rc-0 noise such as `warning: cached state=reviewed`, or a
+  line reading `verdict=cleaned`, was accepted. Under Monitor `PR_REVIEW_READY`
+  is the actionable signal, and in the merge gate the equivalent decides a
+  fallback, so both now require the exact `PR_REVIEW_STATE … state=<known>` /
+  `… verdict=<known>` shape. The merge gate also validates both reviewers'
+  verdict records rather than trusting the exit codes alone.
+
+- **A failed review request stops the round.** `gh pr comment "@codex review"`
+  and `gh pr edit --add-reviewer @copilot` *are* the requests, so a failure means
+  nothing was queued — and the wait step would then poll until it timed out,
+  reporting "no review arrived" rather than "none was asked for".
+
+- **The README no longer describes the removed bus.** Its opening paragraph still
+  told users that reviews run "on a file-based bus", which is the architecture
+  this release deletes — the first thing a reader saw contradicted the setup
+  instructions below it.
+
 - **A failed Copilot request does not start the Copilot phase.**
   `--add-reviewer` *is* the request, so when it fails there is no pass to wait
   for — the driver would poll for a review nobody asked for and then report a

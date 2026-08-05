@@ -58,9 +58,14 @@ that is about to change anyway.
 
 ```bash
 # Codex: a mention. Say what changed since the last round in the same comment.
-gh pr comment N --body "@codex review
+# Branch on it: the comment IS the request, so a failed post means no review was
+# ever queued — and the wait step would then poll for one until it timed out,
+# reporting "no review arrived" rather than "none was asked for".
+if ! gh pr comment N --body "@codex review
 
-<one paragraph: what this round changed and what to look at>"
+<one paragraph: what this round changed and what to look at>"; then
+    echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
+fi
 ```
 
 Do **not** request Copilot yet. Step 7 does that, once Codex is clean.
@@ -305,32 +310,46 @@ fi
 # `state=none` would otherwise send the gate down the fallback path — and with a
 # current-head body-only CHANGES_REQUESTED there is no thread for the unresolved
 # gate to catch, so the merge would pass on a state that was never read.
-CODEX_STATE="${CODEX_HEAD_STATE##*state=}"; CODEX_STATE="${CODEX_STATE%% *}"
+# The WHOLE record, not the last `state=` token: rc-0 noise such as
+# `warning: cached state=none` would otherwise pass and take the fallback path.
+if [[ "$CODEX_HEAD_STATE" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ state=([a-z]+)$ ]]; then
+    CODEX_STATE="${BASH_REMATCH[1]}"
+else
+    echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 0
+fi
 case "$CODEX_STATE" in
     none|pending|reviewed|blocked|dismissed) ;;
-    *) echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 0 ;;
+    *) echo "merge blocked: unknown Codex head state ('$CODEX_STATE')"; exit 0 ;;
 esac
 case "$CODEX_STATE" in
     none)
         # No Codex review of this head at all: the recorded signoff is the
         # authority, and step (2) proves the delta since it is Copilot-only.
         CODEX_EFFECTIVE_SHA="$CODEX_SHA"
-        "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"; CODEX_RC=$? ;;
+        CODEX_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); CODEX_RC=$? ;;
     *)
         # Codex HAS judged this head — that judgement wins over the older one,
         # whatever it says. Record WHICH sha the verdict describes: step (2) has
         # to measure from the same commit, or it would demand Copilot trailers
         # across a range Codex has already reviewed in full.
         CODEX_EFFECTIVE_SHA="$HEAD_OID"
-        "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$HEAD_OID"; CODEX_RC=$? ;;
+        CODEX_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$HEAD_OID"); CODEX_RC=$? ;;
 esac
 # $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
 # push landing mid-gate would otherwise leave a verdict describing an older
 # commit while step 5 pins and merges the newer one.
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID"; COPILOT_RC=$?
+COPILOT_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
 if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
     echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 0
 fi
+# This is the final merge permission, so the exit codes are not taken on trust:
+# an rc-swallowing wrapper or a truncated helper line would otherwise turn an
+# unreadable verdict into a clean signoff. Require the exact record from BOTH.
+for V in "$CODEX_VERDICT" "$COPILOT_VERDICT"; do
+    if ! [[ "$V" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ verdict=clean\ findings=0$ ]]; then
+        echo "merge blocked: a verdict line is not an exact clean record ('$V')"; exit 0
+    fi
+done
 
 # (2) …and the delta between them is Copilot fixes only.
 #

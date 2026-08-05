@@ -1,10 +1,10 @@
 # watch-pr-skill
 
-**A team-grade code-review rhythm for solo developers.** You write the code; a
-second AI agent (Codex) reviews every pull request on a file-based bus, and your
-coding agent (Claude Code *or* Codex) works the fix → resolve → re-request loop
-until the review signs off — the review discipline of a team, with no teammates
-required.
+**A team-grade code-review rhythm for solo developers.** You write the code;
+GitHub's own reviewers — **Codex** and **Copilot** — review every pull request,
+and your coding agent (Claude Code *or* Codex) works the fix → resolve →
+re-request loop until they sign off. The review discipline of a team, with no
+teammates required.
 
 One install serves every project on your machine, and it runs under **both Claude
 Code and Codex**.

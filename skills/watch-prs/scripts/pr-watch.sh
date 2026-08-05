@@ -73,15 +73,20 @@ while :; do
         exit 2
     fi
 
-    state="${line##*state=}"
-    state="${state%% *}"
-    # A helper that exits 0 but prints a line without `state=` leaves the WHOLE
-    # line in $state. Polling on that ran to the ordinary timeout (rc 1), which
-    # the contract reads as "re-request or ask whether to keep waiting" — so an
-    # unreadable probe stopped being distinguishable from a slow reviewer.
+    # The WHOLE record is matched, not "the last state= token in whatever was
+    # printed". Taking the trailing token accepted rc-0 noise such as
+    # `warning: cached state=reviewed`, which then drove the watch into the
+    # terminal path — or, as `state=none`, polled quietly to a timeout that the
+    # contract reads as "re-request or ask whether to keep waiting".
+    if [[ "$line" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ state=([a-z]+)$ ]]; then
+        state="${BASH_REMATCH[1]}"
+    else
+        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable detail=%s\n' "$PR" "$WHO" "$line"
+        exit 2
+    fi
     case "$state" in
         none|pending|reviewed|blocked|dismissed) ;;
-        *) printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable detail=%s\n' "$PR" "$WHO" "$line"
+        *) printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unknown_state detail=%s\n' "$PR" "$WHO" "$line"
            exit 2 ;;
     esac
     if [ "$state" != "$last" ]; then
@@ -110,12 +115,14 @@ while :; do
             # that truncates stdout leaves an rc of 0/1 with no `verdict=` field,
             # and PR_REVIEW_READY is the actionable signal under Monitor — so an
             # unreadable verdict would be indistinguishable from a finished review.
-            case "$verdict" in
-                *verdict=clean*|*verdict=findings*|*verdict=none*) ;;
-                *) printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable_verdict detail=%s\n' \
-                       "$PR" "$WHO" "$verdict"
-                   exit 2 ;;
-            esac
+            # An exact field, not a glob: `*verdict=clean*` also matched
+            # `verdict=cleaned` and any line merely quoting the word, and
+            # PR_REVIEW_READY is the actionable signal under Monitor.
+            if ! [[ "$verdict" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ verdict=(clean|findings|none|error)([[:space:]].*)?$ ]]; then
+                printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable_verdict detail=%s\n' \
+                    "$PR" "$WHO" "$verdict"
+                exit 2
+            fi
             printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s %s\n' \
                 "$PR" "$WHO" "$state" "${verdict##*reviewer=* }"
             printf '%s\n' "$verdict"

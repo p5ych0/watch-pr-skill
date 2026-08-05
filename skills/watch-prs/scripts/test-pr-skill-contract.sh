@@ -197,6 +197,21 @@ grep -qi 'push itself' "$SKILL" \
     && pass "and says why the order matters (auto-review acts on the push)" \
     || die "the ordering is stated without its reason"
 
+# The README is the first thing a user reads, so v1's architecture must not
+# survive in it: someone told about a "file-based bus" goes looking for daemons
+# and bus state that this release deletes.
+if [ -f "$ROOT/README.md" ]; then
+    # Blockquotes are excluded: the "Upgrading from 1.x" note legitimately
+    # describes what v1 WAS, and a blunt grep would forbid explaining the thing
+    # this release removes.
+    readme_now="$(grep -v '^[[:space:]]*>' "$ROOT/README.md")"
+    for gone in 'file-based bus' 'systemd --user' 'response monitor'; do
+        printf '%s' "$readme_now" | grep -qi -- "$gone" \
+            && die "README still presents removed v1 machinery as current: $gone" \
+            || pass "README does not present removed machinery as current ($gone)"
+    done
+fi
+
 # The README carries the same flow for users who never open SKILL.md, so the
 # ordering has to hold there too — it did not, one round after the skill was
 # fixed.
@@ -219,11 +234,21 @@ fi
 grep -q 'if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
     && pass "the Copilot request is branched on before the phase begins" \
     || die "a failed Copilot request still enters the Copilot phase"
+# The @codex comment IS the request, so the same rule applies to it.
+grep -q 'if ! gh pr comment N --body "@codex review' "$SKILL" \
+    && pass "the Codex request is branched on before the wait begins" \
+    || die "a failed @codex request still enters the wait step"
+
+# The merge gate validates the verdict RECORDS, not only the exit codes: this is
+# the final permission, so an rc-swallowing wrapper must not read as clean.
+grep -q 'verdict=clean.*findings=0\$' "$SKILL" \
+    && pass "the merge gate requires an exact clean verdict record from both reviewers" \
+    || die "the merge gate trusts the exit codes without checking the records"
 
 # The head-state line is parsed, not substring-matched.
-grep -q 'CODEX_STATE="${CODEX_HEAD_STATE##\*state=}"' "$SKILL" \
-    && pass "the Codex head-state line is parsed into a field" \
-    || die "the head-state decision is made by substring match"
+grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
+    && pass "the Codex head-state line is matched as a whole record" \
+    || die "the head-state decision is made on a substring or trailing token"
 grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
     && pass "…and validated against the known states" \
     || die "the parsed head-state is not checked against the known states"
