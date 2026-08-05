@@ -86,6 +86,59 @@ copilot_reviews() {
 }
 
 
+# Print "<state>\t<review-id>" for THIS head from ONE reviews fetch, or fail (2).
+# The id is the authoritative latest submitted review the state was derived from,
+# and is empty when there is none (states `none` and `pending`).
+#
+# state and id must come from the SAME snapshot: `head_review_state` and
+# `head_review_findings` each fetched the list independently, so a review that
+# changed between the two calls let the gate judge one snapshot and count another
+# - a COMMENTED read followed by a DISMISSED one counted the withdrawn review's
+# zero comments and returned clean. This result is merge permission, so it is
+# derived once and re-checked before it is trusted.
+head_review_snapshot() {
+    local pr="$1" head="$2" reviews out
+    reviews=$(copilot_reviews "$pr") || return 2
+    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
+        if type != "array" then error("bad shape")
+        else
+          [ .[] | select(.commit_id == $h) ] as $mine
+          | ( [ $mine[] | select(.submitted_at != null) ]
+              | sort_by(.submitted_at) | last ) as $latest
+          | ( if ($mine | length) == 0 then "none"
+              elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "pending"
+              elif $latest == null then "dismissed"
+              elif $latest.state == "CHANGES_REQUESTED" then "blocked"
+              elif $latest.state == "APPROVED" or $latest.state == "COMMENTED" then "reviewed"
+              else "dismissed"
+              end ) as $st
+          | $st + "\t" + (if $st == "reviewed" then ($latest.id | tostring) else "" end)
+        end' 2>/dev/null)" || return 2
+    case "${out%%$'\t'*}" in
+        none|pending|blocked|dismissed|reviewed) printf '%s' "$out" ;;
+        *) return 2 ;;
+    esac
+}
+
+# Count the inline comments of ONE known review id. 0 = count printed · 2 = fail.
+review_comment_count() {
+    local pr="$1" id="$2" raw n
+    case "$id" in
+        ""|*[!0-9]*) return 2 ;;
+    esac
+    if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
+        return 2
+    fi
+    n=$(printf '%s' "$raw" | jq -s '
+        if length == 0 then error("no pages")
+        elif any(.[]; type != "array") then error("non-array page")
+        else [.[][]] | length end' 2>/dev/null) || return 2
+    case "$n" in
+        ""|*[!0-9]*) return 2 ;;
+    esac
+    printf '%s' "$n"
+}
+
 # Print the state of Copilot's review of THIS head, or fail (2).
 #   pending  - an unsubmitted draft exists (review owed, not finished)
 #   blocked  - a submitted review asks for changes
@@ -100,35 +153,39 @@ copilot_reviews() {
 # review with no inline comments read as clean too, because zero comments is what
 # it counted. The state has to be derived from the review records themselves.
 head_review_state() {
-    local pr="$1" head="$2" reviews out
-    reviews=$(copilot_reviews "$pr") || return 2
-    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
-        if type != "array" then error("bad shape")
-        else
-          [ .[] | select(.commit_id == $h) ] as $mine
-          | if ($mine | length) == 0 then "none"
-            elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "pending"
-            else
-              # The AUTHORITATIVE record is the LATEST submitted review, not "any
-              # accepted one anywhere in the list". `any(... APPROVED/COMMENTED)`
-              # called the head reviewed when an older clean review was followed
-              # by a DISMISSED one - and head_review_findings then selected that
-              # dismissed review, counted its zero comments, and the gate merged.
-              ( [ $mine[] | select(.submitted_at != null) ]
-                | sort_by(.submitted_at) | last ) as $latest
-              | if $latest == null then "dismissed"
-                elif $latest.state == "CHANGES_REQUESTED" then "blocked"
-                elif $latest.state == "APPROVED" or $latest.state == "COMMENTED" then "reviewed"
-                else "dismissed"     # DISMISSED, or any state we do not accept
-                end
-            end
-        end' 2>/dev/null)" || return 2
-    case "$out" in
-        none|pending|blocked|dismissed|reviewed) printf '%s' "$out" ;;
-        *) return 2 ;;
-    esac
+    local snap
+    snap="$(head_review_snapshot "$1" "$2")" || return 2
+    printf '%s' "${snap%%$'\t'*}"
 }
 
+
+# The gate's clean decision, derived and then RE-CHECKED.
+#   0 = clean (prints the count) · 1 = not clean (prints the reason) · 2 = error
+#
+# A clean answer here is merge permission, so it is the one place that pays for a
+# second look: the state and the review id come from one snapshot, the comments
+# are counted for THAT id, and the snapshot is taken again afterwards. If it
+# moved - a draft opened, the review was dismissed, a newer one landed - the
+# count describes a review that is no longer authoritative and cannot authorise a
+# merge.
+clean_verdict() {
+    local pr="$1" head="$2" snap1 snap2 st id n
+    snap1="$(head_review_snapshot "$pr" "$head")" || return 2
+    st="${snap1%%$'\t'*}"; id="${snap1#*$'\t'}"
+    case "$st" in
+        reviewed) ;;
+        *) printf '%s' "$st"; return 1 ;;
+    esac
+    n="$(review_comment_count "$pr" "$id")" || return 2
+    snap2="$(head_review_snapshot "$pr" "$head")" || return 2
+    if [ "$snap2" != "$snap1" ]; then
+        printf 'changed'
+        return 1
+    fi
+    [ "$n" -eq 0 ] 2>/dev/null || { printf 'findings:%s' "$n"; return 1; }
+    printf '0'
+    return 0
+}
 
 # Is Copilot currently a REQUESTED reviewer on this PR?
 #   0 = yes · 1 = no · 2 = cannot tell.
@@ -421,15 +478,34 @@ cmd_poll() {
         echo "COPILOT_REVIEW pr=$pr sha=unknown findings=0 status=error reviewer=copilot"; return 2
     fi
     short="${head:0:7}"
+    # Each iteration branches on STATE. Polling a bare comment count reported the
+    # OLD record the moment `request` re-requested a dismissed review - the
+    # DISMISSED review is still submitted, so the count was 0 and the poll
+    # returned `status=commented findings=0` instead of waiting for the
+    # replacement. The same path misread a zero-comment CHANGES_REQUESTED review,
+    # and an older clean review sitting beside a PENDING re-review.
+    local pstate
     while [ "$waited" -lt "$COPILOT_TIMEOUT" ]; do
-        findings=$(head_review_findings "$pr" "$head"); rc=$?
-        if [ "$rc" -eq 0 ]; then
-            echo "COPILOT_REVIEW pr=$pr sha=$short findings=${findings:-0} status=commented reviewer=copilot"
-            return 0
-        elif [ "$rc" -eq 2 ]; then
+        if ! pstate="$(head_review_state "$pr" "$head")"; then
             echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=error reviewer=copilot"
             return 2
         fi
+        case "$pstate" in
+            reviewed)
+                findings=$(head_review_findings "$pr" "$head"); rc=$?
+                if [ "$rc" -eq 0 ]; then
+                    echo "COPILOT_REVIEW pr=$pr sha=$short findings=${findings:-0} status=commented reviewer=copilot"
+                    return 0
+                elif [ "$rc" -eq 2 ]; then
+                    echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=error reviewer=copilot"
+                    return 2
+                fi ;;
+            blocked)
+                echo "COPILOT_REVIEW pr=$pr sha=$short findings=0 status=commented reason=changes_requested reviewer=copilot"
+                return 0 ;;
+        esac
+        # none / pending / dismissed: the review we are waiting for has not
+        # arrived yet, so keep waiting rather than reporting the stale one.
         sleep "$COPILOT_POLL_SECONDS"
         waited=$((waited + COPILOT_POLL_SECONDS))
     done
@@ -512,16 +588,18 @@ cmd_gate() {
                 return 1 ;;
             reviewed)
                 revoke_unavailable "$pr" || true
-                findings=$(head_review_findings "$pr" "$head"); rc=$?
-                case "$rc" in
-                    0) if [ "${findings:-1}" -eq 0 ] 2>/dev/null; then
-                           echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0 source=live_review"
-                           return 0
-                       fi
-                       echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings source=live_review_overrides_marker"
-                       return 1 ;;
-                    *) echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
+                local mverdict mrc=0
+                mverdict="$(clean_verdict "$pr" "$head")" || mrc=$?
+                case "$mrc" in
+                    0) echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0 source=live_review"
+                       return 0 ;;
+                    2) echo "COPILOT_GATE pr=$pr sha=$short status=error reason=live_review_state_unreadable"
                        return 2 ;;
+                esac
+                case "$mverdict" in
+                    changed)    echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_state_changed"; return 1 ;;
+                    findings:*) echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=${mverdict#findings:} source=live_review_overrides_marker"; return 1 ;;
+                    *)          echo "COPILOT_GATE pr=$pr sha=$short status=none reason=$mverdict source=live_review_overrides_marker"; return 1 ;;
                 esac ;;
         esac
         # `none` = no review on this head at all; the markers may speak.
@@ -563,33 +641,25 @@ cmd_gate() {
         echo "COPILOT_GATE pr=$pr sha=$short status=decline_stale recorded=${recorded:0:7}"
     fi
 
-    # STATE first, count second. A count alone cannot tell a clean signoff from a
-    # dismissed review, a changes-requested review with no inline comments, or a
-    # re-review that is still a draft.
-    local state
-    if ! state="$(head_review_state "$pr" "$head")"; then
-        echo "COPILOT_GATE pr=$pr sha=$short status=error reason=review_state_unreadable"
-        return 2
-    fi
-    case "$state" in
-        none)      echo "COPILOT_GATE pr=$pr sha=$short status=none"; return 1 ;;
-        pending)   echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_in_progress"; return 1 ;;
-        blocked)   echo "COPILOT_GATE pr=$pr sha=$short status=findings reason=changes_requested"; return 1 ;;
-        dismissed) echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_dismissed"; return 1 ;;
+    # ONE decision, from clean_verdict: it derives the state and the authoritative
+    # review id from a single snapshot, counts that review's comments, and re-reads
+    # the snapshot before calling anything clean. A separate `head_review_state`
+    # call here would be a THIRD fetch and a second source of truth - which is how
+    # the state and the count came from different snapshots in the first place.
+    local verdict vrc=0
+    verdict="$(clean_verdict "$pr" "$head")" || vrc=$?
+    case "$vrc" in
+        0) echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0"; return 0 ;;
+        2) echo "COPILOT_GATE pr=$pr sha=$short status=error reason=fetch_failed"; return 2 ;;
     esac
-
-    findings=$(head_review_findings "$pr" "$head"); rc=$?
-    case "$rc" in
-        0)  if [ "${findings:-1}" -eq 0 ] 2>/dev/null; then
-                echo "COPILOT_GATE pr=$pr sha=$short status=clean findings=0"
-                return 0
-            fi
-            echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=$findings"
-            return 1 ;;
-        2)  echo "COPILOT_GATE pr=$pr sha=$short status=error reason=fetch_failed"
-            return 2 ;;
-        *)  echo "COPILOT_GATE pr=$pr sha=$short status=none"
-            return 1 ;;
+    case "$verdict" in
+        none)        echo "COPILOT_GATE pr=$pr sha=$short status=none"; return 1 ;;
+        pending)     echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_in_progress"; return 1 ;;
+        dismissed)   echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_dismissed"; return 1 ;;
+        blocked)     echo "COPILOT_GATE pr=$pr sha=$short status=findings reason=changes_requested"; return 1 ;;
+        changed)     echo "COPILOT_GATE pr=$pr sha=$short status=none reason=review_state_changed"; return 1 ;;
+        findings:*)  echo "COPILOT_GATE pr=$pr sha=$short status=findings findings=${verdict#findings:}"; return 1 ;;
+        *)           echo "COPILOT_GATE pr=$pr sha=$short status=error reason=unexpected_verdict"; return 2 ;;
     esac
 }
 

@@ -253,6 +253,26 @@
   reached its regex as a clean SHA - and a fully tagged compare then emitted
   `CODEX_AUTO_SKIP` off a corrupt marker, writing no review request at all.
 
+- **The gate's clean answer comes from one snapshot, re-read before it is
+  trusted.** `head_review_state` and `head_review_findings` each fetched the
+  review list independently, so a review that changed between the two calls let
+  the gate judge one snapshot and count another - a COMMENTED read followed by a
+  DISMISSED one counted the withdrawn review's zero comments and returned clean.
+  `clean_verdict` now derives the state and the authoritative review id from a
+  single snapshot, counts that review's comments, and re-reads the snapshot
+  before returning clean; if it moved, the count describes a review that is no
+  longer authoritative and the gate says so. The gate no longer takes a separate
+  state reading either - a second source of truth is how the two diverged.
+
+- **`poll` branches on review state.** It still polled a bare comment count, so
+  the moment `request` re-requested a dismissed review the still-submitted
+  DISMISSED record made it report `status=commented findings=0` instead of
+  waiting for the replacement; the same path misread a zero-comment
+  changes-requested review and an older clean review sitting beside a draft. Each
+  iteration now judges the state: only an accepted review is counted, a
+  changes-requested one is reported as the finished review it is, and a draft or
+  a dismissal is waited past.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

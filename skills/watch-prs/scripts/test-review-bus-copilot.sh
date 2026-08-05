@@ -622,7 +622,14 @@ rm -f "$TMP/comments-24.json"
 SEL_BIN="$TMP/selbin"; mkdir -p "$SEL_BIN"
 cat > "$SEL_BIN/jq" <<'SH'
 #!/usr/bin/env bash
-# Faults ONLY the review-selection filter (the one ending in `.id // empty`).
+# Faults the review-SELECTION filters: the snapshot the gate now derives its
+# verdict from, and the older `.id // empty` selector. Each prints a plausible
+# value first, so only the STATUS distinguishes it from a real answer.
+if [ -n "${FAULT_SEL:-}" ] && printf '%s' "$*" | grep -q 'select(.commit_id == $h)'; then
+    printf 'reviewed\t24
+'
+    exit 7
+fi
 if [ -n "${FAULT_SEL:-}" ] && printf '%s' "$*" | grep -q 'id // empty'; then
     printf '24
 '
@@ -736,6 +743,83 @@ rc=$?
 [ "$rc" -eq 4 ] \
     && pass "request: an accepted review on this head is still already_reviewed_head" \
     || die "request: re-requests over an accepted review (rc=$rc)"
+
+# (pp) The state and the count must describe ONE snapshot. They were fetched
+# independently, so a review that changed between the two calls let the gate judge
+# one snapshot and count another: a COMMENTED read followed by a DISMISSED one
+# counted the withdrawn review's zero comments and returned clean.
+SNAP_BIN="$TMP/snapbin"; mkdir -p "$SNAP_BIN"
+cat > "$SNAP_BIN/gh" <<SH
+#!/usr/bin/env bash
+# First reviews fetch: an accepted review. Every later one: dismissed.
+case "\$* " in
+  *"/reviews "*|*"/reviews"*)
+     case "\$*" in
+       *"/reviews/"*) exec /usr/bin/env GH_REAL=1 "$TMP/bin/gh" "\$@" ;;
+     esac
+     if [ ! -e "$TMP/snap-seen" ]; then
+        : > "$TMP/snap-seen"
+        printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":61}]' "$HEAD40"
+     else
+        printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":62}]' "$HEAD40"
+     fi
+     exit 0 ;;
+esac
+exec "$TMP/bin/gh" "\$@"
+SH
+chmod +x "$SNAP_BIN/gh"
+rm -f "$TMP/snap-seen"
+printf '[]' > "$TMP/comments-61.json"
+out="$(PATH="$SNAP_BIN:$PATH" GH_HEAD="$HEAD40" run_unavail gate 7 2>&1)"; rc=$?
+# Specifically rc 1 with the transition reason: accepting "any non-zero" would
+# also pass on a plain fetch error, which is how this fixture first passed
+# against the unfixed code.
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+    && pass "gate: a review that changes between snapshots is reported as changed" \
+    || die "gate: judged one snapshot and counted another (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "gate: returned clean across a state transition: $out" \
+    || pass "gate: no clean signoff across a state transition"
+rm -f "$TMP/snap-seen" "$TMP/comments-61.json"
+
+# (qq) `poll` must branch on state too. After `request` re-requests a dismissed
+# review the DISMISSED record is still submitted, so a count-only poll reported
+# `status=commented findings=0` immediately instead of waiting for the
+# replacement review.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-01T00:00:00Z","id":63}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" \
+       CODEX_REVIEW_COPILOT_TIMEOUT=1 COPILOT_POLL_SECONDS=1 run_unavail poll 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'status=timeout'; } \
+    && pass "poll: a dismissed review is waited past, not reported as clean" \
+    || die "poll: reported the stale dismissed review (rc=$rc out='$out')"
+
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":64}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" \
+       CODEX_REVIEW_COPILOT_TIMEOUT=1 COPILOT_POLL_SECONDS=1 run_unavail poll 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'status=timeout'; } \
+    && pass "poll: a draft is waited on, not counted" \
+    || die "poll: reported a draft as a finished review (rc=$rc out='$out')"
+
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-01T00:00:00Z","id":65}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" \
+       CODEX_REVIEW_COPILOT_TIMEOUT=1 COPILOT_POLL_SECONDS=1 run_unavail poll 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'changes_requested'; } \
+    && pass "poll: a zero-comment changes-requested review is a finished review, named as such" \
+    || die "poll: misclassified changes_requested (rc=$rc out='$out')"
+
+# The control: an accepted review is still reported normally.
+printf '[{"user":{"login":"copilot-pull-request-reviewer[bot]"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":66}]' \
+    "$HEAD40" > "$TMP/reviews-state.json"
+printf '[]' > "$TMP/comments-66.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews-state.json" \
+       CODEX_REVIEW_COPILOT_TIMEOUT=1 COPILOT_POLL_SECONDS=1 run_unavail poll 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'findings=0'; } \
+    && pass "poll: an accepted review is still reported with its count" \
+    || die "poll: the state check broke the ordinary poll (rc=$rc out='$out')"
+rm -f "$TMP/comments-66.json"
 
 # (m) The instructions shipped to Copilot must match the counting proved above.
 # Case (l) shows every INLINE comment on the latest review is counted, and any
