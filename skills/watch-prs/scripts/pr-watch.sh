@@ -202,10 +202,40 @@ while :; do
                     "$PR" "$WHO" "$vrc" "$(q "$verdict")"
                 exit 2
             fi
-            printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s verdict=%s%s\n' \
-                "$PR" "$WHO" "$state" "$v_field" "$v_tail"
-            printf '%s\n' "$verdict"
-            exit 0 ;;
+            # The head is re-resolved AFTER the verdict, and READY is withheld
+            # unless it is still the one both probes were pinned to.
+            #
+            # Pinning made the state and the verdict describe the same commit. It
+            # did not make that commit current: a push landing after the head
+            # probe leaves both probes correctly describing the OLD head, and
+            # announcing that as READY advances the driver on a review of code
+            # that is no longer there — step 7 would then capture the NEW head as
+            # the Codex-signed-off sha, and nothing would notice until the merge
+            # gate failed.
+            #
+            # A moved head is not an error: it means this poll's answer is stale
+            # and the next poll should ask about the new head. So the loop
+            # CONTINUES rather than exiting — the new head has no review yet, so
+            # it reports `none` and goes back to waiting, which is the truth.
+            head_now="$("$STATE_SCRIPT" head "$PR" 2>&1)"; nrc=$?
+            if [ "$nrc" -ne 0 ] || ! [[ "$head_now" =~ ^[0-9a-f]{40}$ ]]; then
+                printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_recheck_failed rc=%s detail=%s\n' \
+                    "$PR" "$WHO" "$nrc" "$(q "$head_now")"
+                exit 2
+            fi
+            if [ "$head_now" != "$head" ]; then
+                printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=head_moved from=%s to=%s waited_s=%s\n' \
+                    "$PR" "$WHO" "${head:0:7}" "${head_now:0:7}" "$waited"
+                # The next poll's state is about a different commit, so the
+                # change-suppression memory must not hide it.
+                last=""
+            else
+                printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s verdict=%s%s\n' \
+                    "$PR" "$WHO" "$state" "$v_field" "$v_tail"
+                printf '%s\n' "$verdict"
+                exit 0
+            fi
+            ;;
     esac
 
     if [ "$waited" -ge "$TIMEOUT" ]; then

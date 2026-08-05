@@ -33,7 +33,7 @@ REPO_DIR="$(git rev-parse --show-toplevel)"
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
 # macOS the fallback would fail before finding the scripts at all.
-[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts "$HOME"/.codex/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
+[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS"
 ```
@@ -108,9 +108,6 @@ says what to add.
 Re-arm on `WATCH_RC` 1 as well: a timeout means the verdict has not arrived yet,
 not that the round is over. Only `0` (verdict in hand) and `2` (fail closed) end
 the watch for that round.
-
-**Codex** — there is no watch tool, so run it in the background and read its
-output, or simply block on it.
 
 It prints on **change**, not on every poll, so a long wait does not bury the
 session in identical lines:
@@ -483,16 +480,24 @@ while :; do
     true)  ;;
     *) OK=0; break ;;
   esac
-  CURSOR=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
-  { [ -n "$CURSOR" ] && [ "$CURSOR" != "null" ]; } || { OK=0; break; }
+  NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+  { [ -n "$NEXT" ] && [ "$NEXT" != "null" ]; } || { OK=0; break; }
+  # The cursor must ADVANCE. A stale or malformed page can report
+  # `hasNextPage: true` while returning the cursor it was asked for, and the gate
+  # then requests that identical page forever. A hang is worse than a blocked
+  # merge: nothing times out and the operator is left waiting on a gate that will
+  # never answer.
+  [ "$NEXT" != "$CURSOR" ] || { OK=0; break; }
+  CURSOR="$NEXT"
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
 
 # (4) Required checks green. Capture the STATUS separately: `gh pr checks` can
 # print `true` and then exit non-zero, and command substitution keeps the output —
-# so comparing the string alone lets an errored probe read as "all green". The
-# merge below uses `--admin`, which bypasses branch protection, so this probe is
-# the only thing standing between a failed read and an unchecked merge.
+# so comparing the string alone lets an errored probe read as "all green". In the
+# default mode the merge below uses `--admin`, which bypasses branch protection,
+# so this probe is the only thing standing between a failed read and an unchecked
+# merge.
 CHECKS_RC=0
 CHECKS=$(gh pr checks N --repo $OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null) || CHECKS_RC=$?
 if [ "$CHECKS_RC" -ne 0 ] || [ "$CHECKS" != "true" ]; then
@@ -500,11 +505,40 @@ if [ "$CHECKS_RC" -ne 0 ] || [ "$CHECKS" != "true" ]; then
 fi
 
 # (5) Merge, PINNED to the head every gate above was evaluated against.
-if gh pr merge N --repo $OWNER/$REPO --squash --delete-branch --admin \
+#
+# `--admin` by default, and that is a deliberate trade rather than an oversight.
+#
+# What it costs: every gate above is evaluated by this script, at a point in
+# time, against data fetched a moment earlier, and `--match-head-commit` only
+# proves the HEAD has not moved since. It says nothing about the *mutable*
+# conditions — a review can be submitted, dismissed, or turned into a body-only
+# CHANGES_REQUESTED in the window between the last probe and this call, none of
+# which changes the head. `--admin` merges with administrator privileges
+# *because* the PR does not meet requirements, so it is exactly what discards
+# GitHub's own evaluation of those conditions at merge time. That window stays
+# open in the default mode.
+#
+# Why it is still the default: branch protection normally requires an approving
+# review from another account, and neither reviewer here is one — a Codex or
+# Copilot review does not satisfy "required approvals". For the solo maintainer
+# this plugin is built around, dropping `--admin` does not tighten the gate, it
+# removes the merge path entirely, on every PR. A tool whose happy path cannot
+# complete is a worse failure than a seconds-wide race in a repository where
+# nobody else is reviewing.
+#
+# REVIEW_MERGE_STRICT=1 takes the other side: GitHub evaluates reviews, checks
+# and conversations itself, atomically, which is the only place that race can
+# actually be closed. Set it where the repository has protection rules that the
+# loop can genuinely satisfy — a team repo, or required checks with no required
+# human approval. If GitHub then refuses, the merge does not happen and the
+# operator decides, which is the point.
+ADMIN=--admin
+[ "${REVIEW_MERGE_STRICT:-}" = "1" ] && ADMIN=""
+if gh pr merge N --repo $OWNER/$REPO --squash --delete-branch $ADMIN \
        --match-head-commit "$HEAD_OID"; then
     echo "merged $HEAD_OID"
 else
-    echo "merge blocked: head moved after the gates ran, or the merge failed."; exit 0
+    echo "merge blocked: head moved after the gates ran, branch protection refused (strict mode), or the merge failed."; exit 0
 fi
 ```
 

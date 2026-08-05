@@ -294,6 +294,45 @@ grep -qi 'do not ask' "$SKILL" \
     && pass "the watch is armed and re-armed without asking the operator" \
     || die "the skill leaves arming the watch as a question for the operator"
 
+# ── the merge mode is a setting, not a hard-coded bypass ───────────────────
+# `--admin` stays the default because branch protection normally requires an
+# approving review from another account, and neither reviewer is one — dropping
+# it would remove the solo maintainer's merge path rather than tighten the gate.
+# But it must be reachable: strict mode is what closes the window between the
+# last probe and the merge, where a review can change without the head moving.
+grep -q 'REVIEW_MERGE_STRICT' "$SKILL" \
+    && pass "the merge mode is selectable, not a hard-coded --admin" \
+    || die "--admin is unconditional; there is no way to let GitHub enforce protection"
+grep -q 'ADMIN=--admin' "$SKILL" \
+    && pass "…defaulting to --admin so a protected solo repo can still merge" \
+    || die "the default merge mode is not --admin"
+grep -q 'merge N --repo \$OWNER/\$REPO --squash --delete-branch \$ADMIN' "$SKILL" \
+    && pass "…and the merge command uses the selected mode" \
+    || die "the merge command does not use \$ADMIN"
+
+# ── pagination must terminate ──────────────────────────────────────────────
+# A page reporting hasNextPage=true with the cursor it was asked for makes the
+# gate request that identical page forever. A hang is worse than a blocked merge:
+# nothing times out and the operator waits on a gate that never answers.
+grep -q 'NEXT" != "\$CURSOR"' "$SKILL" \
+    && pass "the merge gate stops when the pagination cursor does not advance" \
+    || die "a repeated cursor would loop the merge gate forever"
+
+# ── v2 ships to Claude Code only ───────────────────────────────────────────
+# Both reviewers run in GitHub's cloud, so nothing is installed for them; the
+# driver needs a watch tool, which is why there is one manifest and not two.
+[ -e "$ROOT/.codex-plugin" ] \
+    && die "the Codex plugin manifest is back; v2 ships to Claude Code only" \
+    || pass "no Codex plugin manifest"
+[ -e "$ROOT/.agents" ] \
+    && die "the Codex marketplace metadata is back" \
+    || pass "no Codex marketplace metadata"
+if [ -f "$ROOT/README.md" ]; then
+    grep -q 'codex plugin' "$ROOT/README.md" \
+        && die "README still documents installing this plugin into Codex" \
+        || pass "README does not document a Codex install"
+fi
+
 # A GraphQL 200 can carry both `errors` and structurally valid `data`. The
 # unresolved-thread count answers 0 on partial data, and 0 is merge permission —
 # taken with `--admin`, so nothing downstream catches the omitted thread.

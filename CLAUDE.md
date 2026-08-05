@@ -19,7 +19,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-review-state.sh` | Whether a named reviewer's review of the current head can carry a merge. |
 | `skills/watch-prs/scripts/pr-merge-range.sh` | Whether every commit since the reviewed SHA is a review-fix commit reachable from it. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
-| `.claude-plugin/`, `.codex-plugin/` | Plugin and marketplace manifests. |
+| `.claude-plugin/` | Plugin and marketplace manifests. |
 
 Everything else is documentation. **v2 runs no reviewer of its own**: Codex and
 Copilot are first-party GitHub apps, so there is no watcher, no response
@@ -66,9 +66,8 @@ category; do not "fix" a script into a stricter mode.
   same installed copy serves every project, so a literal identity there would
   leak one project's state into another's.
 - It does **not** cover this repository's own metadata or its installation
-  documentation. `.claude-plugin/`, `.codex-plugin/`, and the install commands in
-  `README.md` necessarily name `p5ych0/watch-pr-skill` — that is this plugin's
-  own identity.
+  documentation. `.claude-plugin/` and the install commands in `README.md`
+  necessarily name `p5ych0/watch-pr-skill` — that is this plugin's own identity.
 - Identity derives from `git remote get-url origin`. `REVIEW_BUS_REMOTE`,
   `REVIEW_BUS_OWNER`, and `REVIEW_BUS_REPO` override it so tests can supply an
   identity without a real remote. `test-pr-identity.sh` enforces this by scanning
@@ -100,10 +99,10 @@ change with no `README.md` update is incomplete, not merely undocumented.
 
 ## Release
 
-Bump `version` in **both** `.claude-plugin/plugin.json` and
-`.codex-plugin/plugin.json` — they are separate manifests for the two plugin
-systems and drift silently if only one is touched — and add a `CHANGELOG.md`
-entry in the same PR. Entries explain the failure that was fixed and how it
+Bump `version` in `.claude-plugin/plugin.json` and add a `CHANGELOG.md` entry in
+the same PR. There is one manifest: v2 ships to Claude Code only, because the
+driver needs a watch tool and both reviewers run in GitHub's cloud rather than
+from anything installed here. Entries explain the failure that was fixed and how it
 manifested, not just what changed.
 
 ## Stating the task

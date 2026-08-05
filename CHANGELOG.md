@@ -71,6 +71,46 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Claude Code only — the Codex plugin packaging is gone.** v1 shipped a Codex
+  plugin because the review ran on this machine, through the `codex` CLI and a
+  local bus. In v2 both reviewers are GitHub apps running in GitHub's cloud, and
+  what they read is committed to the repository, so there is nothing to install
+  for them; the driver, meanwhile, needs a watch tool. `.codex-plugin/` and
+  `.agents/plugins/marketplace.json` are removed — the latter still advertised an
+  "Automated PR review-bus loop", so anyone installing through it got metadata for
+  the architecture this release deletes. One manifest now, not two that drift.
+
+- **A verdict about a superseded head is not a signoff.** Pinning both probes to
+  one OID made the state and the verdict describe the same commit; it did not make
+  that commit current. A push landing after the head probe left both probes
+  correctly describing the *old* head, and announcing that as `PR_REVIEW_READY`
+  advanced the driver on a review of code that was no longer there — the Copilot
+  phase would then record the new head as the Codex-signed-off SHA, and nothing
+  noticed until the merge gate failed. The head is re-resolved after the verdict,
+  and a move is reported and re-polled rather than announced.
+
+- **A pagination cursor that does not advance is a hang.** A stale or malformed
+  page can report `hasNextPage: true` while returning the cursor it was asked for,
+  and both `pr-findings.sh list` and the merge gate then requested that identical
+  page forever. That is worse than the documented failure: nothing times out, no
+  status is returned, and the caller waits on a command that will never answer.
+
+- **`blocked-body` refuses an unrecognised review state.** The helper suppresses
+  output for anything that is not exactly `CHANGES_REQUESTED`, so a record with a
+  null or unknown state produced empty stdout and rc 0 — indistinguishable from
+  "this blocking review has no body". The driver only calls it because it saw
+  `state=blocked`, so that is exactly where silence loses the only text there is.
+
+- **The merge mode is a setting.** `--admin` remains the default: branch
+  protection normally requires an approving review from another account, and
+  neither reviewer is one, so dropping it would not tighten the gate for a solo
+  maintainer — it would remove the merge path entirely, on every PR. The cost is
+  real and now stated: every gate runs client-side against data fetched a moment
+  earlier, and `--match-head-commit` only proves the head has not moved, so a
+  review can change in the window without the head changing. `REVIEW_MERGE_STRICT=1`
+  drops `--admin` and lets GitHub evaluate reviews, checks and conversations
+  atomically, which is the only place that race can actually be closed.
+
 - **The round summary and the review request are one comment.** The `@codex`
   mention *is* the request, so posting it separately from the summary split the
   record the reviewer is told to read and sent the request half with no account

@@ -96,11 +96,22 @@ cmd_list() {
             true)  ;;
             *) echo "PR_FINDINGS pr=$pr status=error reason=hasnextpage_not_boolean" >&2; return 2 ;;
         esac
-        cursor=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
-        { [ -n "$cursor" ] && [ "$cursor" != "null" ]; } || {
+        next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+        { [ -n "$next" ] && [ "$next" != "null" ]; } || {
             echo "PR_FINDINGS pr=$pr status=error reason=missing_cursor" >&2
             return 2
         }
+        # The cursor must ADVANCE. A stale or malformed page can report
+        # `hasNextPage: true` while returning the same `endCursor` it was asked
+        # for, and the loop then requests that identical page forever — a hang,
+        # which is worse than the documented failure: nothing times out, no
+        # status is returned, and the caller waits on a command that will never
+        # answer. Fail closed instead.
+        if [ "$next" = "$cursor" ]; then
+            echo "PR_FINDINGS pr=$pr status=error reason=cursor_did_not_advance" >&2
+            return 2
+        fi
+        cursor="$next"
     done
 }
 
@@ -159,7 +170,14 @@ cmd_blocked_body() {
                    or (.user.login | type) != "string"
                    or (.commit_id | type) != "string"
                    or (.commit_id | test("^[0-9a-f]{40}$") | not)
-                   or ((.state | type) != "string" and .state != null)
+                   # The known set, not merely "a string or null". This helper
+                   # SUPPRESSES output for anything that is not exactly
+                   # CHANGES_REQUESTED, so a record with a null or unrecognised
+                   # state produced empty stdout and rc 0 — indistinguishable
+                   # from "this blocking review has no body". The driver reaches
+                   # here precisely because it saw `state=blocked`, so that is
+                   # the one case where silence loses the only text there is.
+                   or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
                    or ((.submitted_at | type) != "string" and .submitted_at != null)
                    or (.submitted_at != null
                        and (.submitted_at

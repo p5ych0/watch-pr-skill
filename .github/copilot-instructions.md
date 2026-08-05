@@ -6,7 +6,7 @@ duplication is deliberate and is the only one in this repository.
 
 ## What this repository is
 
-A Claude Code / Codex plugin that drives a **native** PR review loop. Both
+A Claude Code plugin that drives a **native** PR review loop. Both
 reviewers are first-party GitHub apps — `chatgpt-codex-connector[bot]` and
 `copilot-pull-request-reviewer[bot]` — so the plugin does not run reviewers
 itself. What ships:
@@ -74,7 +74,7 @@ One installed copy of this plugin serves every project on a machine, so a litera
 slug — `p5ych0/watch-pr-skill` included — would send another project's PR reviews
 here. Identity is derived from `git remote get-url origin`. This is a blocking
 finding wherever it appears in `skills/watch-prs/`; it does **not** apply to the
-plugin's own metadata (`.claude-plugin/`, `.codex-plugin/`) or to the install
+plugin's own metadata (`.claude-plugin/`) or to the install
 commands in `README.md`, which legitimately name this repository.
 
 ## Bash strict-mode conventions

@@ -246,6 +246,52 @@ out="$(GH_PAGE1="$TMP/emptyerr.json" run list 7 2>&1)"; rc=$?
     && pass "list: an empty errors array is still refused (fail closed)" \
     || die "empty errors array gave rc=$rc out='$out'"
 
+# ── a cursor that does not advance is a hang, not a page ──────────────────
+# A stale or malformed page can report `hasNextPage: true` while returning the
+# same `endCursor` it was asked for. The loop then requests that identical page
+# forever — worse than the documented failure, because nothing times out and the
+# caller waits on a command that will never answer.
+page true '"C1"' "$NODE_OK" > "$TMP/cur1.json"
+page true '"C1"' "$NODE_OK" > "$TMP/cur2.json"
+out="$(timeout 20 env GH_PAGE1="$TMP/cur1.json" GH_PAGE2="$TMP/cur2.json" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: a cursor that repeats => 2, not an endless walk" \
+    || die "repeated cursor gave rc=$rc (124 = it hung) out='$out'"
+
+# A cursor that DOES advance still paginates — the guard must not stop a real
+# multi-page read.
+page true '"C1"' "$NODE_OK" > "$TMP/adv1.json"
+page false null "$NODE_OK" > "$TMP/adv2.json"
+out="$(timeout 20 env GH_PAGE1="$TMP/adv1.json" GH_PAGE2="$TMP/adv2.json" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "list: an advancing cursor still paginates" \
+    || die "advancing cursor gave rc=$rc out='$out'"
+
+# ── blocked-body: an unknown state is not "no body" ───────────────────────
+# This helper SUPPRESSES output for anything that is not exactly
+# CHANGES_REQUESTED, so a record with a null or unrecognised state produced empty
+# stdout and rc 0 — indistinguishable from "this blocking review has no body".
+# The driver only gets here because it saw `state=blocked`, so that is precisely
+# where silence loses the only text there is.
+for badstate in 'null' '"WIBBLE"' '""'; do
+    printf '[{"user":{"login":"%s"},"commit_id":"%s","state":%s,"submitted_at":"2026-01-02T00:00:00Z","body":"the request","id":1}]' \
+        "$BOT" "$HEAD40" "$badstate" > "$TMP/badstate.json"
+    out="$(GH_REVIEWS="$TMP/badstate.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "blocked-body: review state $badstate => 2, not silent" \
+        || die "blocked-body state $badstate gave rc=$rc out='$out'"
+done
+
+# A real CHANGES_REQUESTED body still comes back.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T00:00:00Z","body":"the request","id":1}]' \
+    "$BOT" "$HEAD40" > "$TMP/goodstate.json"
+out="$(GH_REVIEWS="$TMP/goodstate.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the request'; } \
+    && pass "blocked-body: a real blocking body is still returned" \
+    || die "valid CHANGES_REQUESTED body was lost (rc=$rc out='$out')"
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"

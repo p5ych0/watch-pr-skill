@@ -407,6 +407,71 @@ for spec in 'HEAD_RC=2' 'HEAD_OUT=abc1234' 'HEAD_OUT=' 'HEAD_OUT=zzzz' "HEAD_OUT
         || pass "no READY from an unusable head ($spec)"
 done
 
+# ── a verdict about a head that is no longer current is not READY ─────────
+# Pinning made the state and the verdict describe the SAME commit. It did not
+# make that commit CURRENT: a push landing after the head probe leaves both
+# probes correctly describing the old head, and announcing that as READY advances
+# the driver on a review of code that is no longer there.
+#
+# Written without mkstub, which owns the `head` answer — this stub needs its own.
+cat > "$TMP/moving.sh" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = "head" ]; then
+    n=\$(cat "\$MOVE_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$MOVE_N"
+    # A different head every single call: the recheck can never match the pin.
+    printf '%s%033d\n' "abc1234" "\$n"
+    exit 0
+fi
+head="\$4"
+if [ "\$1" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "\$2" "\${head:0:7}" "\$3"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "\$2" "\${head:0:7}" "\$3"
+exit 0
+SH
+chmod +x "$TMP/moving.sh"
+rm -f "$TMP/move.n"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/moving.sh" MOVE_N="$TMP/move.n" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && die "a verdict for a superseded head was announced as READY: $out" \
+    || pass "a verdict for a superseded head is not announced as READY"
+printf '%s' "$out" | grep -q 'state=head_moved' \
+    && pass "the moved head is reported, so the wait is explainable" \
+    || die "no head_moved line when the head changed mid-poll: $out"
+[ "$rc" -eq 1 ] \
+    && pass "a head that keeps moving times out rather than announcing a stale verdict" \
+    || die "moving head gave rc=$rc (1 = timed out, which is the honest answer)"
+
+# A head that moves ONCE still settles: the next poll asks about the new head and
+# reports it. This is what keeps the recheck from being a permanent block.
+cat > "$TMP/settling.sh" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = "head" ]; then
+    n=\$(cat "\$MOVE_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$MOVE_N"
+    if [ "\$n" -le 1 ]; then printf '%s\n' "$HEAD40"; else printf '%s\n' "$OTHER40"; fi
+    exit 0
+fi
+head="\$4"
+if [ "\$1" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "\$2" "\${head:0:7}" "\$3"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "\$2" "\${head:0:7}" "\$3"
+exit 0
+SH
+chmod +x "$TMP/settling.sh"
+rm -f "$TMP/move.n"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/settling.sh" MOVE_N="$TMP/move.n" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PR_REVIEW_READY'; } \
+    && pass "a head that moves once still reaches READY on the new head" \
+    || die "settling head never reached READY (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q "${OTHER40:0:7}" \
+    && pass "…and the verdict announced is the one for the NEW head" \
+    || die "READY did not name the new head: $out"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

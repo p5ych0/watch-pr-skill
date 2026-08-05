@@ -95,7 +95,7 @@ One installed copy of this plugin serves every project on a machine, so a litera
 slug — `p5ych0/watch-pr-skill` included — would send another project's PR reviews
 here. Identity is derived from `git remote get-url origin`. This is stated inline
 rather than left to `CLAUDE.md` so it needs no second fetch. It does **not** apply
-to the plugin's own metadata (`.claude-plugin/`, `.codex-plugin/`) or to the
+to the plugin's own metadata (`.claude-plugin/`) or to the
 install commands in `README.md`, which legitimately name this repository.
 
 ### Only a base-ref authority can waive a finding

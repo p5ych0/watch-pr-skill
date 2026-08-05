@@ -97,25 +97,23 @@ caveat is gone with the daemons it was about.
 
 ## Install
 
-**Claude Code:**
-
 ```
 /plugin marketplace add p5ych0/watch-pr-skill
 /plugin install watch-pr-skill@p5ych0-tools
 ```
 
-**Codex:**
+Install once at user scope; it is then available in every project.
 
-```
-codex plugin marketplace add p5ych0/watch-pr-skill
-codex plugin add watch-pr-skill@p5ych0-tools
-```
+**Claude Code only — and there is nothing to install for the reviewers.** v1
+shipped a Codex plugin because the review ran on this machine, through the
+`codex` CLI and a local bus. In v2 both reviewers are GitHub apps that run in
+GitHub's cloud: Codex answers an `@codex review` mention and Copilot answers a
+review request, neither of which involves anything installed here. What they read
+is committed to the repository — `AGENTS.md` and `.github/copilot-instructions.md`
+on the **base ref** — so the per-project setup below is the whole of it.
 
-(Older/newer Codex builds vary — some use `codex plugin install`; if `add` is
-missing, run `codex plugin --help`. The `@p5ych0-tools` marketplace suffix is
-required.)
-
-Install once per tool at user scope; it is then available in every project.
+What this plugin installs is the *driver*: the contract for the model running the
+loop, which watches for verdicts, closes rounds and gates the merge.
 
 ## Per-project setup
 
@@ -191,6 +189,29 @@ settings.
 | `REVIEW_BUS_REMOTE` | `git remote get-url origin` | override the origin URL identity is derived from (tests) |
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
+| `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
+
+### `REVIEW_MERGE_STRICT`
+
+The merge uses `--admin` by default, and that is a deliberate trade.
+
+Branch protection normally requires an approving review **from another account**,
+and neither reviewer here is one — a Codex or Copilot review does not count
+towards "required approvals". For a solo maintainer with a protected `main`,
+dropping `--admin` would not tighten the gate; it would remove the merge path
+entirely, on every PR.
+
+What the default costs: every gate runs in this plugin, against data fetched a
+moment earlier, and `--match-head-commit` only proves the head has not moved. A
+review can be submitted or dismissed in the window between the last check and the
+merge without changing the head, and `--admin` is precisely what tells GitHub not
+to re-evaluate that.
+
+Set `REVIEW_MERGE_STRICT=1` where the repository's protection rules are ones the
+loop can actually satisfy — a team repo, or required checks with no required
+human approval. GitHub then evaluates reviews, checks and conversations itself,
+atomically, which is the only place that race can genuinely be closed. If it
+refuses, the merge does not happen and you decide what to do.
 
 ### Watching without prompts
 
@@ -239,19 +260,10 @@ inflated count is the direction that sails past the boundary and skips the pause
 
 ## Updating
 
-**Claude Code:**
-
 ```
 /plugin marketplace update p5ych0-tools
 /plugin update watch-pr-skill
 /reload-plugins
-```
-
-**Codex:**
-
-```
-codex plugin marketplace upgrade p5ych0-tools
-codex plugin add watch-pr-skill@p5ych0-tools
 ```
 
 Nothing to relaunch afterwards: v2 starts no background process, so the next
