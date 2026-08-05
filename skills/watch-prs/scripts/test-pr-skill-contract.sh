@@ -197,6 +197,37 @@ grep -qi 'push itself' "$SKILL" \
     && pass "and says why the order matters (auto-review acts on the push)" \
     || die "the ordering is stated without its reason"
 
+# The README carries the same flow for users who never open SKILL.md, so the
+# ordering has to hold there too — it did not, one round after the skill was
+# fixed.
+README="$ROOT/README.md"
+if [ -f "$README" ]; then
+    # Matched on fragments that survive the line wrap: "check the round" and
+    # "boundary" sit on different lines, and a phrase-spanning regex silently
+    # never matches — which is how a line-order assertion reports failure
+    # regardless of the text.
+    readme_order=$(awk '/check the round/{b=NR} /then push/{p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
+    [ "$readme_order" = "ok" ] \
+        && pass "README checks the round boundary before the push" \
+        || die "README still tells users to push before the boundary check"
+else
+    pass "README not present; flow-order check skipped"
+fi
+
+# A failed Copilot request must not start the phase: --add-reviewer IS the
+# request, so a failure means there is no pass to wait for.
+grep -q 'if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
+    && pass "the Copilot request is branched on before the phase begins" \
+    || die "a failed Copilot request still enters the Copilot phase"
+
+# The head-state line is parsed, not substring-matched.
+grep -q 'CODEX_STATE="${CODEX_HEAD_STATE##\*state=}"' "$SKILL" \
+    && pass "the Codex head-state line is parsed into a field" \
+    || die "the head-state decision is made by substring match"
+grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
+    && pass "…and validated against the known states" \
+    || die "the parsed head-state is not checked against the known states"
+
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.

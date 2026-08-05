@@ -227,7 +227,15 @@ if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
 fi
 
-gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot
+# `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
+# for, so entering the phase would poll for a review nobody asked for and then
+# report a timeout — which reads as "Copilot is slow", not "Copilot was never
+# asked".
+if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then
+    echo "ABORT: could not request Copilot — do not enter the Copilot phase."
+    echo "This is not permission to skip the pass: decide with the operator."
+    exit 0
+fi
 WHO="$COPILOT_BOT"
 ```
 
@@ -293,8 +301,17 @@ CODEX_HEAD_STATE=$("$RB_SCRIPTS"/pr-review-state.sh state N "$CODEX_BOT" "$HEAD_
 if [ "$CODEX_STATE_RC" -ne 0 ]; then
     echo "merge blocked: could not read Codex's state on the current head (rc=$CODEX_STATE_RC)"; exit 0
 fi
-case "$CODEX_HEAD_STATE" in
-    *state=none*)
+# PARSED, not substring-matched. A truncated or wrapped line that merely CONTAINS
+# `state=none` would otherwise send the gate down the fallback path — and with a
+# current-head body-only CHANGES_REQUESTED there is no thread for the unresolved
+# gate to catch, so the merge would pass on a state that was never read.
+CODEX_STATE="${CODEX_HEAD_STATE##*state=}"; CODEX_STATE="${CODEX_STATE%% *}"
+case "$CODEX_STATE" in
+    none|pending|reviewed|blocked|dismissed) ;;
+    *) echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 0 ;;
+esac
+case "$CODEX_STATE" in
+    none)
         # No Codex review of this head at all: the recorded signoff is the
         # authority, and step (2) proves the delta since it is Copilot-only.
         CODEX_EFFECTIVE_SHA="$CODEX_SHA"

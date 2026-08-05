@@ -145,13 +145,14 @@ Then:
    runs as the session's Monitor, so the verdict surfaces into the chat by
    itself; under Codex, run it in the background. An unreadable state is a stop,
    never "no findings".
-4. **Fix and close the round** — commit `fix(review): …`, push, reply to each
+4. **Fix and close the round** — commit `fix(review): …`, **check the round
+   boundary** (`pr-round-count.sh <PR> <reviewer>`), then push, reply to each
    thread with what changed, resolve it, post a round summary saying what was
-   addressed and what was intentionally skipped, **check the round boundary**
-   (`pr-round-count.sh <PR> <reviewer>`), and only then re-request **the same
-   reviewer**. That order matters: re-requesting first sends the next review past
-   the very boundary the check-in exists to stop at. A resolved thread is not a
-   record of a fix; the summary is.
+   addressed and what was intentionally skipped, and re-request **the same
+   reviewer**. The boundary check comes *before the push*: with Codex automatic
+   review enabled the push itself requests the next review, so a check placed
+   after it asks you about a round that has already started. A resolved thread is
+   not a record of a fix; the summary is.
 5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
    until it is clean too. Fix commits here carry a `Review-Phase: copilot`
    trailer, which is how the merge gate knows the head advanced only through

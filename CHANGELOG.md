@@ -49,6 +49,19 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **A failed Copilot request does not start the Copilot phase.**
+  `--add-reviewer` *is* the request, so when it fails there is no pass to wait
+  for — the driver would poll for a review nobody asked for and then report a
+  timeout, which reads as "Copilot is slow" rather than "Copilot was never asked".
+  It is not permission to skip the pass either: the failure stops the loop and
+  goes to the operator.
+
+- **The Codex head-state decision is parsed, not substring-matched.** A truncated
+  or wrapped line that merely *contained* `state=none` sent the gate down the
+  fallback path — and with a current-head body-only `CHANGES_REQUESTED` there is
+  no thread for the unresolved gate to catch, so the merge would pass on a state
+  that was never read.
+
 - **The round check-in runs before the push, not after it.** With Codex automatic
   review enabled the *push itself* requests the next review, so a boundary check
   placed after the push cannot stop anything — the operator would be asked once
