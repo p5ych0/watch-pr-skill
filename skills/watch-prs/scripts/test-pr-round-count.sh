@@ -40,12 +40,25 @@ run() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
 # fixtures off by one.
 sha() { printf '%s' "$1" | sha1sum | cut -c1-40; }
 
+# `submitted_at != null` is what makes a record count as a submitted review, and
+# the script now requires a well-formed ISO timestamp before believing that — so
+# the fixtures have to carry real ones. The tag in a spec only has to be
+# non-null; this turns it into a valid, distinct timestamp. `RAW:<json>` passes a
+# value through untouched, for the cases that feed a deliberately bad one.
+iso() { printf '"2026-01-%02dT00:00:00Z"' "$(( ($1 - 1) % 28 + 1 ))"; }
+
 # Build a reviews list: each argument is "<login>|<commit-tag>|<submitted_at|null>".
 mk() {
-    local first=1
+    local first=1 n=0
     { printf '['
       for spec in "$@"; do
           who="${spec%%|*}"; rest="${spec#*|}"; c="$(sha "${rest%%|*}")"; sub="${rest##*|}"
+          n=$((n + 1))
+          case "$sub" in
+              null)   ;;
+              RAW:*)  sub="${sub#RAW:}" ;;
+              *)      sub="$(iso "$n")" ;;
+          esac
           [ "$first" -eq 1 ] || printf ','
           first=0
           printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":%s,"state":"COMMENTED","id":1}' \
@@ -157,6 +170,42 @@ out="$(GH_REVIEWS="$TMP/bad.json" run 7 2>&1)"; rc=$?
 printf '[{}]' > "$TMP/rec.json"
 out="$(GH_REVIEWS="$TMP/rec.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "empty review records => 2" || die "[{}] gave rc=$rc"
+
+# ── a malformed submitted_at is not one more round ─────────────────────────
+# `submitted_at != null` decides whether a record counts as a submitted review,
+# so any old string satisfied it. One extra matching-reviewer record with a junk
+# timestamp and a full-SHA commit_id was counted as another distinct head — and
+# at a real boundary that inflates `rounds` past the multiple and SKIPS the
+# operator pause, which is the direction that loses the safety check.
+for bad in '"zzzz"' '""' '"2026-01-02"' '"2026-01-02T00:00:00zzzz"' '"not a timestamp"'; do
+    mk "$CODEX|aaa|RAW:$bad"
+    out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "submitted_at $bad => 2, not a counted round" \
+        || die "malformed submitted_at $bad gave rc=$rc out='$out'"
+done
+
+# The exact case that skips the pause: 10 real rounds plus one junk-timestamp
+# record must NOT report 11 and sail past the boundary.
+specs=(); for i in $(seq 1 10); do specs+=("$CODEX|c$i|t"); done
+specs+=("$CODEX|junk|RAW:\"zzzz\"")
+mk "${specs[@]}"
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a junk timestamp at the boundary fails closed instead of skipping the pause" \
+    || die "junk timestamp at the boundary gave rc=$rc out='$out' (0 = the pause was skipped)"
+
+# Real ISO variants stay acceptable: fractional seconds and numeric offsets are
+# what GitHub actually returns from some endpoints, and rejecting them would
+# fail closed on every round.
+for good in '"2026-01-02T03:04:05Z"' '"2026-01-02T03:04:05.123Z"' \
+            '"2026-01-02T03:04:05+01:00"' '"2026-01-02T03:04:05-0500"'; do
+    mk "$CODEX|aaa|RAW:$good"
+    out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+        && pass "submitted_at $good is a real round" \
+        || die "valid ISO $good was rejected (rc=$rc out='$out')"
+done
 
 # A genuinely empty list is a readable zero, not an error.
 printf '[]' > "$TMP/none.json"

@@ -82,7 +82,20 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                # A blank or non-SHA commit_id counted as its own "distinct head",
                # which can turn a true boundary of 10 into 11 and skip the pause.
                or (.commit_id | test("^[0-9a-f]{40}$") | not)
-               or ((.submitted_at | type) != "string" and .submitted_at != null))
+               or ((.submitted_at | type) != "string" and .submitted_at != null)
+               # `submitted_at != null` is what makes a record COUNT as a
+               # submitted review below, so any old string satisfied it. A
+               # malformed page carrying one extra matching-reviewer record with
+               # `submitted_at:"zzzz"` and a full-SHA commit_id was counted as
+               # another distinct reviewed head — and at a real 10-round boundary
+               # that inflates `rounds` to 11, which is exactly the direction that
+               # SKIPS the operator pause. Same anchored ISO test as
+               # pr-review-state.sh, for the same reason: unreadable must not
+               # read as one more round.
+               or (.submitted_at != null
+                   and (.submitted_at
+                        | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                        | not)))
         then error("malformed review record")
         else [ $all[]
                | select((.user.login | IN($who[])) and .submitted_at != null)

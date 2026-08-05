@@ -58,6 +58,37 @@ the plugin no longer runs a reviewer of its own.
   `… verdict=<known>` shape. The merge gate also validates both reviewers'
   verdict records rather than trusting the exit codes alone.
 
+- **A record's shape is not its identity.** Matching the whole record still left
+  `pr`, `sha` and `reviewer` as wildcards, so a well-formed line about *something
+  else* was accepted as an answer: a misrouted or cached
+  `PR_REVIEW_STATE pr=999 … state=reviewed` drove the watch into its terminal
+  path, and in the merge gate one clean record satisfied the check for either
+  reviewer — so a clean Copilot line, or a clean line for a stale SHA, could pass
+  as Codex's signoff and the gate would merge without the named reviewer ever
+  having approved the commit being merged. Every record is now compared to the PR,
+  reviewer and head it is supposed to describe, and `pr-watch.sh` additionally
+  requires the verdict to name the same SHA as the state it was paired with, so a
+  push landing between the two calls fails closed instead of pairing a fresh state
+  with a stale verdict.
+
+- **The verdict value, its field and the exit status must agree.** Requiring only
+  the record shape accepted `verdict=clean` with no `findings=0`, and a clean
+  record returned with rc 1 — which `PR_REVIEW_READY` then announced as a finished
+  clean review, and that is what starts the next phase.
+
+- **A failing helper cannot smuggle a signal.** `pr-watch.sh` echoes helper output
+  in its diagnostics, and its stdout *is* the channel Monitor reads. A helper
+  printing a newline followed by a forged `PR_REVIEW_READY …` got that line
+  surfaced as actionable even though the watch exited 2 — the exit status is not
+  what the session sees. Diagnostics are now quoted onto one line.
+
+- **A malformed `submitted_at` is not one more round.** `pr-round-count.sh` treated
+  any string as a submitted review, so a single junk timestamp on a full-SHA
+  record counted as another distinct reviewed head — and at a real boundary that
+  inflates the count past the multiple and skips the operator check-in, which is
+  the direction that loses the pause. It now requires the same anchored ISO
+  timestamp `pr-review-state.sh` does.
+
 - **A failed review request stops the round.** `gh pr comment "@codex review"`
   and `gh pr edit --add-reviewer @copilot` *are* the requests, so a failure means
   nothing was queued — and the wait step would then poll until it timed out,

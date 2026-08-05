@@ -241,14 +241,35 @@ grep -q 'if ! gh pr comment N --body "@codex review' "$SKILL" \
 
 # The merge gate validates the verdict RECORDS, not only the exit codes: this is
 # the final permission, so an rc-swallowing wrapper must not read as clean.
-grep -q 'verdict=clean.*findings=0\$' "$SKILL" \
+grep -q 'V_WANT="PR_REVIEW_STATE pr=N sha=' "$SKILL" \
     && pass "the merge gate requires an exact clean verdict record from both reviewers" \
     || die "the merge gate trusts the exit codes without checking the records"
+# …and each record must name ITS OWN reviewer and the sha that reviewer judged.
+# Wildcarding pr/sha/reviewer let one clean line satisfy the check for either
+# variable, so a clean Copilot record — or a clean record for a stale sha —
+# passed as Codex's signoff.
+grep -q 'reviewer=\$V_WHO verdict=clean findings=0"' "$SKILL" \
+    && pass "each clean record is bound to the reviewer it is meant to prove" \
+    || die "the merge gate accepts a clean record from any reviewer"
+grep -q '"\$CODEX_BOT|\$CODEX_EFFECTIVE_SHA|\$CODEX_VERDICT"' "$SKILL" \
+    && pass "…on the sha that reviewer actually judged" \
+    || die "the clean records are not bound to the sha each reviewer judged"
+# A literal comparison, not `[[ == ]]`: the bot logins end in `[bot]`, which a
+# pattern context reads as a character class.
+grep -q '\[ "\$V_LINE" != "\$V_WANT" \]' "$SKILL" \
+    && pass "the verdict records are compared literally, not as patterns" \
+    || die "the verdict comparison would read [bot] as a character class"
 
 # The head-state line is parsed, not substring-matched.
 grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
     && pass "the Codex head-state line is matched as a whole record" \
     || die "the head-state decision is made on a substring or trailing token"
+# …and the record must be ABOUT the PR, reviewer and head that were asked for.
+# A well-formed `state=none` for something else took the fallback path and merged
+# on the recorded signoff while Codex had a current-head CHANGES_REQUESTED.
+grep -q '"\$S_PR" != "N" \] || \[ "\$S_WHO" != "\$CODEX_BOT" \] || \[ "\$S_SHA" != "\${HEAD_OID:0:7}"' "$SKILL" \
+    && pass "the head-state record is bound to the PR, reviewer and head requested" \
+    || die "any well-formed state record satisfies the head-state check"
 grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
     && pass "…and validated against the known states" \
     || die "the parsed head-state is not checked against the known states"

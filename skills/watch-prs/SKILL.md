@@ -312,10 +312,23 @@ fi
 # gate to catch, so the merge would pass on a state that was never read.
 # The WHOLE record, not the last `state=` token: rc-0 noise such as
 # `warning: cached state=none` would otherwise pass and take the fallback path.
-if [[ "$CODEX_HEAD_STATE" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ state=([a-z]+)$ ]]; then
-    CODEX_STATE="${BASH_REMATCH[1]}"
+if [[ "$CODEX_HEAD_STATE" =~ ^PR_REVIEW_STATE\ pr=([0-9]+)\ sha=([0-9a-f]{7,40})\ reviewer=([^[:space:]]+)\ state=([a-z]+)$ ]]; then
+    S_PR="${BASH_REMATCH[1]}"; S_SHA="${BASH_REMATCH[2]}"
+    S_WHO="${BASH_REMATCH[3]}"; CODEX_STATE="${BASH_REMATCH[4]}"
 else
     echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 0
+fi
+# The record has to be ABOUT what was asked. A well-formed line is not the same
+# as an answer: a misrouted wrapper or a stale cache returning `pr=… sha=…
+# reviewer=… state=none` for another PR, another reviewer, or an older head
+# matched the shape above and sent the gate down the `none` fallback — merging on
+# the recorded signoff while Codex actually had a body-only CHANGES_REQUESTED on
+# this head, which leaves no thread for the unresolved-thread gate to catch.
+#
+# Compared as STRINGS, not with `=~`: `$CODEX_BOT` ends in `[bot]`, which a regex
+# reads as a character class.
+if [ "$S_PR" != "N" ] || [ "$S_WHO" != "$CODEX_BOT" ] || [ "$S_SHA" != "${HEAD_OID:0:7}" ]; then
+    echo "merge blocked: Codex head-state record is about something else ('$CODEX_HEAD_STATE')"; exit 0
 fi
 case "$CODEX_STATE" in
     none|pending|reviewed|blocked|dismissed) ;;
@@ -345,9 +358,23 @@ fi
 # This is the final merge permission, so the exit codes are not taken on trust:
 # an rc-swallowing wrapper or a truncated helper line would otherwise turn an
 # unreadable verdict into a clean signoff. Require the exact record from BOTH.
-for V in "$CODEX_VERDICT" "$COPILOT_VERDICT"; do
-    if ! [[ "$V" =~ ^PR_REVIEW_STATE\ pr=[0-9]+\ sha=[0-9a-f]+\ reviewer=[^[:space:]]+\ verdict=clean\ findings=0$ ]]; then
-        echo "merge blocked: a verdict line is not an exact clean record ('$V')"; exit 0
+#
+# Each record must name ITS OWN reviewer and the sha that reviewer actually
+# judged — Codex on $CODEX_EFFECTIVE_SHA, Copilot on $HEAD_OID. Leaving `pr`,
+# `sha` and `reviewer` as wildcards meant one clean record satisfied the check
+# for either variable: a clean Copilot line, or a clean line for a stale sha,
+# passed as Codex's signoff and the gate merged without ever proving the named
+# reviewer approved the commit being merged.
+#
+# Every field is known here, so this is a literal string comparison rather than a
+# pattern — `[ = ]`, not `[[ == ]]`, because the bot logins end in `[bot]` and
+# `[[ ]]` would read that as a character class on the right-hand side.
+for SPEC in "$CODEX_BOT|$CODEX_EFFECTIVE_SHA|$CODEX_VERDICT" \
+            "$COPILOT_BOT|$HEAD_OID|$COPILOT_VERDICT"; do
+    V_WHO="${SPEC%%|*}"; V_REST="${SPEC#*|}"; V_SHA="${V_REST%%|*}"; V_LINE="${V_REST#*|}"
+    V_WANT="PR_REVIEW_STATE pr=N sha=${V_SHA:0:7} reviewer=$V_WHO verdict=clean findings=0"
+    if [ "$V_LINE" != "$V_WANT" ]; then
+        echo "merge blocked: $V_WHO did not return an exact clean record for ${V_SHA:0:7} ('$V_LINE')"; exit 0
     fi
 done
 

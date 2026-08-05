@@ -197,6 +197,11 @@ survives a new session or a new machine. Set
 `REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
 value falls back to `10` rather than silently disabling a safety pause.
 
+A review record only counts as a round when GitHub reports a full commit SHA and
+a well-formed timestamp for it. If any record is unreadable the command exits 2
+and the driver stops, rather than counting the bad record as another head — an
+inflated count is the direction that sails past the boundary and skips the pause.
+
 ## Updating
 
 **Claude Code:**
