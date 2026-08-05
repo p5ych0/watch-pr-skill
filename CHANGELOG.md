@@ -49,6 +49,16 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **Reviews are read-only.** `AGENTS.md` previously said *"run focused tests only
+  when necessary to validate a finding"*, which invited the reviewer to install
+  dependencies and set up an environment before reading a diff made entirely of
+  shell and Markdown — turning a three-minute read into a twenty-minute one while
+  the author is blocked either way. Both instruction files now say plainly: no
+  environment setup, no dependency install, no test runs, no script execution.
+  Where a finding would have been confirmed by running something, the reviewer
+  states the failing case it expects and the author verifies it — which is the
+  author's job in this loop, and they run the suite before every push.
+
 - **The loop is phased: Codex to clean, then Copilot.** Requesting both every
   round buys a Copilot pass on every intermediate commit and mixes its findings
   into a round that was not about them. Codex now reviews to a clean signoff

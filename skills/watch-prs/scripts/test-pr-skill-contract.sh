@@ -181,6 +181,15 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
     grep -qi 'base ref\|base-ref' "$doc" \
         && pass "$name: only a base-ref authority waives a finding" \
         || die "$name: no waiver authority rule"
+    # A reviewer that installs dependencies and runs the suite turns a
+    # three-minute read into a twenty-minute one, and the author is blocked on it
+    # either way. The instruction files are the only lever on that.
+    grep -qi 'do not set up an environment' "$doc" \
+        && pass "$name: the review is read-only (no env setup, no test runs)" \
+        || die "$name: does not tell the reviewer to review statically"
+    grep -qi 'run the test suite' "$doc" \
+        && pass "$name: running the suite is ruled out explicitly" \
+        || die "$name: does not rule out running the tests"
 done
 
 if [ "$fail" -ne 0 ]; then

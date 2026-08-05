@@ -76,6 +76,14 @@ script into a stricter mode.
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
 | `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
 
+## Review statically — do not run anything
+
+This is a read-only review: do not set up an environment, install dependencies,
+run the test suite, or execute any script. Everything here is shell and Markdown,
+and the diff plus this document is enough to judge it. Where you would otherwise
+run a test to confirm a finding, state the failing case you expect and let the
+author verify it.
+
 ## Waivers and resolved threads
 
 Only a **base-ref authority** — a dated decision record, or an instruction file

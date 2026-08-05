@@ -58,6 +58,21 @@ The reviewers are told to put those in the **overall review body**, and to open 
 
 No daemon, no `codex` CLI, no `inotify-tools`, no systemd.
 
+### Making reviews fast
+
+A review of shell and Markdown does not need an environment. Both instruction
+files tell the reviewers so explicitly — no setup, no dependency install, no test
+runs — because the alternative is a twenty-minute pass that says what a
+three-minute pass would have said, while the author waits either way.
+
+Two settings matter as much as the instructions:
+
+- **Codex → Environments**: if this repository has a setup script or automatic
+  dependency installation configured, remove it. Nothing here needs building.
+- **Exhaustive review**: keeps looking after the first problem. Worth it on a
+  behaviour change; if you want a fast pass on a docs-only PR, turn it off for
+  that round.
+
 ### Codex review settings
 
 Per-repository behaviour lives on the Codex **Code review** settings page:
