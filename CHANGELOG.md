@@ -172,6 +172,36 @@
   groups the reasons by which of the two they are, since the group decides
   whether the driver re-requests the review or fixes its own environment.
 
+- **"Visible text" is one predicate, and it is not a category test.** Three
+  character-class rules failed here in a row, each missing what the next found -
+  and the third still accepted U+3164 HANGUL FILLER and U+2800 BRAILLE PATTERN
+  BLANK, which are `Lo` and `So` by category while rendering as nothing. Unicode
+  categories cannot answer "does this render", so the blank code points are
+  removed by VALUE first and the category test applies to what remains. The rule
+  is defined once and used by both the validator and the pre-signoff check;
+  having it spelled twice is how the earlier versions drifted apart.
+
+- **A superseded review still records the reviewer's summary.** That branch
+  called `write_response` with seven arguments, silently dropping
+  `model_summary` - so a valid result whose request was overtaken lost the
+  reviewer's words, the one thing the base-ref contract says is recorded on every
+  review. The review ran and produced a summary; only its comments were
+  abandoned.
+
+- **A failed read is not a verdict on the content.** The shape check treated
+  "jq exited non-zero" and "jq ran and rejected this" identically, routing both
+  through the deduplicating `invalid_response_shape` sentinel - so a transient jq
+  fault claimed the digest and retired a perfectly valid response for the rest of
+  the session. Command failure now takes the non-deduplicated tool-failure path;
+  `invalid_response_shape` is reserved for content jq successfully parsed and
+  rejected.
+
+- **A delivery marker cannot outlive a failed delivery.** It was committed
+  before the final write, so `--once` against a full disk created the marker and
+  then failed to print - and the next healthy run suppressed the handoff
+  entirely, losing a completed review from a persistent namespace. Both the
+  handoff and the sentinel roll the marker back when their write fails.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With

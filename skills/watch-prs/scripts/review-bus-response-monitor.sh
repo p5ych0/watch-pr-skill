@@ -156,7 +156,12 @@ emit_sentinel() {
            # delivery and the underlying reason, undeduplicated by definition.
            printf '%s_REVIEW_PARSE_ERROR reason=emit_marker_failed resp=%s\n' "$PREFIX" "$file" ;;
     esac
-    printf '%s_REVIEW_PARSE_ERROR reason=%s resp=%s\n' "$PREFIX" "$reason" "$file"
+    # Same ordering problem as the handoff: a marker that survives a failed write
+    # suppresses the only report of a broken response.
+    if ! printf '%s_REVIEW_PARSE_ERROR reason=%s resp=%s\n' "$PREFIX" "$reason" "$file"; then
+        rm -f "$marker" 2>/dev/null || true
+        return 0
+    fi
 }
 
 emit_response() {
@@ -249,7 +254,20 @@ emit_response() {
                    or ($r.status == "comments_posted" and $r.findings_count < 1)
                 then empty else $r end
             end' "$file" 2>/dev/null)" \
-       || [ -z "$snap" ]; then
+       ; then
+        # A jq that FAILED is a read failure, not a verdict on the content: it
+        # went through the deduplicating `invalid_response_shape` sentinel, which
+        # claimed the digest, so a transient jq fault retired a perfectly valid
+        # response for the rest of the session. Command failure takes the
+        # non-deduplicated tool-failure path, exactly like sanitize_failed.
+        printf '%s_REVIEW_PARSE_ERROR reason=snapshot_failed resp=%s\n' "$PREFIX" "$file"
+        return 0
+    fi
+    if [ -z "$snap" ]; then
+        # jq RAN and rejected the content: that is a property of the response, so
+        # it is deduplicated - re-reading the same bytes will reach the same
+        # verdict, and repeating it every sweep is the flood this helper exists to
+        # prevent.
         emit_sentinel "$file" "$digest" invalid_response_shape
         return 0
     fi
@@ -329,7 +347,14 @@ emit_response() {
            printf '%s_REVIEW_PARSE_ERROR reason=emit_marker_failed resp=%s\n' "$PREFIX" "$file" ;;
     esac
 
-    printf '%s\n' "$line"
+    # The marker records DELIVERY, so it cannot outlive a delivery that failed.
+    # Committing it before this write meant `--once` against a full disk created
+    # the marker and then failed to print - and the next healthy run suppressed
+    # the handoff entirely, losing a completed review from a persistent namespace.
+    if ! printf '%s\n' "$line"; then
+        rm -f "$marker" 2>/dev/null || true
+        return 0
+    fi
 }
 
 # Mark a response handled WITHOUT emitting — used to suppress stale prior-

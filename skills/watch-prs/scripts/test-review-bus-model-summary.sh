@@ -519,7 +519,10 @@ fi
 # neither whitespace nor control nor format, so the earlier `[^\p{Cc}\p{Cf}\s]`
 # rule accepted them - and a summary of nothing but a variation selector earned
 # a clean APPROVE. A mark with no base character renders as nothing.
-for invisible in '"\u0000"' '"\u0000\u0000"' '"\u202e"' '"\ufe0f"' '"\ufe0f\ufe0f"' '"\u0301"' '"\u200b\ufe0f"'; do
+# U+3164 HANGUL FILLER is category Lo and U+2800 BRAILLE PATTERN BLANK is So, so
+# both are "letters or symbols" by CATEGORY while rendering as nothing - which
+# is why the rule cannot be a category test alone.
+for invisible in '"\u0000"' '"\u0000\u0000"' '"\u202e"' '"\ufe0f"' '"\ufe0f\ufe0f"' '"\u0301"' '"\u200b\ufe0f"' '"\u3164"' '"\u2800"' '"\u3164\u2800\ufe0f"' '"\u115f\u1160"'; do
     inv_resp="$(run_with_summary "invisible$(printf '%s' "$invisible" | tr -cd '0-9a-z')" "$invisible")"
     # No response at all is the CORRECT outcome here: require_model_summary now
     # rejects the result before any signoff, so process_review returns without
@@ -553,6 +556,58 @@ sym_resp="$(run_with_summary symbolonly '"!"')"
 [ "$(jq -r '.status' "$sym_resp")" = "approved" ] \
     && pass "a punctuation-only summary is text (renders), so it signs off" \
     || die "the rule rejected a rendered punctuation character"
+
+
+# Non-ASCII text that DOES render must still sign off - the blank-code-point list
+# removes invisibles, it does not restrict the summary to ASCII.
+for visible_case in '"\u043f\u0440\u0438\u0432\u0435\u0442"' '"a\u3164b"' '"\u2713 verified"'; do
+    v_resp="$(run_with_summary "vis$(printf '%s' "$visible_case" | tr -cd '0-9a-z')" "$visible_case")"
+    [ "$(jq -r '.status' "$v_resp")" = "approved" ] \
+        && pass "visible non-ASCII summary ($visible_case) still signs off" \
+        || die "the blank-code-point rule rejected rendering text: $visible_case"
+done
+
+# ── the reviewer's words survive a SUPERSEDED review ───────────────────────
+# The superseded branch called write_response with seven arguments, silently
+# dropping model_summary - so a valid mixed result whose request was overtaken
+# lost the reviewer's words, which the base-ref contract says are recorded on
+# EVERY review. The review ran and produced a summary; only its comments were
+# abandoned.
+superseded_run() {
+    local out="$TMP/pr-superseded"
+    rm -rf "$out"; mkdir -p "$out/snap"
+    jq -n --arg s "$MODEL_SUMMARY" '{summary: $s, findings: [{path:"a.sh",line:1,side:"RIGHT",body:"x"}]}' \
+        > "$out/result.json"
+    (
+        set +eu
+        progress_set() { :; }
+        resolve_requested_commit() { printf 'ffffffffffffffffffffffffffffffffffffffff\n'; }
+        prepare_review_worktree() { printf '%s\n' "$REPO_DIR"; }
+        fetch_review_context() { :; }
+        build_prompt() { :; }
+        run_codex_review() { :; }
+        max_comment_id() { printf '0\n'; }
+        count_comments_after() { printf '0\n'; }
+        post_clean_signoff() { printf 'COMMENT\n'; }
+        post_findings() { printf '0 0 0\n'; }
+        # A newer request for the same PR arrived while the review ran.
+        newer_request_for_same_pr() { printf 'deadbee\n'; return 0; }
+        process_review 4 abc1234 main "$out/prompt.txt" "$out/result.json" \
+                       "$out/snap" "$out/resp.json" "$out/log.txt" "2026-01-01T00:00:00Z" >/dev/null 2>&1
+    )
+    printf '%s\n' "$out/resp.json"
+}
+sup_resp="$(superseded_run)"
+if [ -f "$sup_resp" ]; then
+    [ "$(jq -r '.status' "$sup_resp")" = "error" ] \
+        && pass "a superseded review records an error verdict" \
+        || die "superseded review status wrong: $(jq -r '.status' "$sup_resp")"
+    [ "$(jq -r '.model_summary // "ABSENT"' "$sup_resp")" = "$MODEL_SUMMARY" ] \
+        && pass "a superseded review still records the reviewer's summary" \
+        || die "model_summary was dropped from the superseded response"
+else
+    die "superseded fixture produced no response"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

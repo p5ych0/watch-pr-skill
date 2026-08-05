@@ -358,6 +358,47 @@ write_response() {
     mv "${resp}.tmp" "$resp"
 }
 
+# The single definition of "the reviewer wrote something visible".
+#
+# Three character-class rules failed here in a row, each missing a category the
+# next one found: `\S` matched controls and formats; excluding \p{Cc}/\p{Cf}
+# still accepted marks (U+FE0F); and `[\p{L}\p{N}\p{P}\p{S}]` still accepts
+# characters that are letters or symbols by CATEGORY but render as nothing -
+# U+3164 HANGUL FILLER is Lo, U+2800 BRAILLE PATTERN BLANK is So. Categories
+# alone cannot answer "does this render", so the blank code points are removed by
+# VALUE first and the category test is applied to what is left.
+#
+# Defined once and used by both the validator and the pre-signoff check, because
+# two spellings of this rule is how the previous versions drifted apart.
+REVIEW_BUS_VISIBLE_JQ='
+def visible:
+  ( explode
+    | map(select(
+        . != 4447      # U+115F HANGUL CHOSEONG FILLER
+        and . != 4448  # U+1160 HANGUL JUNGSEONG FILLER
+        and . != 12644 # U+3164 HANGUL FILLER
+        and . != 65440 # U+FFA0 HALFWIDTH HANGUL FILLER
+        and . != 10240 # U+2800 BRAILLE PATTERN BLANK
+        and (. < 8203 or . > 8207)     # U+200B..U+200F zero-width / marks
+        and (. < 8288 or . > 8303)     # U+2060..U+206F word joiner, invisibles
+        and (. < 65024 or . > 65039)   # U+FE00..U+FE0F variation selectors
+      ))
+    | implode
+    | test("[\\p{L}\\p{N}\\p{P}\\p{S}]") );
+'
+
+# 0 when the JSON-encoded string in $1 contains visible text, 1 when it does not,
+# 2 when the check itself could not run.
+has_visible_text() {
+    local out
+    out="$(jq -r "$REVIEW_BUS_VISIBLE_JQ"' if visible then "yes" else "no" end' <<< "$1" 2>/dev/null)" || return 2
+    case "$out" in
+        yes) return 0 ;;
+        no)  return 1 ;;
+        *)   return 2 ;;
+    esac
+}
+
 # Print the model's own summary from a codex result, or FAIL.
 #
 # Validating and extracting are the same operation on purpose. When they were
@@ -404,9 +445,9 @@ require_model_summary() {
     # The positive test is the one that holds: at least one letter, number,
     # punctuation mark or symbol, which is what "the reviewer wrote something"
     # actually means.
-    out="$(jq -ec 'select((.summary | type) == "string")
-                   | select(.summary | test("[\\p{L}\\p{N}\\p{P}\\p{S}]"))
-                   | .summary' "$result" 2>/dev/null)" || return 1
+    out="$(jq -ec 'select((.summary | type) == "string") | .summary' "$result" 2>/dev/null)" || return 1
+    [ -n "$out" ] || return 1
+    has_visible_text "$out" || return 1
     [ -n "$out" ] || return 1
     printf '%s' "$out"
 }
@@ -1159,7 +1200,12 @@ process_review() {
         findings=0
         summary="request sha=$sha was superseded by newer request sha=$newer_sha after review started; no comments posted."
         echo "CODEX_REVIEW_SUPERSEDED_AFTER_RUN pr=$pr sha=$sha newer_sha=$newer_sha"
-        write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log"
+        # `$model_summary` is passed here too. This is a SEVEN-argument call that
+        # silently dropped it, so a valid mixed result whose request was
+        # superseded lost the reviewer's words - the one thing the base-ref
+        # contract says is recorded on EVERY review. The review ran and produced a
+        # summary; only its comments were abandoned.
+        write_response "$resp" "$pr" "$sha" "$status" "$findings" "$summary" "$log" "$model_summary"
         return 0
     fi
 
@@ -1221,8 +1267,8 @@ process_review() {
         # `[^[:space:][:cntrl:]]` accepts the UTF-8 bytes of a variation selector,
         # which is exactly the case the validator now rejects, and the two must not
         # disagree about what counts as text.
-        if ! summary="$(jq -r . <<< "$model_summary" 2>/dev/null)" \
-           || ! printf '%s' "$summary" | grep -Pq '[\p{L}\p{N}\p{P}\p{S}]'; then
+        if ! has_visible_text "$model_summary" \
+           || ! summary="$(jq -r . <<< "$model_summary" 2>/dev/null)"; then
             echo "CODEX_RESULT_INVALID path=$result reason=summary_undecodable_or_invisible"
             status="error"
             findings=0
