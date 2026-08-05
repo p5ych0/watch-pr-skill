@@ -81,6 +81,31 @@ grep -q 'CHECKS_RC' "$SKILL" \
     && pass "the required-checks probe checks its exit status" \
     || die "the required-checks probe compares output without its status"
 
+# ── the wait step covers BOTH reviewers ────────────────────────────────────
+# Leaving the wait when the first reviewer finishes means the second is first
+# noticed at the merge gate, after the round was fixed and summarised without it.
+[ "$(grep -c 'for WHO in "\$CODEX_BOT" "\$COPILOT_BOT"' "$SKILL")" -ge 2 ] \
+    && pass "the wait step and the blocked-body fetch both cover each reviewer" \
+    || die "a per-reviewer loop is missing (wait step or blocked-body fetch)"
+grep -q 'jq -e -r' "$SKILL" \
+    && pass "the findings projection checks its own status" \
+    || die "the findings projection can fall through on a malformed page"
+[ "$(grep -c 'hasNextPage is not a boolean\|HAS_NEXT' "$SKILL")" -ge 2 ] \
+    && pass "pagination state is validated, not assumed" \
+    || die "a paginated walk trusts hasNextPage without validating it"
+
+# The round boundary must be checked BEFORE the re-request, or the next review is
+# already sent by the time the operator is asked.
+# Matched on the ordering STATEMENT rather than on the two commands' line
+# numbers: the checklist item wraps, so a line-order test silently never matched
+# and reported failure regardless of the text.
+{ grep -q 'check the round boundary' "$SKILL" && grep -q 'only then' "$SKILL"; } \
+    && pass "the close-round checklist checks the boundary before re-requesting" \
+    || die "the checklist does not order the boundary check before the re-request"
+grep -qi 'past the boundary the check-in exists to stop at' "$SKILL" \
+    && pass "and says why that order matters" \
+    || die "the ordering is stated without its reason"
+
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.

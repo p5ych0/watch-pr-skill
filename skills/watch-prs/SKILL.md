@@ -69,8 +69,14 @@ decide with the operator.
 
 There is no notification channel; poll. A review normally lands in a few minutes.
 
+Poll **both** reviewers. Leaving the wait as soon as the first one finishes means
+the second is first noticed at the merge gate as a blocking exit code, after the
+round has already been fixed and summarised without it.
+
 ```bash
-"$RB_SCRIPTS"/pr-review-state.sh state N "$CODEX_BOT"
+for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
+    "$RB_SCRIPTS"/pr-review-state.sh state N "$WHO"
+done
 ```
 
 prints one of:
@@ -82,6 +88,10 @@ prints one of:
 | `reviewed` | a submitted APPROVED/COMMENTED review exists | go to step 4 |
 | `blocked` | CHANGES_REQUESTED | treat as findings |
 | `dismissed` | the signoff was withdrawn | request the review again |
+
+Stay in this step until **each** reviewer has reached an actionable terminal
+state — `reviewed`, `blocked` or `dismissed`. `none` and `pending` mean the pass
+is still coming.
 
 Exit status 2 means the state could not be read. **Fail closed** — never treat it
 as "no findings".
@@ -103,11 +113,21 @@ while :; do
       reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
         nodes{isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null)     || { echo "ABORT: thread fetch failed — do not act on a partial read"; break; }
   echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1     || { echo "ABORT: thread page unreadable"; break; }
-  echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.nodes[]
+  # `jq -e`, and its status checked: a page whose `nodes` or comment shape is
+  # malformed makes this projection exit non-zero, and an unchecked failure would
+  # fall through to the pagination test and read as "no more findings".
+  echo "$PAGE" | jq -e -r '.data.repository.pullRequest.reviewThreads.nodes[]
       | select(.isResolved==false)
-      | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"'
-  [ "$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "true" ] || break
+      | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"' \
+    || { echo "ABORT: findings page malformed — do not act on a partial read"; break; }
+  HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || { echo "ABORT: pageInfo unreadable"; break; }
+  case "$HAS_NEXT" in
+    false) break ;;
+    true)  ;;
+    *) echo "ABORT: hasNextPage is not a boolean ('$HAS_NEXT')"; break ;;
+  esac
   CURSOR=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+  [ -n "$CURSOR" ] && [ "$CURSOR" != "null" ] || { echo "ABORT: hasNextPage=true with no cursor"; break; }
 done
 ```
 
@@ -116,10 +136,15 @@ done
 inline comment — the merge gate then refuses to pass while the findings fetch
 above shows nothing to fix, which looks like a stuck loop rather than a request.
 
+Run it for **whichever** reviewer is blocked — hard-coding one of them leaves the
+same hole for the other.
+
 ```bash
-gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate \
-  --jq 'map(select(.user.login=="'"$CODEX_BOT"'" and .state=="CHANGES_REQUESTED"))
-        | sort_by(.submitted_at) | last | .body // empty'
+for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
+  gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate \
+    --jq --arg who "$WHO" 'map(select(.user.login==$who and .state=="CHANGES_REQUESTED"))
+          | sort_by(.submitted_at) | last | .body // empty'
+done
 ```
 
 ## 5. Fix, then close the round
@@ -133,7 +158,10 @@ resolving it. Then, in one pass:
 2. push;
 3. reply to each thread with what changed, and resolve it;
 4. post the round summary (step 1's contract);
-5. re-request both reviewers (step 2).
+5. **check the round boundary — step 6 — and only then** re-request both
+   reviewers (step 2). In that order: re-requesting first sends the next review
+   past the boundary the check-in exists to stop at, so the operator is asked
+   after the thing they were meant to decide about has already happened.
 
 **A resolved thread is not a record of a fix.** The summary is.
 
@@ -204,8 +232,17 @@ while :; do
   echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 || { OK=0; break; }
   CNT=$(echo "$PAGE" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') || { OK=0; break; }
   UNRESOLVED=$((UNRESOLVED + CNT))
-  [ "$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "true" ] || break
+  # The pagination state is validated, not assumed: a missing or malformed
+  # `hasNextPage` treated as "last page" stops the walk early, and on a PR with
+  # more than 100 threads the gate would then see unresolved=0 and merge.
+  HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || { OK=0; break; }
+  case "$HAS_NEXT" in
+    false) break ;;
+    true)  ;;
+    *) OK=0; break ;;
+  esac
   CURSOR=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+  { [ -n "$CURSOR" ] && [ "$CURSOR" != "null" ]; } || { OK=0; break; }
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
 

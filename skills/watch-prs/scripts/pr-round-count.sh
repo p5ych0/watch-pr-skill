@@ -71,7 +71,8 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                type != "object"
                or (.user | type) != "object"
                or (.user.login | type) != "string"
-               or (.commit_id | type) != "string")
+               or (.commit_id | type) != "string"
+               or ((.submitted_at | type) != "string" and .submitted_at != null))
         then error("malformed review record")
         else [ $all[]
                | select((.user.login | IN($who[])) and .submitted_at != null)
