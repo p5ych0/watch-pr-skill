@@ -94,9 +94,15 @@ grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
     && pass "Copilot is validated on the current head" \
     || die "Copilot's verdict is not pinned to \$HEAD_OID"
 # …and the range check is what makes trusting an older Codex signoff safe.
-grep -qE 'pr-merge-range.sh "\$CODEX_SHA" "\$HEAD_OID"' "$SKILL" \
-    && pass "the range check proves the delta since the Codex signoff is Copilot-only" \
-    || die "the range check does not span \$CODEX_SHA..\$HEAD_OID"
+# The range must measure from the sha the VERDICT describes. Keyed to the stale
+# recorded sha, it demands Copilot trailers across a range Codex has already
+# reviewed in full — blocking a merge both reviewers just approved.
+grep -qE 'pr-merge-range.sh "\$CODEX_EFFECTIVE_SHA" "\$HEAD_OID"' "$SKILL" \
+    && pass "the range check measures from the sha Codex's verdict describes" \
+    || die "the range check is keyed to \$CODEX_SHA even when Codex reviewed the head"
+[ "$(grep -c 'CODEX_EFFECTIVE_SHA=' "$SKILL")" -ge 2 ] \
+    && pass "the effective Codex sha is set on BOTH branches" \
+    || die "the effective Codex sha is not set on every branch"
 grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
     && pass "the Codex signoff SHA is shape-checked before it is trusted" \
     || die "CODEX_SHA is used without validating its shape"

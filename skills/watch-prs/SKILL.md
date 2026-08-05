@@ -274,10 +274,14 @@ case "$CODEX_HEAD_STATE" in
     *state=none*)
         # No Codex review of this head at all: the recorded signoff is the
         # authority, and step (2) proves the delta since it is Copilot-only.
+        CODEX_EFFECTIVE_SHA="$CODEX_SHA"
         "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"; CODEX_RC=$? ;;
     *)
         # Codex HAS judged this head — that judgement wins over the older one,
-        # whatever it says.
+        # whatever it says. Record WHICH sha the verdict describes: step (2) has
+        # to measure from the same commit, or it would demand Copilot trailers
+        # across a range Codex has already reviewed in full.
+        CODEX_EFFECTIVE_SHA="$HEAD_OID"
         "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$HEAD_OID"; CODEX_RC=$? ;;
 esac
 # $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
@@ -290,12 +294,17 @@ fi
 
 # (2) …and the delta between them is Copilot fixes only.
 #
-# This is what makes checking Codex on an older SHA safe: the range check proves
-# the head advanced from $CODEX_SHA only through commits carrying
-# `Review-Phase: copilot`, reachable from it. Without this step, an older Codex
-# signoff would be an open door.
-if [ "$HEAD_OID" != "$CODEX_SHA" ]; then
-    "$RB_SCRIPTS"/pr-merge-range.sh "$CODEX_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
+# This is what makes checking Codex on an OLDER sha safe: the range proves the
+# head advanced from it only through commits carrying `Review-Phase: copilot`,
+# reachable from it. Without this step an older signoff would be an open door.
+#
+# It measures from $CODEX_EFFECTIVE_SHA — the commit the verdict above actually
+# describes — not from $CODEX_SHA. When Codex has reviewed the current head, the
+# two are the same and there is nothing to prove; measuring from the stale
+# recorded sha instead would demand Copilot trailers across a range Codex has
+# already reviewed in full, and block a merge both reviewers just approved.
+if [ "$HEAD_OID" != "$CODEX_EFFECTIVE_SHA" ]; then
+    "$RB_SCRIPTS"/pr-merge-range.sh "$CODEX_EFFECTIVE_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
     if [ "$RANGE" -ne 0 ]; then
         echo "merge blocked: range check returned $RANGE (1 = an untagged commit, or the Codex-reviewed SHA is not an ancestor; 2 = could not inspect)"; exit 0
     fi

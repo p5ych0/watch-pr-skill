@@ -175,6 +175,47 @@ printf '[{}]' > "$TMP/emptyrec.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/emptyrec.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "unreadable: empty review records => 2" || die "[{}] gave rc=$rc"
 
+# ── an explicit head must be a FULL sha ───────────────────────────────────
+# `abc123` is all-hex, so a character-only check accepted it and the commit_id
+# filter matched nothing — reporting state=none, which the merge gate reads as
+# "Codex has not judged this head" and answers by trusting an older signoff.
+mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 61
+for shorthead in abc abc123 0123456789abcdef; do
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run state 7 "$BOT" "$shorthead" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "an explicit short head ('$shorthead') => 2, not state=none" \
+        || die "short head '$shorthead' gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'state=none' \
+        && die "short head '$shorthead' was reported as state=none" \
+        || pass "short head '$shorthead' is not reported as an absent review"
+done
+
+# ── submitted_at must look like a timestamp, because the sort is LEXICAL ───
+# `head_review_snapshot` sorts on it to pick the authoritative review, so
+# "zzzz" sorts after every real ISO timestamp: a stale APPROVED could outrank a
+# current CHANGES_REQUESTED and report clean.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T00:00:00Z","id":71},{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"zzzz","id":72}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/badts.json"
+# The stale APPROVED must have a READABLE empty comment list, or the unfixed code
+# fails for a different reason (no comments page) and this fixture would pass
+# without ever exercising the timestamp rule.
+printf '[]' > "$TMP/comments-72.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badts.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a non-timestamp submitted_at => 2 (never sorted above a real review)" \
+    || die "bad timestamp gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'verdict=clean' \
+    && die "a stale APPROVED with a junk timestamp reported CLEAN: $out" \
+    || pass "no clean verdict from a junk timestamp"
+# Real ISO timestamps, with and without fractional seconds, still work.
+for ts in '"2026-01-01T00:00:00Z"' '"2026-01-01T00:00:00.123Z"' '"2026-01-01T00:00:00+01:00"'; do
+    mk_reviews APPROVED "$ts" 73
+    printf '[]' > "$TMP/comments-73.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 0 ] && pass "a real ISO timestamp ($ts) is accepted" \
+        || die "valid timestamp $ts rejected (rc=$rc out='$out')"
+done
+
 # ── the clean verdict is re-checked against a second snapshot ──────────────
 # State and count came from separate fetches once, so a review that changed in
 # between was judged on one snapshot and counted on another.

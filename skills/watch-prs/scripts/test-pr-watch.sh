@@ -131,6 +131,25 @@ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
     || pass "no READY line when the verdict could not be read"
 [ "$rc" -eq 2 ] && pass "and it exits 2" || die "unreadable verdict gave rc=$rc"
 
+# Any non-0/1 verdict status is unreadable, not just the documented 2 — the same
+# class the state probe guards, on the second call.
+for vrc_case in 2 126 127 3; do
+    seq_set reviewed
+    out="$(VERDICT='verdict=error' VERDICT_RC=$vrc_case run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a verdict helper exiting $vrc_case => 2" \
+        || die "verdict rc=$vrc_case gave rc=$rc"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "verdict rc=$vrc_case still emitted the READY signal" \
+        || pass "verdict rc=$vrc_case emitted no READY signal"
+done
+# rc 1 IS an answer — "not clean" — and must still be reported as actionable.
+seq_set reviewed
+out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' && printf '%s' "$out" | grep -q 'findings=3'; } \
+    && pass "a not-clean verdict is still an actionable READY" \
+    || die "rc 1 was treated as unreadable (rc=$rc out='$out')"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

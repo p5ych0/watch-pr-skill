@@ -85,7 +85,11 @@ while :; do
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
             verdict="$("$STATE_SCRIPT" verdict "$PR" "$WHO" 2>&1)"; vrc=$?
-            if [ "$vrc" -eq 2 ]; then
+            # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
+            # documented 2, or a 126/127 if the helper stops being executable
+            # between the two calls — is unreadable, and this is the same class
+            # the state probe above already guards.
+            if [ "$vrc" -ne 0 ] && [ "$vrc" -ne 1 ]; then
                 # PR_REVIEW_READY is THE signal that there is something to act on
                 # — under Monitor it is what reaches the session. Emitting it and
                 # then exiting 2 tells the session to act and the shell that it

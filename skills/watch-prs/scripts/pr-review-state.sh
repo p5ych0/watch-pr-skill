@@ -82,7 +82,14 @@ reviewer_reviews() {
                    or (.id | type) != "number"
                    or (.commit_id | type) != "string"
                    or ((.state | type) != "string" and .state != null)
-                   or ((.submitted_at | type) != "string" and .submitted_at != null))
+                   # Not merely a string: `head_review_snapshot` sorts on this to
+                   # decide which review is authoritative, and the sort is
+                   # LEXICAL. `submitted_at:"zzzz"` sorts after every real ISO
+                   # timestamp, so a stale APPROVED record could outrank a current
+                   # CHANGES_REQUESTED and report clean.
+                   or ((.submitted_at | type) != "string" and .submitted_at != null)
+                   or (.submitted_at != null
+                       and (.submitted_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}") | not)))
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who) ]
             end
@@ -188,9 +195,19 @@ main() {
             exit 2
         }
     fi
+    # Length as well as alphabet, and for the EXPLICIT argument too. `abc123` is
+    # all-hex, so a character-only check accepted it and the commit_id filter then
+    # matched nothing — reporting `state=none`, which callers read as "this
+    # reviewer has not judged the head" rather than "you passed me nonsense". The
+    # gate uses exactly that distinction to decide whether to fall back to the
+    # recorded signoff.
     case "$head" in
         *[!0-9a-f]*|"") echo "PR_REVIEW_STATE pr=$pr status=error reason=bad_head" >&2; exit 2 ;;
     esac
+    if [ "${#head}" -ne 40 ]; then
+        echo "PR_REVIEW_STATE pr=$pr status=error reason=head_not_full_sha" >&2
+        exit 2
+    fi
 
     local short="${head:0:7}" out rc=0
     if [ "$cmd" = "state" ]; then

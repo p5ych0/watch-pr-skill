@@ -49,6 +49,29 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The range check measures from the SHA the verdict describes.** Making the
+  Codex verdict head-aware left the range keyed to the recorded signoff, so when
+  Codex had reviewed the current head cleanly the gate still demanded
+  `Review-Phase: copilot` trailers across a range Codex had already reviewed in
+  full — blocking a merge both reviewers had just approved. Both branches now
+  record the effective Codex SHA and the range starts there.
+
+- **`submitted_at` must look like a timestamp.** The snapshot sorts on it to pick
+  the authoritative review, and the sort is LEXICAL: `"zzzz"` sorts after every
+  real ISO timestamp, so a stale zero-comment `APPROVED` outranked a current
+  `CHANGES_REQUESTED` on the same head and the verdict came back clean.
+
+- **A head passed in by the caller is validated like one the helper resolves.**
+  `abc123` is all-hex, so a character-only check accepted it and the `commit_id`
+  filter matched nothing — reporting `state=none`, which the merge gate reads as
+  "this reviewer has not judged the head" and answers by trusting an older
+  signoff.
+
+- **Any non-answer from the verdict helper is unreadable.** Only 0 and 1 are
+  answers; the documented 2 was handled but a 126/127 still emitted
+  `PR_REVIEW_READY` and exited 0, which under Monitor is what tells the session
+  there is something to act on.
+
 - **A newer Codex review of the current head wins over the recorded signoff.**
   Both obvious answers to "which SHA do we check Codex against" are wrong, and
   this release shipped each in turn. Always the current head makes the gate
