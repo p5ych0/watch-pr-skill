@@ -62,17 +62,41 @@ Copilot get asked. Running both every round costs a Copilot pass on every
 intermediate commit, and its findings arrive interleaved with Codex's on code
 that is about to change anyway.
 
-```bash
-# Codex: a mention. Say what changed since the last round in the same comment.
-# Branch on it: the comment IS the request, so a failed post means no review was
-# ever queued — and the wait step would then poll for one until it timed out,
-# reporting "no review arrived" rather than "none was asked for".
-if ! gh pr comment N --body "@codex review
+**Establish the review mode first — it decides whether to ask at all.** With
+Codex automatic review enabled, opening or pushing the PR has *already* queued a
+pass over this head, and a mention then queues a **second** review of the same
+commit: two passes, two sets of findings, one round. This is the same duplicate
+the round-closing step avoids, and it applies just as much to the first request.
 
-<one paragraph: what this round changed and what to look at>"; then
-    echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
+`AUTO_REVIEW` is set once per PR and used by every later step. It cannot be
+probed from `gh` — it is a Codex account/repository setting, not repository
+state — so ask the operator rather than guessing. The wrong guess is either a
+duplicate pass or a review nobody requested.
+
+```bash
+AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
+
+if [ "$AUTO_REVIEW" = "yes" ]; then
+    # The pass is already queued by the push that created or updated the PR.
+    # Post the account of what to look at WITHOUT a mention, so the reviewer has
+    # it, and go straight to the wait.
+    if ! gh pr comment N --body "<one paragraph: what this change does and what to look at>"; then
+        echo "ABORT: could not post the PR context — do not enter the wait step."; exit 0
+    fi
+else
+    # The mention IS the request. Branch on it: a failed post means no review was
+    # ever queued, and the wait step would then poll for one until it timed out,
+    # reporting "no review arrived" rather than "none was asked for".
+    if ! gh pr comment N --body "@codex review
+
+<one paragraph: what this change does and what to look at>"; then
+        echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
+    fi
 fi
 ```
+
+Either way the wait step is next: with auto-review on there is a pass in flight
+to watch, and with it off one has just been asked for.
 
 Do **not** request Copilot yet. Step 7 does that, once Codex is clean.
 
@@ -194,13 +218,15 @@ resolving it. Then, in one pass:
    `Review-Phase: copilot` trailer**: it is what tells the merge gate that the
    head advanced only through Copilot fixes, so Codex's earlier signoff still
    covers it and does not have to be re-earned;
-2. **check the round boundary — step 6 — BEFORE pushing**, then push. With Codex
-   automatic review enabled the *push itself* requests the next review, so a
-   boundary check placed after it cannot stop anything: the operator would be
-   asked once round 11 was already running. Checking before the push is the only
-   ordering that works whether auto-review is on or off;
-3. **run the self-check — step 5a — and fix what it finds, before anything is
-   pushed**;
+2. **run the self-check — step 5a — and fix what it finds.** This is the step
+   that exists to stop a defect reaching a reviewer, so it runs while the change
+   can still be amended, before anything leaves the machine;
+3. **check the round boundary — step 6 — and only then push.** With Codex
+   automatic review enabled the *push itself* requests the next review, so both
+   the self-check and the boundary check have to precede it: a boundary check
+   placed after it cannot stop anything, and a self-check placed after it has
+   already let the round start. Checking before the push is the only ordering
+   that works whether auto-review is on or off;
 4. reply to each thread with what changed, **react to it**, and resolve it — and
    **verify the resolve succeeded** rather than assuming it did.
    `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
@@ -282,16 +308,7 @@ The reviewer contract says the newest round summary is read before the diff. Tha
 only holds if the summary exists before the pass starts — so the ordering is
 decided by **what starts it**, and there are two different answers.
 
-```bash
-# Which mode is this repository in? Automatic review means the PUSH is the
-# trigger; nothing else has to be sent, and sending a mention as well queues a
-# SECOND pass over the same head — two reviews, two sets of findings, one round.
-#
-# This cannot be probed from `gh`: it is a Codex setting, not repository state.
-# Ask the operator once per PR and carry the answer, rather than guessing — the
-# wrong guess is either a duplicate pass or a review nobody requested.
-AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
-```
+`$AUTO_REVIEW` was established in step 2 and is carried for the whole PR.
 
 **Automatic review OFF** — the mention is the trigger, so it can carry the
 summary and the push is inert:

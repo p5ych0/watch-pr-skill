@@ -71,6 +71,35 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The self-check does not block every other repository.** It resolved its root
+  from `git rev-parse`, so in a consumer checkout — which is most of them, since
+  one installed copy drives every project — it looked for plugin sources that were
+  not there and exited 2, turning a mandatory pre-push gate into a block on every
+  review round outside this repository. It now reports a distinguished
+  `status=not_applicable` and exits 0: the domain of these checks is empty there,
+  which is a different fact from both "failed" and "passed", and the caller is
+  told which. It is deliberately *not* resolved relative to the script instead —
+  that would check the installed plugin, which is not what anyone is about to
+  push, and report a confident PASS about a tree nobody touched.
+
+- **A comment can no longer switch the self-check off.** `for NAME` was matched
+  anywhere in a block, so prose such as `# wait for SUMMARY_FILE` registered the
+  name as a loop variable and silenced the undefined-variable finding —
+  recreating the exact false-negative class the checker was introduced to
+  prevent. Loop variables are now recognised only at real command positions.
+
+- **The checklist ran the self-check after the push it exists to prevent.** Step 2
+  said to check the boundary "then push" while the self-check was step 3, so a
+  driver following the numbered sequence pushed first. The contract test did not
+  catch it because it compared the position of two lines in the file rather than
+  the order of the steps; it now compares the step numbers.
+
+- **The first review request respects the review mode too.** With automatic review
+  on, opening or pushing the PR has already queued a pass, so the unconditional
+  `@codex review` in the request step queued a second review of the same head —
+  the same duplicate the round-closing step avoids. `AUTO_REVIEW` is established
+  once, in the request step, and both branches use it.
+
 - **A self-check runs before the push.** `pr-selfcheck.sh` verifies that every
   variable `SKILL.md` uses is assigned in it, every script parses, every helper it
   drives is shipped, every script has a test, and the suite passes. Each of those

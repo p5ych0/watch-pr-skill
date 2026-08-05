@@ -137,6 +137,59 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a failing test is a finding" \
     || die "failing test not caught (rc=$rc out='$out')"
 
+# ── a repository that is not this plugin is NOT an error ──────────────────
+# One installed copy drives every project, so the working repo is usually a
+# consumer with no `skills/watch-prs/` tree. Reporting rc 2 there made a
+# mandatory pre-push gate block every review round outside this checkout.
+UNRELATED="$TMP/unrelated"
+mkdir -p "$UNRELATED"; git -C "$UNRELATED" init -q 2>/dev/null
+printf 'print("hi")\n' > "$UNRELATED/app.py"
+out="$("$SCRIPT" "$UNRELATED" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+    && pass "a repo with no plugin sources reports not_applicable, not an error" \
+    || die "unrelated repo gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "not_applicable was reported as clean, which reads as a pass" \
+    || pass "…and is distinguishable from a clean result"
+
+# Run from INSIDE that repo with no argument, which is how SKILL.md invokes it.
+out="$(cd "$UNRELATED" && "$SCRIPT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+    && pass "…and the same holds for the no-argument invocation the contract uses" \
+    || die "no-arg run from an unrelated repo gave rc=$rc out='$out'"
+
+# ── a comment must not be able to switch the check off ────────────────────
+# `for NAME` matched anywhere counted NAME as a loop variable, so prose such as
+# `# wait for SUMMARY_FILE` silenced the undefined-variable finding — recreating
+# the exact false-negative class this checker exists to prevent.
+COMMENT_SKILL='# skill
+```bash
+OWNER=acme
+# wait for SUMMARY_FILE to settle before posting
+echo "$OWNER"
+gh pr comment N --body "$(cat "$SUMMARY_FILE")"
+```
+'
+R="$(mkroot "$COMMENT_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+    && pass "a comment reading for-NAME does not count as defining NAME" \
+    || die "a comment silenced the undefined-variable check (rc=$rc out='$out')"
+
+# A real loop variable is still recognised, so the guard does not become noise.
+LOOP_SKILL='# skill
+```bash
+OWNER=acme
+for THING in a b c; do echo "$THING $OWNER"; done
+```
+'
+R="$(mkroot "$LOOP_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'THING' \
+    && die "a real for-loop variable was reported as undefined: $out" \
+    || pass "a real for-loop variable is recognised as assigned"
+[ "$rc" -eq 0 ] && pass "…and that tree is otherwise clean" || die "loop fixture gave rc=$rc out='$out'"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

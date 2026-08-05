@@ -98,7 +98,7 @@ grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
     || die "CODEX_SHA is required by the gate but never assigned"
 # With auto-review on, the PUSH requests the next review — so the boundary check
 # has to precede it, not merely precede the explicit re-request.
-grep -qi 'BEFORE pushing' "$SKILL" \
+grep -qi 'and only then push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
 grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
@@ -343,13 +343,31 @@ grep -q 'ABORT: could not post the round summary — do not request Copilot yet'
 grep -q 'pr-selfcheck.sh' "$SKILL" \
     && pass "the contract runs the self-check" \
     || die "nothing runs pr-selfcheck.sh before a round is pushed"
-awk '/pr-selfcheck.sh; SELF_RC=/ {c=NR}
-     /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "…before the push, not after it" \
-    || die "the self-check does not precede the push"
+# The ORDER IN THE NUMBERED PROCEDURE, not merely the order of the two lines in
+# the file. The previous version matched a self-check line appearing anywhere
+# before any later `git push` code block, which stayed true while the checklist
+# told the driver to push in step 2 and self-check in step 3 — so a driver
+# following the sequence pushed before running the check meant to prevent it.
+self_step="$(grep -nE '^[0-9]+\. \*\*run the self-check' "$SKILL" | head -1 | cut -d: -f1)"
+push_step="$(grep -nE '^[0-9]+\. \*\*check the round boundary' "$SKILL" | head -1 | cut -d: -f1)"
+{ [ -n "$self_step" ] && [ -n "$push_step" ] && [ "$self_step" -lt "$push_step" ]; } \
+    && pass "…and the numbered procedure runs it before the step that pushes" \
+    || die "the checklist pushes before the self-check that is meant to prevent it"
 grep -q 'SELF_RC' "$SKILL" \
     && pass "…and its exit status is branched on" \
     || die "the self-check output is not checked"
+
+# ── the first request respects the review mode too ─────────────────────────
+# With auto-review on, opening or pushing the PR has already queued a pass, so an
+# unconditional mention queues a SECOND review of the same head.
+sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)"
+req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)"
+{ [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
+    && pass "the review mode is established in the request step, before the mention" \
+    || die "the first @codex mention is posted before the review mode is known"
+grep -q 'if \[ "\$AUTO_REVIEW" = "yes" \]; then' "$SKILL" \
+    && pass "…and the initial request branches on it" \
+    || die "the initial request does not branch on the review mode"
 
 # ── findings get a reaction ────────────────────────────────────────────────
 # Every Codex finding ends with "Useful? React with thumbs", and that reaction is

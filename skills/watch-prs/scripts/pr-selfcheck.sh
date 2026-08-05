@@ -42,6 +42,26 @@ fi
 SKILL="$ROOT/skills/watch-prs/SKILL.md"
 SCRIPTS="$ROOT/skills/watch-prs/scripts"
 
+# THIS CHECK IS ABOUT THIS PLUGIN'S OWN SOURCES, and most repositories are not
+# it. One installed copy drives every project on a machine, so the working repo
+# is usually some consumer with no `skills/watch-prs/` tree at all — and treating
+# that as "could not run" made a mandatory pre-push gate exit 2 in every one of
+# them, blocking every review round outside this checkout.
+#
+# A distinguished status rather than an error, and rather than silence: the
+# domain of these checks is empty here, which is a different fact from "the
+# checks failed" and from "the checks passed". Nothing is fail-open about it —
+# there is genuinely nothing in scope — but the caller is told so explicitly so
+# it can never be read as a clean bill for code that was never looked at.
+#
+# It is NOT resolved relative to this script instead. Doing that would check the
+# installed plugin, which is not what anyone is about to push, and would report a
+# confident PASS about a tree the operator never touched.
+if [ ! -f "$SKILL" ] || [ ! -d "$SCRIPTS" ]; then
+    echo "PR_SELFCHECK status=not_applicable reason=not_a_watch_pr_skill_checkout root=$ROOT"
+    exit 0
+fi
+
 findings=0
 note() { printf 'PR_SELFCHECK finding=%s %s\n' "$1" "$2"; findings=$((findings + 1)); }
 ok()   { printf 'ok   - %s\n' "$1"; }
@@ -72,7 +92,17 @@ if [ -f "$SKILL" ]; then
     assigned="$(printf '%s\n' "$blocks" \
         | grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
         | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"
-    forvars="$(printf '%s\n' "$blocks" | grep -oE 'for +[A-Za-z_][A-Za-z0-9_]*' \
+    # Loop variables, ONLY where a `for` command can actually start: at the
+    # beginning of a line or after `;`/`do`/`then`/`else`, and followed by `in`.
+    #
+    # `for +NAME` anywhere was a false negative waiting to happen, and precisely
+    # the class this checker exists to prevent: a comment reading
+    # `# wait for SUMMARY_FILE` registered SUMMARY_FILE as a loop variable, so the
+    # undefined-variable check went quiet about a variable still defined nowhere.
+    # A checker that a passing comment can switch off is worse than none.
+    forvars="$(printf '%s\n' "$blocks" \
+        | grep -oE '(^|;|[[:space:]](do|then|else)[[:space:]])[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
+        | grep -oE 'for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
         | awk '{print $2}' | sort -u)"
     assigned="$(printf '%s\n%s\n' "$assigned" "$forvars" | sort -u)"
     # Uses: $NAME and ${NAME...}, restricted to UPPERCASE names.
