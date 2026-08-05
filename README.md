@@ -149,13 +149,16 @@ Then:
 3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
    state is actionable and prints one line when it changes. In Claude Code it
    runs as the session's Monitor, so the verdict surfaces into the chat by
-   itself; under Codex, run it in the background. An unreadable state is a stop,
-   never "no findings".
+   itself; under Codex, run it in the background. It is armed and re-armed as
+   part of each round without asking you — see **Watching without prompts**. An
+   unreadable state is a stop, never "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, **check the round
    boundary** (`pr-round-count.sh <PR> <reviewer>`), then push, reply to each
-   thread with what changed, resolve it, post a round summary saying what was
-   addressed and what was intentionally skipped, and re-request **the same
-   reviewer**. The boundary check comes *before the push*: with Codex automatic
+   thread with what changed, resolve it, and post **one comment** that opens with
+   `@codex review` and continues with the round summary — the mention *is* the
+   request, so the account of what changed and the request for the next pass are
+   the same comment. The summary says what was addressed and what was
+   intentionally skipped. The boundary check comes *before the push*: with Codex automatic
    review enabled the push itself requests the next review, so a check placed
    after it asks you about a round that has already started. A resolved thread is
    not a record of a fix; the summary is.
@@ -188,6 +191,32 @@ settings.
 | `REVIEW_BUS_REMOTE` | `git remote get-url origin` | override the origin URL identity is derived from (tests) |
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
+
+### Watching without prompts
+
+The whole point of `pr-watch.sh` is that you do not sit and poll, so the driver
+arms it as part of every round rather than asking you each time. In Claude Code
+that means the **`Monitor` tool**, which is *not* covered by a `Bash(…)`
+permission rule — it is a separate tool, so a session that allows every Bash
+command will still stop and ask before each watch. That turns an automatic loop
+back into a manual one, one prompt per round.
+
+Allow it once, in `.claude/settings.local.json`:
+
+```json
+{ "permissions": { "allow": ["Monitor", "TaskStop"] } }
+```
+
+`TaskStop` is what cancels a watch, so allowing one without the other leaves you
+prompted to stop what you were not prompted to start.
+
+This is deliberately **not** in the committed `.claude/settings.json`: that file
+enables the plugin for anyone who clones the repository, and granting a tool that
+runs background commands is a decision each user should make for their own
+checkout rather than inherit from a clone.
+
+A watch ends when it reports a verdict, so one arming covers one review. Re-arming
+is part of requesting the next review, not a separate question.
 
 ### Round check-in
 

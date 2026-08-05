@@ -260,6 +260,40 @@ grep -q '\[ "\$V_LINE" != "\$V_WANT" \]' "$SKILL" \
     && pass "the verdict records are compared literally, not as patterns" \
     || die "the verdict comparison would read [bot] as a character class"
 
+# ── the round summary and the review request are ONE comment ───────────────
+# The mention IS the request, so splitting them divides the record the reviewer
+# is told to read and sends the request half with no account of what changed.
+grep -q 'SUMMARY_FILE' "$SKILL" \
+    && pass "the round summary is posted in the same comment as the @codex request" \
+    || die "the summary and the request are still two separate comments"
+
+# A mention describing an UNFIXED defect is read as a task, not as context: Codex
+# then edits and commits in an environment with no remote and no credentials, so
+# the commit exists nowhere and the review never happens. This cost a whole round
+# once already.
+grep -qi 'never as a work order' "$SKILL" \
+    && pass "the skill warns that an open defect in a mention is read as a task" \
+    || die "nothing stops a round summary restating an unfixed defect to the reviewer"
+
+# Resolving is checked, not assumed: a round reported as fully resolved when it
+# was not sends the next review back over findings that were already answered.
+#
+# Matched on the rule's own words, not on `isResolved` — that token also appears
+# in the merge gate's GraphQL query further down the file, so a grep for it
+# passed against a SKILL.md with the rule deleted.
+#
+# A FRAGMENT that fits on one line, not the whole phrase: this file is wrapped,
+# `grep` is line-oriented, and an assertion spanning a line break silently never
+# matches. That has now happened three times in this suite.
+grep -qi 'resolve succeeded' "$SKILL" \
+    && pass "the skill says to verify each resolve succeeded" \
+    || die "thread resolution is assumed rather than verified"
+
+# The watch is armed as part of the round, not put to the operator as a question.
+grep -qi 'do not ask' "$SKILL" \
+    && pass "the watch is armed and re-armed without asking the operator" \
+    || die "the skill leaves arming the watch as a question for the operator"
+
 # A GraphQL 200 can carry both `errors` and structurally valid `data`. The
 # unresolved-thread count answers 0 on partial data, and 0 is merge permission —
 # taken with `--admin`, so nothing downstream catches the omitted thread.

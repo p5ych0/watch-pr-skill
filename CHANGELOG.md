@@ -71,6 +71,33 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The round summary and the review request are one comment.** The `@codex`
+  mention *is* the request, so posting it separately from the summary split the
+  record the reviewer is told to read and sent the request half with no account
+  of what changed.
+
+- **A summary states what was done — never what is still open.** A mention whose
+  body describes an unfixed defect is read as a *task*: Codex runs as a coding
+  agent, edits, commits and reports work from an environment with no remote and
+  no credentials, so the commit resolves to nothing, the review never happens,
+  and the round is spent. That is not hypothetical — it cost a round of #10.
+  `SKILL.md` now says to describe changes in the past tense and point at an issue
+  number for anything still open; `AGENTS.md` and the Copilot instructions tell
+  the reviewers the summary is a record, not a work list.
+
+- **Thread resolution is verified, not assumed.** `resolveReviewThread` returns
+  `thread{isResolved}` and the driver now reads it. A round reported as fully
+  resolved when it was not sent the next review back over findings that had
+  already been answered, and the extra volume read as regression rather than
+  repetition.
+
+- **The watch is armed as part of the round, not put to the operator.** In Claude
+  Code the `Monitor` tool is not covered by a `Bash(…)` permission rule, so a
+  session allowing every Bash command still stopped to ask before each watch —
+  one prompt per round, which turns the automatic loop back into a manual one.
+  `README.md § Watching without prompts` says what to allow, and why that grant
+  stays out of the committed settings.
+
 - **One head, resolved once and pinned through every probe.** The records
   abbreviate the SHA to seven hex, so binding the state record to the verdict
   record could not tell two commits apart when their prefixes collided — and a

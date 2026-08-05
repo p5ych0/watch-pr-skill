@@ -90,6 +90,24 @@ into the chat by itself instead of being waited on:
 
 - `command`: `"$RB_SCRIPTS"/pr-watch.sh N "$WHO"`
 - `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
+- `persistent`: `true`
+
+**Arm it as part of the round, and re-arm it the same way — do not ask.** The
+watch is how the loop notices anything at all; a round that ends without one
+leaves the driver waiting on a verdict nothing will report. `pr-watch.sh` exits
+when it reaches a terminal state, so **one arming covers one verdict**: every
+review request in step 2 needs its own, for the reviewer named by `$WHO`.
+
+Treat it as part of requesting the review, not as a separate decision to put to
+the operator. It reads no secrets, changes nothing, and stopping it costs one
+`TaskStop` — so a prompt per round buys nothing and turns an automatic loop back
+into a manual one. If the harness prompts anyway, that is a permissions gap
+rather than a question worth relaying; `README.md § Watching without prompts`
+says what to add.
+
+Re-arm on `WATCH_RC` 1 as well: a timeout means the verdict has not arrived yet,
+not that the round is over. Only `0` (verdict in hand) and `2` (fail closed) end
+the watch for that round.
 
 **Codex** — there is no watch tool, so run it in the background and read its
 output, or simply block on it.
@@ -178,15 +196,53 @@ resolving it. Then, in one pass:
    boundary check placed after it cannot stop anything: the operator would be
    asked once round 11 was already running. Checking before the push is the only
    ordering that works whether auto-review is on or off;
-3. reply to each thread with what changed, and resolve it;
-4. post the round summary (step 1's contract);
-5. re-request **`$WHO`**, the same reviewer this round was about — unless
-   automatic review has already done it. The boundary was checked in step 2,
-   before the push, precisely so this step cannot outrun it.
+3. reply to each thread with what changed, and resolve it — and **verify the
+   resolve succeeded** rather than assuming it did. `resolveReviewThread` returns
+   `thread{isResolved}`; read it. A round reported as "all threads resolved" when
+   they were not sends the next review over findings that were already answered,
+   and the extra volume reads as regression rather than repetition;
+4. **re-request `$WHO` and post the round summary as ONE comment.** In the Codex
+   phase the mention *is* the request, so `@codex review` opens the comment and
+   the summary follows it. Splitting them into two comments divides the record
+   the reviewer is told to read, and the request half arrives with no account of
+   what changed. In the Copilot phase the request is `gh pr edit --add-reviewer
+   @copilot`, which is not a comment, so there the summary stands alone.
 
-Re-request **only the active reviewer**. Asking the other one on every round buys
-a review of code that is about to change again, and mixes its findings into a
-round that was not about them.
+```bash
+# Codex phase: one comment carries both. Branch on it — the comment IS the
+# request, so a failed post means no review was queued and the wait step would
+# poll for one until it timed out.
+if ! gh pr comment N --body "@codex review
+
+$(cat "$SUMMARY_FILE")"; then
+    echo "ABORT: could not post the round summary and @codex request."; exit 0
+fi
+```
+
+Re-request **only the active reviewer** — unless automatic review has already
+done it. The boundary was checked in step 2, before the push, precisely so this
+step cannot outrun it. Asking the other reviewer on every round buys a review of
+code that is about to change again, and mixes its findings into a round that was
+not about them.
+
+### Write the summary as a record, never as a work order
+
+**State only what was done.** A `@codex` mention whose body describes an
+*unfixed* defect — its file, its consequence, what it would take to close — is
+read as a task, not as context. Codex will then run as a coding agent: it edits,
+commits and reports work in an environment with no remote and no credentials, so
+the commit exists nowhere, the review never happens, and the round is spent.
+
+That is not hypothetical; it is where this contract came from. A round summary
+that ended with "the seventh finding is deferred to #11 — it inflates `rounds` to
+11 and skips the operator pause" produced exactly that: an implementation of the
+deferred fix, a commit ID that resolves to nothing, and a review that had to be
+requested again.
+
+So: describe changes in the past tense, and put anything still open where it
+belongs — a GitHub issue, linked by number and nothing more. "One finding was
+answered on its thread rather than applied; the summary explains why" is a
+record. Restating the defect in the mention is a work order.
 
 **A resolved thread is not a record of a fix.** The summary is.
 
