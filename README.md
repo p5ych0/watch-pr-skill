@@ -152,13 +152,19 @@ settings.
 |---|---|---|
 | `REVIEW_BUS_REMOTE` | `git remote get-url origin` | override the origin URL identity is derived from (tests) |
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
+| `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
 
 ### Round check-in
 
 A review loop can run many rounds, so it stays *your* decision to keep going
-rather than rubber-stamping an endless back-and-forth: every **10 distinct pushed
-heads** on a PR, the driver stops and asks — continue, stop and merge, stop and
-leave open, or abandon.
+rather than rubber-stamping an endless back-and-forth: every **10 distinct
+reviewed heads** on a PR, `pr-round-count.sh` exits 3 and the driver stops to ask
+— continue, stop and merge, stop and leave open, or abandon.
+
+The count comes from GitHub each time, so it survives a new session or a new
+machine, and two reviewers on one commit counts once. Set
+`REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
+value falls back to `10` rather than silently disabling a safety pause.
 
 ## Updating
 

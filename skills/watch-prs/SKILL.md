@@ -31,7 +31,9 @@ REMOTE=$(git remote get-url origin 2>/dev/null)
 _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
 REPO_DIR="$(git rev-parse --show-toplevel)"
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
-[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -d "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts "$HOME"/.codex/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | sort -V | tail -1)"
+# `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
+# macOS the fallback would fail before finding the scripts at all.
+[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts "$HOME"/.codex/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS"
 ```
@@ -87,18 +89,38 @@ as "no findings".
 ## 4. Read the findings
 
 Inline review comments are the findings. The review **body** is the reviewer's
-non-blocking channel and never gates the merge.
+non-blocking channel and does not gate the merge — with one exception, below.
+
+**Paginate.** A truncated thread list reads exactly like a shorter review, and
+here that is worse than at the merge gate: you would reply, resolve and summarise
+against an incomplete set before any gate runs.
 
 ```bash
-gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -f query='
-  query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){
-    reviewThreads(first:100){pageInfo{hasNextPage endCursor}
-      nodes{isResolved path line comments(first:1){nodes{author{login} body}}}}}}}' \
-  --jq '.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)|"### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"'
+CURSOR=null
+while :; do
+  PAGE=$(gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -F cursor="$CURSOR" -f query='
+    query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
+      reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
+        nodes{isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null)     || { echo "ABORT: thread fetch failed — do not act on a partial read"; break; }
+  echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1     || { echo "ABORT: thread page unreadable"; break; }
+  echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.nodes[]
+      | select(.isResolved==false)
+      | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"'
+  [ "$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')" = "true" ] || break
+  CURSOR=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+done
 ```
 
-If `hasNextPage` is true, fetch the remaining pages before acting: a truncated
-thread list reads exactly like a shorter review.
+**When a reviewer's state is `blocked`, read its review body too.** A
+`CHANGES_REQUESTED` review can carry its whole argument in the body with no
+inline comment — the merge gate then refuses to pass while the findings fetch
+above shows nothing to fix, which looks like a stuck loop rather than a request.
+
+```bash
+gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate \
+  --jq 'map(select(.user.login=="'"$CODEX_BOT"'" and .state=="CHANGES_REQUESTED"))
+        | sort_by(.submitted_at) | last | .body // empty'
+```
 
 ## 5. Fix, then close the round
 
@@ -117,9 +139,25 @@ resolving it. Then, in one pass:
 
 ## 6. Round check-in
 
-Every 10 distinct pushed heads on a PR, stop and decide with the operator:
-continue, stop and merge, stop and leave open, or abandon. A review loop that
-never pauses is a loop nobody chose to keep running.
+Before re-requesting, ask whether this is a boundary:
+
+```bash
+"$RB_SCRIPTS"/pr-round-count.sh N; ROUNDS_RC=$?
+```
+
+- `0` — carry on.
+- `3` — **stop and decide with the operator**: continue, stop and merge, stop and
+  leave open, or abandon. A review loop that never pauses is a loop nobody chose
+  to keep running. Cross a single pause with `REVIEW_ROUND_THRESHOLD=0` for that
+  one call, or answer the question.
+- `2` — the count could not be established. Fail closed: do not re-request as if
+  it were round one.
+
+A round is a **distinct PR head that received a submitted review**, derived from
+GitHub each time — so two reviewers on one commit is one round, a re-review of an
+unchanged head does not inflate it, and the count survives a new session or a new
+machine. v1 kept this in a `/tmp` file, so the pause it promised quietly
+disappeared whenever that file did.
 
 ## 7. Merge gate
 
@@ -129,17 +167,27 @@ earlier head.
 ```bash
 REVIEWED_SHA=<the sha the clean review was for>
 
-# (1) Both reviewers clean on the CURRENT head.
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT";   CODEX_RC=$?
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT"; COPILOT_RC=$?
+# (0) Resolve the head ONCE, and fail closed on a lookup that printed something
+# and then failed — command substitution keeps that stdout, so a plausible SHA
+# from a failed fetch would otherwise pass the shape check below.
+HEAD_RC=0
+HEAD_OID=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
+if [ "$HEAD_RC" -ne 0 ] || ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "merge blocked: head lookup failed (rc=$HEAD_RC)"; exit 0
+fi
+
+# (1) Both reviewers clean ON THAT EXACT HEAD. Pass $HEAD_OID explicitly: letting
+# each verdict resolve the head itself means a push landing between the two calls
+# leaves both verdicts describing an older commit while step 5 pins and merges the
+# newer one — and if that commit carries a `Review-Phase: copilot` trailer, the
+# range check below accepts it.
+"$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT"   "$HEAD_OID"; CODEX_RC=$?
+"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID"; COPILOT_RC=$?
 if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
     echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 0
 fi
 
-# (2) The head still equals what was reviewed, and everything since the reviewed
-# SHA is a review-fix commit reachable from it.
-HEAD_OID=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null)
-if ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]]; then echo "merge blocked: head unreadable"; exit 0; fi
+# (2) Everything since the reviewed SHA is a review-fix commit reachable from it.
 if [ "${HEAD_OID:0:7}" != "$REVIEWED_SHA" ]; then
     "$RB_SCRIPTS"/pr-merge-range.sh "$REVIEWED_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
     if [ "$RANGE" -ne 0 ]; then
@@ -161,9 +209,15 @@ while :; do
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
 
-# (4) Required checks green — `--admin` must not bypass them.
-if [ "$(gh pr checks N --repo $OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null)" != "true" ]; then
-    echo "merge blocked: required checks not all green (or fetch failed)."; exit 0
+# (4) Required checks green. Capture the STATUS separately: `gh pr checks` can
+# print `true` and then exit non-zero, and command substitution keeps the output —
+# so comparing the string alone lets an errored probe read as "all green". The
+# merge below uses `--admin`, which bypasses branch protection, so this probe is
+# the only thing standing between a failed read and an unchecked merge.
+CHECKS_RC=0
+CHECKS=$(gh pr checks N --repo $OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null) || CHECKS_RC=$?
+if [ "$CHECKS_RC" -ne 0 ] || [ "$CHECKS" != "true" ]; then
+    echo "merge blocked: required checks not all green, or the probe failed (rc=$CHECKS_RC out='$CHECKS')"; exit 0
 fi
 
 # (5) Merge, PINNED to the head every gate above was evaluated against.

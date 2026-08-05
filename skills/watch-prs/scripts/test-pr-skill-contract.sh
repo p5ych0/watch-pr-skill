@@ -62,6 +62,33 @@ grep -q 'pr-review-state.sh' "$SKILL" \
 grep -q 'pr-merge-range.sh' "$SKILL" \
     && pass "skill drives pr-merge-range.sh" \
     || die "skill does not use pr-merge-range.sh"
+# The round check-in must have an implementation, not just a promise: v1's
+# guarantee lived in a /tmp counter that vanished with the file.
+grep -q 'pr-round-count.sh' "$SKILL" \
+    && pass "the round check-in is enforced by a script, not only described" \
+    || die "skill promises a round check-in with nothing implementing it"
+
+# ── the merge gate resolves the head ONCE and pins every check to it ───────
+# Letting each verdict resolve the head itself lets a push land between them, so
+# both verdicts describe an older commit while the merge pins the newer one.
+grep -qE 'verdict N "\$CODEX_BOT" +"\$HEAD_OID"' "$SKILL" \
+    && pass "reviewer verdicts are pinned to the resolved head" \
+    || die "verdict calls do not take an explicit \$HEAD_OID"
+grep -q 'HEAD_RC' "$SKILL" \
+    && pass "the head lookup checks its exit status" \
+    || die "the head lookup does not branch on its own status"
+grep -q 'CHECKS_RC' "$SKILL" \
+    && pass "the required-checks probe checks its exit status" \
+    || die "the required-checks probe compares output without its status"
+
+# ── portability: no GNU-only tools on the path that must work on macOS ─────
+# Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
+# used, and matching that explanation would make the assertion unfalsifiable.
+if grep -vE '^[[:space:]]*#' "$SKILL" | grep -q 'sort -V'; then
+    die "skill uses GNU-only 'sort -V' while README advertises portability"
+else
+    pass "no GNU-only sort in the script-resolution fallback"
+fi
 
 # ── the merge is pinned to the head the gates were evaluated against ───────
 grep -qE -- '--match-head-commit "\$HEAD_OID"' "$SKILL" \

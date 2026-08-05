@@ -49,6 +49,15 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The round check-in is enforced, not just promised.** v1 kept the count in a
+  `/tmp` file, so the pause silently disappeared whenever a session started on
+  another machine or the file was cleaned up — a guarantee that only holds while
+  a temp file survives is not a guarantee. `pr-round-count.sh` derives it from
+  GitHub every time: a round is a *distinct PR head that received a submitted
+  review*, so two reviewers on one commit is one round and a re-review of an
+  unchanged head does not inflate it. An unreadable count exits 2 rather than
+  reading as "no rounds yet", which is the direction that skips the pause.
+
 ### Upgrading from 1.x
 
 Stop and disable the daemons, then delete their unit files:
