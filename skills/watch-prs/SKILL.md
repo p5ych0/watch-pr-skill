@@ -116,9 +116,25 @@ while :; do
   # `jq -e`, and its status checked: a page whose `nodes` or comment shape is
   # malformed makes this projection exit non-zero, and an unchecked failure would
   # fall through to the pagination test and read as "no more findings".
-  echo "$PAGE" | jq -e -r '.data.repository.pullRequest.reviewThreads.nodes[]
-      | select(.isResolved==false)
-      | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"' \
+  # The SHAPE is validated before anything is formatted. `jq -e` alone is not
+  # enough: string interpolation renders a missing author or body as `null` and
+  # still exits 0, so the driver would reply, resolve and summarise against
+  # "null" text believing it had read the findings.
+  echo "$PAGE" | jq -e -r '
+      .data.repository.pullRequest.reviewThreads.nodes as $n
+      | if ($n | type) != "array"
+           or any($n[];
+                  type != "object"
+                  or (.isResolved | type) != "boolean"
+                  or (.comments.nodes | type) != "array"
+                  or (select(.isResolved == false)
+                      | (.comments.nodes | length) == 0
+                        or (.comments.nodes[0].author.login | type) != "string"
+                        or (.comments.nodes[0].body | type) != "string"))
+        then error("malformed thread node")
+        else $n[] | select(.isResolved == false)
+             | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"
+        end' \
     || { echo "ABORT: findings page malformed — do not act on a partial read"; break; }
   HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || { echo "ABORT: pageInfo unreadable"; break; }
   case "$HAS_NEXT" in
@@ -141,9 +157,17 @@ same hole for the other.
 
 ```bash
 for WHO in "$CODEX_BOT" "$COPILOT_BOT"; do
-  gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate \
-    --jq --arg who "$WHO" 'map(select(.user.login==$who and .state=="CHANGES_REQUESTED"))
-          | sort_by(.submitted_at) | last | .body // empty'
+  # Piped to `jq`, not `gh --jq`: that flag takes a single expression and cannot
+  # accept `--arg`, so passing one makes gh exit with "accepts 1 arg(s)".
+  # `-s` because --paginate emits one array per page.
+  gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate 2>/dev/null \
+    | jq -s -r --arg who "$WHO" '
+        if length == 0 or any(.[]; type != "array") then error("bad page")
+        else [ .[][] ]
+          | map(select(.user.login == $who and .state == "CHANGES_REQUESTED"))
+          | sort_by(.submitted_at) | last | .body // empty
+        end' \
+    || echo "ABORT: could not read $WHO's blocking review body"
 done
 ```
 
@@ -230,7 +254,15 @@ while :; do
     query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
       reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor} nodes{isResolved} }}}}' 2>/dev/null) || { OK=0; break; }
   echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 || { OK=0; break; }
-  CNT=$(echo "$PAGE" | jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved==false)]|length') || { OK=0; break; }
+  # `nodes:{}` and `nodes:[{}]` both make a naive count return 0 with status 0,
+  # and 0 here is merge permission. Require an array of objects with a boolean
+  # `isResolved` before counting anything.
+  CNT=$(echo "$PAGE" | jq '
+      .data.repository.pullRequest.reviewThreads.nodes as $n
+      | if ($n | type) != "array"
+           or any($n[]; type != "object" or (.isResolved | type) != "boolean")
+        then error("malformed nodes")
+        else [ $n[] | select(.isResolved == false) ] | length end') || { OK=0; break; }
   UNRESOLVED=$((UNRESOLVED + CNT))
   # The pagination state is validated, not assumed: a missing or malformed
   # `hasNextPage` treated as "last page" stops the walk early, and on a PR with

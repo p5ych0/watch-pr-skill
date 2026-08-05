@@ -74,7 +74,7 @@ script into a stricter mode.
 | Mode | Scripts | Why |
 | --- | --- | --- |
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
-| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
+| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
 
 ## Waivers and resolved threads
 
