@@ -41,7 +41,7 @@ cmd_list() {
         page=$(gh api graphql -F number="$pr" -F owner="$OWNER" -F repo="$REPO" -F cursor="$cursor" -f query='
             query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
               reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
-                nodes{isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null) || {
+                nodes{id isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null) || {
             echo "PR_FINDINGS pr=$pr status=error reason=fetch_failed" >&2
             return 2
         }
@@ -54,6 +54,7 @@ cmd_list() {
             | if ($n | type) != "array"
                  or any($n[];
                         type != "object"
+                        or (.id | type) != "string"
                         or (.isResolved | type) != "boolean"
                         or (.comments.nodes | type) != "array"
                         or (select(.isResolved == false)
@@ -61,8 +62,12 @@ cmd_list() {
                               or (.comments.nodes[0].author.login | type) != "string"
                               or (.comments.nodes[0].body | type) != "string"))
               then error("malformed thread node")
+              # The thread ID is printed with every finding. path:line is not an
+              # identifier: two unresolved comments can share a line, and a fix
+              # commit shifts the lines anyway — so the driver had nothing stable
+              # to resolve against and could close the wrong thread.
               else ( [ $n[] | select(.isResolved == false) ]
-                     | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n")
+                     | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\nthread=\(.id)\n\(.comments.nodes[0].body)\n")
                      | join("\n") )
               end' 2>/dev/null) || {
             echo "PR_FINDINGS pr=$pr status=error reason=malformed_page" >&2
@@ -121,6 +126,17 @@ cmd_blocked_body() {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_fetch_failed" >&2
         return 2
     }
+    # The LATEST review of this head decides, not "any CHANGES_REQUESTED record".
+    # Filtering on state alone printed a request the reviewer had already
+    # SUPERSEDED with an approval on the same head, sending the driver into
+    # another fix round after a signoff. This mirrors how pr-review-state.sh picks
+    # the authoritative review.
+    #
+    # commit_id and submitted_at are validated as a full SHA and a complete ISO
+    # timestamp because this helper FILTERS and SORTS on them: a short commit_id
+    # is silently filtered away as another head, and a junk timestamp sorts above
+    # a real one and returns stale text.
+    #
     # The record SHAPE is validated before anything is selected. The optional
     # selectors below would otherwise map a malformed page away and exit 0, making
     # a parse failure indistinguishable from "this body-only CHANGES_REQUESTED has
@@ -133,21 +149,22 @@ cmd_blocked_body() {
                    or (.user | type) != "object"
                    or (.user.login | type) != "string"
                    or (.commit_id | type) != "string"
+                   or (.commit_id | test("^[0-9a-f]{40}$") | not)
                    or ((.state | type) != "string" and .state != null)
                    or ((.submitted_at | type) != "string" and .submitted_at != null)
+                   or (.submitted_at != null
+                       and (.submitted_at
+                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                            | not))
                    or ((.body | type) != "string" and .body != null))
             then error("malformed review record")
-            else [ $all[]
-                   | select(.user.login == $who
-                            and .state == "CHANGES_REQUESTED"
-                            and .commit_id == $head) ] as $mine
-              # A MATCHING blocked review must carry a string body. `.body //
-              # empty` mapped a null or absent one to empty stdout with rc 0,
-              # which in this path is indistinguishable from "the blocking review
-              # had no body" — leaving the loop without the only finding it has.
-              | if any($mine[]; (.body | type) != "string")
+            else ( [ $all[] | select(.user.login == $who and .commit_id == $head) ]
+                   | sort_by(.submitted_at) | last ) as $latest
+              | if $latest == null or $latest.state != "CHANGES_REQUESTED"
+                then empty
+                elif ($latest.body | type) != "string"
                 then error("blocked review without a readable body")
-                else $mine | sort_by(.submitted_at) | last | .body // empty
+                else $latest.body
                 end
             end
         end' 2>/dev/null) || {

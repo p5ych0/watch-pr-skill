@@ -142,8 +142,14 @@ inline comment — the merge gate then refuses to pass while `list` shows nothin
 fix, which looks like a stuck loop rather than a request.
 
 ```bash
-"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"
+"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"; BODY_RC=$?
 ```
+
+`BODY_RC` carries the same contract as `FIND_RC`: **`2` is a stop.** If the head
+lookup or the reviews fetch is unreadable, empty output means "could not read",
+not "there is no body" — and this is the only path that can surface a body-only
+request, so continuing would fix, close and re-request as though the reviewer had
+asked for nothing.
 
 The head argument is **omitted on purpose**: `$HEAD_OID` is not assigned until the
 merge gate, so passing it here would abort under `set -u` or — worse in a

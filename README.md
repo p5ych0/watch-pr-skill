@@ -147,8 +147,11 @@ Then:
    never "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, push, reply to each
    thread with what changed, resolve it, post a round summary saying what was
-   addressed and what was intentionally skipped, then re-request **the same
-   reviewer**. A resolved thread is not a record of a fix; the summary is.
+   addressed and what was intentionally skipped, **check the round boundary**
+   (`pr-round-count.sh <PR> <reviewer>`), and only then re-request **the same
+   reviewer**. That order matters: re-requesting first sends the next review past
+   the very boundary the check-in exists to stop at. A resolved thread is not a
+   record of a fix; the summary is.
 5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
    until it is clean too. Fix commits here carry a `Review-Phase: copilot`
    trailer, which is how the merge gate knows the head advanced only through

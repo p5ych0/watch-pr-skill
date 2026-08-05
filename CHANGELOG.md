@@ -49,6 +49,18 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **A superseded request is not an active finding.** `blocked-body` filtered on
+  state alone, so a `CHANGES_REQUESTED` the reviewer had already withdrawn by
+  approving the same head still printed — sending the driver into another fix
+  round after a signoff. The LATEST review of the head decides now, the same way
+  the verdict does.
+
+- **Findings carry their thread ID.** `path:line` is not an identifier: two
+  unresolved comments can share a line, and a fix commit shifts the lines anyway,
+  so the driver had nothing stable to resolve against and could close the wrong
+  thread. Every finding now prints `thread=<id>`, and a thread without one is a
+  malformed page.
+
 - **Review records are validated where they are used, not only where they are
   counted.** `commit_id` was checked as a SHA in the round counter but not in the
   review-state parser, where a short value is filtered out as "another head" — so

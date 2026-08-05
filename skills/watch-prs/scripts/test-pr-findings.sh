@@ -42,7 +42,7 @@ page() {   # <hasNextPage> <cursor> <nodes-json>
     printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":%s,"endCursor":%s},"nodes":%s}}}}}' \
         "$1" "$2" "$3"
 }
-NODE_OK='[{"isResolved":false,"path":"a.sh","line":1,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding one"}]}},{"isResolved":true,"path":"b.sh","line":2,"comments":{"nodes":[{"author":{"login":"bot"},"body":"old"}]}}]'
+NODE_OK='[{"id":"T_1","isResolved":false,"path":"a.sh","line":1,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding one"}]}},{"id":"T_2","isResolved":true,"path":"b.sh","line":2,"comments":{"nodes":[{"author":{"login":"bot"},"body":"old"}]}}]'
 
 # ── list: the happy path ───────────────────────────────────────────────────
 page false null "$NODE_OK" > "$TMP/p1.json"
@@ -60,7 +60,7 @@ out="$(GH_PAGE1="$TMP/empty.json" run list 7 2>&1)"; rc=$?
 
 # ── list: pagination is followed, and its state validated ──────────────────
 page true '"CUR"' "$NODE_OK" > "$TMP/p1.json"
-page false null '[{"isResolved":false,"path":"c.sh","line":3,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding two"}]}}]' > "$TMP/p2.json"
+page false null '[{"id":"T_3","isResolved":false,"path":"c.sh","line":3,"comments":{"nodes":[{"author":{"login":"bot"},"body":"finding two"}]}}]' > "$TMP/p2.json"
 out="$(GH_PAGE1="$TMP/p1.json" GH_PAGE2="$TMP/p2.json" run list 7 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one' && printf '%s' "$out" | grep -q 'finding two'; } \
     && pass "list: follows the cursor to the next page" || die "pagination (rc=$rc out='$out')"
@@ -79,10 +79,10 @@ out="$(GH_PAGE1="$TMP/badnext.json" run list 7 2>&1)"; rc=$?
 # Each of these once produced output rather than an abort.
 i=0
 for bad in '{}' '[{}]' \
-    '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[]}}]' \
-    '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":null,"body":"x"}]}}]' \
-    '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":null}]}}]' \
-    '[{"isResolved":"false","path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]'
+    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[]}}]' \
+    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":null,"body":"x"}]}}]' \
+    '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":null}]}}]' \
+    '[{"id":"T_9","isResolved":"false","path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]'
 do
     i=$((i + 1))
     page false null "$bad" > "$TMP/bad$i.json"
@@ -98,14 +98,14 @@ out="$(GH_GQL_RC=1 run list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "list: fetch failure => 2" || die "fetch failure gave rc=$rc"
 
 # ── blocked-body: scoped to the reviewer AND the head ──────────────────────
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1","body":"please change X"}]' \
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"}]' \
     "$BOT" "$HEAD40" > "$TMP/rev.json"
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'please change X'; } \
     && pass "blocked-body: prints the blocking body for this head" || die "blocked-body (rc=$rc out='$out')"
 
 # A stale CHANGES_REQUESTED on an OLDER commit is not an active finding.
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1","body":"stale request"}]' \
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"stale request"}]' \
     "$BOT" "$OLD40" > "$TMP/stale.json"
 out="$(GH_REVIEWS="$TMP/stale.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && [ -z "$out" ]; } \
@@ -113,7 +113,7 @@ out="$(GH_REVIEWS="$TMP/stale.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; 
     || die "stale body leaked (rc=$rc out='$out')"
 
 # Another reviewer's blocking body is not this reviewer's.
-printf '[{"user":{"login":"someone-else"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1","body":"theirs"}]' \
+printf '[{"user":{"login":"someone-else"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"theirs"}]' \
     "$HEAD40" > "$TMP/other.json"
 out="$(GH_REVIEWS="$TMP/other.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"
 [ -z "$out" ] && pass "blocked-body: scoped to the named reviewer" || die "another reviewer's body leaked: $out"
@@ -167,10 +167,10 @@ out="$(GH_HEAD="abc" GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" 2>&1)"
 # finding that has nowhere else to appear.
 for nobody in 'null' '""x'; do
     if [ "$nobody" = 'null' ]; then
-        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1","body":null}]' \
+        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":null}]' \
             "$BOT" "$HEAD40" > "$TMP/nobody.json"
     else
-        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1"}]' \
+        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z"}]' \
             "$BOT" "$HEAD40" > "$TMP/nobody.json"
     fi
     out="$(GH_REVIEWS="$TMP/nobody.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
@@ -178,6 +178,40 @@ for nobody in 'null' '""x'; do
         && pass "blocked-body: a matching review with no readable body => 2" \
         || die "missing body ($nobody) gave rc=$rc out='$out'"
 done
+
+# ── a SUPERSEDED request is not an active finding ─────────────────────────
+# Filtering on state alone printed a request the reviewer had already withdrawn
+# by approving the same head — sending the driver into another fix round after a
+# signoff.
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"looks good now"}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/superseded.json"
+out="$(GH_REVIEWS="$TMP/superseded.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$out" ]; } \
+    && pass "blocked-body: a request superseded by a later approval is not printed" \
+    || die "superseded request still printed (rc=$rc out='$out')"
+
+# …and the reverse: a request that came AFTER an approval is still active.
+printf '[{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"fine"},{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"actually, change Y"}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/relatest.json"
+out="$(GH_REVIEWS="$TMP/relatest.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'change Y'; } \
+    && pass "blocked-body: a request newer than an approval is still active" \
+    || die "the latest request was suppressed (rc=$rc out='$out')"
+
+# ── findings carry the thread id the driver has to resolve ────────────────
+# path:line is not an identifier: two unresolved comments can share a line, and a
+# fix commit shifts the lines anyway.
+page false null "$NODE_OK" > "$TMP/p1.json"
+out="$(GH_PAGE1="$TMP/p1.json" run list 7 2>&1)"
+printf '%s' "$out" | grep -q 'thread=T_1' \
+    && pass "list: each finding carries its thread id" \
+    || die "no thread id in the findings output: $out"
+printf '%s' "$out" | grep -q 'thread=T_2' \
+    && die "list: printed a resolved thread's id" || pass "list: only unresolved threads are listed"
+# A node without an id is malformed: the driver would have nothing to resolve.
+page false null '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/noid.json"
+out="$(GH_PAGE1="$TMP/noid.json" run list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "list: a thread with no id => 2" || die "missing thread id gave rc=$rc"
 
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?

@@ -162,9 +162,17 @@ grep -q 'pr-findings.sh list' "$SKILL" \
 grep -q 'pr-findings.sh blocked-body' "$SKILL" \
     && pass "the blocked-review body is delegated to the same script" \
     || die "the blocked-body fetch is inline again"
-grep -q 'FIND_RC' "$SKILL" \
-    && pass "the driver branches on the findings read's status" \
-    || die "the findings read's status is not acted on"
+grep -q 'FIND_RC=\$?' "$SKILL" \
+    && pass "the driver captures the findings read's status" \
+    || die "the findings read's status is not captured"
+# The blocked-body read needs the same contract: it is the ONLY path that can
+# surface a body-only request, so an unreadable one must not read as "no body".
+# The ASSIGNMENT, not the prose: the paragraph below the command also names
+# BODY_RC, so a bare grep for the word passes even when the status is not
+# captured at all.
+grep -q 'BODY_RC=\$?' "$SKILL" \
+    && pass "the driver captures the blocked-body read's status" \
+    || die "the blocked-body read's status is not captured"
 
 # The round boundary must be checked BEFORE the re-request, or the next review is
 # already sent by the time the operator is asked.
