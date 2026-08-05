@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# review-bus-merge-range.sh — may the head be merged on a Codex signoff that was
-# given for an EARLIER commit?
+# pr-merge-range.sh — may the head be merged on a review signoff that was given
+# for an EARLIER commit?
 #
-#   review-bus-merge-range.sh <reviewed_sha> <head_oid> [repo_dir]
+#   pr-merge-range.sh <reviewed_sha> <head_oid> [repo_dir]
 #
 #   0  every commit in reviewed..head carries a `Review-Phase: copilot` trailer,
-#      so the head advanced only through the Copilot fix loop that Codex is
-#      deliberately not re-run on.
+#      so the head advanced only through the review fix loop.
 #   1  an intervening commit carries no such trailer, or the reviewed SHA is not
-#      an ancestor of the head. Codex never vetted this head — do NOT merge.
+#      an ancestor of the head — unreviewed work reached this head. Do NOT merge.
 #   2  the range could not be inspected. Callers MUST fail closed.
 #
 # This lived inline in SKILL.md, where it had two defects that no test could

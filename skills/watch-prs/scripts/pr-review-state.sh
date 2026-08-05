@@ -13,11 +13,17 @@
 #   pr-review-state.sh state  <pr> <reviewer-login> [head-oid]
 #   pr-review-state.sh verdict <pr> <reviewer-login> [head-oid]
 #
-# `state` prints one of: none | pending | blocked | dismissed | reviewed
-# `verdict` prints `clean`, `findings:<n>`, `changed`, or the blocking state, and
-# exits 0 only for `clean`.
+# Both print ONE structured line, `PR_REVIEW_STATE pr=… sha=… reviewer=… …`:
 #
-# Exit codes: 0 = clean / state printed · 1 = not clean · 2 = cannot tell.
+#   state    …  state=none|pending|blocked|dismissed|reviewed
+#   verdict  …  verdict=clean findings=0
+#            …  verdict=findings findings=<n>
+#            …  verdict=none reason=<pending|dismissed|blocked|review_state_changed>
+#            …  verdict=error reason=<unreadable|head_lookup_failed>
+#
+# Exit codes: 0 = clean, or the state line was printed · 1 = not clean ·
+# 2 = cannot tell. Callers branch on the STATUS; the `reason=` field says why,
+# and is diagnostic rather than something to parse for control flow.
 #
 # `set -uo pipefail`, NOT `-e`: several `gh` probes fail as normal operation and
 # the subcommands use exit status as control flow. See CLAUDE.md § Bash
