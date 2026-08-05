@@ -1124,7 +1124,18 @@ if [ -f "$REPO_ROOT/CHANGELOG.md" ] && [ -f "$REPO_ROOT/.claude-plugin/plugin.js
         || die "manifest versions differ: claude=$man_ver codex=$cdx_ver"
     # The version this entry names as the preserving release must be a release
     # that EXISTS in this file and actually introduces model_summary.
-    prereq="$(sed -n '1,20p' "$CHLOG" | grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+ preserved the note' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    # The WHOLE newest section, to the next heading - not a fixed line window. A
+    # `sed -n '1,20p'` window put the reference on line 21 out of scope, so this
+    # guard reported "nothing to check" and validated nothing, which is worse than
+    # not having it: a green tick over an unverified claim.
+    newest_section="$(awk '/^## \[/{n++} n==1{print} n==2{exit}' "$CHLOG")"
+    prereq="$(printf '%s\n' "$newest_section" | grep -m1 -oE '[0-9]+\.[0-9]+\.[0-9]+ preserved the note' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    # And the reference must EXIST. This release documents a reader whose whole
+    # premise is a field an earlier release provides; silently tolerating no
+    # reference is how the prerequisite chain goes unchecked.
+    [ -n "$prereq" ] \
+        && pass "the newest release states which version preserved the note ($prereq)" \
+        || die "the newest release section states no preserving-release prerequisite"
     if [ -n "$prereq" ]; then
         grep -q "^## \[$prereq\]" "$CHLOG" \
             && pass "the named preserving release ($prereq) exists in the CHANGELOG" \
@@ -1135,8 +1146,6 @@ if [ -f "$REPO_ROOT/CHANGELOG.md" ] && [ -f "$REPO_ROOT/.claude-plugin/plugin.js
             inblk { print }' "$CHLOG" | grep -q 'model_summary' \
             && pass "the named preserving release ($prereq) is the one that introduces model_summary" \
             || die "$prereq is named as preserving the note but its section never mentions model_summary"
-    else
-        pass "no explicit preserving-release reference to check"
     fi
 fi
 
@@ -1337,9 +1346,23 @@ rc_st=0
 out_st2="$(PATH="$FAULT_BIN:$PATH" FAULT_SHA_FILE="resp-6b8ffa2.json" \
            BUS_DIR="$STALE_BUS" MONITOR_EMITTED_DIR="$TMP/emstale2" \
            "$MONITOR" --once 2>/dev/null)" || rc_st=$?
-[ "$rc_st" -ne 0 ] \
-    && pass "a failed stale suppression exits non-zero (the live loop must not run)" \
-    || die "a failed stale suppression was reported as success"
+# `--once` keeps its DOCUMENTED exit 0 even here. SKILL.md tells the driver to
+# branch on the LINES, not the status, and says --once exits 0 after a sentinel;
+# one exception would make that contract false where a driver cannot see it.
+[ "$rc_st" -eq 0 ] \
+    && pass "--once still exits 0 after a stale-suppression failure (documented contract)" \
+    || die "--once exited $rc_st, contradicting the documented exit-0 contract"
+err_st="$(PATH="$FAULT_BIN:$PATH" FAULT_SHA_FILE="resp-6b8ffa2.json" \
+          BUS_DIR="$STALE_BUS" MONITOR_EMITTED_DIR="$TMP/emstale3" \
+          "$MONITOR" --once 2>&1 >/dev/null || true)"
+printf '%s' "$err_st" | grep -q 'MONITOR_FATAL' \
+    && pass "the failure is still announced on stderr (MONITOR_FATAL)" \
+    || die "the stale-suppression failure was not announced: $err_st"
+# The LIVE watch is what must refuse to start - that is where the next sweep
+# would emit the superseded handoff.
+grep -q 'if \[ "\$ONCE" -ne 1 \]; then' "$MONITOR" \
+    && pass "only the live watch exits non-zero on a stale-suppression failure" \
+    || die "the monitor does not distinguish --once from the live watch here"
 printf '%s' "$out_st2" | grep -q 'stale_suppression_failed' \
     && pass "the failure names itself (stale_suppression_failed)" \
     || die "the failed suppression emitted no distinguished error: $out_st2"
@@ -1387,7 +1410,11 @@ assert_last_resp() {   # <label> <bus-dir> <expected-path> [env assignments...]
     local line out
     out="$(env "$@" BUS_DIR="$bus" MONITOR_EMITTED_DIR="$(mktemp -d)" "$MONITOR" --once 2>/dev/null || true)"
     line="$(printf '%s\n' "$out" | grep -m1 'BUSTEST_REVIEW_PARSE_ERROR' || true)"
-    [ -n "$line" ] || { die "$label: no sentinel emitted"; return; }
+    # `return 0`, never a bare `return`: the base-ref Bash policy requires every
+    # return to state a value, and a bare one here inherits whatever status `die`
+    # happens to end on - making this helper depend on die's implementation, and
+    # able to kill the suite under `set -Eeuo pipefail` if that ever changes.
+    [ -n "$line" ] || { die "$label: no sentinel emitted"; return 0; }
     [ "${line##*resp=}" = "$want" ] \
         && pass "$label: the last resp= token is exactly the response path" \
         || die "$label: last-resp= gave '${line##*resp=}' (want '$want')"
@@ -1405,6 +1432,62 @@ assert_last_resp "note_not_a_nonempty_string" "$NOTE_BAD_BUS" "$NOTE_BAD_BUS/res
 TRUNC_BUS="$TMP/lastresptrunc"; mkdir -p "$TRUNC_BUS/responses"
 printf '%s' '{"pr":7,"sha":"ba600de","status":"appro' > "$TRUNC_BUS/responses/resp-ba600de.json"
 assert_last_resp "truncated response" "$TRUNC_BUS" "$TRUNC_BUS/responses/resp-ba600de.json"
+
+
+# ── a digest failure is reportable even if the SOURCE moved ────────────────
+# The digest is taken from the snapshot, a private copy, so probing the mutable
+# source path could not explain the failure - it only provided an escape: a
+# hasher fault that raced a moved response made `--once` exit 0 with no output.
+MOVED_BUS="$TMP/movedbus"; mkdir -p "$MOVED_BUS/responses" "$TMP/movedbin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$MOVED_BUS/responses/resp-ba600de.json"
+cat > "$TMP/movedbin/sha256sum" <<SH
+#!/usr/bin/env bash
+# Fault the SNAPSHOT hash and move the original out from under the call.
+if [ -n "\${FAULT_MOVED:-}" ]; then
+    mv "$MOVED_BUS/responses/resp-ba600de.json" "$MOVED_BUS/gone.json" 2>/dev/null || true
+    exit 7
+fi
+exec /usr/bin/sha256sum "\$@"
+SH
+chmod +x "$TMP/movedbin/sha256sum"
+rc_mv=0
+out_mv="$(PATH="$TMP/movedbin:$PATH" FAULT_MOVED=1 BUS_DIR="$MOVED_BUS" \
+          MONITOR_EMITTED_DIR="$TMP/emmoved" "$MONITOR" --once 2>/dev/null)" || rc_mv=$?
+printf '%s' "$out_mv" | grep -q 'reason=digest_failed' \
+    && pass "a snapshot-hash failure reports digest_failed even if the source moved" \
+    || die "the moved-source hash failure produced no sentinel (rc=$rc_mv out='$out_mv')"
+mv "$MOVED_BUS/gone.json" "$MOVED_BUS/responses/resp-ba600de.json" 2>/dev/null || true
+
+# ── a formatter fault must not delete a marker it never claimed ────────────
+# The claim happens after formatting, so `rm -f "$marker"` on the failure path
+# deleted the marker an EARLIER successful sweep had written - and once the fault
+# cleared, the same handoff was emitted a second time.
+DUP_BUS="$TMP/dupbus"; mkdir -p "$DUP_BUS/responses" "$TMP/dupbin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$DUP_BUS/responses/resp-ba600de.json"
+cat > "$TMP/dupbin/jq" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${FAULT_FMT2:-}" ] && printf '%s' "$*" | grep -q '_REVIEW pr='; then
+    exit 7
+fi
+exec /usr/bin/jq "$@"
+SH
+chmod +x "$TMP/dupbin/jq"
+DUP_EMIT="$TMP/dupemit"
+d1="$(BUS_DIR="$DUP_BUS" MONITOR_EMITTED_DIR="$DUP_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW pr=7 ' || true)"
+[ "$d1" -eq 1 ] && pass "first sweep delivers the response once" || die "first sweep emitted $d1 handoffs"
+marker_count_before="$(ls -A "$DUP_EMIT" 2>/dev/null | wc -l)"
+PATH="$TMP/dupbin:$PATH" FAULT_FMT2=1 BUS_DIR="$DUP_BUS" MONITOR_EMITTED_DIR="$DUP_EMIT" \
+    "$MONITOR" --once >/dev/null 2>&1 || true
+marker_count_after="$(ls -A "$DUP_EMIT" 2>/dev/null | wc -l)"
+[ "$marker_count_after" -ge "$marker_count_before" ] \
+    && pass "a formatter fault deletes no pre-existing marker" \
+    || die "the formatter fault removed a marker it never claimed ($marker_count_before -> $marker_count_after)"
+d3="$(BUS_DIR="$DUP_BUS" MONITOR_EMITTED_DIR="$DUP_EMIT" "$MONITOR" --once 2>/dev/null | grep -c 'BUSTEST_REVIEW pr=7 ' || true)"
+[ "$d3" -eq 0 ] \
+    && pass "after the fault clears the response is not re-emitted (marker intact)" \
+    || die "the same handoff was emitted again after the fault ($d3)"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

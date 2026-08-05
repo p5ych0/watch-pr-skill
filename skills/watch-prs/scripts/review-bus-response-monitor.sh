@@ -349,13 +349,16 @@ emit_response() {
     # faulting hasher indistinguishable from an empty responses dir, and the
     # digest is load-bearing: the ack gate, the emit marker and `--note`'s
     # verification are all keyed on it, so a partial or absent value must stop
-    # the emit loudly. The ONE genuine no-op is the response having disappeared,
-    # which is verified rather than assumed.
+    # the emit loudly.
+    #
+    # No "did the original vanish?" escape here: the digest is taken from the
+    # SNAPSHOT, a private copy that already exists, so the mutable source path
+    # says nothing about why hashing it failed. Probing `$file` let a hasher fault
+    # that raced a moved response return silently - `--once` exited 0 with no
+    # output, indistinguishable from an empty queue. The disappearance no-op
+    # belongs to snapshot_response, which is the step that actually reads `$file`.
     if ! digest="$(response_digest "$snapf")"; then
         rm -f "$snapf" 2>/dev/null || true
-        if [ ! -e "$file" ]; then
-            return 0            # vanished mid-sweep: a real no-op, not a failure
-        fi
         emit_sentinel "$file" "nodigest" digest_failed
         return 0
     fi
@@ -490,6 +493,10 @@ emit_response() {
           "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\"\(.summary // "" | gsub("[^\\u0020-\\u007e]"; " ") | gsub("\""; " ") | .[0:200])\" digest=\($digest) resp=" + $path
         ' <<< "$snap" 2>/dev/null
     )"; then
+        # No marker cleanup: the claim happens further down, so this invocation
+        # holds nothing to release - and `rm -f` here deleted the marker an
+        # EARLIER successful sweep had written, which made the same handoff emit a
+        # second time once the fault cleared.
         printf '%s_REVIEW_PARSE_ERROR reason=format_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
@@ -520,7 +527,7 @@ emit_response() {
     # unlike the content reasons. Claiming the digest here retired a valid
     # response for the whole session.
     if [ -z "$line" ]; then
-        rm -f "$marker" 2>/dev/null || true
+        # Same reasoning as the format failure above: nothing was claimed here.
         printf '%s_REVIEW_PARSE_ERROR reason=empty_line resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
@@ -747,7 +754,18 @@ replay_existing || replay_rc=$?
 # state where the next thing emitted is known-wrong.
 if [ "$replay_rc" -ne 0 ]; then
     echo "MONITOR_FATAL reason=stale_suppression_failed; not entering the live watch" >&2
-    exit 1
+    # `--once` keeps its DOCUMENTED exit 0. SKILL.md tells the driver to branch on
+    # the lines and not the exit status, and it says `--once` exits 0 after a
+    # sentinel; a special case here would make that contract false for one reason
+    # out of ten, which is worse than no contract. The sentinel is already on
+    # stdout and MONITOR_FATAL on stderr, so nothing is hidden.
+    #
+    # The LIVE watch still refuses to start: its next sweep would emit the
+    # superseded handoff, and exiting non-zero is what makes systemd restart the
+    # unit and re-attempt the suppression.
+    if [ "$ONCE" -ne 1 ]; then
+        exit 1
+    fi
 fi
 
 # Surface any review that is STILL in flight as state=resumed (a monitor that

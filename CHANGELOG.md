@@ -130,6 +130,26 @@
   of what ships. The base-ref design requires S2b to retire that interim
   paragraph; it does, and the prompt-scope assertions invert with it.
 
+- **A digest failure is reported even when the source moved.** The digest is
+  taken from the private snapshot, so probing the mutable response path could not
+  explain a hashing failure - it only supplied an escape: a hasher fault racing a
+  moved response made `--once` exit 0 with no output, indistinguishable from an
+  empty queue. The disappearance no-op belongs to the snapshot step, which is the
+  one that actually reads the source.
+
+- **A failing sweep no longer deletes another sweep's marker.** The emit marker
+  is claimed after formatting, so the `rm -f` on the format and empty-line
+  failure paths released a marker this invocation never held - erasing the record
+  written by an EARLIER successful sweep, so the same handoff was delivered twice
+  once the fault cleared. Neither path touches the marker now.
+
+- **`--once` keeps its documented exit 0.** The stale-suppression failure exited
+  non-zero even in `--once`, contradicting the contract `SKILL.md` ships - and a
+  contract that is false for one reason out of ten is worse than none, because a
+  driver cannot see which. `--once` exits 0 with the sentinel on stdout and
+  `MONITOR_FATAL` on stderr; the LIVE watch still refuses to start, which is
+  where the superseded handoff would actually be emitted.
+
 ## [1.0.13] — 2026-08-04
 
 - **Fix: the reviewer's own summary was discarded whenever a review reported
