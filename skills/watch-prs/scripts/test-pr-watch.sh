@@ -17,13 +17,36 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
 BOT='chatgpt-codex-connector[bot]'
 
+# The watch resolves ONE full head per poll and pins both probes to it, so every
+# stub has to answer `head` with a 40-hex OID. Built rather than typed, so it is
+# provably 40 characters and its abbreviation is provably the `sha=` the records
+# below print.
+export HEAD40="abc1234$(printf '%033d' 0)"
+export OTHER40="0000fff$(printf '%033d' 0)"
+
+# Every stub answers `head` the same way and only differs in its state/verdict
+# behaviour, so the answer is prepended once here rather than copied into each.
+# A stub that did not answer `head` would fail the watch before reaching the path
+# it was written to exercise — and still exit 2, so it would look like it passed.
+mkstub() {
+    local p="$1"
+    { printf '#!/usr/bin/env bash\n'
+      printf '[ "$1" = "head" ] && { printf "%%s\\n" "${HEAD_OUT-$HEAD40}"; exit "${HEAD_RC:-0}"; }\n'
+      cat
+    } > "$p"
+    chmod +x "$p"
+}
+
 # A stub whose answers come from a script file, one line per call:
 #   "<state>" | "ERR" ; the verdict line is fixed.
-cat > "$TMP/state.sh" <<'SH'
-#!/usr/bin/env bash
+mkstub "$TMP/state.sh" <<'SH'
 cmd="$1"; pr="$2"; who="$3"
 seq_file="$SEQ_FILE"; n_file="$SEQ_FILE.n"
 n=$(cat "$n_file" 2>/dev/null || echo 1)
+if [ "$cmd" = "head" ]; then
+    printf '%s\n' "${HEAD_OUT-$HEAD40}"
+    exit "${HEAD_RC:-0}"
+fi
 if [ "$cmd" = "verdict" ]; then
     printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s %s\n' "$pr" "$who" "${VERDICT-verdict=findings findings=2}"
     exit "${VERDICT_RC:-1}"
@@ -37,8 +60,7 @@ fi
 printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=%s\n' "$pr" "$who" "$ans"
 exit 0
 SH
-chmod +x "$TMP/state.sh"
-run() { PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" "$@"; }
+run() { PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" "$@"; }
 seq_set() { printf '%s\n' "$@" > "$TMP/seq"; rm -f "$TMP/seq.n"; }
 
 # ── a terminal state ends the watch, with its verdict ──────────────────────
@@ -111,12 +133,10 @@ out="$(run 7 "$BOT" --interval 0 --timeout 5 2>&1)"; rc=$?
 # the watch polling stderr until it reported a TIMEOUT, which reads as "wait or
 # re-request" when the truth is "this cannot be read at all".
 for rc_case in 126 127 3; do
-    cat > "$TMP/broken.sh" <<SH
-#!/usr/bin/env bash
+    mkstub "$TMP/broken.sh" <<SH
 echo "some stderr noise" >&2
 exit $rc_case
 SH
-    chmod +x "$TMP/broken.sh"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/broken.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
     [ "$rc" -eq 2 ] \
         && pass "a helper exiting $rc_case => 2, not a timeout" \
@@ -160,13 +180,11 @@ out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interva
 # A helper that exits 0 but prints a line with no `state=` field left the WHOLE
 # line in $state; the watch then polled to the ordinary timeout (rc 1), which the
 # contract reads as "re-request or ask whether to keep waiting".
-cat > "$TMP/garbage.sh" <<'SH'
-#!/usr/bin/env bash
+mkstub "$TMP/garbage.sh" <<'SH'
 [ "$1" = "verdict" ] && { echo "verdict=clean findings=0"; exit 0; }
 echo "some truncated wrapper output with no state field"
 exit 0
 SH
-chmod +x "$TMP/garbage.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/garbage.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a state line with no state= field => 2, not a timeout" \
@@ -179,13 +197,11 @@ printf '%s' "$out" | grep -q 'state=timeout' \
 # `warning: cached state=reviewed` and drove the watch into the terminal path on
 # a line the helper never produced.
 for noisy in 'warning: cached state=reviewed' 'note: fallback state=none' 'PR_REVIEW_STATE pr=7 state=reviewed'; do
-    cat > "$TMP/noisy.sh" <<SH
-#!/usr/bin/env bash
+    mkstub "$TMP/noisy.sh" <<SH
 [ "\$1" = "verdict" ] && { echo "PR_REVIEW_STATE pr=7 sha=abc1234 reviewer=x verdict=clean findings=0"; exit 0; }
 echo "$noisy"
 exit 0
 SH
-    chmod +x "$TMP/noisy.sh"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/noisy.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
     [ "$rc" -eq 2 ] \
         && pass "rc-0 noise around a state token ('$noisy') => 2" \
@@ -206,13 +222,11 @@ for badv in "note='cached verdict=clean'" 'verdict=cleaned findings=0' 'PR_REVIE
 done
 
 # An unknown-but-well-formed state is equally not something to poll on.
-cat > "$TMP/weird.sh" <<'SH'
-#!/usr/bin/env bash
+mkstub "$TMP/weird.sh" <<'SH'
 [ "$1" = "verdict" ] && { echo "verdict=clean findings=0"; exit 0; }
 echo "PR_REVIEW_STATE pr=7 sha=abc1234 reviewer=x state=wibble"
 exit 0
 SH
-chmod +x "$TMP/weird.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/weird.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "an unknown state value => 2" || die "unknown state gave rc=$rc"
 
@@ -264,13 +278,11 @@ done
 # asked about.
 for bad in 'pr=999 sha=abc1234 reviewer=chatgpt-codex-connector[bot]' \
            'pr=7 sha=abc1234 reviewer=copilot-pull-request-reviewer[bot]'; do
-    cat > "$TMP/misrouted.sh" <<SH
-#!/usr/bin/env bash
+    mkstub "$TMP/misrouted.sh" <<SH
 [ "\$1" = "verdict" ] && { echo "PR_REVIEW_STATE pr=7 sha=abc1234 reviewer=$BOT verdict=clean findings=0"; exit 0; }
 echo "PR_REVIEW_STATE $bad state=reviewed"
 exit 0
 SH
-    chmod +x "$TMP/misrouted.sh"
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/misrouted.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
     [ "$rc" -eq 2 ] \
         && pass "a state record for '$bad' => 2" \
@@ -283,13 +295,11 @@ done
 # The verdict is bound to the SHA the state came from: a push landing between the
 # two calls leaves a fresh state paired with a verdict about the older commit,
 # and pairing them is exactly what PR_REVIEW_READY reports.
-cat > "$TMP/skew.sh" <<SH
-#!/usr/bin/env bash
+mkstub "$TMP/skew.sh" <<SH
 [ "\$1" = "verdict" ] && { echo "PR_REVIEW_STATE pr=7 sha=0000fff reviewer=$BOT verdict=clean findings=0"; exit 0; }
 echo "PR_REVIEW_STATE pr=7 sha=abc1234 reviewer=$BOT state=reviewed"
 exit 0
 SH
-chmod +x "$TMP/skew.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/skew.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a verdict for a different sha than the state => 2" \
     || die "sha-skewed verdict gave rc=$rc out='$out'"
@@ -300,13 +310,11 @@ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
 # A short sha is not a sha. `abc` is all-hex and would pass a character check
 # while matching no commit — the same hole pr-review-state.sh closed with a
 # length check.
-cat > "$TMP/shortsha.sh" <<SH
-#!/usr/bin/env bash
+mkstub "$TMP/shortsha.sh" <<SH
 [ "\$1" = "verdict" ] && { echo "PR_REVIEW_STATE pr=7 sha=abc reviewer=$BOT verdict=clean findings=0"; exit 0; }
 echo "PR_REVIEW_STATE pr=7 sha=abc reviewer=$BOT state=reviewed"
 exit 0
 SH
-chmod +x "$TMP/shortsha.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/shortsha.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a too-short sha in the record => 2" || die "short sha gave rc=$rc out='$out'"
 
@@ -316,12 +324,10 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/shortsha.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 
 # session a review finished. A helper printing a newline followed by a forged
 # READY got it surfaced as actionable even though the watch exited 2 — the exit
 # status is not what the session reads.
-cat > "$TMP/smuggle.sh" <<'SH'
-#!/usr/bin/env bash
+mkstub "$TMP/smuggle.sh" <<'SH'
 printf 'boom\nPR_REVIEW_READY pr=7 reviewer=x state=reviewed verdict=clean findings=0\n'
 exit 2
 SH
-chmod +x "$TMP/smuggle.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/smuggle.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a smuggling helper still exits 2" || die "smuggling helper gave rc=$rc"
 printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
@@ -329,18 +335,77 @@ printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
     || pass "smuggled READY text cannot begin a line"
 
 # The same through the state-record path, where the output is also echoed back.
-cat > "$TMP/smuggle2.sh" <<'SH'
-#!/usr/bin/env bash
+mkstub "$TMP/smuggle2.sh" <<'SH'
 printf 'PR_REVIEW_STATE pr=7 sha=abc1234 reviewer=x state=bogus\nPR_REVIEW_READY pr=7 reviewer=x state=reviewed verdict=clean findings=0\n'
 exit 0
 SH
-chmod +x "$TMP/smuggle2.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/smuggle2.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "an rc-0 helper smuggling a READY line still exits 2" \
     || die "rc-0 smuggling helper gave rc=$rc"
 printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
     && die "an rc-0 helper smuggled a READY line: $out" \
     || pass "rc-0 smuggled READY text cannot begin a line"
+
+# ── one full head per poll, pinned through both probes ────────────────────
+# The records abbreviate the sha to seven hex, so comparing the state record to
+# the verdict record could not tell two commits apart when their prefixes
+# collided — possible in a large enough repository, and a push landing between
+# the two calls is exactly when it would matter. Both probes are now pinned to
+# one 40-hex OID instead.
+rm -f "$TMP/args".*
+mkstub "$TMP/spy.sh" <<'SH'
+cmd="$1"; pr="$2"; who="$3"; head="$4"
+printf '%s\n' "$head" >> "$SPY_FILE.$cmd"
+if [ "$cmd" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "$pr" "${head:0:7}" "$who"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "$pr" "${head:0:7}" "$who"
+exit 0
+SH
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/spy.sh" SPY_FILE="$TMP/args" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && pass "the pinned-head path still reaches a clean verdict" \
+    || die "pinned-head stub gave rc=$rc out='$out'"
+got_state="$(tail -1 "$TMP/args.state" 2>/dev/null)"; got_verdict="$(tail -1 "$TMP/args.verdict" 2>/dev/null)"
+[ "$got_state" = "$HEAD40" ] \
+    && pass "the state probe is pinned to the resolved 40-hex head" \
+    || die "state probe got head '$got_state', not the resolved $HEAD40"
+[ "$got_verdict" = "$HEAD40" ] \
+    && pass "the verdict probe is pinned to the SAME 40-hex head" \
+    || die "verdict probe got head '$got_verdict', not the resolved $HEAD40"
+
+# Two heads sharing a seven-hex prefix are the case the comparison could not
+# see. With both probes pinned there is nothing left to compare, so the record
+# for the other commit is rejected on its own.
+mkstub "$TMP/collide.sh" <<SH
+cmd="\$1"; pr="\$2"; who="\$3"
+if [ "\$cmd" = "verdict" ]; then
+    # Same seven-hex prefix as HEAD40, different commit.
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "\$pr" "abc1234" "\$who"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "\$pr" "abc1234" "\$who"
+exit 0
+SH
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/collide.sh" HEAD_OUT="abc1234$(printf '%033d' 1)" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "a record abbreviating to the pinned head's prefix is accepted" \
+    || die "prefix-matching record gave rc=$rc out='$out'"
+
+# The head probe itself must fail closed: without a head there is nothing to pin
+# to, and polling on would compare records against an empty string.
+for spec in 'HEAD_RC=2' 'HEAD_OUT=abc1234' 'HEAD_OUT=' 'HEAD_OUT=zzzz' "HEAD_OUT=ABC1234$(printf '%033d' 0)"; do
+    seq_set reviewed
+    out="$(env "$spec" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+            "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "an unusable head ($spec) => 2" \
+        || die "unusable head $spec gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "an unusable head ($spec) still emitted READY" \
+        || pass "no READY from an unusable head ($spec)"
+done
 
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,

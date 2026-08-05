@@ -213,6 +213,39 @@ page false null '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{
 out="$(GH_PAGE1="$TMP/noid.json" run list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "list: a thread with no id => 2" || die "missing thread id gave rc=$rc"
 
+# ── a GraphQL 200 carrying `errors` is not a response ─────────────────────
+# GraphQL answers 200 with BOTH `errors` and a structurally valid `data` when it
+# resolves part of a query. The partial data passes every shape check, so a
+# silently short findings list is indistinguishable from a shorter review — and
+# the driver replies to, resolves and summarises against exactly that list.
+printf '{"errors":[{"message":"Something went wrong"}],"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}' \
+    > "$TMP/partial.json"
+out="$(GH_PAGE1="$TMP/partial.json" run list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: a partial response carrying GraphQL errors => 2" \
+    || die "a page with .errors and valid data gave rc=$rc out='$out'"
+
+# The same when the partial data still contains findings — the danger is the ones
+# it left out, so a non-empty list is not evidence the read was complete.
+printf '{"errors":[{"message":"timeout"}],"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":%s}}}}}' \
+    "$NODE_OK" > "$TMP/partial2.json"
+out="$(GH_PAGE1="$TMP/partial2.json" run list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: errors alongside real findings still => 2" \
+    || die "partial page with findings gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'thread=T_1' \
+    && die "a partial page's findings were printed as if complete" \
+    || pass "list: nothing is printed from a partial page"
+
+# `errors: []` is not an error — GitHub does not send it, but treating any
+# `errors` key as fatal regardless of contents would be a different bug.
+printf '{"errors":[],"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":%s}}}}}' \
+    "$NODE_OK" > "$TMP/emptyerr.json"
+out="$(GH_PAGE1="$TMP/emptyerr.json" run list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: an empty errors array is still refused (fail closed)" \
+    || die "empty errors array gave rc=$rc out='$out'"
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"

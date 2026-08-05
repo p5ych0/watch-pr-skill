@@ -47,22 +47,27 @@ sha() { printf '%s' "$1" | sha1sum | cut -c1-40; }
 # value through untouched, for the cases that feed a deliberately bad one.
 iso() { printf '"2026-01-%02dT00:00:00Z"' "$(( ($1 - 1) % 28 + 1 ))"; }
 
-# Build a reviews list: each argument is "<login>|<commit-tag>|<submitted_at|null>".
+# Build a reviews list. Each argument is
+#   "<login>|<commit-tag>|<submitted_at|null>[|<state-json>]"
+# where the optional fourth field is the raw JSON for `state` — it defaults to a
+# plain submitted review, and the state cases below override it.
 mk() {
-    local first=1 n=0
+    local first=1 n=0 who c sub st
     { printf '['
       for spec in "$@"; do
-          who="${spec%%|*}"; rest="${spec#*|}"; c="$(sha "${rest%%|*}")"; sub="${rest##*|}"
+          IFS='|' read -r who tag sub st <<<"$spec"
+          c="$(sha "$tag")"
           n=$((n + 1))
           case "$sub" in
               null)   ;;
               RAW:*)  sub="${sub#RAW:}" ;;
               *)      sub="$(iso "$n")" ;;
           esac
+          [ -n "$st" ] || st='"COMMENTED"'
           [ "$first" -eq 1 ] || printf ','
           first=0
-          printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":%s,"state":"COMMENTED","id":1}' \
-              "$who" "$c" "$sub"
+          printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":%s,"state":%s,"id":1}' \
+              "$who" "$c" "$sub" "$st"
       done
       printf ']'
     } > "$TMP/reviews.json"
@@ -206,6 +211,46 @@ for good in '"2026-01-02T03:04:05Z"' '"2026-01-02T03:04:05.123Z"' \
         && pass "submitted_at $good is a real round" \
         || die "valid ISO $good was rejected (rc=$rc out='$out')"
 done
+
+# ── `state` decides whether a record is a finished pass ────────────────────
+# Counting on `submitted_at` alone meant a record with a null or unrecognised
+# state was still a reviewed head. One of those on a distinct full SHA turns a
+# true boundary of 10 into 11 and skips the operator pause.
+for badstate in 'null' '"WIBBLE"' '""' '123' '"approved"'; do
+    mk "$CODEX|aaa|t|$badstate"
+    out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "review state $badstate => 2, not a counted round" \
+        || die "state $badstate gave rc=$rc out='$out'"
+done
+
+# Every state GitHub actually returns for a submitted review is still a round.
+for goodstate in '"APPROVED"' '"CHANGES_REQUESTED"' '"COMMENTED"' '"DISMISSED"'; do
+    mk "$CODEX|aaa|t|$goodstate"
+    out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+        && pass "state $goodstate is a round" \
+        || die "valid state $goodstate was rejected (rc=$rc out='$out')"
+done
+
+# PENDING is a draft in flight, which is what pr-review-state.sh refuses to read
+# as a signoff — so it is not a round however its timestamp reads. Readable, so
+# it is a zero rather than an error.
+mk "$CODEX|aaa|t|\"PENDING\""
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=0'; } \
+    && pass "a PENDING draft is not a round" \
+    || die "PENDING counted as a round (rc=$rc out='$out')"
+
+# The case with the consequence: ten real rounds plus one bad-state record must
+# not report eleven and sail past the boundary.
+specs=(); for i in $(seq 1 10); do specs+=("$CODEX|c$i|t"); done
+specs+=("$CODEX|rogue|t|null")
+mk "${specs[@]}"
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a null-state record at the boundary fails closed instead of skipping the pause" \
+    || die "null-state record at the boundary gave rc=$rc out='$out' (0 = the pause was skipped)"
 
 # A genuinely empty list is a readable zero, not an error.
 printf '[]' > "$TMP/none.json"

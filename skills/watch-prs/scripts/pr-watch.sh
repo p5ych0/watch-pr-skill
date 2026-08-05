@@ -76,7 +76,25 @@ q() { printf '%q' "$1"; }
 waited=0
 last=""
 while :; do
-    line="$("$STATE_SCRIPT" state "$PR" "$WHO" 2>&1)"; rc=$?
+    # ONE head per poll, resolved first and passed to both probes.
+    #
+    # Letting each call resolve its own head made the state and the verdict
+    # describe different commits when a push landed between them, and comparing
+    # their printed `sha=` fields could not detect it: the records abbreviate to
+    # seven hex, and two heads can share a seven-hex prefix. Pinning both to a
+    # full 40-hex OID removes the comparison rather than tightening it.
+    #
+    # Resolved per POLL, not once per watch, so the watch still follows the head
+    # when a push lands between polls — which is the case it is there to notice.
+    head="$("$STATE_SCRIPT" head "$PR" 2>&1)"; hrc=$?
+    if [ "$hrc" -ne 0 ] || ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_unresolvable rc=%s detail=%s\n' \
+            "$PR" "$WHO" "$hrc" "$(q "$head")"
+        exit 2
+    fi
+    want_sha="${head:0:7}"
+
+    line="$("$STATE_SCRIPT" state "$PR" "$WHO" "$head" 2>&1)"; rc=$?
     if [ "$rc" -ne 0 ]; then
         # ANY non-zero status, not just the helper's documented 2. A missing or
         # non-executable helper exits 126/127, and treating that as a state left
@@ -108,10 +126,10 @@ while :; do
     # cache satisfied the pattern above and drove the loop into the terminal
     # verdict path for a review of a different PR by a different reviewer.
     #
-    # sha is not compared — this watch is never told which head it is waiting on,
-    # and the helper resolves it per poll — so it is bound to the VERDICT record
-    # below instead, which must describe the same commit the state came from.
-    if [ "$r_pr" != "$PR" ] || [ "$r_who" != "$WHO" ]; then
+    # Including the sha, which is now the head this poll pinned both probes to —
+    # so a record about any other commit is rejected outright rather than merely
+    # cross-checked against the other record.
+    if [ "$r_pr" != "$PR" ] || [ "$r_who" != "$WHO" ] || [ "$r_sha" != "$want_sha" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=record_identity_mismatch detail=%s\n' \
             "$PR" "$WHO" "$(q "$line")"
         exit 2
@@ -130,7 +148,7 @@ while :; do
         reviewed|blocked|dismissed)
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
-            verdict="$("$STATE_SCRIPT" verdict "$PR" "$WHO" 2>&1)"; vrc=$?
+            verdict="$("$STATE_SCRIPT" verdict "$PR" "$WHO" "$head" 2>&1)"; vrc=$?
             # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
             # documented 2, or a 126/127 if the helper stops being executable
             # between the two calls — is unreadable, and this is the same class
@@ -158,14 +176,12 @@ while :; do
                     "$PR" "$WHO" "$(q "$verdict")"
                 exit 2
             fi
-            # Same identity check as the state record, plus the sha: this pair of
-            # calls is what PR_REVIEW_READY reports, so a verdict describing
-            # another PR, another reviewer, or a DIFFERENT COMMIT than the state
-            # that reached the terminal branch is not an answer about this poll.
-            # The sha binding is what a push landing between the two calls looks
-            # like, and it must stop the watch rather than pair a fresh state with
-            # a stale verdict.
-            if [ "$v_pr" != "$PR" ] || [ "$v_who" != "$WHO" ] || [ "$v_sha" != "$r_sha" ]; then
+            # Same identity check as the state record, against the SAME pinned
+            # head — not against the state record's own field. Comparing the two
+            # records to each other could not tell two commits apart when their
+            # seven-hex prefixes collided; comparing both to the 40-hex OID this
+            # poll resolved cannot.
+            if [ "$v_pr" != "$PR" ] || [ "$v_who" != "$WHO" ] || [ "$v_sha" != "$want_sha" ]; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=verdict_identity_mismatch detail=%s\n' \
                     "$PR" "$WHO" "$(q "$verdict")"
                 exit 2

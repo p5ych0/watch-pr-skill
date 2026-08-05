@@ -49,6 +49,15 @@ cmd_list() {
         # enough: string interpolation renders a missing author or body as `null`
         # and still exits 0, so a malformed page would produce "null" finding text
         # that the driver would reply to, resolve, and summarise against.
+        # A GraphQL 200 can carry BOTH `errors` and a structurally valid `data`.
+        # The partial data satisfies every shape check below while silently
+        # omitting threads, so a short findings list would be indistinguishable
+        # from a shorter review — and the driver replies to, resolves and
+        # summarises against exactly that list.
+        printf '%s' "$page" | jq -e 'has("errors") | not' >/dev/null 2>&1 || {
+            echo "PR_FINDINGS pr=$pr status=error reason=graphql_errors" >&2
+            return 2
+        }
         nodes=$(printf '%s' "$page" | jq -e -r '
             .data.repository.pullRequest.reviewThreads.nodes as $n
             | if ($n | type) != "array"

@@ -260,6 +260,26 @@ grep -q '\[ "\$V_LINE" != "\$V_WANT" \]' "$SKILL" \
     && pass "the verdict records are compared literally, not as patterns" \
     || die "the verdict comparison would read [bot] as a character class"
 
+# A GraphQL 200 can carry both `errors` and structurally valid `data`. The
+# unresolved-thread count answers 0 on partial data, and 0 is merge permission —
+# taken with `--admin`, so nothing downstream catches the omitted thread.
+grep -q 'has("errors") | not' "$SKILL" \
+    && pass "the unresolved-thread gate refuses a response carrying GraphQL errors" \
+    || die "a partial GraphQL response can still produce UNRESOLVED=0"
+
+# The README must not advertise Copilot as optional while the gate requires it:
+# a user would install for a repository without Copilot and find out at merge
+# time that the loop cannot finish.
+if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
+    README="$SCRIPT_DIR/../../../README.md"
+    grep -qi 'if you want the second pass' "$README" \
+        && die "README still presents Copilot as optional while the gate requires it" \
+        || pass "README does not present Copilot as optional"
+    grep -qi 'required, not' "$README" \
+        && pass "README says plainly that Copilot is required" \
+        || die "README does not state that Copilot is required"
+fi
+
 # The head-state line is parsed, not substring-matched.
 grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
     && pass "the Codex head-state line is matched as a whole record" \

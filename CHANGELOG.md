@@ -71,6 +71,34 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **One head, resolved once and pinned through every probe.** The records
+  abbreviate the SHA to seven hex, so binding the state record to the verdict
+  record could not tell two commits apart when their prefixes collided — and a
+  push landing between the two calls is precisely when that would matter.
+  `pr-review-state.sh` grew a `head` subcommand returning the full 40-hex OID;
+  `pr-watch.sh` resolves it once per poll and passes it to both probes, so the
+  comparison is removed rather than tightened.
+
+- **A GraphQL 200 carrying `errors` is not a response.** GraphQL answers 200 with
+  *both* `errors` and structurally valid `data` when it resolves part of a query.
+  The partial data passed every shape check in the unresolved-thread gate, whose
+  answer is `UNRESOLVED=0` — merge permission, taken with `--admin`, so nothing
+  downstream would have caught the omitted thread. `pr-findings.sh list` had the
+  same hole, where a silently short list is indistinguishable from a shorter
+  review.
+
+- **A review's `state` decides whether it is a finished pass.** `pr-round-count.sh`
+  counted on `submitted_at` alone, so a record with a null or unrecognised state
+  was a reviewed head, and `PENDING` — a draft in flight, which
+  `pr-review-state.sh` refuses to read as a signoff — counted as a round. Both
+  inflate the count, which is the direction that skips the operator pause.
+
+- **Copilot is required, and the README now says so.** It was listed as a
+  prerequisite "if you want the second pass", while the merge gate demands a clean
+  verdict from both reviewers and the Copilot phase stops rather than skipping. A
+  user could install for a repository without Copilot and discover only at merge
+  time that the loop cannot finish. There is deliberately no skip switch.
+
 - **The verdict value, its field and the exit status must agree.** Requiring only
   the record shape accepted `verdict=clean` with no `findings=0`, and a clean
   record returned with rc 1 — which `PR_REVIEW_READY` then announced as a finished

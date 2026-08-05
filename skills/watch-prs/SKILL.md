@@ -402,6 +402,11 @@ while :; do
   PAGE=$(gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -F cursor="$CURSOR" -f query='
     query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
       reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor} nodes{isResolved} }}}}' 2>/dev/null) || { OK=0; break; }
+  # A GraphQL 200 can carry BOTH `errors` and a structurally valid `data`. The
+  # partial data passes every shape check below while silently omitting threads,
+  # and this gate's answer is `UNRESOLVED=0` — merge permission, taken with
+  # `--admin`. So a response carrying errors is not a response.
+  echo "$PAGE" | jq -e 'has("errors") | not' >/dev/null 2>&1 || { OK=0; break; }
   echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1 || { OK=0; break; }
   # `nodes:{}` and `nodes:[{}]` both make a naive count return 0 with status 0,
   # and 0 here is merge permission. Require an array of objects with a boolean

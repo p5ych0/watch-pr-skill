@@ -82,6 +82,14 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                # A blank or non-SHA commit_id counted as its own "distinct head",
                # which can turn a true boundary of 10 into 11 and skip the pause.
                or (.commit_id | test("^[0-9a-f]{40}$") | not)
+               # `state` decides whether a record is a finished pass, so it is
+               # validated rather than ignored. A null or unrecognised state was
+               # counted as a reviewed head on the strength of `submitted_at`
+               # alone — one such record on a distinct full SHA turns a true
+               # boundary of 10 into 11 and skips the operator pause. The known
+               # set is the one pr-review-state.sh judges against, so the two
+               # scripts cannot disagree about what a review is.
+               or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
                or ((.submitted_at | type) != "string" and .submitted_at != null)
                # `submitted_at != null` is what makes a record COUNT as a
                # submitted review below, so any old string satisfied it. A
@@ -97,8 +105,13 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                         | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
                         | not)))
         then error("malformed review record")
+        # A round is a FINISHED pass. `PENDING` is a draft in flight — the same
+        # thing pr-review-state.sh refuses to read as a signoff — so it is not a
+        # round however its `submitted_at` reads.
         else [ $all[]
-               | select((.user.login | IN($who[])) and .submitted_at != null)
+               | select((.user.login | IN($who[]))
+                        and .submitted_at != null
+                        and .state != "PENDING")
                | .commit_id ] | unique | length
         end
     end' 2>/dev/null) || {

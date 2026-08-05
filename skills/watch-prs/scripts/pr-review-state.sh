@@ -12,6 +12,12 @@
 # Usage:
 #   pr-review-state.sh state  <pr> <reviewer-login> [head-oid]
 #   pr-review-state.sh verdict <pr> <reviewer-login> [head-oid]
+#   pr-review-state.sh head   <pr> [reviewer-login]      -> the full 40-hex head
+#
+# `head` exists so a caller making more than one probe can pin them all to ONE
+# commit. The records print an abbreviated `sha=`, which is enough to read but
+# not enough to compare: two heads can share a seven-hex prefix, so a caller that
+# checked one record against another would accept two different commits.
 #
 # Both print ONE structured line, `PR_REVIEW_STATE pr=… sha=… reviewer=… …`:
 #
@@ -192,13 +198,16 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict) ;;
-        *) echo "usage: $0 {state|verdict} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head) ;;
+        *) echo "usage: $0 {state|verdict|head} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
     esac
-    [ -n "$who" ] || { echo "PR_REVIEW_STATE status=error reason=no_reviewer" >&2; exit 2; }
+    # `head` asks about the PR, not about a reviewer, so it needs no login.
+    if [ "$cmd" != "head" ]; then
+        [ -n "$who" ] || { echo "PR_REVIEW_STATE status=error reason=no_reviewer" >&2; exit 2; }
+    fi
 
     if [ -z "$head" ]; then
         head="$(pr_head_oid "$pr")" || {
@@ -218,6 +227,13 @@ main() {
     if [ "${#head}" -ne 40 ]; then
         echo "PR_REVIEW_STATE pr=$pr status=error reason=head_not_full_sha" >&2
         exit 2
+    fi
+
+    # Printed bare and in full: this is the value a caller pins its other probes
+    # to, so an abbreviation would put back the ambiguity it exists to remove.
+    if [ "$cmd" = "head" ]; then
+        printf '%s\n' "$head"
+        return 0
     fi
 
     local short="${head:0:7}" out rc=0

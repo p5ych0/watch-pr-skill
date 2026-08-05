@@ -54,7 +54,13 @@ The reviewers are told to put those in the **overall review body**, and to open 
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
   Until it is linked, `@codex` replies with a setup link instead of a review —
   that reply is the diagnostic.
-- Copilot code review available to the repository, if you want the second pass.
+- **Copilot code review available to the repository.** This is required, not
+  optional: the merge gate demands a clean verdict from *both* reviewers, and the
+  Copilot phase stops rather than skipping if the request cannot be made. On a
+  repository without Copilot the loop runs its Codex phase and then cannot
+  finish. There is deliberately no skip switch — a gate with a documented way
+  around it stops being a gate — so if you want a Codex-only loop, stop after the
+  Codex phase and merge by hand.
 
 No daemon, no `codex` CLI, no `inotify-tools`, no systemd.
 
