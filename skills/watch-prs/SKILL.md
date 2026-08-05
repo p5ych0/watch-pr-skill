@@ -101,74 +101,34 @@ as "no findings".
 Inline review comments are the findings. The review **body** is the reviewer's
 non-blocking channel and does not gate the merge — with one exception, below.
 
-**Paginate.** A truncated thread list reads exactly like a shorter review, and
-here that is worse than at the merge gate: you would reply, resolve and summarise
-against an incomplete set before any gate runs.
-
 ```bash
-CURSOR=null
-while :; do
-  PAGE=$(gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -F cursor="$CURSOR" -f query='
-    query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
-      reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
-        nodes{isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null)     || { echo "ABORT: thread fetch failed — do not act on a partial read"; break; }
-  echo "$PAGE" | jq -e '.data.repository.pullRequest.reviewThreads' >/dev/null 2>&1     || { echo "ABORT: thread page unreadable"; break; }
-  # `jq -e`, and its status checked: a page whose `nodes` or comment shape is
-  # malformed makes this projection exit non-zero, and an unchecked failure would
-  # fall through to the pagination test and read as "no more findings".
-  # The SHAPE is validated before anything is formatted. `jq -e` alone is not
-  # enough: string interpolation renders a missing author or body as `null` and
-  # still exits 0, so the driver would reply, resolve and summarise against
-  # "null" text believing it had read the findings.
-  echo "$PAGE" | jq -e -r '
-      .data.repository.pullRequest.reviewThreads.nodes as $n
-      | if ($n | type) != "array"
-           or any($n[];
-                  type != "object"
-                  or (.isResolved | type) != "boolean"
-                  or (.comments.nodes | type) != "array"
-                  or (select(.isResolved == false)
-                      | (.comments.nodes | length) == 0
-                        or (.comments.nodes[0].author.login | type) != "string"
-                        or (.comments.nodes[0].body | type) != "string"))
-        then error("malformed thread node")
-        else $n[] | select(.isResolved == false)
-             | "### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n"
-        end' \
-    || { echo "ABORT: findings page malformed — do not act on a partial read"; break; }
-  HAS_NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || { echo "ABORT: pageInfo unreadable"; break; }
-  case "$HAS_NEXT" in
-    false) break ;;
-    true)  ;;
-    *) echo "ABORT: hasNextPage is not a boolean ('$HAS_NEXT')"; break ;;
-  esac
-  CURSOR=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
-  [ -n "$CURSOR" ] && [ "$CURSOR" != "null" ] || { echo "ABORT: hasNextPage=true with no cursor"; break; }
-done
+"$RB_SCRIPTS"/pr-findings.sh list N; FIND_RC=$?
 ```
+
+- `0` — the printed threads are the complete set of unresolved findings.
+- `2` — the read could not be trusted. **Stop.** Do not reply, resolve or
+  summarise: a truncated or malformed page is indistinguishable from a shorter
+  review, and everything downstream would be based on it.
+
+The script paginates, validates each page's shape before formatting anything, and
+refuses to guess when `hasNextPage` is missing or a thread has no readable
+comment. That is deliberately not inline here: this logic spent three review
+rounds as a snippet in this file, where no test ran it, and each round found
+another way for it to fail open. The repository has been here before — the
+merge-range check lived inline "where nothing executed it" and became a script for
+the same reason.
 
 **When a reviewer's state is `blocked`, read its review body too.** A
 `CHANGES_REQUESTED` review can carry its whole argument in the body with no
-inline comment — the merge gate then refuses to pass while the findings fetch
-above shows nothing to fix, which looks like a stuck loop rather than a request.
-
-`$WHO` is the active reviewer from step 3 — written as a variable, not a literal,
-so the Copilot phase gets the same treatment as the Codex phase rather than
-leaving the hole open for whichever one was hard-coded.
+inline comment — the merge gate then refuses to pass while `list` shows nothing to
+fix, which looks like a stuck loop rather than a request.
 
 ```bash
-  # Piped to `jq`, not `gh --jq`: that flag takes a single expression and cannot
-  # accept `--arg`, so passing one makes gh exit with "accepts 1 arg(s)".
-  # `-s` because --paginate emits one array per page.
-  gh api "repos/$OWNER/$REPO/pulls/N/reviews" --paginate 2>/dev/null \
-    | jq -s -r --arg who "$WHO" '
-        if length == 0 or any(.[]; type != "array") then error("bad page")
-        else [ .[][] ]
-          | map(select(.user.login == $who and .state == "CHANGES_REQUESTED"))
-          | sort_by(.submitted_at) | last | .body // empty
-        end' \
-    || echo "ABORT: could not read $WHO's blocking review body"
+"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO" "$HEAD_OID"
 ```
+
+Scoped to the current head on purpose: a stale `CHANGES_REQUESTED` on an older
+commit, already superseded by a signoff on this one, is not an active finding.
 
 ## 5. Fix, then close the round
 

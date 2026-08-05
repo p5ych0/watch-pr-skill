@@ -49,6 +49,31 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The findings read is a script, not a snippet.** Three consecutive review
+  rounds found fail-open cases in the inline version — an unchecked `jq` status,
+  an unvalidated `hasNextPage`, a `gh api --jq` that could not run at all, a
+  missing `pipefail`, interpolation rendering a missing author as `null` — and
+  each fix was itself prose that no test executed. `pr-findings.sh` now owns it,
+  with the cases as tests. This repository has been here before: the merge-range
+  check lived inline "where nothing executed it", shipped two defects, and became
+  `pr-merge-range.sh` for the same reason.
+
+  It also fixes two live defects in that logic: the blocked-body fetch captured
+  `gh`'s output and status together, so a `--paginate` call that wrote a valid
+  page and then failed passed its partial output off as the answer; and it
+  selected `CHANGES_REQUESTED` reviews by reviewer and state but not by head, so
+  a stale request on an older commit — already superseded by a signoff on the
+  current one — printed as an active finding.
+
+- **`REVIEW_ROUND_THRESHOLD` handles leading zeros.** Bash reads them as octal in
+  arithmetic, so `00` silently disabled the safety pause and `08`/`09` aborted
+  with an undocumented exit 1 — neither being the documented fallback to 10. Only
+  a bare `0` disables the check-in now.
+
+- **A review's `commit_id` must be a real SHA to count as a round.** Any string
+  was accepted, so a malformed-but-successful page could contribute a phantom
+  "distinct head" and turn a true boundary of 10 into 11, skipping the pause.
+
 - **Reviews are read-only.** `AGENTS.md` previously said *"run focused tests only
   when necessary to validate a finding"*, which invited the reviewer to install
   dependencies and set up an environment before reading a diff made entirely of

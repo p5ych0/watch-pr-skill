@@ -109,12 +109,17 @@ grep -q 'pr-round-count.sh N "\$WHO"' "$SKILL" \
 grep -q 'WHO="\$CODEX_BOT"' "$SKILL" && grep -q 'WHO="\$COPILOT_BOT"' "$SKILL" \
     && pass "the active reviewer is a variable, set per phase" \
     || die "the active reviewer is not parameterised across phases"
-grep -q 'jq -e -r' "$SKILL" \
-    && pass "the findings projection checks its own status" \
-    || die "the findings projection can fall through on a malformed page"
-[ "$(grep -c 'hasNextPage is not a boolean\|HAS_NEXT' "$SKILL")" -ge 2 ] \
-    && pass "pagination state is validated, not assumed" \
-    || die "a paginated walk trusts hasNextPage without validating it"
+# The findings read is a SCRIPT, not a snippet. Three rounds of fail-open bugs
+# lived in the inline version because no test executed it.
+grep -q 'pr-findings.sh list' "$SKILL" \
+    && pass "the findings read is delegated to a tested script" \
+    || die "the findings read is inline again — no test can execute it"
+grep -q 'pr-findings.sh blocked-body' "$SKILL" \
+    && pass "the blocked-review body is delegated to the same script" \
+    || die "the blocked-body fetch is inline again"
+grep -q 'FIND_RC' "$SKILL" \
+    && pass "the driver branches on the findings read's status" \
+    || die "the findings read's status is not acted on"
 
 # The round boundary must be checked BEFORE the re-request, or the next review is
 # already sent by the time the operator is asked.

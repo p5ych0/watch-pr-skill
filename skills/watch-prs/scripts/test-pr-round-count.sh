@@ -31,12 +31,21 @@ chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH"
 run() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
 
-# Build a reviews list: each argument is "<login>|<commit>|<submitted_at|null>".
+# Expand a short tag into a 40-hex SHA. `commit_id` is validated as a real SHA,
+# so fixtures must look like commits: a short tag would be rejected as malformed
+# and every case would pass for the wrong reason.
+#
+# sha1sum, not zero-padding: padding "c1" and "c10" to 40 characters produces the
+# SAME string, which silently merged two rounds into one and made the boundary
+# fixtures off by one.
+sha() { printf '%s' "$1" | sha1sum | cut -c1-40; }
+
+# Build a reviews list: each argument is "<login>|<commit-tag>|<submitted_at|null>".
 mk() {
     local first=1
     { printf '['
       for spec in "$@"; do
-          who="${spec%%|*}"; rest="${spec#*|}"; c="${rest%%|*}"; sub="${rest##*|}"
+          who="${spec%%|*}"; rest="${spec#*|}"; c="$(sha "${rest%%|*}")"; sub="${rest##*|}"
           [ "$first" -eq 1 ] || printf ','
           first=0
           printf '{"user":{"login":"%s"},"commit_id":"%s","submitted_at":%s,"state":"COMMENTED","id":1}' \

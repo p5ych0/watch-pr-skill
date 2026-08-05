@@ -23,8 +23,15 @@ set -uo pipefail
 THRESHOLD="${REVIEW_ROUND_THRESHOLD:-10}"
 # A malformed threshold falls back to the default rather than disabling the
 # check-in: a typo must not silently remove a safety pause. `0` disables it, but
-# only when written exactly.
+# only when written EXACTLY that way.
+#
+# Leading zeros are rejected rather than accepted as digits, because Bash reads
+# them as octal in arithmetic: `00` silently disabled the pause, and `08`/`09`
+# aborted the script with an undocumented exit 1 — neither of which is the
+# documented fallback.
 case "$THRESHOLD" in
+    0)           ;;              # explicitly disabled
+    0*)          THRESHOLD=10 ;; # 00, 08, 012 … not a plain decimal
     ""|*[!0-9]*) THRESHOLD=10 ;;
 esac
 
@@ -72,6 +79,9 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                or (.user | type) != "object"
                or (.user.login | type) != "string"
                or (.commit_id | type) != "string"
+               # A blank or non-SHA commit_id counted as its own "distinct head",
+               # which can turn a true boundary of 10 into 11 and skip the pause.
+               or (.commit_id | test("^[0-9a-f]{40}$") | not)
                or ((.submitted_at | type) != "string" and .submitted_at != null))
         then error("malformed review record")
         else [ $all[]

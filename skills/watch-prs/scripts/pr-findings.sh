@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Read a PR's findings, and the blocking review body when there is one.
+#
+#   pr-findings.sh list <pr>
+#   pr-findings.sh blocked-body <pr> <reviewer-login> [head-oid]
+#
+#   0  output printed (possibly empty: no unresolved threads / no blocking body)
+#   2  the read could not be trusted — the caller MUST NOT act on a partial answer
+#
+# WHY THIS IS A SCRIPT AND NOT A SNIPPET IN SKILL.md
+#
+# It was a snippet. Three consecutive review rounds found fail-open cases in it —
+# an unchecked `jq` status, an unvalidated `hasNextPage`, a `gh api --jq` that
+# could not run at all, a missing `pipefail`, interpolation rendering a missing
+# author as `null` — and each fix was itself prose that no test executed. This
+# repository has been here before: the merge-range check lived inline in SKILL.md
+# "where nothing executed it", shipped two defects, and became
+# `pr-merge-range.sh`. Code that decides whether the driver has read the findings
+# belongs where a test can run it.
+#
+# `set -uo pipefail`, NOT `-e`: `gh` probes fail as normal operation and the
+# result is control flow. `pipefail` matters here in particular — `gh --paginate`
+# can write a valid page and THEN fail, and without it the pipeline would report
+# jq's success and the partial page would pass for the whole answer.
+set -uo pipefail
+
+REMOTE="${REVIEW_BUS_REMOTE:-$(git remote get-url origin 2>/dev/null)}"
+if [ -z "$REMOTE" ]; then
+    echo "PR_FINDINGS status=error reason=no_origin" >&2
+    exit 2
+fi
+_p="${REMOTE%.git}"; REPO="${REVIEW_BUS_REPO:-${_p##*/}}"; _p="${_p%/*}"
+OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
+REPO_SLUG="$OWNER/$REPO"
+
+# Every unresolved thread, paginated, with the page shape validated before any
+# of it is formatted.
+cmd_list() {
+    local pr="$1" cursor="null" page nodes has_next
+    while :; do
+        page=$(gh api graphql -F number="$pr" -F owner="$OWNER" -F repo="$REPO" -F cursor="$cursor" -f query='
+            query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
+              reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
+                nodes{isResolved path line comments(first:1){nodes{author{login} body}}} }}}}' 2>/dev/null) || {
+            echo "PR_FINDINGS pr=$pr status=error reason=fetch_failed" >&2
+            return 2
+        }
+        # The shape is checked before anything is printed. `jq -e` alone is not
+        # enough: string interpolation renders a missing author or body as `null`
+        # and still exits 0, so a malformed page would produce "null" finding text
+        # that the driver would reply to, resolve, and summarise against.
+        nodes=$(printf '%s' "$page" | jq -e -r '
+            .data.repository.pullRequest.reviewThreads.nodes as $n
+            | if ($n | type) != "array"
+                 or any($n[];
+                        type != "object"
+                        or (.isResolved | type) != "boolean"
+                        or (.comments.nodes | type) != "array"
+                        or (select(.isResolved == false)
+                            | (.comments.nodes | length) == 0
+                              or (.comments.nodes[0].author.login | type) != "string"
+                              or (.comments.nodes[0].body | type) != "string"))
+              then error("malformed thread node")
+              else ( [ $n[] | select(.isResolved == false) ]
+                     | map("### \(.path):\(.line) [\(.comments.nodes[0].author.login)]\n\(.comments.nodes[0].body)\n")
+                     | join("\n") )
+              end' 2>/dev/null) || {
+            echo "PR_FINDINGS pr=$pr status=error reason=malformed_page" >&2
+            return 2
+        }
+        [ -n "$nodes" ] && printf '%s\n' "$nodes"
+
+        # The pagination state is validated, not assumed: a missing or malformed
+        # `hasNextPage` read as "last page" would silently truncate the findings,
+        # and a truncated list is indistinguishable from a shorter review.
+        has_next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage') || {
+            echo "PR_FINDINGS pr=$pr status=error reason=pageinfo_unreadable" >&2
+            return 2
+        }
+        case "$has_next" in
+            false) return 0 ;;
+            true)  ;;
+            *) echo "PR_FINDINGS pr=$pr status=error reason=hasnextpage_not_boolean" >&2; return 2 ;;
+        esac
+        cursor=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+        { [ -n "$cursor" ] && [ "$cursor" != "null" ]; } || {
+            echo "PR_FINDINGS pr=$pr status=error reason=missing_cursor" >&2
+            return 2
+        }
+    done
+}
+
+# The body of a CHANGES_REQUESTED review by $2 ON THIS HEAD.
+#
+# A reviewer can put the whole request in the body with no inline comment, in
+# which case the merge gate blocks while `list` shows nothing to fix — a stuck
+# loop rather than a request. Scoped to the head on purpose: a stale
+# CHANGES_REQUESTED on an older commit, already superseded by a signoff on the
+# current one, would otherwise be printed as an active finding.
+cmd_blocked_body() {
+    local pr="$1" who="$2" head="${3:-}" raw out
+    if [ -z "$head" ]; then
+        head=$(gh pr view "$pr" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null) || {
+            echo "PR_FINDINGS pr=$pr status=error reason=head_lookup_failed" >&2
+            return 2
+        }
+    fi
+    case "$head" in
+        *[!0-9a-f]*|"") echo "PR_FINDINGS pr=$pr status=error reason=bad_head" >&2; return 2 ;;
+    esac
+
+    # Captured separately from the parse. `gh --paginate` can write a valid page
+    # and then exit non-zero, and a pipeline would report jq's success while the
+    # partial page passed for the whole answer.
+    raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews" --paginate 2>/dev/null) || {
+        echo "PR_FINDINGS pr=$pr status=error reason=reviews_fetch_failed" >&2
+        return 2
+    }
+    out=$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg head "$head" '
+        if length == 0 or any(.[]; type != "array") then error("bad page")
+        else [ .[][] ]
+          | map(select((.user.login? // "") == $who
+                       and (.state? // "") == "CHANGES_REQUESTED"
+                       and (.commit_id? // "") == $head))
+          | sort_by(.submitted_at) | last | .body // empty
+        end' 2>/dev/null) || {
+        echo "PR_FINDINGS pr=$pr status=error reason=reviews_unreadable" >&2
+        return 2
+    }
+    [ -n "$out" ] && printf '%s\n' "$out"
+    return 0
+}
+
+main() {
+    local cmd="${1:-}" pr="${2:-}"
+    case "$pr" in
+        ""|*[!0-9]*) echo "usage: $0 {list <pr>|blocked-body <pr> <reviewer> [head]}" >&2; exit 2 ;;
+    esac
+    case "$cmd" in
+        list)         cmd_list "$pr" ;;
+        blocked-body) [ -n "${3:-}" ] || { echo "usage: $0 blocked-body <pr> <reviewer> [head]" >&2; exit 2; }
+                      cmd_blocked_body "$pr" "$3" "${4:-}" ;;
+        *) echo "usage: $0 {list <pr>|blocked-body <pr> <reviewer> [head]}" >&2; exit 2 ;;
+    esac
+}
+
+if [ -z "${PR_FINDINGS_LIB_ONLY:-}" ] && [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi
