@@ -66,6 +66,14 @@ every `return` in the diff and confirm it states a value.
 `skills/watch-prs/scripts/test-*.sh` case, self-contained, with `gh` stubbed and
 no network.
 
+**A runtime script or `SKILL.md` must never hard-code an owner, repo or branch.**
+One installed copy of this plugin serves every project on a machine, so a literal
+slug — `p5ych0/watch-pr-skill` included — would send another project's PR reviews
+here. Identity is derived from `git remote get-url origin`. This is a blocking
+finding wherever it appears in `skills/watch-prs/`; it does **not** apply to the
+plugin's own metadata (`.claude-plugin/`, `.codex-plugin/`) or to the install
+commands in `README.md`, which legitimately name this repository.
+
 ## Bash strict-mode conventions
 
 Strict mode is chosen per script category. Match the category; do not "fix" a
@@ -74,7 +82,7 @@ script into a stricter mode.
 | Mode | Scripts | Why |
 | --- | --- | --- |
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
-| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
+| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
 
 ## Review statically — do not run anything
 

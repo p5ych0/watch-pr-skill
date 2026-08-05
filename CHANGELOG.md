@@ -49,6 +49,16 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **The merge gate could never pass after a Copilot fix.** The phased loop
+  deliberately does not re-run Codex during the Copilot phase — that is what the
+  `Review-Phase: copilot` trailer and the range check are for — but the gate still
+  asked for Codex's verdict on the *current* head. On a Copilot-fix commit that
+  verdict is `none`, forever, so the supported path could not merge. Codex is now
+  validated against `$CODEX_SHA`, the head it actually signed off, and the range
+  check spanning `$CODEX_SHA..$HEAD_OID` is what makes trusting that older signoff
+  safe: it proves the head advanced only through tagged Copilot fixes reachable
+  from it.
+
 - **A finished review surfaces by itself again.** Removing the bus also removed
   v1's response monitor, and nothing replaced it — the contract simply said
   "there is no notification channel; poll", which in practice means the driver

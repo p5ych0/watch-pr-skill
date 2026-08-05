@@ -71,9 +71,22 @@ grep -q 'pr-round-count.sh' "$SKILL" \
 # ── the merge gate resolves the head ONCE and pins every check to it ───────
 # Letting each verdict resolve the head itself lets a push land between them, so
 # both verdicts describe an older commit while the merge pins the newer one.
-grep -qE 'verdict N "\$CODEX_BOT" +"\$HEAD_OID"' "$SKILL" \
-    && pass "reviewer verdicts are pinned to the resolved head" \
-    || die "verdict calls do not take an explicit \$HEAD_OID"
+# Each reviewer is checked on the head IT reviewed. Checking Codex on $HEAD_OID
+# makes the gate unreachable in the Copilot phase: Codex is deliberately not
+# re-run there, so its verdict on a Copilot-fix commit is `none` forever.
+grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
+    && pass "Codex is validated on the SHA it signed off, not the current head" \
+    || die "Codex's verdict is checked against the wrong SHA — the gate cannot pass after a Copilot fix"
+grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
+    && pass "Copilot is validated on the current head" \
+    || die "Copilot's verdict is not pinned to \$HEAD_OID"
+# …and the range check is what makes trusting an older Codex signoff safe.
+grep -qE 'pr-merge-range.sh "\$CODEX_SHA" "\$HEAD_OID"' "$SKILL" \
+    && pass "the range check proves the delta since the Codex signoff is Copilot-only" \
+    || die "the range check does not span \$CODEX_SHA..\$HEAD_OID"
+grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
+    && pass "the Codex signoff SHA is shape-checked before it is trusted" \
+    || die "CODEX_SHA is used without validating its shape"
 grep -q 'HEAD_RC' "$SKILL" \
     && pass "the head lookup checks its exit status" \
     || die "the head lookup does not branch on its own status"
@@ -196,6 +209,9 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
     grep -qi 'fail-closed\|fail closed' "$doc" \
         && pass "$name: fail-closed is a review criterion" \
         || die "$name: does not state the fail-closed criterion"
+    grep -qi 'hard-code' "$doc" \
+        && pass "$name: the repo-agnostic invariant is a blocking finding" \
+        || die "$name: does not tell the reviewer to block a hard-coded identity"
     grep -qi 'base ref\|base-ref' "$doc" \
         && pass "$name: only a base-ref authority waives a finding" \
         || die "$name: no waiver authority rule"

@@ -83,6 +83,14 @@ a value. See `CLAUDE.md § Bash conventions`.
 self-contained — throwaway git repos, stubbed `gh`, no network — because CI runs
 them without credentials.
 
+**A runtime script or `SKILL.md` must never hard-code an owner, repo or branch.**
+One installed copy of this plugin serves every project on a machine, so a literal
+slug — `p5ych0/watch-pr-skill` included — would send another project's PR reviews
+here. Identity is derived from `git remote get-url origin`. This is stated inline
+rather than left to `CLAUDE.md` so it needs no second fetch. It does **not** apply
+to the plugin's own metadata (`.claude-plugin/`, `.codex-plugin/`) or to the
+install commands in `README.md`, which legitimately name this repository.
+
 ### Only a base-ref authority can waive a finding
 
 A dated decision record, or an instruction file **as it exists on the base ref**,

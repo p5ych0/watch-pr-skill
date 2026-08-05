@@ -129,6 +129,23 @@ printf '{"message":"Not Found"}' > "$TMP/obj.json"
 out="$(GH_REVIEWS="$TMP/obj.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: object-shaped page => 2" || die "object page gave rc=$rc"
 
+# A malformed reviews page must not be indistinguishable from "no body". The
+# optional selectors would map it away and exit 0, leaving the loop without the
+# one finding it has to act on.
+i=0
+for bad in '[{}]' \
+    '[{"user":{"login":"x"},"state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":123}]' \
+    '[{"user":"notanobject","state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":"x"}]' \
+    '[{"user":{"login":"x"},"state":"CHANGES_REQUESTED","commit_id":42,"submitted_at":"t","body":"x"}]'
+do
+    i=$((i + 1))
+    printf '%s' "$bad" > "$TMP/badrec$i.json"
+    out="$(GH_REVIEWS="$TMP/badrec$i.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "blocked-body: malformed record #$i => 2 (not silence)" \
+        || die "malformed record #$i gave rc=$rc out='$out'"
+done
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"

@@ -142,10 +142,15 @@ inline comment — the merge gate then refuses to pass while `list` shows nothin
 fix, which looks like a stuck loop rather than a request.
 
 ```bash
-"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO" "$HEAD_OID"
+"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"
 ```
 
-Scoped to the current head on purpose: a stale `CHANGES_REQUESTED` on an older
+The head argument is **omitted on purpose**: `$HEAD_OID` is not assigned until the
+merge gate, so passing it here would abort under `set -u` or — worse in a
+long-lived session — filter against a stale 40-hex value left over from another
+PR. The helper resolves the head itself, with its own guarded lookup.
+
+Scoped to the current head either way: a stale `CHANGES_REQUESTED` on an older
 commit, already superseded by a signoff on this one, is not an active finding.
 
 ## 5. Fix, then close the round
@@ -228,7 +233,10 @@ Run every check immediately before merging — an earlier check answered about a
 earlier head.
 
 ```bash
-REVIEWED_SHA=<the sha the clean review was for>
+# The FULL 40-hex head Codex signed off on. In the Copilot phase the head moves
+# past it, and Codex is deliberately not re-run — so this, not $HEAD_OID, is what
+# Codex's verdict is checked against.
+CODEX_SHA=<full 40-hex sha of the head Codex last reviewed clean>
 
 # (0) Resolve the head ONCE, and fail closed on a lookup that printed something
 # and then failed — command substitution keeps that stdout, so a plausible SHA
@@ -239,22 +247,35 @@ if [ "$HEAD_RC" -ne 0 ] || ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]]; then
     echo "merge blocked: head lookup failed (rc=$HEAD_RC)"; exit 0
 fi
 
-# (1) Both reviewers clean ON THAT EXACT HEAD. Pass $HEAD_OID explicitly: letting
-# each verdict resolve the head itself means a push landing between the two calls
-# leaves both verdicts describing an older commit while step 5 pins and merges the
-# newer one — and if that commit carries a `Review-Phase: copilot` trailer, the
-# range check below accepts it.
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT"   "$HEAD_OID"; CODEX_RC=$?
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID"; COPILOT_RC=$?
+# (1) Each reviewer clean on the head IT reviewed.
+#
+# Copilot is checked on $HEAD_OID — it reviews the current head, by definition of
+# the phase. Codex is checked on $CODEX_SHA, the head it signed off, because the
+# Copilot phase deliberately does not re-run it: asking for a Codex verdict on a
+# Copilot-fix commit returns `none`, and the gate could never pass.
+#
+# $HEAD_OID is passed explicitly rather than letting each call resolve the head:
+# a push landing between the two would otherwise leave a verdict describing an
+# older commit while step 5 pins and merges the newer one.
+if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "merge blocked: CODEX_SHA is not a full 40-hex sha"; exit 0
+fi
+"$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT"   "$CODEX_SHA"; CODEX_RC=$?
+"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID";  COPILOT_RC=$?
 if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
     echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 0
 fi
 
-# (2) Everything since the reviewed SHA is a review-fix commit reachable from it.
-if [ "${HEAD_OID:0:7}" != "$REVIEWED_SHA" ]; then
-    "$RB_SCRIPTS"/pr-merge-range.sh "$REVIEWED_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
+# (2) …and the delta between them is Copilot fixes only.
+#
+# This is what makes checking Codex on an older SHA safe: the range check proves
+# the head advanced from $CODEX_SHA only through commits carrying
+# `Review-Phase: copilot`, reachable from it. Without this step, an older Codex
+# signoff would be an open door.
+if [ "$HEAD_OID" != "$CODEX_SHA" ]; then
+    "$RB_SCRIPTS"/pr-merge-range.sh "$CODEX_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
     if [ "$RANGE" -ne 0 ]; then
-        echo "merge blocked: range check returned $RANGE (1 = an untagged commit, or the reviewed SHA is not an ancestor; 2 = could not inspect)"; exit 0
+        echo "merge blocked: range check returned $RANGE (1 = an untagged commit, or the Codex-reviewed SHA is not an ancestor; 2 = could not inspect)"; exit 0
     fi
 fi
 

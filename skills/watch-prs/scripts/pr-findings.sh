@@ -116,13 +116,28 @@ cmd_blocked_body() {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_fetch_failed" >&2
         return 2
     }
+    # The record SHAPE is validated before anything is selected. The optional
+    # selectors below would otherwise map a malformed page away and exit 0, making
+    # a parse failure indistinguishable from "this body-only CHANGES_REQUESTED has
+    # no text" — and that is the one finding the driver has to act on.
     out=$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg head "$head" '
         if length == 0 or any(.[]; type != "array") then error("bad page")
-        else [ .[][] ]
-          | map(select((.user.login? // "") == $who
-                       and (.state? // "") == "CHANGES_REQUESTED"
-                       and (.commit_id? // "") == $head))
-          | sort_by(.submitted_at) | last | .body // empty
+        else [ .[][] ] as $all
+          | if any($all[];
+                   type != "object"
+                   or (.user | type) != "object"
+                   or (.user.login | type) != "string"
+                   or (.commit_id | type) != "string"
+                   or ((.state | type) != "string" and .state != null)
+                   or ((.submitted_at | type) != "string" and .submitted_at != null)
+                   or ((.body | type) != "string" and .body != null))
+            then error("malformed review record")
+            else [ $all[]
+                   | select(.user.login == $who
+                            and .state == "CHANGES_REQUESTED"
+                            and .commit_id == $head) ]
+                 | sort_by(.submitted_at) | last | .body // empty
+            end
         end' 2>/dev/null) || {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_unreadable" >&2
         return 2
