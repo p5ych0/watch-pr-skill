@@ -140,8 +140,11 @@ Then:
    Copilot asked (step 6). Running both every round buys a Copilot pass on every
    intermediate commit and mixes its findings into rounds that were not about
    them.
-3. **Wait.** There is no notification channel; the skill polls. A review normally
-   lands in a few minutes. An unreadable state is a stop, never "no findings".
+3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
+   state is actionable and prints one line when it changes. In Claude Code it
+   runs as the session's Monitor, so the verdict surfaces into the chat by
+   itself; under Codex, run it in the background. An unreadable state is a stop,
+   never "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, push, reply to each
    thread with what changed, resolve it, post a round summary saying what was
    addressed and what was intentionally skipped, then re-request **the same

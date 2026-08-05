@@ -67,34 +67,52 @@ Do **not** request Copilot yet. Step 7 does that, once Codex is clean.
 
 ## 3. Wait for the verdict
 
-There is no notification channel; poll. A review normally lands in a few minutes.
-
 Poll the **active** reviewer — `$CODEX_BOT` in the Codex phase, `$COPILOT_BOT`
 in the Copilot phase. Set `WHO` once at the top of the round and use it
 throughout, so the round is fixed, summarised and re-requested for the same
 reviewer it was waiting on.
 
+Do not sit in a polling loop by hand. `pr-watch.sh` blocks until there is
+something to act on and prints one line when the state changes:
+
 ```bash
-WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 8 has begun
-"$RB_SCRIPTS"/pr-review-state.sh state N "$WHO"
+WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
+"$RB_SCRIPTS"/pr-watch.sh N "$WHO"; WATCH_RC=$?
 ```
 
-prints one of:
+**Claude Code** — run it as this session's **Monitor** so the verdict surfaces
+into the chat by itself instead of being waited on:
 
-| state | meaning | what to do |
+- `command`: `"$RB_SCRIPTS"/pr-watch.sh N "$WHO"`
+- `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
+
+**Codex** — there is no watch tool, so run it in the background and read its
+output, or simply block on it.
+
+It prints on **change**, not on every poll, so a long wait does not bury the
+session in identical lines:
+
+```
+PR_REVIEW_WATCH pr=10 reviewer=chatgpt-codex-connector[bot] state=none waited_s=0
+PR_REVIEW_WATCH pr=10 reviewer=chatgpt-codex-connector[bot] state=pending waited_s=120
+PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verdict=findings findings=5
+```
+
+| `WATCH_RC` | meaning | what to do |
 | --- | --- | --- |
-| `none` | no review on this head | keep waiting; re-request if it never arrives |
-| `pending` | a draft is open — the pass is not finished | keep waiting |
-| `reviewed` | a submitted APPROVED/COMMENTED review exists | go to step 4 |
-| `blocked` | CHANGES_REQUESTED | treat as findings |
-| `dismissed` | the signoff was withdrawn | request the review again |
+| `0` | terminal state reached, verdict on the last line | step 4 |
+| `1` | timed out | re-request, or ask the operator whether to keep waiting |
+| `2` | the state could not be read | **fail closed** — never treat it as "no findings" |
 
-Stay in this step until that reviewer reaches an actionable terminal state —
-`reviewed`, `blocked` or `dismissed`. `none` and `pending` mean the pass is still
-coming; keep waiting rather than moving on.
+The states it reports, and what each means:
 
-Exit status 2 means the state could not be read. **Fail closed** — never treat it
-as "no findings".
+| state | meaning |
+| --- | --- |
+| `none` | no review on this head yet |
+| `pending` | a draft is open — the pass is not finished |
+| `reviewed` | a submitted APPROVED/COMMENTED review exists |
+| `blocked` | CHANGES_REQUESTED — treat as findings, and read its body in step 4 |
+| `dismissed` | the signoff was withdrawn — request the review again |
 
 ## 4. Read the findings
 

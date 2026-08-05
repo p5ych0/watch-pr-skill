@@ -49,6 +49,17 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **A finished review surfaces by itself again.** Removing the bus also removed
+  v1's response monitor, and nothing replaced it — the contract simply said
+  "there is no notification channel; poll", which in practice means the driver
+  sits in a hand-rolled loop and the operator watches it do so. `pr-watch.sh`
+  blocks until the reviewer's state is actionable, prints one line per state
+  CHANGE rather than per poll, and reports the verdict on the terminal line so
+  there is no second round-trip. Claude Code runs it as the session's Monitor;
+  under Codex it backgrounds. An unreadable state exits 2 rather than looking
+  like "still waiting", because the difference between "no review yet" and
+  "cannot tell" is the difference between waiting and merging on a bad read.
+
 - **The findings read is a script, not a snippet.** Three consecutive review
   rounds found fail-open cases in the inline version — an unchecked `jq` status,
   an unvalidated `hasNextPage`, a `gh api --jq` that could not run at all, a

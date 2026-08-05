@@ -111,6 +111,19 @@ grep -q 'WHO="\$CODEX_BOT"' "$SKILL" && grep -q 'WHO="\$COPILOT_BOT"' "$SKILL" \
     || die "the active reviewer is not parameterised across phases"
 # The findings read is a SCRIPT, not a snippet. Three rounds of fail-open bugs
 # lived in the inline version because no test executed it.
+# The verdict must arrive by itself. v2 removed v1's response monitor along with
+# the bus; without a replacement the driver hand-polls, which is what the operator
+# noticed.
+grep -q 'pr-watch.sh' "$SKILL" \
+    && pass "the wait is delegated to pr-watch.sh, not hand-polled" \
+    || die "nothing surfaces a finished review — the driver would poll by hand"
+grep -qi 'Monitor' "$SKILL" \
+    && pass "Claude Code is told to run the watch as a Monitor" \
+    || die "the skill does not say how to surface the verdict automatically"
+grep -q 'WATCH_RC' "$SKILL" \
+    && pass "the driver branches on the watch's status" \
+    || die "the watch's exit status is not acted on"
+
 grep -q 'pr-findings.sh list' "$SKILL" \
     && pass "the findings read is delegated to a tested script" \
     || die "the findings read is inline again — no test can execute it"
