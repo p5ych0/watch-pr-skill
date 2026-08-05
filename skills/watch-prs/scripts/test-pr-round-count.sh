@@ -125,6 +125,26 @@ out="$(REVIEW_ROUND_THRESHOLD=abc GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; r
     && pass "a malformed threshold falls back to 10, never to disabled" \
     || die "a typo disabled the check-in (rc=$rc out='$out')"
 
+# Leading zeros are OCTAL to Bash arithmetic: `00` silently disabled the safety
+# pause and `08`/`09` aborted with an undocumented exit 1 — neither being the
+# documented fallback to 10.
+#
+# These existed once and were lost when the file was reverted to fix an unrelated
+# fixture bug, so the guard shipped without them. That is exactly the regression
+# this block prevents.
+specs_lz=(); for i in $(seq 1 10); do specs_lz+=("$CODEX|lz$i|\"t$i\""); done
+mk "${specs_lz[@]}"
+for bad in 00 08 09 012; do
+    out="$(REVIEW_ROUND_THRESHOLD="$bad" GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
+        && pass "threshold '$bad' falls back to 10, not to disabled or an error" \
+        || die "threshold '$bad' gave rc=$rc out='$out'"
+done
+# Exactly `0` still disables the check-in.
+out="$(REVIEW_ROUND_THRESHOLD=0 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=0'; } \
+    && pass "a bare 0 still disables the check-in" || die "0 no longer disables (rc=$rc)"
+
 # ── everything unreadable fails closed ─────────────────────────────────────
 out="$(GH_RC=1 run 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "fetch failure => 2" || die "fetch failure gave rc=$rc"

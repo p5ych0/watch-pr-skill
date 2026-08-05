@@ -150,6 +150,36 @@ out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interva
     && pass "a not-clean verdict is still an actionable READY" \
     || die "rc 1 was treated as unreadable (rc=$rc out='$out')"
 
+# ── a state parsed out of a malformed line is not a state ──────────────────
+# A helper that exits 0 but prints a line with no `state=` field left the WHOLE
+# line in $state; the watch then polled to the ordinary timeout (rc 1), which the
+# contract reads as "re-request or ask whether to keep waiting".
+cat > "$TMP/garbage.sh" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = "verdict" ] && { echo "verdict=clean findings=0"; exit 0; }
+echo "some truncated wrapper output with no state field"
+exit 0
+SH
+chmod +x "$TMP/garbage.sh"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/garbage.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a state line with no state= field => 2, not a timeout" \
+    || die "unparseable state line gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'state=timeout' \
+    && die "an unparseable state was reported as a timeout" \
+    || pass "an unparseable state is not reported as a timeout"
+
+# An unknown-but-well-formed state is equally not something to poll on.
+cat > "$TMP/weird.sh" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = "verdict" ] && { echo "verdict=clean findings=0"; exit 0; }
+echo "PR_REVIEW_STATE pr=7 sha=abc reviewer=x state=wibble"
+exit 0
+SH
+chmod +x "$TMP/weird.sh"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/weird.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "an unknown state value => 2" || die "unknown state gave rc=$rc"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

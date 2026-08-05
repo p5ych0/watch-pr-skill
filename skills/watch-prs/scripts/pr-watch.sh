@@ -75,6 +75,15 @@ while :; do
 
     state="${line##*state=}"
     state="${state%% *}"
+    # A helper that exits 0 but prints a line without `state=` leaves the WHOLE
+    # line in $state. Polling on that ran to the ordinary timeout (rc 1), which
+    # the contract reads as "re-request or ask whether to keep waiting" — so an
+    # unreadable probe stopped being distinguishable from a slow reviewer.
+    case "$state" in
+        none|pending|reviewed|blocked|dismissed) ;;
+        *) printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable detail=%s\n' "$PR" "$WHO" "$line"
+           exit 2 ;;
+    esac
     if [ "$state" != "$last" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=%s waited_s=%s\n' "$PR" "$WHO" "$state" "$waited"
         last="$state"

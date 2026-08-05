@@ -49,6 +49,25 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **Review records are validated where they are used, not only where they are
+  counted.** `commit_id` was checked as a SHA in the round counter but not in the
+  review-state parser, where a short value is filtered out as "another head" — so
+  a malformed page read as `state=none`, which the merge gate answers by trusting
+  an older signoff instead of stopping. The timestamp check was a *prefix* match,
+  so `2026-01-02T00:00:00zzzz` passed and still sorted after the real
+  `2026-01-02T00:00:00Z`: the same lexical hole the check was added to close. It
+  is anchored at both ends now.
+
+- **A blocked review must have a readable body.** `.body // empty` mapped a null
+  or absent body to empty output with a success status — indistinguishable from
+  "the blocking review had no body", in the one path whose whole job is to surface
+  a finding that has nowhere else to appear.
+
+- **An unparseable state line is not a state.** A helper exiting 0 with output
+  that has no `state=` field left the entire line in the state variable; the watch
+  then polled to its ordinary timeout, which the contract reads as "re-request or
+  ask whether to keep waiting". Only the five known states are accepted.
+
 - **The range check measures from the SHA the verdict describes.** Making the
   Codex verdict head-aware left the range keyed to the recorded signoff, so when
   Codex had reviewed the current head cleanly the gate still demanded

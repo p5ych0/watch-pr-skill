@@ -140,8 +140,15 @@ cmd_blocked_body() {
             else [ $all[]
                    | select(.user.login == $who
                             and .state == "CHANGES_REQUESTED"
-                            and .commit_id == $head) ]
-                 | sort_by(.submitted_at) | last | .body // empty
+                            and .commit_id == $head) ] as $mine
+              # A MATCHING blocked review must carry a string body. `.body //
+              # empty` mapped a null or absent one to empty stdout with rc 0,
+              # which in this path is indistinguishable from "the blocking review
+              # had no body" — leaving the loop without the only finding it has.
+              | if any($mine[]; (.body | type) != "string")
+                then error("blocked review without a readable body")
+                else $mine | sort_by(.submitted_at) | last | .body // empty
+                end
             end
         end' 2>/dev/null) || {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_unreadable" >&2

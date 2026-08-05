@@ -81,6 +81,11 @@ reviewer_reviews() {
                    or (.user.login | type) != "string"
                    or (.id | type) != "number"
                    or (.commit_id | type) != "string"
+                   # A short or non-SHA commit_id is filtered out as "another
+                   # head", so a malformed page reads as `state=none` — which the
+                   # merge gate answers by trusting an older signoff instead of
+                   # stopping.
+                   or (.commit_id | test("^[0-9a-f]{40}$") | not)
                    or ((.state | type) != "string" and .state != null)
                    # Not merely a string: `head_review_snapshot` sorts on this to
                    # decide which review is authoritative, and the sort is
@@ -88,8 +93,14 @@ reviewer_reviews() {
                    # timestamp, so a stale APPROVED record could outrank a current
                    # CHANGES_REQUESTED and report clean.
                    or ((.submitted_at | type) != "string" and .submitted_at != null)
+                   # ANCHORED at both ends: a prefix check let
+                   # `2026-01-02T00:00:00zzzz` through, and it sorts after the
+                   # real `2026-01-02T00:00:00Z` — the same lexical-sort hole the
+                   # prefix check was added to close.
                    or (.submitted_at != null
-                       and (.submitted_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}") | not)))
+                       and (.submitted_at
+                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                            | not)))
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who) ]
             end

@@ -79,8 +79,11 @@ printf '%s' "$out" | grep -q 'state=none' && pass "state: no review => none" \
     || die "state: empty review list gave '$out'"
 
 # A review on ANOTHER head says nothing about this one.
-printf '[{"user":{"login":"%s"},"commit_id":"bbbb","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":12}]' \
-    "$BOT" > "$TMP/other.json"
+# A FULL sha for the other head: commit_id is validated, so a short one would be
+# rejected as malformed and this case would pass without testing head scoping.
+OTHER40="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":12}]' \
+    "$BOT" "$OTHER40" > "$TMP/other.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/other.json" run state 7 "$BOT" 2>&1)"
 printf '%s' "$out" | grep -q 'state=none' && pass "state: a review on another head does not count" \
     || die "state: an other-head review leaked in: $out"
@@ -215,6 +218,32 @@ for ts in '"2026-01-01T00:00:00Z"' '"2026-01-01T00:00:00.123Z"' '"2026-01-01T00:
     [ "$rc" -eq 0 ] && pass "a real ISO timestamp ($ts) is accepted" \
         || die "valid timestamp $ts rejected (rc=$rc out='$out')"
 done
+
+# A review's own commit_id must be a full SHA. Short or non-SHA values were
+# filtered out as "another head", so a malformed page read as state=none — which
+# the merge gate answers by trusting an older signoff instead of stopping.
+for badsha in abc 0123456789abcdef "" not-a-sha; do
+    printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":81}]' \
+        "$BOT" "$badsha" > "$TMP/badcommit.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badcommit.json" run state 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a review with commit_id '${badsha:-<empty>}' => 2, not state=none" \
+        || die "commit_id '${badsha:-<empty>}' gave rc=$rc out='$out'"
+done
+
+# The timestamp check must be ANCHORED. A prefix match let
+# `2026-01-02T00:00:00zzzz` through, and it sorts after the real
+# `2026-01-02T00:00:00Z` — the same lexical hole the check was added to close.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T00:00:00Z","id":91},{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-02T00:00:00zzzz","id":92}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/prefixts.json"
+printf '[]' > "$TMP/comments-92.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/prefixts.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a same-prefix malformed timestamp => 2" \
+    || die "prefix-matching timestamp gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'verdict=clean' \
+    && die "a stale APPROVED with a prefix-valid timestamp reported CLEAN: $out" \
+    || pass "no clean verdict from a prefix-valid timestamp"
 
 # ── the clean verdict is re-checked against a second snapshot ──────────────
 # State and count came from separate fetches once, so a review that changed in

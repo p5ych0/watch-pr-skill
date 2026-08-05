@@ -161,6 +161,24 @@ out="$(GH_HEAD="abc" GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" 2>&1)"
     && pass "blocked-body: a short head from its own lookup => 2" \
     || die "self-resolved short head gave rc=$rc out='$out'"
 
+# A MATCHING blocked review must carry a readable body. `.body // empty` mapped a
+# null or absent one to empty stdout with rc 0 — indistinguishable from "the
+# blocking review had no body", in the one path whose whole job is to surface a
+# finding that has nowhere else to appear.
+for nobody in 'null' '""x'; do
+    if [ "$nobody" = 'null' ]; then
+        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1","body":null}]' \
+            "$BOT" "$HEAD40" > "$TMP/nobody.json"
+    else
+        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"t1"}]' \
+            "$BOT" "$HEAD40" > "$TMP/nobody.json"
+    fi
+    out="$(GH_REVIEWS="$TMP/nobody.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "blocked-body: a matching review with no readable body => 2" \
+        || die "missing body ($nobody) gave rc=$rc out='$out'"
+done
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"
