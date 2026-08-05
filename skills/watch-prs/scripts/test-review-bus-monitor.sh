@@ -1231,8 +1231,10 @@ printf '%s' "$out_fs" | grep -q 'deadbeef' \
     && die "partial hasher output was advertised as a digest: $out_fs" \
     || pass "partial hasher output is not advertised as a digest"
 
-# (b) A faulting formatter: only the sentinel, and the emit marker is RELEASED so
-# a later sweep can retry - the response was never delivered.
+# (b) A faulting formatter: only the sentinel, and NO marker exists afterwards -
+# not because one was released, but because the claim happens after the line is
+# ready, so this path never took one. That is what keeps the response retryable
+# without touching state another sweep may own.
 FAULT_EMIT2="$TMP/em-fault-jq"
 out_fj="$(PATH="$FAULT_BIN:$PATH" FAULT_JQ=1 BUS_DIR="$FAULT_BUS" \
           MONITOR_EMITTED_DIR="$FAULT_EMIT2" "$MONITOR" --once 2>/dev/null || true)"
@@ -1488,6 +1490,52 @@ d3="$(BUS_DIR="$DUP_BUS" MONITOR_EMITTED_DIR="$DUP_EMIT" "$MONITOR" --once 2>/de
 [ "$d3" -eq 0 ] \
     && pass "after the fault clears the response is not re-emitted (marker intact)" \
     || die "the same handoff was emitted again after the fault ($d3)"
+
+
+# ── a response that vanishes DURING the snapshot is a no-op, not a stop ────
+# The watcher archiving the old response between this sweep's `find` and the `cp`
+# is ordinary same-SHA reprocessing. Collapsing every snapshot failure into
+# `reason=snapshot_failed` reported that race as a sentinel - which SKILL.md
+# defines as a fail-closed STOP - so routine churn would halt the workflow. The
+# empty-directory fixture cannot reach this: the file must disappear mid-call.
+VAN2_BUS="$TMP/van2bus"; mkdir -p "$VAN2_BUS/responses" "$TMP/van2bin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$VAN2_BUS/responses/resp-ba600de.json"
+cat > "$TMP/van2bin/cp" <<SH
+#!/usr/bin/env bash
+# Delete the source at the moment of the copy, then let the real cp fail on it.
+if [ -n "\${FAULT_VANISH:-}" ]; then
+    rm -f "$VAN2_BUS/responses/resp-ba600de.json" 2>/dev/null || true
+fi
+exec /usr/bin/cp "\$@"
+SH
+chmod +x "$TMP/van2bin/cp"
+rc_v2=0
+out_v2="$(PATH="$TMP/van2bin:$PATH" FAULT_VANISH=1 BUS_DIR="$VAN2_BUS" \
+          MONITOR_EMITTED_DIR="$TMP/emvan2" "$MONITOR" --once 2>/dev/null)" || rc_v2=$?
+printf '%s' "$out_v2" | grep -q 'REVIEW_PARSE_ERROR' \
+    && die "a response that vanished mid-snapshot was reported as a fail-closed stop: $out_v2" \
+    || pass "a response that vanishes during the snapshot is a silent no-op"
+[ "$rc_v2" -eq 0 ] \
+    && pass "and --once still exits 0 for that race" \
+    || die "the vanished-mid-snapshot race exited $rc_v2"
+
+# A snapshot failure with the source STILL PRESENT is a real fault and must be
+# reported - the no-op must not swallow unreadable or failed-copy cases.
+VAN3_BUS="$TMP/van3bus"; mkdir -p "$VAN3_BUS/responses" "$TMP/van3bin"
+printf '%s' '{"pr":7,"sha":"ba600de","status":"approved","findings_count":0,"reviewer":"codex","summary":"clean"}' \
+    > "$VAN3_BUS/responses/resp-ba600de.json"
+cat > "$TMP/van3bin/cp" <<'SH'
+#!/usr/bin/env bash
+[ -n "${FAULT_CP:-}" ] && exit 7
+exec /usr/bin/cp "$@"
+SH
+chmod +x "$TMP/van3bin/cp"
+out_v3="$(PATH="$TMP/van3bin:$PATH" FAULT_CP=1 BUS_DIR="$VAN3_BUS" \
+          MONITOR_EMITTED_DIR="$TMP/emvan3" "$MONITOR" --once 2>/dev/null || true)"
+printf '%s' "$out_v3" | grep -q 'reason=snapshot_failed' \
+    && pass "a copy failure with the source still present is still reported" \
+    || die "the vanished no-op swallowed a genuine snapshot failure: $out_v3"
 
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"

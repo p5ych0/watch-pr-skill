@@ -89,8 +89,9 @@
   through one helper that checks the status and requires exactly 64 lowercase hex
   characters; the formatter's status is checked before its output is accepted;
   both failures emit `_REVIEW_PARSE_ERROR` instead of silence or a handoff; and a
-  failed emit releases its marker so a later sweep retries rather than treating
-  the response as delivered. On the `--note` side the unguarded hash took the
+  failed emit leaves the response retryable because the marker is not claimed
+  until the line is ready - the failure path takes nothing, and releases nothing.
+  On the `--note` side the unguarded hash took the
   script down under `set -e` carrying the tool's own exit code (7) with no
   `MONITOR_NOTE_ERROR` line; it now reports the documented exit 2.
 
@@ -149,6 +150,15 @@
   driver cannot see which. `--once` exits 0 with the sentinel on stdout and
   `MONITOR_FATAL` on stderr; the LIVE watch still refuses to start, which is
   where the superseded handoff would actually be emitted.
+
+- **A response that vanishes mid-snapshot is a no-op, not a stop.** Every
+  snapshot-copy failure was reported as `reason=snapshot_failed`, and `SKILL.md`
+  defines that sentinel as a fail-closed halt - so the watcher archiving an old
+  response between a sweep's `find` and its `cp`, which is ordinary same-SHA
+  reprocessing, would stop the workflow. The disappearance no-op belongs at this
+  boundary, since `snapshot_response` is the only step that reads the mutable
+  source; unreadable and failed-copy cases with the file still present are still
+  reported.
 
 ## [1.0.13] — 2026-08-04
 

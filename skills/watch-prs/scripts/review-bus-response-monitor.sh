@@ -341,6 +341,16 @@ emit_response() {
     # line it was advertised on - and `--note` verifies against that digest.
     local snapf
     if ! snapf="$(snapshot_response "$file")"; then
+        # THIS is where the vanished-file no-op belongs: snapshot_response is the
+        # step that reads the mutable source, so it is the only one whose failure
+        # a disappearance can explain. The watcher archiving the old response
+        # between this sweep's `find` and the `cp` is ORDINARY same-SHA
+        # reprocessing, and reporting it as a sentinel - a documented fail-closed
+        # stop - would halt the workflow over a routine race. Anything else
+        # (unreadable, a failed copy, no temp file) is still reported.
+        if [ ! -e "$file" ]; then
+            return 0
+        fi
         printf '%s_REVIEW_PARSE_ERROR reason=snapshot_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
@@ -493,10 +503,13 @@ emit_response() {
           "\($prefix)_REVIEW pr=\(.pr) sha=\(.sha) status=\(.status) findings=\(.findings_count) reviewer=\(.reviewer)\(if (.model_summary // "") != "" then " reviewer_note=1" else "" end) summary=\"\(.summary // "" | gsub("[^\\u0020-\\u007e]"; " ") | gsub("\""; " ") | .[0:200])\" digest=\($digest) resp=" + $path
         ' <<< "$snap" 2>/dev/null
     )"; then
-        # No marker cleanup: the claim happens further down, so this invocation
-        # holds nothing to release - and `rm -f` here deleted the marker an
-        # EARLIER successful sweep had written, which made the same handoff emit a
-        # second time once the fault cleared.
+        # NOTHING is claimed at this point - the emit marker is taken further
+        # down, immediately before the line is printed - so there is nothing to
+        # release here and this path deliberately leaves any existing marker
+        # alone. An `rm -f` here used to delete the marker an EARLIER successful
+        # sweep had written, which delivered the same handoff twice once the fault
+        # cleared. The response stays retryable because no marker was ever taken
+        # for it in this invocation, not because one was released.
         printf '%s_REVIEW_PARSE_ERROR reason=format_failed resp=%s\n' "$PREFIX" "$file"
         return 0
     fi
