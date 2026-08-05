@@ -74,9 +74,22 @@ grep -q 'pr-round-count.sh' "$SKILL" \
 # Each reviewer is checked on the head IT reviewed. Checking Codex on $HEAD_OID
 # makes the gate unreachable in the Copilot phase: Codex is deliberately not
 # re-run there, so its verdict on a Copilot-fix commit is `none` forever.
+# Both obvious answers are wrong: always-$HEAD_OID makes the gate unreachable in
+# the Copilot phase, always-$CODEX_SHA ignores a NEW Codex review that auto-review
+# may have produced on the current head — and a body-only CHANGES_REQUESTED leaves
+# no thread for the unresolved gate to catch.
+grep -q 'state N "$CODEX_BOT" "$HEAD_OID"' "$SKILL" \
+    && pass "the gate asks whether Codex has judged the CURRENT head" \
+    || die "the gate never checks for a newer Codex review on the current head"
 grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
-    && pass "Codex is validated on the SHA it signed off, not the current head" \
-    || die "Codex's verdict is checked against the wrong SHA — the gate cannot pass after a Copilot fix"
+    && pass "…and falls back to the recorded signoff when it has not" \
+    || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
+grep -qE 'verdict N "\$CODEX_BOT" +"\$HEAD_OID"' "$SKILL" \
+    && pass "…and a current-head Codex judgement wins over the older one" \
+    || die "a newer Codex review on the current head is never honoured"
+grep -q 'CODEX_STATE_RC' "$SKILL" \
+    && pass "an unreadable Codex head-state blocks the merge" \
+    || die "the current-head state probe's status is not acted on"
 grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
     && pass "Copilot is validated on the current head" \
     || die "Copilot's verdict is not pinned to \$HEAD_OID"

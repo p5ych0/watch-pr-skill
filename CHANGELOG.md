@@ -49,6 +49,33 @@ the plugin no longer runs a reviewer of its own.
   comment**, because every inline comment becomes a thread the merge gate
   requires resolved.
 
+- **A newer Codex review of the current head wins over the recorded signoff.**
+  Both obvious answers to "which SHA do we check Codex against" are wrong, and
+  this release shipped each in turn. Always the current head makes the gate
+  unreachable in the Copilot phase, where Codex is deliberately not re-run.
+  Always the recorded signoff ignores a review that Codex *auto-review* may have
+  produced on the Copilot-fix head — and a body-only `CHANGES_REQUESTED` leaves no
+  inline thread for the unresolved-thread gate to catch either, so every gate
+  would pass with an active request for changes standing. The gate asks about the
+  current head first and falls back to the signoff only when Codex has genuinely
+  not judged it.
+
+- **The watch fails closed on any helper failure, and never sleeps past its
+  deadline.** It treated only the documented exit 2 as unreadable, so a missing or
+  non-executable helper (126/127) had its stderr parsed as a state and eventually
+  reported a *timeout* — which reads as "wait or re-request" when the truth is
+  "this cannot be read". It also emitted `PR_REVIEW_READY` — the signal that
+  reaches the session under Monitor — before checking whether the verdict could be
+  read, and slept a full interval before re-checking the deadline, so
+  `--timeout 1` with the default interval waited thirty seconds. Leading-zero
+  intervals are rejected for the same octal reason as the round threshold, and an
+  option given without its value is usage rather than an infinite parse loop.
+
+- **A resolved head must be a full SHA.** `abc` is all-hex, so a character-only
+  check accepted it and the `commit_id` filter then matched nothing — printing no
+  blocking body with a success status, indistinguishable from "there is no
+  blocking body".
+
 - **The merge gate could never pass after a Copilot fix.** The phased loop
   deliberately does not re-run Codex during the Copilot phase — that is what the
   `Review-Phase: copilot` trailer and the range check are for — but the gate still

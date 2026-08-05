@@ -247,21 +247,43 @@ if [ "$HEAD_RC" -ne 0 ] || ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]]; then
     echo "merge blocked: head lookup failed (rc=$HEAD_RC)"; exit 0
 fi
 
-# (1) Each reviewer clean on the head IT reviewed.
+# (1) Each reviewer clean on the head that reviewer actually judged.
 #
 # Copilot is checked on $HEAD_OID — it reviews the current head, by definition of
-# the phase. Codex is checked on $CODEX_SHA, the head it signed off, because the
-# Copilot phase deliberately does not re-run it: asking for a Codex verdict on a
-# Copilot-fix commit returns `none`, and the gate could never pass.
+# the phase. Codex is the awkward one, and BOTH obvious answers are wrong:
 #
-# $HEAD_OID is passed explicitly rather than letting each call resolve the head:
-# a push landing between the two would otherwise leave a verdict describing an
-# older commit while step 5 pins and merges the newer one.
+#   - always $HEAD_OID: the Copilot phase deliberately does not re-run Codex, so
+#     its verdict on a Copilot-fix commit is `none` forever and the gate that the
+#     phasing exists to support can never pass;
+#   - always $CODEX_SHA: if Codex AUTO-REVIEW is on, a Copilot-fix push gets a
+#     NEW Codex review on the current head. Validating only the older signoff
+#     ignores it — and a body-only CHANGES_REQUESTED leaves no inline thread for
+#     the unresolved-thread gate to catch either, so every gate passes while an
+#     active request for changes stands.
+#
+# So: ask about the CURRENT head first, and fall back to the recorded signoff
+# only when Codex has genuinely not reviewed this head.
 if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "merge blocked: CODEX_SHA is not a full 40-hex sha"; exit 0
 fi
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT"   "$CODEX_SHA"; CODEX_RC=$?
-"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID";  COPILOT_RC=$?
+CODEX_HEAD_STATE=$("$RB_SCRIPTS"/pr-review-state.sh state N "$CODEX_BOT" "$HEAD_OID"); CODEX_STATE_RC=$?
+if [ "$CODEX_STATE_RC" -eq 2 ]; then
+    echo "merge blocked: could not read Codex's state on the current head"; exit 0
+fi
+case "$CODEX_HEAD_STATE" in
+    *state=none*)
+        # No Codex review of this head at all: the recorded signoff is the
+        # authority, and step (2) proves the delta since it is Copilot-only.
+        "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"; CODEX_RC=$? ;;
+    *)
+        # Codex HAS judged this head — that judgement wins over the older one,
+        # whatever it says.
+        "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$HEAD_OID"; CODEX_RC=$? ;;
+esac
+# $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
+# push landing mid-gate would otherwise leave a verdict describing an older
+# commit while step 5 pins and merges the newer one.
+"$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$HEAD_OID"; COPILOT_RC=$?
 if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
     echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 0
 fi

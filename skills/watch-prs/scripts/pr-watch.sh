@@ -31,8 +31,13 @@ WHO=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --interval) INTERVAL="${2:-}"; shift 2 || true ;;
-        --timeout)  TIMEOUT="${2:-}";  shift 2 || true ;;
+        # A missing value is usage, not something to recover from: `shift 2 ||
+        # true` left the same option in $1 and the parser span forever, hanging
+        # the watch before it started.
+        --interval) [ "$#" -ge 2 ] || { echo "$0: --interval needs a value" >&2; exit 2; }
+                    INTERVAL="$2"; shift 2 ;;
+        --timeout)  [ "$#" -ge 2 ] || { echo "$0: --timeout needs a value" >&2; exit 2; }
+                    TIMEOUT="$2"; shift 2 ;;
         -*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
         *) if [ -z "$PR" ]; then PR="$1"; elif [ -z "$WHO" ]; then WHO="$1"; fi; shift ;;
     esac
@@ -45,18 +50,26 @@ esac
 # Non-numeric values fall back to the defaults rather than aborting or, worse,
 # becoming 0 — a zero interval would spin, and a zero timeout would return
 # "timed out" before the first poll.
-case "$INTERVAL" in 0|*[!0-9]*|"") INTERVAL=30 ;; esac
-case "$TIMEOUT"  in *[!0-9]*|"")   TIMEOUT=3600 ;; esac
+# Leading zeros are rejected, not accepted as digits: Bash reads them as octal, so
+# `00` made `sleep` return at once and `waited` never advance — a spin — while
+# `08`/`09` aborted inside the arithmetic below.
+case "$INTERVAL" in 0|0*|*[!0-9]*|"") INTERVAL=30 ;; esac
+case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|"") TIMEOUT=3600 ;; esac
 
 waited=0
 last=""
 while :; do
     line="$("$STATE_SCRIPT" state "$PR" "$WHO" 2>&1)"; rc=$?
-    if [ "$rc" -eq 2 ]; then
-        # An unreadable state is not "still waiting": the caller must decide,
-        # because the difference between "no review yet" and "cannot tell" is the
-        # difference between waiting and merging on a bad read.
-        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error detail=%s\n' "$PR" "$WHO" "$line"
+    if [ "$rc" -ne 0 ]; then
+        # ANY non-zero status, not just the helper's documented 2. A missing or
+        # non-executable helper exits 126/127, and treating that as a state left
+        # the watch polling stderr until it reported a timeout — which reads as
+        # "wait or re-request" when the truth is "this cannot be read at all".
+        #
+        # An unreadable state is not "still waiting": the difference between "no
+        # review yet" and "cannot tell" is the difference between waiting and
+        # merging on a bad read.
+        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error rc=%s detail=%s\n' "$PR" "$WHO" "$rc" "$line"
         exit 2
     fi
 
@@ -72,10 +85,17 @@ while :; do
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
             verdict="$("$STATE_SCRIPT" verdict "$PR" "$WHO" 2>&1)"; vrc=$?
+            if [ "$vrc" -eq 2 ]; then
+                # PR_REVIEW_READY is THE signal that there is something to act on
+                # — under Monitor it is what reaches the session. Emitting it and
+                # then exiting 2 tells the session to act and the shell that it
+                # could not be read, and the line is what gets noticed.
+                printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error detail=%s\n' "$PR" "$WHO" "$verdict"
+                exit 2
+            fi
             printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s %s\n' \
                 "$PR" "$WHO" "$state" "${verdict##*reviewer=* }"
             printf '%s\n' "$verdict"
-            [ "$vrc" -eq 2 ] && exit 2
             exit 0 ;;
     esac
 
@@ -83,6 +103,13 @@ while :; do
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
         exit 1
     fi
-    sleep "$INTERVAL"
-    waited=$((waited + INTERVAL))
+    # Never sleep past the deadline. A full interval was slept before the timeout
+    # was re-checked, so `--timeout 1` with the default 30s interval waited 30
+    # seconds to report a one-second timeout — and any caller whose timeout is
+    # shorter than the interval saw the same.
+    nap="$INTERVAL"
+    remaining=$((TIMEOUT - waited))
+    [ "$nap" -gt "$remaining" ] && nap="$remaining"
+    sleep "$nap"
+    waited=$((waited + nap))
 done

@@ -146,6 +146,21 @@ do
         || die "malformed record #$i gave rc=$rc out='$out'"
 done
 
+# A resolved head must be a FULL sha. `abc` is all-hex, so a character-only check
+# accepted it and the commit_id filter then matched nothing — printing no body
+# with rc 0, which is indistinguishable from "no blocking body".
+for shorthead in abc aaaa 0123456789; do
+    out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "$shorthead" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "blocked-body: an all-hex but short head ('$shorthead') => 2" \
+        || die "short head '$shorthead' gave rc=$rc out='$out'"
+done
+# The same when the helper resolves the head itself and gh returns something short.
+out="$(GH_HEAD="abc" GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "blocked-body: a short head from its own lookup => 2" \
+    || die "self-resolved short head gave rc=$rc out='$out'"
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"

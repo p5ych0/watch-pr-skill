@@ -100,5 +100,61 @@ out="$(run 7 "$BOT" --interval 0 --timeout 5 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] || [ "$rc" -eq 0 ] && pass "a zero interval falls back rather than spinning" \
     || die "interval 0 gave rc=$rc"
 
+# ── ANY non-zero helper status is an error, not a state ────────────────────
+# A missing or non-executable helper exits 126/127. Treating that as a state left
+# the watch polling stderr until it reported a TIMEOUT, which reads as "wait or
+# re-request" when the truth is "this cannot be read at all".
+for rc_case in 126 127 3; do
+    cat > "$TMP/broken.sh" <<SH
+#!/usr/bin/env bash
+echo "some stderr noise" >&2
+exit $rc_case
+SH
+    chmod +x "$TMP/broken.sh"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/broken.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a helper exiting $rc_case => 2, not a timeout" \
+        || die "helper rc=$rc_case gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'state=timeout' \
+        && die "helper rc=$rc_case was reported as a timeout" \
+        || pass "helper rc=$rc_case is not reported as a timeout"
+done
+
+# ── READY must not precede a verdict that could not be read ────────────────
+# Under Monitor, PR_REVIEW_READY is what reaches the session. Printing it and
+# then exiting 2 tells the session to act while telling the shell it could not
+# be read — and the line is what gets noticed.
+seq_set reviewed
+out="$(VERDICT='verdict=error reason=unreadable' VERDICT_RC=2 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && die "an unreadable verdict still emitted the READY signal: $out" \
+    || pass "no READY line when the verdict could not be read"
+[ "$rc" -eq 2 ] && pass "and it exits 2" || die "unreadable verdict gave rc=$rc"
+
+# ── an option without its value is usage, not an infinite loop ─────────────
+# `shift 2 || true` left the same option in $1 and the parser span forever,
+# hanging the watch before it started. Run under `timeout` so a regression fails
+# the suite instead of freezing it.
+for opt in --interval --timeout; do
+    timeout 5 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+        "$SCRIPT" 7 "$BOT" "$opt" >/dev/null 2>&1; rc=$?
+    [ "$rc" -eq 2 ] && pass "$opt without a value => 2 (no hang)" \
+        || die "$opt without a value gave rc=$rc (124 = it hung)"
+done
+
+# ── leading-zero intervals are octal in Bash arithmetic ────────────────────
+# `00` made sleep return at once and `waited` never advance — a spin — and
+# `08`/`09` aborted inside the arithmetic. Both must fall back to the default.
+seq_set none
+for bad in 00 08 09; do
+    start=$(date +%s)
+    timeout 20 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+        "$SCRIPT" 7 "$BOT" --interval "$bad" --timeout 1 >/dev/null 2>&1; rc=$?
+    elapsed=$(( $(date +%s) - start ))
+    { [ "$rc" -eq 1 ] && [ "$elapsed" -lt 20 ]; } \
+        && pass "--interval $bad falls back rather than spinning or aborting" \
+        || die "--interval $bad gave rc=$rc after ${elapsed}s"
+done
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
