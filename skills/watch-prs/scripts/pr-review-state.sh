@@ -103,9 +103,23 @@ reviewer_reviews() {
                    # `2026-01-02T00:00:00zzzz` through, and it sorts after the
                    # real `2026-01-02T00:00:00Z` — the same lexical-sort hole the
                    # prefix check was added to close.
+                   #
+                   # CANONICAL UTC ONLY — no numeric offset, no fractional
+                   # seconds. Both are valid ISO 8601, and accepting them put the
+                   # hole back in a subtler form, because the sort is lexical and
+                   # neither sorts chronologically:
+                   #
+                   #   03:00:00+02:00  is 01:00 UTC, yet sorts AFTER 02:30:00Z
+                   #   03:00:00.5Z     sorts BEFORE 03:00:00Z ('.' < 'Z')
+                   #
+                   # So an older APPROVED could outrank a newer
+                   # CHANGES_REQUESTED and report clean. GitHub returns canonical
+                   # `Z` timestamps here; anything else is unexpected enough to
+                   # be worth failing closed over, and failing closed is the
+                   # direction that cannot invent a signoff.
                    or (.submitted_at != null
                        and (.submitted_at
-                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
                             | not)))
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who) ]

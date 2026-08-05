@@ -210,8 +210,9 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badts.json" run verdict 7 "$BOT" 2>&1)
 printf '%s' "$out" | grep -q 'verdict=clean' \
     && die "a stale APPROVED with a junk timestamp reported CLEAN: $out" \
     || pass "no clean verdict from a junk timestamp"
-# Real ISO timestamps, with and without fractional seconds, still work.
-for ts in '"2026-01-01T00:00:00Z"' '"2026-01-01T00:00:00.123Z"' '"2026-01-01T00:00:00+01:00"'; do
+# Canonical UTC works; the non-canonical forms are rejected below, because the
+# sort that decides which review is authoritative is lexical.
+for ts in '"2026-01-01T00:00:00Z"'; do
     mk_reviews APPROVED "$ts" 73
     printf '[]' > "$TMP/comments-73.json"
     out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
@@ -244,6 +245,36 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/prefixts.json" run verdict 7 "$BOT" 2>
 printf '%s' "$out" | grep -q 'verdict=clean' \
     && die "a stale APPROVED with a prefix-valid timestamp reported CLEAN: $out" \
     || pass "no clean verdict from a prefix-valid timestamp"
+
+# ── the sort is LEXICAL, so the format must make lexical == chronological ──
+# A numeric offset is valid ISO 8601 and passes any format check that allows it,
+# but does not order correctly: `03:00:00+02:00` is 01:00 UTC and therefore
+# EARLIER than `02:30:00Z`, yet sorts after it. An older APPROVED would then
+# outrank a newer CHANGES_REQUESTED and report clean — the exact hole the
+# anchored check was added to close, in a subtler form.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T02:30:00Z","id":95},{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-02T03:00:00+02:00","id":96}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/offsetts.json"
+printf '[]' > "$TMP/comments-96.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/offsetts.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "an offset timestamp => 2, rather than sorting above a newer UTC review" \
+    || die "offset timestamp gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'verdict=clean' \
+    && die "an older APPROVED (+02:00) outranked a newer CHANGES_REQUESTED: $out" \
+    || pass "no clean verdict from an offset-timestamped approval"
+
+# Fractional seconds fail the same way in the other direction: `03:00:00.5Z`
+# sorts BEFORE `03:00:00Z`, because '.' is below 'Z' in ASCII.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-02T03:00:00Z","id":97},{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T03:00:00.5Z","id":98}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/fracts.json"
+printf '[]' > "$TMP/comments-97.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/fracts.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a fractional-second timestamp => 2" \
+    || die "fractional timestamp gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'verdict=clean' \
+    && die "a newer CHANGES_REQUESTED sorted below an older APPROVED: $out" \
+    || pass "no clean verdict from a fractional-second timestamp"
 
 # ── the clean verdict is re-checked against a second snapshot ──────────────
 # State and count came from separate fetches once, so a review that changed in

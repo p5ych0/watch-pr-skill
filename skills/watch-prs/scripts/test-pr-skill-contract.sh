@@ -311,12 +311,42 @@ grep -q 'merge N --repo \$OWNER/\$REPO --squash --delete-branch \$ADMIN' "$SKILL
     || die "the merge command does not use \$ADMIN"
 
 # ── pagination must terminate ──────────────────────────────────────────────
-# A page reporting hasNextPage=true with the cursor it was asked for makes the
-# gate request that identical page forever. A hang is worse than a blocked merge:
-# nothing times out and the operator waits on a gate that never answers.
-grep -q 'NEXT" != "\$CURSOR"' "$SKILL" \
-    && pass "the merge gate stops when the pagination cursor does not advance" \
-    || die "a repeated cursor would loop the merge gate forever"
+# A page reporting hasNextPage=true with a cursor already used makes the gate
+# walk that cycle forever. A hang is worse than a blocked merge: nothing times
+# out and the operator waits on a gate that never answers.
+#
+# EVERY cursor, not just the previous one: comparing against the last cursor
+# caught an immediate self-loop but not `null → A → B → A → B …`.
+grep -q 'SEEN="\$SEEN\$NEXT\$RS"' "$SKILL" \
+    && pass "the merge gate records every pagination cursor it has requested" \
+    || die "a cursor cycle would loop the merge gate forever"
+grep -q 'case "\$SEEN" in \*"\$RS\$NEXT\$RS"\*) OK=0; break ;; esac' "$SKILL" \
+    && pass "…and stops when one repeats" \
+    || die "the merge gate does not check the cursor against the ones it has used"
+
+# ── the Copilot summary is posted BEFORE the request ───────────────────────
+# In the Codex phase the mention carries the summary, so the order is settled by
+# construction. Here it is not: --add-reviewer is a separate call and Copilot can
+# start reading within seconds, so requesting first means a fast pass reviews
+# against the PREVIOUS round's summary.
+awk '/gh pr comment N --body "\$\(cat "\$SUMMARY_FILE"\)"/ {c=NR}
+     /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "the Copilot round summary is posted before the review request" \
+    || die "Copilot can be requested before the round summary exists"
+grep -q 'ABORT: could not post the round summary — do not request Copilot yet' "$SKILL" \
+    && pass "…and a failed summary post stops the phase" \
+    || die "a failed Copilot-phase summary post does not stop the request"
+
+# ── the reviewers review; they do not implement ────────────────────────────
+# Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
+# as a work order, and the run edited files and committed from an environment
+# with no remote — so the commit existed nowhere and no review was produced.
+for f in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
+    [ -f "$f" ] || continue
+    grep -qi 'You do not implement' "$f" \
+        && pass "$(basename "$f") states that the reviewer never writes code" \
+        || die "$(basename "$f") does not forbid the reviewer from implementing"
+done
 
 # ── v2 ships to Claude Code only ───────────────────────────────────────────
 # Both reviewers run in GitHub's cloud, so nothing is installed for them; the

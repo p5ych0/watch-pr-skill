@@ -200,16 +200,23 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
     && pass "a junk timestamp at the boundary fails closed instead of skipping the pause" \
     || die "junk timestamp at the boundary gave rc=$rc out='$out' (0 = the pause was skipped)"
 
-# Real ISO variants stay acceptable: fractional seconds and numeric offsets are
-# what GitHub actually returns from some endpoints, and rejecting them would
-# fail closed on every round.
-for good in '"2026-01-02T03:04:05Z"' '"2026-01-02T03:04:05.123Z"' \
-            '"2026-01-02T03:04:05+01:00"' '"2026-01-02T03:04:05-0500"'; do
-    mk "$CODEX|aaa|RAW:$good"
+# CANONICAL UTC only. Numeric offsets and fractional seconds are valid ISO 8601
+# but do not sort chronologically under the LEXICAL sort the review helpers use —
+# `03:00:00+02:00` is 01:00 UTC yet sorts after `02:30:00Z`, and `03:00:00.5Z`
+# sorts before `03:00:00Z`. The same rule is applied in all three scripts so they
+# cannot disagree about what a timestamp is. GitHub returns `Z` here.
+mk "$CODEX|aaa|RAW:\"2026-01-02T03:04:05Z\""
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+    && pass "a canonical UTC submitted_at is a real round" \
+    || die "canonical UTC timestamp was rejected (rc=$rc out='$out')"
+for nonc in '"2026-01-02T03:04:05.123Z"' '"2026-01-02T03:04:05+01:00"' \
+            '"2026-01-02T03:04:05-0500"' '"2026-01-02T03:04:05+00:00"'; do
+    mk "$CODEX|aaa|RAW:$nonc"
     out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-    { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
-        && pass "submitted_at $good is a real round" \
-        || die "valid ISO $good was rejected (rc=$rc out='$out')"
+    [ "$rc" -eq 2 ] \
+        && pass "non-canonical timestamp $nonc => 2" \
+        || die "non-canonical $nonc was accepted (rc=$rc out='$out')"
 done
 
 # ── `state` decides whether a record is a finished pass ────────────────────

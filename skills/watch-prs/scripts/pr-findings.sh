@@ -36,7 +36,13 @@ REPO_SLUG="$OWNER/$REPO"
 # Every unresolved thread, paginated, with the page shape validated before any
 # of it is formatted.
 cmd_list() {
-    local pr="$1" cursor="null" page nodes has_next
+    # `seen` is a record separator-delimited set of every cursor this walk has
+    # requested, so a cycle of ANY length is caught rather than only a cursor
+    # repeating itself immediately. RS (0x1E) cannot occur in a base64 GraphQL
+    # cursor, so it cannot make two different cursors look like one.
+    local pr="$1" cursor="null" page nodes has_next next
+    local RS=$'\x1e' seen
+    seen="${RS}null${RS}"
     while :; do
         page=$(gh api graphql -F number="$pr" -F owner="$OWNER" -F repo="$REPO" -F cursor="$cursor" -f query='
             query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
@@ -101,16 +107,19 @@ cmd_list() {
             echo "PR_FINDINGS pr=$pr status=error reason=missing_cursor" >&2
             return 2
         }
-        # The cursor must ADVANCE. A stale or malformed page can report
-        # `hasNextPage: true` while returning the same `endCursor` it was asked
-        # for, and the loop then requests that identical page forever — a hang,
-        # which is worse than the documented failure: nothing times out, no
-        # status is returned, and the caller waits on a command that will never
-        # answer. Fail closed instead.
-        if [ "$next" = "$cursor" ]; then
-            echo "PR_FINDINGS pr=$pr status=error reason=cursor_did_not_advance" >&2
-            return 2
-        fi
+        # The cursor must be one this walk has NEVER requested — not merely
+        # different from the last one. Comparing against the previous cursor
+        # alone caught only an immediate self-loop: a sequence like
+        # `null → A → B → A → B …` passes that check on every step and alternates
+        # forever. A cycle of any length is still a hang, and a hang is worse
+        # than the documented failure, because nothing times out, no status is
+        # returned, and the caller waits on a command that will never answer.
+        case "$seen" in
+            *"$RS$next$RS"*)
+                echo "PR_FINDINGS pr=$pr status=error reason=cursor_cycle" >&2
+                return 2 ;;
+        esac
+        seen="$seen$next$RS"
         cursor="$next"
     done
 }
@@ -181,7 +190,7 @@ cmd_blocked_body() {
                    or ((.submitted_at | type) != "string" and .submitted_at != null)
                    or (.submitted_at != null
                        and (.submitted_at
-                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
                             | not))
                    or ((.body | type) != "string" and .body != null))
             then error("malformed review record")

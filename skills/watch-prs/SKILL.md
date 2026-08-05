@@ -203,7 +203,9 @@ resolving it. Then, in one pass:
    the summary follows it. Splitting them into two comments divides the record
    the reviewer is told to read, and the request half arrives with no account of
    what changed. In the Copilot phase the request is `gh pr edit --add-reviewer
-   @copilot`, which is not a comment, so there the summary stands alone.
+   @copilot`, which is not a comment, so there the summary is a separate post —
+   and it goes **first**, branched on, because Copilot can start reading within
+   seconds and would otherwise review against the previous round's summary.
 
 ```bash
 # Codex phase: one comment carries both. Branch on it — the comment IS the
@@ -283,6 +285,18 @@ Ask Copilot:
 CODEX_SHA=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
 if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
+fi
+
+# THE SUMMARY GOES FIRST, and its post is branched on.
+#
+# In the Codex phase the mention carries the summary, so the ordering is settled
+# by construction. Here it is not: `--add-reviewer` is a separate call, and
+# Copilot can begin reading within seconds. Requesting first means a fast pass
+# reviews against the PREVIOUS round's account of what changed and what was
+# skipped — and step 1 makes that account a precondition of asking, not a
+# courtesy. If the summary cannot be posted, there is nothing to request against.
+if ! gh pr comment N --body "$(cat "$SUMMARY_FILE")"; then
+    echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi
 
 # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
@@ -450,7 +464,10 @@ if [ "$HEAD_OID" != "$CODEX_EFFECTIVE_SHA" ]; then
 fi
 
 # (3) No unresolved threads, paginated, fail closed.
-UNRESOLVED=0; CURSOR=null; OK=1
+# SEEN holds every cursor already requested, RS-delimited, so a cycle of any
+# length is caught. Comparing only against the previous cursor caught an
+# immediate self-loop but not `null → A → B → A → B …`, which alternates forever.
+UNRESOLVED=0; CURSOR=null; OK=1; RS=$'\x1e'; SEEN="${RS}null${RS}"
 while :; do
   PAGE=$(gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -F cursor="$CURSOR" -f query='
     query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
@@ -482,12 +499,12 @@ while :; do
   esac
   NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
   { [ -n "$NEXT" ] && [ "$NEXT" != "null" ]; } || { OK=0; break; }
-  # The cursor must ADVANCE. A stale or malformed page can report
-  # `hasNextPage: true` while returning the cursor it was asked for, and the gate
-  # then requests that identical page forever. A hang is worse than a blocked
-  # merge: nothing times out and the operator is left waiting on a gate that will
-  # never answer.
-  [ "$NEXT" != "$CURSOR" ] || { OK=0; break; }
+  # The cursor must be one this walk has NEVER requested. A stale or malformed
+  # page can report `hasNextPage: true` while returning a cursor already used,
+  # and the gate then walks that cycle forever. A hang is worse than a blocked
+  # merge: nothing times out and the operator waits on a gate that never answers.
+  case "$SEEN" in *"$RS$NEXT$RS"*) OK=0; break ;; esac
+  SEEN="$SEEN$NEXT$RS"
   CURSOR="$NEXT"
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi

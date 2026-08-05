@@ -102,7 +102,7 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                # read as one more round.
                or (.submitted_at != null
                    and (.submitted_at
-                        | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?(Z|[+-][0-9]{2}:?[0-9]{2})$")
+                        | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
                         | not)))
         then error("malformed review record")
         # A round is a FINISHED pass. `PENDING` is a draft in flight — the same

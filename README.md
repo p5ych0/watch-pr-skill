@@ -2,12 +2,10 @@
 
 **A team-grade code-review rhythm for solo developers.** You write the code;
 GitHub's own reviewers — **Codex** and **Copilot** — review every pull request,
-and your coding agent (Claude Code *or* Codex) works the fix → resolve →
-re-request loop until they sign off. The review discipline of a team, with no
-teammates required.
+and **Claude Code** works the fix → resolve → re-request loop until they sign
+off. The review discipline of a team, with no teammates required.
 
-One install serves every project on your machine, and it runs under **both Claude
-Code and Codex**.
+One install serves every project on your machine.
 
 ## Why
 
@@ -132,7 +130,6 @@ loop, which watches for verdicts, closes rounds and gates the merge.
 Invoke the skill:
 
 - Claude Code: `/watch-pr-skill:watch-prs`
-- Codex: `/skills` → pick `watch-prs` (or type `$watch-prs`)
 
 Then:
 
@@ -147,9 +144,9 @@ Then:
 3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
    state is actionable and prints one line when it changes. In Claude Code it
    runs as the session's Monitor, so the verdict surfaces into the chat by
-   itself; under Codex, run it in the background. It is armed and re-armed as
-   part of each round without asking you — see **Watching without prompts**. An
-   unreadable state is a stop, never "no findings".
+   itself. It is armed and re-armed as part of each round without asking you —
+   see **Watching without prompts**. An unreadable state is a stop, never
+   "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, **check the round
    boundary** (`pr-round-count.sh <PR> <reviewer>`), then push, reply to each
    thread with what changed, resolve it, and post **one comment** that opens with
@@ -271,10 +268,9 @@ session simply uses the new version.
 
 ## Tested versions
 
-Verified against Claude Code and Codex as of July 2026. **Both plugin systems are
-young and moving fast** (Codex's marketplace CLI is recent; `~/.codex/prompts`
-regressed once) — if install or invocation differs from the above, check each
-tool's current plugin docs and open an issue.
+Verified against Claude Code as of July 2026. **The plugin system is young and
+moving fast** — if install or invocation differs from the above, check the current
+plugin docs and open an issue.
 
 ## Troubleshooting
 

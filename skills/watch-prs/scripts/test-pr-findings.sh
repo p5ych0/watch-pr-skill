@@ -259,6 +259,45 @@ out="$(timeout 20 env GH_PAGE1="$TMP/cur1.json" GH_PAGE2="$TMP/cur2.json" \
     && pass "list: a cursor that repeats => 2, not an endless walk" \
     || die "repeated cursor gave rc=$rc (124 = it hung) out='$out'"
 
+# A CYCLE, not just a self-loop: `null -> A -> B -> A -> B ...` passes an
+# "is it different from the last one" check on every step and alternates forever.
+# The guard tracks every cursor already requested, so a cycle of any length ends
+# the walk instead of hanging it.
+page true '"A"' "$NODE_OK" > "$TMP/cyc1.json"
+printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":"A"},"nodes":%s}}}}}' \
+    "$NODE_OK" > "$TMP/cycB.json"
+# Page 2 onward alternates B, A, B, A ... by echoing back a cursor already used.
+cat > "$TMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "api graphql")
+    n=$(cat "$CYC_N" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CYC_N"
+    if [ $((n % 2)) -eq 0 ]; then cur='"B"'; else cur='"A"'; fi
+    printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":%s},"nodes":[]}}}}}' "$cur" ;;
+  *) printf '{}' ;;
+esac
+GHSH
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/cyc.n"
+out="$(timeout 20 env CYC_N="$TMP/cyc.n" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: a two-page cursor cycle => 2, not an endless alternation" \
+    || die "cursor cycle gave rc=$rc (124 = it hung) out='$out'"
+# Restore the shared stub for the cases below.
+cat > "$TMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+case "$1 ${2:-}" in
+  "api graphql")
+    [ -n "${GH_GQL_RC:-}" ] && exit "$GH_GQL_RC"
+    if [ -n "${GH_PAGE2:-}" ] && [ -e "$TMP_SEEN" ]; then cat "$GH_PAGE2"; else
+       : > "$TMP_SEEN" 2>/dev/null || true; cat "${GH_PAGE1:-/dev/null}"; fi ;;
+  "api "*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
+  "pr view"*) printf '%s' "${GH_HEAD:-}" ;;
+  *) printf '{}' ;;
+esac
+GHSH
+chmod +x "$TMP/bin/gh"
+
 # A cursor that DOES advance still paginates — the guard must not stop a real
 # multi-page read.
 page true '"C1"' "$NODE_OK" > "$TMP/adv1.json"
@@ -291,6 +330,27 @@ out="$(GH_REVIEWS="$TMP/goodstate.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the request'; } \
     && pass "blocked-body: a real blocking body is still returned" \
     || die "valid CHANGES_REQUESTED body was lost (rc=$rc out='$out')"
+
+# ── blocked-body sorts on submitted_at too, so the same rule applies ──────
+# `sort_by(.submitted_at) | last` decides which review is authoritative here as
+# well, and the sort is lexical. An older APPROVED carrying a numeric offset
+# sorts ABOVE a newer CHANGES_REQUESTED — `03:00:00+02:00` is 01:00 UTC — so the
+# latest record is read as the approval and the blocking body is silently
+# suppressed: empty output, rc 0, which the driver reads as "no body".
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T02:30:00Z","body":"the newer request"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00+02:00","body":"older approval"}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/bboffset.json"
+out="$(GH_REVIEWS="$TMP/bboffset.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "blocked-body: an offset timestamp => 2, not a hidden request body" \
+    || die "blocked-body offset timestamp gave rc=$rc out='$out'"
+
+# Fractional seconds mis-sort the other way: `.5Z` sorts before plain `Z`.
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00.5Z","body":"the newer request"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00Z","body":"older approval"}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/bbfrac.json"
+out="$(GH_REVIEWS="$TMP/bbfrac.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "blocked-body: a fractional-second timestamp => 2" \
+    || die "blocked-body fractional timestamp gave rc=$rc out='$out'"
 
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?

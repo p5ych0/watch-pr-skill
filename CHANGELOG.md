@@ -71,6 +71,38 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Timestamps must be canonical UTC, because the sort is lexical.** The
+  validator accepted numeric offsets and fractional seconds — both valid ISO
+  8601 — while `sort_by(.submitted_at)` orders them as strings, and neither form
+  sorts chronologically: `03:00:00+02:00` is 01:00 UTC yet sorts *after*
+  `02:30:00Z`, and `03:00:00.5Z` sorts *before* `03:00:00Z`. So an older
+  `APPROVED` could outrank a newer `CHANGES_REQUESTED` and report clean, and
+  `blocked-body` would suppress the newer request's text entirely — empty output
+  with rc 0, which reads as "this blocking review has no body". This was the
+  anchored-timestamp hole from earlier in this release, reopened in a subtler
+  form by the fix that widened the format. All three scripts now require
+  `…THH:MM:SSZ`, which is what GitHub returns and what makes lexical order
+  chronological.
+
+- **A pagination cursor cycle of any length is caught.** Comparing each cursor
+  against the previous one stopped an immediate self-loop but not
+  `null → A → B → A → B …`, which alternates forever. Both `pr-findings.sh` and
+  the merge gate now record every cursor they have requested.
+
+- **The Copilot round summary is posted before the request.** In the Codex phase
+  the mention carries the summary, so the order is settled by construction; in
+  the Copilot phase `--add-reviewer` is a separate call and Copilot can begin
+  reading within seconds, so requesting first meant a fast pass reviewed against
+  the previous round's account of what changed. The summary post is now first and
+  branched on.
+
+- **The reviewers review; they do not implement.** Stated first in `AGENTS.md`
+  and the Copilot instructions, because ignoring it is not a no-op: a round
+  summary mentioning an unfixed defect was read as a work order, and the run
+  edited files and reported a commit made in an environment with no remote and no
+  credentials — so the commit existed nowhere, no review was produced, and the
+  round was spent.
+
 - **Claude Code only — the Codex plugin packaging is gone.** v1 shipped a Codex
   plugin because the review ran on this machine, through the `codex` CLI and a
   local bus. In v2 both reviewers are GitHub apps running in GitHub's cloud, and
@@ -79,6 +111,9 @@ the plugin no longer runs a reviewer of its own.
   `.agents/plugins/marketplace.json` are removed — the latter still advertised an
   "Automated PR review-bus loop", so anyone installing through it got metadata for
   the architecture this release deletes. One manifest now, not two that drift.
+  The README's Codex-driver claims went with them: the opening promise that either
+  agent could run the loop, the Codex invocation, and the tested-version claim all
+  described a path with no installation mechanism behind it.
 
 - **A verdict about a superseded head is not a signoff.** Pinning both probes to
   one OID made the state and the verdict describe the same commit; it did not make
