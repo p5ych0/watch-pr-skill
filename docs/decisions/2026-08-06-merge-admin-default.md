@@ -94,14 +94,29 @@ repository's *configured* protection rules; it does not create requirements that
 were never configured. So it closes a race only for conditions the repository
 actually enforces server-side.
 
-Concretely: a branch protection rule that requires status checks but sets
-"required approvals" to zero makes the *check* condition atomic at merge time,
-while reviews and conversation resolution stay unenforced — nothing is requiring
-them, so nothing re-evaluates them. That combination is the one worth having
-here, because it is the one this plugin's reviewers can actually satisfy. **No
-user-facing instructions for setting it exist in this repository yet**; they
-belong with the `REVIEW_MERGE_STRICT` implementation and arrive with #10. Until
-then, treat the paragraph above as a description of what to configure, not a
+Concretely, the combination worth having is:
+
+- **required status checks** — on;
+- **require conversation resolution before merging** — on;
+- **required approvals** — zero.
+
+Conversation resolution belongs in that list. The workflow already satisfies it:
+the base contract makes zero unresolved threads a hard rule and its merge block
+paginates every review thread and refuses while any is unresolved. So enabling
+the corresponding protection costs nothing the loop was not already doing, and
+in strict mode it becomes atomic — closing the case where a thread is opened
+after the final client-side probe. Recommending checks only would have pointed
+operators at a weaker configuration than the one they can actually run.
+
+Required approvals stay at zero because that is the single condition this
+plugin's reviewers cannot satisfy for a same-credential PR, and it is exactly
+what the accepted trade-off is about. The base contract already draws that line
+itself: `--admin` is permitted to bypass a missing approval, and explicitly
+**must not** be used to bypass `required_review_thread_resolution`.
+
+**No user-facing instructions for setting this up exist in this repository yet**;
+they belong with the `REVIEW_MERGE_STRICT` implementation and arrive with #10.
+Until then, treat the list above as a description of what to configure, not a
 pointer to instructions.
 
 **Which of those already hold here.** The first does: the base ref re-reads the
