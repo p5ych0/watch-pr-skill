@@ -1008,6 +1008,29 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 #
 # stderr is captured separately from stdout, so the distinguishing message is
 # available without polluting the value being compared.
+# THE WHOLE DIAGNOSTIC IS MATCHED, not searched for a phrase. `gh pr checks` has
+# no dedicated status for "none configured" — it documents exit 8 for pending and
+# nothing for this — so the message is the only signal, and a substring test
+# accepted it inside a LARGER failure: a run that printed the benign line and then
+# failed for an unrelated reason was classified as benign, and the default
+# administrator merge proceeded with no trusted checks result at all. Matching the
+# entire message means an extra line, an extra sentence or a wrapped error all
+# fall through to the blocking branch, which is the direction that cannot be
+# wrong.
+#
+# Both wordings are accepted because `gh` drops "required" when the branch has no
+# checks whatsoever, and both mean the same thing here: nothing to be green.
+checks_msg_is_none_configured() {
+    case "$1" in
+        *"
+"*) return 1 ;;                       # more than one line is more than one thing
+    esac
+    case "$1" in
+        "no checks reported on the '"*"' branch"|"no required checks reported on the '"*"' branch")
+            return 0 ;;
+    esac
+    return 1
+}
 CHECKS_RC=0
 CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
 # THE CONTAINER IS VALIDATED BEFORE `all`. `all(.[]; …)` over an empty stream is
@@ -1031,7 +1054,7 @@ rm -f "$CHECKS_ERR" 2>/dev/null
 if [ "$CHECKS_RC" -eq 0 ]; then
     # A real answer: every required check must be a pass.
     [ "$CHECKS" = "true" ] || { echo "merge blocked: a required check is not green (out='$CHECKS')"; exit 0; }
-elif printf '%s' "$CHECKS_MSG" | grep -q 'no required checks'; then
+elif checks_msg_is_none_configured "$CHECKS_MSG"; then
     # No required checks are configured. There is nothing to be green, so this
     # gate has nothing to say — and says so, rather than passing silently or
     # blocking forever. The other gates still apply.

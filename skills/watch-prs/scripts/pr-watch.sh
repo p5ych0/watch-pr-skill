@@ -154,7 +154,19 @@ probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limi
         kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null || break
         # A failed `sleep` advanced the counter anyway, so the loop could burn
         # the limit at once and kill a healthy probe as a "timeout".
-        sleep "$tick" || { rm -f "$tmp" 2>/dev/null; return 125; }
+        #
+        # THE PROBE IS KILLED AND REAPED FIRST. Returning on the clock failure
+        # alone left a running `gh` behind — the capability check above passed, so
+        # this path is reached with a live child — and the watch then exited 2 with
+        # that process still holding an API call open. Every re-arm of a persistent
+        # watch added another. The same teardown as the timeout branch, because it
+        # is the same situation: this probe is over and nothing may outlive it.
+        sleep "$tick" || {
+            kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            rm -f "$tmp" 2>/dev/null
+            return 125
+        }
         n=$((n + 1))
     done
     if kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then

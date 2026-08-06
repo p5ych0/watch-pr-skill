@@ -79,6 +79,19 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The none-configured checks diagnostic is matched whole, not searched for.**
+  `gh pr checks` has no dedicated status for "no required checks" — it documents
+  exit 8 for pending and nothing for this — so the message is the only signal, and
+  a substring test accepted the benign phrase inside a LARGER failure. A run that
+  printed it and then failed for an unrelated reason was classified as benign, and
+  the default administrator merge proceeded with no trusted checks result at all.
+
+- **A failed polling clock tears the probe down before returning.** The
+  fractional-sleep capability check has already succeeded on that path, so it is
+  reached with a live child: returning 125 alone left a `gh` process holding an
+  API call open after the watch exited, and every re-arm of a persistent watch
+  added another.
+
 - **The pause instruction reports each reviewer's own count.** Scoping the footer
   to a reviewer was not enough while the message printed the COMBINED count beside
   every login: with 41 Codex heads and 5 Copilot heads, an operator following the

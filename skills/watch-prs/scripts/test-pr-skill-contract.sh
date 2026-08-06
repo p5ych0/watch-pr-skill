@@ -942,6 +942,38 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
     && pass "the acknowledgement footer names the reviewer and the count" \
     || die "the acknowledgement footer is unscoped and will cross between phases"
 
+# ── the none-configured checks message is matched whole, not searched ──────
+# `gh pr checks` has no dedicated status for "no required checks" — it documents
+# exit 8 for pending and nothing for this — so the message is the only signal.
+# A substring test therefore accepted the benign phrase inside a LARGER failure:
+# a run that printed it and then failed for an unrelated reason was classified as
+# benign, and the default administrator merge proceeded with no trusted checks
+# result. The helper is extracted so this can be executed rather than read.
+CHK="$(sed -n '/^checks_msg_is_none_configured() {/,/^}/p' "$SKILL")"
+if [ -z "$CHK" ]; then
+    die "no checks-diagnostic helper in SKILL.md — has the merge gate moved?"
+else
+    chk() { bash -c "$CHK"'
+checks_msg_is_none_configured "$1" && echo BENIGN || echo BLOCK' _ "$1"; }
+    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
+        && pass "the exact none-configured message opens the gate" \
+        || die "the real gh diagnostic was not recognised"
+    [ "$(chk "no checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
+        && pass "…including the wording gh uses when there are no checks at all" \
+        || die "the no-checks-whatsoever wording blocks forever"
+    # The finding: the phrase followed by a real error.
+    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch
+error: connection reset by peer")" = BLOCK ] \
+        && pass "the phrase followed by an error blocks the merge" \
+        || die "a failed probe containing the benign phrase was treated as benign"
+    [ "$(chk "warning: no required checks reported on the '"'"'main'"'"' branch, and the API call failed")" = BLOCK ] \
+        && pass "…and so does the phrase embedded in a larger message" \
+        || die "an embedded phrase was treated as the whole diagnostic"
+    [ "$(chk "")" = BLOCK ] && pass "an empty diagnostic blocks" || die "an empty diagnostic opened the gate"
+    [ "$(chk "some other failure entirely")" = BLOCK ] \
+        && pass "an unrelated failure blocks" || die "an unrelated failure opened the gate"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

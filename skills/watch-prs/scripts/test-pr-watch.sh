@@ -837,5 +837,52 @@ for huge in 18446744073709551616 340282366920938463463374607431768211456; do
         || pass "…and announced no timeout"
 done
 
+# ── a failed polling clock tears the probe down before returning ───────────
+# The capability check at the top of `probe` succeeds, so this path is reached
+# with a LIVE child. Returning 125 on the clock failure alone left that `gh`
+# running: the watch exited 2 with an API call still open, and every re-arm of a
+# persistent watch added another orphan.
+#
+# The stub `sleep` works for the 0.2 capability probe and for the child, and
+# fails only for the polling tick — so the child is provably alive when the clock
+# fails, and the assertion is about teardown rather than about timing.
+ORPH="$TMP/orph"; mkdir -p "$ORPH"
+for b in bash sh date true false kill sed grep printf env mktemp cat rm wc awk tr; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$ORPH/$b"
+done
+REAL_SLEEP="$(command -v sleep)"
+# The stub keys on the CHILD's own start marker rather than on a call counter:
+# `probe` uses the same `sleep 0.2` for its fractional-capability check as for
+# its polling tick, so a counter cannot tell them apart, and failing the wrong
+# one drops the probe to whole-second ticks and measures nothing. The child waits
+# half a second before signalling, which the capability check — running within
+# microseconds of the fork — is always ahead of.
+cat > "$ORPH/sleep" <<SLEEPSH
+#!/usr/bin/env bash
+if [ "\$1" = "0.2" ] && [ -e "$TMP/probe-started" ]; then exit 1; fi
+exec "$REAL_SLEEP" "\$@"
+SLEEPSH
+chmod +x "$ORPH/sleep"
+mkstub "$TMP/slowstate.sh" <<SLOWSH
+"$REAL_SLEEP" 0.5
+: > "$TMP/probe-started"
+"$REAL_SLEEP" 30
+printf 'PR_REVIEW_STATE pr=\$2 sha=abc1234 reviewer=\$3 state=reviewed\n'
+exit 0
+SLOWSH
+rm -f "$TMP/probe-started"
+out="$(PATH="$ORPH:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/slowstate.sh" SEQ_FILE="$TMP/seq" \
+        HEAD40="$HEAD40" run_limited 25 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 20 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "a failed polling clock fails the watch closed" \
+    || die "a failed polling clock gave rc=$rc: '$out'"
+# The teardown, asserted directly: no `sleep 30` started by that probe may still
+# be running. An rc-only assertion passes on the leaking version, since the leak
+# is invisible to the exit status — that is exactly why it survived.
+leaked="$(pgrep -f "$REAL_SLEEP 30" 2>/dev/null | wc -l | tr -d ' ')"
+[ "${leaked:-0}" -eq 0 ] \
+    && pass "…and reaps the probe rather than leaving it holding an API call" \
+    || die "the probe survived the clock failure ($leaked orphan(s))"
+pkill -f "$REAL_SLEEP 30" 2>/dev/null
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
