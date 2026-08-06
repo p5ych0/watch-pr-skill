@@ -235,6 +235,49 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS_RC=1 \
     && pass "an unreadable comment fetch => 2, never state=none" \
     || die "comment fetch failure gave rc=$rc '$out'"
 
+# ── a NEWER clean comment supersedes an older review on the same head ─────
+# A clean re-review arrives through the comment channel, so consulting comments
+# only when there was no review at all left an older finding-bearing or blocked
+# review authoritative forever — the watch timed out repeatedly despite a newer
+# clean pass having landed.
+mk_clean_comment_at() {   # <sha10> <created_at>
+    jq -n --arg login "$BOT" --arg phrase "$CLEAN_PHRASE" --arg sha "$1" --arg ts "$2" \
+        '[{id: 950, created_at: $ts, user: {login: $login},
+           body: ($phrase + "\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+        > "$TMP/icomments.json"
+}
+mk_reviews CHANGES_REQUESTED '"2026-01-01T00:00:00Z"' 940
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=reviewed' \
+    && pass "a newer clean comment supersedes an older blocking review" \
+    || die "the stale review stayed authoritative: $out"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean'; } \
+    && pass "…and the verdict is clean, so the phase can move on" \
+    || die "newer clean comment gave rc=$rc '$out'"
+
+# The other direction: an OLDER clean comment must not beat a newer review.
+mk_reviews CHANGES_REQUESTED '"2026-01-03T00:00:00Z"' 941
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=blocked' \
+    && pass "an older clean comment does not supersede a newer review" \
+    || die "a stale clean comment won: $out"
+
+# A draft still dominates both: the pass is not finished.
+printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":942}]' \
+    "$BOT" "$HEAD40" > "$TMP/reviews.json"
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-09T00:00:00Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=pending' \
+    && pass "an in-flight draft outranks even a newer clean comment" \
+    || die "a clean comment overrode a draft: $out"
+
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31
 printf '[]' > "$TMP/comments-31.json"
@@ -407,6 +450,7 @@ cat > "$TMP/bin/gh" <<SH
 #!/usr/bin/env bash
 case "\$*" in
   *"/reviews/"*"/comments"*) printf '[]' ;;
+  *"/issues/"*"/comments"*) printf '[]' ;;
   *"/reviews"*)
      if [ ! -e "$TMP/seen" ]; then
         : > "$TMP/seen"

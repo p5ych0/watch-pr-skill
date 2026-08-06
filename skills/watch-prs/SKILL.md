@@ -835,7 +835,13 @@ CHECKS_RC=0
 CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
 CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket \
              --jq 'all(.[]; .bucket=="pass")' 2>"$CHECKS_ERR") || CHECKS_RC=$?
-CHECKS_MSG="$(cat "$CHECKS_ERR" 2>/dev/null)"; rm -f "$CHECKS_ERR" 2>/dev/null
+# The READ has its own status, taken before `rm` overwrites it. A `cat` that
+# emitted text containing "no required checks" and then failed would otherwise be
+# classified as the benign none-configured case — turning a failed probe into a
+# merge with no trusted checks result at all.
+CHECKS_MSG="$(cat "$CHECKS_ERR" 2>/dev/null)"; CHECKS_MSG_RC=$?
+rm -f "$CHECKS_ERR" 2>/dev/null
+[ "$CHECKS_MSG_RC" -eq 0 ] || { echo "merge blocked: could not read the checks diagnostic (rc=$CHECKS_MSG_RC)"; exit 0; }
 if [ "$CHECKS_RC" -eq 0 ]; then
     # A real answer: every required check must be a pass.
     [ "$CHECKS" = "true" ] || { echo "merge blocked: a required check is not green (out='$CHECKS')"; exit 0; }

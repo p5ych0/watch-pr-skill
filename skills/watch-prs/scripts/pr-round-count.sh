@@ -95,6 +95,18 @@ raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$PR/reviews" --paginat
     exit 2
 }
 
+# A CLEAN pass is a round, and it leaves no review behind.
+#
+# Codex submits a review only when it has findings, so a clean head appears
+# nowhere in `pulls/N/reviews`. Counting reviews alone made nine finding-bearing
+# heads plus a clean tenth report `rounds=9` — and the phase-transition checks
+# that consult this number would skip the operator pause at exactly the boundary
+# it exists for.
+icraw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$PR/comments" --paginate 2>/dev/null) || {
+    echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_fetch_failed"
+    exit 2
+}
+
 # Same page-shape discipline as pr-review-state.sh: `jq -s` slurps into an array
 # of PAGES, empty input slurps to zero pages, and `.[][]` over an object iterates
 # its values — so an errored body or an empty read would otherwise count as
@@ -141,12 +153,44 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                | select((.user.login | IN($who[]))
                         and .submitted_at != null
                         and .state != "PENDING")
-               | .commit_id ] | unique | length
+               | .commit_id ] | unique
         end
     end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=unreadable"
     exit 2
 }
+# The clean-pass heads, as 10-char prefixes — that is all the comment carries.
+# A prefix already covered by a counted review head is not a second round, so the
+# union is taken on prefixes rather than on the two different shapes.
+clean_shas=$(printf '%s' "$icraw" | jq -s --argjson who "$WHO_JSON" '
+    if length == 0 then error("no pages")
+    elif any(.[]; type != "array") then error("non-array page")
+    else [ .[][] ] as $all
+      | if any($all[];
+               type != "object"
+               or (.user | type) != "object"
+               or (.user.login | type) != "string"
+               or ((.body | type) != "string" and .body != null))
+        then error("malformed comment record")
+        else [ $all[]
+               | select((.user.login | IN($who[])) and ((.body | type) == "string"))
+               | select(.body | contains("Reviewed commit:"))
+               | select(.body | test("[Dd]idn.t find any major issues"))
+               | (.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{7,40})`").sha)
+             ] | unique
+        end
+    end' 2>/dev/null) || {
+    echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_unreadable"
+    exit 2
+}
+
+rounds=$(jq -n --argjson r "$rounds" --argjson c "$clean_shas" '
+    ($r | map(.[0:10])) as $rp
+    | ($rp + ($c | map(.[0:10]))) | unique | length' 2>/dev/null) || {
+    echo "PR_ROUND_COUNT pr=$PR status=error reason=count_unreadable"
+    exit 2
+}
+
 case "$rounds" in
     ""|*[!0-9]*) echo "PR_ROUND_COUNT pr=$PR status=error reason=bad_count"; exit 2 ;;
 esac

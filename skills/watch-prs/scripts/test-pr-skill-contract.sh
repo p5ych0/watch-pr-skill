@@ -624,6 +624,17 @@ grep -q 'PRIOR_REVIEW=""' "$SKILL" \
     && pass "the automatic-review path waits on any terminal review" \
     || die "the automatic path captures the in-flight pass as its own baseline"
 
+# ── the checks diagnostic is read with its status ─────────────────────────
+# A `cat` that emitted text containing "no required checks" and then failed would
+# be classified as the benign none-configured case, letting the default admin
+# merge proceed with no trusted checks result at all.
+grep -q 'CHECKS_MSG_RC' "$SKILL" \
+    && pass "the checks diagnostic read takes its own status" \
+    || die "a failed diagnostic read can be classified as 'no required checks'"
+grep -q 'could not read the checks diagnostic' "$SKILL" \
+    && pass "…and blocks the merge when it fails" \
+    || die "a failed diagnostic read does not block"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

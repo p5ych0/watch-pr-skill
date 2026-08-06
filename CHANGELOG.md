@@ -71,6 +71,25 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **A clean pass counts as a round.** It leaves no review behind, so counting
+  `pulls/N/reviews` alone reported nine heads for nine-plus-a-clean-tenth — and
+  the phase-transition checks that consult that number then skipped the operator
+  pause at exactly the boundary. Clean-pass comments are counted alongside review
+  records, deduplicated on the head they name.
+
+- **Both verdict channels are placed in time against each other.** Consulting
+  comments only when there was no review at all was too narrow: a clean
+  *re-review* on an unchanged head also arrives as a comment, so an older
+  finding-bearing or blocked review stayed authoritative forever and the watch
+  timed out repeatedly despite a newer clean pass. Whichever is newer wins — and
+  an in-flight draft still outranks both, because the pass is not finished.
+
+- **`sha1sum` is not on stock macOS.** The round-count fixtures used it, so on the
+  platform `README.md` calls supported they produced empty commit IDs and the
+  suite failed — through `pr-selfcheck.sh`, which runs every test as a mandatory
+  pre-push gate. Same trap as `timeout`, one round later. It now falls back
+  through `shasum` and `openssl` to a pure-shell expansion needing none of them.
+
 - **The automatic-review path has no pre-request baseline.** `--after-review`
   means "newer than this one", which is right for a re-request and actively wrong
   for the initial automatic pass: the push that triggered it preceded the skill,

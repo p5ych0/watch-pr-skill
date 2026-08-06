@@ -23,6 +23,12 @@ mkdir -p "$TMP/bin"
 cat > "$TMP/bin/gh" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
+  *"/issues/"*"/comments"*)
+    # A clean pass leaves no review, only this comment — so the round count has
+    # to read both endpoints. Defaults to an empty list so the pre-existing
+    # cases behave exactly as before.
+    [ -n "${GH_ICOMMENTS_RC:-}" ] && exit "$GH_ICOMMENTS_RC"
+    if [ -n "${GH_ICOMMENTS:-}" ]; then cat "$GH_ICOMMENTS"; else printf '[]'; fi ;;
   *"/reviews"*) [ -n "${GH_RC:-}" ] && exit "$GH_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
   *) printf '{}' ;;
 esac
@@ -38,7 +44,24 @@ run() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
 # sha1sum, not zero-padding: padding "c1" and "c10" to 40 characters produces the
 # SAME string, which silently merged two rounds into one and made the boundary
 # fixtures off by one.
-sha() { printf '%s' "$1" | sha1sum | cut -c1-40; }
+# NOT `sha1sum`: stock macOS ships `shasum`, not the GNU name, and the suite is a
+# mandatory pre-push gate — the same portability trap `timeout` was. Falls back
+# through the available hashers, then to a pure-shell expansion that needs none.
+sha() {
+    if command -v sha1sum >/dev/null 2>&1; then printf '%s' "$1" | sha1sum | cut -c1-40
+    elif command -v shasum >/dev/null 2>&1; then printf '%s' "$1" | shasum | cut -c1-40
+    elif command -v openssl >/dev/null 2>&1; then printf '%s' "$1" | openssl dgst -sha1 | awk '{print $NF}' | cut -c1-40
+    else
+        # Deterministic and distinct per input, which is all the fixtures need.
+        local acc="" ch i=0
+        while [ "${#acc}" -lt 40 ]; do
+            i=$((i + 1))
+            ch=$(printf '%s%s' "$1" "$i" | cksum | cut -d" " -f1)
+            acc="$acc$(printf '%08x' $((ch % 4294967296)))"
+        done
+        printf '%s' "${acc:0:40}"
+    fi
+}
 
 # `submitted_at != null` is what makes a record count as a submitted review, and
 # the script now requires a well-formed ISO timestamp before believing that — so
@@ -162,6 +185,59 @@ done
 out="$(REVIEW_ROUND_THRESHOLD=0 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=0'; } \
     && pass "a bare 0 still disables the check-in" || die "0 no longer disables (rc=$rc)"
+
+# ── a CLEAN pass is a round, and leaves no review ─────────────────────────
+# Codex submits a review only when it has findings, so a clean head appears
+# nowhere in `pulls/N/reviews`. Counting reviews alone reported nine heads for
+# nine-plus-a-clean-tenth, and the phase-transition checks that consult this
+# number then skipped the operator pause at exactly the boundary.
+mk_clean_icomment() {   # <sha10>… ; one clean-pass comment per argument
+    local first=1
+    { printf '['
+      for sha in "$@"; do
+          [ "$first" -eq 1 ] || printf ','
+          first=0
+          jq -n -c --arg login "$CODEX" --arg sha "$sha" \
+            '{id: 700, user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}'
+      done
+      printf ']'
+    } > "$TMP/icomments.json"
+}
+
+# Nine finding-bearing heads plus a clean tenth is TEN rounds, and a boundary.
+specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+mk "${specs[@]}"
+mk_clean_icomment "$(sha k10 | cut -c1-10)"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+    && pass "nine reviewed heads plus a clean tenth is ten rounds, and pauses" \
+    || die "clean-comment head not counted (rc=$rc out='$out')"
+
+# A clean comment on a head that ALREADY has a review is not a second round.
+specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+mk "${specs[@]}"
+mk_clean_icomment "$(sha k9 | cut -c1-10)"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=9'; } \
+    && pass "a clean comment on an already-counted head is not a new round" \
+    || die "double-counted a head (rc=$rc out='$out')"
+
+# A comment from another account, or without the clean phrasing, is not a round.
+specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+mk "${specs[@]}"
+jq -n -c --arg sha "$(sha k10 | cut -c1-10)" \
+    '[{id: 701, user: {login: "somebody"}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=9'; } \
+    && pass "a clean comment from another account is not a round" \
+    || die "another account added a round (rc=$rc out='$out')"
+
+# An unreadable comment fetch is NOT "no clean passes".
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS_RC=1 run 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "an unreadable comment fetch => 2, never a lower count" \
+    || die "comment fetch failure gave rc=$rc"
 
 # ── everything unreadable fails closed ─────────────────────────────────────
 out="$(GH_RC=1 run 7 2>&1)"; rc=$?

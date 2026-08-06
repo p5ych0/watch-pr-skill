@@ -183,6 +183,8 @@ clean_comment_for_head() {
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$pr/comments" --paginate 2>/dev/null); then
         return 2
     fi
+    # Prints "<id>\t<created_at>": the caller needs the timestamp to place this
+    # against the newest submitted review on the same head.
     out="$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg h "${head:0:10}" '
         if length == 0 then error("no pages")
         elif any(.[]; type != "array") then error("non-array page")
@@ -192,6 +194,7 @@ clean_comment_for_head() {
                    or (.user | type) != "object"
                    or (.user.login | type) != "string"
                    or (.id | type) != "number"
+                   or ((.created_at | type) != "string" and .created_at != null)
                    or ((.body | type) != "string" and .body != null))
             then error("malformed comment record")
             else ( [ $all[]
@@ -202,12 +205,14 @@ clean_comment_for_head() {
                      | select(.body | contains($h))
                      | select(.body | test("[Dd]idn.t find any major issues"))
                    ] | sort_by(.id) | last ) as $c
-              | if $c == null then "" else ($c.id | tostring) end
+              | if $c == null then "" else (($c.id | tostring) + "\t" + ($c.created_at // "")) end
             end
         end' 2>/dev/null)" || return 2
     case "$out" in
-        "")            return 1 ;;
-        *[!0-9]*)      return 2 ;;
+        "") return 1 ;;
+    esac
+    case "${out%%$'\t'*}" in
+        ""|*[!0-9]*) return 2 ;;
     esac
     printf '%s' "$out"
 }
@@ -248,15 +253,31 @@ head_review_snapshot() {
                               and $latest != null
                            then ($latest.id | tostring) else "" end)
         end' 2>/dev/null)" || return 2
-    # A submitted review always wins. The comment channel is consulted ONLY when
-    # this reviewer has no review on this head at all — so a later review with
-    # findings can never be masked by an earlier clean comment.
-    if [ "${out%%$'\t'*}" = "none" ]; then
-        cid="$(clean_comment_for_head "$pr" "$who" "$head")"
-        case "$?" in
-            0) out="reviewed"$'\t'"comment:$cid" ;;
-            1) ;;                 # genuinely nothing yet
-            *) return 2 ;;        # unreadable: never "no review"
+    # BOTH CHANNELS, placed in time against each other.
+    #
+    # Consulting comments only when there was no review at all was too narrow: a
+    # clean RE-review on an unchanged head also arrives as a comment, so an older
+    # finding-bearing or blocked review stayed authoritative forever and the watch
+    # timed out repeatedly despite a newer clean pass. Whichever is newer wins,
+    # and a review with no timestamp cannot outrank anything.
+    local latest_ts cinfo cid cts
+    cinfo="$(clean_comment_for_head "$pr" "$who" "$head")"; crc=$?
+    case "$crc" in
+        0|1) ;;
+        *) return 2 ;;            # unreadable: never "no comment"
+    esac
+    if [ "$crc" -eq 0 ]; then
+        cid="${cinfo%%$'\t'*}"; cts="${cinfo#*$'\t'}"
+        latest_ts="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
+            [ .[] | select(.commit_id == $h) | select(.submitted_at != null) | .submitted_at ]
+            | sort | last // ""' 2>/dev/null)" || return 2
+        # A drafted re-review still dominates: `pending` means the pass is not
+        # finished, whatever any comment says.
+        case "${out%%$'\t'*}" in
+            pending) ;;
+            *) if [ -z "$latest_ts" ] || [ "$cts" \> "$latest_ts" ]; then
+                   out="reviewed"$'\t'"comment:$cid"
+               fi ;;
         esac
     fi
     case "${out%%$'\t'*}" in
