@@ -460,6 +460,31 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "an && between a pinned assignment and an unpinned call is caught" \
     || die "&& masking passed the pin check (rc=$rc out='$out')"
 
+# The occurrence COUNT is guarded too. A `wc` that printed a plausible number and
+# then failed left the count trusted, so a failed parse could vouch for every
+# `gh pr` call on the line.
+# It fails on the SECOND call only. The verb count is taken first and has its own
+# guard, so a wc that always fails exits there and the occurrence-count guard is
+# never reached — the fixture would pass without it and prove nothing.
+WCBIN="$TMP/wcbin"; mkdir -p "$WCBIN"
+REAL_WC="$(command -v wc)"
+cat > "$WCBIN/wc" <<WCSH
+#!/usr/bin/env bash
+n=\$(cat "\$WC_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$WC_N"
+if [ "\$n" -ge 2 ]; then printf '1\n'; exit 1; fi
+exec "$REAL_WC" "\$@"
+WCSH
+chmod +x "$WCBIN/wc"
+R="$(mkroot "$PINNED_SKILL")"
+rm -f "$TMP/wc.n"
+out="$(PATH="$WCBIN:$PATH" WC_N="$TMP/wc.n" "$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a wc that prints and then fails => 2, not a trusted count" \
+    || die "failing wc gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a failed occurrence count reported clean: $out" \
+    || pass "…and never reports clean"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

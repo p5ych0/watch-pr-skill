@@ -28,6 +28,7 @@ INTERVAL="${PR_WATCH_INTERVAL:-30}"
 TIMEOUT="${PR_WATCH_TIMEOUT:-3600}"
 PR=""
 WHO=""
+AFTER_REVIEW=""
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -38,6 +39,14 @@ while [ "$#" -gt 0 ]; do
                     INTERVAL="$2"; shift 2 ;;
         --timeout)  [ "$#" -ge 2 ] || { echo "$0: --timeout needs a value" >&2; exit 2; }
                     TIMEOUT="$2"; shift 2 ;;
+        # The review id observed BEFORE the request was made. A re-request on an
+        # UNCHANGED head — after a dismissal, or after answering a finding — has
+        # nothing to distinguish the old terminal review from the new one, so the
+        # first poll reported the previous pass as this round's and the loop acted
+        # on it again. With this set, a terminal state whose authoritative review
+        # is still that id is treated as "not yet".
+        --after-review) [ "$#" -ge 2 ] || { echo "$0: --after-review needs a value" >&2; exit 2; }
+                    AFTER_REVIEW="$2"; shift 2 ;;
         -*) echo "usage: $0 <pr> <reviewer-login> [--interval S] [--timeout S]" >&2; exit 2 ;;
         *) if [ -z "$PR" ]; then PR="$1"; elif [ -z "$WHO" ]; then WHO="$1"; fi; shift ;;
     esac
@@ -115,16 +124,31 @@ elapsed_s() {
 probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limit
     local limit="$1"; shift
     [ "$limit" -gt 0 ] || limit=1
-    local out rc pid
-    local tmp="${PR_WATCH_TMPDIR:-${TMPDIR:-/tmp}}/pr-watch.$$.$RANDOM"
+    local out rc pid tmp
+    # `mktemp`, not a constructed name. `/tmp/pr-watch.<pid>.<15-bit>` is
+    # predictable and the redirection below truncates it, so on a shared host
+    # another user who sees the watch PID can pre-create a matching symlink and
+    # have the watch truncate any file the operator can write.
+    tmp="$(mktemp "${TMPDIR:-/tmp}/pr-watch.XXXXXX")" || {
+        echo "PR_REVIEW_WATCH state=error reason=no_probe_buffer" >&2
+        return 125
+    }
     set -m
     ( "$@" ) >"$tmp" 2>&1 &
     pid=$!
     set +m
-    local n=0
-    while [ "$n" -lt "$limit" ]; do
+    # Polled in FRACTIONS of a second where the platform allows it. At one-second
+    # granularity every probe cost a full second even when the helper answered
+    # immediately, which quietly turned `--timeout` into a budget the machinery
+    # spent rather than one the reviewer got.
+    local tick ticks n=0
+    if sleep 0.2 2>/dev/null; then tick=0.2; ticks=$(( limit * 5 ))
+    else tick=1; ticks="$limit"; fi
+    while [ "$n" -lt "$ticks" ]; do
         kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null || break
-        sleep 1
+        # A failed `sleep` advanced the counter anyway, so the loop could burn
+        # the limit at once and kill a healthy probe as a "timeout".
+        sleep "$tick" || { rm -f "$tmp" 2>/dev/null; return 125; }
         n=$((n + 1))
     done
     if kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then
@@ -135,8 +159,15 @@ probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limi
     fi
     wait "$pid"; rc=$?
     [ "$rc" -eq 124 ] && timed_out
-    out="$(cat "$tmp" 2>/dev/null)"
+    [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
+    # The READ has its own status, captured before `rm` overwrites `$?`. A `cat`
+    # that emitted a complete, plausible record and then failed would otherwise
+    # come back as the child's success, and the caller would accept a state or a
+    # verdict from a buffer read that never finished.
+    local crc
+    out="$(cat "$tmp" 2>/dev/null)"; crc=$?
     rm -f "$tmp" 2>/dev/null
+    [ "$crc" -eq 0 ] || return 125
     printf '%s' "$out"
     return "$rc"
 }
@@ -156,7 +187,10 @@ remaining_s() {
     local e
     e="$(elapsed_s)" || return 1
     local r=$(( TIMEOUT - e ))
-    [ "$r" -lt 1 ] && r=1
+    # An exhausted remainder is the TIMEOUT, not one more second. Clamping it let
+    # a probe start after the deadline had already passed, and a verdict or
+    # head-recheck begun there could still produce PR_REVIEW_READY.
+    [ "$r" -lt 1 ] && return 2
     printf '%s' "$r"
 }
 waited=0
@@ -172,9 +206,12 @@ while :; do
     #
     # Resolved per POLL, not once per watch, so the watch still follows the head
     # when a push lands between polls — which is the case it is there to notice.
-    rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    rem="$(remaining_s)"; rrc=$?
+    [ "$rrc" -eq 2 ] && timed_out
+    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
     [ "$hrc" -eq 124 ] && timed_out
+    [ "$hrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$hrc" -ne 0 ] || ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_unresolvable rc=%s detail=%s\n' \
             "$PR" "$WHO" "$hrc" "$(q "$head")"
@@ -182,9 +219,12 @@ while :; do
     fi
     want_sha="${head:0:7}"
 
-    rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    rem="$(remaining_s)"; rrc=$?
+    [ "$rrc" -eq 2 ] && timed_out
+    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     line="$(probe "$rem" "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
     [ "$rc" -eq 124 ] && timed_out
+    [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$rc" -ne 0 ]; then
         # ANY non-zero status, not just the helper's documented 2. A missing or
         # non-executable helper exits 126/127, and treating that as a state left
@@ -234,13 +274,37 @@ while :; do
         last="$state"
     fi
 
+    # A terminal state that is still the review we were told to wait past is not
+    # this round's answer.
+    if [ -n "$AFTER_REVIEW" ]; then
+        case "$state" in
+            reviewed|blocked|dismissed)
+                rem="$(remaining_s)"; rrc=$?
+                [ "$rrc" -eq 2 ] && timed_out
+                [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+                cur="$(probe "$rem" "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
+                [ "$crc2" -eq 124 ] && timed_out
+                [ "$crc2" -ne 0 ] && { echo "PR_REVIEW_WATCH state=error reason=review_id_unreadable" >&2; exit 2; }
+                if [ "$cur" = "$AFTER_REVIEW" ]; then
+                    if [ "$last" != "stale" ]; then
+                        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=awaiting_new_review after=%s waited_s=%s\n' \
+                            "$PR" "$WHO" "$AFTER_REVIEW" "$waited"
+                        last="stale"
+                    fi
+                    state="pending"
+                fi ;;
+        esac
+    fi
     case "$state" in
         reviewed|blocked|dismissed)
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
-            rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            rem="$(remaining_s)"; rrc=$?
+    [ "$rrc" -eq 2 ] && timed_out
+    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
             verdict="$(probe "$rem" "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
             [ "$vrc" -eq 124 ] && timed_out
+            [ "$vrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
             # documented 2, or a 126/127 if the helper stops being executable
             # between the two calls — is unreadable, and this is the same class
@@ -351,9 +415,12 @@ while :; do
             # and the next poll should ask about the new head. So the loop
             # CONTINUES rather than exiting — the new head has no review yet, so
             # it reports `none` and goes back to waiting, which is the truth.
-            rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            rem="$(remaining_s)"; rrc=$?
+    [ "$rrc" -eq 2 ] && timed_out
+    [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
             head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
             [ "$nrc" -eq 124 ] && timed_out
+            [ "$nrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             if [ "$nrc" -ne 0 ] || ! [[ "$head_now" =~ ^[0-9a-f]{40}$ ]]; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_recheck_failed rc=%s detail=%s\n' \
                     "$PR" "$WHO" "$nrc" "$(q "$head_now")"

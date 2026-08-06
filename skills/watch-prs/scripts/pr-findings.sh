@@ -43,7 +43,19 @@ if [ -z "$REMOTE" ]; then
 fi
 _p="${REMOTE%.git}"; REPO="${REVIEW_BUS_REPO:-${_p##*/}}"; _p="${_p%/*}"
 OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
-REPO_SLUG="$OWNER/$REPO"
+# The HOST is derived from origin too, and passed explicitly. `gh` takes the
+# hostname from `GH_HOST` when a command supplies none, so with that set these
+# calls could read the same-numbered PR from a different GitHub host while the
+# local origin identifies another project entirely — the same class as the
+# `GH_REPO` hole, one level up.
+case "$REMOTE" in
+    *github.com*) HOST="github.com" ;;
+    ssh://*) _h="${REMOTE#ssh://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *://*) _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *@*:*) _h="${REMOTE#*@}"; HOST="${_h%%:*}" ;;
+    *) HOST="github.com" ;;
+esac
+REPO_SLUG="$HOST/$OWNER/$REPO"
 
 # Every unresolved thread, paginated, with the page shape validated before any
 # of it is formatted.
@@ -56,7 +68,7 @@ cmd_list() {
     local RS=$'\x1e' seen
     seen="${RS}null${RS}"
     while :; do
-        page=$(gh api graphql -F number="$pr" -f owner="$OWNER" -f repo="$REPO" -F cursor="$cursor" -f query='
+        page=$(gh api --hostname "$HOST" graphql -F number="$pr" -f owner="$OWNER" -f repo="$REPO" -F cursor="$cursor" -f query='
             query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
               reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
                 nodes{id isResolved path line comments(first:1){nodes{databaseId author{login} body}}} }}}}' 2>/dev/null) || {
@@ -176,7 +188,7 @@ cmd_blocked_body() {
     # Captured separately from the parse. `gh --paginate` can write a valid page
     # and then exit non-zero, and a pipeline would report jq's success while the
     # partial page passed for the whole answer.
-    raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews" --paginate 2>/dev/null) || {
+    raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews" --paginate 2>/dev/null) || {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_fetch_failed" >&2
         return 2
     }

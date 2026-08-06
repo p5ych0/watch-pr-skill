@@ -71,6 +71,36 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Every `gh` call names the host, not just the repository.** `GH_HOST` supplies
+  the hostname when a command gives none, so the helpers could read the
+  same-numbered PR from a *different GitHub host* while the local origin
+  identified another project — the `GH_REPO` hole, one level up. The host is
+  derived from origin and passed explicitly everywhere.
+
+- **A same-head re-request waits for a new review.** After a dismissal, or after
+  answering a finding, the head does not change — so the first poll saw the
+  *previous* terminal review and reported it as this round's answer.
+  `pr-watch.sh --after-review <id>` treats the pre-request review as "not yet".
+
+- **The recorded Codex signoff is re-validated on the sha it records.** A push
+  between the clean verdict and the lookup recorded the new, unreviewed head, and
+  the gate only discovered the missing verdict after the entire Copilot phase.
+
+- **The probe buffer is created with `mktemp`.** A constructed
+  `/tmp/pr-watch.<pid>.<15-bit>` name is predictable and the redirection truncates
+  it, so on a shared host another user could aim it at any file the operator can
+  write.
+
+- **The probe's buffered read, its watchdog sleeps, and the occurrence count all
+  take their status**, and an exhausted deadline no longer becomes one more
+  second — a probe could otherwise start after `--timeout` had passed and still
+  produce `PR_REVIEW_READY`.
+
+- **The accepted merge-mode limitation has a decision record.**
+  `docs/decisions/2026-08-06-merge-admin-default.md` states the `--admin` race
+  plainly, why it is accepted, and what bounds it. Per `AGENTS.md` only a base-ref
+  authority can accept a limitation, and a comment in the diff is not one.
+
 - **Each probe is bounded by the remaining deadline.** Making the deadline
   wall-clock was not enough: the elapsed checks ran only *between* probes, so a
   `gh` that hung inside one blocked forever and the deadline was never reached at

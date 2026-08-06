@@ -54,7 +54,19 @@ if [ -z "$REMOTE" ]; then
 fi
 _p="${REMOTE%.git}"; REPO="${REVIEW_BUS_REPO:-${_p##*/}}"; _p="${_p%/*}"
 OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
-REPO_SLUG="$OWNER/$REPO"
+# The HOST is derived from origin too, and passed explicitly. `gh` takes the
+# hostname from `GH_HOST` when a command supplies none, so with that set these
+# calls could read the same-numbered PR from a different GitHub host while the
+# local origin identifies another project entirely — the same class as the
+# `GH_REPO` hole, one level up.
+case "$REMOTE" in
+    *github.com*) HOST="github.com" ;;
+    ssh://*) _h="${REMOTE#ssh://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *://*) _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *@*:*) _h="${REMOTE#*@}"; HOST="${_h%%:*}" ;;
+    *) HOST="github.com" ;;
+esac
+REPO_SLUG="$HOST/$OWNER/$REPO"
 
 PR="${1:-}"
 case "$PR" in
@@ -73,7 +85,7 @@ WHO_JSON="$(printf '%s\n' "${REVIEWERS[@]}" | jq -R . | jq -s -c .)" || {
     exit 2
 }
 
-raw=$(gh api "repos/$REPO_SLUG/pulls/$PR/reviews" --paginate 2>/dev/null) || {
+raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$PR/reviews" --paginate 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=fetch_failed"
     exit 2
 }

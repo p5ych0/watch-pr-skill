@@ -299,7 +299,9 @@ if [ -n "$gh_lines" ]; then
             | nomatch grep -oE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]' | wc -l)"
         chk gh_verbs $?
         n_occ=0
-        [ -n "$occ" ] && n_occ="$(printf '%s\n' "$occ" | wc -l)"
+        if [ -n "$occ" ]; then
+            n_occ="$(printf '%s\n' "$occ" | wc -l)"; chk gh_occ_count $?
+        fi
         if [ "$n_occ" -ne "$n_verbs" ]; then
             note truncated_gh_call "SKILL.md: a gh pr call is too short to check:$(printf '%s' "$line" | cut -c1-60)"
             unpinned=1

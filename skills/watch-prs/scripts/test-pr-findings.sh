@@ -27,13 +27,13 @@ cat > "$TMP/bin/gh" <<'SH'
 # GH_PAGE1/GH_PAGE2: graphql pages ; GH_GQL_RC: graphql failure
 # GH_REVIEWS: reviews payload ; GH_REVIEWS_RC: its failure
 # GH_HEAD: headRefOid
-case "$1 ${2:-}" in
-  "api graphql")
+case "$*" in
+  *"graphql"*)
     [ -n "${GH_GQL_RC:-}" ] && exit "$GH_GQL_RC"
     if [ -n "${GH_PAGE2:-}" ] && [ -e "$TMP_SEEN" ]; then cat "$GH_PAGE2"; else
        : > "$TMP_SEEN" 2>/dev/null || true; cat "${GH_PAGE1:-/dev/null}"; fi ;;
-  "api "*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
-  "pr view"*) printf '%s' "${GH_HEAD:-}" ;;
+  *"api "*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
+  *"pr view"*) printf '%s' "${GH_HEAD:-}" ;;
   *) printf '{}' ;;
 esac
 SH
@@ -281,8 +281,8 @@ printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasN
 # Page 2 onward alternates B, A, B, A ... by echoing back a cursor already used.
 cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
-case "$1 ${2:-}" in
-  "api graphql")
+case "$*" in
+  *"graphql"*)
     n=$(cat "$CYC_N" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$CYC_N"
     if [ $((n % 2)) -eq 0 ]; then cur='"B"'; else cur='"A"'; fi
     printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":true,"endCursor":%s},"nodes":[]}}}}}' "$cur" ;;
@@ -298,13 +298,13 @@ out="$(run_limited 20 env CYC_N="$TMP/cyc.n" REVIEW_BUS_REMOTE='git@github.com:a
 # Restore the shared stub for the cases below.
 cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
-case "$1 ${2:-}" in
-  "api graphql")
+case "$*" in
+  *"graphql"*)
     [ -n "${GH_GQL_RC:-}" ] && exit "$GH_GQL_RC"
     if [ -n "${GH_PAGE2:-}" ] && [ -e "$TMP_SEEN" ]; then cat "$GH_PAGE2"; else
        : > "$TMP_SEEN" 2>/dev/null || true; cat "${GH_PAGE1:-/dev/null}"; fi ;;
-  "api "*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
-  "pr view"*) printf '%s' "${GH_HEAD:-}" ;;
+  *"api "*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
+  *"pr view"*) printf '%s' "${GH_HEAD:-}" ;;
   *) printf '{}' ;;
 esac
 GHSH

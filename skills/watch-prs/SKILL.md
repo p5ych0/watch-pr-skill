@@ -33,6 +33,15 @@ settings page.
 REMOTE=$(git remote get-url origin 2>/dev/null) || REMOTE=""
 [ -n "$REMOTE" ] || { echo "ABORT: cwd is not a git checkout with a readable origin"; exit 1; }
 _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
+# The host is derived too. `gh` takes the hostname from `GH_HOST` when a command
+# supplies none, so an unpinned call could act on the same-numbered PR on another
+# GitHub host while every gate inspects this one.
+case "$REMOTE" in
+    *github.com*) HOST="github.com" ;;
+    *://*) _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
+    *@*:*) _hh="${REMOTE#*@}"; HOST="${_hh%%:*}" ;;
+    *) HOST="github.com" ;;
+esac
 # Same rule as the origin lookup above: the status is taken. This path is handed
 # to `pr-merge-range.sh`, which inspects history in it to decide whether every
 # commit since the reviewed SHA is a review fix — so a directory retained from a
@@ -111,14 +120,14 @@ if [ "$AUTO_REVIEW" = "yes" ]; then
     # The pass is already queued by the push that created or updated the PR.
     # Post the account of what to look at WITHOUT a mention, so the reviewer has
     # it, and go straight to the wait.
-    if ! gh pr comment N --repo $OWNER/$REPO --body "<one paragraph: what this change does and what to look at>"; then
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "<one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the PR context — do not enter the wait step."; exit 0
     fi
 else
     # The mention IS the request. Branch on it: a failed post means no review was
     # ever queued, and the wait step would then poll for one until it timed out,
     # reporting "no review arrived" rather than "none was asked for".
-    if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 <one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
@@ -278,7 +287,7 @@ resolving it. Then, in one pass:
    # 👎 only when it was wrong on the facts — not when it was right but declined
    # for cost or scope. Marking a correct finding unhelpful teaches the reviewer
    # to stop reporting that class, which is the opposite of what a decline means.
-   gh api --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" \
+   gh api --hostname "$HOST" --silent -X POST "repos/$OWNER/$REPO/pulls/comments/<comment-id>/reactions" \
        -f content='+1' || echo "note: reaction failed for <comment-id>"
    ```
 
@@ -368,7 +377,7 @@ git push || { echo "ABORT: push failed; do not close or re-request this round.";
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review
+if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
@@ -390,7 +399,7 @@ told to read must already be there, and **no mention is sent at all**:
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $OWNER/$REPO --body "$SUMMARY"; then
+if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not push yet."; exit 0
 fi
 # THIS is the request, so a failed push means no review was queued AND the fixes
@@ -470,7 +479,19 @@ Ask Copilot:
 # Copilot fix, `gh pr view` reports the new head and nothing else records the old
 # one — the state helper prints a 7-character sha, and the merge gate needs the
 # full 40. Without this the gate cannot be populated correctly at all.
-CODEX_SHA=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
+# The head the CLEAN VERDICT described, re-read and then re-validated — not
+# whatever `gh pr view` reports now. If a push lands between the verdict and this
+# lookup, that records the new, unreviewed head as the Codex signoff, Copilot is
+# requested against it, and the final gate only discovers the missing Codex
+# verdict after the whole Copilot phase has run.
+CODEX_SHA=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
+# Re-validate Codex on exactly that sha. If it is not clean, the head moved and
+# the Copilot phase must not start.
+CODEX_RECHECK=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
+if [ "$CODEX_RECHECK_RC" -ne 0 ]; then
+    echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"
+    exit 0
+fi
 if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
 fi
@@ -515,7 +536,7 @@ EOF
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $OWNER/$REPO --body "$SUMMARY"; then
+if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi
 
@@ -523,7 +544,7 @@ fi
 # for, so entering the phase would poll for a review nobody asked for and then
 # report a timeout — which reads as "Copilot is slow", not "Copilot was never
 # asked".
-if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then
+if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
     echo "ABORT: could not request Copilot — do not enter the Copilot phase."
     echo "This is not permission to skip the pass: decide with the operator."
     exit 0
@@ -561,7 +582,7 @@ CODEX_SHA=<full 40-hex sha of the head Codex last reviewed clean>
 # and then failed — command substitution keeps that stdout, so a plausible SHA
 # from a failed fetch would otherwise pass the shape check below.
 HEAD_RC=0
-HEAD_OID=$(gh pr view N --repo $OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
+HEAD_OID=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
 if [ "$HEAD_RC" -ne 0 ] || ! [[ "$HEAD_OID" =~ ^[0-9a-f]{40}$ ]]; then
     echo "merge blocked: head lookup failed (rc=$HEAD_RC)"; exit 0
 fi
@@ -689,7 +710,7 @@ fi
 # immediate self-loop but not `null → A → B → A → B …`, which alternates forever.
 UNRESOLVED=0; CURSOR=null; OK=1; RS=$'\x1e'; SEEN="${RS}null${RS}"
 while :; do
-  PAGE=$(gh api graphql -F number=N -f owner="$OWNER" -f repo="$REPO" -F cursor="$CURSOR" -f query='
+  PAGE=$(gh api --hostname "$HOST" graphql -F number=N -f owner="$OWNER" -f repo="$REPO" -F cursor="$CURSOR" -f query='
     query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
       reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor} nodes{isResolved} }}}}' 2>/dev/null) || { OK=0; break; }
   # A GraphQL 200 can carry BOTH `errors` and a structurally valid `data`. The
@@ -740,7 +761,7 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # so this probe is the only thing standing between a failed read and an unchecked
 # merge.
 CHECKS_RC=0
-CHECKS=$(gh pr checks N --repo $OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null) || CHECKS_RC=$?
+CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null) || CHECKS_RC=$?
 if [ "$CHECKS_RC" -ne 0 ] || [ "$CHECKS" != "true" ]; then
     echo "merge blocked: required checks not all green, or the probe failed (rc=$CHECKS_RC out='$CHECKS')"; exit 0
 fi
@@ -767,6 +788,10 @@ fi
 # complete is a worse failure than a seconds-wide race in a repository where
 # nobody else is reviewing.
 #
+# The trade is recorded on the base ref, in
+# `docs/decisions/2026-08-06-merge-admin-default.md`, so it is a decision a
+# reviewer can weigh rather than an unaddressed defect.
+#
 # REVIEW_MERGE_STRICT=1 takes the other side: GitHub evaluates reviews, checks
 # and conversations itself, atomically, which is the only place that race can
 # actually be closed. Set it where the repository has protection rules that the
@@ -775,7 +800,7 @@ fi
 # operator decides, which is the point.
 ADMIN=--admin
 [ "${REVIEW_MERGE_STRICT:-}" = "1" ] && ADMIN=""
-if gh pr merge N --repo $OWNER/$REPO --squash --delete-branch $ADMIN \
+if gh pr merge N --repo $HOST/$OWNER/$REPO --squash --delete-branch $ADMIN \
        --match-head-commit "$HEAD_OID"; then
     echo "merged $HEAD_OID"
 else

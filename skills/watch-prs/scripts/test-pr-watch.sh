@@ -561,6 +561,69 @@ printf '%s' "$out" | grep -q 'clock_unreadable' \
     && pass "…reported as an unreadable clock" \
     || die "the failing clock was not named: $out"
 
+# ── a same-head re-request waits for a NEW review ─────────────────────────
+# After a dismissal, or after answering a finding, the head does not change — so
+# the first poll saw the PREVIOUS terminal review and reported it as this round's
+# answer. With --after-review the old one is not enough.
+mkstub "$TMP/samehead.sh" <<'SH'
+cmd="$1"
+if [ "$cmd" = "review-id" ]; then printf '%s\n' "${CUR_ID:-99}"; exit 0; fi
+if [ "$cmd" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=clean findings=0\n' "$2" "$3"; exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"
+exit 0
+SH
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --interval 1 --timeout 4 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "a terminal state that is still the pre-request review is not READY" \
+    || die "same-head stale review gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && die "the previous review was announced as this round's: $out" \
+    || pass "…and no READY line is emitted for it"
+printf '%s' "$out" | grep -q 'state=awaiting_new_review' \
+    && pass "…and the wait is explainable" \
+    || die "no awaiting_new_review line: $out"
+
+# A NEW review id on the same head is the answer.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --interval 1 --timeout 6 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PR_REVIEW_READY'; } \
+    && pass "a new review on the same head IS reported" \
+    || die "new same-head review gave rc=$rc out='$out'"
+
+# Without the flag the behaviour is unchanged, so existing callers are unaffected.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 6 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "without --after-review the terminal state is reported as before" \
+    || die "the flagless path changed behaviour (rc=$rc out='$out')"
+
+# ── a buffer read that prints and then fails is not a probe result ────────
+# `probe` reads the child output back from a temp file. A `cat` that emitted a
+# complete, plausible record and then failed came back as the child's SUCCESS, so
+# the caller could accept a state or a verdict from a read that never finished.
+CATBIN="$TMP/catbin"; mkdir -p "$CATBIN"
+REAL_CAT="$(command -v cat)"
+cat > "$CATBIN/cat" <<CATSH
+#!/usr/bin/env bash
+case "\$*" in
+    *pr-watch.*) "$REAL_CAT" "\$@"; exit 1 ;;
+esac
+exec "$REAL_CAT" "\$@"
+CATSH
+chmod +x "$CATBIN/cat"
+seq_set reviewed
+out="$(PATH="$CATBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a probe buffer read that prints and then fails => 2" \
+    || die "failing buffer read gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && die "a failed buffer read still produced a READY line: $out" \
+    || pass "…and never reaches READY"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

@@ -26,7 +26,7 @@ cat > "$TMP/bin/gh" <<'SH'
 # GH_HEAD      string: headRefOid ; GH_HEAD_RC: its exit code
 # GH_REVIEWS_RC / GH_COMMENTS_RC: force a fetch failure
 case "$1 ${2:-}" in
-  "api "*)
+  *"api "*)
     case "$*" in
       *"/reviews/"*"/comments"*)
         [ -n "${GH_COMMENTS_RC:-}" ] && exit "$GH_COMMENTS_RC"
@@ -37,7 +37,7 @@ case "$1 ${2:-}" in
       *"/reviews"*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
       *) printf '{}' ;;
     esac ;;
-  "pr view"*) printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
+  *"pr view"*) printf '%s' "${GH_HEAD:-}"; exit "${GH_HEAD_RC:-0}" ;;
   *) printf '{}' ;;
 esac
 SH
@@ -53,7 +53,9 @@ mk_reviews() {   # <state> <submitted_at|null> <id>
 # ── identity is derived, never hard-coded ──────────────────────────────────
 out="$(PR_REVIEW_STATE_LIB_ONLY=1 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         bash -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
-[ "$out" = "acme/widget" ] && pass "identity derived from origin; sourcing has no side effects" \
+# The slug now carries the HOST as well, so a `GH_HOST` override cannot send
+# these calls to the same-numbered PR on another GitHub host.
+[ "$out" = "github.com/acme/widget" ] && pass "identity derived from origin, host included" \
     || die "identity/source guard wrong (got: $out)"
 
 # ── state: each review state is judged, not counted ────────────────────────
@@ -290,7 +292,7 @@ case "\$*" in
      else
         printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":52}]'
      fi ;;
-  "pr view"*) printf '%s' "$HEAD40" ;;
+  *"pr view"*) printf '%s' "$HEAD40" ;;
   *) printf '{}' ;;
 esac
 SH

@@ -239,11 +239,11 @@ fi
 
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
-grep -q 'if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
+grep -q 'if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
     && pass "the Copilot request is branched on before the phase begins" \
     || die "a failed Copilot request still enters the Copilot phase"
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review' "$SKILL" \
+grep -q 'if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -314,7 +314,7 @@ grep -q 'REVIEW_MERGE_STRICT' "$SKILL" \
 grep -q 'ADMIN=--admin' "$SKILL" \
     && pass "…defaulting to --admin so a protected solo repo can still merge" \
     || die "the default merge mode is not --admin"
-grep -q 'merge N --repo \$OWNER/\$REPO --squash --delete-branch \$ADMIN' "$SKILL" \
+grep -q 'merge N --repo \$HOST/\$OWNER/\$REPO --squash --delete-branch \$ADMIN' "$SKILL" \
     && pass "…and the merge command uses the selected mode" \
     || die "the merge command does not use \$ADMIN"
 
@@ -337,7 +337,7 @@ grep -q 'case "\$SEEN" in \*"\$RS\$NEXT\$RS"\*) OK=0; break ;; esac' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --repo \$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
+awk '/gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
      /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the Copilot round summary is posted before the review request" \
     || die "Copilot can be requested before the round summary exists"
@@ -390,7 +390,7 @@ grep -q 'The push is not' "$SKILL" \
 
 # In the auto-review branch, the push must come AFTER the summary post.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /gh pr comment N --repo \$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
+     inb && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
      inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
     || die "the auto-review recipe pushes before the summary exists"
@@ -460,7 +460,7 @@ grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
 # unpinned call can act on the same-numbered PR somewhere else while every gate
 # inspects this one. Enforced mechanically by pr-selfcheck.sh; asserted here so
 # the contract itself cannot drift.
-[ "$(grep -c 'gh pr comment N --repo $OWNER/$REPO --body' "$SKILL")" -eq 5 ] \
+[ "$(grep -c 'gh pr comment N --repo $HOST/$OWNER/$REPO --body' "$SKILL")" -eq 5 ] \
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "a gh pr comment call does not pass --repo"
 
@@ -527,6 +527,34 @@ if [ -f "$SCRIPT_DIR/pr-watch.sh" ]; then
     grep -q 'waited=\$((waited + nap))' "$SCRIPT_DIR/pr-watch.sh" \
         && die "pr-watch.sh still accumulates the nap instead of reading the clock" \
         || pass "…rather than accumulating the naps"
+fi
+
+# ── the Codex signoff is re-validated on the sha it records ───────────────
+# A push between the clean verdict and this lookup recorded the new, unreviewed
+# head as the signoff, and the gate only noticed after the whole Copilot phase.
+grep -q 'CODEX_RECHECK' "$SKILL" \
+    && pass "the recorded Codex sha is re-validated before the Copilot phase" \
+    || die "CODEX_SHA is recorded without confirming Codex is clean on it"
+
+# ── every gh call names the host as well as the repository ────────────────
+# `GH_HOST` supplies the hostname when a command gives none, so an unpinned call
+# can act on the same-numbered PR on another GitHub host.
+grep -q 'HOST=' "$SKILL" \
+    && pass "the host is derived from origin" \
+    || die "the host is not derived; GH_HOST can redirect every call"
+grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
+    && pass "…and the GraphQL calls pass it explicitly" \
+    || die "a graphql call does not pass --hostname"
+
+# ── the accepted merge-mode limitation is recorded on the base ref ────────
+# AGENTS.md makes a dated decision record the only thing that can accept a
+# limitation; a comment in the diff cannot.
+if [ -d "$ROOT/docs/decisions" ]; then
+    grep -rql 'REVIEW_MERGE_STRICT' "$ROOT/docs/decisions" >/dev/null 2>&1 \
+        && pass "the merge-mode trade-off has a decision record" \
+        || die "the --admin default is accepted nowhere a reviewer can weigh it"
+else
+    die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
 
 # ── the reviewers review; they do not implement ────────────────────────────

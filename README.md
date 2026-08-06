@@ -226,6 +226,9 @@ review can be submitted or dismissed in the window between the last check and th
 merge without changing the head, and `--admin` is precisely what tells GitHub not
 to re-evaluate that.
 
+The trade-off is recorded in
+[`docs/decisions/2026-08-06-merge-admin-default.md`](docs/decisions/2026-08-06-merge-admin-default.md).
+
 Set `REVIEW_MERGE_STRICT=1` where the repository's protection rules are ones the
 loop can actually satisfy — a team repo, or required checks with no required
 human approval. GitHub then evaluates reviews, checks and conversations itself,

@@ -55,7 +55,19 @@ if [ -z "$REMOTE" ]; then
 fi
 _p="${REMOTE%.git}"; REPO="${REVIEW_BUS_REPO:-${_p##*/}}"; _p="${_p%/*}"
 OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
-REPO_SLUG="$OWNER/$REPO"
+# The HOST is derived from origin too, and passed explicitly. `gh` takes the
+# hostname from `GH_HOST` when a command supplies none, so with that set these
+# calls could read the same-numbered PR from a different GitHub host while the
+# local origin identifies another project entirely — the same class as the
+# `GH_REPO` hole, one level up.
+case "$REMOTE" in
+    *github.com*) HOST="github.com" ;;
+    ssh://*) _h="${REMOTE#ssh://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *://*) _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *@*:*) _h="${REMOTE#*@}"; HOST="${_h%%:*}" ;;
+    *) HOST="github.com" ;;
+esac
+REPO_SLUG="$HOST/$OWNER/$REPO"
 
 # 40-hex head OID of a PR. Prints nothing and returns non-zero on failure.
 #
@@ -76,7 +88,7 @@ pr_head_oid() {
 # returning an empty list when anything about the read is untrustworthy.
 reviewer_reviews() {
     local pr="$1" who="$2" raw
-    if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews" --paginate 2>/dev/null); then
+    if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews" --paginate 2>/dev/null); then
         return 2
     fi
     # `jq -s` slurps the paginated stream into an ARRAY OF PAGES. Nothing
@@ -181,7 +193,7 @@ review_comment_count() {
     case "$id" in
         ""|*[!0-9]*) return 2 ;;
     esac
-    if ! raw=$(gh api "repos/$REPO_SLUG/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
+    if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
     n=$(printf '%s' "$raw" | jq -s '
@@ -224,8 +236,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head) ;;
-        *) echo "usage: $0 {state|verdict|head} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -259,6 +271,19 @@ main() {
     # to, so an abbreviation would put back the ambiguity it exists to remove.
     if [ "$cmd" = "head" ]; then
         printf '%s\n' "$head"
+        return 0
+    fi
+
+    # The id of the authoritative review on this head, or empty when there is
+    # none. A caller waiting for a re-request on an UNCHANGED head has nothing
+    # else to tell the new pass from the old one.
+    if [ "$cmd" = "review-id" ]; then
+        local snap
+        snap="$(head_review_snapshot "$pr" "$who" "$head")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        printf '%s\n' "${snap#*$'\t'}"
         return 0
     fi
 
