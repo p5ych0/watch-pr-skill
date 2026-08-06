@@ -697,7 +697,17 @@ for spec in "OFF|$off_start|$on_start" "ON|$on_start|$end_of_file"; do
     c=$(in_range 'pr-round-count.sh N "$WHO"' "$from" "$to")
     q1=$(in_range '--add-reviewer @copilot' "$from" "$to")
     q2=$(in_range '--body "@codex review' "$from" "$to")
-    q=$q1; { [ -n "$q2" ] && { [ -z "$q" ] || [ "$q2" -lt "$q" ]; }; } && q=$q2
+    # In automatic mode the PUSH is the request, so it counts as a triggering
+    # command. Checking only the mention and --add-reviewer let a boundary check
+    # sit after the push and still pass — the third placement of this check, and
+    # the first assertion that covers every way a review can start.
+    q3=""
+    [ "$label" = "ON" ] && q3=$(in_range '^git push' "$from" "$to")
+    q=""
+    for cand in "$q1" "$q2" "$q3"; do
+        [ -n "$cand" ] || continue
+        { [ -z "$q" ] || [ "$cand" -lt "$q" ]; } && q=$cand
+    done
     { [ -n "$c" ] && [ -n "$q" ] && [ "$c" -lt "$q" ]; } \
         && pass "the automatic-review-$label recipe counts rounds before requesting" \
         || die "the automatic-review-$label recipe requests before the boundary check (count=$c request=$q)"
@@ -710,6 +720,14 @@ awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
      /HEAD_BEFORE" = "\$HEAD_AFTER/ {if (w && w < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the reviewer is checked before the head in the automatic recipe" \
     || die "a Copilot round that changed the head skips --add-reviewer"
+
+# ── the push must have landed on THIS PR ──────────────────────────────────
+# A successful `git push` from the wrong worktree, or with a refspec pointing at
+# another branch, leaves the PR head untouched — and because the local head then
+# differs from it, the no-op branch is skipped and nothing is requested at all.
+grep -q 'the push did not update PR N' "$SKILL" \
+    && pass "the round verifies the push actually moved this PR" \
+    || die "a push that landed elsewhere is treated as having queued a review"
 
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read

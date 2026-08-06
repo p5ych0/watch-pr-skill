@@ -71,6 +71,20 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The round boundary is checked before the *push*, in automatic mode.** Placing
+  it before the mention was not enough: with automatic review on, the push itself
+  is the request, so a fix commit on the threshold-th round started the next pass
+  while the count had not yet run. Third placement of this check, and the first
+  that precedes every way a review can be triggered — the contract test now
+  treats the push as a triggering command rather than only the mention and
+  `--add-reviewer`.
+
+- **The push must have landed on this PR.** A successful `git push` from the
+  wrong worktree, or with a refspec pointing elsewhere, leaves the PR head
+  untouched — and because the local head then differs from it, the no-op branch
+  is skipped and nothing is requested at all. The round now confirms the PR head
+  matches the commit it pushed, with a short retry for API lag.
+
 - **The round boundary is checked before the request, not after it.** Both
   round-closing recipes counted rounds in step 6 — *after* step 5 had already
   posted the `@codex` mention or invoked `--add-reviewer`. The pause therefore

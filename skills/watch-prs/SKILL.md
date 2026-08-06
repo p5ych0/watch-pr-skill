@@ -482,6 +482,19 @@ PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
 # around) leaves the push a no-op, so nothing is queued: `--after-review` then
 # rejects the old terminal record and every timeout re-arms forever. Those rounds
 # are explicitly supported, so they need an explicit trigger.
+# THE BOUNDARY IS CHECKED BEFORE THE PUSH — because in this mode the push IS the
+# request. Placing it before the mention was not enough: a fix commit on the
+# threshold-th round moved the head and started the next review while the count
+# had not yet run, so status 3 still paused after round N+1 was queued. Third
+# placement of this check, and the first one that precedes every way a review can
+# be triggered.
+"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
+case "$ROUNDS_RC" in
+    0) ;;
+    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
+    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
+esac
+
 # The REMOTE baseline is re-read at the start of every round, not carried from
 # step 2. After a fix round moved the head from A to B, a `PRIOR_HEAD` still
 # holding A made the unchanged-head comparison false on the NEXT round — so a
@@ -494,17 +507,21 @@ git push || { echo "ABORT: push failed; no review was queued and the fixes are n
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
-# THE BOUNDARY IS CHECKED BEFORE THE REQUEST, not after it in step 6. Counting
-# afterwards meant the pause fired once round N+1 had already been queued and was
-# very likely running — which is not a decision about whether to continue, it is
-# a notification that continuing has begun.
-"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
-case "$ROUNDS_RC" in
-    0) ;;
-    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
-    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
-esac
-
+# The push must have landed on THIS PR. A successful `git push` from the wrong
+# worktree, or with a refspec pointing at another branch, leaves the PR head
+# untouched — and because the local head then differs from it, the no-op branch
+# is skipped and nothing is requested at all. Retried briefly, since the API can
+# lag a moment behind the push.
+if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
+    for _try in 1 2 3; do
+        [ "$HEAD_AFTER" = "$(git rev-parse HEAD)" ] && break
+        sleep 2
+        HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+            || { echo "ABORT: could not re-read the head after pushing."; exit 0; }
+    done
+    [ "$HEAD_AFTER" = "$(git rev-parse HEAD)" ] \
+        || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, local is $(git rev-parse HEAD)) — wrong branch or worktree?"; exit 0; }
+fi
 # WHICH reviewer comes FIRST, before any question about the head.
 #
 # A push never triggers Copilot — the skill establishes that at the top — so in
