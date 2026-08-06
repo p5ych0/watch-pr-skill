@@ -89,9 +89,18 @@ narrower than it first appears, and narrower than the default it justifies:
 - The default earns its keep only where an approval **is** required and the
   reviewing credential cannot supply one.
 
-So the default is the safe fallback for an *unknown* repository, not the right
-setting for every configured one. If your protection rules are ones this loop can
-satisfy, strict mode is the better choice and this record is not an argument
+So the default is the **permissive** fallback, not a safe one. The distinction
+matters: it is chosen so the happy path completes on a repository whose
+protection is unknown, and "unknown" includes configurations it silently bypasses
+— a required merge queue is skipped outright, and any protection the credential
+can bypass is ignored. Calling that safe would be the same overstatement this
+record has already had to remove elsewhere.
+
+**Where the configuration is unknown, strict mode is the safer choice**, at the
+cost of a merge that may be refused until the operator looks at the rules. The
+default is the right one only where the protection is known and known to require
+an approval the reviewing credential cannot give. If your rules are ones this
+loop can satisfy, strict mode is better and this record is not an argument
 against it.
 
 **This rationale is narrower than "every PR".** Where the pull request is
