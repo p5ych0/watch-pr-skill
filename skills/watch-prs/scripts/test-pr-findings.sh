@@ -6,6 +6,9 @@
 # cases, now runnable.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
+# mandatory pre-push gate.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-findings.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
@@ -262,7 +265,7 @@ out="$(GH_PAGE1="$TMP/emptyerr.json" run list 7 2>&1)"; rc=$?
 # caller waits on a command that will never answer.
 page true '"C1"' "$NODE_OK" > "$TMP/cur1.json"
 page true '"C1"' "$NODE_OK" > "$TMP/cur2.json"
-out="$(timeout 20 env GH_PAGE1="$TMP/cur1.json" GH_PAGE2="$TMP/cur2.json" \
+out="$(run_limited 20 env GH_PAGE1="$TMP/cur1.json" GH_PAGE2="$TMP/cur2.json" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "list: a cursor that repeats => 2, not an endless walk" \
@@ -288,7 +291,7 @@ esac
 GHSH
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/cyc.n"
-out="$(timeout 20 env CYC_N="$TMP/cyc.n" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
+out="$(run_limited 20 env CYC_N="$TMP/cyc.n" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "list: a two-page cursor cycle => 2, not an endless alternation" \
     || die "cursor cycle gave rc=$rc (124 = it hung) out='$out'"
@@ -311,7 +314,7 @@ chmod +x "$TMP/bin/gh"
 # multi-page read.
 page true '"C1"' "$NODE_OK" > "$TMP/adv1.json"
 page false null "$NODE_OK" > "$TMP/adv2.json"
-out="$(timeout 20 env GH_PAGE1="$TMP/adv1.json" GH_PAGE2="$TMP/adv2.json" \
+out="$(run_limited 20 env GH_PAGE1="$TMP/adv1.json" GH_PAGE2="$TMP/adv2.json" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" list 7 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] \
     && pass "list: an advancing cursor still paginates" \
@@ -341,13 +344,40 @@ chmod +x "$FAKEBIN/jq"
 page true '"C1"' "$NODE_OK" > "$TMP/failcur.json"
 rm -f "$TMP/jq.n"
 out="$(PATH="$FAKEBIN:$PATH" JQ_N="$TMP/jq.n" GH_PAGE1="$TMP/failcur.json" \
-       REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' timeout 20 "$SCRIPT" list 7 2>&1)"; rc=$?
+       REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' run_limited 20 "$SCRIPT" list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "list: an endCursor parse that prints then fails => 2" \
     || die "failing endCursor parse gave rc=$rc (124 = it walked on forever) out='$out'"
 printf '%s' "$out" | grep -q 'cursor_unreadable' \
     && pass "…reported as an unreadable cursor, not as a cycle" \
     || die "the failing parse was not attributed to the cursor read: $out"
+
+# ── owner/repo go over the wire as STRINGS ────────────────────────────────
+# `gh api -F` applies magic conversions: a repository literally named `true`,
+# `false`, `null` or `123` becomes a Boolean, null or integer, while the query
+# declares `$repo:String!` — so the fetch fails for a perfectly valid repository
+# and the loop cannot run there at all. `-f` sends a raw string.
+STRICTBIN="$TMP/strictbin"; mkdir -p "$STRICTBIN"
+cat > "$STRICTBIN/gh" <<'GHSH'
+#!/usr/bin/env bash
+# Reject the magic-converting flag for owner/repo the way GraphQL rejects the
+# wrong type, and answer normally when they are sent as raw strings.
+for a in "$@"; do
+    case "$a" in
+        -F) prev=F ;;
+        -f) prev=f ;;
+        owner=*|repo=*) [ "${prev:-}" = "F" ] && { echo '{"errors":[{"message":"Boolean cannot represent String"}]}'; exit 0; } ;;
+    esac
+done
+cat "${GH_PAGE1:-/dev/null}"
+GHSH
+chmod +x "$STRICTBIN/gh"
+page false null "$NODE_OK" > "$TMP/strict.json"
+out="$(PATH="$STRICTBIN:$PATH" GH_PAGE1="$TMP/strict.json" \
+       REVIEW_BUS_REMOTE='git@github.com:true/true.git' "$SCRIPT" list 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one'; } \
+    && pass "list: owner and repo are sent as raw strings, so a repo named 'true' works" \
+    || die "owner/repo were type-converted (rc=$rc out='$out')"
 
 # ── blocked-body: an unknown state is not "no body" ───────────────────────
 # This helper SUPPRESSES output for anything that is not exactly

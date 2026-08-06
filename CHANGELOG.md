@@ -71,6 +71,27 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The suite no longer needs GNU `timeout`.** Several fixtures assert that a
+  guard turns an endless walk into a status, so they need a wall-clock limit —
+  and they used `timeout`, which stock macOS does not ship. Since
+  `pr-selfcheck.sh` runs the whole suite as a *mandatory* pre-push gate, that put
+  an undocumented Coreutils dependency between a macOS contributor and their
+  first push, on a platform `README.md` calls supported. `testlib.sh` provides a
+  watchdog that uses `timeout` where it exists and a background killer where it
+  does not, reporting 124 either way so assertions read identically.
+
+- **`owner` and `repo` are sent as raw GraphQL strings.** `gh api -F` applies
+  magic conversions, so a repository literally named `true`, `false`, `null` or
+  `123` arrived as a Boolean, null or integer against a `String!` parameter and
+  the fetch failed — the loop simply could not run there. `cursor` deliberately
+  keeps `-F`: the first page needs a real JSON null.
+
+- **`--repo` must be an argument, not text.** The pin check tested for the
+  substring, so `gh pr comment N --body "remember --repo"` passed while `gh`
+  received no repository selector at all — through the one gate meant to catch
+  exactly that. It now requires `--repo` in the canonical position after the PR
+  argument, which needs no shell-word parsing.
+
 - **Every git probe takes its status — swept, not patched.** This class appeared
   three times: the origin lookups, then `pr-selfcheck.sh`'s root lookup, then the
   identity block's `REPO_DIR` and `pr-merge-range.sh`'s `|| true`. The last is the

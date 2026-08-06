@@ -7,6 +7,9 @@
 # verdict attached.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
+# mandatory pre-push gate.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-watch.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
@@ -507,7 +510,7 @@ printf '%s' "$out" | grep -q "${OTHER40:0:7}" \
 # hanging the watch before it started. Run under `timeout` so a regression fails
 # the suite instead of freezing it.
 for opt in --interval --timeout; do
-    timeout 5 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+    run_limited 5 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
         "$SCRIPT" 7 "$BOT" "$opt" >/dev/null 2>&1; rc=$?
     [ "$rc" -eq 2 ] && pass "$opt without a value => 2 (no hang)" \
         || die "$opt without a value gave rc=$rc (124 = it hung)"
@@ -519,7 +522,7 @@ done
 seq_set none
 for bad in 00 08 09; do
     start=$(date +%s)
-    timeout 20 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+    run_limited 20 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
         "$SCRIPT" 7 "$BOT" --interval "$bad" --timeout 1 >/dev/null 2>&1; rc=$?
     elapsed=$(( $(date +%s) - start ))
     { [ "$rc" -eq 1 ] && [ "$elapsed" -lt 20 ]; } \

@@ -12,6 +12,9 @@
 set -Eeuo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
+# mandatory pre-push gate.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-merge-range.sh"
 
 TMP="$(mktemp -d)"
@@ -192,7 +195,7 @@ chmod +x "$MRTMP/bin/git"
 # fail — that is the assertion. Without it the assignment aborts the script,
 # which then reports nothing at all.
 set +e
-out="$(cd "$MRTMP" && PATH="$MRTMP/bin:$PATH" timeout 20 "$SCRIPT" \
+out="$(cd "$MRTMP" && PATH="$MRTMP/bin:$PATH" run_limited 20 "$SCRIPT" \
         1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 2>&1)"
 rc=$?
 set -e

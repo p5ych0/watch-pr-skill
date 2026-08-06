@@ -56,7 +56,7 @@ cmd_list() {
     local RS=$'\x1e' seen
     seen="${RS}null${RS}"
     while :; do
-        page=$(gh api graphql -F number="$pr" -F owner="$OWNER" -F repo="$REPO" -F cursor="$cursor" -f query='
+        page=$(gh api graphql -F number="$pr" -f owner="$OWNER" -f repo="$REPO" -F cursor="$cursor" -f query='
             query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
               reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
                 nodes{id isResolved path line comments(first:1){nodes{databaseId author{login} body}}} }}}}' 2>/dev/null) || {

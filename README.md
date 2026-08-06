@@ -138,11 +138,14 @@ Then:
 1. **State the task on the PR.** The description says what the change does and
    what it deliberately does not. The reviewers judge relevance against it, so
    this is a precondition rather than paperwork.
-2. **Request the review — Codex first.** A comment containing `@codex review`.
-   The loop is *phased*: Codex reviews to a clean signoff, and only then is
-   Copilot asked (step 6). Running both every round buys a Copilot pass on every
-   intermediate commit and mixes its findings into rounds that were not about
-   them.
+2. **Request the review — Codex first.** With automatic review **off** (the
+   recommended setting) that is a comment containing `@codex review`. With it
+   **on**, opening or pushing the PR has *already* queued a pass, so no mention is
+   sent — one would queue a duplicate review of the same head; post the context
+   comment without the mention and go straight to waiting. The loop is *phased*:
+   Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
+   Running both every round buys a Copilot pass on every intermediate commit and
+   mixes its findings into rounds that were not about them.
 3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
    state is actionable and prints one line when it changes. In Claude Code it
    runs as the session's Monitor, so the verdict surfaces into the chat by

@@ -270,16 +270,26 @@ done
 unpinned=0
 joined="$(printf '%s\n' "$code" | sed -e :a -e '/\\$/N; s/\\\n//; ta')"
 chk join_continuations $?
-gh_lines="$(printf '%s\n' "$joined" | nomatch grep -E 'gh pr (comment|view|edit|merge|checks|close|ready) ')"
+gh_lines="$(printf '%s\n' "$joined" | nomatch grep -E 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]')"
 chk gh_lines $?
 if [ -n "$gh_lines" ]; then
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        case "$line" in
-            *--repo*) ;;
-            *) note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$line" | cut -c1-60)"
-               unpinned=1 ;;
-        esac
+        # A CANONICAL POSITION, not "the text --repo appears somewhere". A
+        # substring test passed `gh pr comment N --body "remember --repo"`,
+        # where `gh` receives no repository selector at all — and this check
+        # gates the push, so a call that GH_REPO redirects elsewhere would have
+        # sailed through the one gate meant to catch it.
+        #
+        # Parsing shell words properly means handling nested quotes; requiring
+        # `--repo` immediately after the PR argument does not, and every call in
+        # the contract already reads that way.
+        if printf '%s' "$line" | grep -qE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]+[^[:space:]]+[[:space:]]+--repo[[:space:]=]'; then
+            :
+        else
+            note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$line" | cut -c1-60)"
+            unpinned=1
+        fi
     done <<EOF
 $gh_lines
 EOF

@@ -681,7 +681,7 @@ fi
 # immediate self-loop but not `null → A → B → A → B …`, which alternates forever.
 UNRESOLVED=0; CURSOR=null; OK=1; RS=$'\x1e'; SEEN="${RS}null${RS}"
 while :; do
-  PAGE=$(gh api graphql -F number=N -F owner="$OWNER" -F repo="$REPO" -F cursor="$CURSOR" -f query='
+  PAGE=$(gh api graphql -F number=N -f owner="$OWNER" -f repo="$REPO" -F cursor="$CURSOR" -f query='
     query($owner:String!,$repo:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){
       reviewThreads(first:100, after:$cursor){ pageInfo{hasNextPage endCursor} nodes{isResolved} }}}}' 2>/dev/null) || { OK=0; break; }
   # A GraphQL 200 can carry BOTH `errors` and a structurally valid `data`. The

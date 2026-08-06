@@ -5,6 +5,9 @@
 # it names the shared review token in comments, not an identity to derive.)
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Portable watchdog: stock macOS ships no GNU `timeout`, and the suite is a
+# mandatory pre-push gate.
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 
 # Concrete-identity patterns that must never be hard-coded: a repo slug
 # (p5ych0/pulse), a unit slug (p5ych0-pulse), or any concrete /tmp path keyed on
@@ -67,7 +70,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
         pr-findings.sh)     set -- list 7 ;;
         *)                  set -- 7 ;;
     esac
-    out="$(PATH="$IDTMP/bin:$PATH" timeout 20 "$ROOT/$sc" "$@" 2>&1)"
+    out="$(PATH="$IDTMP/bin:$PATH" run_limited 20 "$ROOT/$sc" "$@" 2>&1)"
     rc=$?
     # The REASON, not just the status. Without the guard these scripts still exit
     # 2 — they simply fail further downstream, at the first `gh` call made against

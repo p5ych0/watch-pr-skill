@@ -386,8 +386,8 @@ CONT_SKILL='# skill
 ```bash
 OWNER=acme
 REPO=widget
-gh pr comment 7 \\
-    --repo $OWNER/$REPO \\
+gh pr comment 7 \
+    --repo $OWNER/$REPO \
     --body "hello"
 ```
 '
@@ -403,7 +403,7 @@ CONT_BAD='# skill
 ```bash
 OWNER=acme
 REPO=widget
-gh pr comment 7 \\
+gh pr comment 7 \
     --body "hello"
 ```
 '
@@ -412,6 +412,22 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
     && pass "an unpinned continued call is still a finding" \
     || die "joining continuations hid an unpinned call (rc=$rc out='$out')"
+
+# `--repo` has to be an ARGUMENT, not text anywhere on the line. A substring test
+# passed a call whose BODY merely mentioned it, so `gh` received no repository
+# selector while the mandatory gate reported the call pinned.
+MISLEADING_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+gh pr comment 7 --body "remember --repo when posting"
+```
+'
+R="$(mkroot "$MISLEADING_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+    && pass "a body merely mentioning --repo does not count as pinning" \
+    || die "a misleading body passed the pin check (rc=$rc out='$out')"
 
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
