@@ -71,6 +71,17 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The no-match exception lives at the grep, not on the pipeline.** Tolerating
+  status 1 for a whole pipeline could not tell whose 1 it was: under `pipefail`
+  the status is the rightmost non-zero, so a `sed` or `sort` that emitted partial
+  output and exited 1 read exactly like a grep matching nothing. Each grep now
+  normalises its own no-match status, and every extraction is checked strictly.
+
+- **`pr-selfcheck.sh`'s own root lookup takes its status.** `git rev-parse
+  --show-toplevel` can print a plausible directory and then fail, and the check
+  would then scan a tree the probe never vouched for — reporting `status=clean`
+  off a failed read.
+
 - **The origin lookup takes its status.** `git remote get-url origin` can print a
   plausible URL and then exit non-zero, and command substitution keeps what it
   wrote — so `SKILL.md` and the three helpers that derive identity could build

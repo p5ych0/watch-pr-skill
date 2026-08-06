@@ -272,6 +272,67 @@ printf '%s' "$out" | grep -q 'status=clean' \
     && die "a run whose helper discovery failed reported clean: $out" \
     || pass "…and never reports clean"
 
+# ── a DOWNSTREAM stage exiting 1 is not "grep found no matches" ───────────
+# Under `pipefail` the pipeline status is the rightmost non-zero, so tolerating 1
+# for a whole pipeline could not tell whose 1 it was: a `sort` that emitted
+# plausible partial output and exited 1 read exactly like grep matching nothing.
+SORTBIN="$TMP/sortbin"; mkdir -p "$SORTBIN"
+printf '#!/usr/bin/env bash\nprintf "OWNER\\n"\nexit 1\n' > "$SORTBIN/sort"
+chmod +x "$SORTBIN/sort"
+R="$(mkroot "$OK_SKILL")"
+out="$(PATH="$SORTBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a downstream sort that prints and exits 1 => 2, not no-matches" \
+    || die "downstream status 1 gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a run whose sort failed reported clean: $out" \
+    || pass "…and never reports clean"
+
+# A grep that genuinely matches nothing is still fine — the exception has to
+# survive being narrowed, or the check becomes noise on every empty result.
+NOMATCH_SKILL='# skill
+```bash
+OWNER=acme
+echo "$OWNER"
+```
+'
+R="$(mkroot "$NOMATCH_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "a grep matching nothing is still a clean run" \
+    || die "an empty match set was treated as a failure (rc=$rc out='$out')"
+
+# ── a repo-root lookup that prints and THEN fails is not a root ───────────
+# `git rev-parse --show-toplevel` can print a plausible directory and then exit
+# non-zero, and command substitution keeps it — so the check would scan a tree
+# the probe never vouched for and could report clean off a failed read.
+ROOTBIN="$TMP/rootbin"; mkdir -p "$ROOTBIN"
+REAL_GIT2="$(command -v git)"
+cat > "$ROOTBIN/git" <<GITSH
+#!/usr/bin/env bash
+if [ "\$1" = "rev-parse" ]; then
+    printf '%s\n' "\$FAKE_ROOT"
+    exit 1
+fi
+exec "$REAL_GIT2" "\$@"
+GITSH
+chmod +x "$ROOTBIN/git"
+R="$(mkroot "$OK_SKILL")"
+# Run with NO argument, which is the invocation the contract uses, from a
+# directory whose lookup fails while naming a tree that would otherwise pass.
+out="$(cd "$TMP" && PATH="$ROOTBIN:$PATH" FAKE_ROOT="$R" "$SCRIPT" 2>&1)"; rc=$?
+# The REASON, not just the status. Without the guard the script still exits 2 —
+# it just gets there differently — so an rc-only assertion passes on the
+# unguarded code and proves nothing. `repo_root_lookup_failed` is reachable only
+# when the lookup's status was actually taken. This is the second fixture in two
+# rounds to need this correction.
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=repo_root_lookup_failed'; } \
+    && pass "a repo-root lookup that prints and then fails => 2, on its own reason" \
+    || die "failed root lookup gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a failed root lookup produced a clean report: $out" \
+    || pass "…and never reports clean"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

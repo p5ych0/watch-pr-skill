@@ -39,7 +39,21 @@
 # several probes fail as normal operation. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
-ROOT="${1:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+# The root lookup takes its STATUS, like every other probe in this plugin.
+# `git rev-parse --show-toplevel` can print a plausible directory and then exit
+# non-zero, and command substitution keeps it — so the check would scan a tree
+# the probe never actually vouched for, and if that tree happened to satisfy
+# everything it would report `status=clean` off a failed read.
+#
+# An explicit argument is the caller stating the root and has no status to check.
+if [ "$#" -ge 1 ] && [ -n "${1:-}" ]; then
+    ROOT="$1"
+else
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+        echo "PR_SELFCHECK status=error reason=repo_root_lookup_failed" >&2
+        exit 2
+    }
+fi
 if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
     echo "PR_SELFCHECK status=error reason=no_repo_root" >&2
     exit 2
@@ -93,26 +107,26 @@ if [ -f "$SKILL" ]; then
     # exits 1 when nothing matches — a legitimate answer — so `||` fired on every
     # empty result and aborted the whole check.
     #
-    # TWO checkers, not one. Accepting 1 everywhere was too broad: `awk`, `sed`
-    # and `sort` also exit 1 on real errors, and the `blocks` extraction has no
-    # `grep` in it at all — so an `awk` that printed a plausible block and then
-    # failed was waved through as "no matches", and the run continued on partial
-    # input toward `status=clean`.
+    # ONE strict checker, and the grep stages normalise their own status.
     #
-    # `chk` is the strict one: any non-zero is a broken read. `chk_grep` is for
-    # pipelines that END in a grep-family stage, where 1 genuinely means "nothing
-    # matched" and nothing downstream can turn a real error into that same 1.
+    # Two checkers was still wrong. A "tolerant of 1" check applied to a whole
+    # PIPELINE cannot tell whose 1 it is: under `pipefail` the status is the
+    # rightmost non-zero, so a `sed` or `sort` that emitted plausible partial
+    # output and exited 1 was read as "grep found no matches" — the same
+    # ambiguity, one stage further down.
+    #
+    # So the exception lives where the exception actually is. `nomatch` wraps a
+    # single grep and turns ITS 1 into 0, leaving every other status non-zero;
+    # after that, any non-zero anywhere in the pipeline is a broken read and
+    # `chk` can be strict everywhere.
     chk() {   # chk <label> <status> — no non-zero is acceptable
         if [ "$2" -ne 0 ]; then
             echo "PR_SELFCHECK status=error reason=extraction_failed step=$1 rc=$2" >&2
             exit 2
         fi
     }
-    chk_grep() {   # chk_grep <label> <status> — 1 is "no matches"
-        if [ "$2" -gt 1 ]; then
-            echo "PR_SELFCHECK status=error reason=extraction_failed step=$1 rc=$2" >&2
-            exit 2
-        fi
+    nomatch() {   # run a grep; 1 ("no matches") becomes 0, everything else stays
+        "$@" || [ "$?" -eq 1 ]
     }
 
     blocks="$(awk '/^```bash$/{inb=1; next} /^```$/{inb=0} inb' "$SKILL")"; chk blocks $?
@@ -124,7 +138,7 @@ if [ -f "$SKILL" ]; then
     # A comment is not code, and every false negative this check has had came
     # from prose being read as shell: `# wait for SUMMARY_FILE`, then
     # `# then for SUMMARY_FILE in prose`.
-    code="$(printf '%s\n' "$blocks" | grep -vE '^[[:space:]]*#')"; chk_grep strip_comments $?
+    code="$(printf '%s\n' "$blocks" | nomatch grep -vE '^[[:space:]]*#')"; chk strip_comments $?
     # Assignments, ONLY where an assignment can actually occur: at the start of a
     # line or after a `;`, optionally preceded by `local`.
     #
@@ -137,8 +151,8 @@ if [ -f "$SKILL" ]; then
     # already deleted one checker over, so this is verified by a fixture that
     # removes the real assignment and requires the finding.
     assigned="$(printf '%s\n' "$code" \
-        | grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk_grep assigned $?
+        | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
+        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #
@@ -156,8 +170,8 @@ if [ -f "$SKILL" ]; then
     # fixable in one line — the opposite direction from a checker that a comment
     # can switch off, which is silent and indistinguishable from a clean run.
     forvars="$(printf '%s\n' "$code" \
-        | grep -oE '^[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
-        | awk '{print $2}' | sort -u)"; chk_grep forvars $?
+        | nomatch grep -oE '^[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
+        | awk '{print $2}' | sort -u)"; chk forvars $?
     assigned="$(printf '%s\n%s\n' "$assigned" "$forvars" | sort -u)"; chk merge_assigned $?
     # Uses: $NAME and ${NAME...}, restricted to UPPERCASE names.
     #
@@ -176,8 +190,8 @@ if [ -f "$SKILL" ]; then
     # assigned would slip past — that is a real hole, and a stated one is worth
     # more than a lexer that quietly has a different one.
     used="$(printf '%s\n' "$code" \
-        | grep -oE '\$\{?[A-Z][A-Z0-9_]*' \
-        | grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"; chk_grep used $?
+        | nomatch grep -oE '\$\{?[A-Z][A-Z0-9_]*' \
+        | nomatch grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"; chk used $?
     undef=""
     for v in $used; do
         case "$v" in
@@ -216,9 +230,13 @@ done
 # partial list, the loop ran zero or too few iterations, `missing` stayed 0, and
 # the check reported that every helper was present without ever establishing
 # which helpers the skill drives.
-helpers="$(grep -oE '\$RB_SCRIPTS"?/pr-[a-z-]+\.sh' "$SKILL" | grep -oE 'pr-[a-z-]+\.sh' | sort -u)"
+# The grep stages normalise their own no-match status, so any remaining non-zero
+# — including a `sort` that printed partial output and exited 1 — is a broken
+# read rather than "the skill drives no helpers".
+helpers="$(nomatch grep -oE '\$RB_SCRIPTS"?/pr-[a-z-]+\.sh' "$SKILL" \
+    | nomatch grep -oE 'pr-[a-z-]+\.sh' | sort -u)"
 hstat=$?
-if [ "$hstat" -gt 1 ]; then
+if [ "$hstat" -ne 0 ]; then
     echo "PR_SELFCHECK status=error reason=extraction_failed step=helpers rc=$hstat" >&2
     exit 2
 fi
