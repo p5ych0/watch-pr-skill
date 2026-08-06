@@ -14,17 +14,27 @@ conflates them would draw the wrong conclusion about both.
 | Bound | On the base ref today | After #10 |
 | --- | --- | --- |
 | The head is re-read and compared immediately before merging | present | present |
+| That comparison uses the **full** 40-hex SHA | **absent** (7-char prefix) | present |
 | That comparison is **atomic** with the merge (`--match-head-commit`) | **absent** | present |
 | A review-state probe (`blocked` / dismissed / body-only `CHANGES_REQUESTED`) | **absent** | present |
 | `REVIEW_MERGE_STRICT=1` to drop `--admin` entirely | **absent** | present |
 
-### The head exposure is a race
+### The head exposure is two separate things
 
-The base ref *does* re-read `headRefOid` immediately before merging and refuses
-when it no longer matches the reviewed SHA. A push is therefore caught unless it
-lands between that check and the `gh pr merge` call a few lines later. That is a
-TOCTOU race with a small window — not an unbounded gap. `--match-head-commit`,
-which #10 adds, closes it by making the comparison part of the merge itself.
+**A race.** The base ref *does* re-read `headRefOid` immediately before merging
+and refuses when it no longer matches. A push is therefore caught unless it lands
+between that check and the `gh pr merge` call a few lines later — a TOCTOU race
+with a small window, not an unbounded gap. `--match-head-commit`, which #10 adds,
+closes it by making the comparison part of the merge itself.
+
+**A prefix-only comparison, which is not a race at all.** `MERGE_SHA` is a
+seven-character abbreviation and the check compares `${HEAD_OID:0:7}` against it,
+so a commit constructed to share those seven hex characters matches whenever it
+is pushed — before the check, not merely between it and the merge. No timing
+window bounds that one, and `--admin` then merges it. #10 compares the full
+40-hex SHA and pins the merge to it; until then this is a missing bound in its
+own right, listed separately above because calling it part of the race would
+understate it.
 
 ### The review-state exposure is a missing gate
 
@@ -92,10 +102,10 @@ underweighted cost should be raised as a **non-blocking note** — is in
 policy and says so; PR #10 moves that policy into `AGENTS.md`, at which point this
 citation should follow it.)
 
-It is not authority for anything else. The non-atomic head comparison and the
-absent review-state probe on the current base ref are defects, not accepted
-limitations — #10 fixes both, and a reviewer should keep reporting them anywhere
-else they appear.
+It is not authority for anything else. The prefix-only head comparison, its
+non-atomicity, and the absent review-state probe on the current base ref are
+defects, not accepted limitations — #10 fixes all three, and a reviewer should
+keep reporting them anywhere else they appear.
 
 If the reasoning above stops holding — for example if GitHub gains a way for an
 app review to satisfy required approvals — reopen it.
