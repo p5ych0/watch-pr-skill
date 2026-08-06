@@ -728,6 +728,14 @@ awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
 grep -q 'the push did not update PR N' "$SKILL" \
     && pass "the round verifies the push actually moved this PR" \
     || die "a push that landed elsewhere is treated as having queued a review"
+# …against the SHA it pushed, not a fresh read of mutable local HEAD. A checkout
+# reset after the push would otherwise satisfy the comparison with a commit that
+# never reached the PR.
+awk '/^if \[ "\$HEAD_BEFORE" != "\$HEAD_AFTER" \]; then$/ {inb=1}
+     inb && /^fi$/ {inb=0}
+     inb && /git rev-parse HEAD/ {print "bad"; exit}' "$SKILL" | grep -q bad \
+    && die "the push confirmation re-reads mutable local HEAD" \
+    || pass "…comparing against the pushed SHA rather than re-reading HEAD"
 
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read

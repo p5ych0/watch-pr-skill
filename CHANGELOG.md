@@ -79,6 +79,11 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The push confirmation compares against the SHA it pushed.** It re-read
+  `git rev-parse HEAD`, which is mutable: a checkout reset after the push would
+  satisfy the comparison with a commit that never reached the PR. It now compares
+  the remote head against `$HEAD_BEFORE`, captured and validated before the push.
+
 - **The push must have landed on this PR.** A successful `git push` from the
   wrong worktree, or with a refspec pointing elsewhere, leaves the PR head
   untouched — and because the local head then differs from it, the no-op branch

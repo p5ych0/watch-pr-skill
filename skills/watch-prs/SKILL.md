@@ -512,15 +512,21 @@ HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.hea
 # untouched — and because the local head then differs from it, the no-op branch
 # is skipped and nothing is requested at all. Retried briefly, since the API can
 # lag a moment behind the push.
+# Compared against $HEAD_BEFORE — the SHA this round actually pushed, captured
+# and status-checked before the push — NOT a fresh `git rev-parse HEAD`. Local
+# HEAD is mutable: if something resets the checkout after the push, re-reading it
+# can make the comparison succeed against a commit that never reached the PR.
 if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
     for _try in 1 2 3; do
-        [ "$HEAD_AFTER" = "$(git rev-parse HEAD)" ] && break
+        [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] && break
         sleep 2
         HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
             || { echo "ABORT: could not re-read the head after pushing."; exit 0; }
+        [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] \
+            || { echo "ABORT: the re-read head is not a full OID ('$HEAD_AFTER')."; exit 0; }
     done
-    [ "$HEAD_AFTER" = "$(git rev-parse HEAD)" ] \
-        || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, local is $(git rev-parse HEAD)) — wrong branch or worktree?"; exit 0; }
+    [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] \
+        || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, pushed $HEAD_BEFORE) — wrong branch or worktree?"; exit 0; }
 fi
 # WHICH reviewer comes FIRST, before any question about the head.
 #
