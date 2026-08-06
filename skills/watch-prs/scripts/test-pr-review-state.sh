@@ -80,6 +80,20 @@ do
         || die "identity: $url gave '$got' (want $want)"
 done
 
+# An origin with no network authority is not an identity. A local path such as
+# `/srv/mirrors/acme/widget.git` has no host, and defaulting it to github.com
+# while the path split still yields `acme/widget` pointed every call at the
+# unrelated PUBLIC repository of that name.
+for badremote in '/srv/mirrors/acme/widget.git' '../acme/widget.git' './acme/widget.git' 'acme/widget'; do
+    out="$(REVIEW_BUS_REMOTE="$badremote" "$SCRIPT" state 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "origin '$badremote' is refused rather than assumed to be GitHub" \
+        || die "origin '$badremote' gave rc=$rc '$out'"
+    printf '%s' "$out" | grep -q 'origin_has_no_host' \
+        && pass "…and named as hostless" \
+        || die "the hostless origin was not named: $out"
+done
+
 # ── state: each review state is judged, not counted ────────────────────────
 # A comment count cannot tell a signoff from a dismissal, a changes-requested
 # review with no inline comments, or a re-review that is still a draft. All three
@@ -337,6 +351,35 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/ico
 printf '%s' "$out" | grep -q 'state=reviewed' \
     && pass "…and the real footer still signs off when it is the last one" \
     || die "the genuine footer was not read: $out"
+
+# Second-resolution timestamps TIE. A clean re-review comment created in the same
+# second as the review it supersedes cannot be ordered against it, and a strict
+# `>` silently kept the older review — so the watch rejected a completed clean
+# pass as stale.
+mk_reviews CHANGES_REQUESTED '"2026-01-07T12:00:00Z"' 960
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-07T12:00:00Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a same-second review and clean comment => 2, not a silent winner" \
+    || die "same-second tie gave rc=$rc '$out'"
+printf '%s' "$out" | grep -q 'ambiguous_verdict_order' \
+    && pass "…named as an ambiguous ordering" \
+    || die "the tie was not named: $out"
+
+# One second apart still orders cleanly, in both directions.
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-07T12:00:01Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=reviewed' \
+    && pass "a comment one second later still supersedes" \
+    || die "a later comment did not win: $out"
+mk_clean_comment_at "${HEAD40:0:10}" "2026-01-07T11:59:59Z"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=blocked' \
+    && pass "…and one second earlier still does not" \
+    || die "an earlier comment won: $out"
 
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31

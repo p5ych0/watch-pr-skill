@@ -65,13 +65,26 @@ OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
 # `git@ghe.example:org/github.com-mirror.git` to the public host, and a userless
 # SCP-style enterprise origin fell through to the same default — so every pinned
 # command would act on the wrong GitHub entirely.
+# A remote with NO NETWORK AUTHORITY is not an identity, and must not be given
+# one. A local-path origin such as `/srv/mirrors/acme/widget.git` or
+# `../acme/widget.git` has no host, and defaulting it to github.com while the
+# path split still yields `acme/widget` pointed every `gh` call at the unrelated
+# PUBLIC repository of that name — reading, commenting on, and merging the
+# same-numbered PR there.
 case "$REMOTE" in
     *://*)  _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
     *@*:*)  _h="${REMOTE#*@}";   HOST="${_h%%:*}" ;;
+    /*|.*|~*)
+        echo "PR_REVIEW_STATE status=error reason=origin_has_no_host remote=$REMOTE" >&2
+        exit 2 ;;
     *:*/*)  HOST="${REMOTE%%:*}" ;;
-    *)      HOST="github.com" ;;
+    *)
+        echo "PR_REVIEW_STATE status=error reason=origin_has_no_host remote=$REMOTE" >&2
+        exit 2 ;;
 esac
-[ -n "$HOST" ] || HOST="github.com"
+case "$HOST" in
+    ""|*/*|*:*) echo "PR_REVIEW_STATE status=error reason=origin_host_unparseable remote=$REMOTE" >&2; exit 2 ;;
+esac
 REPO_SLUG="$HOST/$OWNER/$REPO"
 
 # 40-hex head OID of a PR. Prints nothing and returns non-zero on failure.
@@ -297,7 +310,18 @@ head_review_snapshot() {
         # finished, whatever any comment says.
         case "${out%%$'\t'*}" in
             pending) ;;
-            *) if [ -z "$latest_ts" ] || [ "$cts" \> "$latest_ts" ]; then
+            *) if [ -n "$latest_ts" ] && [ "$cts" = "$latest_ts" ]; then
+                   # EQUAL is not "the review wins". GitHub timestamps are
+                   # second-resolution, so a clean re-review comment created in
+                   # the same second as the blocking review it supersedes ties —
+                   # and a strict `>` silently left the older review
+                   # authoritative, so the watch rejected the clean pass as stale
+                   # and timed out despite the re-review having completed.
+                   # Nothing here can order them, so this is unreadable, not a
+                   # decision.
+                   echo "PR_REVIEW_STATE pr=$pr status=error reason=ambiguous_verdict_order ts=$cts" >&2
+                   return 2
+               elif [ -z "$latest_ts" ] || [ "$cts" \> "$latest_ts" ]; then
                    out="reviewed"$'\t'"comment:$cid"
                fi ;;
         esac

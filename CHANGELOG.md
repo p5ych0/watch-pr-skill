@@ -79,6 +79,28 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **An origin with no network authority is refused, not defaulted to GitHub.**
+  A local-path remote such as `/srv/mirrors/acme/widget.git` has no host, and
+  defaulting it to `github.com` while the path split still yielded `acme/widget`
+  pointed every `gh` call at the unrelated **public** repository of that name —
+  reading, commenting on and merging the same-numbered PR there. Applied in all
+  four identity parsers.
+
+- **Equal cross-channel timestamps are unreadable, not a silent winner.** GitHub
+  stamps to the second, so a clean re-review comment created in the same second
+  as the review it supersedes ties — and a strict `>` left the older review
+  authoritative, so the watch rejected a completed clean pass as stale and timed
+  out. Nothing available can order them, so it fails closed.
+
+- **A threshold beyond Bash arithmetic falls back rather than wrapping.** An
+  all-digit value larger than the integer range wraps under `-eq` and modulo,
+  possibly to zero — silently taking the disable path that only a literal `0` is
+  meant to take.
+
+- **The helper selection takes its pipeline status.** `head` can emit a plausible
+  cache path and then fail; if that directory holds executables, the validation
+  after it passes and every gate runs helpers chosen by a failed read.
+
 - **The push confirmation compares against the SHA it pushed.** It re-read
   `git rev-parse HEAD`, which is mutable: a checkout reset after the push would
   satisfy the comparison with a commit that never reached the PR. It now compares

@@ -277,6 +277,22 @@ printf '%s' "$out" | grep -q 'rounds=11' \
     && pass "…and a genuine last footer on a new head does add one" \
     || die "the real footer was not counted (rc=$rc out='$out')"
 
+# A threshold beyond Bash arithmetic wraps, possibly to zero — silently taking
+# the disable path that only a literal `0` is meant to take.
+specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|w$i|t"); done
+mk "${specs[@]}"
+for huge in 99999999999999999999 18446744073709551616 100000000000000000000000; do
+    out="$(REVIEW_ROUND_THRESHOLD="$huge" GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+    { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
+        && pass "an out-of-range threshold ($huge) falls back to 10, not to disabled" \
+        || die "threshold $huge gave rc=$rc out='$out'"
+done
+# A large-but-sane cadence is still honoured.
+out="$(REVIEW_ROUND_THRESHOLD=999 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=999'; } \
+    && pass "a large but representable threshold is honoured" \
+    || die "threshold 999 gave rc=$rc out='$out'"
+
 # ── everything unreadable fails closed ─────────────────────────────────────
 out="$(GH_RC=1 run 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "fetch failure => 2" || die "fetch failure gave rc=$rc"

@@ -737,6 +737,20 @@ awk '/^if \[ "\$HEAD_BEFORE" != "\$HEAD_AFTER" \]; then$/ {inb=1}
     && die "the push confirmation re-reads mutable local HEAD" \
     || pass "…comparing against the pushed SHA rather than re-reading HEAD"
 
+# ── a hostless origin is refused, not defaulted to GitHub ─────────────────
+grep -q 'names no host; refusing to guess one' "$SKILL" \
+    && pass "an origin with no network authority is refused" \
+    || die "a local-path origin would be treated as github.com"
+
+# ── the helper selection takes its pipeline status ────────────────────────
+# `head` can emit a plausible path and then fail; if that directory holds
+# executables the validation below passes and every gate runs helpers chosen by a
+# failed read. Asserted on the guard, not on the abort message — the message
+# survives the defect.
+grep -q 'RB_CANDIDATES" | head -1)" \\' "$SKILL" \
+    && pass "the helper selection branches on its pipeline status" \
+    || die "the helper selection pipeline status is unchecked"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

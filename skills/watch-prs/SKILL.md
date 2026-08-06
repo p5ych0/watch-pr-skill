@@ -39,13 +39,20 @@ _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
 # The authority is PARSED, not matched: `github.com` appearing anywhere in an
 # enterprise URL — `git@ghe.example:org/github.com-mirror.git` — would otherwise
 # send every pinned command to the public host.
+# A remote with NO NETWORK AUTHORITY is not an identity. A local-path origin
+# such as `/srv/mirrors/acme/widget.git` has no host, and defaulting it to
+# github.com while the path split still yields `acme/widget` would point every
+# `gh` call at the unrelated PUBLIC repository of that name.
 case "$REMOTE" in
     *://*)  _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
     *@*:*)  _hh="${REMOTE#*@}";   HOST="${_hh%%:*}" ;;
+    /*|.*|~*) echo "ABORT: origin '$REMOTE' names no host; refusing to guess one."; exit 1 ;;
     *:*/*)  HOST="${REMOTE%%:*}" ;;
-    *)      HOST="github.com" ;;
+    *)      echo "ABORT: origin '$REMOTE' names no host; refusing to guess one."; exit 1 ;;
 esac
-[ -n "$HOST" ] || HOST="github.com"
+case "$HOST" in
+    ""|*/*|*:*) echo "ABORT: could not parse a host from origin '$REMOTE'."; exit 1 ;;
+esac
 # Same rule as the origin lookup above: the status is taken. This path is handed
 # to `pr-merge-range.sh`, which inspects history in it to decide whether every
 # commit since the reviewed SHA is a review fix — so a directory retained from a
@@ -64,7 +71,11 @@ RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 if [ ! -d "$RB_SCRIPTS" ]; then
     RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
         || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
-    RB_SCRIPTS="$(printf '%s\n' "$RB_CANDIDATES" | head -1)"
+    # `head` can emit a plausible first path and then fail; the assignment would
+    # keep it, and if that directory happens to hold executables the validation
+    # below passes — every gate then running helpers chosen by a failed read.
+    RB_SCRIPTS="$(printf '%s\n' "$RB_CANDIDATES" | head -1)" \
+        || { echo "ABORT: could not select an installed plugin copy."; exit 1; }
 fi
 # Validated as a directory that actually holds the helpers, not merely non-empty:
 # a plausible-looking path that is missing them fails later, one call at a time.
