@@ -82,6 +82,9 @@ if [ ! -f "$SKILL" ] || [ ! -d "$SCRIPTS" ]; then
     exit 3
 fi
 
+TMPSEG="$(mktemp)" || { echo "PR_SELFCHECK status=error reason=no_scratch_file" >&2; exit 2; }
+trap 'rm -f "$TMPSEG" 2>/dev/null || true; true' EXIT
+
 findings=0
 note() { printf 'PR_SELFCHECK finding=%s %s\n' "$1" "$2"; findings=$((findings + 1)); }
 ok()   { printf 'ok   - %s\n' "$1"; }
@@ -275,6 +278,29 @@ chk gh_lines $?
 if [ -n "$gh_lines" ]; then
     while IFS= read -r line; do
         [ -n "$line" ] || continue
+        # EACH command on the line, not the line as a whole. A line like
+        #     BODY='gh pr comment N --repo <owner>/<repo>'; gh pr comment N --body "$BODY"
+        # carries the pinned text in the assignment, and a whole-line check found
+        # it and passed the real call — which has no selector and is exactly what
+        # GH_REPO redirects. Splitting on `;` puts each command in its own
+        # segment, so the assignment can no longer vouch for the command.
+        # `printf '%s\n'`, not `%s`: without a trailing newline the final — and
+        # usually only — segment leaves `read` returning non-zero, so the loop
+        # body never runs for it and every call reads as pinned.
+        printf '%s\n' "$line" | tr ';' '\n' > "$TMPSEG"
+        while IFS= read -r seg; do
+            case "$seg" in
+                *"gh pr "*) ;;
+                *) continue ;;
+            esac
+            if printf '%s' "$seg" | grep -qE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]+[^[:space:]]+[[:space:]]+--repo[[:space:]=]'; then
+                :
+            else
+                note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$seg" | cut -c1-60)"
+                unpinned=1
+            fi
+        done < "$TMPSEG"
+        continue
         # A CANONICAL POSITION, not "the text --repo appears somewhere". A
         # substring test passed `gh pr comment N --body "remember --repo"`,
         # where `gh` receives no repository selector at all — and this check

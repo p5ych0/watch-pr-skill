@@ -41,6 +41,20 @@ elapsed="${out##*elapsed=}"
     && pass "…and returns at the limit rather than when the command ends" \
     || die "the limit was not enforced promptly (elapsed=${elapsed}s for a 2s limit on a 30s command)"
 
+# ── a child that outlives its parent must not hold the capture pipe ───────
+# Callers use command substitution, so a surviving grandchild that inherited
+# stdout keeps the pipe open and the shell blocks on the read regardless of the
+# dead parent — hanging the mandatory gate past the limit it advertises.
+out="$(PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; start=$(date +%s); res="$(run_limited 2 sh -c "sleep 30 & wait")"; rc=$?; echo "rc=$rc elapsed=$(( $(date +%s) - start ))"')"
+case "$out" in
+    "rc=124 elapsed="*) pass "an orphaned child does not hold the capture open" ;;
+    *) die "orphan case gave '$out' (want rc=124)" ;;
+esac
+orphan_elapsed="${out##*elapsed=}"
+{ [ "$orphan_elapsed" -le 8 ]; } \
+    && pass "…and the capture returns at the limit, not when the child ends" \
+    || die "the capture stayed open for ${orphan_elapsed}s on a 2s limit"
+
 # ── a command that finishes in time keeps its own status ───────────────────
 out="$(PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 5 true; echo "rc=$?"')"
 [ "$out" = "rc=0" ] && pass "a successful command returns 0" || die "success gave '$out'"

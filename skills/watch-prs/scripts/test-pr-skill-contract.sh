@@ -506,6 +506,29 @@ grep -q 'ABORT: could not write the phase summary' "$SKILL" \
     && pass "the Copilot phase summary write is branched on" \
     || die "the phase summary is written without checking the write"
 
+# ── the summary file's creation is checked ────────────────────────────────
+# `mktemp` can print a plausible path and then fail, and every later write and
+# guarded read would then point at an existing file — a stale summary read back
+# as this round's, which is what the guarded read was added to prevent.
+grep -q 'ABORT: could not create the round-summary file' "$SKILL" \
+    && pass "the summary file's creation is branched on" \
+    || die "mktemp is unchecked; a failed create still yields a path"
+grep -q 'ABORT: the round-summary file was not created empty' "$SKILL" \
+    && pass "…and the created file is validated as new and empty" \
+    || die "the summary file is used without validating what was created"
+
+# ── the watch deadline is absolute ────────────────────────────────────────
+# Accumulating only the sleeps excluded the time spent inside the probes, so slow
+# GitHub reads made a one-hour watch run far past an hour.
+if [ -f "$SCRIPT_DIR/pr-watch.sh" ]; then
+    grep -q 'elapsed_s()' "$SCRIPT_DIR/pr-watch.sh" \
+        && pass "pr-watch.sh measures elapsed time against the clock" \
+        || die "pr-watch.sh accumulates sleeps, so probe time escapes --timeout"
+    grep -q 'waited=\$((waited + nap))' "$SCRIPT_DIR/pr-watch.sh" \
+        && die "pr-watch.sh still accumulates the nap instead of reading the clock" \
+        || pass "…rather than accumulating the naps"
+fi
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

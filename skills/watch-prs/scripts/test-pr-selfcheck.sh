@@ -429,6 +429,22 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a body merely mentioning --repo does not count as pinning" \
     || die "a misleading body passed the pin check (rc=$rc out='$out')"
 
+# A pinned call in an ASSIGNMENT must not vouch for an unpinned call beside it.
+# A whole-line check found the text and passed the real command, which has no
+# selector at all.
+MASKING_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+BODY="gh pr comment 7 --repo $OWNER/$REPO"; gh pr comment 7 --body "$BODY"
+```
+'
+R="$(mkroot "$MASKING_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+    && pass "a pinned assignment does not vouch for an unpinned call on the same line" \
+    || die "same-line masking passed the pin check (rc=$rc out='$out')"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

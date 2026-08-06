@@ -73,6 +73,13 @@ case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|"") TIMEOUT=3600 ;; esac
 # emits can start a line of its own.
 q() { printf '%q' "$1"; }
 
+# An ABSOLUTE deadline, measured against the clock rather than accumulated from
+# the sleeps. Counting only the naps excluded every second spent inside the head,
+# state and verdict probes — so a run of slow GitHub reads made a one-hour watch
+# run far past an hour, and a probe that hung meant the timeout check was never
+# reached at all. `--timeout` has to mean elapsed time or it means nothing.
+started="$(date +%s)"
+elapsed_s() { echo $(( $(date +%s) - started )); }
 waited=0
 last=""
 while :; do
@@ -232,6 +239,7 @@ while :; do
                 # The next poll's state is about a review that has changed, so the
                 # change-suppression memory must not hide it.
                 last=""
+                waited="$(elapsed_s)"
                 if [ "$waited" -ge "$TIMEOUT" ]; then
                     printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
                     exit 1
@@ -240,7 +248,7 @@ while :; do
                 remaining=$((TIMEOUT - waited))
                 [ "$nap" -gt "$remaining" ] && nap="$remaining"
                 sleep "$nap"
-                waited=$((waited + nap))
+                waited="$(elapsed_s)"
                 continue
             fi
             # The head is re-resolved AFTER the verdict, and READY is withheld
@@ -279,6 +287,7 @@ while :; do
             ;;
     esac
 
+    waited="$(elapsed_s)"
     if [ "$waited" -ge "$TIMEOUT" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
         exit 1
@@ -291,5 +300,5 @@ while :; do
     remaining=$((TIMEOUT - waited))
     [ "$nap" -gt "$remaining" ] && nap="$remaining"
     sleep "$nap"
-    waited=$((waited + nap))
+    waited="$(elapsed_s)"
 done

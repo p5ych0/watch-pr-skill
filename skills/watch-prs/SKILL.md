@@ -63,7 +63,15 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 # inline mangles it. Freshly created per PR and per session, because a reused
 # path is how a stale summary from another round — or another PR — gets posted
 # as if it were this one's.
-SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")"
+# `mktemp` takes its status like every other probe here, and the result is
+# validated. A wrapper that prints a plausible path and then fails would
+# otherwise point every later write and guarded read at an existing file — and a
+# stale summary read back as this round's is exactly what the guarded read was
+# added to prevent.
+SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
+    || { echo "ABORT: could not create the round-summary file"; exit 1; }
+[ -f "$SUMMARY_FILE" ] && [ ! -s "$SUMMARY_FILE" ] \
+    || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
 echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 ```
 

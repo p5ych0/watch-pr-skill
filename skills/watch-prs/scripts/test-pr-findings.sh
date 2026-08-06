@@ -423,6 +423,21 @@ out="$(GH_REVIEWS="$TMP/bbfrac.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)";
     && pass "blocked-body: a fractional-second timestamp => 2" \
     || die "blocked-body fractional timestamp gave rc=$rc out='$out'"
 
+# ── an in-flight re-review supersedes the old blocking body ───────────────
+# A PENDING review opened on this head after the watch saw `blocked` has a null
+# `submitted_at`, so the sort ignores it and the OLD request comes back — sending
+# the driver to act on findings the in-flight pass may supersede. The snapshot in
+# pr-review-state.sh lets a draft dominate; these two must not disagree.
+printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"the old request"},{"user":{"login":"%s"},"state":"PENDING","commit_id":"%s","submitted_at":null,"body":null}]' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/inflight.json"
+out="$(GH_REVIEWS="$TMP/inflight.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "blocked-body: an in-flight draft on the head => 2, not the old body" \
+    || die "in-flight draft gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'the old request' \
+    && die "the superseded request was returned as current: $out" \
+    || pass "…and the superseded request is not returned"
+
 # A bad head is rejected rather than matched against.
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "not-a-sha" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "blocked-body: a malformed head => 2" || die "bad head gave rc=$rc"

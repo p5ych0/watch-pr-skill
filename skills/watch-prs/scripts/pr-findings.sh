@@ -219,8 +219,17 @@ cmd_blocked_body() {
                             | not))
                    or ((.body | type) != "string" and .body != null))
             then error("malformed review record")
-            else ( [ $all[] | select(.user.login == $who and .commit_id == $head) ]
-                   | sort_by(.submitted_at) | last ) as $latest
+            else [ $all[] | select(.user.login == $who and .commit_id == $head) ] as $mine
+              # An unsubmitted draft DOMINATES, exactly as it does in the
+              # snapshot pr-review-state.sh takes. A PENDING re-review on this
+              # head after the watch saw `blocked` has a null `submitted_at`, so
+              # the sort below ignores it and returns the OLDER request — sending
+              # the driver to act on findings the in-flight pass may supersede.
+              # The two must not disagree about what a pending review means.
+              | if any($mine[]; .state == "PENDING" or .submitted_at == null)
+                then error("re-review in flight")
+                else . end
+              | ( [ $mine[] ] | sort_by(.submitted_at) | last ) as $latest
               | if $latest == null or $latest.state != "CHANGES_REQUESTED"
                 then empty
                 elif ($latest.body | type) != "string"

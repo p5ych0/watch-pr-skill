@@ -27,11 +27,23 @@ run_limited() {
         timeout "$secs" "$@"
         return $?
     fi
-    # No `timeout`: run the command in the background and race it against a
-    # sleeper. `kill -0` distinguishes "still running" from "already gone", so
-    # the watchdog never reports a limit that was not reached.
+    # No `timeout`: run the command in its own PROCESS GROUP and kill the group.
+    #
+    # Killing the top-level PID alone was not enough. Callers capture this with
+    # command substitution, so a surviving child that inherited stdout keeps the
+    # capture pipe open — and the shell blocks on the read regardless of the dead
+    # parent. The suite is a mandatory pre-push gate, so that hangs the gate past
+    # the limit it advertises, which is the one thing the watchdog exists to
+    # prevent.
+    #
+    # `set -m` gives the background job its own process group with `$!` as the
+    # leader, so `kill -9 -$pid` reaches every descendant. It is turned back off
+    # immediately: leaving job control on changes signal handling for the rest of
+    # the caller.
+    set -m
     "$@" &
     local pid=$!
+    set +m
     local waited=0
     while [ "$waited" -lt "$secs" ]; do
         kill -0 "$pid" 2>/dev/null || break
@@ -39,7 +51,9 @@ run_limited() {
         waited=$((waited + 1))
     done
     if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" 2>/dev/null
+        # The group first, then the leader as a fallback for a shell that gave
+        # the job no group of its own.
+        kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
         return 124
     fi

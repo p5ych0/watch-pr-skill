@@ -71,6 +71,31 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The watch deadline is wall-clock.** `--timeout` accumulated only the sleeps,
+  so every second spent inside the head, state and verdict probes escaped it — a
+  run of slow GitHub reads made a one-hour watch run far past an hour, and a
+  hung probe meant the check was never reached at all.
+
+- **The portable watchdog kills the process group.** Killing the top-level PID
+  left a child holding the inherited stdout, and callers capture with command
+  substitution — so the shell blocked on a pipe the dead parent no longer owned,
+  hanging the mandatory gate past the limit the watchdog advertises.
+
+- **The `--repo` check validates each command, not each line.**
+  `BODY='…--repo…'; gh pr comment N --body "$BODY"` carried the pinned text in an
+  assignment, and a whole-line check found it and passed the real call — which
+  has no selector at all.
+
+- **An in-flight re-review supersedes an old blocking body.** A `PENDING` review
+  opened on the head after the watch saw `blocked` has a null `submitted_at`, so
+  the sort ignored it and `blocked-body` returned the *older* request — sending
+  the driver to act on findings the in-flight pass may supersede.
+  `pr-review-state.sh` lets a draft dominate; these two no longer disagree.
+
+- **The summary file's creation is checked.** `mktemp` can print a plausible path
+  and then fail, and every later write and guarded read would point at an
+  existing file — a stale summary posted as the current round record.
+
 - **The suite no longer needs GNU `timeout`.** Several fixtures assert that a
   guard turns an endless walk into a status, so they need a wall-clock limit —
   and they used `timeout`, which stock macOS does not ship. Since

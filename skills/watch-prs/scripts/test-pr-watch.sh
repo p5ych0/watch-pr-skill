@@ -505,6 +505,29 @@ printf '%s' "$out" | grep -q "${OTHER40:0:7}" \
     && pass "…and the verdict announced is the one for the NEW head" \
     || die "READY did not name the new head: $out"
 
+# ── the deadline is wall-clock, not the sum of the sleeps ─────────────────
+# Counting only the naps excluded every second spent inside the probes, so a run
+# of slow GitHub reads made a one-hour watch run far past an hour. This stub
+# takes ~2s per probe: with accumulated sleeps a 6s timeout at a 1s interval
+# would need ~18s of real time to reach; against the clock it returns in ~6s.
+mkstub "$TMP/slow.sh" <<'SH'
+sleep 2
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=none\n' "$2" "$3"
+exit 0
+SH
+start=$(date +%s)
+out="$(HEAD_SLOW=1 PR_WATCH_STATE_SCRIPT="$TMP/slow.sh" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 6 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 1 ] \
+    && pass "a slow-probe watch still reaches its timeout" \
+    || die "slow-probe watch gave rc=$rc out='$out'"
+[ "$elapsed" -le 14 ] \
+    && pass "…within the configured bound, because probe time counts against it" \
+    || die "a 6s timeout took ${elapsed}s: probe time is escaping the deadline"
+printf '%s' "$out" | grep -q 'state=timeout' \
+    && pass "…and reports the timeout record" \
+    || die "no timeout record from the slow-probe watch: $out"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails
