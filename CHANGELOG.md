@@ -71,6 +71,22 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The automatic-review path has no pre-request baseline.** `--after-review`
+  means "newer than this one", which is right for a re-request and actively wrong
+  for the initial automatic pass: the push that triggered it preceded the skill,
+  so the lookup could capture the very review being waited for — and the watch
+  would reject the only terminal review as stale and re-arm forever.
+
+- **Every documented watch invocation carries the baseline.** The shell example
+  passed `--after-review` while the Monitor command beside it did not, leaving the
+  feature inert in the mode Claude Code is actually told to use — the second time
+  that flag shipped without being used.
+
+- **The round boundary gates the phase transitions, not just the re-request.** A
+  phase ending on the threshold-th reviewed head went from a clean verdict
+  straight into the Copilot phase, or into the merge, skipping the operator pause
+  in exactly the case it exists for.
+
 - **A clean pass arrives as a comment, not a review.** Codex submits a review only
   when it has findings; a clean pass is an issue comment carrying
   `**Reviewed commit:** <sha10>` and no review at all. `pulls/N/reviews` is

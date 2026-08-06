@@ -396,11 +396,17 @@ while :; do
                 nap="$INTERVAL"
                 remaining=$((TIMEOUT - waited))
                 [ "$nap" -gt "$remaining" ] && nap="$remaining"
-                # NOT covered by a fixture, and said so rather than assumed: every attempt to
-    # isolate this guard was satisfied by an earlier one — `probe` has its own
-    # sleep guard and fails first — so a mutant removing this line still exits 2
-    # by another route. It is kept because it is correct and symmetric with that
-    # guard, not because a test proves it.
+                # COVERAGE, stated accurately after measuring rather than assuming.
+    #
+    # An earlier version of this comment claimed the INTER-POLL guard was the
+    # uncovered one. That was wrong: removing it fails four assertions. It is the
+    # MOVED-HEAD sleep guard, in the terminal branch above, that no fixture
+    # isolates — the two paths emit the same `reason=sleep_failed` record, so a
+    # mutant on either is masked by the other and both variants exit 2 identically.
+    #
+    # Both guards are kept because both are correct; one of them is proven by
+    # test and one is not, and the file says which rather than letting the
+    # assertion count imply otherwise.
     #
     # A failed sleep here would launch the next round of GitHub probes at once,
     # hammering the API until the clock expired and then reporting an ordinary

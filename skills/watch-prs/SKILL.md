@@ -121,11 +121,25 @@ duplicate pass or a review nobody requested.
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
 
 WHO="$CODEX_BOT"
-# The authoritative review id BEFORE the request, so the watch can tell the new
-# pass from the old one on an unchanged head. Empty is a legitimate answer (no
-# review yet); only a failed read is fatal.
-PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+# The baseline the watch compares against — and it is EMPTY on the automatic
+# path.
+#
+# `--after-review` means "the review I am waiting for is newer than this one".
+# On a re-request that is right. On the INITIAL automatic pass it is actively
+# wrong: the push or PR-open that triggered the review happened before this skill
+# ran, so a lookup here can capture the very pass being waited for. The watch
+# would then reject the only terminal review as stale and re-arm forever, waiting
+# for a review nobody is going to request.
+#
+# There is nothing to capture before the trigger, because the trigger preceded
+# us. So the automatic path waits on any terminal review, and only the explicit
+# re-requests in step 5 carry a baseline.
+if [ "$AUTO_REVIEW" = "yes" ]; then
+    PRIOR_REVIEW=""
+else
+    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+fi
 
 if [ "$AUTO_REVIEW" = "yes" ]; then
     # The pass is already queued by the push that created or updated the PR.
@@ -174,7 +188,7 @@ WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
 **Claude Code** — run it as this session's **Monitor** so the verdict surfaces
 into the chat by itself instead of being waited on:
 
-- `command`: `"$RB_SCRIPTS"/pr-watch.sh N "$WHO"`
+- `command`: `"$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"`
 - `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
 - `persistent`: `true`
 
@@ -572,6 +586,18 @@ fi
 # for, so entering the phase would poll for a review nobody asked for and then
 # report a timeout — which reads as "Copilot is slow", not "Copilot was never
 # asked".
+# The boundary is checked HERE too, not only before a re-request. A phase that
+# ends on the threshold-th reviewed head went straight from a clean verdict into
+# the next phase, so the promised pause was skipped in exactly the case it exists
+# for: the loop has run long enough to reach the boundary AND is about to commit
+# to more work.
+"$RB_SCRIPTS"/pr-round-count.sh N "$CODEX_BOT"; ROUNDS_RC=$?
+case "$ROUNDS_RC" in
+    0) ;;
+    3) echo "PAUSE: round boundary reached; decide with the operator before opening the Copilot phase"; exit 0 ;;
+    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
+esac
+
 WHO="$COPILOT_BOT"
 # The authoritative review id BEFORE the request, so the watch can tell the new
 # pass from the old one on an unchanged head. Empty is a legitimate answer (no
@@ -821,6 +847,17 @@ elif printf '%s' "$CHECKS_MSG" | grep -q 'no required checks'; then
 else
     echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC out='$CHECKS' err='$CHECKS_MSG')"; exit 0
 fi
+
+# (4b) The round boundary, once more. A clean Copilot verdict on the threshold-th
+# head would otherwise walk straight into a merge without the operator being
+# asked at all — the pause is about committing to an outcome, and merging is the
+# largest one available.
+"$RB_SCRIPTS"/pr-round-count.sh N "$COPILOT_BOT"; MERGE_ROUNDS_RC=$?
+case "$MERGE_ROUNDS_RC" in
+    0) ;;
+    3) echo "PAUSE: round boundary reached; decide with the operator before merging"; exit 0 ;;
+    *) echo "merge blocked: could not establish the round count (rc=$MERGE_ROUNDS_RC)"; exit 0 ;;
+esac
 
 # (5) Merge, PINNED to the head every gate above was evaluated against.
 #

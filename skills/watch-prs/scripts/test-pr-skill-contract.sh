@@ -595,6 +595,35 @@ if [ -f "$SCRIPT_DIR/pr-review-state.sh" ]; then
         || die "the clean comment is not bound to a commit"
 fi
 
+# ── the boundary gates the phase transitions, not only the re-request ─────
+# A phase ending on the threshold-th head went from a clean verdict straight into
+# the next phase — skipping the pause in exactly the case it exists for.
+[ "$(grep -c 'pr-round-count.sh N' "$SKILL")" -ge 3 ] \
+    && pass "the round boundary is checked before the phase transition and the merge" \
+    || die "a clean verdict on the boundary skips the operator pause"
+grep -q 'before opening the Copilot phase' "$SKILL" \
+    && pass "…including before the Copilot phase" \
+    || die "the Copilot transition does not check the boundary"
+grep -q 'before merging' "$SKILL" \
+    && pass "…and before merging" \
+    || die "the merge does not check the boundary"
+
+# ── EVERY documented watch invocation carries the baseline ────────────────
+# The shell example passed --after-review while the Monitor command beside it did
+# not, leaving the feature inert in the mode Claude Code is told to use.
+watch_calls="$(grep -c 'pr-watch.sh N "\$WHO"' "$SKILL")"
+watch_pinned="$(grep -c 'pr-watch.sh N "\$WHO" --after-review "\$PRIOR_REVIEW"' "$SKILL")"
+[ "$watch_calls" -eq "$watch_pinned" ] \
+    && pass "every documented watch invocation passes the review baseline" \
+    || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review"
+
+# ── the automatic path has no pre-request baseline ────────────────────────
+# The trigger preceded the skill, so a lookup can capture the very pass being
+# waited for — and the watch would reject the only terminal review as stale.
+grep -q 'PRIOR_REVIEW=""' "$SKILL" \
+    && pass "the automatic-review path waits on any terminal review" \
+    || die "the automatic path captures the in-flight pass as its own baseline"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

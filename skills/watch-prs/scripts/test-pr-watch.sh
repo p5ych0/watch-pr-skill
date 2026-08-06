@@ -652,6 +652,55 @@ printf '%s' "$out" | grep -q 'state=timeout' \
     && die "a broken scheduler was reported as an ordinary timeout: $out" \
     || pass "…and is not reported as a timeout"
 
+# ── the MOVED-HEAD sleep path ─────────────────────────────────────────────
+# This exercises the moved-head branch and its sleep, which the ordinary
+# failing-sleep case above never reaches.
+#
+# It does NOT isolate that branch's guard, and saying so matters: both sleep
+# guards emit the same `reason=sleep_failed` record, so a mutant on either is
+# masked by the other — measured, not assumed. The assertions below therefore
+# prove the moved-head path behaves correctly, not that its particular guard is
+# load-bearing. `pr-watch.sh` records the same limitation beside the guard.
+#
+# The stub moves the head on every `head` call, so the recheck after the verdict
+# always disagrees and the moved-head path is the only one exercised.
+cat > "$TMP/movesleep.sh" <<SH
+#!/usr/bin/env bash
+if [ "\$1" = "head" ]; then
+    n=\$(cat "\$MOVE_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$MOVE_N"
+    printf '%s%033d\n' "abc1234" "\$n"
+    exit 0
+fi
+head="\$4"
+if [ "\$1" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "\$2" "\${head:0:7}" "\$3"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "\$2" "\${head:0:7}" "\$3"
+exit 0
+SH
+chmod +x "$TMP/movesleep.sh"
+rm -f "$TMP/movesleep.n"
+# Sanity: without a failing sleep this reaches the moved-head branch and times
+# out. If it does not, the fixture below would prove nothing about the guard.
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/movesleep.sh" MOVE_N="$TMP/movesleep.n" \
+       run_limited 40 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 4 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'state=head_moved' \
+    && pass "the moved-head branch is the one this fixture exercises" \
+    || die "the fixture never reached the moved-head branch: $out"
+
+# Now fail whole-second sleeps only — `probe` polls in fractions and has its own
+# guard, so a sleep that always failed would exit there and prove nothing.
+rm -f "$TMP/movesleep.n"
+out="$(PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/movesleep.sh" MOVE_N="$TMP/movesleep.n" \
+       run_limited 40 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a failing sleep on the moved-head path => 2 (not isolating; see note)" \
+    || die "moved-head failing sleep gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'reason=sleep_failed' \
+    && pass "…reported as a failed sleep, not an ordinary timeout" \
+    || die "the moved-head sleep failure was not named: $out"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails
