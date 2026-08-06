@@ -130,7 +130,7 @@ printf '%s' "$out" | grep -q 'rounds=1' \
     || die "a non-reviewer counted: $out"
 
 # ── the boundary pauses, and only ON the boundary ──────────────────────────
-specs=(); for i in $(seq 1 9); do specs+=("$CODEX|c$i|\"t$i\""); done
+specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|c$i|\"t$i\""); done
 mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && pass "9 rounds: no pause" || die "paused early at 9 (rc=$rc)"
@@ -146,7 +146,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && pass "11 rounds: the pause does not stick" || die "still pausing at 11 (rc=$rc)"
 
 # The pause re-arms for the next multiple.
-for i in $(seq 12 20); do specs+=("$CODEX|c$i|\"t$i\""); done
+for ((i=12; i<=20; i++)); do specs+=("$CODEX|c$i|\"t$i\""); done
 mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 3 ] && pass "20 rounds: the pause re-arms" || die "no pause at the second boundary (rc=$rc)"
@@ -159,7 +159,7 @@ out="$(REVIEW_ROUND_THRESHOLD=0 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=0'; } \
     && pass "threshold=0 disables the check-in" || die "threshold=0 still paused (rc=$rc)"
 # A typo must not silently disable a safety pause.
-specs2=(); for i in $(seq 1 10); do specs2+=("$CODEX|d$i|\"t$i\""); done
+specs2=(); for ((i=1; i<=10; i++)); do specs2+=("$CODEX|d$i|\"t$i\""); done
 mk "${specs2[@]}"
 out="$(REVIEW_ROUND_THRESHOLD=abc GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
@@ -173,7 +173,7 @@ out="$(REVIEW_ROUND_THRESHOLD=abc GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; r
 # These existed once and were lost when the file was reverted to fix an unrelated
 # fixture bug, so the guard shipped without them. That is exactly the regression
 # this block prevents.
-specs_lz=(); for i in $(seq 1 10); do specs_lz+=("$CODEX|lz$i|\"t$i\""); done
+specs_lz=(); for ((i=1; i<=10; i++)); do specs_lz+=("$CODEX|lz$i|\"t$i\""); done
 mk "${specs_lz[@]}"
 for bad in 00 08 09 012; do
     out="$(REVIEW_ROUND_THRESHOLD="$bad" GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
@@ -205,7 +205,7 @@ mk_clean_icomment() {   # <sha10>… ; one clean-pass comment per argument
 }
 
 # Nine finding-bearing heads plus a clean tenth is TEN rounds, and a boundary.
-specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 mk_clean_icomment "$(sha k10 | cut -c1-10)"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
@@ -214,7 +214,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
     || die "clean-comment head not counted (rc=$rc out='$out')"
 
 # A clean comment on a head that ALREADY has a review is not a second round.
-specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 mk_clean_icomment "$(sha k9 | cut -c1-10)"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
@@ -223,7 +223,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
     || die "double-counted a head (rc=$rc out='$out')"
 
 # A comment from another account, or without the clean phrasing, is not a round.
-specs=(); for i in $(seq 1 9); do specs+=("$CODEX|k$i|t"); done
+specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 jq -n -c --arg sha "$(sha k10 | cut -c1-10)" \
     '[{id: 701, user: {login: "somebody"}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
@@ -242,7 +242,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS_RC=1 run 7 2>&1)"; rc=$?
 # A short hash in the footer cannot be deduplicated against the 10-char prefix
 # taken from a full review SHA, so accepting one would add a PHANTOM round — and
 # ten real heads plus a phantom reports 11, sailing past the modulo-10 pause.
-specs=(); for i in $(seq 1 10); do specs+=("$CODEX|m$i|t"); done
+specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|m$i|t"); done
 mk "${specs[@]}"
 jq -n -c --arg login "$CODEX" --arg sha "$(sha m10 | cut -c1-8)" \
     '[{id: 702, user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
@@ -281,7 +281,7 @@ done
 
 # The exact case that skips the pause: 10 real rounds plus one junk-timestamp
 # record must NOT report 11 and sail past the boundary.
-specs=(); for i in $(seq 1 10); do specs+=("$CODEX|c$i|t"); done
+specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|c$i|t"); done
 specs+=("$CODEX|junk|RAW:\"zzzz\"")
 mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
@@ -340,7 +340,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 
 # The case with the consequence: ten real rounds plus one bad-state record must
 # not report eleven and sail past the boundary.
-specs=(); for i in $(seq 1 10); do specs+=("$CODEX|c$i|t"); done
+specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|c$i|t"); done
 specs+=("$CODEX|rogue|t|null")
 mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?

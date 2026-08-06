@@ -174,15 +174,18 @@ clean_shas=$(printf '%s' "$icraw" | jq -s --argjson who "$WHO_JSON" '
         then error("malformed comment record")
         else [ $all[]
                | select((.user.login | IN($who[])) and ((.body | type) == "string"))
-               | select(.body | contains("Reviewed commit:"))
+               | select(.body | test("(?m)^\\*\\*Reviewed commit:\\*\\* `[0-9a-f]{10}`"))
                | select(.body | test("[Dd]idn.t find any major issues"))
                # EXACTLY ten hex characters, the documented footer width. A
                # shorter hash cannot be deduplicated against the 10-char prefix
                # taken from a full review SHA, so a clean re-review of an
                # already-counted head would add a phantom round — and ten real
                # heads plus that phantom reports 11, skipping the modulo pause.
-               | (.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{10})`").sha)
-             ] | unique
+               # Same parsing rule as pr-review-state.sh: the anchored footer
+               # line, last occurrence. A field-shaped line in prose would
+               # otherwise name a head this comment never reviewed.
+               | (.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0])
+             ] | map(select(. != "")) | unique
         end
     end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_unreadable"

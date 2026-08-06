@@ -314,6 +314,30 @@ printf '%s' "$out" | grep -q 'state=none' \
     && pass "the current prefix in prose is not a signoff; only the footer counts" \
     || die "a prose mention was read as the reviewed commit: $out"
 
+# A FIELD-SHAPED line in prose, ahead of the real footer. `capture` takes the
+# first match anywhere, so an older clean comment carrying this would have been
+# read as a signoff for whatever the decoy named.
+jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE" \
+    '[{id: 904, created_at: "2026-01-05T00:00:00Z", user: {login: $login},
+       body: ($phrase + "\n\nEarlier I wrote:\n**Reviewed commit:** `" + $cur + "`\n\n**Reviewed commit:** `bbbbbbbbbb`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=none' \
+    && pass "a decoy footer line in prose does not sign off; the last footer wins" \
+    || die "a decoy footer was read as the reviewed commit: $out"
+
+# …and the genuine footer still works when it IS the last line.
+jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE" \
+    '[{id: 905, created_at: "2026-01-05T00:00:00Z", user: {login: $login},
+       body: ($phrase + "\n\nEarlier I wrote:\n**Reviewed commit:** `bbbbbbbbbb`\n\n**Reviewed commit:** `" + $cur + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=reviewed' \
+    && pass "…and the real footer still signs off when it is the last one" \
+    || die "the genuine footer was not read: $out"
+
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31
 printf '[]' > "$TMP/comments-31.json"

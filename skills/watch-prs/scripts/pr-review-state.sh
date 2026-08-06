@@ -206,7 +206,14 @@ clean_comment_for_head() {
                      # for an OLDER head that merely mentioned the current
                      # prefix in its prose — the footer named a different
                      # commit, and the current unreviewed head read as clean.
-                     | select((.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{10})`") // {sha: ""}).sha == $h)
+                     # The FOOTER LINE, and the LAST one. `capture` takes the
+                     # first match anywhere, so an older clean comment carrying a
+                     # field-shaped `Reviewed commit:` line in its prose ahead of
+                     # its real footer would be read as a signoff for whatever
+                     # that prose named. Anchored to a line start with the bold
+                     # markers, and the last occurrence wins, because the genuine
+                     # footer is the final one.
+                     | select((.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0]) == $h)
                    ] | sort_by(.id) | last ) as $c
               | if $c == null then ""
                 # The selected comment must carry the SAME canonical UTC stamp

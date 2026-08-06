@@ -71,6 +71,13 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The clean-pass hash comes from the footer LINE, and the last one.**
+  `capture` takes the first match anywhere in the body, so an older clean comment
+  carrying a field-shaped `**Reviewed commit:**` line in its prose ahead of its
+  real footer would have signed off for whatever that decoy named. The match is
+  anchored to a line start with the bold markers, and the last occurrence wins
+  because the genuine footer is final. Same rule in `pr-round-count.sh`.
+
 - **The clean-pass hash comes from the footer, exactly.** Two independent
   `contains` checks accepted a clean comment for an *older* head that merely
   mentioned the current prefix in its prose — the footer named a different commit
