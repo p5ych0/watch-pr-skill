@@ -138,6 +138,10 @@ WHO="$CODEX_BOT"
 # from a no-op one.
 PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the current head."; exit 0; }
+# Validated, not merely fetched. An rc-0 call yielding empty or `null` would make
+# every unchanged-head comparison below false, so automatic mode would assume the
+# no-op push queued a review, queue nothing, and re-arm forever.
+[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the current head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
 
 if [ "$AUTO_REVIEW" = "yes" ]; then
     PRIOR_REVIEW=""
@@ -418,7 +422,17 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
     || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
 
-if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+# Branch on the reviewer this round was about. Copilot is requested ONLY through
+# `--add-reviewer`; posting the Codex mention in a Copilot round re-requests the
+# wrong reviewer and leaves the watch waiting past a pass nobody asked for.
+if [ "$WHO" = "$COPILOT_BOT" ]; then
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+        echo "ABORT: could not post the round summary."; exit 0
+    fi
+    if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+        echo "ABORT: could not re-request Copilot."; exit 0
+    fi
+elif ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
@@ -457,13 +471,29 @@ PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
 # around) leaves the push a no-op, so nothing is queued: `--after-review` then
 # rejects the old terminal record and every timeout re-arms forever. Those rounds
 # are explicitly supported, so they need an explicit trigger.
+# The REMOTE baseline is re-read at the start of every round, not carried from
+# step 2. After a fix round moved the head from A to B, a `PRIOR_HEAD` still
+# holding A made the unchanged-head comparison false on the NEXT round — so a
+# dismissal or an answered-without-code round queued nothing and re-armed forever.
+PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head for this round."; exit 0; }
+[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the round baseline head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
+[[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
 if [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
     # Same head as the last round: the push queued nothing, so ask.
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+    # WHICH reviewer is being re-requested matters. Copilot is never triggered by
+    # a push and never by an `@codex` mention — only by `--add-reviewer` — so a
+    # Copilot fix round that posted the Codex mention requested nothing at all and
+    # the watch waited past the old Copilot review indefinitely.
+    if [ "$WHO" = "$COPILOT_BOT" ]; then
+        if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+            echo "ABORT: could not re-request Copilot for an unchanged head."; exit 0
+        fi
+    elif ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
         echo "ABORT: could not request a review for an unchanged head."; exit 0

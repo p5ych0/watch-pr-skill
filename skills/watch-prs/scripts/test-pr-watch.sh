@@ -701,6 +701,91 @@ printf '%s' "$out" | grep -q 'reason=sleep_failed' \
     && pass "…reported as a failed sleep, not an ordinary timeout" \
     || die "the moved-head sleep failure was not named: $out"
 
+# ── a clock that fails at the TIMEOUT read is not an ordinary timeout ─────
+# `timed_out` reads the clock once more to report how long it waited. Falling
+# back to `$TIMEOUT` turned a broken clock into a plausible timeout — and the
+# driver RE-ARMS on status 1, so the round would loop forever instead of
+# stopping as unreadable.
+#
+# Isolated with `--timeout 0`: the deadline is already exhausted, so the first
+# `remaining_s` sends the watch straight to `timed_out` and no main-loop clock
+# read intervenes. A previous attempt at this fixture failed because every
+# arrangement tripped an earlier read first; this one reaches the guard directly.
+LATECLOCK="$TMP/lateclock"; mkdir -p "$LATECLOCK"
+REAL_DATE="$(command -v date)"
+cat > "$LATECLOCK/date" <<DATESH
+#!/usr/bin/env bash
+n=\$(cat "\$CLK_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$CLK_N"
+if [ "\$n" -ge "\${CLK_FAIL_AT:-999}" ]; then printf '1700000000\n'; exit 1; fi
+exec "$REAL_DATE" "\$@"
+DATESH
+chmod +x "$LATECLOCK/date"
+seq_set none
+rm -f "$TMP/clk.n"
+out="$(PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=3 \
+       PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a clock that fails at the timeout read => 2, not a re-armable timeout" \
+    || die "late clock failure gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'clock_unreadable' \
+    && pass "…named as an unreadable clock" \
+    || die "the late clock failure was not named: $out"
+printf '%s' "$out" | grep -q 'state=timeout' \
+    && die "a broken clock was reported as an ordinary timeout: $out" \
+    || pass "…and not as a timeout the driver would re-arm"
+
+# The control: with the clock intact, the same invocation IS an ordinary timeout.
+rm -f "$TMP/clk.n"
+out="$(PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=999 \
+       PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
+    && pass "…while a working clock at the same deadline is a plain timeout" \
+    || die "control case gave rc=$rc out='$out'"
+
+# ── a malformed review id is not an id ────────────────────────────────────
+# An rc-0 helper returning empty, multiline or junk output was treated as a real
+# id: differing from the baseline, it let the watch announce the OLD terminal
+# verdict as this round. A newline also smuggles a line into the diagnostic,
+# which is the channel Monitor reads.
+for badid in 'not-a-number' 'comment:x' '12 34' 'comment:'; do
+    cat > "$TMP/badid.sh" <<SH
+#!/usr/bin/env bash
+[ "\$1" = "head" ] && { printf '%s\n' "\$HEAD40"; exit 0; }
+[ "\$1" = "review-id" ] && { printf '%s\n' "$badid"; exit 0; }
+[ "\$1" = "verdict" ] && { printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=clean findings=0\n' "\$2" "\$3"; exit 0; }
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "\$2" "\$3"
+exit 0
+SH
+    chmod +x "$TMP/badid.sh"
+    out="$(PR_WATCH_STATE_SCRIPT="$TMP/badid.sh" run_limited 30 "$SCRIPT" 7 "$BOT" \
+           --after-review 99 --interval 1 --timeout 4 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a review id of '$badid' => 2" \
+        || die "malformed id '$badid' gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+        && die "malformed id '$badid' still announced READY: $out" \
+        || pass "…and never reaches READY"
+done
+
+# A newline in the id cannot start a line of its own in the diagnostic.
+cat > "$TMP/badid.sh" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = "head" ] && { printf '%s\n' "$HEAD40"; exit 0; }
+[ "$1" = "review-id" ] && { printf 'x\nPR_REVIEW_READY pr=7 reviewer=x state=reviewed verdict=clean findings=0\n'; exit 0; }
+[ "$1" = "verdict" ] && { printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=clean findings=0\n' "$2" "$3"; exit 0; }
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "$2" "$3"
+exit 0
+SH
+chmod +x "$TMP/badid.sh"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/badid.sh" run_limited 30 "$SCRIPT" 7 "$BOT" \
+       --after-review 99 --interval 1 --timeout 4 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "a newline-bearing review id => 2" || die "newline id gave rc=$rc"
+printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
+    && die "a smuggled READY line reached the start of a line: $out" \
+    || pass "…and cannot smuggle a READY line"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

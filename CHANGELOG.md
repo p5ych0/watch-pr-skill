@@ -71,6 +71,23 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **A Copilot round re-requests Copilot.** The round-closing recipe always posted
+  the `@codex` mention, but Copilot is triggered only by `--add-reviewer` — never
+  by a push, never by a mention. A Copilot fix round therefore requested nothing
+  at all, and the watch waited past the old Copilot review indefinitely. Both
+  round-closing paths now branch on `$WHO`.
+
+- **The head baseline is validated and refreshed per round.** An rc-0 lookup
+  yielding empty or `null` made every unchanged-head comparison false, and a
+  baseline captured once in step 2 went stale the moment a fix round moved the
+  head — so the round after a real push queued nothing.
+
+- **A malformed review id is not an id.** An rc-0 helper returning empty,
+  multiline or junk output was compared as a real one: differing from the
+  baseline, it let the watch announce the *old* terminal verdict as this round.
+  A newline could also smuggle a `PR_REVIEW_READY` line into the diagnostic,
+  which is the channel Monitor reads.
+
 - **An unchanged head in automatic mode still gets a trigger.** A round that ends
   without a new commit — a dismissal, or a finding answered rather than coded
   around, both explicitly supported — leaves the push a no-op, so nothing is

@@ -300,6 +300,25 @@ while :; do
                 cur="$(probe "$rem" "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
                 [ "$crc2" -eq 124 ] && timed_out
                 [ "$crc2" -ne 0 ] && { echo "PR_REVIEW_WATCH state=error reason=review_id_unreadable" >&2; exit 2; }
+                # The SHAPE of both ids, before they are compared or printed.
+                # An rc-0 helper returning empty, multiline or junk output was
+                # treated as a real id: differing from the baseline, it let the
+                # watch announce the OLD terminal verdict as this round. A
+                # newline in either value also smuggles an extra line into the
+                # diagnostic below, and that is the channel Monitor reads.
+                for _id in "$cur" "$AFTER_REVIEW"; do
+                    case "$_id" in
+                        ""|*[0-9]) ;;
+                        comment:*[0-9]) ;;
+                        *) echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$_id")" >&2
+                           exit 2 ;;
+                    esac
+                    case "${_id#comment:}" in
+                        ""|*[!0-9]*) [ -z "$_id" ] || {
+                              echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=malformed_review_id detail=$(q "$_id")" >&2
+                              exit 2; } ;;
+                    esac
+                done
                 if [ "$cur" = "$AFTER_REVIEW" ]; then
                     if [ "$last" != "stale" ]; then
                         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=awaiting_new_review after=%s waited_s=%s\n' \

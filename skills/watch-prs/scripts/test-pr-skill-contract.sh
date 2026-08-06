@@ -655,6 +655,30 @@ grep -q 'could not request a review for an unchanged head' "$SKILL" \
     && pass "…and asks explicitly when the push moved nothing" \
     || die "an unchanged head in automatic mode queues no review at all"
 
+# ── the re-request depends on WHICH reviewer the round was about ──────────
+# Copilot is never triggered by a push and never by an `@codex` mention — only by
+# `--add-reviewer`. A Copilot fix round that posted the Codex mention requested
+# nothing, and the watch waited past the old Copilot review indefinitely.
+[ "$(grep -c 'if \[ "\$WHO" = "\$COPILOT_BOT" \]; then' "$SKILL")" -ge 2 ] \
+    && pass "both round-closing paths branch on the reviewer" \
+    || die "a round-closing request assumes Codex regardless of \$WHO"
+grep -q 'could not re-request Copilot' "$SKILL" \
+    && pass "…and a Copilot round re-requests through --add-reviewer" \
+    || die "a Copilot round never re-requests Copilot"
+
+# ── the fetched heads are validated, not merely fetched ───────────────────
+# An rc-0 call yielding empty or `null` makes every unchanged-head comparison
+# false, so automatic mode assumes the no-op push queued a review.
+[ "$(grep -c 'PRIOR_HEAD" =~ \^\[0-9a-f\]{40}\$' "$SKILL")" -ge 2 ] \
+    && pass "the head baseline is validated as a full OID, each time it is read" \
+    || die "a fetched head is used as a baseline without validation"
+grep -q 'HEAD_AFTER" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
+    && pass "…and so is the head after the push" \
+    || die "the pushed head is not validated"
+grep -q 'could not re-read the head for this round' "$SKILL" \
+    && pass "…and the baseline is refreshed per round, not carried from step 2" \
+    || die "a stale baseline makes the unchanged-head check false after a fix round"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment
