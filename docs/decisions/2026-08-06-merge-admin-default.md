@@ -87,7 +87,8 @@ repositories once it exists.
 - The window is between the final probe and the merge call — seconds, on a PR
   the operator is actively driving.
 - Every gate that *can* be checked client-side is, and each fails closed.
-- `REVIEW_MERGE_STRICT=1` drops `--admin`.
+- `REVIEW_MERGE_STRICT=1` drops `--admin` — which closes a race only where the
+  repository's protections are configured *and* non-bypassable; see below.
 
 **What strict mode does and does not do.** Omitting `--admin` restores the
 repository's *configured* protection rules; it does not create requirements that
@@ -98,9 +99,19 @@ Concretely, the combination worth having is:
 
 - **required status checks** — on;
 - **require conversation resolution before merging** — on;
-- **required approvals** — zero.
+- **required approvals** — zero;
+- **do not allow bypassing the above settings** — on (or an equivalent
+  non-bypassable ruleset, or a `gh` credential without bypass permission).
 
-Conversation resolution belongs in that list. The workflow already satisfies it:
+That last one is not optional decoration. GitHub's protected-branch rules do
+**not** apply to administrators or roles with bypass permission unless bypassing
+is explicitly disallowed — and in the solo-maintainer case this record is about,
+the operator *is* the administrator. Omitting `--admin` from the command
+therefore does not make these gates binding by itself: the credential can still
+merge a pull request whose requirements are unmet. Without this setting, strict
+mode changes which flag is passed and nothing about what GitHub enforces.
+
+Conversation resolution belongs in the list. The workflow already satisfies it:
 the base contract makes zero unresolved threads a hard rule and its merge block
 paginates every review thread and refuses while any is unresolved. So enabling
 the corresponding protection costs nothing the loop was not already doing, and
