@@ -851,38 +851,53 @@ for b in bash sh date true false kill sed grep printf env mktemp cat rm wc awk t
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$ORPH/$b"
 done
 REAL_SLEEP="$(command -v sleep)"
-# The stub keys on the CHILD's own start marker rather than on a call counter:
-# `probe` uses the same `sleep 0.2` for its fractional-capability check as for
-# its polling tick, so a counter cannot tell them apart, and failing the wrong
-# one drops the probe to whole-second ticks and measures nothing. The child waits
-# half a second before signalling, which the capability check — running within
-# microseconds of the fork — is always ahead of.
+# THE WHOLE-SECOND PATH IS FORCED, so there is no capability/tick ambiguity to
+# race against. `probe()` uses the same `sleep 0.2` for its fractional-capability
+# check as for its polling tick, and no marker can tell them apart from inside the
+# stub: keying on the child's start let a descheduled parent fail its capability
+# check instead, which silently drops the probe to whole-second ticks and
+# exercises nothing. So `0.2` always fails — the capability check is *meant* to
+# fail here, that is what a platform without fractional sleep looks like — and the
+# tick under test is the unambiguous `sleep 1`.
+#
+# That tick fails only once the child has published its PID, and passes through to
+# a real sleep before then. Nothing depends on ordering: a tick that runs early
+# simply sleeps a real second and comes round again, while the child stays alive
+# for thirty.
 cat > "$ORPH/sleep" <<SLEEPSH
 #!/usr/bin/env bash
-if [ "\$1" = "0.2" ] && [ -e "$TMP/probe-started" ]; then exit 1; fi
+[ "\$1" = "0.2" ] && exit 1
+if [ "\$1" = "1" ] && [ -s "$TMP/probe-started" ]; then exit 1; fi
 exec "$REAL_SLEEP" "\$@"
 SLEEPSH
 chmod +x "$ORPH/sleep"
+# The child publishes its OWN PID and then `exec`s, so the PID in the marker is
+# the process still holding the buffer. A `pgrep -f`/`pkill -f` over the argv
+# matched any `sleep 30` on the machine — the suite is a mandatory pre-push gate,
+# so that reported a false leak from an unrelated command and then killed it.
 mkstub "$TMP/slowstate.sh" <<SLOWSH
-"$REAL_SLEEP" 0.5
-: > "$TMP/probe-started"
-"$REAL_SLEEP" 30
-printf 'PR_REVIEW_STATE pr=\$2 sha=abc1234 reviewer=\$3 state=reviewed\n'
-exit 0
+printf '%s' "\$\$" > "$TMP/probe-started"
+exec "$REAL_SLEEP" 30
 SLOWSH
 rm -f "$TMP/probe-started"
 out="$(PATH="$ORPH:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/slowstate.sh" SEQ_FILE="$TMP/seq" \
-        HEAD40="$HEAD40" run_limited 25 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 20 2>&1)"; rc=$?
+        HEAD40="$HEAD40" run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 25 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a failed polling clock fails the watch closed" \
     || die "a failed polling clock gave rc=$rc: '$out'"
-# The teardown, asserted directly: no `sleep 30` started by that probe may still
-# be running. An rc-only assertion passes on the leaking version, since the leak
-# is invisible to the exit status — that is exactly why it survived.
-leaked="$(pgrep -f "$REAL_SLEEP 30" 2>/dev/null | wc -l | tr -d ' ')"
-[ "${leaked:-0}" -eq 0 ] \
-    && pass "…and reaps the probe rather than leaving it holding an API call" \
-    || die "the probe survived the clock failure ($leaked orphan(s))"
-pkill -f "$REAL_SLEEP 30" 2>/dev/null
+# The teardown, asserted on THAT process and no other. An rc-only assertion passes
+# on the leaking version — the leak is invisible to the exit status, which is why
+# it survived — but the assertion must not be able to see anything except the
+# child this fixture started.
+probe_pid="$(cat "$TMP/probe-started" 2>/dev/null)"
+case "$probe_pid" in
+    ""|*[!0-9]*) die "the fixture child never published a PID ('$probe_pid')" ;;
+    *)  if kill -0 "$probe_pid" 2>/dev/null; then
+            die "the probe (pid $probe_pid) survived the clock failure"
+            kill -9 "$probe_pid" 2>/dev/null
+        else
+            pass "…and reaps the probe rather than leaving it holding an API call"
+        fi ;;
+esac
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

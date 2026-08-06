@@ -79,6 +79,12 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The suite no longer signals or matches on processes it did not start.** A
+  fixture asserting that a probe was reaped used `pgrep -f`/`pkill -f` over the
+  argv, which matches any `sleep 30` on the machine — and the suite is a mandatory
+  pre-push gate, so it could report a false leak from an unrelated command and
+  then kill it. The child publishes its own PID and only that PID is inspected.
+
 - **The none-configured checks diagnostic is matched whole, not searched for.**
   `gh pr checks` has no dedicated status for "no required checks" — it documents
   exit 8 for pending and nothing for this — so the message is the only signal, and

@@ -949,9 +949,21 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
 # a run that printed it and then failed for an unrelated reason was classified as
 # benign, and the default administrator merge proceeded with no trusted checks
 # result. The helper is extracted so this can be executed rather than read.
-CHK="$(sed -n '/^checks_msg_is_none_configured() {/,/^}/p' "$SKILL")"
-if [ -z "$CHK" ]; then
+# The EXTRACTION has its own status. `sed` can print a plausible complete helper
+# and then fail, and command substitution keeps it — all six cases below would
+# then pass on a source read that never finished, which is a mandatory gate
+# reporting coverage it does not have.
+CHK="$(sed -n '/^checks_msg_is_none_configured() {/,/^}/p' "$SKILL")"; chk_rc=$?
+# …and the helper must be the one the GATE actually calls. Six passing cases prove
+# nothing if the merge condition still greps for a substring beside an unused
+# function — the definition and the call site are separate things, and only the
+# second decides whether the merge proceeds.
+if [ "$chk_rc" -ne 0 ]; then
+    die "could not read SKILL.md to extract the checks helper (rc=$chk_rc)"
+elif [ -z "$CHK" ]; then
     die "no checks-diagnostic helper in SKILL.md — has the merge gate moved?"
+elif ! grep -q 'elif checks_msg_is_none_configured "\$CHECKS_MSG"; then' "$SKILL"; then
+    die "the merge gate does not call checks_msg_is_none_configured; the helper is dead code"
 else
     chk() { bash -c "$CHK"'
 checks_msg_is_none_configured "$1" && echo BENIGN || echo BLOCK' _ "$1"; }
