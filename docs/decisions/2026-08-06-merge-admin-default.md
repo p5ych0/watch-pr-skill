@@ -65,13 +65,22 @@ raising it is raising something true.
 ## Why it is accepted
 
 Branch protection normally requires an approving review **from another account**.
-Neither reviewer this plugin drives is one: a Codex or Copilot review does not
-count towards "required approvals". For the solo maintainer this plugin exists to
-serve, dropping `--admin` does not tighten the gate — it removes the merge path
-entirely, on every pull request.
 
-A tool whose happy path cannot complete is a worse failure than a seconds-wide
-race in a repository where nobody else is reviewing.
+For the case this plugin is built around — a solo maintainer opening a pull
+request and reviewing it through the same `gh` credential — no available review
+satisfies that. GitHub refuses a self-approval, which is why the watcher on this
+branch attempts `APPROVE` and falls back to `COMMENT`
+(`skills/watch-prs/scripts/review-bus-codex-watcher.sh`). Dropping `--admin`
+there does not tighten the gate; it removes the merge path entirely, on every
+pull request. A tool whose happy path cannot complete is a worse failure than a
+seconds-wide race in a repository where nobody else is reviewing.
+
+**This rationale is narrower than "every PR".** Where the pull request is
+authored by a *different* account from the one `gh` is authenticated as — a
+dependency bot, or a worker running as a separate maintainer — that `APPROVE`
+succeeds and can satisfy a one-approval rule, so a normal merge is available and
+`--admin` is not buying anything. Prefer `REVIEW_MERGE_STRICT=1` for those
+repositories once it exists.
 
 ## What bounds it — once #10 has landed
 
@@ -83,15 +92,26 @@ race in a repository where nobody else is reviewing.
 **What strict mode does and does not do.** Omitting `--admin` restores the
 repository's *configured* protection rules; it does not create requirements that
 were never configured. So it closes a race only for conditions the repository
-actually enforces server-side. In the "required checks with no required human
-approval" configuration suggested elsewhere in this plugin's documentation, checks
-become atomic — while reviews and conversation resolution do not, because nothing
-is requiring them. Strict mode is worth setting where the protection rules cover
-the conditions you care about, and it is not a general closure of every race
-described above.
+actually enforces server-side.
 
-Before #10, none of the three bullets apply. `REVIEW_MERGE_STRICT` in particular
-is **not implemented on this branch**: setting it changes nothing.
+Concretely: a branch protection rule that requires status checks but sets
+"required approvals" to zero makes the *check* condition atomic at merge time,
+while reviews and conversation resolution stay unenforced — nothing is requiring
+them, so nothing re-evaluates them. That combination is the one worth having
+here, because it is the one this plugin's reviewers can actually satisfy. **No
+user-facing instructions for setting it exist in this repository yet**; they
+belong with the `REVIEW_MERGE_STRICT` implementation and arrive with #10. Until
+then, treat the paragraph above as a description of what to configure, not a
+pointer to instructions.
+
+**Which of those already hold here.** The first does: the base ref re-reads the
+head immediately before merging, so the window really is the seconds between that
+check and the merge call — that is the race described at the top, and saying
+otherwise would contradict this record's own classification. The second does not:
+the client-side gate set is incomplete on this branch, missing the review-state
+probe and comparing only a seven-character prefix. The third does not either —
+`REVIEW_MERGE_STRICT` is **not implemented here**, and setting it changes
+nothing.
 
 ## For reviewers
 
