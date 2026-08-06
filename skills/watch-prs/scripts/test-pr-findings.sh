@@ -317,6 +317,38 @@ out="$(timeout 20 env GH_PAGE1="$TMP/adv1.json" GH_PAGE2="$TMP/adv2.json" \
     && pass "list: an advancing cursor still paginates" \
     || die "advancing cursor gave rc=$rc out='$out'"
 
+# ── a parse that prints and THEN fails is not a parse ─────────────────────
+# `jq` can write a plausible cursor and exit non-zero, and command substitution
+# keeps what it wrote. Unguarded, the walk continued from an untrusted parse —
+# the same class the count and hasNextPage parses already guarded against.
+REAL_JQ="$(command -v jq)"
+FAKEBIN="$TMP/fakebin"; mkdir -p "$FAKEBIN"
+cat > "$FAKEBIN/jq" <<JQSH
+#!/usr/bin/env bash
+for a in "\$@"; do
+    case "\$a" in
+        *endCursor*)
+            # A DIFFERENT cursor each call, so the cycle guard cannot be what
+            # stops the walk — otherwise this fixture passes on the wrong guard
+            # and the mutant survives.
+            n=\$(cat "\$JQ_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$JQ_N"
+            printf 'PLAUSIBLE%s\n' "\$n"; exit 1 ;;
+    esac
+done
+exec "$REAL_JQ" "\$@"
+JQSH
+chmod +x "$FAKEBIN/jq"
+page true '"C1"' "$NODE_OK" > "$TMP/failcur.json"
+rm -f "$TMP/jq.n"
+out="$(PATH="$FAKEBIN:$PATH" JQ_N="$TMP/jq.n" GH_PAGE1="$TMP/failcur.json" \
+       REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' timeout 20 "$SCRIPT" list 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "list: an endCursor parse that prints then fails => 2" \
+    || die "failing endCursor parse gave rc=$rc (124 = it walked on forever) out='$out'"
+printf '%s' "$out" | grep -q 'cursor_unreadable' \
+    && pass "…reported as an unreadable cursor, not as a cycle" \
+    || die "the failing parse was not attributed to the cursor read: $out"
+
 # ── blocked-body: an unknown state is not "no body" ───────────────────────
 # This helper SUPPRESSES output for anything that is not exactly
 # CHANGES_REQUESTED, so a record with a null or unrecognised state produced empty

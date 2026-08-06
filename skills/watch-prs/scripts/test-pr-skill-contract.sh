@@ -98,7 +98,9 @@ grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
     || die "CODEX_SHA is required by the gate but never assigned"
 # With auto-review on, the PUSH requests the next review — so the boundary check
 # has to precede it, not merely precede the explicit re-request.
-grep -qi 'and only then push' "$SKILL" \
+# A fragment that fits on ONE line — the file is wrapped and `grep` is line
+# oriented, so a phrase spanning a line break silently never matches. Fourth time.
+grep -qi 'precede the push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
 grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
@@ -368,6 +370,31 @@ req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d:
 grep -q 'if \[ "\$AUTO_REVIEW" = "yes" \]; then' "$SKILL" \
     && pass "…and the initial request branches on it" \
     || die "the initial request does not branch on the review mode"
+
+# ── the numbered checklist does not push ──────────────────────────────────
+# The push belongs to the mode-specific recipe: with auto-review on it must come
+# after the threads are resolved and the summary posted, or the pass it triggers
+# reads the previous round's account against threads that are still open.
+grep -qE '^3\. \*\*check the round boundary — step 6\.\*\*' "$SKILL" \
+    && pass "the boundary step no longer carries the push" \
+    || die "the checklist still pushes in the boundary step"
+grep -q 'The push is not' "$SKILL" \
+    && pass "…and says where the push actually belongs" \
+    || die "the checklist does not say where the push belongs"
+
+# In the auto-review branch, the push must come AFTER the summary post.
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /gh pr comment N --body "\$\(cat "\$SUMMARY_FILE"\)"/ {c=NR}
+     inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
+    || die "the auto-review recipe pushes before the summary exists"
+
+# ── the self-check's third outcome is handled ─────────────────────────────
+# `not_applicable` shares no exit status with "checks passed": the same code
+# would have let the driver report a clean check when none ran.
+grep -q 'not applicable\*\*: this repository is not a' "$SKILL" \
+    && pass "the contract documents the not-applicable outcome" \
+    || die "SKILL.md defines no handling for a run where nothing was in scope"
 
 # ── findings get a reaction ────────────────────────────────────────────────
 # Every Codex finding ends with "Useful? React with thumbs", and that reaction is

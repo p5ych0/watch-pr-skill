@@ -145,18 +145,58 @@ UNRELATED="$TMP/unrelated"
 mkdir -p "$UNRELATED"; git -C "$UNRELATED" init -q 2>/dev/null
 printf 'print("hi")\n' > "$UNRELATED/app.py"
 out="$("$SCRIPT" "$UNRELATED" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
-    && pass "a repo with no plugin sources reports not_applicable, not an error" \
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+    && pass "a repo with no plugin sources reports not_applicable" \
     || die "unrelated repo gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
-    && die "not_applicable was reported as clean, which reads as a pass" \
-    || pass "…and is distinguishable from a clean result"
+# EXIT STATUS, not just a line. A distinguished record printed with exit 0 was
+# not distinguished at all: the caller branches on the status, so a run that
+# checked nothing was identical in control flow to one that checked everything.
+[ "$rc" -ne 0 ] \
+    && pass "…with its own exit status, not the one that means \"checks passed\"" \
+    || die "not_applicable exits 0, which the caller cannot tell from clean"
+[ "$rc" -ne 2 ] \
+    && pass "…and not the one that means \"could not run\"" \
+    || die "not_applicable is indistinguishable from a broken check"
 
 # Run from INSIDE that repo with no argument, which is how SKILL.md invokes it.
 out="$(cd "$UNRELATED" && "$SCRIPT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
     && pass "…and the same holds for the no-argument invocation the contract uses" \
     || die "no-arg run from an unrelated repo gave rc=$rc out='$out'"
+
+# ── a comment cannot switch the check off, whatever keyword it contains ────
+# Widening the loop-variable pattern to accept `do|then|else` positions reopened
+# the same false negative one round after closing it, because those alternatives
+# match inside prose too.
+KEYWORD_SKILL='# skill
+```bash
+OWNER=acme
+# then for SUMMARY_FILE in prose
+echo "$OWNER"
+gh pr comment N --body "$(cat "$SUMMARY_FILE")"
+```
+'
+R="$(mkroot "$KEYWORD_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+    && pass "a comment containing a shell keyword does not define a loop variable" \
+    || die "a keyword-bearing comment silenced the check (rc=$rc out='$out')"
+
+# ── a broken extraction is not an empty one ───────────────────────────────
+# `set -uo pipefail` does not stop an unchecked assignment, so a failed pipeline
+# left the variable empty and the consuming loop found nothing to report —
+# status=clean from a run that never established what was used.
+BROKEN_BIN="$TMP/brokenbin"; mkdir -p "$BROKEN_BIN"
+printf '#!/usr/bin/env bash\nprintf "plausible output\\n"\nexit 2\n' > "$BROKEN_BIN/grep"
+chmod +x "$BROKEN_BIN/grep"
+R="$(mkroot "$OK_SKILL")"
+out="$(PATH="$BROKEN_BIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "an extraction that prints and then fails => 2, not clean" \
+    || die "broken extraction gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a run whose extraction failed reported clean: $out" \
+    || pass "…and never reports clean"
 
 # ── a comment must not be able to switch the check off ────────────────────
 # `for NAME` matched anywhere counted NAME as a loop variable, so prose such as

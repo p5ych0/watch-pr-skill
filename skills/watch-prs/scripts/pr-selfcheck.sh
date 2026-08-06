@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Check the plugin's own sources before a push. 0 = clean · 1 = findings · 2 = the
-# check itself could not run.
+# Check the plugin's own sources before a push.
 #
 #   pr-selfcheck.sh [repo-root]
+#
+#   0  clean
+#   1  findings — fix them before pushing
+#   2  the check itself could not run — fail closed
+#   3  not applicable: this repository is not a watch-pr-skill checkout, so
+#      there was nothing in scope to check
 #
 # WHY THIS EXISTS
 #
@@ -48,18 +53,19 @@ SCRIPTS="$ROOT/skills/watch-prs/scripts"
 # that as "could not run" made a mandatory pre-push gate exit 2 in every one of
 # them, blocking every review round outside this checkout.
 #
-# A distinguished status rather than an error, and rather than silence: the
-# domain of these checks is empty here, which is a different fact from "the
-# checks failed" and from "the checks passed". Nothing is fail-open about it —
-# there is genuinely nothing in scope — but the caller is told so explicitly so
-# it can never be read as a clean bill for code that was never looked at.
+# Its OWN EXIT STATUS, not 0. A distinguished line printed alongside exit 0 was
+# not actually distinguished: the caller captures a status, `SKILL.md` defines 0
+# as "the mechanical checks pass", and nothing parsed the record — so a run that
+# checked nothing at all was indistinguishable in control flow from a run that
+# checked everything and found it clean. "Distinct" has to mean distinct to the
+# code that branches on it, not just to a human reading the output.
 #
 # It is NOT resolved relative to this script instead. Doing that would check the
 # installed plugin, which is not what anyone is about to push, and would report a
 # confident PASS about a tree the operator never touched.
 if [ ! -f "$SKILL" ] || [ ! -d "$SCRIPTS" ]; then
     echo "PR_SELFCHECK status=not_applicable reason=not_a_watch_pr_skill_checkout root=$ROOT"
-    exit 0
+    exit 3
 fi
 
 findings=0
@@ -73,11 +79,36 @@ ok()   { printf 'ok   - %s\n' "$1"; }
 # inferred, so adding a new one is a deliberate act.
 if [ -f "$SKILL" ]; then
     KNOWN='HOME|PATH|PWD|BASH_SOURCE|CLAUDE_PLUGIN_ROOT|REVIEW_BUS_REMOTE|REVIEW_BUS_OWNER|REVIEW_BUS_REPO|REVIEW_ROUND_THRESHOLD|REVIEW_MERGE_STRICT|PR_WATCH_INTERVAL|PR_WATCH_TIMEOUT|1|2|3|4|5|6|7|8|9|0|@|\*|\?|#|!|_'
-    blocks="$(awk '/^```bash$/{inb=1; next} /^```$/{inb=0} inb' "$SKILL")"
+
+    # Every extraction below has its STATUS taken. `set -uo pipefail` does not
+    # stop an unchecked assignment, so a failed pipeline left the variable empty
+    # and the loop that consumes it simply found nothing to complain about —
+    # `status=clean` from a run that never established what was used. That is the
+    # precise failure this whole script exists to prevent, in the script itself.
+    #
+    # 0 and 1 are both ANSWERS: `grep` exits 1 when nothing matches, which is a
+    # legitimate result here. Anything else is a broken read.
+    # Checked on the CAPTURED status of each pipeline, not with `|| exit`. Under
+    # `pipefail` a pipeline reports the rightmost non-zero status, and `grep`
+    # exits 1 when nothing matches — a legitimate answer here — so `||` fired on
+    # every empty result and aborted the whole check.
+    chk() {   # chk <label> <status>
+        if [ "$2" -gt 1 ]; then
+            echo "PR_SELFCHECK status=error reason=extraction_failed step=$1 rc=$2" >&2
+            exit 2
+        fi
+    }
+
+    blocks="$(awk '/^```bash$/{inb=1; next} /^```$/{inb=0} inb' "$SKILL")"; chk blocks $?
     if [ -z "$blocks" ]; then
         echo "PR_SELFCHECK status=error reason=no_bash_blocks_in_skill" >&2
         exit 2
     fi
+    # Full-line comments are dropped before anything is inferred from the text.
+    # A comment is not code, and every false negative this check has had came
+    # from prose being read as shell: `# wait for SUMMARY_FILE`, then
+    # `# then for SUMMARY_FILE in prose`.
+    code="$(printf '%s\n' "$blocks" | grep -vE '^[[:space:]]*#')"; chk strip_comments $?
     # Assignments, ONLY where an assignment can actually occur: at the start of a
     # line or after a `;`, optionally preceded by `local`.
     #
@@ -89,22 +120,29 @@ if [ -f "$SKILL" ]; then
     # cannot catch the bug it was written for is the failure this repository has
     # already deleted one checker over, so this is verified by a fixture that
     # removes the real assignment and requires the finding.
-    assigned="$(printf '%s\n' "$blocks" \
+    assigned="$(printf '%s\n' "$code" \
         | grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"
-    # Loop variables, ONLY where a `for` command can actually start: at the
-    # beginning of a line or after `;`/`do`/`then`/`else`, and followed by `in`.
+        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+    # Loop variables, ONLY at the START OF A LINE. This is the third version, and
+    # the narrowness is the point.
     #
-    # `for +NAME` anywhere was a false negative waiting to happen, and precisely
-    # the class this checker exists to prevent: a comment reading
-    # `# wait for SUMMARY_FILE` registered SUMMARY_FILE as a loop variable, so the
-    # undefined-variable check went quiet about a variable still defined nowhere.
-    # A checker that a passing comment can switch off is worse than none.
-    forvars="$(printf '%s\n' "$blocks" \
-        | grep -oE '(^|;|[[:space:]](do|then|else)[[:space:]])[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
-        | grep -oE 'for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' \
-        | awk '{print $2}' | sort -u)"
-    assigned="$(printf '%s\n%s\n' "$assigned" "$forvars" | sort -u)"
+    #   `for +NAME` anywhere          -> `# wait for SUMMARY_FILE` silenced it
+    #   ...plus `(do|then|else)` too  -> `# then for SUMMARY_FILE in prose` did
+    #
+    # Each widening to catch a legitimate position reopened the same false
+    # negative, because the alternatives match inside prose and quoted strings and
+    # anchoring them properly needs a Bash lexer — which this repository has
+    # already built and deleted once.
+    #
+    # So it recognises only `for NAME in` at the beginning of a line. A `for`
+    # after `;` or `do` on the same line is therefore NOT seen, and its variable
+    # is reported as undefined. That is a false POSITIVE: loud, obvious, and
+    # fixable in one line — the opposite direction from a checker that a comment
+    # can switch off, which is silent and indistinguishable from a clean run.
+    forvars="$(printf '%s\n' "$code" \
+        | grep -oE '^[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
+        | awk '{print $2}' | sort -u)"; chk forvars $?
+    assigned="$(printf '%s\n%s\n' "$assigned" "$forvars" | sort -u)"; chk merge_assigned $?
     # Uses: $NAME and ${NAME...}, restricted to UPPERCASE names.
     #
     # THE BOUND IS DELIBERATE, and stating it is the point. The obvious version —
@@ -121,9 +159,9 @@ if [ -f "$SKILL" ]; then
     # separation needs no parsing. A LOWERCASE shell variable used and never
     # assigned would slip past — that is a real hole, and a stated one is worth
     # more than a lexer that quietly has a different one.
-    used="$(printf '%s\n' "$blocks" \
+    used="$(printf '%s\n' "$code" \
         | grep -oE '\$\{?[A-Z][A-Z0-9_]*' \
-        | grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"
+        | grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"; chk used $?
     undef=""
     for v in $used; do
         case "$v" in

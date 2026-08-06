@@ -109,7 +109,13 @@ cmd_list() {
             true)  ;;
             *) echo "PR_FINDINGS pr=$pr status=error reason=hasnextpage_not_boolean" >&2; return 2 ;;
         esac
-        next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+        # The status is taken here for the same reason it is taken for
+        # hasNextPage: `jq` can print a plausible cursor and then fail, and
+        # command substitution keeps what it printed.
+        next=$(printf '%s' "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor') || {
+            echo "PR_FINDINGS pr=$pr status=error reason=cursor_unreadable" >&2
+            return 2
+        }
         { [ -n "$next" ] && [ "$next" != "null" ]; } || {
             echo "PR_FINDINGS pr=$pr status=error reason=missing_cursor" >&2
             return 2

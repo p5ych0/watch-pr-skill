@@ -221,12 +221,14 @@ resolving it. Then, in one pass:
 2. **run the self-check — step 5a — and fix what it finds.** This is the step
    that exists to stop a defect reaching a reviewer, so it runs while the change
    can still be amended, before anything leaves the machine;
-3. **check the round boundary — step 6 — and only then push.** With Codex
-   automatic review enabled the *push itself* requests the next review, so both
-   the self-check and the boundary check have to precede it: a boundary check
-   placed after it cannot stop anything, and a self-check placed after it has
-   already let the round start. Checking before the push is the only ordering
-   that works whether auto-review is on or off;
+3. **check the round boundary — step 6.** Both this and the self-check have to
+   precede the push: with Codex automatic review enabled the *push itself*
+   requests the next review, so a boundary check after it cannot stop anything
+   and a self-check after it has already let the round start. **The push is not
+   here** — it belongs to the mode-specific recipe below, because with
+   auto-review on it must come after the threads are resolved and the summary is
+   posted, or the pass it triggers reads the previous round's account against
+   threads that are still open;
 4. reply to each thread with what changed, **react to it**, and resolve it — and
    **verify the resolve succeeded** rather than assuming it did.
    `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
@@ -271,6 +273,12 @@ wait, so a finding caught here is worth several caught there.
 - `1` — findings. **Fix them now.** Pushing a change this catches spends a whole
   round on something a script found in a second.
 - `2` — the check could not run. Fail closed: that is not a clean bill.
+- `3` — **not applicable**: this repository is not a `watch-pr-skill` checkout,
+  so none of these checks had anything in scope. That is the normal case in every
+  other project, and it is a *separate status from `0` on purpose* — the same
+  exit code would have let the driver report that the checks passed when none
+  ran. Nothing was verified, so the judgement list below carries the whole
+  weight; say so in the summary rather than claiming a clean check.
 
 It checks what can be checked without judgement: every variable used in this
 file is assigned in it, every script parses, every helper this file drives is
@@ -646,7 +654,11 @@ while :; do
     true)  ;;
     *) OK=0; break ;;
   esac
-  NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+  # The STATUS is taken, like the count and hasNextPage parses above it. `jq` can
+  # print a plausible cursor and then exit non-zero, and command substitution
+  # keeps that output — so an untrusted parse would have driven the next page
+  # request while OK stayed 1, and the walk could still end at UNRESOLVED=0.
+  NEXT=$(echo "$PAGE" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor') || { OK=0; break; }
   { [ -n "$NEXT" ] && [ "$NEXT" != "null" ]; } || { OK=0; break; }
   # The cursor must be one this walk has NEVER requested. A stale or malformed
   # page can report `hasNextPage: true` while returning a cursor already used,

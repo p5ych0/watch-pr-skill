@@ -71,6 +71,40 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The merge gate's `endCursor` parse is guarded.** `jq` can print a plausible
+  cursor and then exit non-zero, and command substitution keeps what it printed —
+  so the walk continued from an untrusted parse while `OK` stayed 1, and could
+  still finish at `UNRESOLVED=0`. The count and `hasNextPage` parses beside it
+  were already guarded; this one was not. Same fix in `pr-findings.sh`.
+
+- **`not_applicable` has its own exit status.** Printing a distinguished record
+  alongside exit 0 was not distinguished at all: the caller branches on the
+  status, and `SKILL.md` defines 0 as "the mechanical checks pass" — so a run that
+  checked nothing was identical in control flow to one that checked everything and
+  found it clean. It exits 3, and the contract documents the third outcome.
+
+- **The self-check's extractions take their status.** `set -uo pipefail` does not
+  stop an unchecked assignment, so a failed pipeline left the variable empty and
+  the consuming loop found nothing to report — `status=clean` from a run that
+  never established what was used. That is the exact failure the script exists to
+  prevent, inside the script. Statuses are captured and validated, with 0 and 1
+  both answers because `grep` exits 1 on no match.
+
+- **Loop-variable inference is narrowed to line starts, and comments are dropped
+  first.** Two rounds running, a widening meant to catch a legitimate `for`
+  position reopened the same false negative: `# wait for SUMMARY_FILE`, then
+  `# then for SUMMARY_FILE in prose`. Anchoring the alternatives properly needs a
+  Bash lexer, which this repository has already built and deleted. So it now sees
+  only `for NAME in` at the start of a line — a `for` after `;` or `do` yields a
+  false *positive*, which is loud and fixable, instead of a checker a comment can
+  switch off.
+
+- **The push left the numbered checklist.** Step 3 said to check the boundary
+  "and only then push", ahead of the steps that resolve threads and post the
+  summary — so following the list with auto-review on started the next pass
+  against open threads and the previous round's account. The push belongs to the
+  mode-specific recipe, which already ordered it correctly.
+
 - **The self-check does not block every other repository.** It resolved its root
   from `git rev-parse`, so in a consumer checkout — which is most of them, since
   one installed copy drives every project — it looked for plugin sources that were
