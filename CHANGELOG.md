@@ -71,6 +71,33 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Each probe is bounded by the remaining deadline.** Making the deadline
+  wall-clock was not enough: the elapsed checks ran only *between* probes, so a
+  `gh` that hung inside one blocked forever and the deadline was never reached at
+  all. A probe that exhausts what is left reports the timeout, since that is what
+  elapsing means — not an unreadable state, which the contract answers differently.
+
+- **The clock read is checked like every other probe.** `date` can print a
+  plausible epoch and then fail, and the elapsed calculation hid that behind its
+  own success — leaving elapsed time ordinary-looking, or zero forever, so the
+  watch would never time out.
+
+- **The `--repo` check judges each occurrence, not each line or segment.** A
+  `;`-only splitter was walked straight through by `&&`. Splitting is the wrong
+  tool — deciding which text is a command needs a quote-aware parser — so every
+  `gh pr <verb> <arg> <next>` on the line is extracted and `<next>` must be
+  `--repo`. An assignment can no longer vouch for a call beside it, whatever
+  joins them.
+
+- **The watchdog keeps its output off the caller's pipe.** A killed command's
+  children still held the inherited stdout, so the capture blocked regardless.
+  Output now goes to a temp file. **A stated limitation remains**: a command that
+  backgrounds a child and then exits leaves an orphan that holds the caller's
+  capture until it finishes. Redirecting the job, `exec`-detaching its
+  descriptors and `setsid` were each tried and none close that pipe. It is
+  recorded in `testlib.sh` rather than papered over, and no fixture asserts
+  behaviour the helper does not have.
+
 - **The watch deadline is wall-clock.** `--timeout` accumulated only the sleeps,
   so every second spent inside the head, state and verdict probes escaped it — a
   run of slow GitHub reads made a one-hour watch run far past an hour, and a

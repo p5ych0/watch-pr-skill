@@ -528,6 +528,39 @@ printf '%s' "$out" | grep -q 'state=timeout' \
     && pass "…and reports the timeout record" \
     || die "no timeout record from the slow-probe watch: $out"
 
+# ── a probe that never returns must still hit the deadline ────────────────
+# The elapsed checks only ran BETWEEN probes, so a `gh` that hung inside one
+# blocked forever and the deadline was never reached at all. Each probe is now
+# bounded by what is left of it.
+mkstub "$TMP/hang.sh" <<'SH'
+sleep 3600
+SH
+start=$(date +%s)
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/hang.sh" run_limited 60 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+[ "$rc" -eq 1 ] \
+    && pass "a probe that never returns still reaches the timeout" \
+    || die "hanging probe gave rc=$rc after ${elapsed}s (124 = the watch itself hung) out='$out'"
+[ "$elapsed" -le 20 ] \
+    && pass "…within the configured bound" \
+    || die "a 5s timeout took ${elapsed}s with a hanging probe"
+
+# ── a clock that prints and then fails is not a clock ─────────────────────
+# `date` can print a plausible epoch and then exit non-zero, and the elapsed
+# calculation hid that behind its own success — so elapsed time could stay
+# ordinary-looking, or zero forever, and the watch would never time out.
+CLOCKBIN="$TMP/clockbin"; mkdir -p "$CLOCKBIN"
+printf '#!/usr/bin/env bash\nprintf "1700000000\\n"\nexit 1\n' > "$CLOCKBIN/date"
+chmod +x "$CLOCKBIN/date"
+out="$(PATH="$CLOCKBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a clock read that prints and then fails => 2" \
+    || die "failing clock gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'clock_unreadable' \
+    && pass "…reported as an unreadable clock" \
+    || die "the failing clock was not named: $out"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

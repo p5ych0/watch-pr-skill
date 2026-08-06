@@ -82,9 +82,6 @@ if [ ! -f "$SKILL" ] || [ ! -d "$SCRIPTS" ]; then
     exit 3
 fi
 
-TMPSEG="$(mktemp)" || { echo "PR_SELFCHECK status=error reason=no_scratch_file" >&2; exit 2; }
-trap 'rm -f "$TMPSEG" 2>/dev/null || true; true' EXIT
-
 findings=0
 note() { printf 'PR_SELFCHECK finding=%s %s\n' "$1" "$2"; findings=$((findings + 1)); }
 ok()   { printf 'ok   - %s\n' "$1"; }
@@ -278,44 +275,46 @@ chk gh_lines $?
 if [ -n "$gh_lines" ]; then
     while IFS= read -r line; do
         [ -n "$line" ] || continue
-        # EACH command on the line, not the line as a whole. A line like
-        #     BODY='gh pr comment N --repo <owner>/<repo>'; gh pr comment N --body "$BODY"
-        # carries the pinned text in the assignment, and a whole-line check found
-        # it and passed the real call — which has no selector and is exactly what
-        # GH_REPO redirects. Splitting on `;` puts each command in its own
-        # segment, so the assignment can no longer vouch for the command.
-        # `printf '%s\n'`, not `%s`: without a trailing newline the final — and
-        # usually only — segment leaves `read` returning non-zero, so the loop
-        # body never runs for it and every call reads as pinned.
-        printf '%s\n' "$line" | tr ';' '\n' > "$TMPSEG"
-        while IFS= read -r seg; do
-            case "$seg" in
-                *"gh pr "*) ;;
-                *) continue ;;
-            esac
-            if printf '%s' "$seg" | grep -qE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]+[^[:space:]]+[[:space:]]+--repo[[:space:]=]'; then
-                :
-            else
-                note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$seg" | cut -c1-60)"
-                unpinned=1
-            fi
-        done < "$TMPSEG"
-        continue
-        # A CANONICAL POSITION, not "the text --repo appears somewhere". A
-        # substring test passed `gh pr comment N --body "remember --repo"`,
-        # where `gh` receives no repository selector at all — and this check
-        # gates the push, so a call that GH_REPO redirects elsewhere would have
-        # sailed through the one gate meant to catch it.
+        # EVERY OCCURRENCE on the line, checked by POSITION rather than by
+        # splitting the line into commands.
         #
-        # Parsing shell words properly means handling nested quotes; requiring
-        # `--repo` immediately after the PR argument does not, and every call in
-        # the contract already reads that way.
-        if printf '%s' "$line" | grep -qE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]+[^[:space:]]+[[:space:]]+--repo[[:space:]=]'; then
-            :
-        else
-            note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$line" | cut -c1-60)"
+        # This check has had four holes: a substring test, a position test
+        # applied to the whole line, and a `;`-only splitter that `&&` walked
+        # straight through. Splitting is the wrong tool — deciding which text is
+        # a command needs a quote-aware parser, and a half-parser that reports
+        # `clean` is what this repository has already deleted one checker over.
+        #
+        # Instead: pull out every `gh pr <verb> <arg> <next>` on the line and
+        # require <next> to be `--repo`. An assignment can no longer vouch for a
+        # call beside it, because each call is judged on its own three tokens —
+        #     BODY='gh pr comment 7 --repo OWNER-SLASH-REPO' && gh pr comment 7 --body "$B"
+        # yields two occurrences, and the second one fails on its own.
+        occ="$(printf '%s\n' "$line" \
+            | nomatch grep -oE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+')"
+        chk gh_occurrences $?
+        # A call whose line ends before the third token matches nothing above, so
+        # the counts are compared: fewer occurrences than verbs means one was not
+        # examined, which is not the same as one that passed.
+        n_verbs="$(printf '%s\n' "$line" \
+            | nomatch grep -oE 'gh pr (comment|view|edit|merge|checks|close|ready)[[:space:]]' | wc -l)"
+        chk gh_verbs $?
+        n_occ=0
+        [ -n "$occ" ] && n_occ="$(printf '%s\n' "$occ" | wc -l)"
+        if [ "$n_occ" -ne "$n_verbs" ]; then
+            note truncated_gh_call "SKILL.md: a gh pr call is too short to check:$(printf '%s' "$line" | cut -c1-60)"
             unpinned=1
+            continue
         fi
+        while IFS= read -r one; do
+            [ -n "$one" ] || continue
+            case "$one" in
+                *" --repo"|*" --repo="*) ;;
+                *) note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$one" | cut -c1-60)"
+                   unpinned=1 ;;
+            esac
+        done <<INNER
+$occ
+INNER
     done <<EOF
 $gh_lines
 EOF

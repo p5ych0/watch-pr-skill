@@ -445,6 +445,21 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a pinned assignment does not vouch for an unpinned call on the same line" \
     || die "same-line masking passed the pin check (rc=$rc out='$out')"
 
+# A pinned assignment must not vouch for an unpinned call joined by `&&` either.
+# A `;`-only splitter walked straight past this one.
+AND_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+BODY="gh pr comment 7 --repo $OWNER/$REPO" && gh pr comment 7 --body "$BODY"
+```
+'
+R="$(mkroot "$AND_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+    && pass "an && between a pinned assignment and an unpinned call is caught" \
+    || die "&& masking passed the pin check (rc=$rc out='$out')"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

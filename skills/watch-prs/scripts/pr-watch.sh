@@ -78,8 +78,87 @@ q() { printf '%q' "$1"; }
 # state and verdict probes — so a run of slow GitHub reads made a one-hour watch
 # run far past an hour, and a probe that hung meant the timeout check was never
 # reached at all. `--timeout` has to mean elapsed time or it means nothing.
-started="$(date +%s)"
-elapsed_s() { echo $(( $(date +%s) - started )); }
+# The clock is READ with its status and its shape checked, like every other
+# probe here. `date` can print a plausible epoch and then fail, and command
+# substitution keeps it — an elapsed time stuck at a small number means the
+# deadline is never reached and the watch runs forever, which is the failure this
+# deadline exists to prevent.
+now_s() {
+    local t
+    t="$(date +%s 2>/dev/null)" || return 1
+    case "$t" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    printf '%s' "$t"
+}
+started="$(now_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+# Returns non-zero when the clock cannot be read, so callers branch rather than
+# silently treating a failed read as "no time has passed". `echo $(( … ))` hid
+# exactly that behind its own success.
+elapsed_s() {
+    local t
+    t="$(now_s)" || return 1
+    printf '%s' $(( t - started ))
+}
+
+# Run a probe under the REMAINING deadline.
+#
+# The elapsed checks only ran between probes, so a `gh` that hung inside one
+# blocked forever and the deadline was never reached — and even a merely slow
+# probe could start before the deadline and run arbitrarily past it. Each probe
+# now gets its own limit, so `--timeout` bounds the whole watch and not just the
+# gaps between its calls.
+#
+# `set -m` puts the probe in its own process group so the kill reaches anything
+# `gh` spawned; without that a surviving child holds the capture pipe open and
+# the substitution blocks regardless of the dead parent.
+probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limit
+    local limit="$1"; shift
+    [ "$limit" -gt 0 ] || limit=1
+    local out rc pid
+    local tmp="${PR_WATCH_TMPDIR:-${TMPDIR:-/tmp}}/pr-watch.$$.$RANDOM"
+    set -m
+    ( "$@" ) >"$tmp" 2>&1 &
+    pid=$!
+    set +m
+    local n=0
+    while [ "$n" -lt "$limit" ]; do
+        kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+        n=$((n + 1))
+    done
+    if kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then
+        kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        rm -f "$tmp" 2>/dev/null
+        return 124
+    fi
+    wait "$pid"; rc=$?
+    [ "$rc" -eq 124 ] && timed_out
+    out="$(cat "$tmp" 2>/dev/null)"
+    rm -f "$tmp" 2>/dev/null
+    printf '%s' "$out"
+    return "$rc"
+}
+
+# A probe that hit the remaining deadline IS the timeout, not an unreadable
+# state: the wait ended because `--timeout` elapsed, which is what rc 1 means.
+# Reporting it as rc 2 would tell the caller the state could not be read, and the
+# contract answers those two differently — one waits, the other stops the round.
+timed_out() {
+    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' \
+        "$PR" "$WHO" "$(elapsed_s 2>/dev/null || echo "$TIMEOUT")"
+    exit 1
+}
+
+# Seconds left before the deadline, at least 1 so a probe is always attempted.
+remaining_s() {
+    local e
+    e="$(elapsed_s)" || return 1
+    local r=$(( TIMEOUT - e ))
+    [ "$r" -lt 1 ] && r=1
+    printf '%s' "$r"
+}
 waited=0
 last=""
 while :; do
@@ -93,7 +172,9 @@ while :; do
     #
     # Resolved per POLL, not once per watch, so the watch still follows the head
     # when a push lands between polls — which is the case it is there to notice.
-    head="$("$STATE_SCRIPT" head "$PR" 2>&1)"; hrc=$?
+    rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
+    [ "$hrc" -eq 124 ] && timed_out
     if [ "$hrc" -ne 0 ] || ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_unresolvable rc=%s detail=%s\n' \
             "$PR" "$WHO" "$hrc" "$(q "$head")"
@@ -101,7 +182,9 @@ while :; do
     fi
     want_sha="${head:0:7}"
 
-    line="$("$STATE_SCRIPT" state "$PR" "$WHO" "$head" 2>&1)"; rc=$?
+    rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    line="$(probe "$rem" "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
+    [ "$rc" -eq 124 ] && timed_out
     if [ "$rc" -ne 0 ]; then
         # ANY non-zero status, not just the helper's documented 2. A missing or
         # non-executable helper exits 126/127, and treating that as a state left
@@ -155,7 +238,9 @@ while :; do
         reviewed|blocked|dismissed)
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
-            verdict="$("$STATE_SCRIPT" verdict "$PR" "$WHO" "$head" 2>&1)"; vrc=$?
+            rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            verdict="$(probe "$rem" "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
+            [ "$vrc" -eq 124 ] && timed_out
             # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
             # documented 2, or a 126/127 if the helper stops being executable
             # between the two calls — is unreadable, and this is the same class
@@ -239,7 +324,7 @@ while :; do
                 # The next poll's state is about a review that has changed, so the
                 # change-suppression memory must not hide it.
                 last=""
-                waited="$(elapsed_s)"
+                waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
                 if [ "$waited" -ge "$TIMEOUT" ]; then
                     printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
                     exit 1
@@ -248,7 +333,7 @@ while :; do
                 remaining=$((TIMEOUT - waited))
                 [ "$nap" -gt "$remaining" ] && nap="$remaining"
                 sleep "$nap"
-                waited="$(elapsed_s)"
+                waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
                 continue
             fi
             # The head is re-resolved AFTER the verdict, and READY is withheld
@@ -266,7 +351,9 @@ while :; do
             # and the next poll should ask about the new head. So the loop
             # CONTINUES rather than exiting — the new head has no review yet, so
             # it reports `none` and goes back to waiting, which is the truth.
-            head_now="$("$STATE_SCRIPT" head "$PR" 2>&1)"; nrc=$?
+            rem="$(remaining_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+            head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
+            [ "$nrc" -eq 124 ] && timed_out
             if [ "$nrc" -ne 0 ] || ! [[ "$head_now" =~ ^[0-9a-f]{40}$ ]]; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_recheck_failed rc=%s detail=%s\n' \
                     "$PR" "$WHO" "$nrc" "$(q "$head_now")"
@@ -287,7 +374,7 @@ while :; do
             ;;
     esac
 
-    waited="$(elapsed_s)"
+    waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     if [ "$waited" -ge "$TIMEOUT" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
         exit 1
@@ -300,5 +387,5 @@ while :; do
     remaining=$((TIMEOUT - waited))
     [ "$nap" -gt "$remaining" ] && nap="$remaining"
     sleep "$nap"
-    waited="$(elapsed_s)"
+    waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
 done

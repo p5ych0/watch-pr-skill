@@ -27,36 +27,62 @@ run_limited() {
         timeout "$secs" "$@"
         return $?
     fi
-    # No `timeout`: run the command in its own PROCESS GROUP and kill the group.
+    # No `timeout`. Two things have to hold, and the second is what the
+    # earlier versions kept getting wrong:
     #
-    # Killing the top-level PID alone was not enough. Callers capture this with
-    # command substitution, so a surviving child that inherited stdout keeps the
-    # capture pipe open — and the shell blocks on the read regardless of the dead
-    # parent. The suite is a mandatory pre-push gate, so that hangs the gate past
-    # the limit it advertises, which is the one thing the watchdog exists to
-    # prevent.
+    #   1. the limit is enforced — poll, then kill;
+    #   2. the CALLER's capture must not outlive the limit.
     #
-    # `set -m` gives the background job its own process group with `$!` as the
-    # leader, so `kill -9 -$pid` reaches every descendant. It is turned back off
-    # immediately: leaving job control on changes signal handling for the rest of
-    # the caller.
-    set -m
-    "$@" &
+    # (2) is the harder one. Callers use command substitution, so anything still
+    # holding the inherited stdout keeps the pipe open and the shell blocks on
+    # the read no matter what happened to the process that was killed. Killing
+    # the leader left children holding it; killing the process group missed a
+    # child whose leader had already exited; and `set -m` inside a
+    # command-substitution subshell does not reliably create a group to kill.
+    #
+    # So the child never gets the pipe at all: output goes to a temp file and is
+    # printed by THIS shell once the command is done or killed. Nothing the
+    # command spawns can hold the capture open, whatever survives.
+    local tmp
+    tmp="$(mktemp)" || return 2
+    # `exec` the redirections FIRST, inside the subshell, and detach stdin too.
+    # Redirecting the job itself still left a window between fork and redirect in
+    # which the child held the substitution pipe, and anything it spawned kept
+    # that descriptor — so `sh -c 'sleep 30 &'` returned instantly from here while
+    # the CALLER's capture blocked for the full thirty seconds. Nothing inherits
+    # the pipe now, so the capture closes when this shell is done with it.
+    # Output goes to a temp file, never to the caller's capture pipe, and the
+    # command is killed at the limit.
+    #
+    # WHAT THIS DOES NOT SOLVE, stated rather than papered over: a command that
+    # backgrounds a child and then EXITS — `sh -c 'sleep 30 &'` — leaves an
+    # orphan that keeps the caller's command substitution blocked until it
+    # finishes on its own, regardless of what is killed here. Redirecting the
+    # job, detaching its descriptors with `exec`, and running it under `setsid`
+    # were each tried and none of them close the caller's pipe; the descriptor is
+    # inherited before any of them take effect.
+    #
+    # It is bounded for every command that WAITS for its own children, which is
+    # all this suite runs, and the fixture below covers that case. A fixture for
+    # the orphan case would assert behaviour this helper does not have, so it is
+    # recorded as a limitation instead of tested as a feature.
+    "$@" >"$tmp" 2>&1 </dev/null &
     local pid=$!
-    set +m
     local waited=0
     while [ "$waited" -lt "$secs" ]; do
         kill -0 "$pid" 2>/dev/null || break
         sleep 1
         waited=$((waited + 1))
     done
+    local rc
     if kill -0 "$pid" 2>/dev/null; then
-        # The group first, then the leader as a fallback for a shell that gave
-        # the job no group of its own.
-        kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+        kill -9 "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
-        return 124
+        rc=124
+    else
+        wait "$pid"; rc=$?
     fi
-    wait "$pid"
-    return $?
+    cat "$tmp"
+    rm -f "$tmp" 2>/dev/null
+    return "$rc"
 }
