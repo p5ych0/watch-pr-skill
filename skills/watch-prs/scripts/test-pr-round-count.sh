@@ -237,6 +237,33 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX
 [ "$rc" -eq 3 ] && pass "a login that only matches Codex as a regex does not acknowledge" \
     || die "a bracket-class near-miss acknowledged the pause (rc=$rc out='$out')"
 
+# ── the default invocation instructs per reviewer, not per combined count ──
+# Invoked with no arguments the helper counts BOTH reviewers, and the pause
+# instruction is followed literally. Printing the combined count beside every
+# login told the operator to write a Copilot acknowledgement of 41 when Copilot
+# had 5 rounds — which a later Copilot-only call reads as ahead of its count and
+# refuses permanently. That is the cross-phase block the reviewer-scoped footer
+# exists to remove, recreated one layer out, through the message rather than the
+# parser.
+specs=(); for ((i=1; i<=41; i++)); do specs+=("$CODEX|x$i|\"t$i\""); done
+for ((i=1; i<=5; i++)); do specs+=("$COPILOT|y$i|\"u$i\""); done
+mk "${specs[@]}"
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] && pass "the default invocation pauses on the combined count" \
+    || die "no pause on 46 combined heads (rc=$rc out='$out')"
+printf '%s' "$out" | grep -qF "**Review-Pause-Acknowledged:** \`$CODEX\` \`41\`" \
+    && pass "…and instructs the Codex acknowledgement with Codex's own 41" \
+    || die "the Codex instruction did not carry 41: '$out'"
+printf '%s' "$out" | grep -qF "**Review-Pause-Acknowledged:** \`$COPILOT\` \`5\`" \
+    && pass "…and the Copilot acknowledgement with Copilot's own 5" \
+    || die "the Copilot instruction did not carry 5: '$out'"
+# The consequence, asserted rather than inferred: following the emitted
+# instruction must leave BOTH phases working. An instruction that wedges the
+# phase it names is worse than none, because it looks like the documented path.
+printf '%s' "$out" | grep -qF "\`$COPILOT\` \`46\`" \
+    && die "the Copilot instruction carried the combined count, which wedges that phase" \
+    || pass "…so following the instruction cannot wedge either phase"
+
 # ── who may acknowledge, and what they may claim ──────────────────────────
 # Anyone can comment on a pull request. An unrestricted marker would let a
 # reviewer bot — or a passer-by — switch the operator pause off permanently.

@@ -276,8 +276,11 @@ survives a new session or a new machine. Set
 value falls back to `10` rather than silently disabling a safety pause.
 
 **Saying "continue" is recorded on the PR.** The driver posts a comment carrying
-a `**Review-Pause-Acknowledged:** \`<count>\`` line, and the next check-in is a
-further `REVIEW_ROUND_THRESHOLD` heads past that number. Without it the gate would
+a `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` line, and the next
+check-in is a further `REVIEW_ROUND_THRESHOLD` heads past that number. It names
+the reviewer because the count does: the Codex and Copilot phases are separate
+loops with separate counts, and an unscoped marker acknowledging 41 Codex rounds
+is read by a Copilot phase with 5 as ahead of its count and refused permanently. Without it the gate would
 pause on every subsequent call, since it re-derives everything from GitHub and
 keeps nothing locally. Only repository owners, members and collaborators can
 write that marker, and one naming a round that has not happened yet is rejected:

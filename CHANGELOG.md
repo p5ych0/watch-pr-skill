@@ -79,6 +79,14 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The pause instruction reports each reviewer's own count.** Scoping the footer
+  to a reviewer was not enough while the message printed the COMBINED count beside
+  every login: with 41 Codex heads and 5 Copilot heads, an operator following the
+  emitted instruction literally wrote a Copilot acknowledgement of 41, which the
+  Copilot phase then refuses as ahead of its count — the same cross-phase block,
+  recreated one layer out through the instruction rather than the parser. A count
+  that cannot be established is not printed as a number to copy.
+
 - **A pause acknowledgement belongs to one reviewer's count.** The Codex and
   Copilot phases are separate loops with separate counts — which is why the helper
   takes a reviewer list at all — and the acknowledgement footer did not name one.
@@ -105,7 +113,8 @@ the plugin no longer runs a reviewer of its own.
   The test is now `rounds >= acknowledged + threshold`, which no jump can walk
   past, and the pause therefore STICKS until it is answered rather than clearing
   itself on the next round. Saying "continue" is recorded on the PR — a
-  `**Review-Pause-Acknowledged:** \`<count>\`` footer, read back the same way the
+  `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` footer, read back the
+  same way the
   round count itself is derived, since local state was removed in v1 for
   disappearing between machines. Only OWNER, MEMBER and COLLABORATOR comments are
   read as acknowledgements, and one naming a round that has not happened yet is

@@ -105,9 +105,27 @@ done
 # The test still passed, on scheduling. A mandatory gate that passes for a reason
 # it does not name is the failure mode this whole suite is about.
 REAL_SLEEP="$(command -v sleep)"
+# THE STUB WAITS FOR THE CHILD BEFORE FAILING. Failing the watchdog's first nap
+# immediately still left a race the other way: under a scheduler that leaves the
+# background child pending, the parent could kill it before its first command, so
+# the 125 came back from bounding nothing and the liveness assertion failed on
+# timing. The handshake removes the dependence in both directions — the clock
+# fails only once the child has provably started.
+#
+# The wait is BOUNDED. If the child never signals — which is what the shared-stub
+# version does, since its `sleep 30` fails instantly and the child runs to
+# completion — this must still return, or a broken fixture hangs the suite
+# instead of failing it.
 cat > "$BROKE/sleep" <<SLEEPSH
 #!/usr/bin/env bash
-[ "\$1" = "1" ] && exit 1
+if [ "\$1" = "1" ]; then
+    _w=0
+    while [ ! -e "\$TMP/child-started" ] && [ "\$_w" -lt 50 ]; do
+        "$REAL_SLEEP" 0.1
+        _w=\$((_w + 1))
+    done
+    exit 1
+fi
 exec "$REAL_SLEEP" "\$@"
 SLEEPSH
 chmod +x "$BROKE/sleep"

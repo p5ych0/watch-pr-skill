@@ -142,7 +142,16 @@ icraw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$PR/comments" --pag
 # of PAGES, empty input slurps to zero pages, and `.[][]` over an object iterates
 # its values — so an errored body or an empty read would otherwise count as
 # "no rounds yet", which is the direction that skips the pause.
-rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
+# The count, for one reviewer list. Extracted into a function because the pause
+# below has to report EACH reviewer's own count, not the combined one: the
+# instruction it prints is followed literally, and telling the operator to
+# acknowledge 41 for a reviewer with 5 rounds recreates the cross-phase block
+# through the message instead of through the parser. Same defect, one layer out.
+#
+# Echoes the count and returns 0; echoes a status line and returns 2 otherwise.
+count_for() {
+local _rounds _clean
+    _rounds=$(printf '%s' "$raw" | jq -s --argjson who "$1" '
     if length == 0 then error("no pages")
     elif any(.[]; type != "array") then error("non-array page")
     else [ .[][] ] as $all
@@ -187,13 +196,13 @@ rounds=$(printf '%s' "$raw" | jq -s --argjson who "$WHO_JSON" '
                | .commit_id ] | unique
         end
     end' 2>/dev/null) || {
-    echo "PR_ROUND_COUNT pr=$PR status=error reason=unreadable"
-    exit 2
-}
+        echo "PR_ROUND_COUNT pr=$PR status=error reason=unreadable"
+        return 2
+    }
 # The clean-pass heads, as 10-char prefixes — that is all the comment carries.
 # A prefix already covered by a counted review head is not a second round, so the
 # union is taken on prefixes rather than on the two different shapes.
-clean_shas=$(printf '%s' "$icraw" | jq -s --argjson who "$WHO_JSON" '
+_clean=$(printf '%s' "$icraw" | jq -s --argjson who "$1" '
     if length == 0 then error("no pages")
     elif any(.[]; type != "array") then error("non-array page")
     else [ .[][] ] as $all
@@ -219,17 +228,20 @@ clean_shas=$(printf '%s' "$icraw" | jq -s --argjson who "$WHO_JSON" '
              ] | map(select(. != "")) | unique
         end
     end' 2>/dev/null) || {
-    echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_unreadable"
-    exit 2
-}
+        echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_unreadable"
+        return 2
+    }
 
-rounds=$(jq -n --argjson r "$rounds" --argjson c "$clean_shas" '
+    jq -n --argjson r "$_rounds" --argjson c "$_clean" '
     ($r | map(.[0:10])) as $rp
-    | ($rp + ($c | map(.[0:10]))) | unique | length' 2>/dev/null) || {
-    echo "PR_ROUND_COUNT pr=$PR status=error reason=count_unreadable"
-    exit 2
+    | ($rp + ($c | map(.[0:10]))) | unique | length' 2>/dev/null || {
+        echo "PR_ROUND_COUNT pr=$PR status=error reason=count_unreadable"
+        return 2
+    }
 }
 
+
+rounds="$(count_for "$WHO_JSON")" || exit 2
 case "$rounds" in
     ""|*[!0-9]*) echo "PR_ROUND_COUNT pr=$PR status=error reason=bad_count"; exit 2 ;;
 esac
@@ -320,9 +332,24 @@ fi
 if [ "$rounds" -ge $((ack + THRESHOLD)) ]; then
     echo "PR_ROUND_PAUSE pr=$PR rounds=$rounds threshold=$THRESHOLD acknowledged=$ack"
     echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+    # EACH REVIEWER'S OWN COUNT, never the combined one. This loop used to print
+    # `$rounds` beside every login, and with 41 Codex heads and 5 Copilot heads an
+    # operator following it literally wrote a Copilot acknowledgement of 41 — which
+    # a later Copilot-only call reads as ahead of its count and refuses forever.
+    # That is the cross-phase block this change exists to remove, recreated through
+    # the instruction instead of through the parser.
     echo "To continue, post a comment containing, for each reviewer counted here:" >&2
     for _w in "${REVIEWERS[@]}"; do
-        echo "  **Review-Pause-Acknowledged:** \`$_w\` \`$rounds\`" >&2
+        _wj="$(printf '%s' "$_w" | jq -R . | jq -s -c .)" || {
+            echo "PR_ROUND_COUNT pr=$PR status=error reason=reviewer_list_unreadable" >&2
+            exit 2
+        }
+        # A count that cannot be established is not printed as a number to copy.
+        # `count_for` writes its own status line, and the pause has already been
+        # announced, so the operator sees which reviewer could not be counted
+        # rather than an instruction that would wedge that phase.
+        _wr="$(count_for "$_wj")" || exit 2
+        echo "  **Review-Pause-Acknowledged:** \`$_w\` \`$_wr\`" >&2
     done
     exit 3
 fi
