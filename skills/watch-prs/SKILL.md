@@ -134,6 +134,11 @@ WHO="$CODEX_BOT"
 # There is nothing to capture before the trigger, because the trigger preceded
 # us. So the automatic path waits on any terminal review, and only the explicit
 # re-requests in step 5 carry a baseline.
+# The head this round started from, so the automatic path can tell a real push
+# from a no-op one.
+PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not read the current head."; exit 0; }
+
 if [ "$AUTO_REVIEW" = "yes" ]; then
     PRIOR_REVIEW=""
 else
@@ -447,9 +452,25 @@ fi
 PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
     || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
 
+# The push is the trigger — but ONLY when it moves the head. A round that ends
+# without a new commit (a dismissal, or a finding answered rather than coded
+# around) leaves the push a no-op, so nothing is queued: `--after-review` then
+# rejects the old terminal record and every timeout re-arms forever. Those rounds
+# are explicitly supported, so they need an explicit trigger.
+HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
-# No `@codex review` comment: the push already asked. Sending one too queues a
-# duplicate pass over the same head.
+HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not confirm the pushed head."; exit 0; }
+if [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
+    # Same head as the last round: the push queued nothing, so ask.
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+
+$SUMMARY"; then
+        echo "ABORT: could not request a review for an unchanged head."; exit 0
+    fi
+fi
+# Otherwise no `@codex review` comment: the push already asked, and sending one
+# too queues a duplicate pass over the same head.
 ```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,

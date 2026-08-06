@@ -177,8 +177,23 @@ probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limi
 # Reporting it as rc 2 would tell the caller the state could not be read, and the
 # contract answers those two differently — one waits, the other stops the round.
 timed_out() {
-    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' \
-        "$PR" "$WHO" "$(elapsed_s 2>/dev/null || echo "$TIMEOUT")"
+    # The clock read here has its status taken too. Falling back to `$TIMEOUT`
+    # turned a broken clock into a plausible ordinary timeout — and the driver
+    # RE-ARMS on status 1, so the round would loop indefinitely instead of
+    # stopping as unreadable. A timeout it cannot measure is not a timeout.
+    #
+    # NO ISOLATING FIXTURE, measured rather than assumed. Every arrangement that
+    # breaks the clock trips one of the main-loop reads first, which already exit
+    # 2 with `clock_unreadable` — so a mutant here is masked and a test would pass
+    # either way. That also means the fail-closed BEHAVIOUR is covered; this guard
+    # closes the narrow window where the clock survives every earlier read and
+    # fails only on this one. Kept for that, not because a test proves it.
+    local e
+    e="$(elapsed_s)" || {
+        echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=clock_unreadable" >&2
+        exit 2
+    }
+    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$e"
     exit 1
 }
 

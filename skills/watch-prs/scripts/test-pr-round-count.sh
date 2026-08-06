@@ -252,6 +252,31 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
     && pass "a short-hash footer adds no phantom round; the boundary still pauses" \
     || die "short hash changed the count (rc=$rc out='$out')"
 
+# The footer anchoring is enforced HERE too. The parser change was applied to
+# both helpers but fixtured in only one, so regressing this line to first-match
+# extraction would have left the suite green while counting the decoy SHA —
+# turning a 10-round boundary into 11 and skipping the operator pause.
+specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|n$i|t"); done
+mk "${specs[@]}"
+jq -n -c --arg login "$CODEX" --arg decoy "$(sha n99 | cut -c1-10)" --arg real "$(sha n10 | cut -c1-10)" \
+    '[{id: 703, user: {login: $login},
+       body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+    && pass "a decoy footer adds no round; the genuine last footer is the one counted" \
+    || die "decoy footer changed the count (rc=$rc out='$out')"
+
+# …and when the LAST footer names an uncounted head, it is a real eleventh round.
+jq -n -c --arg login "$CODEX" --arg decoy "$(sha n1 | cut -c1-10)" --arg real "$(sha n99 | cut -c1-10)" \
+    '[{id: 704, user: {login: $login},
+       body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'rounds=11' \
+    && pass "…and a genuine last footer on a new head does add one" \
+    || die "the real footer was not counted (rc=$rc out='$out')"
+
 # ── everything unreadable fails closed ─────────────────────────────────────
 out="$(GH_RC=1 run 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "fetch failure => 2" || die "fetch failure gave rc=$rc"

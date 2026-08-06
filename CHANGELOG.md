@@ -71,6 +71,18 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **An unchanged head in automatic mode still gets a trigger.** A round that ends
+  without a new commit — a dismissal, or a finding answered rather than coded
+  around, both explicitly supported — leaves the push a no-op, so nothing is
+  queued while `--after-review` keeps rejecting the old terminal record and every
+  timeout re-arms. The round records the head it started from and asks explicitly
+  when the push moved nothing.
+
+- **A clock that fails at the timeout read is not a timeout.** `timed_out` fell
+  back to `$TIMEOUT`, turning a broken clock into a plausible ordinary timeout —
+  and the driver *re-arms* on status 1, so the round would loop forever instead
+  of stopping as unreadable.
+
 - **The clean-pass hash comes from the footer LINE, and the last one.**
   `capture` takes the first match anywhere in the body, so an older clean comment
   carrying a field-shaped `**Reviewed commit:**` line in its prose ahead of its

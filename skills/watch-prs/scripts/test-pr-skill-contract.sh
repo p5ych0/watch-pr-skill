@@ -460,9 +460,13 @@ grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
 # unpinned call can act on the same-numbered PR somewhere else while every gate
 # inspects this one. Enforced mechanically by pr-selfcheck.sh; asserted here so
 # the contract itself cannot drift.
-[ "$(grep -c 'gh pr comment N --repo $HOST/$OWNER/$REPO --body' "$SKILL")" -eq 5 ] \
+# A COMPARISON, not a magic number: the count changes whenever a call is added,
+# and a fixed expectation fails for that reason rather than for an unpinned call.
+comment_calls="$(grep -c 'gh pr comment N' "$SKILL")"
+comment_pinned="$(grep -c 'gh pr comment N --repo $HOST/$OWNER/$REPO' "$SKILL")"
+[ "$comment_calls" -eq "$comment_pinned" ] \
     && pass "every gh pr comment call is pinned to the derived repository" \
-    || die "a gh pr comment call does not pass --repo"
+    || die "$((comment_calls - comment_pinned)) gh pr comment call(s) do not pass --repo"
 
 # ── the shipping manifest lists every runtime helper ──────────────────────
 # CLAUDE.md calls everything unlisted "documentation", so an incomplete table is
@@ -634,6 +638,22 @@ grep -q 'CHECKS_MSG_RC' "$SKILL" \
 grep -q 'could not read the checks diagnostic' "$SKILL" \
     && pass "…and blocks the merge when it fails" \
     || die "a failed diagnostic read does not block"
+
+# ── an unchanged head in automatic mode still gets a trigger ──────────────
+# A round that ends without a new commit — a dismissal, or a finding answered
+# rather than coded around — leaves the push a no-op, so nothing is queued and
+# `--after-review` rejects the old record forever.
+grep -q 'PRIOR_HEAD' "$SKILL" \
+    && pass "the round records the head it started from" \
+    || die "automatic mode cannot tell a real push from a no-op one"
+# The CONDITION, not just the variable. Asserting the name alone survived
+# rewriting the test to `if false`, which is the whole behaviour.
+grep -q '\[ "\$HEAD_BEFORE" = "\$HEAD_AFTER" \] && \[ "\$PRIOR_HEAD" = "\$HEAD_AFTER" \]' "$SKILL" \
+    && pass "…and compares it against the head after the push" \
+    || die "the unchanged-head branch does not actually compare the heads"
+grep -q 'could not request a review for an unchanged head' "$SKILL" \
+    && pass "…and asks explicitly when the push moved nothing" \
+    || die "an unchanged head in automatic mode queues no review at all"
 
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
