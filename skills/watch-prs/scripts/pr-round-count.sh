@@ -258,14 +258,24 @@ fi
 # survives disappears on another machine. Its shape is an anchored footer line,
 # the same convention as the clean-pass footer above:
 #
-#     **Review-Pause-Acknowledged:** `41`
+#     **Review-Pause-Acknowledged:** `chatgpt-codex-connector[bot]` `41`
+#
+# IT NAMES THE REVIEWER, because the count does. The Codex and Copilot phases are
+# separate loops with separate counts — that is the whole reason this script takes
+# a reviewer list — and an unscoped acknowledgement crossed between them: an
+# acknowledgement of 41 Codex rounds was read by a Copilot invocation with 5, hit
+# the ahead-of-count guard, and returned status 2 forever, blocking the Copilot
+# phase and the merge gate behind it. Landing that took under an hour: the
+# acknowledgement that cleared the Codex pause on this very PR immediately bricked
+# its Copilot phase. There is no unscoped form; a footer without a reviewer is
+# not an acknowledgement.
 #
 # WHO may write it is part of the rule. Anyone can comment on a pull request, so
 # an unrestricted marker would let a reviewer bot — or a passer-by — disable the
 # operator pause permanently by naming a large number. Only OWNER, MEMBER and
 # COLLABORATOR comments are read, which is the same "a finding is waived only by
 # an authority, never by the PR" line the review contract already draws.
-ack=$(printf '%s' "$icraw" | jq -s -r '
+ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" '
     if length == 0 then error("no pages")
     elif any(.[]; type != "array") then error("non-array page")
     else [ .[][] ] as $all
@@ -284,9 +294,13 @@ ack=$(printf '%s' "$icraw" | jq -s -r '
                # is: a field-shaped line quoted inside prose — this script'"'"'s own
                # documentation, pasted into a comment — must not be read as an
                # acknowledgement nobody made.
-               | (.body | [scan("(?m)^\\*\\*Review-Pause-Acknowledged:\\*\\* `([0-9]{1,9})`")]
-                        | last // [""] | .[0])
-             ] | map(select(. != "")) | map(tonumber) | max // 0
+               | (.body | [scan("(?m)^\\*\\*Review-Pause-Acknowledged:\\*\\* `([^`\n]{1,200})` `([0-9]{1,9})`")]
+                        | last // ["",""])
+               # The login is COMPARED, never interpolated into a pattern: these
+               # are `…[bot]` logins, where `[` and `]` are regex metacharacters
+               # that would silently match something else entirely.
+               | select(.[0] | IN($who[]))
+             ] | map(.[1]) | map(select(. != "")) | map(tonumber) | max // 0
         end
     end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_unreadable"
@@ -306,7 +320,10 @@ fi
 if [ "$rounds" -ge $((ack + THRESHOLD)) ]; then
     echo "PR_ROUND_PAUSE pr=$PR rounds=$rounds threshold=$THRESHOLD acknowledged=$ack"
     echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
-    echo "To continue, post a comment containing: **Review-Pause-Acknowledged:** \`$rounds\`" >&2
+    echo "To continue, post a comment containing, for each reviewer counted here:" >&2
+    for _w in "${REVIEWERS[@]}"; do
+        echo "  **Review-Pause-Acknowledged:** \`$_w\` \`$rounds\`" >&2
+    done
     exit 3
 fi
 

@@ -79,6 +79,22 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **A pause acknowledgement belongs to one reviewer's count.** The Codex and
+  Copilot phases are separate loops with separate counts — which is why the helper
+  takes a reviewer list at all — and the acknowledgement footer did not name one.
+  Acknowledging 41 Codex rounds was then read by a Copilot invocation with 5, trip
+  the ahead-of-count guard, and return status 2 permanently: the Copilot phase and
+  the merge gate behind it were blocked for good. This was not hypothetical. It
+  landed on this repository's own PR #10 within the hour, from the acknowledgement
+  that had just cleared the Codex pause. The footer now names the reviewer, the
+  login is compared rather than interpolated into a regex (`[bot]` is a character
+  class), and there is no unscoped form.
+
+- **The driver takes the gate's status before recording permission.** Reading the
+  count out of a pipeline hid it: a run that printed a plausible pause line and
+  then died some other way still yielded digits, `sed` still succeeded, and the
+  operator's permission was recorded from a probe that failed.
+
 - **The round check-in is a threshold crossed, not a multiple landed on.** The
   pause fired only when `rounds % threshold == 0`, which assumes the counter rises
   by exactly one per call. It does not: a single round can contribute several

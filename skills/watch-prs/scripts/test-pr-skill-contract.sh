@@ -927,6 +927,21 @@ grep -q 'reaches no GitHub server' "$SKILL" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "SKILL.md has no rejection path for an unsupported transport"
 
+# ── acknowledging a check-in takes the gate's status, and names the reviewer ─
+# The acknowledgement is the one place the driver records the OPERATOR's
+# permission. Reading it out of a pipeline hid the helper's status: a run that
+# printed a plausible pause line and then died some other way still yielded
+# digits, `sed` still succeeded, and permission was recorded from an unreadable
+# probe. And the count is per reviewer, so an unscoped footer acknowledging 41
+# Codex rounds is read by a Copilot invocation with 5, trips its ahead-of-count
+# guard and blocks that phase for good.
+grep -q 'ROUNDS_RC" -eq 3' "$SKILL" \
+    && pass "the acknowledgement requires the gate's distinguished pause status" \
+    || die "the driver acknowledges a check-in without checking the gate exited 3"
+grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
+    && pass "the acknowledgement footer names the reviewer and the count" \
+    || die "the acknowledgement footer is unscoped and will cross between phases"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

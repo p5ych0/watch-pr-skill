@@ -157,10 +157,10 @@ mkreviews() {
     mk "${sp[@]}"
 }
 # …and an acknowledgement from the operator clears it, for exactly one interval.
-mkack() { # <count> [association]
-    jq -n --arg n "$1" --arg a "${2:-OWNER}" \
+mkack() { # <count> [association] [reviewer]
+    jq -n --arg n "$1" --arg a "${2:-OWNER}" --arg w "${3:-$CODEX}" \
        '[{user:{login:"operator"},author_association:$a,
-          body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $n + "`\n")}]' \
+          body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $w + "` `" + $n + "`\n")}]' \
        > "$TMP/ack.json"
 }
 mkack 11
@@ -189,6 +189,53 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=41'; } \
     && pass "a count that stepped over the boundary (41) still pauses" \
     || die "41 rounds sailed past the check-in (rc=$rc out='$out')"
+
+# ── an acknowledgement belongs to ONE reviewer's count ────────────────────
+# The Codex and Copilot phases are separate loops with separate counts — that is
+# why this script takes a reviewer list at all — and an unscoped acknowledgement
+# crossed between them. Acknowledging 41 Codex rounds was then read by a Copilot
+# invocation with 5, tripped the ahead-of-count guard, and returned status 2 for
+# good: the Copilot phase and the merge gate behind it were blocked permanently.
+# This is not hypothetical. It happened on this repository's own PR #10, within
+# the hour, to the acknowledgement that had just cleared the Codex pause.
+mkreviews 41
+mkack 41 OWNER "$CODEX"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=41'; } \
+    && pass "a Codex acknowledgement clears the Codex pause" \
+    || die "the scoped acknowledgement did not apply to its own reviewer (rc=$rc out='$out')"
+# The other phase has its own, smaller count. The Codex acknowledgement must be
+# invisible to it — not merely harmless, invisible: `ack=41` against 5 rounds is
+# the ahead-of-count error, so a leak here is a hard block rather than a wrong
+# number, and it fails the whole phase.
+mk "$COPILOT|k1|\"t1\"" "$COPILOT|k2|\"t2\"" "$COPILOT|k3|\"t3\""
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+    && pass "…and is invisible to the Copilot count, which has its own" \
+    || die "a Codex acknowledgement leaked into the Copilot phase (rc=$rc out='$out')"
+# The converse, so the rule is not satisfied by a parser that drops every
+# acknowledgement whose reviewer is not the first in the list.
+mkack 3 OWNER "$COPILOT"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=3'; } \
+    && pass "a Copilot acknowledgement applies to the Copilot count" \
+    || die "the Copilot acknowledgement was not read (rc=$rc out='$out')"
+# An unscoped footer is not an acknowledgement at all. There is no legacy form:
+# accepting one would reintroduce exactly the cross-phase block above.
+jq -n '[{user:{login:"operator"},author_association:"OWNER",
+         body:"Continuing.\n\n**Review-Pause-Acknowledged:** `3`\n"}]' > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+    && pass "a footer naming no reviewer is not an acknowledgement" \
+    || die "an unscoped footer was accepted (rc=$rc out='$out')"
+# The login is COMPARED, not interpolated into a pattern: `[bot]` is a character
+# class, so a regex-built matcher would accept a login sharing one of those
+# characters and reject the real one.
+mkack 41 OWNER 'chatgpt-codex-connector[b]'
+mkreviews 41
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] && pass "a login that only matches Codex as a regex does not acknowledge" \
+    || die "a bracket-class near-miss acknowledged the pause (rc=$rc out='$out')"
 
 # ── who may acknowledge, and what they may claim ──────────────────────────
 # Anyone can comment on a pull request. An unrestricted marker would let a

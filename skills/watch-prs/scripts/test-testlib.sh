@@ -97,8 +97,29 @@ BROKE="$TMP/broke"; mkdir -p "$BROKE"
 for b in bash sh date true false kill sed grep printf env mktemp cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BROKE/$b"
 done
-printf '#!/usr/bin/env bash\nexit 1\n' > "$BROKE/sleep"; chmod +x "$BROKE/sleep"
-out="$(PATH="$BROKE" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 3 sh -c "sleep 30 2>/dev/null; :"; echo "rc=$?"' 2>&1)"
+# The stub fails ONLY for the watchdog's own `sleep 1`, and works for everything
+# else. A stub that failed unconditionally was shared with the child on the same
+# PATH, so `sleep 30` returned instantly and the child could be FINISHED before
+# the parent's first `kill -0` — the watchdog then observed a completed command
+# and returned its status, never reaching the 125 path this case exists to prove.
+# The test still passed, on scheduling. A mandatory gate that passes for a reason
+# it does not name is the failure mode this whole suite is about.
+REAL_SLEEP="$(command -v sleep)"
+cat > "$BROKE/sleep" <<SLEEPSH
+#!/usr/bin/env bash
+[ "\$1" = "1" ] && exit 1
+exec "$REAL_SLEEP" "\$@"
+SLEEPSH
+chmod +x "$BROKE/sleep"
+# The child's liveness is OBSERVABLE, not inferred from the status. Whether the
+# shared-stub version raced correctly depended on whether the parent's first
+# `kill -0` beat the child's `exec` — on this machine the parent wins every time,
+# so a status-only assertion passes either way and proves nothing about the fix.
+# The marker file does not depend on scheduling: with a shared broken `sleep` the
+# child runs to completion at once and writes it; with the clock-only stub it is
+# still sleeping when the watchdog gives up, and never does.
+rm -f "$TMP/child-started" "$TMP/child-ended"
+out="$(PATH="$BROKE" TMP="$TMP" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 3 sh -c ": > \"$TMP/child-started\"; sleep 30; : > \"$TMP/child-ended\""; echo "rc=$?"' 2>&1)"
 case "$out" in
     *"rc=125"*) pass "a failing watchdog sleep returns 125, not an ordinary timeout" ;;
     *) die "broken sleep gave '$out' (want rc=125)" ;;
@@ -106,6 +127,17 @@ esac
 printf '%s' "$out" | grep -q 'rc=124' \
     && die "a broken clock was reported as a timeout" \
     || pass "…and is distinguishable from the limit actually being hit"
+# BOTH halves, and the first is what the shared stub cannot satisfy. When the
+# watchdog's `sleep` and the child's are the same broken stub, the parent's very
+# first nap fails in microseconds and it kills the child before that child has
+# even reached its first command — so the 125 came back from bounding nothing.
+# With the clock-only stub the child is provably running and provably unfinished.
+[ -e "$TMP/child-started" ] \
+    && pass "…and the child had actually started, so something was being bounded" \
+    || die "the child was killed before it ran; the watchdog bounded nothing"
+[ -e "$TMP/child-ended" ] \
+    && die "the child ran to completion; the watchdog never had a live command to bound" \
+    || pass "…and was still running when the clock failed"
 
 # ── a reader that emits and then fails is not a successful run ─────────────
 # `cat` can write a partial buffer and exit non-zero; its status was overwritten

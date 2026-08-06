@@ -633,13 +633,26 @@ reached.
   # The count comes from the gate itself rather than being retyped: an
   # acknowledgement naming the wrong number either pauses again immediately or
   # skips a later check-in, and both are silent.
-  ROUNDS="$("$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null \
-            | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')"
+  #
+  # THE HELPER'S STATUS IS TAKEN, and it must be the distinguished 3. In a
+  # pipeline the parse hides it: a run that printed a plausible pause line and
+  # then died some other way still yielded digits and `sed` still succeeded, so
+  # the acknowledgement below recorded the operator's permission on the strength
+  # of a probe that failed. Permission is the one thing that must never be
+  # inferred from unreadable output.
+  ROUNDS_OUT="$("$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
+  [ "$ROUNDS_RC" -eq 3 ] || { echo "ABORT: the round counter did not report a pause (rc=$ROUNDS_RC)."; exit 0; }
+  ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
+            | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')" \
+      || { echo "ABORT: could not parse the round count."; exit 0; }
   case "$ROUNDS" in
       ""|*[!0-9]*) echo "ABORT: could not read the round count to acknowledge."; exit 0 ;;
   esac
+  # The footer NAMES THE REVIEWER, because the count is per reviewer. An
+  # unscoped acknowledgement of 41 Codex rounds is read by a Copilot invocation
+  # with 5 and trips its ahead-of-count guard, blocking that phase permanently.
   gh pr comment N --repo $HOST/$OWNER/$REPO \
-      --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s`\n' "$ROUNDS")" \
+      --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" "$ROUNDS")" \
       || { echo "ABORT: could not record the acknowledgement; do not request another review."; exit 0; }
   ```
  Only OWNER, MEMBER and
