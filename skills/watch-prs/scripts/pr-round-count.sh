@@ -239,12 +239,76 @@ if [ "$THRESHOLD" -eq 0 ]; then
     exit 0
 fi
 
-# Pause ON the boundary: after the 10th reviewed head, before requesting an 11th.
-if [ "$rounds" -gt 0 ] && [ $((rounds % THRESHOLD)) -eq 0 ]; then
-    echo "PR_ROUND_PAUSE pr=$PR rounds=$rounds threshold=$THRESHOLD"
+# THE BOUNDARY IS CROSSED, NOT LANDED ON.
+#
+# This was `rounds % THRESHOLD -eq 0`, which assumes the counter advances by
+# exactly one per call. It does not: a single round can contribute more than one
+# countable head — a fix commit reviewed and then a clean re-review comment on a
+# later head both land between two invocations — and the count observed here went
+# 35 → 41 across two rounds. The multiple of ten in between was stepped OVER, the
+# equality never held, and the operator pause the threshold exists to trigger
+# never fired at all. A safety pause that a large enough step silently skips is
+# not a safety pause.
+#
+# So the test is an inequality against the last count the OPERATOR acknowledged,
+# which cannot be stepped over however far the counter jumps.
+#
+# The acknowledgement lives on the PR, like the round count itself. Local state
+# was tried in v1 and removed: a pause that only holds while a `/tmp` file
+# survives disappears on another machine. Its shape is an anchored footer line,
+# the same convention as the clean-pass footer above:
+#
+#     **Review-Pause-Acknowledged:** `41`
+#
+# WHO may write it is part of the rule. Anyone can comment on a pull request, so
+# an unrestricted marker would let a reviewer bot — or a passer-by — disable the
+# operator pause permanently by naming a large number. Only OWNER, MEMBER and
+# COLLABORATOR comments are read, which is the same "a finding is waived only by
+# an authority, never by the PR" line the review contract already draws.
+ack=$(printf '%s' "$icraw" | jq -s -r '
+    if length == 0 then error("no pages")
+    elif any(.[]; type != "array") then error("non-array page")
+    else [ .[][] ] as $all
+      | if any($all[]; type != "object")
+        then error("malformed comment record")
+        else [ $all[]
+               # A record that does not carry a readable association is simply
+               # not an acknowledgement. Erroring on it would be the WRONG
+               # direction of fail-closed here: an unread acknowledgement causes
+               # an EXTRA pause, which is safe, while erroring lets one odd
+               # comment take down the whole count.
+               | select((.author_association | type) == "string")
+               | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR"))
+               | select((.body | type) == "string")
+               # Anchored and taken LAST, exactly as the reviewed-commit footer
+               # is: a field-shaped line quoted inside prose — this script'"'"'s own
+               # documentation, pasted into a comment — must not be read as an
+               # acknowledgement nobody made.
+               | (.body | [scan("(?m)^\\*\\*Review-Pause-Acknowledged:\\*\\* `([0-9]{1,9})`")]
+                        | last // [""] | .[0])
+             ] | map(select(. != "")) | map(tonumber) | max // 0
+        end
+    end' 2>/dev/null) || {
+    echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_unreadable"
+    exit 2
+}
+case "$ack" in
+    ""|*[!0-9]*) echo "PR_ROUND_COUNT pr=$PR status=error reason=bad_ack ack=$ack"; exit 2 ;;
+esac
+# An acknowledgement of a round that has not happened yet is not an
+# acknowledgement — it is the disable-forever shape, reachable by a typo as
+# easily as by an attacker. Unreadable, not permissive.
+if [ "$ack" -gt "$rounds" ]; then
+    echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_ahead_of_count ack=$ack rounds=$rounds"
+    exit 2
+fi
+
+if [ "$rounds" -ge $((ack + THRESHOLD)) ]; then
+    echo "PR_ROUND_PAUSE pr=$PR rounds=$rounds threshold=$THRESHOLD acknowledged=$ack"
     echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
+    echo "To continue, post a comment containing: **Review-Pause-Acknowledged:** \`$rounds\`" >&2
     exit 3
 fi
 
-echo "PR_ROUND_COUNT pr=$PR rounds=$rounds threshold=$THRESHOLD pause=0"
+echo "PR_ROUND_COUNT pr=$PR rounds=$rounds threshold=$THRESHOLD acknowledged=$ack pause=0"
 exit 0

@@ -143,8 +143,79 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 
 specs+=("$CODEX|c11|\"t11\""); mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-[ "$rc" -eq 0 ] && pass "11 rounds: the pause does not stick" || die "still pausing at 11 (rc=$rc)"
+# THE PAUSE STICKS UNTIL IT IS ANSWERED. It used to clear itself at 11 — the
+# count simply stopped being a multiple of ten — so a driver that ignored the
+# pause was un-blocked by the very next round, and a count that JUMPED over the
+# multiple was never blocked at all. That is how this repository's own PR #10
+# went 35 → 41 with the check-in at 40 never firing.
+[ "$rc" -eq 3 ] && pass "11 rounds: the pause STICKS until acknowledged" \
+    || die "the pause cleared itself at 11 without an answer (rc=$rc)"
 
+# N distinct reviewed heads, for the cases below that care only about the count.
+mkreviews() {
+    local i sp=(); for ((i=1; i<=$1; i++)); do sp+=("$CODEX|c$i|\"t$i\""); done
+    mk "${sp[@]}"
+}
+# …and an acknowledgement from the operator clears it, for exactly one interval.
+mkack() { # <count> [association]
+    jq -n --arg n "$1" --arg a "${2:-OWNER}" \
+       '[{user:{login:"operator"},author_association:$a,
+          body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $n + "`\n")}]' \
+       > "$TMP/ack.json"
+}
+mkack 11
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=11'; } \
+    && pass "an acknowledgement at 11 clears the pause" \
+    || die "the acknowledgement did not clear the pause (rc=$rc out='$out')"
+
+# The next check-in is a full interval PAST the acknowledged count, not the next
+# multiple of ten — otherwise acknowledging at 11 would pause again at 20, nine
+# rounds later instead of ten.
+mkreviews 21; mkack 11
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] && pass "the next check-in is one interval past the acknowledgement" \
+    || die "no pause at 21 after acknowledging 11 (rc=$rc out='$out')"
+mkreviews 20; mkack 11
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && pass "…and not before it" \
+    || die "paused at 20 after acknowledging 11 (rc=$rc out='$out')"
+
+# A COUNT THAT JUMPS OVER THE BOUNDARY still pauses. This is the whole defect:
+# a single round can contribute several countable heads, so equality against a
+# multiple is a test a large enough step walks straight past.
+mkreviews 41
+out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=41'; } \
+    && pass "a count that stepped over the boundary (41) still pauses" \
+    || die "41 rounds sailed past the check-in (rc=$rc out='$out')"
+
+# ── who may acknowledge, and what they may claim ──────────────────────────
+# Anyone can comment on a pull request. An unrestricted marker would let a
+# reviewer bot — or a passer-by — switch the operator pause off permanently.
+for assoc in NONE CONTRIBUTOR FIRST_TIME_CONTRIBUTOR; do
+    mkack 41 "$assoc"
+    out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+    [ "$rc" -eq 3 ] && pass "a $assoc comment cannot acknowledge the pause" \
+        || die "$assoc acknowledged the pause (rc=$rc out='$out')"
+done
+# An acknowledgement of a round that has not happened is the disable-forever
+# shape, reachable by a typo as easily as by an attacker.
+mkack 999999999
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'ack_ahead_of_count'; } \
+    && pass "an acknowledgement ahead of the count is refused, not obeyed" \
+    || die "a future acknowledgement disabled the pause (rc=$rc out='$out')"
+# A field-shaped line quoted in prose — this script's own documentation, pasted
+# into a comment — is not an acknowledgement. Same anchoring rule as the
+# reviewed-commit footer.
+jq -n '[{user:{login:"operator"},author_association:"OWNER",
+         body:"To continue, post **Review-Pause-Acknowledged:** `41` in a comment."}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] && pass "a marker quoted mid-sentence does not acknowledge" \
+    || die "an inline mention was read as an acknowledgement (rc=$rc out='$out')"
+mkreviews 11
 # The pause re-arms for the next multiple.
 for ((i=12; i<=20; i++)); do specs+=("$CODEX|c$i|\"t$i\""); done
 mk "${specs[@]}"

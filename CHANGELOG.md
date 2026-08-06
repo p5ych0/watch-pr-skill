@@ -79,6 +79,23 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The round check-in is a threshold crossed, not a multiple landed on.** The
+  pause fired only when `rounds % threshold == 0`, which assumes the counter rises
+  by exactly one per call. It does not: a single round can contribute several
+  countable heads, and this repository's own PR #10 went from 35 to 41 across two
+  rounds — the check-in at 40 was stepped over and never fired at all. A safety
+  pause a large enough step silently skips is not a safety pause.
+
+  The test is now `rounds >= acknowledged + threshold`, which no jump can walk
+  past, and the pause therefore STICKS until it is answered rather than clearing
+  itself on the next round. Saying "continue" is recorded on the PR — a
+  `**Review-Pause-Acknowledged:** \`<count>\`` footer, read back the same way the
+  round count itself is derived, since local state was removed in v1 for
+  disappearing between machines. Only OWNER, MEMBER and COLLABORATOR comments are
+  read as acknowledgements, and one naming a round that has not happened yet is
+  refused rather than obeyed: it is the disable-forever shape, reachable by a typo
+  as easily as by anyone who can comment on the PR.
+
 - **A remote whose transport reaches no GitHub server is refused too.**
   `file://github.com/srv/acme/widget.git` carries an authority, so the URL arm
   accepted `github.com` as the host while the path split still yielded

@@ -275,6 +275,19 @@ survives a new session or a new machine. Set
 `REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
 value falls back to `10` rather than silently disabling a safety pause.
 
+**Saying "continue" is recorded on the PR.** The driver posts a comment carrying
+a `**Review-Pause-Acknowledged:** \`<count>\`` line, and the next check-in is a
+further `REVIEW_ROUND_THRESHOLD` heads past that number. Without it the gate would
+pause on every subsequent call, since it re-derives everything from GitHub and
+keeps nothing locally. Only repository owners, members and collaborators can
+write that marker, and one naming a round that has not happened yet is rejected:
+it records a decision you made, it cannot create permission on its own.
+
+The boundary is a **threshold crossed, not a multiple landed on**. It used to be
+`rounds % threshold == 0`, which silently assumes the count rises by one at a
+time — a single round can add several heads, and this repository's own PR #10 went
+from 35 to 41 across two rounds with the check-in at 40 never firing.
+
 A review record only counts as a round when GitHub reports a full commit SHA and
 a well-formed timestamp for it. If any record is unreadable the command exits 2
 and the driver stops, rather than counting the bad record as another head — an

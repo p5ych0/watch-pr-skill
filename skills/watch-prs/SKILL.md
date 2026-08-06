@@ -623,10 +623,38 @@ reached.
 - `0` — carry on.
 - `3` — **stop and decide with the operator**: continue, stop and merge, stop and
   leave open, or abandon. A review loop that never pauses is a loop nobody chose
-  to keep running. Cross a single pause with `REVIEW_ROUND_THRESHOLD=0` for that
-  one call, or answer the question.
+  to keep running.
+
+  When the operator says continue, RECORD THAT ON THE PR before requesting the
+  next review — the gate reads its own acknowledgement back, so without it every
+  subsequent call pauses again on the same count:
+
+  ```bash
+  # The count comes from the gate itself rather than being retyped: an
+  # acknowledgement naming the wrong number either pauses again immediately or
+  # skips a later check-in, and both are silent.
+  ROUNDS="$("$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null \
+            | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')"
+  case "$ROUNDS" in
+      ""|*[!0-9]*) echo "ABORT: could not read the round count to acknowledge."; exit 0 ;;
+  esac
+  gh pr comment N --repo $HOST/$OWNER/$REPO \
+      --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s`\n' "$ROUNDS")" \
+      || { echo "ABORT: could not record the acknowledgement; do not request another review."; exit 0; }
+  ```
+ Only OWNER, MEMBER and
+  COLLABORATOR comments are read as acknowledgements, and one naming a round that
+  has not happened yet is refused — the marker records a decision, it cannot
+  manufacture permission. `REVIEW_ROUND_THRESHOLD=0` still disables the check-in
+  entirely, which is a different thing from acknowledging one pause.
 - `2` — the count could not be established. Fail closed: do not re-request as if
   it were round one.
+
+The boundary is **crossed, not landed on**. It was a `rounds % threshold == 0`
+test, which assumes the counter advances by one per call — it does not, because a
+single round can contribute several countable heads, and a real PR went 35 → 41
+across two rounds with the pause at 40 never firing. The test is now an
+inequality against the last acknowledged count, which no step can jump over.
 
 A round is a **distinct PR head that received a submitted review**, derived from
 GitHub each time — so two reviewers on one commit is one round, a re-review of an
