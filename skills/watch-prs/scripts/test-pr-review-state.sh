@@ -58,6 +58,22 @@ out="$(PR_REVIEW_STATE_LIB_ONLY=1 REVIEW_BUS_REMOTE='git@github.com:acme/widget.
 [ "$out" = "github.com/acme/widget" ] && pass "identity derived from origin, host included" \
     || die "identity/source guard wrong (got: $out)"
 
+# ── the host is parsed from the URL authority ─────────────────────────────
+# Matching `github.com` anywhere in the URL sent an enterprise origin whose PATH
+# happens to contain it to the public host, and every pinned command with it.
+for case in 'git@ghe.example:org/github.com-mirror.git|ghe.example/org/github.com-mirror' \
+            'git@github.com:acme/widget.git|github.com/acme/widget' \
+            'https://ghe.example/o/r.git|ghe.example/o/r' \
+            'ssh://git@ghe.example/o/r.git|ghe.example/o/r'
+do
+    url="${case%%|*}"; want="${case##*|}"
+    got="$(PR_REVIEW_STATE_LIB_ONLY=1 REVIEW_BUS_REMOTE="$url" \
+            bash -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
+    [ "$got" = "$want" ] \
+        && pass "identity: $url => $want" \
+        || die "identity: $url gave '$got' (want $want)"
+done
+
 # ── state: each review state is judged, not counted ────────────────────────
 # A comment count cannot tell a signoff from a dismissal, a changes-requested
 # review with no inline comments, or a re-review that is still a draft. All three
@@ -112,6 +128,33 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/draft.json" run state 7 "$BOT" 2>&1)"
 printf '%s' "$out" | grep -q 'state=pending' \
     && pass "state: an in-flight re-review outranks the earlier clean one" \
     || die "state: clean-plus-draft gave '$out'"
+
+# ── review-id: every TERMINAL state carries one ───────────────────────────
+# `blocked` and `dismissed` are exactly the same-head re-request cases, and an
+# empty id there silently disables the caller comparison that tells the new pass
+# from the old one.
+for case in 'APPROVED|reviewed|51' 'COMMENTED|reviewed|52' \
+            'CHANGES_REQUESTED|blocked|53' 'DISMISSED|dismissed|54'
+do
+    st="${case%%|*}"; rest="${case#*|}"; want_state="${rest%%|*}"; rid="${rest##*|}"
+    mk_reviews "$st" '"2026-01-01T00:00:00Z"' "$rid"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run review-id 7 "$BOT" 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && [ "$out" = "$rid" ]; } \
+        && pass "review-id: $st ($want_state) returns its id" \
+        || die "review-id: $st gave rc=$rc '$out' (want $rid)"
+done
+
+# No review on this head is an empty id with a successful status: there is
+# nothing to wait past, which is different from a failed read.
+printf '[]' > "$TMP/none2.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/none2.json" run review-id 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ -z "$out" ]; } \
+    && pass "review-id: no review yet is an empty id, not an error" \
+    || die "review-id: empty case gave rc=$rc '$out'"
+
+# An unreadable fetch is NOT an empty id.
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-id 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "review-id: an unreadable fetch => 2" || die "review-id: fetch failure gave rc=$rc"
 
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31

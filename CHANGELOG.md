@@ -71,6 +71,20 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The host is parsed from the URL authority.** Matching `github.com` anywhere
+  in the origin sent an enterprise remote whose *path* contains it — such as
+  `git@ghe.example:org/github.com-mirror.git` — to the public host, taking every
+  newly pinned command with it.
+
+- **`--after-review` is actually used.** The flag shipped inert: the driver never
+  called `review-id` and never passed the option, so a same-head re-request still
+  accepted the previous terminal review immediately. The id is captured before
+  each request and passed to the watch that follows it.
+
+- **Every terminal state carries a review id.** The snapshot returned one only for
+  `reviewed`, while `blocked` and `dismissed` are precisely the same-head
+  re-request cases — an empty id there silently disabled the comparison.
+
 - **Every `gh` call names the host, not just the repository.** `GH_HOST` supplies
   the hostname when a command gives none, so the helpers could read the
   same-numbered PR from a *different GitHub host* while the local origin

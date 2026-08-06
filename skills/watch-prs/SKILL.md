@@ -36,12 +36,16 @@ _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
 # The host is derived too. `gh` takes the hostname from `GH_HOST` when a command
 # supplies none, so an unpinned call could act on the same-numbered PR on another
 # GitHub host while every gate inspects this one.
+# The authority is PARSED, not matched: `github.com` appearing anywhere in an
+# enterprise URL — `git@ghe.example:org/github.com-mirror.git` — would otherwise
+# send every pinned command to the public host.
 case "$REMOTE" in
-    *github.com*) HOST="github.com" ;;
-    *://*) _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
-    *@*:*) _hh="${REMOTE#*@}"; HOST="${_hh%%:*}" ;;
-    *) HOST="github.com" ;;
+    *://*)  _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
+    *@*:*)  _hh="${REMOTE#*@}";   HOST="${_hh%%:*}" ;;
+    *:*/*)  HOST="${REMOTE%%:*}" ;;
+    *)      HOST="github.com" ;;
 esac
+[ -n "$HOST" ] || HOST="github.com"
 # Same rule as the origin lookup above: the status is taken. This path is handed
 # to `pr-merge-range.sh`, which inspects history in it to decide whether every
 # commit since the reviewed SHA is a review fix — so a directory retained from a
@@ -116,6 +120,13 @@ duplicate pass or a review nobody requested.
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
 
+WHO="$CODEX_BOT"
+# The authoritative review id BEFORE the request, so the watch can tell the new
+# pass from the old one on an unchanged head. Empty is a legitimate answer (no
+# review yet); only a failed read is fatal.
+PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+
 if [ "$AUTO_REVIEW" = "yes" ]; then
     # The pass is already queued by the push that created or updated the PR.
     # Post the account of what to look at WITHOUT a mention, so the reviewer has
@@ -152,7 +163,12 @@ something to act on and prints one line when the state changes:
 
 ```bash
 WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
-"$RB_SCRIPTS"/pr-watch.sh N "$WHO"; WATCH_RC=$?
+# $PRIOR_REVIEW is the authoritative review id captured BEFORE the request that
+# this watch is waiting on — see step 2 and step 5. A re-request on an unchanged
+# head (after a dismissal, or after answering a finding rather than changing
+# code) has nothing else to tell the new pass from the old one, so without it the
+# first poll reports the PREVIOUS review as this round's answer.
+"$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"; WATCH_RC=$?
 ```
 
 **Claude Code** — run it as this session's **Monitor** so the verdict surfaces
@@ -377,6 +393,12 @@ git push || { echo "ABORT: push failed; do not close or re-request this round.";
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
+# The authoritative review id BEFORE the request, so the watch can tell the new
+# pass from the old one on an unchanged head. Empty is a legitimate answer (no
+# review yet); only a failed read is fatal.
+PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+
 if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
@@ -405,6 +427,12 @@ fi
 # THIS is the request, so a failed push means no review was queued AND the fixes
 # are not on the PR — the watch would then observe the already-reviewed remote
 # head and read its old verdict as this round's.
+# The authoritative review id BEFORE the request, so the watch can tell the new
+# pass from the old one on an unchanged head. Empty is a legitimate answer (no
+# review yet); only a failed read is fatal.
+PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
 # No `@codex review` comment: the push already asked. Sending one too queues a
 # duplicate pass over the same head.
@@ -544,6 +572,13 @@ fi
 # for, so entering the phase would poll for a review nobody asked for and then
 # report a timeout — which reads as "Copilot is slow", not "Copilot was never
 # asked".
+WHO="$COPILOT_BOT"
+# The authoritative review id BEFORE the request, so the watch can tell the new
+# pass from the old one on an unchanged head. Empty is a legitimate answer (no
+# review yet); only a failed read is fatal.
+PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+
 if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
     echo "ABORT: could not request Copilot — do not enter the Copilot phase."
     echo "This is not permission to skip the pass: decide with the operator."

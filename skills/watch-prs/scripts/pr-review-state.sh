@@ -60,13 +60,18 @@ OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
 # calls could read the same-numbered PR from a different GitHub host while the
 # local origin identifies another project entirely — the same class as the
 # `GH_REPO` hole, one level up.
+# The AUTHORITY is parsed, then compared. Matching `github.com` anywhere in the
+# URL sent an enterprise origin such as
+# `git@ghe.example:org/github.com-mirror.git` to the public host, and a userless
+# SCP-style enterprise origin fell through to the same default — so every pinned
+# command would act on the wrong GitHub entirely.
 case "$REMOTE" in
-    *github.com*) HOST="github.com" ;;
-    ssh://*) _h="${REMOTE#ssh://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
-    *://*) _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
-    *@*:*) _h="${REMOTE#*@}"; HOST="${_h%%:*}" ;;
-    *) HOST="github.com" ;;
+    *://*)  _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *@*:*)  _h="${REMOTE#*@}";   HOST="${_h%%:*}" ;;
+    *:*/*)  HOST="${REMOTE%%:*}" ;;
+    *)      HOST="github.com" ;;
 esac
+[ -n "$HOST" ] || HOST="github.com"
 REPO_SLUG="$HOST/$OWNER/$REPO"
 
 # 40-hex head OID of a PR. Prints nothing and returns non-zero on failure.
@@ -179,7 +184,13 @@ head_review_snapshot() {
               # REMOVES a signoff, so it cannot read as one.
               else "dismissed"
               end ) as $st
-          | $st + "\t" + (if $st == "reviewed" then ($latest.id | tostring) else "" end)
+          # The id accompanies every TERMINAL state, not only `reviewed`.
+          # `blocked` and `dismissed` are precisely the same-head re-request
+          # cases, and an empty id there disabled the caller comparison that
+          # exists to tell the new pass from the old one.
+          | $st + "\t" + (if ($st == "reviewed" or $st == "blocked" or $st == "dismissed")
+                              and $latest != null
+                           then ($latest.id | tostring) else "" end)
         end' 2>/dev/null)" || return 2
     case "${out%%$'\t'*}" in
         none|pending|blocked|dismissed|reviewed) printf '%s' "$out" ;;

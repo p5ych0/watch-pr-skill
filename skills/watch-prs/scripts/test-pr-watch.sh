@@ -624,6 +624,34 @@ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
     && die "a failed buffer read still produced a READY line: $out" \
     || pass "…and never reaches READY"
 
+# ── an inter-poll sleep that fails is not a slow review ───────────────────
+# An unchecked failure launched the next round of GitHub probes at once, hammered
+# the API until the clock expired, and then reported an ordinary timeout — so a
+# broken scheduler was indistinguishable from a review that was merely slow, and
+# the driver re-armed on it.
+# It fails only for WHOLE-SECOND arguments. `probe` polls in fractions and has
+# its own guard, so a sleep that always failed exited there and this fixture
+# proved nothing about the inter-poll sleep it was written for.
+SLEEPBIN="$TMP/sleepbin"; mkdir -p "$SLEEPBIN"
+REAL_SLEEP="$(command -v sleep)"
+cat > "$SLEEPBIN/sleep" <<SLEEPSH
+#!/usr/bin/env bash
+case "\$1" in
+    *.*) exec "$REAL_SLEEP" "\$@" ;;
+    *)   exit 1 ;;
+esac
+SLEEPSH
+chmod +x "$SLEEPBIN/sleep"
+seq_set none
+out="$(PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a failing sleep => 2, not a timeout the driver re-arms" \
+    || die "failing sleep gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'state=timeout' \
+    && die "a broken scheduler was reported as an ordinary timeout: $out" \
+    || pass "…and is not reported as a timeout"
+
 # ── an option without its value is usage, not an infinite loop ─────────────
 # `shift 2 || true` left the same option in $1 and the parser span forever,
 # hanging the watch before it started. Run under `timeout` so a regression fails

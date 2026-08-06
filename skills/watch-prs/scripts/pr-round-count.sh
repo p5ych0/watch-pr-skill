@@ -59,13 +59,18 @@ OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
 # calls could read the same-numbered PR from a different GitHub host while the
 # local origin identifies another project entirely — the same class as the
 # `GH_REPO` hole, one level up.
+# The AUTHORITY is parsed, then compared. Matching `github.com` anywhere in the
+# URL sent an enterprise origin such as
+# `git@ghe.example:org/github.com-mirror.git` to the public host, and a userless
+# SCP-style enterprise origin fell through to the same default — so every pinned
+# command would act on the wrong GitHub entirely.
 case "$REMOTE" in
-    *github.com*) HOST="github.com" ;;
-    ssh://*) _h="${REMOTE#ssh://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
-    *://*) _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
-    *@*:*) _h="${REMOTE#*@}"; HOST="${_h%%:*}" ;;
-    *) HOST="github.com" ;;
+    *://*)  _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *@*:*)  _h="${REMOTE#*@}";   HOST="${_h%%:*}" ;;
+    *:*/*)  HOST="${REMOTE%%:*}" ;;
+    *)      HOST="github.com" ;;
 esac
+[ -n "$HOST" ] || HOST="github.com"
 REPO_SLUG="$HOST/$OWNER/$REPO"
 
 PR="${1:-}"

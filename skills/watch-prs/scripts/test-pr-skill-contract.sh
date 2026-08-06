@@ -557,6 +557,17 @@ else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
 
+# ── the re-request id is captured and passed, not merely available ────────
+# A flag nothing invokes is inert: `--after-review` shipped and the driver never
+# called `review-id` nor passed the option, so a same-head re-request still
+# accepted the previous terminal review immediately.
+grep -q 'pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"' "$SKILL" \
+    && pass "the watch is invoked with the pre-request review id" \
+    || die "--after-review is documented but never passed"
+[ "$(grep -c 'PRIOR_REVIEW=\$("\$RB_SCRIPTS"/pr-review-state.sh review-id' "$SKILL")" -ge 3 ] \
+    && pass "…and the id is captured before each request that a watch follows" \
+    || die "the pre-request review id is not captured before every request"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

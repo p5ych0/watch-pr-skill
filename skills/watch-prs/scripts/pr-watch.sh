@@ -396,7 +396,16 @@ while :; do
                 nap="$INTERVAL"
                 remaining=$((TIMEOUT - waited))
                 [ "$nap" -gt "$remaining" ] && nap="$remaining"
-                sleep "$nap"
+                # NOT covered by a fixture, and said so rather than assumed: every attempt to
+    # isolate this guard was satisfied by an earlier one — `probe` has its own
+    # sleep guard and fails first — so a mutant removing this line still exits 2
+    # by another route. It is kept because it is correct and symmetric with that
+    # guard, not because a test proves it.
+    #
+    # A failed sleep here would launch the next round of GitHub probes at once,
+    # hammering the API until the clock expired and then reporting an ordinary
+    # timeout — so a broken scheduler looked exactly like a slow review.
+    sleep "$nap" || { echo "PR_REVIEW_WATCH state=error reason=sleep_failed" >&2; exit 2; }
                 waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
                 continue
             fi
@@ -453,6 +462,9 @@ while :; do
     nap="$INTERVAL"
     remaining=$((TIMEOUT - waited))
     [ "$nap" -gt "$remaining" ] && nap="$remaining"
-    sleep "$nap"
+    # A failed sleep here would launch the next round of GitHub probes at once,
+    # hammering the API until the clock expired and then reporting an ordinary
+    # timeout — so a broken scheduler looked exactly like a slow review.
+    sleep "$nap" || { echo "PR_REVIEW_WATCH state=error reason=sleep_failed" >&2; exit 2; }
     waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
 done
