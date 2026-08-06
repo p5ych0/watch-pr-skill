@@ -24,10 +24,12 @@ A driver for the **native** GitHub reviewers. Nothing runs on your machine.
 | Copilot | `copilot-pull-request-reviewer[bot]` | `gh pr edit <PR> --add-reviewer @copilot` |
 
 Your session requests the reviews, reads the findings, works the fix → reply →
-resolve → re-request loop, and gates the merge. Two small scripts answer the
-questions `gh` cannot answer safely on its own: whether a reviewer's review of
-the *current* head can carry a merge, and whether everything pushed since the
-reviewed commit is a review fix.
+resolve → re-request loop, and gates the merge. Six small scripts answer the
+questions `gh` cannot answer safely on its own — whether a reviewer's review of
+the *current* head can carry a merge, whether everything pushed since the
+reviewed commit is a review fix, what the unresolved findings actually are, how
+many rounds this PR has had, when a verdict is ready to act on, and whether the
+change about to be pushed passes its own checks.
 
 Every review establishes the PR's **intended scope** first — from its description
 and its newest round-summary comment — and uses it for *relevance only*: work the

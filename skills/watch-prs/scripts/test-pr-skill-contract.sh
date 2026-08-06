@@ -464,6 +464,48 @@ grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "a gh pr comment call does not pass --repo"
 
+# ── the shipping manifest lists every runtime helper ──────────────────────
+# CLAUDE.md calls everything unlisted "documentation", so an incomplete table is
+# not a cosmetic gap — it tells a maintainer that four executable helpers are
+# prose. Derived from the directory, so adding a helper without listing it fails.
+CLAUDEMD="$ROOT/CLAUDE.md"
+if [ -f "$CLAUDEMD" ]; then
+    # Scoped to the What-ships TABLE, not the whole file. Every helper is also
+    # named in the strict-mode table further down, so a whole-file grep passed
+    # against a manifest with a helper deleted — the same "the token appears
+    # elsewhere" trap that made an earlier assertion here vacuous.
+    manifest="$(awk '/^## What ships/{inb=1; next} /^## /{inb=0} inb' "$CLAUDEMD")"
+    manifest_missing=""
+    for h in "$SCRIPT_DIR"/pr-*.sh; do
+        [ -e "$h" ] || continue
+        b="$(basename "$h")"
+        printf '%s' "$manifest" | grep -q "$b" || manifest_missing="$manifest_missing $b"
+    done
+    [ -z "$manifest_missing" ] \
+        && pass "CLAUDE.md's What-ships table lists every runtime helper" \
+        || die "runtime helpers missing from the shipping manifest:$manifest_missing"
+fi
+
+# ── every git probe takes its status ──────────────────────────────────────
+# Third time this class appeared: the origin lookups, then the self-check's root
+# lookup, then these two. `|| true` on a probe is the opposite of failing closed.
+grep -q 'ABORT: could not resolve the repository root' "$SKILL" \
+    && pass "the identity block branches on the repo-root probe" \
+    || die "the repo-root probe is unchecked; a failed read becomes the merge tree"
+if [ -f "$SCRIPT_DIR/pr-merge-range.sh" ]; then
+    grep -q 'rev-parse --show-toplevel 2>/dev/null || true' "$SCRIPT_DIR/pr-merge-range.sh" \
+        && die "pr-merge-range.sh still swallows its root probe status with || true" \
+        || pass "pr-merge-range.sh does not swallow its root probe status"
+fi
+
+# ── the phase summary WRITE is checked, not only the read ─────────────────
+# A truncated write leaves a non-empty partial body that the guarded read
+# returns; a failed open leaves the previous round's contents to be read as this
+# round's. Either posts an invalid summary and requests Copilot against it.
+grep -q 'ABORT: could not write the phase summary' "$SKILL" \
+    && pass "the Copilot phase summary write is branched on" \
+    || die "the phase summary is written without checking the write"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

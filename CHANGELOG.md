@@ -71,6 +71,31 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Every git probe takes its status — swept, not patched.** This class appeared
+  three times: the origin lookups, then `pr-selfcheck.sh`'s root lookup, then the
+  identity block's `REPO_DIR` and `pr-merge-range.sh`'s `|| true`. The last is the
+  worst of them: `|| true` discards the status deliberately, so a `git rev-parse`
+  that printed a plausible directory and then failed was indistinguishable from
+  one that worked — and every history check then decided a merge about a tree
+  nothing vouched for.
+
+- **The phase-summary write is checked, not only the read.** A `cat` that
+  truncates and then fails leaves a non-empty partial body the guarded read
+  happily returns; a `cat` that cannot open the file leaves the *previous*
+  round's contents to be read as this one's. Either posts an invalid summary and
+  requests Copilot against it.
+
+- **The `--repo` check understands line continuations.** A correctly pinned call
+  split across a backslash continuation was reported as unpinned — and since the
+  self-check gates the push, that false positive would have blocked the round
+  rather than merely annoying. Lines are joined before matching.
+
+- **The shipping manifest lists every runtime helper.** `CLAUDE.md` classifies
+  everything unlisted as documentation, so a table naming two of six executable
+  helpers told maintainers that four scripts were prose. `README.md`'s "two small
+  scripts" is corrected with it, and the inventory is derived from the directory
+  by the contract test so it cannot drift again.
+
 - **Every `gh pr` call names the repository.** `GH_REPO` overrides the repository
   `gh` infers from the checkout. Every helper and every `gh pr view/edit/checks/
   merge` in the contract passed `--repo`; the five `gh pr comment` calls did not —

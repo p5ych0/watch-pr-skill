@@ -173,6 +173,34 @@ run "$BASE" "$ZERO_HEAD"
     && pass "no matches is a real zero (blocked, not error)" \
     || die "zero-match count did not block cleanly: rc=$rc out=$out"
 
+# ── a root probe that prints and THEN fails is not a root ─────────────────
+# `|| true` discarded the probe's status, so a `git rev-parse` that printed a
+# plausible directory and then failed was indistinguishable from one that
+# worked — and every history check then ran against a tree nothing vouched for.
+MRTMP="$(mktemp -d)"; mkdir -p "$MRTMP/bin"
+MR_REAL_GIT="$(command -v git)"
+cat > "$MRTMP/bin/git" <<GITSH
+#!/usr/bin/env bash
+if [ "\$1" = "rev-parse" ] && [ "\$2" = "--show-toplevel" ]; then
+    printf '%s\n' "/nonexistent-but-plausible"
+    exit 1
+fi
+exec "$MR_REAL_GIT" "\$@"
+GITSH
+chmod +x "$MRTMP/bin/git"
+# `set +e` around the probe: this file runs strict, and the probe is EXPECTED to
+# fail — that is the assertion. Without it the assignment aborts the script,
+# which then reports nothing at all.
+set +e
+out="$(cd "$MRTMP" && PATH="$MRTMP/bin:$PATH" timeout 20 "$SCRIPT" \
+        1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 2>&1)"
+rc=$?
+set -e
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'repo_root_lookup_failed'; } \
+    && pass "a repo-root probe that prints then fails => 2, on its own reason" \
+    || die "failed root probe gave rc=$rc out='$out'"
+rm -rf "$MRTMP"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

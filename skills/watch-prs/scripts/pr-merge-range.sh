@@ -29,7 +29,20 @@ set -uo pipefail
 
 REVIEWED="${1:-}"
 HEAD_OID="${2:-}"
-REPO_DIR="${3:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
+# `|| true` here did the opposite of failing closed: it discarded the probe's
+# status so a `git rev-parse` that printed a plausible directory and then failed
+# was indistinguishable from one that worked, and every history check below then
+# ran against a tree nothing vouched for — deciding a merge about the wrong repo.
+#
+# An explicit third argument is the caller naming the root and has no status.
+if [ -n "${3:-}" ]; then
+    REPO_DIR="$3"
+else
+    REPO_DIR="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+        echo "PR_MERGE_RANGE status=error reason=repo_root_lookup_failed" >&2
+        exit 2
+    }
+fi
 
 if [ -z "$REVIEWED" ] || [ -z "$HEAD_OID" ] || [ -z "$REPO_DIR" ]; then
     echo "MERGE_RANGE status=error reason=usage" >&2

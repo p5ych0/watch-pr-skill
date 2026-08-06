@@ -260,8 +260,17 @@ done
 # whole file. Prose quoting a command in backticks ("the request is `gh pr edit
 # --add-reviewer @copilot`") is documentation, not a call, and reporting it makes
 # the check noise.
+# Backslash continuations are JOINED first. A correctly pinned call written as
+#     gh pr comment N \
+#         --repo "$OWNER/$REPO" --body "…"
+# has `--repo` on the second physical line, so a per-line check reported it as
+# unpinned — and this check is mandatory before the push, so a false positive
+# here does not just annoy, it blocks the round. `sed` joins any line ending in a
+# backslash with the next before anything is matched.
 unpinned=0
-gh_lines="$(printf '%s\n' "$code" | nomatch grep -E 'gh pr (comment|view|edit|merge|checks|close|ready) ')"
+joined="$(printf '%s\n' "$code" | sed -e :a -e '/\\$/N; s/\\\n//; ta')"
+chk join_continuations $?
+gh_lines="$(printf '%s\n' "$joined" | nomatch grep -E 'gh pr (comment|view|edit|merge|checks|close|ready) ')"
 chk gh_lines $?
 if [ -n "$gh_lines" ]; then
     while IFS= read -r line; do

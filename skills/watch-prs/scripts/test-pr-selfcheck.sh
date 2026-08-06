@@ -379,6 +379,40 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "prose quoting a gh command is not treated as a call" \
     || die "a backticked command in prose was reported (rc=$rc out='$out')"
 
+# A pinned call split across a backslash continuation is still pinned. A per-line
+# check reported it as unpinned — and this check gates the push, so a false
+# positive here blocks the round rather than merely annoying.
+CONT_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+gh pr comment 7 \\
+    --repo $OWNER/$REPO \\
+    --body "hello"
+```
+'
+R="$(mkroot "$CONT_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "a pinned gh call split across a continuation is not reported" \
+    || die "a continued pinned call was flagged unpinned (rc=$rc out='$out')"
+
+# …and an UNPINNED continued call is still caught, so joining lines did not
+# simply switch the check off.
+CONT_BAD='# skill
+```bash
+OWNER=acme
+REPO=widget
+gh pr comment 7 \\
+    --body "hello"
+```
+'
+R="$(mkroot "$CONT_BAD")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+    && pass "an unpinned continued call is still a finding" \
+    || die "joining continuations hid an unpinned call (rc=$rc out='$out')"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

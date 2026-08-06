@@ -33,7 +33,12 @@ settings page.
 REMOTE=$(git remote get-url origin 2>/dev/null) || REMOTE=""
 [ -n "$REMOTE" ] || { echo "ABORT: cwd is not a git checkout with a readable origin"; exit 1; }
 _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
-REPO_DIR="$(git rev-parse --show-toplevel)"
+# Same rule as the origin lookup above: the status is taken. This path is handed
+# to `pr-merge-range.sh`, which inspects history in it to decide whether every
+# commit since the reviewed SHA is a review fix — so a directory retained from a
+# failed probe is a merge decision made about the wrong tree.
+REPO_DIR="$(git rev-parse --show-toplevel)" \
+    || { echo "ABORT: could not resolve the repository root"; exit 1; }
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
 # macOS the fallback would fail before finding the scripts at all.
@@ -477,7 +482,12 @@ fi
 # one — a summary left over from another round or another PR. This is the
 # phase-transition summary and it is always about the same thing, so it is
 # always constructed at the point it is used.
-cat > "$SUMMARY_FILE" <<EOF
+# The WRITE is checked, not only the read below it. A `cat` that truncates the
+# file and then fails — a full filesystem — leaves a non-empty partial body that
+# the guarded read happily returns; a `cat` that cannot open the file at all
+# leaves the PREVIOUS round's contents there to be read as this one's. Either
+# posts an invalid summary and requests Copilot against it.
+cat > "$SUMMARY_FILE" <<EOF || { echo "ABORT: could not write the phase summary."; exit 0; }
 ## Codex phase complete — requesting Copilot
 
 Codex signed off on \`$CODEX_SHA\`. Opening the Copilot phase on the same head.

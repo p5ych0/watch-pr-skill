@@ -18,6 +18,10 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/SKILL.md` | The driver contract — how the model requests reviews from the native GitHub reviewers, reads findings, closes rounds, and gates the merge. |
 | `skills/watch-prs/scripts/pr-review-state.sh` | Whether a named reviewer's review of the current head can carry a merge. |
 | `skills/watch-prs/scripts/pr-merge-range.sh` | Whether every commit since the reviewed SHA is a review-fix commit reachable from it. |
+| `skills/watch-prs/scripts/pr-findings.sh` | The unresolved findings, paginated and shape-validated, and the body of a blocking review. |
+| `skills/watch-prs/scripts/pr-round-count.sh` | How many rounds this PR has had, and whether this is an operator check-in boundary. |
+| `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. |
+| `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
