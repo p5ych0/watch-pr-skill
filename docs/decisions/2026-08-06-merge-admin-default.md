@@ -70,10 +70,29 @@ For the case this plugin is built around — a solo maintainer opening a pull
 request and reviewing it through the same `gh` credential — no available review
 satisfies that. GitHub refuses a self-approval, which is why the watcher on this
 branch attempts `APPROVE` and falls back to `COMMENT`
-(`skills/watch-prs/scripts/review-bus-codex-watcher.sh`). Dropping `--admin`
-there does not tighten the gate; it removes the merge path entirely, on every
-pull request. A tool whose happy path cannot complete is a worse failure than a
-seconds-wide race in a repository where nobody else is reviewing.
+(`skills/watch-prs/scripts/review-bus-codex-watcher.sh`). Where an approval is
+genuinely required, dropping `--admin` does not tighten the gate; it removes the
+merge path entirely, on every pull request. A tool whose happy path cannot
+complete is a worse failure than a seconds-wide race in a repository where nobody
+else is reviewing.
+
+**That rationale holds only where an approval is actually required.** It is
+narrower than it first appears, and narrower than the default it justifies:
+
+- On a branch with **no protection at all**, nothing is being bypassed and
+  `--admin` is doing nothing.
+- On a branch configured as this record recommends — checks and conversation
+  resolution on, **required approvals zero** — there is no missing approval, so a
+  normal merge is available once those conditions pass. `--admin` is unnecessary
+  there, and an operator who has configured it should set
+  `REVIEW_MERGE_STRICT=1`.
+- The default earns its keep only where an approval **is** required and the
+  reviewing credential cannot supply one.
+
+So the default is the safe fallback for an *unknown* repository, not the right
+setting for every configured one. If your protection rules are ones this loop can
+satisfy, strict mode is the better choice and this record is not an argument
+against it.
 
 **This rationale is narrower than "every PR".** Where the pull request is
 authored by a *different* account from the one `gh` is authenticated as — a
@@ -86,7 +105,13 @@ repositories once it exists.
 
 - The window is between the final probe and the merge call — seconds, on a PR
   the operator is actively driving.
-- Every gate that *can* be checked client-side is, and each fails closed.
+- Every gate this plugin checks client-side fails closed. That is not the same as
+  every condition GitHub can enforce: notably there is **no merge-queue probe**
+  anywhere in this repository, and `gh pr merge --admin` bypasses a required
+  merge queue outright rather than racing it. **This record does not cover
+  repositories whose base branch requires a merge queue** — there the exposure is
+  not a seconds-wide window but a skipped queue, and `REVIEW_MERGE_STRICT=1` is
+  the only supported setting.
 - `REVIEW_MERGE_STRICT=1` drops `--admin` — which closes a race only where the
   repository's protections are configured *and* non-bypassable; see below.
 
