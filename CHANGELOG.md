@@ -71,6 +71,31 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **Every `gh pr` call names the repository.** `GH_REPO` overrides the repository
+  `gh` infers from the checkout. Every helper and every `gh pr view/edit/checks/
+  merge` in the contract passed `--repo`; the five `gh pr comment` calls did not —
+  so with `GH_REPO` set, review requests and round summaries went to the
+  same-numbered PR in a *different* repository while every gate inspected this
+  one. `pr-selfcheck.sh` now enforces this mechanically, which is what stops the
+  class rather than the instance.
+
+- **A failed push does not close the round.** If `git push` failed — auth, a
+  non-fast-forward, a dropped connection — the recipe still resolved threads and
+  requested the next review, sending the reviewer at code that was never pushed.
+  In automatic-review mode the watch would then read the already-reviewed remote
+  head's verdict as this round's.
+
+- **A watch timeout re-arms.** The status table still offered "re-request, or ask
+  the operator", contradicting the re-arm-without-asking rule added alongside it:
+  re-requesting queues a duplicate pass on the same head, and asking turns the
+  automatic loop back into the manual one it replaces.
+
+- **The cached-helper discovery is checked and its result validated.** `ls` can
+  print one candidate and then fail on an unreadable cache entry, and `head` masks
+  that status — so an unchecked pipeline could select a partial or stale path and
+  every later call would run a different version of the helpers than the one
+  installed.
+
 - **The no-match exception lives at the grep, not on the pipeline.** Tolerating
   status 1 for a whole pipeline could not tell whose 1 it was: under `pipefail`
   the status is the rightmost non-zero, so a `sed` or `sort` that emitted partial

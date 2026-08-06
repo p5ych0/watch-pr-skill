@@ -246,6 +246,37 @@ for s in $helpers; do
 done
 [ "$missing" -eq 0 ] && ok "every helper SKILL.md drives is present"
 
+# ── 3b. every `gh pr` call names the repository ────────────────────────────
+#
+# `gh` resolves the repository from the local checkout — or from `GH_REPO`, which
+# overrides it. Every helper passes `--repo`, and every `gh pr view/edit/checks/
+# merge` in the contract did too; the five `gh pr comment` calls did not. With
+# `GH_REPO` set, those posted review requests and round summaries to the
+# same-numbered PR in a DIFFERENT repository while every gate inspected this one.
+#
+# Mechanical and unambiguous: a `gh pr <verb> N` line either carries `--repo` or
+# it does not.
+# Scoped to the bash blocks with comments already stripped — `$code`, not the
+# whole file. Prose quoting a command in backticks ("the request is `gh pr edit
+# --add-reviewer @copilot`") is documentation, not a call, and reporting it makes
+# the check noise.
+unpinned=0
+gh_lines="$(printf '%s\n' "$code" | nomatch grep -E 'gh pr (comment|view|edit|merge|checks|close|ready) ')"
+chk gh_lines $?
+if [ -n "$gh_lines" ]; then
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        case "$line" in
+            *--repo*) ;;
+            *) note unpinned_gh_call "SKILL.md: a gh pr call without --repo:$(printf '%s' "$line" | cut -c1-60)"
+               unpinned=1 ;;
+        esac
+    done <<EOF
+$gh_lines
+EOF
+fi
+[ "$unpinned" -eq 0 ] && ok "every gh pr call in SKILL.md names the repository"
+
 # ── 4. every script has a test ─────────────────────────────────────────────
 untested=0
 for f in "$SCRIPTS"/pr-*.sh; do

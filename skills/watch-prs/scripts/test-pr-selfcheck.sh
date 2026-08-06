@@ -333,6 +333,52 @@ printf '%s' "$out" | grep -q 'status=clean' \
     && die "a failed root lookup produced a clean report: $out" \
     || pass "…and never reports clean"
 
+# ── a gh pr call that does not name the repository ────────────────────────
+# `GH_REPO` overrides the repository `gh` infers from the checkout, so an
+# unpinned call acts on the same-numbered PR somewhere else while every gate
+# inspects this one.
+UNPINNED_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+gh pr comment 7 --body "hello"
+```
+'
+R="$(mkroot "$UNPINNED_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+    && pass "a gh pr call without --repo is a finding" \
+    || die "unpinned gh call not caught (rc=$rc out='$out')"
+
+PINNED_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+gh pr comment 7 --repo $OWNER/$REPO --body "hello"
+```
+'
+R="$(mkroot "$PINNED_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "a pinned gh pr call is clean" \
+    || die "a pinned gh call was reported (rc=$rc out='$out')"
+
+# Prose quoting a command in backticks is documentation, not a call. Reporting it
+# would make the check noise, and noise is how a checker gets ignored.
+PROSE_SKILL='The request is `gh pr edit --add-reviewer @copilot`, which is not a comment.
+
+```bash
+OWNER=acme
+REPO=widget
+gh pr edit 7 --repo $OWNER/$REPO --add-reviewer @copilot
+```
+'
+R="$(mkroot "$PROSE_SKILL")"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "prose quoting a gh command is not treated as a call" \
+    || die "a backticked command in prose was reported (rc=$rc out='$out')"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

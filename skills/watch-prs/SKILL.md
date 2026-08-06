@@ -37,7 +37,21 @@ REPO_DIR="$(git rev-parse --show-toplevel)"
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
 # macOS the fallback would fail before finding the scripts at all.
-[ -d "$RB_SCRIPTS" ] || RB_SCRIPTS="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null | head -1)"
+#
+# The discovery's STATUS is taken and the result validated. `ls` can print one
+# candidate and then fail on another unreadable cache entry, and `head` masks
+# that status anyway — so an unchecked pipeline could select a partial or stale
+# path, and every state, findings and merge-gate call below would then run a
+# different version of the helpers than the one that was installed.
+if [ ! -d "$RB_SCRIPTS" ]; then
+    RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
+        || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
+    RB_SCRIPTS="$(printf '%s\n' "$RB_CANDIDATES" | head -1)"
+fi
+# Validated as a directory that actually holds the helpers, not merely non-empty:
+# a plausible-looking path that is missing them fails later, one call at a time.
+[ -d "$RB_SCRIPTS" ] && [ -x "$RB_SCRIPTS/pr-review-state.sh" ] \
+    || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
@@ -84,14 +98,14 @@ if [ "$AUTO_REVIEW" = "yes" ]; then
     # The pass is already queued by the push that created or updated the PR.
     # Post the account of what to look at WITHOUT a mention, so the reviewer has
     # it, and go straight to the wait.
-    if ! gh pr comment N --body "<one paragraph: what this change does and what to look at>"; then
+    if ! gh pr comment N --repo $OWNER/$REPO --body "<one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the PR context — do not enter the wait step."; exit 0
     fi
 else
     # The mention IS the request. Branch on it: a failed post means no review was
     # ever queued, and the wait step would then poll for one until it timed out,
     # reporting "no review arrived" rather than "none was asked for".
-    if ! gh pr comment N --body "@codex review
+    if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review
 
 <one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
@@ -155,7 +169,7 @@ PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verd
 | `WATCH_RC` | meaning | what to do |
 | --- | --- | --- |
 | `0` | terminal state reached, verdict on the last line | step 4 |
-| `1` | timed out | re-request, or ask the operator whether to keep waiting |
+| `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask: that is the manual loop this replaces. |
 | `2` | the state could not be read | **fail closed** — never treat it as "no findings" |
 
 The states it reports, and what each means:
@@ -326,7 +340,10 @@ decided by **what starts it**, and there are two different answers.
 summary and the push is inert:
 
 ```bash
-git push                                   # inert: nothing reviews on push
+# Branched on: if the push fails — auth, a non-fast-forward, a dropped
+# connection — the fixes are not on the PR, and closing the round anyway resolves
+# threads and requests a review of code that was never sent.
+git push || { echo "ABORT: push failed; do not close or re-request this round."; exit 0; }
 # reply + resolve threads here
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
@@ -338,7 +355,7 @@ git push                                   # inert: nothing reviews on push
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --body "@codex review
+if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
@@ -360,10 +377,13 @@ told to read must already be there, and **no mention is sent at all**:
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --body "$SUMMARY"; then
+if ! gh pr comment N --repo $OWNER/$REPO --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not push yet."; exit 0
 fi
-git push                                   # THIS is the request
+# THIS is the request, so a failed push means no review was queued AND the fixes
+# are not on the PR — the watch would then observe the already-reviewed remote
+# head and read its old verdict as this round's.
+git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
 # No `@codex review` comment: the push already asked. Sending one too queues a
 # duplicate pass over the same head.
 ```
@@ -477,7 +497,7 @@ EOF
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --body "$SUMMARY"; then
+if ! gh pr comment N --repo $OWNER/$REPO --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi
 

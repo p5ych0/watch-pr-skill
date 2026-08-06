@@ -243,7 +243,7 @@ grep -q 'if ! gh pr edit N --repo $OWNER/$REPO --add-reviewer @copilot; then' "$
     && pass "the Copilot request is branched on before the phase begins" \
     || die "a failed Copilot request still enters the Copilot phase"
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --body "@codex review' "$SKILL" \
+grep -q 'if ! gh pr comment N --repo $OWNER/$REPO --body "@codex review' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -337,7 +337,7 @@ grep -q 'case "\$SEEN" in \*"\$RS\$NEXT\$RS"\*) OK=0; break ;; esac' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --body "\$SUMMARY"/ {c=NR}
+awk '/gh pr comment N --repo \$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
      /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the Copilot round summary is posted before the review request" \
     || die "Copilot can be requested before the round summary exists"
@@ -390,7 +390,7 @@ grep -q 'The push is not' "$SKILL" \
 
 # In the auto-review branch, the push must come AFTER the summary post.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /gh pr comment N --body "\$SUMMARY"/ {c=NR}
+     inb && /gh pr comment N --repo \$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
      inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
     || die "the auto-review recipe pushes before the summary exists"
@@ -422,6 +422,47 @@ grep -q 'comment=' "$ROOT/skills/watch-prs/scripts/pr-findings.sh" \
 grep -q 'ABORT: could not read the round summary' "$SKILL" \
     && pass "…and a failed read aborts rather than posting a truncated record" \
     || die "a failed summary read does not abort"
+
+# ── a failed push does not close the round ────────────────────────────────
+# The fixes are not on the PR, so resolving threads and requesting a review sends
+# the reviewer at code that was never sent — and in auto-review mode the watch
+# then reads the already-reviewed remote head's verdict as this round's.
+[ "$(grep -c '^git push ||' "$SKILL")" -eq 2 ] \
+    && pass "both mode-specific pushes are branched on" \
+    || die "a round push is unchecked; a failed push still closes the round"
+grep -q 'ABORT: push failed' "$SKILL" \
+    && pass "…and a failed push aborts the round" \
+    || die "a failed push does not abort"
+
+# ── a timeout re-arms; it never re-requests and never asks ────────────────
+# Re-requesting queues a duplicate pass on the same head, and asking turns the
+# automatic loop back into the manual one it replaces.
+grep -q 're-arm the same watch' "$SKILL" \
+    && pass "a watch timeout re-arms the same watch" \
+    || die "the timeout action is ambiguous; it may re-request or prompt"
+grep -q 'timed out | re-request, or ask the operator' "$SKILL" \
+    && die "the timeout row still offers re-requesting or prompting" \
+    || pass "…and neither re-requests nor prompts"
+
+# ── the helper discovery is checked and its result validated ──────────────
+# `ls` can print one candidate and then fail on an unreadable cache entry, and
+# `head` masks that status — so an unchecked pipeline selects a partial or stale
+# path and every later call runs a different version of the helpers.
+grep -q 'ABORT: could not enumerate installed plugin copies' "$SKILL" \
+    && pass "the cached-helper discovery branches on its status" \
+    || die "the helper discovery pipeline is unchecked"
+grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
+    && pass "…and the selected directory is validated before it is used" \
+    || die "the discovered helper directory is used without validation"
+
+# ── every gh pr call names the repository ─────────────────────────────────
+# `GH_REPO` overrides the repository `gh` infers from the checkout, so an
+# unpinned call can act on the same-numbered PR somewhere else while every gate
+# inspects this one. Enforced mechanically by pr-selfcheck.sh; asserted here so
+# the contract itself cannot drift.
+[ "$(grep -c 'gh pr comment N --repo $OWNER/$REPO --body' "$SKILL")" -eq 5 ] \
+    && pass "every gh pr comment call is pinned to the derived repository" \
+    || die "a gh pr comment call does not pass --repo"
 
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
