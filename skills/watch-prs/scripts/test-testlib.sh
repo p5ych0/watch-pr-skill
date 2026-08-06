@@ -86,5 +86,42 @@ else
     pass "no timeout on this platform; the fallback is the only path (already covered)"
 fi
 
+# ── a broken watchdog clock is unreadable, not a timeout ───────────────────
+# `sleep` IS the watchdog on this path. When it failed the loop still advanced
+# `waited`, burned the limit in a tight spin, killed the command and returned an
+# ordinary 124 — so a fixture asserting "this hangs, therefore it times out"
+# passed while no wall-clock limit was in force. That is a mandatory gate
+# reporting PASS from a broken clock, which is the precise shape of failure this
+# suite exists to refuse.
+BROKE="$TMP/broke"; mkdir -p "$BROKE"
+for b in bash sh date true false kill sed grep printf env mktemp cat rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BROKE/$b"
+done
+printf '#!/usr/bin/env bash\nexit 1\n' > "$BROKE/sleep"; chmod +x "$BROKE/sleep"
+out="$(PATH="$BROKE" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 3 sh -c "sleep 30 2>/dev/null; :"; echo "rc=$?"' 2>&1)"
+case "$out" in
+    *"rc=125"*) pass "a failing watchdog sleep returns 125, not an ordinary timeout" ;;
+    *) die "broken sleep gave '$out' (want rc=125)" ;;
+esac
+printf '%s' "$out" | grep -q 'rc=124' \
+    && die "a broken clock was reported as a timeout" \
+    || pass "…and is distinguishable from the limit actually being hit"
+
+# ── a reader that emits and then fails is not a successful run ─────────────
+# `cat` can write a partial buffer and exit non-zero; its status was overwritten
+# by `rm` and the COMMAND's 0 returned, so a caller comparing a prefix or
+# grepping the capture still matched and reported PASS on output nobody finished
+# reading.
+CATF="$TMP/catf"; mkdir -p "$CATF"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$CATF/$b"
+done
+printf '#!/usr/bin/env bash\nprintf "partial"\nexit 1\n' > "$CATF/cat"; chmod +x "$CATF/cat"
+out="$(PATH="$CATF" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>&1)"
+case "$out" in
+    "rc=125 res=partial") pass "a reader that emits and then fails returns 125" ;;
+    *) die "failing reader gave '$out' (want rc=125 res=partial)" ;;
+esac
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -66,8 +66,14 @@ esac
 # Leading zeros are rejected, not accepted as digits: Bash reads them as octal, so
 # `00` made `sleep` return at once and `waited` never advance — a spin — while
 # `08`/`09` aborted inside the arithmetic below.
-case "$INTERVAL" in 0|0*|*[!0-9]*|"") INTERVAL=30 ;; esac
-case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|"") TIMEOUT=3600 ;; esac
+# BOUNDED BY LENGTH, before any arithmetic. An all-digit value beyond Bash's
+# integer range passes the digit test and then wraps inside `TIMEOUT - e`,
+# possibly to zero or negative — `remaining_s` reports an immediate ordinary
+# timeout, and the documented driver re-arms an ordinary timeout indefinitely.
+# Ten digits is far past any real interval or deadline and safely inside the
+# range, so an over-long value is a misconfiguration, not a duration.
+case "$INTERVAL" in 0|0*|*[!0-9]*|""|??????????*) INTERVAL=30 ;; esac
+case "$TIMEOUT"  in 0) ;; 0*|*[!0-9]*|""|??????????*) TIMEOUT=3600 ;; esac
 
 # Helper output quoted onto ONE line before it is printed as a diagnostic.
 #

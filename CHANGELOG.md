@@ -79,6 +79,44 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **A remote whose transport reaches no GitHub server is refused too.**
+  `file://github.com/srv/acme/widget.git` carries an authority, so the URL arm
+  accepted `github.com` as the host while the path split still yielded
+  `acme/widget` — the same wrong-public-repository outcome as a bare local path,
+  reached through the arm meant to be the safe one. Only `ssh`, `git`, `https`,
+  `http` and `git+ssh` are accepted.
+
+- **Each duplicated identity parser is now proven independently.** The hostless
+  rule landed in all four copies but only `test-pr-review-state.sh` exercised it,
+  so reverting the branch in `pr-findings.sh` or `pr-round-count.sh` left the
+  suite green and silently restored the wrong-repository path. The new matrix
+  runs every origin shape through each script and asserts, via a `gh` spy, that
+  no request was ever addressed — the rejection message quotes the remote, so
+  grepping the output for the derived slug matched the diagnostic itself.
+
+- **An out-of-range `--timeout` falls back instead of wrapping.** 2^64 is all
+  digits and wraps to exactly zero, so `remaining_s` reported an immediate
+  ordinary timeout on the first poll — and the driver re-arms an ordinary
+  timeout, turning an unreadable configuration into an endless loop that never
+  waited for a review. Same bound as the round threshold, which had it already.
+
+- **The required-checks payload is shape-checked before `all`.** `all(.[]; …)`
+  over an empty stream is `true`, so a successful read returning an object, a
+  null or an empty array came out as "every required check passed" and the
+  administrator merge proceeded on a payload nothing had read.
+
+- **The phase-summary heredoc is quoted.** Unquoted, the shell expanded the prose
+  while writing it — and that body is composed from the round, routinely holding
+  Markdown code spans of shell text, including text copied out of an untrusted PR
+  description. The reviewed SHA is emitted separately through `printf`.
+
+- **The portable watchdog fails closed on its own clock and its own reader.**
+  When `sleep` failed the loop still advanced, burned the limit in a spin and
+  returned an ordinary 124 — so a fixture asserting "this hangs, therefore it
+  times out" passed with no wall-clock limit in force. And `cat` could emit a
+  partial buffer and fail with its status overwritten by `rm`, returning the
+  command's own 0. Both now return a distinguished 125.
+
 - **An origin with no network authority is refused, not defaulted to GitHub.**
   A local-path remote such as `/srv/mirrors/acme/widget.git` has no host, and
   defaulting it to `github.com` while the path split still yielded `acme/widget`

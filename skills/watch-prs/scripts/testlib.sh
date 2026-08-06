@@ -69,9 +69,20 @@ run_limited() {
     "$@" >"$tmp" 2>&1 </dev/null &
     local pid=$!
     local waited=0
+    # THE SLEEP IS THE WATCHDOG. If it fails, the loop still advanced `waited`
+    # and burned through the limit at once, killed the command and returned an
+    # ordinary 124 — so a fixture asserting "this hangs, so it times out" passed
+    # while no wall-clock limit was in force at all, which is the exact
+    # failure-looks-like-success shape this suite exists to catch. A broken clock
+    # is unreadable, not a timeout.
     while [ "$waited" -lt "$secs" ]; do
         kill -0 "$pid" 2>/dev/null || break
-        sleep 1
+        if ! sleep 1; then
+            kill -9 "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            rm -f "$tmp" 2>/dev/null
+            return 125
+        fi
         waited=$((waited + 1))
     done
     local rc
@@ -82,7 +93,16 @@ run_limited() {
     else
         wait "$pid"; rc=$?
     fi
-    cat "$tmp"
+    # THE READ HAS ITS OWN STATUS, taken before `rm` overwrites it. `cat` can
+    # emit a partial buffer and then fail; the command's own 0 was then returned
+    # and the caller compared a truncated capture against its expectation. Where
+    # that expectation is a prefix or a `grep`, it still matched, and a mandatory
+    # gate reported PASS on output it never finished reading.
+    cat "$tmp"; local read_rc=$?
     rm -f "$tmp" 2>/dev/null
+    # 125 for "the watchdog itself could not do its job", distinct from 124 (the
+    # limit was hit) and from the command's own status. GNU `timeout` uses 125
+    # the same way, so the two paths still read alike.
+    [ "$read_rc" -eq 0 ] || return 125
     return "$rc"
 }

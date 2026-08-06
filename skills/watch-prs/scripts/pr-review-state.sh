@@ -71,8 +71,18 @@ OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
 # path split still yields `acme/widget` pointed every `gh` call at the unrelated
 # PUBLIC repository of that name — reading, commenting on, and merging the
 # same-numbered PR there.
+# The TRANSPORT is checked, not only the authority. `file://github.com/srv/acme/widget.git`
+# is a file-transport remote that carries an authority, so parsing it as a URL
+# yielded HOST=github.com while the path split yielded `acme/widget` — the same
+# wrong-public-repository outcome as a bare local path, reached through the arm
+# that was supposed to be the safe one. Only transports that actually reach a
+# GitHub server are accepted; anything else names no reviewable identity.
 case "$REMOTE" in
-    *://*)  _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    ssh://*|git://*|https://*|http://*|git+ssh://*)
+            _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
+    *://*)
+        echo "PR_REVIEW_STATE status=error reason=origin_transport_unsupported remote=$REMOTE" >&2
+        exit 2 ;;
     *@*:*)  _h="${REMOTE#*@}";   HOST="${_h%%:*}" ;;
     /*|.*|~*)
         echo "PR_REVIEW_STATE status=error reason=origin_has_no_host remote=$REMOTE" >&2

@@ -88,6 +88,86 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
         echo "ok   - $sc did not derive an identity from it"
     fi
 done
+
+# ── the origin SHAPE matrix, run against each parser independently ─────────
+# The three scripts and `SKILL.md` each carry their own copy of the identity
+# parser. The hostless and file-transport rules landed in all four, but the only
+# behavioural fixtures were in `test-pr-review-state.sh` — so reverting the
+# branch in `pr-findings.sh` or `pr-round-count.sh` left the suite green and
+# quietly restored the wrong-repository path. Duplicated code needs duplicated
+# coverage; a rule proven in one copy is unproven in the others.
+#
+# The dangerous shapes all derive a PLAUSIBLE `acme/widget` from the path while
+# naming no GitHub server, so the failure they cause is not an error — it is
+# every `gh` call landing on the unrelated PUBLIC repository of that name.
+set +e
+SHAPETMP="$(mktemp -d)"
+mkdir -p "$SHAPETMP/bin"
+# `gh` records what it was asked to do. The rejection message necessarily quotes
+# the remote, so grepping the OUTPUT for the derived slug matches the diagnostic
+# itself and proves nothing. What matters is whether a request was ever addressed
+# with it — so the spy file, not the message, is the assertion.
+cat > "$SHAPETMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_SPY"
+exit 1
+GHSH
+chmod +x "$SHAPETMP/bin/gh"
+shape_case() { # <remote> <expected-reason|OK> <label>
+    local remote="$1" want="$2" label="$3" sc rc out
+    cat > "$SHAPETMP/bin/git" <<GITSH
+#!/usr/bin/env bash
+if [ "\$1" = "remote" ]; then printf '%s\n' '$remote'; exit 0; fi
+exec "$REAL_GIT" "\$@"
+GITSH
+    chmod +x "$SHAPETMP/bin/git"
+    for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+        [ -f "$ROOT/$sc" ] || continue
+        case "$sc" in
+            pr-review-state.sh) set -- state 7 somebody ;;
+            pr-findings.sh)     set -- list 7 ;;
+            *)                  set -- 7 ;;
+        esac
+        : > "$SHAPETMP/spy"
+        out="$(GH_SPY="$SHAPETMP/spy" PATH="$SHAPETMP/bin:$PATH" run_limited 20 "$ROOT/$sc" "$@" 2>&1)"; rc=$?
+        if [ "$want" = "OK" ]; then
+            # The negative control. A real GitHub remote must NOT be caught by
+            # either rule — otherwise a matrix of rejections could be satisfied
+            # by a parser that rejects everything, which is not the invariant.
+            if printf '%s' "$out" | grep -qE 'reason=origin_(has_no_host|transport_unsupported)'; then
+                echo "FAIL - $sc rejected a valid remote as $label (out='$out')"; idfail=1
+            else
+                echo "ok   - $sc accepts $label"
+            fi
+            continue
+        fi
+        if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "reason=$want"; then
+            echo "ok   - $sc refuses $label"
+        else
+            echo "FAIL - $sc accepted $label (want reason=$want, rc=$rc out='$out')"; idfail=1
+        fi
+        # The consequence, asserted directly: no request may have been addressed
+        # at all. An rc-only assertion passes on a parser that rejected for some
+        # other reason downstream, having already read, commented on, or merged
+        # in the wrong repository on its way there.
+        if [ -s "$SHAPETMP/spy" ]; then
+            echo "FAIL - $sc addressed a request from $label: $(tr '\n' ';' < "$SHAPETMP/spy")"
+            idfail=1
+        else
+            echo "ok   - …and addressed no request from it"
+        fi
+    done
+}
+shape_case '/srv/mirrors/acme/widget.git' origin_has_no_host 'an absolute local path'
+shape_case '../acme/widget.git'           origin_has_no_host 'a relative local path'
+shape_case '~/mirrors/acme/widget.git'    origin_has_no_host 'a tilde local path'
+shape_case 'file://github.com/srv/acme/widget.git' origin_transport_unsupported \
+           'a file:// URL carrying a github.com authority'
+shape_case 'git@github.com:acme/widget.git' OK 'an ordinary SCP-style GitHub remote'
+shape_case 'https://github.com/acme/widget.git' OK 'an ordinary https GitHub remote'
+rm -rf "$SHAPETMP"
+set -e
+
 rm -rf "$IDTMP"
 set -e
 if [ "$idfail" -ne 0 ]; then

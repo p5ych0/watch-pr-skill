@@ -878,6 +878,55 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
         || die "$name: does not rule out running the tests"
 done
 
+# ── the phase summary is written by a QUOTED heredoc ───────────────────────
+# `SKILL.md` is executed by the driver verbatim, so an unquoted heredoc around
+# prose is a live substitution site: the summary body is composed from the round
+# and routinely contains Markdown code spans holding shell text, including text
+# copied out of an untrusted PR description or a reviewer comment. The assertion
+# is structural rather than on the abort message, because a message survives the
+# defect it names.
+hd="$(grep -n 'cat >>\{0,1\} "\$SUMMARY_FILE" <<' "$SKILL" || true)"
+if [ -z "$hd" ]; then
+    die "no summary heredoc found in SKILL.md — has the recipe moved?"
+else
+    bad="$(printf '%s\n' "$hd" | grep -v "<<'EOF'" || true)"
+    [ -z "$bad" ] \
+        && pass "every summary heredoc is quoted, so prose is written, not executed" \
+        || die "an unquoted summary heredoc executes the prose it writes: $bad"
+fi
+# …and the one value it needs still reaches the file, or the quoting silently
+# turned the SHA into the literal text $CODEX_SHA in every summary. The two parts
+# are matched separately because the printf and its argument are on separate
+# continued lines, and a single-line pattern would fail on correct code.
+if grep -q "printf .*Codex signed off on" "$SKILL" \
+   && grep -q '"\$CODEX_SHA" >> "\$SUMMARY_FILE"' "$SKILL"; then
+    pass "the reviewed SHA is emitted separately through printf"
+else
+    die "the quoted heredoc drops the reviewed SHA and nothing re-emits it"
+fi
+
+# ── the required-checks payload is shape-checked before `all` ──────────────
+# `all(.[]; …)` over an empty stream is `true`, so an object, a null, or an empty
+# array from a SUCCESSFUL read came out as "every required check passed" and the
+# default administrator merge proceeded on a payload nothing had read.
+grep -q 'if type != "array" or length == 0 then "malformed"' "$SKILL" \
+    && pass 'the checks payload must be a non-empty array before all() runs' \
+    || die 'the checks jq computes all() without validating its container'
+grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SKILL" \
+    && pass "…and each element must actually carry a bucket string" \
+    || die "the checks jq does not validate the bucket records"
+
+# ── the identity parser rejects transports that reach no GitHub server ─────
+# `SKILL.md` carries its own copy of the parser, and it is the copy the driver
+# runs. `test-pr-identity.sh` can execute the three scripts' copies but not this
+# one, so the structural assertion is what covers it.
+grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SKILL" \
+    && pass "SKILL.md accepts only GitHub network transports" \
+    || die "SKILL.md parses any URL scheme as a GitHub identity"
+grep -q 'reaches no GitHub server' "$SKILL" \
+    && pass "…and refuses the rest rather than guessing a host" \
+    || die "SKILL.md has no rejection path for an unsupported transport"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

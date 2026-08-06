@@ -43,8 +43,17 @@ _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
 # such as `/srv/mirrors/acme/widget.git` has no host, and defaulting it to
 # github.com while the path split still yields `acme/widget` would point every
 # `gh` call at the unrelated PUBLIC repository of that name.
+# The TRANSPORT is checked, not only the authority. `file://github.com/srv/acme/widget.git`
+# is a file-transport remote that carries an authority, so parsing it as a URL
+# yielded HOST=github.com while the path split yielded `acme/widget` — the same
+# wrong-public-repository outcome as a bare local path, reached through the arm
+# that was supposed to be the safe one. Only transports that actually reach a
+# GitHub server are accepted; anything else names no reviewable identity.
 case "$REMOTE" in
-    *://*)  _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
+    ssh://*|git://*|https://*|http://*|git+ssh://*)
+            _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
+    *://*)
+        echo "ABORT: origin '$REMOTE' uses a transport that reaches no GitHub server."; exit 1 ;;
     *@*:*)  _hh="${REMOTE#*@}";   HOST="${_hh%%:*}" ;;
     /*|.*|~*) echo "ABORT: origin '$REMOTE' names no host; refusing to guess one."; exit 1 ;;
     *:*/*)  HOST="${REMOTE%%:*}" ;;
@@ -672,16 +681,29 @@ fi
 # the guarded read happily returns; a `cat` that cannot open the file at all
 # leaves the PREVIOUS round's contents there to be read as this one's. Either
 # posts an invalid summary and requests Copilot against it.
-cat > "$SUMMARY_FILE" <<EOF || { echo "ABORT: could not write the phase summary."; exit 0; }
+# The heredoc is QUOTED, and the one value it needs is written separately.
+# Unquoted, the shell expanded the prose while writing it — and this body is
+# prose you compose from the round, which routinely contains Markdown code spans
+# holding shell text. A summary quoting a finding about `$(gh pr view …)` or a
+# backtick-delimited command line was therefore EXECUTED while being written,
+# and text lifted from an untrusted PR description or a reviewer comment is the
+# same substitution with someone else choosing the command. Where it did not
+# execute, it silently vanished: `$HOST` in quoted prose came out empty and
+# `cat` still succeeded, so the mangling was invisible.
+cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase summary."; exit 0; }
 ## Codex phase complete — requesting Copilot
-
-Codex signed off on \`$CODEX_SHA\`. Opening the Copilot phase on the same head.
-
+EOF
+# `$CODEX_SHA` is already validated as 40-hex above, and `printf` gives it no
+# chance to be anything else. Appends are checked individually: a partial file
+# reads as a complete summary.
+printf '\nCodex signed off on `%s`. Opening the Copilot phase on the same head.\n\n' \
+    "$CODEX_SHA" >> "$SUMMARY_FILE" || { echo "ABORT: could not write the phase summary."; exit 0; }
+cat >> "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase summary."; exit 0; }
 <what the PR does, and what the Codex phase changed — one paragraph. If Codex
 approved on the first pass with no fix rounds, say that: it is the difference
 between "nothing was found" and "everything found was addressed".>
 
-Fix commits from here carry a \`Review-Phase: copilot\` trailer, which is how the
+Fix commits from here carry a `Review-Phase: copilot` trailer, which is how the
 merge gate knows the head advanced only through Copilot fixes and that Codex's
 signoff still covers it.
 EOF
@@ -947,8 +969,17 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # available without polluting the value being compared.
 CHECKS_RC=0
 CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
+# THE CONTAINER IS VALIDATED BEFORE `all`. `all(.[]; …)` over an empty stream is
+# `true` by definition, so a successful read that returned an object, a null or
+# an empty array — anything that is not a list of bucket records — came out as
+# "every required check passed" and the administrator merge proceeded on a
+# checks payload nothing had actually read. The shape is asserted first and a
+# distinguished `malformed` emitted otherwise, which the equality test below
+# already refuses.
 CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket \
-             --jq 'all(.[]; .bucket=="pass")' 2>"$CHECKS_ERR") || CHECKS_RC=$?
+             --jq 'if type != "array" or length == 0 then "malformed"
+                   elif any(.[]; type != "object" or (.bucket | type) != "string") then "malformed"
+                   else all(.[]; .bucket == "pass") end' 2>"$CHECKS_ERR") || CHECKS_RC=$?
 # The READ has its own status, taken before `rm` overwrites it. A `cat` that
 # emitted text containing "no required checks" and then failed would otherwise be
 # classified as the benign none-configured case — turning a failed probe into a

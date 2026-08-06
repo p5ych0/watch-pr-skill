@@ -811,5 +811,31 @@ for bad in 00 08 09; do
         || die "--interval $bad gave rc=$rc after ${elapsed}s"
 done
 
+# ── an out-of-range timeout falls back rather than wrapping ────────────────
+# `--timeout 18446744073709551616` is all digits, so the shape test accepted it
+# — and 2^64 wraps to exactly 0 inside `TIMEOUT - e`. `remaining_s` then reported
+# an immediate ordinary timeout on the very first poll, and the documented driver
+# re-arms an ordinary timeout, so an unreadable configuration became an endless
+# no-op loop that never once waited for a review.
+#
+# The observable consequence is what is asserted: given a sequence that never
+# reaches a terminal state, the watch must still be POLLING when the harness
+# limit fires, rather than having announced a timeout at once. The run is bounded
+# by `run_limited` because the fixed code falls back to a 3600s deadline — an
+# unbounded call here would hang the suite for an hour instead of failing it.
+for huge in 18446744073709551616 340282366920938463463374607431768211456; do
+    seq_set none
+    out="$(run_limited 6 env PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+             HEAD40="$HEAD40" "$SCRIPT" 7 "$BOT" --interval 1 --timeout "$huge" 2>&1)"; rc=$?
+    if [ "$rc" -eq 124 ]; then
+        pass "an out-of-range timeout ($huge) falls back instead of wrapping to zero"
+    else
+        die "timeout=$huge exited early (rc=$rc out='$out')"
+    fi
+    printf '%s' "$out" | grep -q 'state=timeout' \
+        && die "…and it announced an immediate timeout from a wrapped deadline" \
+        || pass "…and announced no timeout"
+done
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
