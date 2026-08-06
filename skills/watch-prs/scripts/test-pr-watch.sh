@@ -749,7 +749,7 @@ out="$(PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=999 \
 # id: differing from the baseline, it let the watch announce the OLD terminal
 # verdict as this round. A newline also smuggles a line into the diagnostic,
 # which is the channel Monitor reads.
-for badid in 'not-a-number' 'comment:x' '12 34' 'comment:'; do
+for badid in 'not-a-number' 'comment:x' '12 34' 'comment:' ''; do
     cat > "$TMP/badid.sh" <<SH
 #!/usr/bin/env bash
 [ "\$1" = "head" ] && { printf '%s\n' "\$HEAD40"; exit 0; }
@@ -762,7 +762,7 @@ SH
     out="$(PR_WATCH_STATE_SCRIPT="$TMP/badid.sh" run_limited 30 "$SCRIPT" 7 "$BOT" \
            --after-review 99 --interval 1 --timeout 4 2>&1)"; rc=$?
     [ "$rc" -eq 2 ] \
-        && pass "a review id of '$badid' => 2" \
+        && pass "a review id of '${badid:-<empty>}' => 2" \
         || die "malformed id '$badid' gave rc=$rc out='$out'"
     printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
         && die "malformed id '$badid' still announced READY: $out" \

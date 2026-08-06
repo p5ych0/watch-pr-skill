@@ -71,6 +71,12 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The round boundary is checked before the request, not after it.** Both
+  round-closing recipes counted rounds in step 6 — *after* step 5 had already
+  posted the `@codex` mention or invoked `--add-reviewer`. The pause therefore
+  fired once round N+1 was queued and very likely running, which is a
+  notification that continuing has begun rather than a decision about whether to.
+
 - **A Copilot round re-requests Copilot.** The round-closing recipe always posted
   the `@codex` mention, but Copilot is triggered only by `--add-reviewer` — never
   by a push, never by a mention. A Copilot fix round therefore requested nothing

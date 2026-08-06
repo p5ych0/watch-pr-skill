@@ -422,6 +422,17 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
     || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
 
+# THE BOUNDARY IS CHECKED BEFORE THE REQUEST, not after it in step 6. Counting
+# afterwards meant the pause fired once round N+1 had already been queued and was
+# very likely running — which is not a decision about whether to continue, it is
+# a notification that continuing has begun.
+"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
+case "$ROUNDS_RC" in
+    0) ;;
+    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
+    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
+esac
+
 # Branch on the reviewer this round was about. Copilot is requested ONLY through
 # `--add-reviewer`; posting the Codex mention in a Copilot round re-requests the
 # wrong reviewer and leaves the watch waiting past a pass nobody asked for.
@@ -483,24 +494,38 @@ git push || { echo "ABORT: push failed; no review was queued and the fixes are n
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
-if [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
-    # Same head as the last round: the push queued nothing, so ask.
-    # WHICH reviewer is being re-requested matters. Copilot is never triggered by
-    # a push and never by an `@codex` mention — only by `--add-reviewer` — so a
-    # Copilot fix round that posted the Codex mention requested nothing at all and
-    # the watch waited past the old Copilot review indefinitely.
-    if [ "$WHO" = "$COPILOT_BOT" ]; then
-        if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
-            echo "ABORT: could not re-request Copilot for an unchanged head."; exit 0
-        fi
-    elif ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+# THE BOUNDARY IS CHECKED BEFORE THE REQUEST, not after it in step 6. Counting
+# afterwards meant the pause fired once round N+1 had already been queued and was
+# very likely running — which is not a decision about whether to continue, it is
+# a notification that continuing has begun.
+"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
+case "$ROUNDS_RC" in
+    0) ;;
+    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
+    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
+esac
+
+# WHICH reviewer comes FIRST, before any question about the head.
+#
+# A push never triggers Copilot — the skill establishes that at the top — so in
+# the Copilot phase automatic review is irrelevant and the request is always
+# explicit. Branching on the head first meant a Copilot round that DID change the
+# head skipped `--add-reviewer` entirely, and the watch waited past the old
+# Copilot result for a pass nobody had asked for.
+if [ "$WHO" = "$COPILOT_BOT" ]; then
+    if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+        echo "ABORT: could not re-request Copilot."; exit 0
+    fi
+elif [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
+    # Codex, same head as the last round: the push queued nothing, so ask.
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
         echo "ABORT: could not request a review for an unchanged head."; exit 0
     fi
 fi
-# Otherwise no `@codex review` comment: the push already asked, and sending one
-# too queues a duplicate pass over the same head.
+# Otherwise no `@codex review` comment: the push already asked Codex, and sending
+# one too queues a duplicate pass over the same head.
 ```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
@@ -537,7 +562,11 @@ record. Restating the defect in the mention is a work order.
 
 ## 6. Round check-in
 
-Before re-requesting, ask whether this is a boundary:
+**This runs inside step 5, before the request-triggering command** — both
+recipes above call it. Counting afterwards meant the pause fired once the next
+round had already been queued, which is a notification rather than a decision.
+It is documented separately because the phase transitions in steps 7 and 8 check
+the same boundary for the same reason.
 
 ```bash
 "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?

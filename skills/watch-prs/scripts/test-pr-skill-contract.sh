@@ -679,6 +679,38 @@ grep -q 'could not re-read the head for this round' "$SKILL" \
     && pass "…and the baseline is refreshed per round, not carried from step 2" \
     || die "a stale baseline makes the unchanged-head check false after a fix round"
 
+# ── the boundary is checked BEFORE the request, in both recipes ───────────
+# Counting afterwards meant the pause fired once round N+1 was already queued and
+# probably running — a notification, not a decision.
+# Line numbers, compared per recipe. An awk state machine got this wrong twice:
+# `inb` never reset, so the second recipe saw the first one's request line.
+off_start=$(grep -n 'Automatic review OFF' "$SKILL" | head -1 | cut -d: -f1)
+on_start=$(grep -n 'Automatic review ON' "$SKILL" | head -1 | cut -d: -f1)
+in_range() {   # in_range <pattern> <from> <to> -> first matching line number
+    # `-e`, not `--`: passing `--` as the first ARGUMENT shifted every parameter
+    # by one, so the pattern became the range and every lookup returned line 1.
+    grep -n -e "$1" "$SKILL" | awk -F: -v a="$2" -v b="$3" '$1>a && $1<b {print $1; exit}'
+}
+end_of_file=$(wc -l < "$SKILL")
+for spec in "OFF|$off_start|$on_start" "ON|$on_start|$end_of_file"; do
+    label="${spec%%|*}"; rest="${spec#*|}"; from="${rest%%|*}"; to="${rest#*|}"
+    c=$(in_range 'pr-round-count.sh N "$WHO"' "$from" "$to")
+    q1=$(in_range '--add-reviewer @copilot' "$from" "$to")
+    q2=$(in_range '--body "@codex review' "$from" "$to")
+    q=$q1; { [ -n "$q2" ] && { [ -z "$q" ] || [ "$q2" -lt "$q" ]; }; } && q=$q2
+    { [ -n "$c" ] && [ -n "$q" ] && [ "$c" -lt "$q" ]; } \
+        && pass "the automatic-review-$label recipe counts rounds before requesting" \
+        || die "the automatic-review-$label recipe requests before the boundary check (count=$c request=$q)"
+done
+
+# ── Copilot is re-requested regardless of whether the head moved ──────────
+# A push never triggers Copilot, so branching on the head first skipped
+# `--add-reviewer` on any Copilot round that DID change the head.
+awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
+     /HEAD_BEFORE" = "\$HEAD_AFTER/ {if (w && w < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "the reviewer is checked before the head in the automatic recipe" \
+    || die "a Copilot round that changed the head skips --add-reviewer"
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

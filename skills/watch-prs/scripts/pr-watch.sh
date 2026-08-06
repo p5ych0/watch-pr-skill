@@ -306,6 +306,16 @@ while :; do
                 # watch announce the OLD terminal verdict as this round. A
                 # newline in either value also smuggles an extra line into the
                 # diagnostic below, and that is the channel Monitor reads.
+                # An EMPTY current id is malformed here. The state probe just
+                # reported a terminal state, so an authoritative review exists
+                # and the helper must name it; empty differed from a non-empty
+                # baseline and let the watch announce the OLD verdict as this
+                # round. An empty BASELINE stays legal — it means there was no
+                # prior review to wait past.
+                case "$cur" in
+                    "") echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=empty_review_id" >&2
+                        exit 2 ;;
+                esac
                 for _id in "$cur" "$AFTER_REVIEW"; do
                     case "$_id" in
                         ""|*[0-9]) ;;
