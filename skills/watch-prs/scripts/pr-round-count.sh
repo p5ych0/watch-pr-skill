@@ -176,7 +176,12 @@ clean_shas=$(printf '%s' "$icraw" | jq -s --argjson who "$WHO_JSON" '
                | select((.user.login | IN($who[])) and ((.body | type) == "string"))
                | select(.body | contains("Reviewed commit:"))
                | select(.body | test("[Dd]idn.t find any major issues"))
-               | (.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{7,40})`").sha)
+               # EXACTLY ten hex characters, the documented footer width. A
+               # shorter hash cannot be deduplicated against the 10-char prefix
+               # taken from a full review SHA, so a clean re-review of an
+               # already-counted head would add a phantom round — and ten real
+               # heads plus that phantom reports 11, skipping the modulo pause.
+               | (.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{10})`").sha)
              ] | unique
         end
     end' 2>/dev/null) || {

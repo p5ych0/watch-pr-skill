@@ -71,6 +71,20 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The clean-pass hash comes from the footer, exactly.** Two independent
+  `contains` checks accepted a clean comment for an *older* head that merely
+  mentioned the current prefix in its prose — the footer named a different commit
+  and the current, unreviewed head read as clean. The hash is extracted from the
+  `Reviewed commit:` field and compared exactly, and `pr-round-count.sh` requires
+  the documented ten characters: a shorter one cannot be deduplicated against the
+  prefix of a full review SHA, so a clean re-review of an already-counted head
+  would have added a phantom round and pushed the count past the pause.
+
+- **A clean comment must carry a canonical timestamp.** It is ordered against
+  review timestamps, so `zzzz` would sort above every real one and override a
+  newer `CHANGES_REQUESTED`, and a null would read as clean whenever no review
+  existed. Unreadable ordering is not an ordering, so it fails closed.
+
 - **A clean pass counts as a round.** It leaves no review behind, so counting
   `pulls/N/reviews` alone reported nine heads for nine-plus-a-clean-tenth — and
   the phase-transition checks that consult that number then skipped the operator

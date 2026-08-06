@@ -200,12 +200,27 @@ clean_comment_for_head() {
             else ( [ $all[]
                      | select(.user.login == $who)
                      | select((.body | type) == "string")
-                     # Bound to THIS head, and to a clean-pass phrasing. Both.
-                     | select(.body | contains("Reviewed commit:"))
-                     | select(.body | contains($h))
                      | select(.body | test("[Dd]idn.t find any major issues"))
+                     # The hash is EXTRACTED FROM THE FIELD and compared exactly.
+                     # Two independent `contains` checks passed a clean comment
+                     # for an OLDER head that merely mentioned the current
+                     # prefix in its prose — the footer named a different
+                     # commit, and the current unreviewed head read as clean.
+                     | select((.body | capture("Reviewed commit:[^`]*`(?<sha>[0-9a-f]{10})`") // {sha: ""}).sha == $h)
                    ] | sort_by(.id) | last ) as $c
-              | if $c == null then "" else (($c.id | tostring) + "\t" + ($c.created_at // "")) end
+              | if $c == null then ""
+                # The selected comment must carry the SAME canonical UTC stamp
+                # required of a review, because it is ordered against those. A
+                # `zzzz` sorts above every real timestamp and would override a
+                # newer CHANGES_REQUESTED, and a null would be treated as clean
+                # whenever no review existed. Unreadable ordering is not an
+                # ordering, so this fails closed rather than guessing.
+                elif ($c.created_at | type) != "string"
+                     or ($c.created_at
+                         | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+                         | not)
+                then error("clean comment without a canonical timestamp")
+                else (($c.id | tostring) + "\t" + $c.created_at) end
             end
         end' 2>/dev/null)" || return 2
     case "$out" in

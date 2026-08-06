@@ -239,6 +239,19 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS_RC=1 run 7 2>&1)"; rc=$?
     && pass "an unreadable comment fetch => 2, never a lower count" \
     || die "comment fetch failure gave rc=$rc"
 
+# A short hash in the footer cannot be deduplicated against the 10-char prefix
+# taken from a full review SHA, so accepting one would add a PHANTOM round — and
+# ten real heads plus a phantom reports 11, sailing past the modulo-10 pause.
+specs=(); for i in $(seq 1 10); do specs+=("$CODEX|m$i|t"); done
+mk "${specs[@]}"
+jq -n -c --arg login "$CODEX" --arg sha "$(sha m10 | cut -c1-8)" \
+    '[{id: 702, user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+    && pass "a short-hash footer adds no phantom round; the boundary still pauses" \
+    || die "short hash changed the count (rc=$rc out='$out')"
+
 # ── everything unreadable fails closed ─────────────────────────────────────
 out="$(GH_RC=1 run 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "fetch failure => 2" || die "fetch failure gave rc=$rc"

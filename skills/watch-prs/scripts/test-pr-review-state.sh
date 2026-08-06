@@ -175,9 +175,11 @@ CLEAN_PHRASE='Codex Review: Didn'\''t find any major issues. Breezy!'
 # inside a JSON string is an unescaped control character — the fixture was
 # invalid JSON and the helper failed closed on it, which looked like the code
 # being wrong rather than the fixture.
-mk_clean_comment() {   # <sha10> [phrase] [login]
+mk_clean_comment() {   # <sha10> [phrase] [login] [created_at]
     jq -n --arg login "${3:-$BOT}" --arg phrase "${2:-$CLEAN_PHRASE}" --arg sha "$1" \
-        '[{id: 901, user: {login: $login}, body: ($phrase + "\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+        --arg ts "${4-2026-01-05T00:00:00Z}" \
+        '[{id: 901, created_at: $ts, user: {login: $login},
+           body: ($phrase + "\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
         > "$TMP/icomments.json"
 }
 printf '[]' > "$TMP/noreviews.json"
@@ -220,13 +222,13 @@ printf '%s' "$out" | grep -q 'state=none' \
 
 # A SUBMITTED review always wins: a later blocking review must not be masked by
 # an earlier clean comment on the same head.
-mk_clean_comment "${HEAD40:0:10}"
+mk_clean_comment "${HEAD40:0:10}" "$CLEAN_PHRASE" "$BOT" "2026-01-01T00:00:00Z"
 mk_reviews CHANGES_REQUESTED '"2026-01-02T00:00:00Z"' 903
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
 printf '%s' "$out" | grep -q 'state=blocked' \
-    && pass "a submitted review outranks a clean comment on the same head" \
-    || die "a clean comment masked a blocking review: $out"
+    && pass "an older clean comment does not mask a newer blocking review" \
+    || die "a stale clean comment masked a newer blocking review: $out"
 
 # An unreadable comment fetch is NOT "no clean comment".
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS_RC=1 \
@@ -277,6 +279,40 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
 printf '%s' "$out" | grep -q 'state=pending' \
     && pass "an in-flight draft outranks even a newer clean comment" \
     || die "a clean comment overrode a draft: $out"
+
+# A clean comment is ordered against reviews, so it must carry the SAME canonical
+# UTC stamp they do. `zzzz` sorts above every real timestamp and would override a
+# newer CHANGES_REQUESTED; a null would read as clean whenever no review existed.
+printf '[]' > "$TMP/noreviews.json"
+for badts in '' 'zzzz' '2026-01-05' '2026-01-05T00:00:00+01:00'; do
+    mk_clean_comment "${HEAD40:0:10}" "$CLEAN_PHRASE" "$BOT" "$badts"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+            run state 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a clean comment timestamped '${badts:-<empty>}' => 2" \
+        || die "clean comment with timestamp '${badts:-<empty>}' gave rc=$rc '$out'"
+done
+# A genuinely absent created_at is the same: unreadable ordering is not ordering.
+jq -n --arg login "$BOT" --arg phrase "$CLEAN_PHRASE" --arg sha "${HEAD40:0:10}" \
+    '[{id: 902, created_at: null, user: {login: $login},
+       body: ($phrase + "\n\n**Reviewed commit:** `" + $sha + "`\n")}]' > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] && pass "a clean comment with a null created_at => 2" \
+    || die "null created_at gave rc=$rc '$out'"
+
+# The hash is taken FROM THE FOOTER, not found anywhere in the body. A clean pass
+# for an older head that merely mentions the current prefix in its prose is not a
+# signoff for the current head.
+jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE" \
+    '[{id: 903, created_at: "2026-01-05T00:00:00Z", user: {login: $login},
+       body: ($phrase + " Superseded by " + $cur + " later.\n\n**Reviewed commit:** `bbbbbbbbbb`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=none' \
+    && pass "the current prefix in prose is not a signoff; only the footer counts" \
+    || die "a prose mention was read as the reviewed commit: $out"
 
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31
