@@ -26,8 +26,12 @@ settings page.
 ## Derive identity
 
 ```bash
-REMOTE=$(git remote get-url origin 2>/dev/null)
-[ -n "$REMOTE" ] || { echo "ABORT: cwd is not a git checkout with an origin"; exit 1; }
+# The STATUS, not just the output: `git remote get-url origin` can print a
+# plausible URL and then fail, and command substitution keeps what it printed.
+# Every `gh` call below is addressed by the identity derived here, so an
+# untrusted one sends this project's review traffic somewhere else.
+REMOTE=$(git remote get-url origin 2>/dev/null) || REMOTE=""
+[ -n "$REMOTE" ] || { echo "ABORT: cwd is not a git checkout with a readable origin"; exit 1; }
 _p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
 REPO_DIR="$(git rev-parse --show-toplevel)"
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
@@ -327,9 +331,16 @@ git push                                   # inert: nothing reviews on push
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
 # until it timed out.
+# The summary is READ with its status taken, before any of it is posted.
+# `$(cat …)` inside the argument swallows the reader's status, so a partial read
+# still produced a successful `gh pr comment` — and the reviewer contract makes
+# the newest summary the thing read before the diff, so a truncated one is worse
+# than none: it looks complete.
+SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
+[ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
 if ! gh pr comment N --body "@codex review
 
-$(cat "$SUMMARY_FILE")"; then
+$SUMMARY"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
 fi
 ```
@@ -342,7 +353,14 @@ told to read must already be there, and **no mention is sent at all**:
 # re-reports findings that were already answered, and the volume reads as
 # regression rather than repetition.
 # Then the summary, branched on, and only then the push.
-if ! gh pr comment N --body "$(cat "$SUMMARY_FILE")"; then
+# The summary is READ with its status taken, before any of it is posted.
+# `$(cat …)` inside the argument swallows the reader's status, so a partial read
+# still produced a successful `gh pr comment` — and the reviewer contract makes
+# the newest summary the thing read before the diff, so a truncated one is worse
+# than none: it looks complete.
+SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
+[ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
+if ! gh pr comment N --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not push yet."; exit 0
 fi
 git push                                   # THIS is the request
@@ -452,7 +470,14 @@ Fix commits from here carry a \`Review-Phase: copilot\` trailer, which is how th
 merge gate knows the head advanced only through Copilot fixes and that Codex's
 signoff still covers it.
 EOF
-if ! gh pr comment N --body "$(cat "$SUMMARY_FILE")"; then
+# The summary is READ with its status taken, before any of it is posted.
+# `$(cat …)` inside the argument swallows the reader's status, so a partial read
+# still produced a successful `gh pr comment` — and the reviewer contract makes
+# the newest summary the thing read before the diff, so a truncated one is worse
+# than none: it looks complete.
+SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
+[ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
+if ! gh pr comment N --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi
 

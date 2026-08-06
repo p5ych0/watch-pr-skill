@@ -147,13 +147,18 @@ Then:
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings".
-4. **Fix and close the round** — commit `fix(review): …`, **check the round
-   boundary** (`pr-round-count.sh <PR> <reviewer>`), then push, reply to each
-   thread with what changed, resolve it, and post **one comment** that opens with
+4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
+   (`pr-selfcheck.sh`), **check the round boundary**
+   (`pr-round-count.sh <PR> <reviewer>`), reply to each thread with what changed,
+   react 👍/👎, and resolve it. Then, **with automatic review off** (the
+   recommended setting), push and post **one comment** that opens with
    `@codex review` and continues with the round summary — the mention *is* the
    request, so the account of what changed and the request for the next pass are
-   the same comment. The summary says what was addressed and what was
-   intentionally skipped. The boundary check comes *before the push*: with Codex automatic
+   the same comment. **With automatic review on** the push *is* the request, so
+   the summary must be posted **before** it and no mention is sent at all; a
+   mention would queue a second review of the same head. Either way the summary
+   says what was addressed and what was intentionally skipped, and both checks
+   come *before the push*: with Codex automatic
    review enabled the push itself requests the next review, so a check placed
    after it asks you about a round that has already started. A resolved thread is
    not a record of a fix; the summary is.

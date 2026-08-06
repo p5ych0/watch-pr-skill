@@ -90,9 +90,25 @@ if [ -f "$SKILL" ]; then
     # legitimate result here. Anything else is a broken read.
     # Checked on the CAPTURED status of each pipeline, not with `|| exit`. Under
     # `pipefail` a pipeline reports the rightmost non-zero status, and `grep`
-    # exits 1 when nothing matches — a legitimate answer here — so `||` fired on
-    # every empty result and aborted the whole check.
-    chk() {   # chk <label> <status>
+    # exits 1 when nothing matches — a legitimate answer — so `||` fired on every
+    # empty result and aborted the whole check.
+    #
+    # TWO checkers, not one. Accepting 1 everywhere was too broad: `awk`, `sed`
+    # and `sort` also exit 1 on real errors, and the `blocks` extraction has no
+    # `grep` in it at all — so an `awk` that printed a plausible block and then
+    # failed was waved through as "no matches", and the run continued on partial
+    # input toward `status=clean`.
+    #
+    # `chk` is the strict one: any non-zero is a broken read. `chk_grep` is for
+    # pipelines that END in a grep-family stage, where 1 genuinely means "nothing
+    # matched" and nothing downstream can turn a real error into that same 1.
+    chk() {   # chk <label> <status> — no non-zero is acceptable
+        if [ "$2" -ne 0 ]; then
+            echo "PR_SELFCHECK status=error reason=extraction_failed step=$1 rc=$2" >&2
+            exit 2
+        fi
+    }
+    chk_grep() {   # chk_grep <label> <status> — 1 is "no matches"
         if [ "$2" -gt 1 ]; then
             echo "PR_SELFCHECK status=error reason=extraction_failed step=$1 rc=$2" >&2
             exit 2
@@ -108,7 +124,7 @@ if [ -f "$SKILL" ]; then
     # A comment is not code, and every false negative this check has had came
     # from prose being read as shell: `# wait for SUMMARY_FILE`, then
     # `# then for SUMMARY_FILE in prose`.
-    code="$(printf '%s\n' "$blocks" | grep -vE '^[[:space:]]*#')"; chk strip_comments $?
+    code="$(printf '%s\n' "$blocks" | grep -vE '^[[:space:]]*#')"; chk_grep strip_comments $?
     # Assignments, ONLY where an assignment can actually occur: at the start of a
     # line or after a `;`, optionally preceded by `local`.
     #
@@ -122,7 +138,7 @@ if [ -f "$SKILL" ]; then
     # removes the real assignment and requires the finding.
     assigned="$(printf '%s\n' "$code" \
         | grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+        | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk_grep assigned $?
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #
@@ -141,7 +157,7 @@ if [ -f "$SKILL" ]; then
     # can switch off, which is silent and indistinguishable from a clean run.
     forvars="$(printf '%s\n' "$code" \
         | grep -oE '^[[:space:]]*for[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+in([[:space:]]|$)' \
-        | awk '{print $2}' | sort -u)"; chk forvars $?
+        | awk '{print $2}' | sort -u)"; chk_grep forvars $?
     assigned="$(printf '%s\n%s\n' "$assigned" "$forvars" | sort -u)"; chk merge_assigned $?
     # Uses: $NAME and ${NAME...}, restricted to UPPERCASE names.
     #
@@ -161,7 +177,7 @@ if [ -f "$SKILL" ]; then
     # more than a lexer that quietly has a different one.
     used="$(printf '%s\n' "$code" \
         | grep -oE '\$\{?[A-Z][A-Z0-9_]*' \
-        | grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"; chk used $?
+        | grep -oE '[A-Z][A-Z0-9_]*' | sort -u)"; chk_grep used $?
     undef=""
     for v in $used; do
         case "$v" in
@@ -195,8 +211,19 @@ done
 # A contract naming a script that is not shipped fails at the point the driver
 # needs it most, and `$RB_SCRIPTS` resolving to an empty string turns that into a
 # confusing path error rather than a missing-file one.
+# The list is built and its STATUS taken BEFORE the loop. Discovering the helpers
+# inline in `for ... $(pipeline)` meant a failed pipeline produced an empty or
+# partial list, the loop ran zero or too few iterations, `missing` stayed 0, and
+# the check reported that every helper was present without ever establishing
+# which helpers the skill drives.
+helpers="$(grep -oE '\$RB_SCRIPTS"?/pr-[a-z-]+\.sh' "$SKILL" | grep -oE 'pr-[a-z-]+\.sh' | sort -u)"
+hstat=$?
+if [ "$hstat" -gt 1 ]; then
+    echo "PR_SELFCHECK status=error reason=extraction_failed step=helpers rc=$hstat" >&2
+    exit 2
+fi
 missing=0
-for s in $(grep -oE '\$RB_SCRIPTS"?/pr-[a-z-]+\.sh' "$SKILL" | grep -oE 'pr-[a-z-]+\.sh' | sort -u); do
+for s in $helpers; do
     [ -f "$SCRIPTS/$s" ] || { note missing_script "SKILL.md drives $s, which is not in scripts/"; missing=1; }
 done
 [ "$missing" -eq 0 ] && ok "every helper SKILL.md drives is present"

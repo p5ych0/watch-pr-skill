@@ -33,6 +33,65 @@ for f in "$ROOT"/pr-*.sh; do
     for g in "${FILES[@]}"; do [ "$g" = "$f" ] && covered=1; done
     [ "$covered" -eq 1 ] || missing="$missing $(basename "$f")"
 done
+# ── an origin lookup that prints and THEN fails is not an identity ────────
+# `git remote get-url origin` can write a plausible URL and exit non-zero, and
+# command substitution keeps what it wrote. Every `gh` call is addressed by the
+# identity derived from it, so accepting that output sends one project's review
+# traffic somewhere else.
+#
+# `set +e` around the block: this file runs under `-Eeuo pipefail`, and these
+# probes are EXPECTED to fail — that is the assertion. Without it the first stub
+# invocation aborts the script, which then reports nothing at all.
+idfail=0
+set +e
+IDTMP="$(mktemp -d)"
+mkdir -p "$IDTMP/bin"
+REAL_GIT="$(command -v git)"
+cat > "$IDTMP/bin/git" <<GITSH
+#!/usr/bin/env bash
+if [ "\$1" = "remote" ]; then
+    printf 'git@github.com:someone-else/other-repo.git\n'
+    exit 1
+fi
+exec "$REAL_GIT" "\$@"
+GITSH
+chmod +x "$IDTMP/bin/git"
+# `gh` is stubbed too, so the UNGUARDED path cannot reach the network — CI has no
+# credentials — and so that its failure is distinguishable from the guarded one.
+printf '#!/usr/bin/env bash\nexit 1\n' > "$IDTMP/bin/gh"
+chmod +x "$IDTMP/bin/gh"
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    case "$sc" in
+        pr-review-state.sh) set -- state 7 somebody ;;
+        pr-findings.sh)     set -- list 7 ;;
+        *)                  set -- 7 ;;
+    esac
+    out="$(PATH="$IDTMP/bin:$PATH" timeout 20 "$ROOT/$sc" "$@" 2>&1)"
+    rc=$?
+    # The REASON, not just the status. Without the guard these scripts still exit
+    # 2 — they simply fail further downstream, at the first `gh` call made against
+    # the wrong repository — so an rc-only assertion passes on the unguarded code
+    # and proves nothing. `no_origin` is reachable only when the lookup's status
+    # was actually taken.
+    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=no_origin'; then
+        echo "ok   - $sc rejects an origin lookup that printed before failing"
+    else
+        echo "FAIL - $sc accepted a failed origin lookup (rc=$rc out='$out')"; idfail=1
+    fi
+    if printf '%s' "$out" | grep -q 'someone-else'; then
+        echo "FAIL - $sc used the untrusted remote it was given"; idfail=1
+    else
+        echo "ok   - $sc did not derive an identity from it"
+    fi
+done
+rm -rf "$IDTMP"
+set -e
+if [ "$idfail" -ne 0 ]; then
+    echo "RESULT: FAIL"
+    exit 1
+fi
+
 if [ -n "$missing" ]; then
     echo "FAIL - runtime script(s) not covered by the identity guard:$missing"
     echo "RESULT: FAIL"

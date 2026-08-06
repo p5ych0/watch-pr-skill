@@ -35,7 +35,19 @@ case "$THRESHOLD" in
     ""|*[!0-9]*) THRESHOLD=10 ;;
 esac
 
-REMOTE="${REVIEW_BUS_REMOTE:-$(git remote get-url origin 2>/dev/null)}"
+# The STATUS is taken, not just the output. `git remote get-url origin` can print
+# a plausible URL and then exit non-zero — a partially-configured remote, a
+# permissions error mid-read — and command substitution keeps whatever it wrote.
+# `$OWNER/$REPO` derived from that drives every `gh` call below, so an untrusted
+# identity here sends one project's review traffic somewhere else entirely.
+#
+# Only the DERIVED lookup is guarded this way: an explicit REVIEW_BUS_REMOTE is
+# the caller stating the identity, and has no status to check.
+if [ -n "${REVIEW_BUS_REMOTE:-}" ]; then
+    REMOTE="$REVIEW_BUS_REMOTE"
+else
+    REMOTE="$(git remote get-url origin 2>/dev/null)" || REMOTE=""
+fi
 if [ -z "$REMOTE" ]; then
     echo "PR_ROUND_COUNT status=error reason=no_origin" >&2
     exit 2

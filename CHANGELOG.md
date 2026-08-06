@@ -71,6 +71,36 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **The origin lookup takes its status.** `git remote get-url origin` can print a
+  plausible URL and then exit non-zero, and command substitution keeps what it
+  wrote — so `SKILL.md` and the three helpers that derive identity could build
+  `$OWNER/$REPO` from an untrusted read. Every `gh` call is addressed by that
+  identity, so the failure sends one project's review traffic somewhere else
+  entirely. This predates the whole hardening stretch.
+
+- **The round summary is read before it is posted.** `$(cat "$SUMMARY_FILE")`
+  inside the argument swallowed the reader's status, so a partial read still
+  produced a successful post — and the reviewer contract makes the newest summary
+  the thing read before the diff, which makes a truncated one worse than none: it
+  looks complete. All three posting paths read it into a variable first.
+
+- **Status 1 means "no matches" only where a grep produced it.** One tolerant
+  checker for every extraction was too broad — `awk`, `sed` and `sort` also exit 1
+  on real errors, and the block extraction contains no grep at all, so an `awk`
+  that printed a plausible block and then failed was waved through. And the
+  helper-discovery pipeline was still unchecked entirely: a failure there left an
+  empty list, the loop ran zero iterations, and every helper was reported present.
+
+- **`pr-selfcheck.sh` is listed under its actual strict mode.** `CLAUDE.md`'s
+  table is authoritative and told authors that anything not in the `-uo` row uses
+  `-euo`; a future change following that rule would have enabled `-e` and aborted
+  the check on a `grep` that matched nothing. The Copilot restatement is synced.
+
+- **The README carries both review orderings.** It still told users to push and
+  then resolve and summarise — the ordering `SKILL.md` had just fixed — so anyone
+  following the README with automatic review on started the next pass against
+  open threads and the previous summary.
+
 - **The merge gate's `endCursor` parse is guarded.** `jq` can print a plausible
   cursor and then exit non-zero, and command substitution keeps what it printed —
   so the walk continued from an untrusted parse while `OK` stayed 1, and could

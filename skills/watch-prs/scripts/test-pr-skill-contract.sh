@@ -223,10 +223,16 @@ if [ -f "$README" ]; then
     # "boundary" sit on different lines, and a phrase-spanning regex silently
     # never matches — which is how a line-order assertion reports failure
     # regardless of the text.
-    readme_order=$(awk '/check the round/{b=NR} /then push/{p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
+    readme_order=$(awk '/check the round/{if(!b)b=NR} /push and post/{if(!p)p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
     [ "$readme_order" = "ok" ] \
         && pass "README checks the round boundary before the push" \
         || die "README still tells users to push before the boundary check"
+    # …and it must carry BOTH orderings, since the push is the trigger with
+    # automatic review on. One round after the skill was fixed the README still
+    # described only the auto-review-off flow.
+    grep -q 'With automatic review on' "$README" \
+        && pass "README describes the auto-review ordering too" \
+        || die "README documents only one review mode; the other starts a pass with no summary"
 else
     pass "README not present; flow-order check skipped"
 fi
@@ -331,7 +337,7 @@ grep -q 'case "\$SEEN" in \*"\$RS\$NEXT\$RS"\*) OK=0; break ;; esac' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --body "\$\(cat "\$SUMMARY_FILE"\)"/ {c=NR}
+awk '/gh pr comment N --body "\$SUMMARY"/ {c=NR}
      /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the Copilot round summary is posted before the review request" \
     || die "Copilot can be requested before the round summary exists"
@@ -384,7 +390,7 @@ grep -q 'The push is not' "$SKILL" \
 
 # In the auto-review branch, the push must come AFTER the summary post.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /gh pr comment N --body "\$\(cat "\$SUMMARY_FILE"\)"/ {c=NR}
+     inb && /gh pr comment N --body "\$SUMMARY"/ {c=NR}
      inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
     || die "the auto-review recipe pushes before the summary exists"
@@ -405,6 +411,17 @@ grep -q 'pulls/comments/<comment-id>/reactions' "$SKILL" \
 grep -q 'comment=' "$ROOT/skills/watch-prs/scripts/pr-findings.sh" \
     && pass "…and list prints the comment id the reaction needs" \
     || die "pr-findings.sh does not print a comment id to react to"
+
+# ── the summary is read with its status taken, on every path ──────────────
+# `$(cat …)` inside the argument swallows the reader's status, so a partial read
+# still produced a successful post — and the reviewer contract makes the newest
+# summary the thing read before the diff, so a truncated one looks complete.
+[ "$(grep -c 'SUMMARY="$(cat "$SUMMARY_FILE")"' "$SKILL")" -eq 3 ] \
+    && pass "all three summary posts read the file with a guarded status" \
+    || die "a summary post still interpolates \$(cat …) and swallows its status"
+grep -q 'ABORT: could not read the round summary' "$SKILL" \
+    && pass "…and a failed read aborts rather than posting a truncated record" \
+    || die "a failed summary read does not abort"
 
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read

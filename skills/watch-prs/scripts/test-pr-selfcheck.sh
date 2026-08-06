@@ -230,6 +230,48 @@ printf '%s' "$out" | grep -q 'THING' \
     || pass "a real for-loop variable is recognised as assigned"
 [ "$rc" -eq 0 ] && pass "…and that tree is otherwise clean" || die "loop fixture gave rc=$rc out='$out'"
 
+# ── status 1 is only "no matches" where a grep produced it ────────────────
+# One tolerant checker for every pipeline was too broad: `awk`, `sed` and `sort`
+# also exit 1 on real errors, and the `blocks` extraction has no grep in it at
+# all — so an awk that printed a plausible block and then failed was waved
+# through as "nothing matched", and the run continued on partial input.
+AWKBIN="$TMP/awkbin"; mkdir -p "$AWKBIN"
+printf '#!/usr/bin/env bash\nprintf "OWNER=plausible\\n"\nexit 1\n' > "$AWKBIN/awk"
+chmod +x "$AWKBIN/awk"
+R="$(mkroot "$OK_SKILL")"
+out="$(PATH="$AWKBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "an awk that prints and then exits 1 => 2, not treated as no-matches" \
+    || die "awk exiting 1 gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a run whose block extraction failed reported clean: $out" \
+    || pass "…and never reports clean"
+
+# ── the helper-discovery list is established before it is trusted ─────────
+# Discovering helpers inline in `for ... $(pipeline)` meant a failed pipeline
+# produced an empty list, the loop ran zero iterations, and the check reported
+# every helper present without establishing which helpers the skill drives.
+HELPBIN="$TMP/helpbin"; mkdir -p "$HELPBIN"
+REAL_GREP="$(command -v grep)"
+cat > "$HELPBIN/grep" <<GREPSH
+#!/usr/bin/env bash
+for a in "\$@"; do
+    case "\$a" in
+        *RB_SCRIPTS*) printf 'pr-plausible.sh\n'; exit 2 ;;
+    esac
+done
+exec "$REAL_GREP" "\$@"
+GREPSH
+chmod +x "$HELPBIN/grep"
+R="$(mkroot "$OK_SKILL")"
+out="$(PATH="$HELPBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a failed helper-discovery pipeline => 2, not an empty helper list" \
+    || die "helper discovery failure gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'status=clean' \
+    && die "a run whose helper discovery failed reported clean: $out" \
+    || pass "…and never reports clean"
+
 # ── the check itself failing is not "clean" ───────────────────────────────
 # rc 2 is "could not run", and it must never be confused with rc 0.
 out="$("$SCRIPT" "$TMP/does-not-exist" 2>&1)"; rc=$?

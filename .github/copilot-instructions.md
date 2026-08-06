@@ -94,7 +94,7 @@ script into a stricter mode.
 | Mode | Scripts | Why |
 | --- | --- | --- |
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
-| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh` | **`-e` is forbidden**: subcommands use exit status as control flow and several `gh` probes fail as normal operation. |
+| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh`, `pr-selfcheck.sh` | **`-e` is forbidden**: subcommands use exit status as control flow, several `gh` probes fail as normal operation, and a `grep` that matches nothing exits 1 as its normal answer. |
 
 ## Review statically — do not run anything
 
