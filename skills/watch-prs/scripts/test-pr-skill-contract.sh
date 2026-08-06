@@ -568,6 +568,33 @@ grep -q 'pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"' "$SKILL" \
     && pass "…and the id is captured before each request that a watch follows" \
     || die "the pre-request review id is not captured before every request"
 
+# ── "no required checks" is not "could not tell" ──────────────────────────
+# `gh pr checks --required` exits NON-ZERO when the branch has no required checks
+# at all. Treating every non-zero status as unreadable blocked the merge on every
+# repository without branch protection, permanently — a gate that never opens,
+# not a fail-closed guard. Found by trying to merge, not by reading the code.
+grep -q 'no required checks' "$SKILL" \
+    && pass "the gate distinguishes 'none configured' from a failed probe" \
+    || die "a repo with no required checks can never pass the merge gate"
+grep -q 'the required-checks probe failed' "$SKILL" \
+    && pass "…and a genuinely failed probe still blocks" \
+    || die "the checks probe no longer blocks on a real failure"
+grep -q 'CHECKS_ERR' "$SKILL" \
+    && pass "…using stderr, so the message does not pollute the compared value" \
+    || die "the checks probe does not capture stderr separately"
+
+# ── a clean pass arrives as a comment, not a review ───────────────────────
+# Codex submits a review only when it has findings, so `pulls/N/reviews` is empty
+# on a clean head and the phase could never complete.
+if [ -f "$SCRIPT_DIR/pr-review-state.sh" ]; then
+    grep -q 'clean_comment_for_head' "$SCRIPT_DIR/pr-review-state.sh" \
+        && pass "pr-review-state.sh reads the clean-pass comment channel" \
+        || die "a clean Codex pass is invisible; the phase cannot complete"
+    grep -q 'Reviewed commit:' "$SCRIPT_DIR/pr-review-state.sh" \
+        && pass "…bound to the head the comment names" \
+        || die "the clean comment is not bound to a commit"
+fi
+
 # ── the reviewers review; they do not implement ────────────────────────────
 # Ignoring this is not a no-op: a summary mentioning an unfixed defect was read
 # as a work order, and the run edited files and committed from an environment

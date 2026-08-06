@@ -156,6 +156,62 @@ reviewer_reviews() {
         end' 2>/dev/null || return 2
 }
 
+# A reviewer's clean-pass signal delivered as a PR COMMENT, bound to this head.
+# Prints the comment id and returns 0 when one exists; 1 when none does; 2 when
+# the read could not be trusted.
+#
+# WHY THIS EXISTS
+#
+# Codex does not submit a review when it finds nothing. A pass with findings
+# arrives as a review with inline comments; a CLEAN pass arrives only as an issue
+# comment reading "Codex Review: Didn't find any major issues", carrying
+# `**Reviewed commit:** <sha10>`. `pulls/N/reviews` is therefore EMPTY on a clean
+# head, so every caller here reported `state=none` and the Codex phase could
+# never complete — the merge gate could not see a clean verdict at all.
+#
+# That was not a hypothetical: PR #10 took thirty review rounds and all thirty-one
+# Codex reviews carried findings, so the success path was never once exercised
+# until PR #12 came back clean and the watch polled until it timed out.
+#
+# TWO signals are required, not one. The commit binding alone would accept any
+# comment that happens to quote this head, and the phrase alone would accept a
+# clean pass on a DIFFERENT commit. A false negative here merely keeps the loop
+# waiting; a false positive invents a signoff, so this is the direction to be
+# conservative in.
+clean_comment_for_head() {
+    local pr="$1" who="$2" head="$3" raw out
+    if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$pr/comments" --paginate 2>/dev/null); then
+        return 2
+    fi
+    out="$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg h "${head:0:10}" '
+        if length == 0 then error("no pages")
+        elif any(.[]; type != "array") then error("non-array page")
+        else [ .[][] ] as $all
+          | if any($all[];
+                   type != "object"
+                   or (.user | type) != "object"
+                   or (.user.login | type) != "string"
+                   or (.id | type) != "number"
+                   or ((.body | type) != "string" and .body != null))
+            then error("malformed comment record")
+            else ( [ $all[]
+                     | select(.user.login == $who)
+                     | select((.body | type) == "string")
+                     # Bound to THIS head, and to a clean-pass phrasing. Both.
+                     | select(.body | contains("Reviewed commit:"))
+                     | select(.body | contains($h))
+                     | select(.body | test("[Dd]idn.t find any major issues"))
+                   ] | sort_by(.id) | last ) as $c
+              | if $c == null then "" else ($c.id | tostring) end
+            end
+        end' 2>/dev/null)" || return 2
+    case "$out" in
+        "")            return 1 ;;
+        *[!0-9]*)      return 2 ;;
+    esac
+    printf '%s' "$out"
+}
+
 # Print "<state>\t<review-id>" for THIS head from ONE reviews fetch, or fail (2).
 # The id is the authoritative latest submitted review the state was derived from,
 # and is empty unless the state is `reviewed`.
@@ -165,7 +221,7 @@ reviewer_reviews() {
 # counted on another - a COMMENTED read followed by a DISMISSED one counted the
 # withdrawn review's zero comments and reported clean.
 head_review_snapshot() {
-    local pr="$1" who="$2" head="$3" reviews out
+    local pr="$1" who="$2" head="$3" reviews out cid
     reviews=$(reviewer_reviews "$pr" "$who") || return 2
     out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
         if type != "array" then error("bad shape")
@@ -192,6 +248,17 @@ head_review_snapshot() {
                               and $latest != null
                            then ($latest.id | tostring) else "" end)
         end' 2>/dev/null)" || return 2
+    # A submitted review always wins. The comment channel is consulted ONLY when
+    # this reviewer has no review on this head at all — so a later review with
+    # findings can never be masked by an earlier clean comment.
+    if [ "${out%%$'\t'*}" = "none" ]; then
+        cid="$(clean_comment_for_head "$pr" "$who" "$head")"
+        case "$?" in
+            0) out="reviewed"$'\t'"comment:$cid" ;;
+            1) ;;                 # genuinely nothing yet
+            *) return 2 ;;        # unreadable: never "no review"
+        esac
+    fi
     case "${out%%$'\t'*}" in
         none|pending|blocked|dismissed|reviewed) printf '%s' "$out" ;;
         *) return 2 ;;
@@ -233,7 +300,13 @@ clean_verdict() {
         reviewed) ;;
         *) printf '%s' "$st"; return 1 ;;
     esac
-    n="$(review_comment_count "$pr" "$id")" || return 2
+    # A comment-sourced signoff carries no inline comments by construction:
+    # there is no review to count them against. Counting is skipped rather than
+    # faked, and the re-check below still guards against the state moving.
+    case "$id" in
+        comment:*) n=0 ;;
+        *) n="$(review_comment_count "$pr" "$id")" || return 2 ;;
+    esac
     snap2="$(head_review_snapshot "$pr" "$who" "$head")" || return 2
     if [ "$snap2" != "$snap1" ]; then
         printf 'changed'

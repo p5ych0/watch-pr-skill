@@ -34,6 +34,12 @@ case "$1 ${2:-}" in
         if [ -n "${GH_FIXTURE_DIR:-}" ] && [ -f "$GH_FIXTURE_DIR/comments-$rid.json" ]; then
           cat "$GH_FIXTURE_DIR/comments-$rid.json"
         else cat "${GH_COMMENTS:-/dev/null}"; fi ;;
+      *"/issues/"*"/comments"*)
+        # The clean-pass channel: Codex reports "no findings" as an ISSUE
+        # comment and submits no review at all. Defaults to an empty list so
+        # every pre-existing case behaves exactly as before.
+        [ -n "${GH_ICOMMENTS_RC:-}" ] && exit "$GH_ICOMMENTS_RC"
+        if [ -n "${GH_ICOMMENTS:-}" ]; then cat "$GH_ICOMMENTS"; else printf '[]'; fi ;;
       *"/reviews"*) [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"; cat "${GH_REVIEWS:-/dev/null}" ;;
       *) printf '{}' ;;
     esac ;;
@@ -155,6 +161,79 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/none2.json" run review-id 7 "$BOT" 2>&
 # An unreadable fetch is NOT an empty id.
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-id 7 "$BOT" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "review-id: an unreadable fetch => 2" || die "review-id: fetch failure gave rc=$rc"
+
+# ── a clean pass arrives as a COMMENT, not a review ───────────────────────
+# Codex submits a review only when it has findings. A clean pass is an issue
+# comment carrying `**Reviewed commit:** <sha10>` and no review at all, so
+# `pulls/N/reviews` is empty — and every caller here reported `state=none`,
+# leaving the Codex phase unable to complete and the merge gate unable to see a
+# clean verdict. Thirty review rounds never reached this path.
+# The apostrophe lives in its own single-quoted variable: inside a "${2:-…}"
+# default the '"'"' idiom does not escape anything, it just ends the double quote.
+CLEAN_PHRASE='Codex Review: Didn'\''t find any major issues. Breezy!'
+# Built with `jq`, not `printf`: the body contains newlines, and a raw newline
+# inside a JSON string is an unescaped control character — the fixture was
+# invalid JSON and the helper failed closed on it, which looked like the code
+# being wrong rather than the fixture.
+mk_clean_comment() {   # <sha10> [phrase] [login]
+    jq -n --arg login "${3:-$BOT}" --arg phrase "${2:-$CLEAN_PHRASE}" --arg sha "$1" \
+        '[{id: 901, user: {login: $login}, body: ($phrase + "\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+        > "$TMP/icomments.json"
+}
+printf '[]' > "$TMP/noreviews.json"
+mk_clean_comment "${HEAD40:0:10}"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=reviewed' \
+    && pass "a clean-pass comment bound to this head is a reviewed state" \
+    || die "clean comment gave '$out'"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
+    && pass "…and yields a clean verdict, so the phase can complete" \
+    || die "clean comment verdict gave rc=$rc '$out'"
+
+# BOUND to this head. A clean pass on another commit says nothing about this one.
+mk_clean_comment "bbbbbbbbbb"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=none' \
+    && pass "a clean comment for another head does not count" \
+    || die "other-head clean comment leaked in: $out"
+
+# BOTH signals required: the commit binding alone would accept any comment that
+# happens to quote this head.
+mk_clean_comment "${HEAD40:0:10}" "Some unrelated remark about the diff"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=none' \
+    && pass "a comment quoting the head without the clean phrasing is not a signoff" \
+    || die "an unrelated comment was read as clean: $out"
+
+# Another account cannot sign off for this reviewer.
+mk_clean_comment "${HEAD40:0:10}" "$CLEAN_PHRASE" "somebody"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=none' \
+    && pass "a clean comment from another account is not this reviewer's signoff" \
+    || die "another account signed off: $out"
+
+# A SUBMITTED review always wins: a later blocking review must not be masked by
+# an earlier clean comment on the same head.
+mk_clean_comment "${HEAD40:0:10}"
+mk_reviews CHANGES_REQUESTED '"2026-01-02T00:00:00Z"' 903
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run state 7 "$BOT" 2>&1)"
+printf '%s' "$out" | grep -q 'state=blocked' \
+    && pass "a submitted review outranks a clean comment on the same head" \
+    || die "a clean comment masked a blocking review: $out"
+
+# An unreadable comment fetch is NOT "no clean comment".
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS_RC=1 \
+        run state 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "an unreadable comment fetch => 2, never state=none" \
+    || die "comment fetch failure gave rc=$rc '$out'"
 
 # ── verdict: only an accepted review with zero findings is clean ───────────
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31

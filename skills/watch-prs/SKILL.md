@@ -795,10 +795,31 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # default mode the merge below uses `--admin`, which bypasses branch protection,
 # so this probe is the only thing standing between a failed read and an unchecked
 # merge.
+#
+# "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
+# NON-ZERO when the branch has no required checks at all, saying so on stderr —
+# not because anything failed. Treating every non-zero status as unreadable
+# therefore blocked the merge on every repository without branch protection,
+# permanently. That is not a fail-closed guard, it is a gate that never opens,
+# and it was found by trying to merge rather than by reading the code.
+#
+# stderr is captured separately from stdout, so the distinguishing message is
+# available without polluting the value being compared.
 CHECKS_RC=0
-CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket --jq 'all(.[]; .bucket=="pass")' 2>/dev/null) || CHECKS_RC=$?
-if [ "$CHECKS_RC" -ne 0 ] || [ "$CHECKS" != "true" ]; then
-    echo "merge blocked: required checks not all green, or the probe failed (rc=$CHECKS_RC out='$CHECKS')"; exit 0
+CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
+CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket \
+             --jq 'all(.[]; .bucket=="pass")' 2>"$CHECKS_ERR") || CHECKS_RC=$?
+CHECKS_MSG="$(cat "$CHECKS_ERR" 2>/dev/null)"; rm -f "$CHECKS_ERR" 2>/dev/null
+if [ "$CHECKS_RC" -eq 0 ]; then
+    # A real answer: every required check must be a pass.
+    [ "$CHECKS" = "true" ] || { echo "merge blocked: a required check is not green (out='$CHECKS')"; exit 0; }
+elif printf '%s' "$CHECKS_MSG" | grep -q 'no required checks'; then
+    # No required checks are configured. There is nothing to be green, so this
+    # gate has nothing to say — and says so, rather than passing silently or
+    # blocking forever. The other gates still apply.
+    echo "note: no required checks configured on this branch; the checks gate has nothing to assert"
+else
+    echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC out='$CHECKS' err='$CHECKS_MSG')"; exit 0
 fi
 
 # (5) Merge, PINNED to the head every gate above was evaluated against.

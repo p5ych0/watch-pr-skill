@@ -71,6 +71,28 @@ the plugin no longer runs a reviewer of its own.
   push landing between the two calls fails closed instead of pairing a fresh state
   with a stale verdict.
 
+- **A clean pass arrives as a comment, not a review.** Codex submits a review only
+  when it has findings; a clean pass is an issue comment carrying
+  `**Reviewed commit:** <sha10>` and no review at all. `pulls/N/reviews` is
+  therefore empty on a clean head, so `pr-review-state.sh` reported `state=none`
+  and the Codex phase could never complete — the merge gate could not see a clean
+  verdict at all. `clean_comment_for_head` reads that channel, bound to the head
+  the comment names and to a clean-pass phrasing, both required: a false negative
+  keeps the loop waiting, a false positive would invent a signoff. A submitted
+  review always wins, so a later blocking review cannot be masked by an earlier
+  clean comment.
+
+  **This was not found by review.** PR #10 took thirty rounds and all thirty-one
+  Codex reviews carried findings, so the success path was never exercised. It
+  surfaced when PR #12 came back clean and the watch polled until it timed out.
+
+- **"No required checks" is not "could not tell".** `gh pr checks --required`
+  exits non-zero when the branch has none configured, saying so on stderr. The
+  gate treated every non-zero status as an unreadable probe and blocked — so on
+  any repository without branch protection the merge gate could never open. That
+  is not a fail-closed guard; it is a gate with no passing path. Found the same
+  way: by trying to merge.
+
 - **The host is parsed from the URL authority.** Matching `github.com` anywhere
   in the origin sent an enterprise remote whose *path* contains it — such as
   `git@ghe.example:org/github.com-mirror.git` — to the public host, taking every
