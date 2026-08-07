@@ -1435,10 +1435,24 @@ count_claims() {   # count_claims <pattern> <text> ; prints the count, 2 on erro
     local out rc=0
     out="$(grep -oiE "$1" <<<"$2")" || rc=$?
     case "$rc" in
-        0) printf '%s' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" ;;
-        1) printf '0' ;;
+        0) ;;
+        1) printf '0'; return 0 ;;
         *) return 2 ;;
     esac
+    # COUNTED IN THE SHELL, with no pipeline and no external command. `wc` or `tr`
+    # can emit a plausible number and then exit non-zero, and
+    # `printf "%s" "$( … | wc -l | tr -d ' ')"` swallowed that status — a failed
+    # parse returning success with a bogus count, which is the "a call that printed
+    # before failing is not data" rule one layer in.
+    #
+    # Guarding that status would have worked only because this file sets
+    # `pipefail`: without it the pipeline reports `tr`'s success and the failure is
+    # invisible again. Counting here removes the failure mode instead of detecting
+    # it, and cannot be reintroduced by copying the function somewhere with
+    # different shell options.
+    local n=0 _line
+    while IFS= read -r _line; do n=$((n + 1)); done <<<"$out"
+    printf '%s' "$n"
 }
 # EVERY mention must carry the qualifier, so the two counts have to match. A
 # presence check passed while one of two bullets had lost it — the "somewhere in
@@ -1454,6 +1468,7 @@ cl_count() {   # cl_count <claim-pattern> <qualified-pattern> <label>
         && pass "every mention in the release entry is qualified: $3 ($qualified/$total)" \
         || die "the release entry states $3 unqualified in $((total - qualified)) of $total places"
 }
+TMP_CL="$(mktemp -d)" || die "no scratch directory for the counter fixture"
 cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
     grep -qF "$1" <<<"$cl_202" \
         && pass "the release entry $2" \
@@ -1468,6 +1483,32 @@ cl_absent() {   # cl_absent <pattern> <what its presence means>
         *) die "the scan for '$2' could not be completed" ;;
     esac
 }
+# …and that guard is exercised, not merely written. A counter that prints a
+# plausible number before failing is the shape that made this fail open, so the
+# fixture runs `count_claims` under exactly that.
+CNTB="$TMP_CL/bin"; mkdir -p "$CNTB"
+for b in bash sh grep printf cat rm; do
+    _p="$(command -v "$b" 2>/dev/null)" && ln -sf "$_p" "$CNTB/$b"
+done
+# The class is REMOVED, so the fixture proves independence rather than detection:
+# with no `wc` and no `tr` on the PATH at all, the count must still be right. A
+# guard against a failing counter would only have held under `pipefail`; not
+# needing the counter holds everywhere.
+cnt_out="$(PATH="$CNTB" bash -c '
+'"$(declare -f count_claims)"'
+count_claims "defect" "a defect and another defect"; echo "|rc=$?"' 2>&1)"
+case "$cnt_out" in
+    '2|rc=0') pass "the count needs no external counter, so a failing one cannot corrupt it" ;;
+    *) die "count_claims depends on an external counter ('$cnt_out')" ;;
+esac
+# The control: with a working counter the same call must still count.
+cnt_ok="$(bash -c '
+'"$(declare -f count_claims)"'
+count_claims "defect" "a defect and another defect"' 2>&1)"
+[ "$cnt_ok" = "2" ] \
+    && pass "…while a working counter still counts both mentions" \
+    || die "count_claims miscounted a known input ('$cnt_ok')"
+
 cl_req 'repairing a consumer a changed validator or producer breaks is finishing the change' \
     'keeps the regression exception to the scope rule' \
     'would have a reader reject a required regression repair'
