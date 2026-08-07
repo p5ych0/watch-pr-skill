@@ -1175,8 +1175,18 @@ while IFS= read -r line; do
     while [ -n "$rest" ] && [ "$ok" -eq 1 ]; do
         rest="${rest#;}"; seg="${rest%%;*}"; rest="${rest#"$seg"}"
         seg="${seg#"${seg%%[![:space:]]*}"}"; seg="${seg%"${seg##*[![:space:]]}"}"
+        # A COMPLETE IDENTIFIER ASSIGNMENT, character by character. The glob
+        # `[A-Za-z_]*'=$?'` reads as "one identifier character, then anything,
+        # then =$?" — so `gh api repos/…/comments && FIND_RC=$?` satisfied it.
+        # `*` in a glob is not `*` in a regex, and that difference was the hole.
         case "$seg" in
-            ''|[A-Za-z_]*'=$?') ;;
+            '') ;;
+            *'=$?')
+                _name="${seg%'=$?'}"
+                case "$_name" in
+                    ''|[!A-Za-z_]*) ok=0 ;;
+                    *[!A-Za-z0-9_]*) ok=0 ;;
+                esac ;;
             *) ok=0 ;;
         esac
     done
@@ -1347,66 +1357,41 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     grep -qi 'changed code is still[[:space:]]*defective' <<<"$flat" \
         && pass "$name: a wrong reply is a finding only if the code is still DEFECTIVE" \
         || die "$name: would have the reviewer block a merge to correct the record"
-    # THE REQUIREMENT, not the field name. Searching for `consequence` passed when
-    # the instruction was reversed to "do not include the triggering input or
-    # consequence" — the words present, the direction inverted. Same
-    # subject-without-outcome defect as the guards above.
-    grep -qiE '(include|name|state)s?[^.]{0,140}consequence' <<<"$flat" \
-        && pass "$name: a finding must state its consequence" \
-        || die "$name: does not require a finding to state its consequence"
-    # …and must not NEGATE it. "do not include the triggering input or consequence"
-    # contains every word the positive check looks for, which is the same
-    # subject-without-outcome hole in its last form: the verb is there, the
-    # polarity is not.
-    neg_rc=0
-    grep -qiE '(do not|do n.t|never|must not)[^.]{0,40}(include|name|state)[^.]{0,100}(consequence|triggering input|input or state that triggers)' <<<"$flat" || neg_rc=$?
-    case "$neg_rc" in
-        0) die "$name: tells the reviewer NOT to include a finding's required fields" ;;
-        1) pass "…and does not tell the reviewer to omit them" ;;
-        *) die "$name: the negation scan could not be completed (rc=$neg_rc)" ;;
-    esac
-    grep -qiE '(include|name|state)s?[^.]{0,80}(triggering input|input or state that triggers)' <<<"$flat" \
-        && pass "$name: a finding must state the input that triggers it" \
-        || die "$name: does not require a finding to state its triggering input"
-    # DISTINGUISHING text again. Bare `scope` matched several pre-existing uses in
-    # both files — "judge the PR against its own goal", "out-of-scope problems" —
-    # so this passed with the second-copy requirement deleted. Same defect as the
-    # `resolved threads` assertion beside it, and I fixed that one without
-    # checking its sibling: the instance rather than the class, which is the thing
-    # this PR is about.
-    # ONE COMBINED PREDICATE, not two independent ones. Separate checks for
-    # `second copy` and `this PR also` are both satisfied by a rule that says to
-    # name a second copy WHETHER OR NOT this PR changes it — the two facts can be
-    # present while the relationship between them is reversed, which is the whole
-    # instruction. This is the same subject-versus-outcome gap as the guards above,
-    # in its last hiding place.
-    # …AND the required ACTION. Binding the two noun phrases still matched
-    # "do not name a second copy that this PR also changes" — the relationship
-    # correct, the instruction inverted. Every layer of this check has now been
-    # defeated by a negation until the verb was included.
-    # …AND the required ACTION, in whichever form the file states it. Binding the
-    # two noun phrases still matched "do NOT name a second copy that this PR also
-    # changes" — relationship correct, instruction inverted. Every layer of this
-    # check has been defeated by a negation until the verb was included.
+    # THE CANONICAL CLAUSE, VERBATIM — the prose analogue of the whitelist that
+    # settled the endpoint guard.
     #
-    # AGENTS.md ends the clause with ", say so"; the Copilot copy leads with
-    # "naming any second copy …". Both are the positive instruction; matching only
-    # one would fail the other file for wording rather than for meaning.
-    grep -qiE '(naming any second copy[^.]{0,80}that this PR also changes|second copy[^.]{0,80}that this PR also changes(\*\*)?, say so)' <<<"$flat" \
-        && pass "$name: a finding must NAME a second copy this PR also changes" \
-        || die "$name: does not require naming an in-diff second copy"
-    # …with the polarity guarded, like the field checks beside it. "avoid naming
-    # any second copy that this PR also changes" matches the positive pattern
-    # exactly — the action and the boundary both present, the instruction
-    # inverted. This assertion was the one place that gained no negation scan when
-    # the others did.
-    sc_rc=0
-    grep -qiE '(do not|do n.t|never|avoid|refrain from)[^.]{0,30}(nam(e|ing)|mention(ing)?|list(ing)?)[^.]{0,40}second copy' <<<"$flat" || sc_rc=$?
-    case "$sc_rc" in
-        0) die "$name: tells the reviewer NOT to name an in-diff second copy" ;;
-        1) pass "…and does not tell the reviewer to omit it" ;;
-        *) die "$name: the second-copy negation scan could not be completed (rc=$sc_rc)" ;;
+    # Positive patterns plus negation scans do not converge here. "Include the
+    # triggering input" was defeated by "do not include…", then by "include
+    # neither… nor…", and "naming any second copy" by "avoid naming…" and then by
+    # "omit naming…". Each fix enumerated one more way to negate, and English has
+    # no bounded list of those — the same wall the route and command blacklists
+    # hit, with no whitelist of commands available because the subject is meaning.
+    #
+    # What IS bounded is the sentence itself. Requiring the exact clause makes any
+    # alteration fail — negated, reworded, or weakened — and the cost is precisely
+    # the property wanted for contract text: changing it is a deliberate act that
+    # updates this list, not a quiet edit that still satisfies a pattern.
+    case "$name" in
+        AGENTS.md)
+            req_clauses=(
+                'the input or state that triggers it** — the concrete case, not the category'
+                '**the consequence** — what ends up wrong, in terms of what this tool does'
+                'The author is expected to assert the consequence in a test, and can only do that if you state it'
+                'if the same defect exists in a second copy **that this PR also changes**, say so'
+            ) ;;
+        copilot-instructions.md)
+            req_clauses=(
+                'Include the input or state that triggers it, the **consequence** in terms of what this tool does'
+                'the author is expected to assert that consequence in a test'
+                'naming any second copy of the same defect **that this PR also changes**'
+            ) ;;
+        *) req_clauses=() ;;
     esac
+    for clause in ${req_clauses+"${req_clauses[@]}"}; do
+        grep -qF "$clause" <<<"$flat" \
+            && pass "$name: states verbatim — ${clause:0:52}…" \
+            || die "$name: this required clause is altered or missing — ${clause:0:52}…"
+    done
     grep -qi 'proposal, not the finding' <<<"$flat" \
         && pass "$name: a code suggestion is a proposal, not the finding" \
         || die "$name: does not say a code suggestion is only a proposal"
