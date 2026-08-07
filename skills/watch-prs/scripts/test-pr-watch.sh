@@ -917,12 +917,20 @@ out="$(run_limited 30 env PATH="$ORPH:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/slowsta
 # on the leaking version — the leak is invisible to the exit status, which is why
 # it survived — but the assertion must not be able to see anything except the
 # child this fixture started.
-# The READ has its own status. A `cat` that emits a numeric PREFIX and then fails
-# — `12345` truncated to `123` — yields digits that satisfy the shape test, and
+# The READ has its own status, in a function so the guard can be EXERCISED rather
+# than asserted about. A `cat` that emits a numeric PREFIX and then fails —
+# `12345` truncated to `123` — yields digits that satisfy the shape test, and
 # `kill -0 123` then reports no such process, so this gate records PASS while the
-# real probe is still leaked. Same class as every other guarded read here.
-probe_pid="$(cat "$TMP/probe-started" 2>/dev/null)"; pid_rc=$?
-[ "$pid_rc" -eq 0 ] || die "could not read the fixture child's PID marker (rc=$pid_rc)"
+# real probe is still leaked.
+read_pid_marker() {   # <file> -> prints the PID, non-zero if it cannot be trusted
+    local v rc
+    v="$(cat "$1" 2>/dev/null)"; rc=$?
+    [ "$rc" -eq 0 ] || return 1
+    case "$v" in ""|*[!0-9]*) return 1 ;; esac
+    printf '%s' "$v"
+}
+probe_pid="$(read_pid_marker "$TMP/probe-started")" \
+    || die "could not read the fixture child's PID marker"
 case "$probe_pid" in
     ""|*[!0-9]*) die "the fixture child never published a PID ('$probe_pid')" ;;
     *)  if kill -0 "$probe_pid" 2>/dev/null; then
@@ -942,11 +950,26 @@ for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$PIDR/$b"
 done
 printf '#!/usr/bin/env bash\nprintf "123"\nexit 1\n' > "$PIDR/cat"; chmod +x "$PIDR/cat"
-: > "$TMP/pidmarker"
-out="$(PATH="$PIDR" bash -c 'v="$(cat "$1" 2>/dev/null)"; echo "rc=$? v=$v"' _ "$TMP/pidmarker")"
-[ "$out" = "rc=1 v=123" ] \
-    && pass "a truncated PID read is distinguishable by status, so the guard has something to catch" \
-    || die "the reader stub did not produce the prefix-then-fail shape ('$out')"
+printf '99999' > "$TMP/pidmarker"
+# THE PRODUCTION FUNCTION IS CALLED, under a `cat` that prints a valid-looking
+# prefix and then fails. The previous version of this case ran an inline snippet
+# instead and only demonstrated that Bash exposes `cat`'s status — removing the
+# guard from `read_pid_marker` left it passing, which is the precise shape of
+# useless coverage this suite exists to refuse.
+pidout="$(PATH="$PIDR:$PATH" bash -c '
+'"$(declare -f read_pid_marker)"'
+read_pid_marker "$1" && echo "ACCEPTED:$?" || echo "REJECTED"' _ "$TMP/pidmarker" 2>&1)"
+[ "$pidout" = REJECTED ] \
+    && pass "the marker read rejects a PID that was printed and then failed" \
+    || die "a truncated PID read was accepted ('$pidout')"
+# The control: the same function on a good read must still accept, or "rejects
+# everything" would satisfy the assertion above.
+pidout="$(bash -c '
+'"$(declare -f read_pid_marker)"'
+read_pid_marker "$1"' _ "$TMP/pidmarker" 2>&1)"
+[ "$pidout" = 99999 ] \
+    && pass "…and accepts a complete one" \
+    || die "the marker read rejected a good PID ('$pidout')"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -66,8 +66,15 @@ run_limited() {
     # all this suite runs, and the fixture below covers that case. A fixture for
     # the orphan case would assert behaviour this helper does not have, so it is
     # recorded as a limitation instead of tested as a feature.
-    "$@" >"$tmp" 2>&1 </dev/null &
+    # `set -m` puts the command in its own PROCESS GROUP, so the kill below reaches
+    # what it spawned. Killing the leader alone left descendants running: the
+    # `sh -c "sleep 30 & wait"` case here returns 124 with its `sleep` orphaned,
+    # and a mandatory suite that leaks a process per run leaks one per run forever.
+    # The group is what has to die, not the process that happened to lead it.
+    set -m
+    ( "$@" ) >"$tmp" 2>&1 </dev/null &
     local pid=$!
+    set +m
     local waited=0
     # THE SLEEP IS THE WATCHDOG. If it fails, the loop still advanced `waited`
     # and burned through the limit at once, killed the command and returned an
@@ -76,9 +83,9 @@ run_limited() {
     # failure-looks-like-success shape this suite exists to catch. A broken clock
     # is unreadable, not a timeout.
     while [ "$waited" -lt "$secs" ]; do
-        kill -0 "$pid" 2>/dev/null || break
+        { kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; } || break
         if ! sleep 1; then
-            kill -9 "$pid" 2>/dev/null
+            kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
             wait "$pid" 2>/dev/null
             rm -f "$tmp" 2>/dev/null
             return 125
@@ -86,8 +93,10 @@ run_limited() {
         waited=$((waited + 1))
     done
     local rc
-    if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" 2>/dev/null
+    if kill -0 -"$pid" 2>/dev/null || kill -0 "$pid" 2>/dev/null; then
+        # The GROUP first, the leader only as a fallback where the group never
+        # formed. A leader-only kill is what left the orphan.
+        kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
         rc=124
     else

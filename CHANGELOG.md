@@ -79,6 +79,13 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The portable watchdog reaps descendants, not just the process it started.**
+  `run_limited` killed only the leader, so a bounded command with children — the
+  `sh -c "sleep 30 & wait"` shape its own suite runs — returned 124 with its
+  `sleep` orphaned. A mandatory gate that leaks one process per run leaks one per
+  run forever. The command now goes in its own process group and the group is
+  killed, with the leader as a fallback where the group never formed.
+
 - **The suite is passable where GNU `timeout` is absent — the platform it claims
   to support.** Fixtures prefixed their stubs onto the CALLER's `PATH`, so the
   portable watchdog inherited them: it polls with its own `sleep`, reads with its

@@ -61,6 +61,30 @@ child_elapsed="${out##*elapsed=}"
     && pass "…and the caller's capture returns at the limit, not when the child ends" \
     || die "the capture stayed open for ${child_elapsed}s on a 2s limit"
 
+# ── descendants die with the command, not after it ────────────────────────
+# Killing the leader alone left what it spawned running: this exact shape —
+# `sleep 30 & wait` — returned 124 with the `sleep` still alive, so a mandatory
+# suite leaked one process per run, outside any fixture's cleanup. The PID is
+# recorded by the child itself, so the assertion can name the survivor instead of
+# matching an argv pattern that could belong to anyone.
+rm -f "$TMP/desc.pid"
+out="$(PATH="$NOTO" TMP="$TMP" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 2 sh -c "sleep 30 & echo \$! > \"$TMP/desc.pid\"; wait"; echo "rc=$?"')"
+case "$out" in
+    *"rc=124"*) pass "a command with a live descendant still stops at the limit" ;;
+    *) die "descendant case gave '$out' (want rc=124)" ;;
+esac
+desc_pid="$(cat "$TMP/desc.pid" 2>/dev/null)"; desc_rc=$?
+[ "$desc_rc" -eq 0 ] || die "could not read the descendant PID marker (rc=$desc_rc)"
+case "$desc_pid" in
+    ""|*[!0-9]*) die "the child never recorded a descendant PID ('$desc_pid')" ;;
+    *)  if kill -0 "$desc_pid" 2>/dev/null; then
+            kill -9 "$desc_pid" 2>/dev/null
+            die "the descendant (pid $desc_pid) outlived the watchdog"
+        else
+            pass "…and its descendant is reaped with it, not orphaned"
+        fi ;;
+esac
+
 # ── a command that finishes in time keeps its own status ───────────────────
 out="$(PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 5 true; echo "rc=$?"')"
 [ "$out" = "rc=0" ] && pass "a successful command returns 0" || die "success gave '$out'"
@@ -192,20 +216,72 @@ esac
 # THIS FILE is exempt, and only this one: its cases exist to drive `run_limited`
 # under a PATH with no `timeout` on it, which is the fallback they test. Every
 # other fixture stubs the SUBJECT and must not reach the watchdog.
-bad="$(grep -nE 'PATH''=.*run_limited' "$SELF_DIR"/test-*.sh 2>/dev/null \
+# THE SCAN'S STATUS IS TAKEN, and "no match" is distinguished from "could not
+# read". `2>/dev/null … || true` turned an unreadable fixture into an empty
+# result, and an empty result is exactly what "no fixture violates this" looks
+# like — so the guard could report its invariant held without having established
+# anything. grep exits 1 for no-match and >1 for a real error.
+# The scan is a FUNCTION so its failure path can be exercised, not merely
+# asserted about — the same lesson as the marker read: a guard nobody runs is a
+# guard nobody has tested.
+scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
+    local dir="$1" errf out rc msg mrc
+    errf="$(mktemp)" || return 2
+    out="$(grep -nE 'PATH''=.*run_limited' "$dir"/test-*.sh 2>"$errf")"; rc=$?
+    msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
+    rm -f "$errf" 2>/dev/null
+    [ "$mrc" -eq 0 ] || return 2
+    # grep exits 1 for NO MATCH and >1 for a real error. Collapsing those with
+    # `|| true` turned an unreadable fixture into an empty result — and an empty
+    # result is exactly what "no fixture violates this" looks like, so the guard
+    # could report its invariant held without having established anything.
+    [ "$rc" -le 1 ] || return 2
+    [ -z "$msg" ] || return 2
+    printf '%s' "$out"
+    return 0
+}
+bad="$(scan_watchdog_path_misuse "$SELF_DIR")"; scan_rc=$?
+[ "$scan_rc" -eq 0 ] || die "the fixture scan could not be completed (rc=$scan_rc)"
+bad="$(printf '%s' "$bad" \
        | grep -v "^$SELF_DIR/test-testlib.sh:" \
        | grep -v 'run_limited [0-9]* env ' || true)"
 # Continued lines count too: the assignment and the call are routinely split.
+# `test-testlib.sh` is skipped here for the same reason as above — its cases exist
+# to drive `run_limited` under a PATH with no `timeout` on it.
 bad2="$(awk 'FILENAME ~ /test-testlib\.sh$/ { next }
              /PATH=/ && /\\$/ { prev = FILENAME ":" FNR ": " $0; next }
              prev != "" && /run_limited/ && !/run_limited [0-9]+ env / { print prev }
-             { prev = "" }' "$SELF_DIR"/test-*.sh 2>/dev/null || true)"
+             { prev = "" }' "$SELF_DIR"/test-*.sh)"; scan2_rc=$?
+[ "$scan2_rc" -eq 0 ] || die "the continued-line fixture scan failed (rc=$scan2_rc)"
 if [ -z "$bad" ] && [ -z "$bad2" ]; then
     pass "no fixture prefixes an environment onto run_limited itself"
 else
     die "a fixture puts its environment on the watchdog's PATH, not the subject's:"
     printf '%s\n%s\n' "$bad" "$bad2" | sed '/^$/d; s/^/       /'
 fi
+
+# …and the scan's own failure path, exercised against a fixture it cannot read.
+SCANTMP="$(mktemp -d)"
+printf '#!/usr/bin/env bash\n: \n' > "$SCANTMP/test-unreadable.sh"
+chmod 000 "$SCANTMP/test-unreadable.sh"
+if cat "$SCANTMP/test-unreadable.sh" >/dev/null 2>&1; then
+    # Running as root, or on a filesystem that ignores the mode. Stated rather
+    # than passed silently: the case did not run, so it proved nothing.
+    pass "SKIPPED: this user can read a mode-000 file, so the unreadable case cannot be built"
+else
+    scan_watchdog_path_misuse "$SCANTMP" >/dev/null 2>&1
+    [ "$?" -eq 2 ] \
+        && pass "a fixture the scan cannot read is a failure, not an empty result" \
+        || die "an unreadable fixture was reported as 'no offenders'"
+fi
+# A directory with a clean fixture must still come back clean, or "always fails"
+# would satisfy the assertion above.
+printf '#!/usr/bin/env bash\nrun_limited 5 env PATH=/x true\n' > "$SCANTMP/test-clean.sh"
+rm -f "$SCANTMP/test-unreadable.sh"
+scan_watchdog_path_misuse "$SCANTMP" >/dev/null 2>&1
+[ "$?" -eq 0 ] && pass "…and a readable, compliant fixture scans clean" \
+    || die "the scan failed on a compliant fixture"
+rm -rf "$SCANTMP"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
