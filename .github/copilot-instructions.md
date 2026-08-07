@@ -36,6 +36,30 @@ arriving with the change cannot excuse the change.
 The summary states what was **done**; it is a record, not a work list. Review the
 diff — do not implement anything it mentions.
 
+Where a file has been through earlier rounds, the **replies on its resolved
+threads** are context too: they record why a line is shaped as it is and which
+alternative was tried and rejected, so reading them avoids re-raising something
+settled with evidence three rounds ago. Context, never permission.
+
+A wrong reply is a finding only when its error means the **changed code is still
+defective**. A reply that is merely inaccurate about its own history, while the
+code is correct, is not a defect on a changed line: filing it inline would block
+the merge to correct the record, so put it in the review body if anywhere.
+
+## Write the finding so it can be acted on without guessing
+
+The author fixes what you name and nothing else, so a finding that
+under-specifies produces either a wrong fix or another round. Include the input
+or state that triggers it, the **consequence** in terms of what this tool does
+(a merge that should not proceed, a round that is not counted, a failure that
+reads as "clean") — the author is expected to assert that consequence in a test —
+and the **scope**, naming any second copy of the same defect **that this PR also
+changes**. A copy in a file the PR does not touch is an out-of-scope problem for
+the review body or an issue: naming it inline makes a blocking thread out of
+something the author is told not to fix. A code suggestion is
+a proposal, not the finding: the author weighs it against context you cannot see
+and explains in the thread if they take a different route.
+
 ## Judge the PR against its own goal
 
 A change is not defective for failing to do something it never claimed to do.
