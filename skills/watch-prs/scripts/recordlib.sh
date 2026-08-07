@@ -126,9 +126,25 @@ def pages_or_error:
 # No `[[ =~ ]]`: the pattern is data there, and a caller could pass one. `case`
 # with a length test says the same thing without giving anything a chance to be
 # interpreted.
-is_full_sha() {
+# Why a value is not a full SHA, for the callers that report the two apart. They
+# each spelled this out themselves — the same `case` plus length test, three more
+# times — and the first drift guard did not see them, because it only recognised
+# the jq REGEX spelling of the rule. A guard that matches one spelling of a
+# duplicated rule leaves the duplication it was built to remove.
+#
+#   reason="$(sha_reason "$head")" || { echo "… reason=$reason"; return 2; }
+#
+# Prints nothing and returns 0 when the value is a full SHA.
+sha_reason() {
     case "${1-}" in
-        ""|*[!0-9a-f]*) return 1 ;;
+        ""|*[!0-9a-f]*) printf 'bad_head'; return 1 ;;
     esac
-    [ "${#1}" -eq 40 ]
+    [ "${#1}" -eq 40 ] || { printf 'head_not_full_sha'; return 1; }
+    return 0
+}
+
+# The predicate, defined in terms of the same rule so there is exactly one place
+# it lives. `pr-watch.sh` wants a yes/no; the helpers above want the reason.
+is_full_sha() {
+    sha_reason "${1-}" >/dev/null
 }

@@ -121,10 +121,7 @@ REPO_SLUG="$HOST/$OWNER/$REPO"
 pr_head_oid() {
     local out
     out="$(gh pr view "$1" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null)" || return 1
-    case "$out" in
-        *[!0-9a-f]*|"") return 1 ;;
-    esac
-    [ "${#out}" -eq 40 ] || return 1
+    is_full_sha "$out" || return 1
     printf '%s' "$out"
 }
 
@@ -389,11 +386,8 @@ main() {
     # reviewer has not judged the head" rather than "you passed me nonsense". The
     # gate uses exactly that distinction to decide whether to fall back to the
     # recorded signoff.
-    case "$head" in
-        *[!0-9a-f]*|"") echo "PR_REVIEW_STATE pr=$pr status=error reason=bad_head" >&2; exit 2 ;;
-    esac
-    if [ "${#head}" -ne 40 ]; then
-        echo "PR_REVIEW_STATE pr=$pr status=error reason=head_not_full_sha" >&2
+    if ! _sha_why="$(sha_reason "$head")"; then
+        echo "PR_REVIEW_STATE pr=$pr status=error reason=$_sha_why" >&2
         exit 2
     fi
 

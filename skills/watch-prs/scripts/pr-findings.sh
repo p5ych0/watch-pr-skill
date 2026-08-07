@@ -224,10 +224,10 @@ cmd_blocked_body() {
     # check, then match no commit_id at all — printing nothing with rc 0, which is
     # indistinguishable from "no blocking body". pr_head_oid validates the same
     # way for the same reason.
-    case "$head" in
-        *[!0-9a-f]*|"") echo "PR_FINDINGS pr=$pr status=error reason=bad_head" >&2; return 2 ;;
-    esac
-    [ "${#head}" -eq 40 ] || { echo "PR_FINDINGS pr=$pr status=error reason=head_not_full_sha" >&2; return 2; }
+    if ! _sha_why="$(sha_reason "$head")"; then
+        echo "PR_FINDINGS pr=$pr status=error reason=$_sha_why" >&2
+        return 2
+    fi
 
     # Captured separately from the parse. `gh --paginate` can write a valid page
     # and then exit non-zero, and a pipeline would report jq's success while the

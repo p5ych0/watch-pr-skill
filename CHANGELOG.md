@@ -23,6 +23,14 @@
   reported — a record without it cannot be distinguished from another and must
   not be counted as a pass. Two helpers previously accepted such a record.
 
+- **Every shell-side SHA check goes through the same rule too.** Three helpers
+  validated a head with a `case` plus a length test — the same rule spelled a
+  different way — and the first version of the drift guard reported clean because
+  it recognised only the jq regex. A guard that matches one spelling of a
+  duplicated rule has not found the duplication. `sha_reason` keeps the two
+  diagnostics (`bad_head` versus `head_not_full_sha`) that those sites reported
+  apart, so sharing the rule costs nothing an operator was reading.
+
 - **The same rule now covers `pr-watch.sh`.** It validates helper output rather
   than API records, but a head that is not a real SHA is the input to every
   subsequent probe; it carried two more hand-written copies of the shape check.

@@ -106,15 +106,42 @@ want reject valid_comment_record '"not an object"'               "a non-object c
 # `.[][]` over an object iterates its VALUES rather than failing — so an errored
 # body or an empty read produced "no records", which every caller reads as "no
 # findings" or "no rounds yet". Both skip a gate.
-pages() { printf '%s' "$1" | jq -c "$RECORDLIB_JQ"'pages_or_error | [.[][]] | length' 2>/dev/null; }
-[ "$(pages '[[{"a":1}]]')" = "1" ] \
-    && pass "a well-formed page is counted" || die "a valid page was not counted"
-[ -z "$(pages '')" ] \
-    && pass "an empty read is an error, not zero records" || die "an empty read counted as zero records"
-[ -z "$(pages '[{"message":"Not Found"}]')" ] \
-    && pass "an error body is an error, not zero records" || die "an error object counted as zero records"
-[ "$(pages '[[]]')" = "0" ] \
-    && pass "a genuinely empty page is zero records" || die "an empty page was rejected"
+# The STATUS is what the callers branch on, so the status is what is asserted.
+# Checking only that nothing was printed passes when `error(...)` is replaced by
+# `empty` — jq then exits 0 with no output, and `pr-findings.sh blocked-body`
+# reads that as an ordinary empty result rather than a failed fetch. Absence of
+# output is the symptom; a non-zero exit is the guard.
+pages() {   # prints "<rc>:<output>"
+    local out rc
+    # `-s`, exactly as every caller runs it. Without the slurp this helper did
+    # not model the thing under test at all: jq on empty input produces nothing
+    # and exits 0, so the "an empty read is an error" case passed on the absence
+    # of output while the status it claimed to check was 0 the whole time.
+    out="$(printf '%s' "$1" | jq -s -c "$RECORDLIB_JQ"'pages_or_error | [.[][]] | length' 2>/dev/null)"; rc=$?
+    printf '%s:%s' "$rc" "$out"
+}
+# The inputs are PRE-SLURP, exactly what `gh --paginate` writes: one JSON value
+# per page, concatenated. My first version passed already-slurped shapes, so an
+# error body arrived wrapped in a list and looked like a valid page — the fixture
+# testing something the caller never sees.
+[ "$(pages '[{"a":1}]')" = "0:1" ] \
+    && pass "a well-formed page is counted, with a success status" \
+    || die "a valid page gave '$(pages '[{"a":1}]')'"
+case "$(pages '')" in
+    0:*) die "an empty read exited 0 — a caller reads that as zero records" ;;
+    *)   pass "an empty read exits non-zero, not zero records" ;;
+esac
+case "$(pages '{"message":"Not Found"}')" in
+    0:*) die "an error body exited 0 — a caller reads that as zero records" ;;
+    *)   pass "an error body exits non-zero, not zero records" ;;
+esac
+case "$(pages '[] {"message":"Not Found"}')" in
+    0:*) die "a mixed page set exited 0 — the non-array page was ignored" ;;
+    *)   pass "one non-array page among valid ones still exits non-zero" ;;
+esac
+[ "$(pages '[]')" = "0:0" ] \
+    && pass "a genuinely empty page is zero records, with a success status" \
+    || die "an empty page gave '$(pages '[]')'"
 
 # ── is_full_sha, the same rule for shell ──────────────────────────────────
 # `pr-watch.sh` validates helper OUTPUT rather than API records, but a head that
@@ -154,7 +181,15 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         FILENAME ~ /recordlib\.sh$/ { next }
         /^[[:space:]]*#/ { next }
         /IN\("PENDING","APPROVED"/          { print FILENAME ":" FNR ": state set" }
-        /\^\[0-9a-f\]\{40\}\$/              { print FILENAME ":" FNR ": commit_id shape" }
+        /\^\[0-9a-f\]\{40\}\$/              { print FILENAME ":" FNR ": commit_id shape (jq)" }
+        # …and the SHELL spelling of the same rule. The first version of this
+        # guard recognised only the jq regex, and reported success while three
+        # helpers re-implemented the SHA check as a `case` plus a length test —
+        # the very duplication it exists to remove, invisible because it was
+        # written a different way. A guard that matches one spelling of a
+        # duplicated rule has not found the duplication.
+        /\*\[!0-9a-f\]\*/                    { print FILENAME ":" FNR ": commit_id shape (shell case)" }
+        /\$\{#[A-Za-z_]+\}" -(eq|ne) 40/      { print FILENAME ":" FNR ": commit_id length (shell)" }
         /\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}T/ { print FILENAME ":" FNR ": timestamp shape" }
         /length == 0 then error\("no pages"\)/ { print FILENAME ":" FNR ": page shape" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
@@ -182,6 +217,18 @@ seen="$(scan_inline_rules "$DRIFT")"; drc=$?
 { [ "$drc" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-drifted.sh'; } \
     && pass "…and the scan catches a helper that re-implements one" \
     || die "the drift guard did not catch a planted inline rule (rc=$drc out='$seen')"
+# …in the SHELL spelling too. This is the case the first version of the guard
+# missed: three helpers already validated a SHA with `case` plus a length test,
+# and the scan reported clean because it only knew the jq regex.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$h" in *[!0-9a-f]*|"") return 1 ;; esac\n'
+  printf '[ "${#h}" -eq 40 ] || return 1\n'
+} > "$DRIFT/pr-shelldrift.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc2=$?
+{ [ "$drc2" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-shelldrift.sh.*shell'; } \
+    && pass "…including the shell spelling of the SHA rule" \
+    || die "the drift guard missed a shell-spelled SHA check (rc=$drc2 out='$seen')"
+rm -f "$DRIFT/pr-shelldrift.sh"
 # An unreadable file is a failed scan, not a clean one — the same rule the
 # library itself encodes, applied to the guard that enforces it.
 printf '#!/usr/bin/env bash\n: \n' > "$DRIFT/pr-unreadable.sh"
