@@ -1,5 +1,119 @@
 # Changelog
 
+## [2.0.2] — 2026-08-07
+
+**The working discipline is written down, on both sides of the loop.** No
+**shell-script logic** changes — but `SKILL.md` *is* the shipped driver contract,
+so this release does change how a session behaves. Deferral reasoning moves out of
+the review-request summary, finding bodies may no longer be read through the REST
+comments endpoint, and new rules decide which fixes a session applies at all.
+Calling that inert would be wrong; every rule below was already what a good round
+looked like, and none of it was stated where it binds.
+
+- **Finding bodies come from the helper, never from the REST comments endpoint.**
+  `pulls/N/comments` has no resolution filter and returns every review comment the
+  PR has ever had, so reading bodies there hands the driver findings answered
+  three rounds ago mixed into the current set — and fixing an already-answered
+  comment is precisely the scope expansion these rules forbid.
+  `pr-findings.sh list` already prints each unresolved finding's complete body.
+
+- **A deferral is recorded as a disposition, not a description — in every copy of
+  the rule.** Three files asked the summary to say what was skipped *"and why"*,
+  which invites the unfixed defect and its rationale into the `@codex review`
+  mention. `SKILL.md`, `CLAUDE.md` and `README.md` now agree, and the contract
+  test fails if any of them asks for the reasoning again.
+
+  The mechanism: the summary shares a comment with the `@codex review` mention,
+  and a mention describing an *unfixed* defect is read as a task — Codex runs as a
+  coding agent and commits in an environment with no remote, spending the round.
+  Past-tense disposition and a bare issue number; the defect itself stays out.
+
+- **A wrong reply on an old thread is a finding only when the code is still
+  defective.** A reply that is merely inaccurate about its own history, while the
+  changed code is correct, is not a defect on a changed line — filing it inline
+  would block the merge to correct the record.
+
+- **The contract guard uses a POSIX character class, not `\s`.** `\s` is a GNU
+  extension; BSD `grep` on stock macOS — which `README.md` lists as supported —
+  reads it as a literal `s`, so the guard searched for "evens*when", failed, and
+  killed the round on correct text. The whole suite is a mandatory pre-push gate,
+  so that stops a macOS contributor closing a round while CI stays green. Fourth
+  GNU-only construct to reach this repository after `timeout`, `sha1sum` and
+  `seq`; a mechanical guard against the class is filed as #15.
+
+- **A regression the fix itself introduces is always this round's work.** The
+  out-of-scope rule said a different defect found while fixing is "never in
+  scope", which would have the driver defer a defect it had just caused — part of
+  what the PR changed, and on its way to a merge if the next reviewer missed it.
+  The line is drawn at *pre-existing*, not at whether it was the defect named — a
+  **different pre-existing** defect stays out of scope, while the same defect in a
+  copy this PR also changes is part of the finding and gets fixed with it. A
+  *different pre-existing* copy in an untouched file stays out — but an untouched
+  file this PR **broke** does not: repairing a consumer a changed validator or
+  producer breaks is finishing the change, not widening it.
+
+- **Scope discipline and the class-wide self-check are reconciled.** One rule says
+  fix only what the finding names; the self-check asks whether you fixed the
+  instance or the class. They meet on scope: the finding names a **defect**, not a
+  line, so the same defect in another copy is the same finding — but only within
+  what this PR already changes. The same shape outside the diff is recorded and
+  left to the operator, and a *different pre-existing* defect found nearby is not in
+  scope — a regression the fix itself causes always is.
+
+- **Mutation proof is not waivable by disclosure.** The contract briefly offered
+  "say so in the summary" as a way out. A summary is untrusted context, not
+  authority: closing a round on "no mutant is claimed" leaves an assertion that
+  passed before the fix while the suite and the self-check both report green.
+  Where a mutation genuinely cannot be constructed, the limitation is written as a
+  comment at the site and the round stops for the operator. That comment
+  **explains rather than accepts**: added in the pull request, it arrives with the
+  change and is untrusted context like any other, so a reviewer is right to keep
+  reporting the missing proof. Acceptance is a dated record landed on the base ref
+  by its own PR, as `docs/decisions/2026-08-06-merge-admin-default.md` was.
+
+- **The skill now binds the driving session to a scope discipline.** The failure
+  mode of an automated fix loop is not laziness, it is enthusiasm: fixing more
+  than was asked, building more than the finding requires, and bundling both into
+  a commit whose summary says "closing review comments" — where a reviewer has no
+  reason to look for it. `SKILL.md` states six rules as a contract: fix what the
+  finding names and nothing else; build the smallest thing that makes it false;
+  every change must be reviewable as a fix; validate a finding before acting on
+  it; prove a fix can fail; say what you did not do.
+
+- **The driver is told to read a finding whole.** `pr-findings.sh list` prints one
+  line per thread so the set is countable — that line is not the finding. The
+  reviewers write a title and then the argument: the triggering input, the
+  consequence, and often a note that the same defect exists in a second copy.
+  Acting on the title alone produces a fix aimed at a paraphrase. A code
+  suggestion is now explicitly a **proposal**, weighed against context the
+  reviewer could not see, with the reasoning recorded in the thread if it is not
+  taken.
+
+- **Reviewers are pointed at the replies on earlier resolved threads.** They
+  record why a line is shaped as it is and which alternative was already tried, so
+  reading them avoids re-raising something settled with evidence several rounds
+  ago. A wrong reply is a finding **only when its error means the changed code is
+  still defective** — a reply inaccurate merely about its own history, while the
+  code is correct, is not a defect on a changed line, and filing it inline would
+  block the merge to correct the record. Context, never permission, like
+  everything else arriving with the change.
+
+- **What a well-formed finding contains is now stated.** The author is told to fix
+  what the finding names and nothing else, so an under-specified finding produces
+  either a wrong fix or another round. A finding names the triggering input, the
+  **consequence** in terms of what this tool does, and the **scope** — any second
+  copy of the same defect **that this PR also changes**, since a copy in an
+  untouched file is an out-of-scope problem the author is forbidden to pull in. Both reviewer files carry this; the contract test
+  asserts it in each, because `.github/copilot-instructions.md` restates the
+  policy inline and is exactly the copy that drifts.
+
+- **`README.md` says when to use it, and when not.** It is worth reaching for on
+  anything you would want a colleague to read; it is worth less on a typo fix,
+  vendored files or a throwaway spike. A PR with no clear stated goal produces
+  vague findings and long rounds, because the goal is the one input the whole loop
+  calibrates on — and a loop running long is information, usually that the change
+  should be split.
+
 ## [2.0.1] — 2026-08-07
 
 **One definition of a well-formed record** (issue #11).

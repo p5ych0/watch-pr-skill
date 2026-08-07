@@ -1044,6 +1044,458 @@ grep -q 'trailer_not_in_trailer_block' "$SKILL" \
     && pass "…and names the status the gate reports when it is misplaced" \
     || die "the contract does not mention the misplaced-trailer status"
 
+# ── the driver's working discipline is stated, not assumed ─────────────────
+# The failure mode of an automated fix loop is not laziness, it is enthusiasm:
+# fixing more than was asked, building more than the finding requires, and
+# bundling both into a commit whose summary says "closing review comments". Each
+# of these rules exists because breaking it lengthened a real PR here, so each is
+# asserted rather than left to be inferred from the surrounding prose.
+# EVERY clause this contract declares binding, not a sample of them. The first
+# version asserted five of six, so deleting "every change must be reviewable as a
+# fix" left the suite green — a contract can lose a rule silently exactly as a
+# helper can lose a field check.
+for rule in \
+    'Fix what the finding names' \
+    'Do not build more than the finding requires' \
+    'Every change you make must be reviewable as a fix' \
+    'Validate a finding before you act on it' \
+    'Prove a fix can fail' \
+    'Say what you did not do'; do
+    grep -qF "$rule" "$SKILL" \
+        && pass "the contract states: $rule" \
+        || die "the contract no longer states: $rule"
+done
+
+# ── the driver is told to read a finding whole ─────────────────────────────
+# `list` prints one line per thread so the set is countable; that line is not the
+# finding. Acting on the title alone produces a fix aimed at a paraphrase, which
+# is how a round ends with the thread resolved and the finding still true.
+grep -q 'Read each finding whole' "$SKILL" \
+    && pass "the contract tells the driver to read the finding body" \
+    || die "the contract does not tell the driver to read past the title"
+grep -q 'suggestion' "$SKILL" \
+    && pass "…including any code suggestion attached to it" \
+    || die "the contract never mentions code suggestions"
+grep -q 'proposal rather than an instruction' "$SKILL" \
+    && pass "…and that a suggestion is a proposal, not an instruction" \
+    || die "the contract does not say how to weigh a code suggestion"
+# The bodies come from the helper, which filters to UNRESOLVED threads. The REST
+# comments endpoint has no such filter and returns every review comment the PR has
+# ever had, so fetching bodies there hands the driver findings answered three
+# rounds ago — and fixing an already-answered comment is the scope expansion these
+# same rules forbid. The contract said so only after a review round said it first.
+# The endpoint is NAMED — the contract warns against it — so what must be absent
+# is a CALL to it, not the string. FLATTENED, because `gh api` calls in this file
+# routinely span continuation lines: a line-based match saw only one token of a
+# split invocation and reported clean. Third time line-wrapping has defeated a
+# check in this PR, which is why the flattened copy is taken once and reused.
+skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
+    || die "could not flatten SKILL.md for the endpoint check"
+# The scans below use herestrings rather than `printf | grep`: under `pipefail`,
+# `grep -q` exiting at the first match SIGPIPEs the producer and the pipeline
+# reports the match as ABSENT — the fail-open direction. The fixture demonstrating
+# that hazard, and the counting machinery for CHANGELOG consistency, are held back
+# for a follow-up PR: both are hardening of this file rather than tests of the
+# documentation this change delivers, and both were the source of most of the
+# review churn on it.
+# A POSITIVE CONSTRAINT, not a blacklist of route spellings.
+#
+# Three versions of this guard tried to recognise the forbidden call by its shape
+# — `[^|]*` treated a jq pipe as a pipeline boundary, `{0,200}` was a ceiling a
+# long filter walks past, and the route regex was defeated in turn by `$PR`,
+# quotes, and a backslash continuation. Each fix was correct and each was one
+# spelling behind, because a lexical blacklist can always be evaded: the last
+# evasion found was `PULLS="repos/…/pulls/$PR"; gh api "$PULLS/comments"`, where no
+# contiguous route substring exists at all.
+#
+# The invariant was never really about that string. It is that the findings are
+# read through the HELPER, which filters to unresolved threads — so the check is
+# now that the findings-reading section executes `pr-findings.sh` and calls no
+# `gh api` at all. No composition of variables satisfies that, because the
+# constraint is on what the section may invoke rather than on how a URL is spelt.
+#
+# `gh api` remains legitimate elsewhere in the file — reactions and thread
+# resolution use it — so the constraint is scoped to the section that reads
+# findings.
+findings_code="$(awk '
+    /^## 4\. Read the findings/ { insec = 1 }
+    insec && /^## 5\./ { insec = 0 }
+    !insec { next }
+    /^[ ]{0,3}(```+|~~~+)/ {
+        line = $0; sub(/^[ ]+/, "", line)
+        ch = substr(line, 1, 1); n = 0
+        while (substr(line, n + 1, 1) == ch) n++
+        if (!inb) { inb = 1; fch = ch; fn = n; next }
+        if (ch == fch && n >= fn && substr(line, n + 1) ~ /^[[:space:]]*$/) { inb = 0; next }
+        next
+    }
+    inb { print; next }
+    # AN INDENTED BLOCK IS ALSO CODE. Markdown treats four spaces at the top level
+    # as a code block, and a fenced helper call elsewhere in the section kept
+    # `findings_code` non-empty — so a recipe hidden in an indented block was
+    # omitted while the whitelist reported clean. It never had to defeat the
+    # check, only to sit outside what the extractor looked at.
+    # TABS FIRST. A leading tab indents a Markdown code block exactly as four
+    # spaces do, and an extractor that knew only spaces omitted it — the third
+    # narrowing of this same extractor, so the fix normalises rather than adding
+    # one more accepted shape.
+    { gsub(/\t/, "    ") }
+    /^[ ]{4,}[^[:space:]]/ { sub(/^[ ]+/, ""); print }' "$SKILL")" \
+    || die "could not extract the findings-reading section from SKILL.md"
+[ -n "$findings_code" ] \
+    || die "the findings-reading section has no executable block; has it moved?"
+# A WHITELIST, which is where this had to end up. Blacklisting the route was
+# defeated by five spellings; blacklisting `gh api` was still lexical and is
+# defeated by `gh  api`, `"gh" api`, or a continuation between the two words.
+# Every blacklist is one spelling behind because the space of ways to write a
+# command is open.
+#
+# So the section is constrained to what it MAY run rather than what it may not:
+# every executable line here has to be a `pr-findings.sh` invocation. Anything
+# else fails however it is spelt, because the check is not looking at how a
+# command is written — it is looking for anything that is not the one permitted
+# command. That closes the sequence rather than extending it.
+#
+# If this section ever legitimately needs a second command, this guard fails and
+# is updated deliberately. That is the correct cost: adding a call here is exactly
+# the change that should not happen quietly.
+findings_stmts=0 findings_bad=""
+while IFS= read -r line; do
+    # A COMMENT IS DECIDED BY THE FIRST NON-BLANK CHARACTER. The glob `' '*'#'*`
+    # matched any indented line containing a `#` ANYWHERE, so
+    # `    gh api …/comments # fetch bodies` was discarded as a comment and never
+    # reached the whitelist at all — a bypass that did not need to defeat the
+    # check, only to avoid it.
+    _t="${line#"${line%%[![:space:]]*}"}"
+    case "$_t" in
+        ''|'#'*) continue ;;
+    esac
+    findings_stmts=$((findings_stmts + 1))
+    # ANCHORED to the whole statement. An unanchored glob only asked that the
+    # permitted call appear SOMEWHERE, so `gh api …; "$RB_SCRIPTS"/pr-findings.sh
+    # list N` satisfied it — a whitelist carrying a blacklist's hole. The statement
+    # is split on `;`: the first command must BE the helper, and every following
+    # segment must be a status capture, which is the only other thing these lines
+    # do.
+    stmt="${line#"${line%%[![:space:]]*}"}"
+    first="${stmt%%;*}"; rest="${stmt#"$first"}"
+    ok=1
+    # The permitted segment must be the helper call and NOTHING ELSE. Splitting on
+    # `;` alone left `… list N && gh api …` intact in `first`, where a prefix glob
+    # accepted it — the anchor was on the start of a segment rather than on the
+    # whole command. Control operators and command substitution chain a second
+    # command without a semicolon, so they are refused here.
+    case "$first" in
+        # `>(`/`<(` are process substitution: `… list N > >(gh api …)` runs a second
+        # command with none of the tokens above in it. `<` and `>` are refused
+        # outright — these statements have no business redirecting.
+        *'&&'*|*'||'*|*'|'*|*'&'*|*'$('*|*'`'*|*'>('*|*'<('*|*'>'*|*'<'*) ok=0 ;;
+        '"$RB_SCRIPTS"/pr-findings.sh '*) ;;
+        *) ok=0 ;;
+    esac
+    while [ -n "$rest" ] && [ "$ok" -eq 1 ]; do
+        rest="${rest#;}"; seg="${rest%%;*}"; rest="${rest#"$seg"}"
+        seg="${seg#"${seg%%[![:space:]]*}"}"; seg="${seg%"${seg##*[![:space:]]}"}"
+        # A COMPLETE IDENTIFIER ASSIGNMENT, character by character. The glob
+        # `[A-Za-z_]*'=$?'` reads as "one identifier character, then anything,
+        # then =$?" — so `gh api repos/…/comments && FIND_RC=$?` satisfied it.
+        # `*` in a glob is not `*` in a regex, and that difference was the hole.
+        case "$seg" in
+            '') ;;
+            *'=$?')
+                _name="${seg%'=$?'}"
+                case "$_name" in
+                    ''|[!A-Za-z_]*) ok=0 ;;
+                    *[!A-Za-z0-9_]*) ok=0 ;;
+                esac ;;
+            *) ok=0 ;;
+        esac
+    done
+    [ "$ok" -eq 1 ] || findings_bad="$findings_bad
+       $line"
+done <<<"$findings_code"
+[ "$findings_stmts" -gt 0 ] \
+    && pass "the findings-reading section has executable statements to check" \
+    || die "the findings-reading section executes nothing; has it moved?"
+if [ -z "$findings_bad" ]; then
+    pass "…and every one of them is a pr-findings.sh call, whatever else could be spelt"
+else
+    die "the findings-reading section runs something other than pr-findings.sh:"
+    printf '%s\n' "$findings_bad"
+fi
+grep -q 'no resolution filter' "$SKILL" \
+    && pass "…and says why that endpoint cannot be used for findings" \
+    || die "the contract does not explain why the REST endpoint is wrong here"
+# The deferral rule must not contradict the work-order rule: a mention describing
+# an UNFIXED defect is read as a task, and Codex then commits in an environment
+# with no remote. The disposition belongs in the summary; the description does not.
+# Mutation proof is mandatory in this repository, so the contract must not offer
+# disclosure as a way out of it: a summary is untrusted context, not authority,
+# and closing a round on "no mutant is claimed" leaves an assertion that passed
+# before the fix while the suite reports green.
+# The body-reading rule needs the SENTENCE, not just the heading above it:
+# reversing the prose to "the title is sufficient" left that heading intact and
+# every other check satisfied. Asserted here rather than beside the heading
+# because the sentence wraps in the file and is only contiguous once flattened.
+# The README must describe the operator stop, because it is the one rule a user
+# MEETS rather than reads about: a loop that will not close, with the reason only
+# in a summary. Documenting the behaviour without documenting the decision that
+# unblocks it leaves them stuck with no way to know what is being asked.
+rd_flat="$(tr '\n' ' ' < "$SCRIPT_DIR/../../../README.md" | tr -s ' ')" \
+    || die "could not flatten README.md"
+grep -qF 'stops for you' <<<"$rd_flat" \
+    && pass "the README says the loop stops for the operator when a mutation cannot be built" \
+    || die "a user could meet a loop that will not close with no user-facing explanation"
+grep -qF 'a dated record landed on the base branch by its own PR' <<<"$rd_flat" \
+    && pass "…and says what decision unblocks it" \
+    || die "the README does not tell the operator how to accept the limitation"
+
+grep -qF 'That line is not the finding.' <<<"$skill_flat" \
+    && pass "the contract says explicitly that the printed line is not the finding" \
+    || die "the body-reading rule could be reversed under an unchanged heading"
+grep -q 'not waivable by disclosure' <<<"$skill_flat" \
+    && pass "mutation proof cannot be waived by saying so in the summary" \
+    || die "the contract lets a summary line stand in for an unproven fixture"
+grep -qi 'write the limitation as a comment \*\*at the site\*\*' <<<"$skill_flat" \
+    && pass "…an unprovable case is written at the site" \
+    || die "the contract does not say where an unprovable limitation is recorded"
+# …and does NOT pretend that comment is authority. A comment added in this PR
+# arrives WITH the change, so it is untrusted context exactly like the summary —
+# calling it a base-ref record would let the round converge on the author's own
+# say-so, which is the thing the rule above exists to forbid.
+grep -qi 'It explains; it does not accept' <<<"$skill_flat" \
+    && pass "…and that comment explains rather than accepts" \
+    || die "the contract treats a comment added in this PR as an accepted limitation"
+grep -qi 'landed on the \*\*base ref by its own pull request\*\*' <<<"$skill_flat" \
+    && pass "…with acceptance requiring a separately landed base-ref record" \
+    || die "the contract does not say how a limitation actually becomes authority"
+# The OUTCOME, not only the prohibition. Recording the limitation and carrying on
+# is still closing a round on an unproven fixture — the stop is what makes the
+# rule bite, and it was the one clause the previous pair of assertions missed.
+grep -qE '\*\*stop for the operator\*\*' <<<"$skill_flat" \
+    && pass "…and the round stops for the operator rather than closing" \
+    || die "the contract records an unprovable case but lets the round close anyway"
+
+# The scope rule and the class-wide self-check must not contradict each other:
+# one says fix only what was named, the other says find every occurrence of the
+# same shape. They are reconciled by scope, not left for the driver to pick.
+grep -q 'is the DEFECT, not the line' <<<"$skill_flat" \
+    && pass "the scope rule and the class-wide self-check are reconciled" \
+    || die "the contract gives the driver two incompatible scope instructions"
+grep -q 'outside this PR' <<<"$skill_flat" \
+    && pass "…and a same-shape defect outside the diff is recorded, not pulled in" \
+    || die "the contract does not bound class-wide fixing to the PR's own diff"
+# The DECISIVE clause: when a finding states its scope, that scope governs — but
+# only over copies this PR already changes. Without the first half the driver has
+# no rule for an explicit "fix the other parsers"; without the second half it
+# contradicts the outside-diff boundary directly above.
+grep -q 'states its scope' <<<"$skill_flat" \
+    && pass "a finding's stated scope governs the class-wide fix" \
+    || die "the contract has no rule for a finding that states its own scope"
+grep -q 'that scope governs \*\*for the copies this PR already changes\*\*' <<<"$skill_flat" \
+    && pass "…bounded to the copies this PR already changes" \
+    || die "stated scope is unbounded and contradicts the outside-diff rule"
+# `[[:space:]]`, never `\s`. `\s` is a GNU extension: BSD grep on stock macOS —
+# which README lists as supported — reads it as a literal `s`, so this searched for
+# "evens*when", failed, and called `die` on correct text. The whole suite is a
+# mandatory pre-push gate, so a macOS contributor could not close a round while CI
+# stayed green. Same class as the `timeout`, `sha1sum` and `seq` findings before it.
+#
+# The flattened text has already collapsed runs of whitespace to single spaces, so
+# a plain space would do; the class is used anyway because the next person to copy
+# this line may not be matching flattened text.
+# THE SELF-CHECK BULLET SPECIFICALLY. The bounded wording appears in the scope
+# rules, so an assertion that merely finds it somewhere in the file stayed green
+# while the self-check thirty lines later still said "search for the same shape
+# everywhere else and fix them together" — the two halves of the contract giving
+# opposite instructions, which is what this whole PR keeps being about.
+grep -qF 'search for the same shape **everywhere else this PR already changes** and fix those together' <<<"$skill_flat" \
+    && pass "the class-wide self-check carries the diff boundary too" \
+    || die "the self-check would have the driver widen the PR into untouched code"
+grep -q 'even[[:space:]]*when the finding names it' <<<"$skill_flat" \
+    && pass "…and a named PRE-EXISTING copy outside the diff is still not pulled in" \
+    || die "a finding naming an untouched file could still widen the PR"
+# …but an untouched file this PR BROKE is not an unrelated problem. A validator
+# loosened or a producer altered can break a consumer the diff never touched, and
+# repairing it finishes the change rather than widening it. Without this the rule
+# told the driver to leave a regression it had just caused, because the file
+# happened to sit outside the diff.
+grep -qF 'repairing that consumer is not widening the PR, it is' <<<"$skill_flat" \
+    && pass "…while repairing a consumer this PR broke stays in scope" \
+    || die "the contract would leave a regression it caused in an untouched file"
+# A REGRESSION THE FIX CAUSED BELONGS TO THIS ROUND. The rule said a different
+# defect found while fixing is "never in scope", which would have the driver defer
+# a defect it had just introduced — part of what this PR changed, and on its way to
+# a merge if the next reviewer misses it. The line is drawn at pre-existing, not at
+# "was it the defect the finding named".
+# THE OUTCOME, not the subject. Matching only "a regression the fix itself
+# introduces" passed when the sentence was negated — the contract could say such a
+# regression is NOT this round's work and this check would still be green.
+grep -q 'regression the fix itself introduces' <<<"$skill_flat" \
+    && pass "the contract addresses a regression the fix introduces" \
+    || die "the contract no longer addresses a regression the fix causes"
+grep -q 'it is part of what this PR changed, so it is this round' <<<"$skill_flat" \
+    && pass "…and says it is this round's work" \
+    || die "the contract does not say a fix-introduced regression is this round's work"
+# BOTH qualifiers. "pre-existing" alone still excluded the same defect in a copy
+# this PR changes, which the bullets above require fixing together — the driver
+# could leave an in-diff twin and collect the same finding next round.
+# Subject AND outcome. `A *different* pre-existing defect` alone passed with the
+# sentence reversed to "is in scope", which is the opposite instruction.
+grep -q 'A \*different\* pre-existing defect' <<<"$skill_flat" \
+    && pass "…and only a DIFFERENT pre-existing defect is out of scope" \
+    || die "the out-of-scope rule would exclude an in-diff twin of the same defect"
+grep -qE 'A \*different\* pre-existing defect found while fixing this one is not in scope' <<<"$skill_flat" \
+    && pass "…and that defect is stated to be OUT of scope" \
+    || die "the contract does not state the out-of-scope outcome"
+# …and the CURRENT release entry must not describe these rules the old way. Four
+# stale copies have now been found in it, so the check is negative — the wrong
+# forms must be ABSENT — rather than positive: asserting that a qualified form
+# appears somewhere is satisfied by one occurrence while another sits unqualified
+# two paragraphs down, which is exactly how the last two survived.
+#
+# Scoped to the TOP entry only. Everything below it is history, and a release note
+# has to be able to quote a superseded rule to explain what was fixed.
+# ── the release entry does not teach a rejected account ────────────────────
+# Deliberately NOT the counting machinery — that was split out with the rest of
+# the changelog guards and belongs with them. These two claims are checked here
+# because both were corrected in `SKILL.md` and left stale in `CHANGELOG.md` in
+# the same round, which is the instance-not-class miss this whole change is about.
+cl_202="$(awk -v want='## [2.0.2]' '
+    index($0, want) == 1 { inb = 1; next }
+    /^## \[/ { inb = 0 }
+    inb { print }' "$SCRIPT_DIR/../../../CHANGELOG.md" | tr '\n' ' ' | tr -s ' ')" \
+    || die "could not extract the 2.0.2 CHANGELOG entry"
+[ -n "$cl_202" ] || die "the 2.0.2 CHANGELOG entry is missing or empty"
+# …and the scope account must carry the regression exception, which the entry
+# contradicted after SKILL.md gained it — the same instance-not-class miss, one
+# file over, for the second round running.
+grep -qF 'repairing a consumer a changed validator or producer breaks is finishing the change' <<<"$cl_202" \
+    && pass "the release entry keeps the regression exception to the scope rule" \
+    || die "the release entry would have a reader reject a required regression repair"
+grep -qF 'explains rather than accepts' <<<"$cl_202" \
+    && pass "the release entry says the at-the-site comment explains rather than accepts" \
+    || die "the release entry still teaches that an author-created comment is authority"
+# THE POSITIVE ACCOUNT. Forbidding one phrasing is a blacklist, and "No operational
+# behavior changes; this only updates documentation" evades it while making exactly
+# the claim that was wrong. The entry has to SAY both halves: which layer is
+# unchanged, and that session behaviour is not.
+grep -qF 'No **shell-script logic** changes' <<<"$cl_202" \
+    && pass "the release entry names the layer that is unchanged" \
+    || die "the release entry does not say what is actually unchanged"
+grep -qF 'so this release does change how a session behaves' <<<"$cl_202" \
+    && pass "…and states that session behaviour does change" \
+    || die "the release entry does not say the driver contract changed behaviour"
+
+grep -q 'disposition, never as a description' "$SKILL" \
+    && pass "deferrals are recorded as a disposition, not a description" \
+    || die "the contract invites a summary that reads as a work order"
+# …and NO copy of the summary rule may ask for the reasoning. "what was skipped,
+# and why" invites the unfixed defect into the mention, which is the work order.
+# Three files carried that wording; fixing one and not the others is how a rule
+# survives being reconciled.
+# CHANGELOG.md is NOT in this list, and adding it was a mistake I made and am
+# undoing: a changelog has to be able to QUOTE a superseded directive in order to
+# explain the failure that was fixed — "the old contract said the summary explains
+# why" is exactly the sentence a release note needs — and a whole-file ban would
+# fail the mandatory suite for describing history correctly. Its current entry is
+# checked below instead, positively and scoped to that entry.
+for doc in "$SKILL" "$SCRIPT_DIR/../../../CLAUDE.md" "$SCRIPT_DIR/../../../README.md"; do
+    [ -f "$doc" ] || { die "missing instruction file: $doc"; continue; }
+    dname="$(basename "$doc")"
+    dflat="$(tr '\n' ' ' < "$doc" | tr -s ' ')" || { die "$dname: could not read"; continue; }
+    # A SET of phrasings, not one literal. The first version matched only
+    # `intentionally skipped, and why`, and a third copy of the rule was worded
+    # differently — "the summary explains why" — so the check could not see it.
+    # Three rounds of this PR each found one more copy; the pattern list is what
+    # each of them added, and a new phrasing belongs here rather than being
+    # noticed by a reviewer for a fourth time.
+    # The pattern set grew again: a fourth copy asked the summary to argue for a
+    # BROADER FIX — a design proposal rather than a reason for a skip, different
+    # wording, same outcome, because anything in the mention that describes work
+    # to be done is read as a work order.
+    #
+    # Deliberately NOT matched: "say so in the summary" where what is said is a
+    # past-tense fact about this round's own checks — the self-check reporting it
+    # had nothing in scope. That cannot become a work order, and widening the
+    # pattern to catch it would forbid the summary from doing its job.
+    dir_rc=0
+    grep -qiE \
+        'skipped, and why|summary explains why|explains? why it was (skipped|deferred|left)|and why it was (skipped|deferred|left)|(warranted|broader fix)[^.]{0,60}say so in the summary|(the )?(reason|rationale)[^.]{0,40}(not applied|was skipped|for skipping|it was left)' \
+        <<<"$dflat" || dir_rc=$?
+    case "$dir_rc" in
+        0) die "$dname: still asks the summary to explain something that was not done" ;;
+        1) pass "$dname: does not invite the deferred defect into the summary" ;;
+        *) die "$dname: the summary-directive scan could not be completed" ;;
+    esac
+done
+
+# ── both reviewer files carry the same context and finding-quality rules ───
+# `.github/copilot-instructions.md` restates the policy inline because Copilot
+# reads only that file and does not follow pointers, so a rule added to AGENTS.md
+# alone reaches one reviewer of two. That asymmetry is the documented reason the
+# duplicate exists, which makes it exactly the thing that drifts.
+for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilot-instructions.md"; do
+    [ -f "$doc" ] || { die "missing reviewer instruction file: $doc"; continue; }
+    name="$(basename "$doc")"
+    # DISTINGUISHING text, not a phrase the file already contained. `resolved
+    # threads` matched `AGENTS.md`'"'"'s "zero unresolved threads" and the Copilot
+    # file'"'"'s "Waivers and resolved threads" heading, so this pair of assertions
+    # passed with the reply-context paragraph deleted from both — a guard for
+    # duplicate drift that could not see the duplicate drift.
+    # FLATTENED before matching. These files are wrapped prose, so a phrase that
+    # spans a line break is invisible to line-based grep — the first version of
+    # these assertions failed on correct text for exactly that reason.
+    flat="$(tr '\n' ' ' < "$doc" | tr -s ' ')" || { die "$name: could not read"; continue; }
+    grep -qi 'replies on .*resolved threads' <<<"$flat" \
+        && pass "$name: earlier-round replies are named as context" \
+        || die "$name: does not tell the reviewer to read earlier thread replies"
+    # The PREDICATE, not the phrase: "changed code is still" alone is satisfied by
+    # "…is still correct", which reverses the rule while matching the check.
+    grep -qi 'changed code is still[[:space:]]*defective' <<<"$flat" \
+        && pass "$name: a wrong reply is a finding only if the code is still DEFECTIVE" \
+        || die "$name: would have the reviewer block a merge to correct the record"
+    # THE CANONICAL CLAUSE, VERBATIM — the prose analogue of the whitelist that
+    # settled the endpoint guard.
+    #
+    # Positive patterns plus negation scans do not converge here. "Include the
+    # triggering input" was defeated by "do not include…", then by "include
+    # neither… nor…", and "naming any second copy" by "avoid naming…" and then by
+    # "omit naming…". Each fix enumerated one more way to negate, and English has
+    # no bounded list of those — the same wall the route and command blacklists
+    # hit, with no whitelist of commands available because the subject is meaning.
+    #
+    # What IS bounded is the sentence itself. Requiring the exact clause makes any
+    # alteration fail — negated, reworded, or weakened — and the cost is precisely
+    # the property wanted for contract text: changing it is a deliberate act that
+    # updates this list, not a quiet edit that still satisfies a pattern.
+    case "$name" in
+        AGENTS.md)
+            req_clauses=(
+                'the input or state that triggers it** — the concrete case, not the category'
+                '**the consequence** — what ends up wrong, in terms of what this tool does'
+                'The author is expected to assert the consequence in a test, and can only do that if you state it'
+                'if the same defect exists in a second copy **that this PR also changes**, say so'
+            ) ;;
+        copilot-instructions.md)
+            req_clauses=(
+                'Include the input or state that triggers it — **the concrete case, not the category**'
+                'the **consequence** in terms of what this tool does'
+                'the author is expected to assert that consequence in a test'
+                'naming any second copy of the same defect **that this PR also changes**'
+            ) ;;
+        *) req_clauses=() ;;
+    esac
+    for clause in ${req_clauses+"${req_clauses[@]}"}; do
+        grep -qF "$clause" <<<"$flat" \
+            && pass "$name: states verbatim — ${clause:0:52}…" \
+            || die "$name: this required clause is altered or missing — ${clause:0:52}…"
+    done
+    grep -qi 'proposal, not the finding' <<<"$flat" \
+        && pass "$name: a code suggestion is a proposal, not the finding" \
+        || die "$name: does not say a code suggestion is only a proposal"
+done
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

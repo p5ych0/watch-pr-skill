@@ -43,6 +43,79 @@ an unrelated note filed inline would block a PR that is not responsible for it.
 The reviewers are told to put those in the **overall review body**, and to open a
 **GitHub issue** when the problem deserves tracking beyond the PR.
 
+### What it asks of the session driving it
+
+The skill binds the model to a working discipline, because the failure mode of an
+automated fix loop is not laziness — it is enthusiasm. Each rule below exists
+because breaking it turns a three-round PR into a long one:
+
+- **Fix what the finding names, and nothing else** — where "what the finding
+  names" is the *defect*, so the same defect in another copy the PR already
+  changes is part of it, and a regression the fix itself introduces is always this
+  round's work. A round is about that round's findings. Nearby tidying, an opportunistic rename, hardening a path nobody
+  raised — all of it enlarges the diff the next review must read, and it arrives
+  bundled into a commit whose summary says "closing review comments", where a
+  reviewer has no reason to look for it.
+- **Build the smallest thing that makes the finding false.** Configuration nobody
+  asked for, an abstraction for a single call site, a general mechanism where a
+  specific fix was requested — each becomes surface that must then be reviewed and
+  maintained. If a broader fix is genuinely warranted, the session opens an issue
+  and raises it with you rather than deciding by building — and keeps that
+  discussion out of the review request, where a design proposal reads as a work
+  order.
+- **Validate a finding before acting on it.** Reviewers can be wrong, or right
+  about a defect and wrong about its cause. The session reproduces the claim
+  first, and where it does not hold, says so in the thread with evidence instead
+  of changing code to satisfy it.
+- **Read the whole finding, not its title.** The reviewers write a one-line title
+  and then the actual argument — the triggering input, the consequence, and often
+  a note that the same defect exists elsewhere. A code suggestion attached to a
+  finding is treated as a proposal, weighed against context the reviewer could
+  not see, with the reasoning recorded in the thread if it is not taken.
+- **Prove a fix can fail, or stop.** A test that passes against the unfixed code
+  converts an unverified assumption into a green tick, so the session reverts each
+  fix and confirms the test fails for the reason it names. Where that genuinely
+  cannot be constructed, it writes the limitation at the site and **stops for
+  you** — the loop will not close on its own say-so. Accepting the limitation is
+  your call, and it becomes binding the way the `--admin` trade-off did: a dated
+  record landed on the base branch by its own PR. If a loop refuses to close and
+  the summary says a mutation could not be built, that is this rule, and that is
+  the decision it is waiting on.
+- **Say what was not done.** Anything skipped, deferred or disagreed with goes in
+  the round summary. Silence would read as "addressed", and neither you nor the
+  reviewer could tell the difference. It goes there as a past-tense disposition
+  and an issue number, not as a description of the unfixed problem: the summary
+  shares a comment with the review request, and a request that describes work to
+  be done gets treated as one.
+
+You are not expected to police this. It is in the skill contract, the reviewers
+are told what a well-formed finding contains, and the round check-in brings the
+decision back to you at a cadence you set.
+
+## When to use it
+
+**Use it when a change deserves a second pair of eyes and there is nobody to
+ask** — anything you would want reviewed if you had a colleague: behaviour
+changes, anything touching money, auth, data loss or concurrency, a refactor you
+want an independent check on, or work you will not remember the reasoning behind
+in a month. It is at its best on a PR that has a clear stated goal, because that
+is what the reviewers judge relevance against.
+
+**It is worth less on:** a one-line typo fix, generated or vendored files,
+formatting-only commits, or a spike you intend to throw away. The loop costs
+reviewer time and round-trips; a PR whose diff is not worth reading is not worth
+gating.
+
+**Do not reach for it as a substitute for knowing what you want.** The reviewers
+judge the change against what the PR says it set out to do, so a PR with no clear
+goal produces vague findings and long rounds. Write the description first; that
+is the one input the whole loop is calibrated on.
+
+**If a review loop is running long**, that is information rather than a reason to
+push through. The round check-in exists to surface exactly that — see
+[Round check-in](#round-check-in). Rounds that keep finding defects in the *fixes*
+usually mean the change is too large, and splitting the PR is the faster route.
+
 > **Upgrading from 1.x?** v1 ran its own reviewer over a file-based bus with two
 > `systemd --user` daemons. All of it is removed — see the 2.0.0 entry in
 > [`CHANGELOG.md`](CHANGELOG.md) for why, and for the teardown commands.

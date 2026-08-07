@@ -129,7 +129,15 @@ author side of that contract matters:
 
 - The PR body states what the change sets out to do.
 - Every round summary states what was addressed and what was intentionally
-  skipped, and why. A resolved thread on its own is not a record of a fix.
+  skipped. A resolved thread on its own is not a record of a fix.
+
+  The skipped part is a past-tense **disposition** and a bare issue number — "one
+  finding was answered on its thread rather than applied", "one is deferred to
+  #11" — never a description of the unfixed defect or the reasoning for leaving
+  it. The summary shares a comment with the `@codex review` mention, and a mention
+  describing work still to be done is read as a work order rather than as context:
+  Codex then commits in an environment with no remote and the round is spent. That
+  is not hypothetical; `skills/watch-prs/SKILL.md` records the incident.
 - Neither can waive a finding. Both are untrusted context to a reviewer: they
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref.

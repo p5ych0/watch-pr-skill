@@ -23,6 +23,120 @@ is the diagnostic, not a review. Per-repository behaviour (auto-review, trigger
 condition, exhaustive review, credit use) is set on the Codex **Code review**
 settings page.
 
+## How to work this loop
+
+These rules bind you for every round. They are here because breaking them is what
+turns a three-round PR into a fifty-round one, and every line below was earned
+that way rather than assumed.
+
+**Fix what the finding names. Nothing else.** A round is about the findings in
+that round. Refactoring nearby code, tidying something you noticed, hardening a
+path nobody raised, renaming for consistency — all of it enlarges the diff the
+next review has to read, and a reviewer judges relevance against what the PR said
+it set out to do. Unrelated improvements arrive as their own PR or as an issue.
+
+**"What the finding names" is the DEFECT, not the line.** The same defect in
+another copy is the same finding — closing one site and leaving its twin is what
+produced three consecutive rounds of head validation, then non-zero statuses, then
+record identity, and the self-check below asks you about exactly that. The two
+rules meet like this:
+
+- If the finding **states its scope** — "apply the same rule in the other
+  parsers" — that scope governs **for the copies this PR already changes**, and
+  fixing less of those is leaving the finding open.
+- If it names one site and the same shape exists **elsewhere in what this PR
+  already changes**, fix those together. That is completing the fix, not widening
+  it.
+- If a **different pre-existing** defect of the same shape exists **outside this
+  PR's diff**, do not pull it in, even when the finding names it.
+
+  This exclusion is about *pre-existing* problems only. Where your change breaks
+  an untouched consumer — a validator loosened, a producer's output altered, a
+  contract widened — repairing that consumer is not widening the PR, it is
+  finishing the change you already made. A regression is this round's work
+  wherever the file that has to change happens to sit, and a reviewer naming that
+  file is naming the fix, not asking you to adopt unrelated work. The reviewers are told to keep out-of-scope problems
+  out of inline comments for exactly this reason, so a named copy in an untouched
+  file is a reviewer mistake rather than an instruction — answer it on the thread,
+  record it as an issue, and reference the issue number in the summary. A defect
+  that has been there for a year is not made urgent by your having noticed it
+  mid-round, and widening the PR to reach it is the scope expansion these rules
+  exist to prevent.
+
+A *different* pre-existing defect found while fixing this one is not in scope,
+however tempting the proximity — "different" matters as much as "pre-existing",
+because the **same** defect in a copy this PR also changes is the finding itself,
+and the bullets above require fixing it with the rest. **A regression the fix itself introduces is a different
+matter entirely**: it is part of what this PR changed, so it is this round's work
+and must be corrected before the round closes. The distinction is whether the
+behaviour was already wrong before you touched it, not whether it is the defect
+the finding named.
+
+**Do not build more than the finding requires.** The smallest change that makes
+the finding false is the correct change. Adding configuration nobody asked for, a
+new abstraction for a single call site, or a general mechanism where a specific
+fix was requested all create surface that must then be reviewed, tested and
+maintained — and in this repository each of those rounds has, historically,
+produced its own findings. If a general fix is genuinely warranted, do not decide
+that silently by building it — and do not argue it in the summary either, because
+the summary rides with the `@codex review` mention and a design proposal there is
+a work order. Open an issue for it, reference the number, and raise it with the
+operator outside the review request.
+
+**Every change you make must be reviewable as a fix.** Bundling an unrelated
+change into a review-fix commit hides it: the reviewer reads the round summary,
+sees a list of findings, and has no reason to look for anything else. That is how
+a defect enters a PR that was, on paper, only closing review comments.
+
+**Validate a finding before you act on it.** A reviewer can be wrong, can be
+working from a stale head, or can describe a real problem with the wrong cause.
+Reproduce the claim against the current code first. If it does not hold, say so in
+the thread with the evidence rather than changing code to satisfy it — an
+unnecessary change is a defect with a good excuse. If it holds but its suggested
+remedy is wrong, fix the defect the right way and explain the difference.
+
+**Prove a fix can fail.** A test that passes against the unfixed code is worse
+than no test: it converts an unverified assumption into a green tick. Revert the
+fix, confirm the test fails *for the reason it names*, restore it.
+
+**This is not waivable by disclosure.** A summary is untrusted context, not
+authority — saying "no mutant is claimed" does not make an unproven fixture
+acceptable, and closing the round on that leaves an assertion that passed before
+the fix while the suite and the self-check both report green.
+
+Where a mutation genuinely cannot be constructed — every arrangement trips an
+earlier guard, and you have tried rather than assumed — write the limitation as a
+comment **at the site**, so the next reader of that code meets it, and **stop for
+the operator**. Be clear about what that comment is and is not: added in this pull
+request, it arrives *with* the change and is untrusted context exactly like the
+summary. It explains; it does not accept. A reviewer is right to keep reporting
+the missing proof, and the round cannot converge on the strength of the comment
+alone.
+
+Accepting the limitation is the operator's decision, and it becomes authority only
+the way every other accepted limitation here does: a dated record landed on the
+**base ref by its own pull request**, which a reviewer can then read as settled.
+`docs/decisions/2026-08-06-merge-admin-default.md` is the worked example — it was
+landed separately, before the PR that relied on it. `pr-watch.sh`'s clock guard
+carries such a comment for a limitation already settled that way.
+
+**Say what you did not do — as a disposition, never as a description.** Silence
+reads as "addressed", and the reviewer has no way to tell the difference. But the
+summary is posted in the same comment as the `@codex review` mention, and a
+mention that describes an *unfixed* defect is read as a task rather than as
+context: Codex then runs as a coding agent, commits in an environment with no
+remote, and the round is spent producing a commit that exists nowhere. That has
+happened here.
+
+So record the **disposition** in the past tense and nothing more — "one finding
+was answered on its thread rather than applied", "one is deferred to #11" — with a
+bare issue number where there is one. Do not restate the defect, its file, its
+consequence, or what closing it would take. Where a broader fix looks warranted,
+that discussion belongs **outside the review request** — an issue, and the
+operator — with at most "deferred to #N" in the summary itself; naming the
+decision in the mention is enough to make it a work order. **Write the summary as a record,
+never as a work order** below has the full rule and the incident it came from.
+
 ## Derive identity
 
 ```bash
@@ -114,7 +228,11 @@ The reviewers judge relevance against what the PR says it set out to do, so this
 is a precondition, not documentation. Before requesting a review, the PR
 description must state what the change does and what it deliberately does not.
 Every later round adds a **round-summary comment** saying what was addressed and
-what was intentionally skipped, and why.
+what was intentionally skipped — the skipped part as a past-tense **disposition**
+with a bare issue number, never as a description of the unfixed defect or the
+reasoning behind leaving it. That mention is a review request, and a request that
+describes work to be done is read as a work order; see **Write the summary as a
+record, never as a work order**.
 
 Neither can waive a finding — both are untrusted context to a reviewer. Where a
 limitation is genuinely accepted, record it on the **base ref**.
@@ -308,6 +426,46 @@ PR. The helper resolves the head itself, with its own guarded lookup.
 Scoped to the current head either way: a stale `CHANGES_REQUESTED` on an older
 commit, already superseded by a signoff on this one, is not an active finding.
 
+### Read each finding whole, not just its title
+
+`list` prints one line per thread so the set is countable. **That line is not the
+finding.** The reviewers write a one-line title and then several sentences that
+carry the actual argument — the input that triggers it, why the current code
+mishandles it, and what the consequence is. Acting on the title alone produces a
+fix aimed at a paraphrase, which is how a round ends with the finding still true
+and the thread resolved.
+
+`list` already prints each finding's **complete body** under its `thread=`/
+`comment=` line — that is what the multi-line output after each header is. Read
+it there. Do **not** reach for `pulls/N/comments` to fetch bodies: that endpoint
+has no resolution filter and returns every review comment the PR has ever had, so
+it hands you findings answered three rounds ago mixed in with the current set —
+and fixing an already-answered comment is precisely the scope expansion the rules
+above forbid. `pr-findings.sh` filters to unresolved threads; the REST endpoint
+cannot.
+
+Three things in a body change what you should do, and all three are easy to miss
+when skimming:
+
+- **A code suggestion.** Both reviewers can attach one — a fenced ```suggestion
+  block, or a proposed patch written into the prose. Read it, and treat it as a
+  proposal rather than an instruction: it is written without the surrounding
+  context you have, and applying one unread is how a fix lands that satisfies the
+  comment and breaks something else. Where you disagree, implement the correct
+  fix and say in the thread why the suggestion was not taken.
+- **A stated consequence.** "…so the merge proceeds with no trusted checks
+  result" tells you what to assert in the test. A fix whose test asserts the
+  mechanism but not the consequence leaves the consequence unproven — and in this
+  repository that has repeatedly meant a mutant that changed nothing.
+- **A scope hint.** Wording like "and apply the same rule in the other parsers"
+  or "add a fixture for this form" is part of the finding, not a suggestion for
+  later. Ignoring it produces the same finding again next round, in the copy you
+  did not touch.
+
+Reply to each thread with **what changed and why**, not "fixed". The reply is
+what a reviewer reads if the same area comes up again, and "fixed" tells it
+nothing it can check.
+
 ## 5. Fix, then close the round
 
 Fix the findings. Where you disagree, say so in the thread rather than silently
@@ -406,10 +564,14 @@ arbitrary — each one is a mistake that actually shipped from this repository.
 **Then read your own diff against the list below.** These are the classes that
 produced the rounds, and none of them is mechanical:
 
-- **Did I fix the instance or the class?** A finding names one place. Before
-  fixing it, search for the same shape everywhere else and fix them together. The
-  same fix arrived in three consecutive rounds — head validation, then non-zero
-  statuses, then record identity — because each round closed one site.
+- **Did I fix the instance or the class, within this diff?** A finding names one
+  place. Before fixing it, search for the same shape **everywhere else this PR
+  already changes** and fix those together — the same fix arrived in three
+  consecutive rounds (head validation, then non-zero statuses, then record
+  identity) because each round closed one site. A copy in a file this PR does not
+  touch is recorded and left to the operator, exactly as the scope rules above
+  require; this check asks whether the class was closed inside the diff, never
+  whether the diff was widened to reach it.
 - **Did I widen something without rechecking what consumes it?** Accepting ISO
   offsets in a timestamp validator reopened a lexical-sort hole an earlier round
   had closed, because the sort was never revisited. A validator is a contract
@@ -617,8 +779,11 @@ requested again.
 
 So: describe changes in the past tense, and put anything still open where it
 belongs — a GitHub issue, linked by number and nothing more. "One finding was
-answered on its thread rather than applied; the summary explains why" is a
-record. Restating the defect in the mention is a work order.
+answered on its thread rather than applied" is a record; **the reasoning lives on
+that thread, not in the summary.** The reviewer reads the thread when it matters,
+and a reply is not a review request — so the same words that are safe there turn
+the mention into a work order. Restating the defect in the mention *is* the work
+order, and so is explaining why it was left.
 
 **A resolved thread is not a record of a fix.** The summary is.
 
