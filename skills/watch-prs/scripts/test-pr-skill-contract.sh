@@ -1135,7 +1135,7 @@ findings_code="$(awk '
     # `findings_code` non-empty — so a recipe hidden in an indented block was
     # omitted while the whitelist reported clean. It never had to defeat the
     # check, only to sit outside what the extractor looked at.
-    /^    [^ ]/ { sub(/^    /, ""); print }' "$SKILL")" \
+    /^    [^[:space:]]/ || /^[ ]{4,}[^[:space:]]/ { sub(/^[ ]+/, ""); print }' "$SKILL")" \
     || die "could not extract the findings-reading section from SKILL.md"
 [ -n "$findings_code" ] \
     || die "the findings-reading section has no executable block; has it moved?"
@@ -1342,16 +1342,25 @@ cl_202="$(awk -v want='## [2.0.2]' '
     inb { print }' "$SCRIPT_DIR/../../../CHANGELOG.md" | tr '\n' ' ' | tr -s ' ')" \
     || die "could not extract the 2.0.2 CHANGELOG entry"
 [ -n "$cl_202" ] || die "the 2.0.2 CHANGELOG entry is missing or empty"
+# …and the scope account must carry the regression exception, which the entry
+# contradicted after SKILL.md gained it — the same instance-not-class miss, one
+# file over, for the second round running.
+grep -qF 'repairing a consumer a changed validator or producer breaks is finishing the change' <<<"$cl_202" \
+    && pass "the release entry keeps the regression exception to the scope rule" \
+    || die "the release entry would have a reader reject a required regression repair"
 grep -qF 'explains rather than accepts' <<<"$cl_202" \
     && pass "the release entry says the at-the-site comment explains rather than accepts" \
     || die "the release entry still teaches that an author-created comment is authority"
-cl_inert_rc=0
-grep -qiE 'no behaviour change; every rule' <<<"$cl_202" || cl_inert_rc=$?
-case "$cl_inert_rc" in
-    0) die "the release entry calls a driver-contract change operationally inert" ;;
-    1) pass "…and does not call a driver-contract change operationally inert" ;;
-    *) die "the release-entry scan could not be completed (rc=$cl_inert_rc)" ;;
-esac
+# THE POSITIVE ACCOUNT. Forbidding one phrasing is a blacklist, and "No operational
+# behavior changes; this only updates documentation" evades it while making exactly
+# the claim that was wrong. The entry has to SAY both halves: which layer is
+# unchanged, and that session behaviour is not.
+grep -qF 'No **shell-script logic** changes' <<<"$cl_202" \
+    && pass "the release entry names the layer that is unchanged" \
+    || die "the release entry does not say what is actually unchanged"
+grep -qF 'so this release does change how a session behaves' <<<"$cl_202" \
+    && pass "…and states that session behaviour does change" \
+    || die "the release entry does not say the driver contract changed behaviour"
 
 grep -q 'disposition, never as a description' "$SKILL" \
     && pass "deferrals are recorded as a disposition, not a description" \

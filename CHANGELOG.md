@@ -47,7 +47,10 @@ looked like, and none of it was stated where it binds.
   what the PR changed, and on its way to a merge if the next reviewer missed it.
   The line is drawn at *pre-existing*, not at whether it was the defect named — a
   **different pre-existing** defect stays out of scope, while the same defect in a
-  copy this PR also changes is part of the finding and gets fixed with it.
+  copy this PR also changes is part of the finding and gets fixed with it. A
+  *different pre-existing* copy in an untouched file stays out — but an untouched
+  file this PR **broke** does not: repairing a consumer a changed validator or
+  producer breaks is finishing the change, not widening it.
 
 - **Scope discipline and the class-wide self-check are reconciled.** One rule says
   fix only what the finding names; the self-check asks whether you fixed the
