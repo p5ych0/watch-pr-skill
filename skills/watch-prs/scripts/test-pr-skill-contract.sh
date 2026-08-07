@@ -1135,7 +1135,12 @@ findings_code="$(awk '
     # `findings_code` non-empty — so a recipe hidden in an indented block was
     # omitted while the whitelist reported clean. It never had to defeat the
     # check, only to sit outside what the extractor looked at.
-    /^    [^[:space:]]/ || /^[ ]{4,}[^[:space:]]/ { sub(/^[ ]+/, ""); print }' "$SKILL")" \
+    # TABS FIRST. A leading tab indents a Markdown code block exactly as four
+    # spaces do, and an extractor that knew only spaces omitted it — the third
+    # narrowing of this same extractor, so the fix normalises rather than adding
+    # one more accepted shape.
+    { gsub(/\t/, "    ") }
+    /^[ ]{4,}[^[:space:]]/ { sub(/^[ ]+/, ""); print }' "$SKILL")" \
     || die "could not extract the findings-reading section from SKILL.md"
 [ -n "$findings_code" ] \
     || die "the findings-reading section has no executable block; has it moved?"
@@ -1228,6 +1233,26 @@ grep -q 'no resolution filter' "$SKILL" \
 # disclosure as a way out of it: a summary is untrusted context, not authority,
 # and closing a round on "no mutant is claimed" leaves an assertion that passed
 # before the fix while the suite reports green.
+# The body-reading rule needs the SENTENCE, not just the heading above it:
+# reversing the prose to "the title is sufficient" left that heading intact and
+# every other check satisfied. Asserted here rather than beside the heading
+# because the sentence wraps in the file and is only contiguous once flattened.
+# The README must describe the operator stop, because it is the one rule a user
+# MEETS rather than reads about: a loop that will not close, with the reason only
+# in a summary. Documenting the behaviour without documenting the decision that
+# unblocks it leaves them stuck with no way to know what is being asked.
+rd_flat="$(tr '\n' ' ' < "$SCRIPT_DIR/../../../README.md" | tr -s ' ')" \
+    || die "could not flatten README.md"
+grep -qF 'stops for you' <<<"$rd_flat" \
+    && pass "the README says the loop stops for the operator when a mutation cannot be built" \
+    || die "a user could meet a loop that will not close with no user-facing explanation"
+grep -qF 'a dated record landed on the base branch by its own PR' <<<"$rd_flat" \
+    && pass "…and says what decision unblocks it" \
+    || die "the README does not tell the operator how to accept the limitation"
+
+grep -qF 'That line is not the finding.' <<<"$skill_flat" \
+    && pass "the contract says explicitly that the printed line is not the finding" \
+    || die "the body-reading rule could be reversed under an unchanged heading"
 grep -q 'not waivable by disclosure' <<<"$skill_flat" \
     && pass "mutation proof cannot be waived by saying so in the summary" \
     || die "the contract lets a summary line stand in for an unproven fixture"

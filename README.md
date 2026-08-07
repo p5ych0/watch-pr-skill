@@ -72,6 +72,15 @@ because breaking it turns a three-round PR into a long one:
   a note that the same defect exists elsewhere. A code suggestion attached to a
   finding is treated as a proposal, weighed against context the reviewer could
   not see, with the reasoning recorded in the thread if it is not taken.
+- **Prove a fix can fail, or stop.** A test that passes against the unfixed code
+  converts an unverified assumption into a green tick, so the session reverts each
+  fix and confirms the test fails for the reason it names. Where that genuinely
+  cannot be constructed, it writes the limitation at the site and **stops for
+  you** — the loop will not close on its own say-so. Accepting the limitation is
+  your call, and it becomes binding the way the `--admin` trade-off did: a dated
+  record landed on the base branch by its own PR. If a loop refuses to close and
+  the summary says a mutation could not be built, that is this rule, and that is
+  the decision it is waiting on.
 - **Say what was not done.** Anything skipped, deferred or disagreed with goes in
   the round summary. Silence would read as "addressed", and neither you nor the
   reviewer could tell the difference. It goes there as a past-tense disposition
