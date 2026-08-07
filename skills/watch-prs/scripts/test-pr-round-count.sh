@@ -162,7 +162,7 @@ mkreviews() {
 # …and an acknowledgement from the operator clears it, for exactly one interval.
 mkack() { # <count> [association] [reviewer]
     jq -n --arg n "$1" --arg a "${2:-OWNER}" --arg w "${3:-$CODEX}" \
-       '[{user:{login:"operator"},author_association:$a,
+       '[{user:{login:"operator"},author_association:$a,id:901,
           body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $w + "` `" + $n + "`\n")}]' \
        > "$TMP/ack.json"
 }
@@ -225,7 +225,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPIL
     || die "the Copilot acknowledgement was not read (rc=$rc out='$out')"
 # An unscoped footer is not an acknowledgement at all. There is no legacy form:
 # accepting one would reintroduce exactly the cross-phase block above.
-jq -n '[{user:{login:"operator"},author_association:"OWNER",
+jq -n '[{user:{login:"operator"},author_association:"OWNER",id:902,
          body:"Continuing.\n\n**Review-Pause-Acknowledged:** `3`\n"}]' > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
@@ -286,7 +286,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.
-jq -n '[{user:{login:"operator"},author_association:"OWNER",
+jq -n '[{user:{login:"operator"},author_association:"OWNER",id:902,
          body:"To continue, post **Review-Pause-Acknowledged:** `41` in a comment."}]' \
    > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?

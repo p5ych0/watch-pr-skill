@@ -22,6 +22,8 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-round-count.sh` | How many rounds this PR has had, and whether this is an operator check-in boundary. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. |
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
+| `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is — one definition, sourced by every helper that reads the API. |
+| `skills/watch-prs/scripts/testlib.sh` | The portable watchdog the fixtures run under. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
@@ -79,7 +81,18 @@ category; do not "fix" a script into a stricter mode.
 
 ## Tests
 
-- One `skills/watch-prs/scripts/test-<area>.sh` per area.
+- One `skills/watch-prs/scripts/test-<area>.sh` per area. `pr-selfcheck.sh`
+  enforces this for every `pr-*.sh` **and for the sourced libraries** — a shared
+  definition is the highest-leverage file in the tree, so it cannot be the
+  untested one.
+
+- **A rule that applies to more than one helper lives in `recordlib.sh`, not in
+  each of them.** Every field check there was originally written out in two or
+  three scripts, and every one of them was found missing from at least one — the
+  known review-state set reached two helpers and sat missing from the third for
+  eleven review rounds, where an unrecognised value was reported as a *withdrawn
+  review*. `test-recordlib.sh` carries a drift guard that fails if a helper
+  re-implements a rule inline; when you need a new one, add it there.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
 - Every behaviour change ships its test in the same PR.

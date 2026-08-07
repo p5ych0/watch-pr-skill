@@ -101,14 +101,14 @@ out="$(GH_GQL_RC=1 run list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "list: fetch failure => 2" || die "fetch failure gave rc=$rc"
 
 # ── blocked-body: scoped to the reviewer AND the head ──────────────────────
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"}]' \
     "$BOT" "$HEAD40" > "$TMP/rev.json"
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'please change X'; } \
     && pass "blocked-body: prints the blocking body for this head" || die "blocked-body (rc=$rc out='$out')"
 
 # A stale CHANGES_REQUESTED on an OLDER commit is not an active finding.
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"stale request"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"stale request"}]' \
     "$BOT" "$OLD40" > "$TMP/stale.json"
 out="$(GH_REVIEWS="$TMP/stale.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && [ -z "$out" ]; } \
@@ -116,7 +116,7 @@ out="$(GH_REVIEWS="$TMP/stale.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; 
     || die "stale body leaked (rc=$rc out='$out')"
 
 # Another reviewer's blocking body is not this reviewer's.
-printf '[{"user":{"login":"someone-else"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"theirs"}]' \
+printf '[{"user":{"login":"someone-else"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"theirs"}]' \
     "$HEAD40" > "$TMP/other.json"
 out="$(GH_REVIEWS="$TMP/other.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"
 [ -z "$out" ] && pass "blocked-body: scoped to the named reviewer" || die "another reviewer's body leaked: $out"
@@ -137,9 +137,9 @@ out="$(GH_REVIEWS="$TMP/obj.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc
 # one finding it has to act on.
 i=0
 for bad in '[{}]' \
-    '[{"user":{"login":"x"},"state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":123}]' \
-    '[{"user":"notanobject","state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":"x"}]' \
-    '[{"user":{"login":"x"},"state":"CHANGES_REQUESTED","commit_id":42,"submitted_at":"t","body":"x"}]'
+    '[{"user":{"login":"x"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":123}]' \
+    '[{"user":"notanobject","id":701,"state":"CHANGES_REQUESTED","commit_id":"'"$HEAD40"'","submitted_at":"t","body":"x"}]' \
+    '[{"user":{"login":"x"},"id":701,"state":"CHANGES_REQUESTED","commit_id":42,"submitted_at":"t","body":"x"}]'
 do
     i=$((i + 1))
     printf '%s' "$bad" > "$TMP/badrec$i.json"
@@ -170,10 +170,10 @@ out="$(GH_HEAD="abc" GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" 2>&1)"
 # finding that has nowhere else to appear.
 for nobody in 'null' '""x'; do
     if [ "$nobody" = 'null' ]; then
-        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":null}]' \
+        printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":null}]' \
             "$BOT" "$HEAD40" > "$TMP/nobody.json"
     else
-        printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z"}]' \
+        printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z"}]' \
             "$BOT" "$HEAD40" > "$TMP/nobody.json"
     fi
     out="$(GH_REVIEWS="$TMP/nobody.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
@@ -186,7 +186,7 @@ done
 # Filtering on state alone printed a request the reviewer had already withdrawn
 # by approving the same head — sending the driver into another fix round after a
 # signoff.
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"looks good now"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"},{"user":{"login":"%s"},"id":701,"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"looks good now"}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/superseded.json"
 out="$(GH_REVIEWS="$TMP/superseded.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && [ -z "$out" ]; } \
@@ -194,7 +194,7 @@ out="$(GH_REVIEWS="$TMP/superseded.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&
     || die "superseded request still printed (rc=$rc out='$out')"
 
 # …and the reverse: a request that came AFTER an approval is still active.
-printf '[{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"fine"},{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"actually, change Y"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"fine"},{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"actually, change Y"}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/relatest.json"
 out="$(GH_REVIEWS="$TMP/relatest.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'change Y'; } \
@@ -413,7 +413,7 @@ out="$(GH_REVIEWS="$TMP/goodstate.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1
 # sorts ABOVE a newer CHANGES_REQUESTED — `03:00:00+02:00` is 01:00 UTC — so the
 # latest record is read as the approval and the blocking body is silently
 # suppressed: empty output, rc 0, which the driver reads as "no body".
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T02:30:00Z","body":"the newer request"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00+02:00","body":"older approval"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T02:30:00Z","body":"the newer request"},{"user":{"login":"%s"},"id":701,"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00+02:00","body":"older approval"}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/bboffset.json"
 out="$(GH_REVIEWS="$TMP/bboffset.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
@@ -421,7 +421,7 @@ out="$(GH_REVIEWS="$TMP/bboffset.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)
     || die "blocked-body offset timestamp gave rc=$rc out='$out'"
 
 # Fractional seconds mis-sort the other way: `.5Z` sorts before plain `Z`.
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00.5Z","body":"the newer request"},{"user":{"login":"%s"},"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00Z","body":"older approval"}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00.5Z","body":"the newer request"},{"user":{"login":"%s"},"id":701,"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-02T03:00:00Z","body":"older approval"}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/bbfrac.json"
 out="$(GH_REVIEWS="$TMP/bbfrac.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
@@ -433,7 +433,7 @@ out="$(GH_REVIEWS="$TMP/bbfrac.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)";
 # `submitted_at`, so the sort ignores it and the OLD request comes back — sending
 # the driver to act on findings the in-flight pass may supersede. The snapshot in
 # pr-review-state.sh lets a draft dominate; these two must not disagree.
-printf '[{"user":{"login":"%s"},"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"the old request"},{"user":{"login":"%s"},"state":"PENDING","commit_id":"%s","submitted_at":null,"body":null}]' \
+printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"the old request"},{"user":{"login":"%s"},"id":701,"state":"PENDING","commit_id":"%s","submitted_at":null,"body":null}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/inflight.json"
 out="$(GH_REVIEWS="$TMP/inflight.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \

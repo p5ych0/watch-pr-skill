@@ -20,6 +20,22 @@
 # result is control flow. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
+# The shared record validators. Three scripts read the same two endpoints, and
+# each used to re-implement the same field checks — which is why the same rule
+# kept having to be added a third and fourth time, and why `state` reached two
+# scripts and stopped. See recordlib.sh and issue #11.
+#
+# The status is taken: a helper whose validators failed to load would fall back
+# to whatever the jq programs below happen to do with undefined functions, which
+# is an error per call rather than a clear refusal here.
+_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+    echo "PR_ROUND_COUNT status=error reason=lib_dir_unresolvable" >&2; exit 2; }
+# shellcheck source=recordlib.sh
+. "$_RB_SELF_DIR/recordlib.sh" || {
+    echo "PR_ROUND_COUNT status=error reason=recordlib_unreadable" >&2; exit 2; }
+[ -n "${RECORDLIB_JQ:-}" ] || {
+    echo "PR_ROUND_COUNT status=error reason=recordlib_empty" >&2; exit 2; }
+
 THRESHOLD="${REVIEW_ROUND_THRESHOLD:-10}"
 # A malformed threshold falls back to the default rather than disabling the
 # check-in: a typo must not silently remove a safety pause. `0` disables it, but
@@ -151,66 +167,32 @@ icraw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/issues/$PR/comments" --pag
 # Echoes the count and returns 0; echoes a status line and returns 2 otherwise.
 count_for() {
 local _rounds _clean
-    _rounds=$(printf '%s' "$raw" | jq -s --argjson who "$1" '
-    if length == 0 then error("no pages")
-    elif any(.[]; type != "array") then error("non-array page")
-    else [ .[][] ] as $all
-      | if any($all[];
-               type != "object"
-               or (.user | type) != "object"
-               or (.user.login | type) != "string"
-               or (.commit_id | type) != "string"
-               # A blank or non-SHA commit_id counted as its own "distinct head",
-               # which can turn a true boundary of 10 into 11 and skip the pause.
-               or (.commit_id | test("^[0-9a-f]{40}$") | not)
-               # `state` decides whether a record is a finished pass, so it is
-               # validated rather than ignored. A null or unrecognised state was
-               # counted as a reviewed head on the strength of `submitted_at`
-               # alone — one such record on a distinct full SHA turns a true
-               # boundary of 10 into 11 and skips the operator pause. The known
-               # set is the one pr-review-state.sh judges against, so the two
-               # scripts cannot disagree about what a review is.
-               or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
-               or ((.submitted_at | type) != "string" and .submitted_at != null)
-               # `submitted_at != null` is what makes a record COUNT as a
-               # submitted review below, so any old string satisfied it. A
-               # malformed page carrying one extra matching-reviewer record with
-               # `submitted_at:"zzzz"` and a full-SHA commit_id was counted as
-               # another distinct reviewed head — and at a real 10-round boundary
-               # that inflates `rounds` to 11, which is exactly the direction that
-               # SKIPS the operator pause. Same anchored ISO test as
-               # pr-review-state.sh, for the same reason: unreadable must not
-               # read as one more round.
-               or (.submitted_at != null
-                   and (.submitted_at
-                        | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-                        | not)))
-        then error("malformed review record")
-        # A round is a FINISHED pass. `PENDING` is a draft in flight — the same
-        # thing pr-review-state.sh refuses to read as a signoff — so it is not a
-        # round however its `submitted_at` reads.
-        else [ $all[]
-               | select((.user.login | IN($who[]))
-                        and .submitted_at != null
-                        and .state != "PENDING")
-               | .commit_id ] | unique
-        end
-    end' 2>/dev/null) || {
+    _rounds=$(printf '%s' "$raw" | jq -s --argjson who "$1" "$RECORDLIB_JQ"'
+    pages_or_error
+    | [ .[][] ] as $all
+    # THE SHARED VALIDATOR, not a local copy. Every rule it applies used to be
+    # written out here and again in two other scripts, so a fix reached one and
+    # not the others — `state` reached two and stopped, and the third then read an
+    # unrecognised value as a withdrawn review. See recordlib.sh and issue #11.
+    | if any($all[]; valid_review_record | not)
+      then error("malformed review record")
+      # A round is a FINISHED pass. PENDING is a draft in flight — the same thing
+      # pr-review-state.sh refuses to read as a signoff — so it is not a round
+      # however its submitted_at reads.
+      else [ $all[]
+             | select((.user.login | IN($who[]))
+                      and .submitted_at != null
+                      and .state != "PENDING")
+             | .commit_id ] | unique
+      end' 2>/dev/null) || {
         echo "PR_ROUND_COUNT pr=$PR status=error reason=unreadable"
         return 2
     }
-# The clean-pass heads, as 10-char prefixes — that is all the comment carries.
-# A prefix already covered by a counted review head is not a second round, so the
-# union is taken on prefixes rather than on the two different shapes.
-_clean=$(printf '%s' "$icraw" | jq -s --argjson who "$1" '
-    if length == 0 then error("no pages")
-    elif any(.[]; type != "array") then error("non-array page")
-    else [ .[][] ] as $all
-      | if any($all[];
-               type != "object"
-               or (.user | type) != "object"
-               or (.user.login | type) != "string"
-               or ((.body | type) != "string" and .body != null))
+
+_clean=$(printf '%s' "$icraw" | jq -s --argjson who "$1" "$RECORDLIB_JQ"'
+    pages_or_error
+    | [ .[][] ] as $all
+      | if any($all[]; valid_comment_record | not)
         then error("malformed comment record")
         else [ $all[]
                | select((.user.login | IN($who[])) and ((.body | type) == "string"))
@@ -226,8 +208,7 @@ _clean=$(printf '%s' "$icraw" | jq -s --argjson who "$1" '
                # otherwise name a head this comment never reviewed.
                | (.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0])
              ] | map(select(. != "")) | unique
-        end
-    end' 2>/dev/null) || {
+        end' 2>/dev/null) || {
         echo "PR_ROUND_COUNT pr=$PR status=error reason=comments_unreadable"
         return 2
     }
@@ -287,10 +268,14 @@ fi
 # operator pause permanently by naming a large number. Only OWNER, MEMBER and
 # COLLABORATOR comments are read, which is the same "a finding is waived only by
 # an authority, never by the PR" line the review contract already draws.
-ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" '
-    if length == 0 then error("no pages")
-    elif any(.[]; type != "array") then error("non-array page")
-    else [ .[][] ] as $all
+ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" "$RECORDLIB_JQ"'
+    pages_or_error
+    | [ .[][] ] as $all
+      # Deliberately NOT `valid_comment_record` here. An unread acknowledgement
+      # causes an EXTRA pause, which is the safe direction, so a record this scan
+      # cannot read is skipped below rather than failing the whole count — one odd
+      # comment must not be able to take the round counter down. The container is
+      # still checked, because a page that is not a page is a failed read.
       | if any($all[]; type != "object")
         then error("malformed comment record")
         else [ $all[]
@@ -313,8 +298,7 @@ ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" '
                # that would silently match something else entirely.
                | select(.[0] | IN($who[]))
              ] | map(.[1]) | map(select(. != "")) | map(tonumber) | max // 0
-        end
-    end' 2>/dev/null) || {
+        end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_unreadable"
     exit 2
 }
