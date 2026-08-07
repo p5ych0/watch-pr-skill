@@ -1621,28 +1621,44 @@ if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
         printf '%s' "$left"
         return 1
     }
-    # Each verdict against a case that produces it. Without these the two
-    # inconclusive branches are unreachable code asserting nothing.
-    mkdir -p "$TMP_CL/probe/leaky/tmp.XXXXXX"
-    while IFS='|' read -r want crc where what; do
+    # THE DIAGNOSTIC IS THE PRODUCT, so it is what gets asserted. A numeric verdict
+    # checked in isolation leaves the dispatch below untested: swap the scan-failure
+    # text for the leak text and every status still matches, while an unreadable
+    # directory once again sends the author to the EXIT trap. The whole point of
+    # this round's split was WHICH CAUSE IS NAMED — so the fixture reads the name.
+    cleanup_diagnostic() {   # <verdict> <child rc> <entries> ; the message, 0 if clean
+        case "$1" in
+            0) printf 'a completed run removes its scratch tree rather than leaking it'
+               return 0 ;;
+            1) printf "a run left its scratch tree behind ('%s')" "$3"; return 1 ;;
+            2) printf "the cleanup probe's own run failed (rc=%s); the leak check proves nothing" "$2"
+               return 1 ;;
+            *) printf 'the scratch directory could not be scanned; the leak check proves nothing'
+               return 1 ;;
+        esac
+    }
+    # One entry point, used by the fixture and by the real check alike — otherwise
+    # the fixture exercises a copy of the dispatch rather than the dispatch.
+    cleanup_verdict() {   # <child rc> <dir> ; prints the diagnostic, 0 if clean
+        local v left
+        v=0
+        left="$(report_cleanup "$1" "$2")" || v=$?
+        cleanup_diagnostic "$v" "$1" "$left"
+    }
+    mkdir -p "$TMP_CL/probe/leaky/tmp.XXXXXX" "$TMP_CL/probe/emptied"
+    while IFS='|' read -r want crc where needle what; do
         [ -n "$want" ] || continue
-        got=0; report_cleanup "$crc" "$TMP_CL/probe/$where" >/dev/null || got=$?
-        [ "$got" = "$want" ] \
-            && pass "the cleanup verdict for $what is its own, not a leak report" \
-            || die "the cleanup verdict for $what was $got, wanted $want"
+        got=0; msg="$(cleanup_verdict "$crc" "$TMP_CL/probe/$where")" || got=$?
+        { [ "$got" = "$want" ] && grep -qF "$needle" <<<"$msg"; } \
+            && pass "$what is named as itself, not as another cause" \
+            || die "$what reported rc=$got '$msg' (wanted $want naming '$needle')"
     done <<'CLCASES'
-1|0|leaky|a directory holding a leaked tree
-2|1|tdir|a child run that failed
-3|0|never-scanned|a directory that cannot be scanned
+0|0|emptied|removes its scratch tree|a run that cleaned up
+1|0|leaky|left its scratch tree behind ('tmp.XXXXXX')|a directory holding a leaked tree
+1|1|tdir|own run failed (rc=1)|a child run that failed
+1|0|never-scanned|could not be scanned|a directory that cannot be scanned
 CLCASES
-    cln_verdict=0
-    cln_left="$(report_cleanup "$cln_rc" "$CTD")" || cln_verdict=$?
-    case "$cln_verdict" in
-        0) pass "a completed run removes its scratch tree rather than leaking it" ;;
-        1) die "a run left its scratch tree behind ('$cln_left')" ;;
-        2) die "the cleanup probe's own run failed (rc=$cln_rc); the leak check proves nothing" ;;
-        *) die "the scratch directory could not be scanned; the leak check proves nothing" ;;
-    esac
+    cln_msg="$(cleanup_verdict "$cln_rc" "$CTD")" && pass "$cln_msg" || die "$cln_msg"
 fi
 cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
     grep -qF "$1" <<<"$cl_202" \
