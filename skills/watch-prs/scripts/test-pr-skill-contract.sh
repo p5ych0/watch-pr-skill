@@ -1098,68 +1098,50 @@ skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
 # for a follow-up PR: both are hardening of this file rather than tests of the
 # documentation this change delivers, and both were the source of most of the
 # review churn on it.
-# INDENTED FENCES COUNT. Markdown allows up to three spaces before the backticks,
-# and this file already uses that form for the blocks nested under list items —
-# including the round-check-in snippet. A column-zero-only extractor skipped an
-# entire class of executable block, so a forbidden call placed in one read clean.
-# TILDE fences too. CommonMark allows `~~~` as an equivalent fence, so a block
-# opened that way was invisible to a backtick-only extractor.
-# THE OPENER'"'"'S MARKER AND LENGTH decide what closes it. An unconditional toggle
-# treated a three-backtick line INSIDE a four-backtick block — legal, and exactly
-# how a here-document quoting fenced markdown looks — as the close, dropping the
-# rest of that block from the scan.
-skill_code="$(awk '
+# A POSITIVE CONSTRAINT, not a blacklist of route spellings.
+#
+# Three versions of this guard tried to recognise the forbidden call by its shape
+# — `[^|]*` treated a jq pipe as a pipeline boundary, `{0,200}` was a ceiling a
+# long filter walks past, and the route regex was defeated in turn by `$PR`,
+# quotes, and a backslash continuation. Each fix was correct and each was one
+# spelling behind, because a lexical blacklist can always be evaded: the last
+# evasion found was `PULLS="repos/…/pulls/$PR"; gh api "$PULLS/comments"`, where no
+# contiguous route substring exists at all.
+#
+# The invariant was never really about that string. It is that the findings are
+# read through the HELPER, which filters to unresolved threads — so the check is
+# now that the findings-reading section executes `pr-findings.sh` and calls no
+# `gh api` at all. No composition of variables satisfies that, because the
+# constraint is on what the section may invoke rather than on how a URL is spelt.
+#
+# `gh api` remains legitimate elsewhere in the file — reactions and thread
+# resolution use it — so the constraint is scoped to the section that reads
+# findings.
+findings_code="$(awk '
+    /^## 4\. Read the findings/ { insec = 1 }
+    insec && /^## 5\./ { insec = 0 }
+    !insec { next }
     /^[ ]{0,3}(```+|~~~+)/ {
         line = $0; sub(/^[ ]+/, "", line)
         ch = substr(line, 1, 1); n = 0
         while (substr(line, n + 1, 1) == ch) n++
         if (!inb) { inb = 1; fch = ch; fn = n; next }
-        # A CLOSER MAY HAVE ONLY WHITESPACE AFTER ITS MARKER. ```not-a-close is
-        # block CONTENT by CommonMark, and closing on it dropped everything after
-        # it from the scan. The opener is exempt from this: its trailing text is
-        # the info string (```bash).
         if (ch == fch && n >= fn && substr(line, n + 1) ~ /^[[:space:]]*$/) { inb = 0; next }
     }
     inb { print }' "$SKILL")" \
-    || die "could not extract the executable blocks from SKILL.md"
-[ -n "$skill_code" ] || die "SKILL.md has no fenced blocks; has the format changed?"
-# THE ROUTE SHAPE, not the documentation placeholder. `pulls/N/comments` is how
-# the contract writes it in prose; a real call is `pulls/$PR/comments` or
-# `pulls/123/comments`, and neither matched a literal `N`.
-#
-# `issues/<n>/comments` is deliberately NOT matched — that endpoint is where Codex
-# reports a clean pass and the helpers read it on purpose. And `pulls/comments/
-# <id>/reactions`, which this file does call, has no PR segment before `comments`,
-# so the path shape below cannot reach it.
-# QUOTES STRIPPED before matching: `"repos/$O/$R/pulls/"$PR"/comments"` assembles
-# the same route across quoting boundaries, and a pattern that treats a quote as a
-# path terminator never sees it.
-# CONTINUATIONS JOINED as well as quotes stripped. A backslash-newline is not a
-# path boundary — `"…/pulls/$PR/"\` then `"comments"` is one logical word to the
-# shell — so a route split that way survived a normaliser that only removed
-# quotes. Both are the same class: the endpoint assembled out of pieces the
-# pattern treats as separators.
-skill_code_bare="$(printf '%s' "$skill_code" | sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' | tr -d '"'"'"'"')" \
-    || die "could not normalise the executable blocks"
-# A FAILED SCAN IS NOT A CLEAN ONE. `&& die || pass` classifies grep status 2 —
-# the scan could not complete — exactly like status 1, "nothing found", so an
-# unreadable input reported the guard satisfied. Every negative scan in this file
-# goes through this helper now.
-scan_absent() {   # scan_absent <pattern> <text> <label>
-    # `|| rc=$?` because this file runs under `-e`: a no-match grep is status 1 and
-    # would abort the script before `case "$?"` could classify it. That is the
-    # third time this trap has bitten in this PR, so every status here is captured
-    # at the point it is produced rather than read afterwards.
-    local rc=0
-    grep -qE "$1" <<<"$2" || rc=$?
-    case "$rc" in
-        0) die "$3" ;;
-        1) pass "…not $3" ;;
-        *) die "the scan for '$3' could not be completed" ;;
-    esac
-}
-scan_absent 'pulls/[^/[:space:]]+/comments' "$skill_code_bare" \
-    "the contract fetches finding bodies from the unfiltered comments endpoint"
+    || die "could not extract the findings-reading section from SKILL.md"
+[ -n "$findings_code" ] \
+    || die "the findings-reading section has no executable block; has it moved?"
+grep -q 'pr-findings\.sh' <<<"$findings_code" \
+    && pass "the findings are read through the helper that filters to unresolved threads" \
+    || die "the findings-reading section no longer uses pr-findings.sh"
+gh_rc=0
+grep -q 'gh api' <<<"$findings_code" || gh_rc=$?
+case "$gh_rc" in
+    0) die "the findings-reading section calls gh api directly, bypassing the unresolved filter" ;;
+    1) pass "…and calls no gh api of its own, whatever route it might spell" ;;
+    *) die "the findings-section scan could not be completed (rc=$gh_rc)" ;;
+esac
 grep -q 'no resolution filter' "$SKILL" \
     && pass "…and says why that endpoint cannot be used for findings" \
     || die "the contract does not explain why the REST endpoint is wrong here"
