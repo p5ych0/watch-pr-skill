@@ -1132,16 +1132,42 @@ findings_code="$(awk '
     || die "could not extract the findings-reading section from SKILL.md"
 [ -n "$findings_code" ] \
     || die "the findings-reading section has no executable block; has it moved?"
-grep -q 'pr-findings\.sh' <<<"$findings_code" \
-    && pass "the findings are read through the helper that filters to unresolved threads" \
-    || die "the findings-reading section no longer uses pr-findings.sh"
-gh_rc=0
-grep -q 'gh api' <<<"$findings_code" || gh_rc=$?
-case "$gh_rc" in
-    0) die "the findings-reading section calls gh api directly, bypassing the unresolved filter" ;;
-    1) pass "…and calls no gh api of its own, whatever route it might spell" ;;
-    *) die "the findings-section scan could not be completed (rc=$gh_rc)" ;;
-esac
+# A WHITELIST, which is where this had to end up. Blacklisting the route was
+# defeated by five spellings; blacklisting `gh api` was still lexical and is
+# defeated by `gh  api`, `"gh" api`, or a continuation between the two words.
+# Every blacklist is one spelling behind because the space of ways to write a
+# command is open.
+#
+# So the section is constrained to what it MAY run rather than what it may not:
+# every executable line here has to be a `pr-findings.sh` invocation. Anything
+# else fails however it is spelt, because the check is not looking at how a
+# command is written — it is looking for anything that is not the one permitted
+# command. That closes the sequence rather than extending it.
+#
+# If this section ever legitimately needs a second command, this guard fails and
+# is updated deliberately. That is the correct cost: adding a call here is exactly
+# the change that should not happen quietly.
+findings_stmts=0 findings_bad=""
+while IFS= read -r line; do
+    case "$line" in
+        ''|'#'*|' '*'#'*) continue ;;
+    esac
+    findings_stmts=$((findings_stmts + 1))
+    case "$line" in
+        *'"$RB_SCRIPTS"/pr-findings.sh '*) ;;
+        *) findings_bad="$findings_bad
+       $line" ;;
+    esac
+done <<<"$findings_code"
+[ "$findings_stmts" -gt 0 ] \
+    && pass "the findings-reading section has executable statements to check" \
+    || die "the findings-reading section executes nothing; has it moved?"
+if [ -z "$findings_bad" ]; then
+    pass "…and every one of them is a pr-findings.sh call, whatever else could be spelt"
+else
+    die "the findings-reading section runs something other than pr-findings.sh:"
+    printf '%s\n' "$findings_bad"
+fi
 grep -q 'no resolution filter' "$SKILL" \
     && pass "…and says why that endpoint cannot be used for findings" \
     || die "the contract does not explain why the REST endpoint is wrong here"
