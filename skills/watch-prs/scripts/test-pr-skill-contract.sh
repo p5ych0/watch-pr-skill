@@ -1526,8 +1526,16 @@ rm -f "$MTP/bin/mktemp"
 # The CALL SITE, not just the helper. Everything above still passes if the two
 # lines that acquire `TMP_CL` are put back the way they were, because a working
 # `mktemp` never reaches the guard — the helper is proven and the caller is not.
-# So the guard is exercised where it lives: this file is run against a `mktemp`
-# that fails, and it has to stop before anything is written.
+# So the guard is exercised where it lives: this file is re-run against a `mktemp`
+# it cannot trust, and it has to stop before anything is written.
+#
+# BOTH untrustworthy shapes, because only one of them separates the two
+# regressions. A `mktemp` that FAILS is rejected by a bare `mktemp -d` with a
+# status guard just as well as by `mktemp_d`, so that case alone leaves the
+# status-guarded bare form indistinguishable from the fix. A `mktemp` that prints
+# an absolute path it never created and returns 0 is the one only validation
+# catches — and it is not hypothetical, it is what a `mktemp` racing a cleaner or
+# a broken $TMPDIR does.
 #
 # `mkdir` and `ln` are stubbed to RECORD rather than act. What the unfixed form
 # does is write fixture symlinks into `/bin`, and performing that in order to
@@ -1535,32 +1543,65 @@ rm -f "$MTP/bin/mktemp"
 # evidence at no risk. The child skips this block, so a regression that lets it
 # past the guard cannot recurse.
 if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
-    SPB="$TMP_CL/probe/bin"; WIT="$TMP_CL/probe/writes"
-    mkdir -p "$SPB"
-    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$WIT" \
-        > "$SPB/mkdir"
-    cp "$SPB/mkdir" "$SPB/ln"
-    printf '#!/usr/bin/env bash\nexit 1\n' > "$SPB/mktemp"
-    chmod +x "$SPB/mkdir" "$SPB/ln" "$SPB/mktemp"
-    # `run_limited <secs> env …`, so the stub PATH reaches the SUBJECT and not the
-    # watchdog. Written the other way round first, and `test-testlib.sh` caught
-    # it: `run_limited`'s own fallback shells out to `mktemp`, which here is a
-    # `mktemp` stubbed to fail — the watchdog would have returned 125 without
-    # running this file at all, and the guard would have been asserting about
-    # nothing. The environment belongs to the thing under test.
-    sp_rc=0
-    sp_out="$(run_limited 180 env CONTRACT_SCRATCH_PROBE=1 PATH="$SPB:$PATH" \
-        bash "${BASH_SOURCE[0]}" 2>&1)" || sp_rc=$?
-    { [ "$sp_rc" -ne 0 ] && [ "$sp_rc" -ne 124 ] && [ "$sp_rc" -ne 125 ] \
-        && grep -qF 'no scratch directory for the counter fixture' <<<"$sp_out" \
-        && grep -qF 'RESULT: FAIL' <<<"$sp_out"; } \
-        && pass "a failing mktemp stops this file rather than being recorded" \
-        || die "a failing mktemp did not stop this file (rc=$sp_rc)"
-    # The whole point: `die` would have let it carry on with an empty `TMP_CL`,
-    # and every `$TMP_CL/…` under it then resolves to an absolute system path.
-    [ ! -s "$WIT" ] \
-        && pass "…and it creates nothing, so no fixture path can resolve to a system one" \
-        || die "the run wrote after a failed mktemp: $(tr '\n' ';' <"$WIT")"
+    SPB="$TMP_CL/probe/bin"; mkdir -p "$SPB"
+    sp_probe() {   # sp_probe <stub exit status> <what the case is>
+        local wit out rc
+        wit="$TMP_CL/probe/writes$1"; rc=0
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$wit" \
+            > "$SPB/mkdir"
+        cp "$SPB/mkdir" "$SPB/ln"
+        # The path the stub prints is absolute, plausible, and NEVER CREATED —
+        # the whole point of the second case.
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\nexit %s\n' \
+            "$TMP_CL/probe/never-made" "$1" > "$SPB/mktemp"
+        chmod +x "$SPB/mkdir" "$SPB/ln" "$SPB/mktemp"
+        # `run_limited <secs> env …`, so the stub PATH reaches the SUBJECT and not
+        # the watchdog. Written the other way round first, and `test-testlib.sh`
+        # caught it: `run_limited`'s own fallback shells out to `mktemp`, which
+        # here is a stubbed one — the watchdog would have returned 125 without
+        # running this file at all, and the guard would have been asserting about
+        # nothing. The environment belongs to the thing under test.
+        out="$(run_limited 300 env CONTRACT_SCRATCH_PROBE=1 PATH="$SPB:$PATH" \
+            bash "${BASH_SOURCE[0]}" 2>&1)" || rc=$?
+        { [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 125 ] \
+            && grep -qF 'no scratch directory for the counter fixture' <<<"$out" \
+            && grep -qF 'RESULT: FAIL' <<<"$out"; } \
+            && pass "a mktemp that $2 stops this file rather than being recorded" \
+            || die "a mktemp that $2 did not stop this file (rc=$rc)"
+        # The whole point: `die` would have let it carry on with an unusable
+        # `TMP_CL`, and every `$TMP_CL/…` under it then resolves somewhere else.
+        [ ! -s "$wit" ] \
+            && pass "…and it creates nothing under a path it was handed" \
+            || die "the run wrote after a mktemp that $2: $(tr '\n' ';' <"$wit")"
+    }
+    sp_probe 1 'prints a plausible path and then fails'
+    sp_probe 0 'prints a path it never created and succeeds'
+
+    # THE CLEANUP, observed rather than assumed. Nothing above looks at `$TMP_CL`
+    # after the process is gone, so deleting the EXIT trap — or making it a no-op —
+    # left the suite green while every run leaked a scratch tree again. Cleanup was
+    # a deliberate change in this commit, so it gets an assertion like any other.
+    #
+    # The child is given its own $TMPDIR, which is the only way to learn where its
+    # scratch went without the child having to report it: whatever `mktemp` gave it
+    # is under this directory, so "the trap ran" and "this directory is empty" are
+    # the same statement. It runs to completion with a real `mktemp` — that is the
+    # path where a leak actually happens.
+    CTD="$TMP_CL/tdir"; mkdir -p "$CTD"
+    cln_rc=0
+    run_limited 300 env CONTRACT_SCRATCH_PROBE=1 TMPDIR="$CTD" \
+        bash "${BASH_SOURCE[0]}" >/dev/null 2>&1 || cln_rc=$?
+    cln_left="$(ls -A "$CTD" 2>/dev/null)" || cln_left='THE_SCAN_FAILED'
+    # The two ways this can go wrong are reported apart. Folded into one
+    # condition, a child that failed for a reason of its own — any other assertion
+    # in this file — was announced as a LEAK, which is a guard misnaming the defect
+    # it found. A failed child is inconclusive, not clean and not a leak.
+    case "$cln_rc" in
+        0) [ -z "$cln_left" ] \
+               && pass "a completed run removes its scratch tree rather than leaking it" \
+               || die "a run left its scratch tree behind ('$cln_left')" ;;
+        *) die "the cleanup probe's own run failed (rc=$cln_rc); the leak check proves nothing" ;;
+    esac
 fi
 cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
     grep -qF "$1" <<<"$cl_202" \
@@ -1612,8 +1653,14 @@ cl_req 'explains rather than accepts' \
 cl_count 'defect[^.]{0,40}(found nearby|stays out of scope)[^.]{0,20}' \
          '\*{0,2}different pre-existing\*{0,2} defect (found nearby is not in scope|stays out of scope)' \
          'a different pre-existing defect is OUT of scope'
-cl_count '(same defect in a copy|copy of the same defect)[^.]{0,80}' \
-         '(same defect in a copy this PR also changes|copy of the same defect \*\*that this PR also changes\*\*)[^.]{0,80}' \
+# THREE mentions, not two. The third — "the same defect in another copy is the
+# same finding" — was outside both patterns, so it counted as neither claim nor
+# qualifier and the two recognised mentions stayed equal: removing or reversing
+# that boundary left the entry stating an unbounded scope rule with the mandatory
+# suite reporting clean. A count only guards the occurrences it can see, which is
+# the same "somewhere in the file" weakness one level up.
+cl_count '(same defect in a copy|copy of the same defect|same defect in another copy)[^.]{0,80}' \
+         '(same defect in a copy this PR also changes|copy of the same defect \*\*that this PR also changes\*\*|same defect in another copy[^.]{0,60}only within what this PR already changes)[^.]{0,80}' \
          'the second-copy requirement is bounded to the diff'
 cl_count 'a wrong reply (on an old thread )?is a finding[^.]{0,80}' \
          'a wrong reply (on an old thread )?is a finding \*{0,2}only when (its error means )?the (changed )?code is still[[:space:]]*defective' \
