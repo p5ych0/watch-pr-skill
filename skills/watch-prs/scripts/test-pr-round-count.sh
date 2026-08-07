@@ -162,7 +162,7 @@ mkreviews() {
 # …and an acknowledgement from the operator clears it, for exactly one interval.
 mkack() { # <count> [association] [reviewer]
     jq -n --arg n "$1" --arg a "${2:-OWNER}" --arg w "${3:-$CODEX}" \
-       '[{user:{login:"operator"},author_association:$a,
+       '[{user:{login:"operator"},author_association:$a,id:901,created_at:"2026-01-01T00:00:00Z",
           body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $w + "` `" + $n + "`\n")}]' \
        > "$TMP/ack.json"
 }
@@ -225,7 +225,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPIL
     || die "the Copilot acknowledgement was not read (rc=$rc out='$out')"
 # An unscoped footer is not an acknowledgement at all. There is no legacy form:
 # accepting one would reintroduce exactly the cross-phase block above.
-jq -n '[{user:{login:"operator"},author_association:"OWNER",
+jq -n '[{user:{login:"operator"},author_association:"OWNER",id:902,created_at:"2026-01-01T00:00:00Z",
          body:"Continuing.\n\n**Review-Pause-Acknowledged:** `3`\n"}]' > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
@@ -286,7 +286,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.
-jq -n '[{user:{login:"operator"},author_association:"OWNER",
+jq -n '[{user:{login:"operator"},author_association:"OWNER",id:902,created_at:"2026-01-01T00:00:00Z",
          body:"To continue, post **Review-Pause-Acknowledged:** `41` in a comment."}]' \
    > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
@@ -346,7 +346,7 @@ mk_clean_icomment() {   # <sha10>… ; one clean-pass comment per argument
           [ "$first" -eq 1 ] || printf ','
           first=0
           jq -n -c --arg login "$CODEX" --arg sha "$sha" \
-            '{id: 700, user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}'
+            '{id: 700, created_at: "2026-01-01T00:00:00Z", user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}'
       done
       printf ']'
     } > "$TMP/icomments.json"
@@ -374,7 +374,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
 specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 jq -n -c --arg sha "$(sha k10 | cut -c1-10)" \
-    '[{id: 701, user: {login: "somebody"}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+    '[{id: 701, created_at: "2026-01-01T00:00:00Z", user: {login: "somebody"}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=9'; } \
@@ -393,12 +393,32 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS_RC=1 run 7 2>&1)"; rc=$?
 specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|m$i|t"); done
 mk "${specs[@]}"
 jq -n -c --arg login "$CODEX" --arg sha "$(sha m10 | cut -c1-8)" \
-    '[{id: 702, user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+    '[{id: 702, created_at: "2026-01-01T00:00:00Z", user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
 { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
     && pass "a short-hash footer adds no phantom round; the boundary still pauses" \
     || die "short hash changed the count (rc=$rc out='$out')"
+
+# A clean-pass comment with no `created_at` is not a round. This helper never
+# reads that field — it counts on the footer and the phrasing — so a malformed
+# record was countable, and an extra round pushes the count past the operator
+# check-in. That is the unsafe direction, and it is the consequence the shared
+# validator's `created_at` rule exists to prevent, asserted where the consequence
+# lands rather than only where the rule is written.
+specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|m$i|t"); done
+mk "${specs[@]}"
+jq -n -c --arg login "$CODEX" --arg sha "$(sha m10 | cut -c1-10)" \
+    '[{id: 705, user: {login: $login},
+       body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
+    > "$TMP/icomments.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "a clean-pass comment with no created_at fails closed, rather than counting" \
+    || die "a comment without created_at was counted (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'rounds=10' \
+    && die "…and it inflated the count to 10, which is what skips the check-in: $out" \
+    || pass "…so it cannot inflate the count past the operator check-in"
 
 # The footer anchoring is enforced HERE too. The parser change was applied to
 # both helpers but fixtured in only one, so regressing this line to first-match
@@ -407,7 +427,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
 specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|n$i|t"); done
 mk "${specs[@]}"
 jq -n -c --arg login "$CODEX" --arg decoy "$(sha n99 | cut -c1-10)" --arg real "$(sha n10 | cut -c1-10)" \
-    '[{id: 703, user: {login: $login},
+    '[{id: 703, created_at: "2026-01-01T00:00:00Z", user: {login: $login},
        body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
@@ -417,7 +437,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
 
 # …and when the LAST footer names an uncounted head, it is a real eleventh round.
 jq -n -c --arg login "$CODEX" --arg decoy "$(sha n1 | cut -c1-10)" --arg real "$(sha n99 | cut -c1-10)" \
-    '[{id: 704, user: {login: $login},
+    '[{id: 704, created_at: "2026-01-01T00:00:00Z", user: {login: $login},
        body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?

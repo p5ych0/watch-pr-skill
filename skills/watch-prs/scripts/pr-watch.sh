@@ -21,6 +21,18 @@
 # flow. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
+# The shared shape rules. `pr-watch.sh` validates helper OUTPUT rather than API
+# records, but "a full commit SHA" must mean one thing across the plugin — it was
+# written out twice here as a Bash regex while three other scripts each had their
+# own jq copy. See recordlib.sh and issue #11.
+_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+    echo "PR_REVIEW_WATCH state=error reason=lib_dir_unresolvable" >&2; exit 2; }
+# shellcheck source=recordlib.sh
+. "$_RB_SELF_DIR/recordlib.sh" || {
+    echo "PR_REVIEW_WATCH state=error reason=recordlib_unreadable" >&2; exit 2; }
+command -v is_full_sha >/dev/null 2>&1 || {
+    echo "PR_REVIEW_WATCH state=error reason=recordlib_incomplete" >&2; exit 2; }
+
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
 
@@ -286,7 +298,7 @@ while :; do
     head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
     [ "$hrc" -eq 124 ] && timed_out
     [ "$hrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
-    if [ "$hrc" -ne 0 ] || ! [[ "$head" =~ ^[0-9a-f]{40}$ ]]; then
+    if [ "$hrc" -ne 0 ] || ! is_full_sha "$head"; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_unresolvable rc=%s detail=%s\n' \
             "$PR" "$WHO" "$hrc" "$(q "$head")"
         exit 2
@@ -541,7 +553,7 @@ while :; do
             head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
             [ "$nrc" -eq 124 ] && timed_out
             [ "$nrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
-            if [ "$nrc" -ne 0 ] || ! [[ "$head_now" =~ ^[0-9a-f]{40}$ ]]; then
+            if [ "$nrc" -ne 0 ] || ! is_full_sha "$head_now"; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=head_recheck_failed rc=%s detail=%s\n' \
                     "$PR" "$WHO" "$nrc" "$(q "$head_now")"
                 exit 2

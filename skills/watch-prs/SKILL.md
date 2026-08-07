@@ -316,7 +316,26 @@ resolving it. Then, in one pass:
 1. commit — `fix(review): <what changed>`. **In the Copilot phase, add a
    `Review-Phase: copilot` trailer**: it is what tells the merge gate that the
    head advanced only through Copilot fixes, so Codex's earlier signoff still
-   covers it and does not have to be re-earned;
+   covers it and does not have to be re-earned.
+
+   **It has to be a real trailer, not a line in the body.** `git` parses trailers
+   from the LAST paragraph of the message only, so this belongs in the same block
+   as `Co-Authored-By:` with no blank line before it:
+
+   ```
+   fix(x): what changed
+
+   Why it changed.
+
+   Review-Phase: copilot
+   Co-Authored-By: …
+   ```
+
+   A blank line above it makes it its own paragraph, which `git` does not read as
+   a trailer at all — the commit then looks correct to anyone reading it and is
+   invisible to the merge gate, which reports `untagged_commit` and asks for a
+   trailer that is plainly already there. `pr-merge-range.sh` names that case
+   separately (`trailer_not_in_trailer_block`) because the fix is different;
 2. **run the self-check — step 5a — and fix what it finds.** This is the step
    that exists to stop a defect reaching a reviewer, so it runs while the change
    can still be amended, before anything leaves the machine;

@@ -207,6 +207,52 @@ set -e
     || die "failed root probe gave rc=$rc out='$out'"
 rm -rf "$MRTMP"
 
+# ── a trailer written in the body but NOT in the trailer block ────────────
+# `git` reads trailers from the LAST paragraph only. `Review-Phase: copilot`
+# separated from the final block by a blank line therefore looks correct to a
+# human reading the commit and is invisible to `%(trailers:…)` — it blocks with
+# `untagged_commit`, which tells the operator to add a trailer they can plainly
+# see is already there.
+#
+# This is not hypothetical: it happened while developing this plugin, following
+# this plugin's own instructions, and cost a rewrite of an already-pushed commit.
+BASE2="$(git -C "$REPO" rev-parse HEAD)"
+{ printf 'fix(x): a Copilot fix\n\n'
+  printf 'Body text explaining the change.\n\n'
+  printf 'Review-Phase: copilot\n\n'
+  printf 'Co-Authored-By: Someone <s@example.com>\n'
+} > "$TMP/msg.txt"
+echo "$RANDOM$RANDOM" > "$REPO/f.txt"
+git -C "$REPO" add -A
+git -C "$REPO" commit -q -F "$TMP/msg.txt"
+MISPLACED="$(git -C "$REPO" rev-parse HEAD)"
+run "$BASE2" "$MISPLACED"
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'reason=trailer_not_in_trailer_block'; } \
+    && pass "a trailer outside the trailer block is named as such, not as missing" \
+    || die "misplaced trailer gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'LAST paragraph' \
+    && pass "…and the diagnostic says where it has to go" \
+    || die "the diagnostic does not explain the fix: $out"
+printf '%s' "$out" | grep -q 'reason=untagged_commit' \
+    && die "…but it was still reported as merely untagged: $out" \
+    || pass "…and is not reported as merely untagged"
+
+# The control: the SAME message with the trailer in the final block passes, so the
+# case above is about placement rather than about the message being rejected.
+BASE3="$(git -C "$REPO" rev-parse HEAD)"
+{ printf 'fix(x): a Copilot fix\n\n'
+  printf 'Body text explaining the change.\n\n'
+  printf 'Review-Phase: copilot\n'
+  printf 'Co-Authored-By: Someone <s@example.com>\n'
+} > "$TMP/msg.txt"
+echo "$RANDOM$RANDOM" > "$REPO/f.txt"
+git -C "$REPO" add -A
+git -C "$REPO" commit -q -F "$TMP/msg.txt"
+run "$BASE3" "$(git -C "$REPO" rev-parse HEAD)"
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'tagged=1'; } \
+    && pass "…while the same trailer inside the final block is accepted" \
+    || die "a correctly-placed trailer was rejected (rc=$rc out='$out')"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

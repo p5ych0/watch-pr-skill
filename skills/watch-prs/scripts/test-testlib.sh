@@ -315,7 +315,10 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
     # routinely split across them, and that used to be a second unguarded scan.
     out="$(awk '
         FNR == 1 { buf = ""; start = 0 }
-        FILENAME ~ /test-testlib\.sh$/ { next }
+        # EXACT basename, not a suffix — the same rule as the recordlib guard:
+        # a suffix match also exempts a file merely NAMED like the exempt one.
+        { _base = FILENAME; sub(/^.*\//, "", _base) }
+        _base == "test-testlib.sh" { next }
         {
             if (start == 0) start = FNR
             line = $0

@@ -24,6 +24,22 @@
 # jq's success and the partial page would pass for the whole answer.
 set -uo pipefail
 
+# The shared record validators. Three scripts read the same two endpoints, and
+# each used to re-implement the same field checks — which is why the same rule
+# kept having to be added a third and fourth time, and why `state` reached two
+# scripts and stopped. See recordlib.sh and issue #11.
+#
+# The status is taken: a helper whose validators failed to load would fall back
+# to whatever the jq programs below happen to do with undefined functions, which
+# is an error per call rather than a clear refusal here.
+_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+    echo "PR_FINDINGS status=error reason=lib_dir_unresolvable" >&2; exit 2; }
+# shellcheck source=recordlib.sh
+. "$_RB_SELF_DIR/recordlib.sh" || {
+    echo "PR_FINDINGS status=error reason=recordlib_unreadable" >&2; exit 2; }
+[ -n "${RECORDLIB_JQ:-}" ] || {
+    echo "PR_FINDINGS status=error reason=recordlib_empty" >&2; exit 2; }
+
 # The STATUS is taken, not just the output. `git remote get-url origin` can print
 # a plausible URL and then exit non-zero — a partially-configured remote, a
 # permissions error mid-read — and command substitution keeps whatever it wrote.
@@ -208,10 +224,10 @@ cmd_blocked_body() {
     # check, then match no commit_id at all — printing nothing with rc 0, which is
     # indistinguishable from "no blocking body". pr_head_oid validates the same
     # way for the same reason.
-    case "$head" in
-        *[!0-9a-f]*|"") echo "PR_FINDINGS pr=$pr status=error reason=bad_head" >&2; return 2 ;;
-    esac
-    [ "${#head}" -eq 40 ] || { echo "PR_FINDINGS pr=$pr status=error reason=head_not_full_sha" >&2; return 2; }
+    if ! _sha_why="$(sha_reason "$head")"; then
+        echo "PR_FINDINGS pr=$pr status=error reason=$_sha_why" >&2
+        return 2
+    fi
 
     # Captured separately from the parse. `gh --paginate` can write a valid page
     # and then exit non-zero, and a pipeline would report jq's success while the
@@ -235,29 +251,16 @@ cmd_blocked_body() {
     # selectors below would otherwise map a malformed page away and exit 0, making
     # a parse failure indistinguishable from "this body-only CHANGES_REQUESTED has
     # no text" — and that is the one finding the driver has to act on.
-    out=$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg head "$head" '
-        if length == 0 or any(.[]; type != "array") then error("bad page")
-        else [ .[][] ] as $all
-          | if any($all[];
-                   type != "object"
-                   or (.user | type) != "object"
-                   or (.user.login | type) != "string"
-                   or (.commit_id | type) != "string"
-                   or (.commit_id | test("^[0-9a-f]{40}$") | not)
-                   # The known set, not merely "a string or null". This helper
-                   # SUPPRESSES output for anything that is not exactly
-                   # CHANGES_REQUESTED, so a record with a null or unrecognised
-                   # state produced empty stdout and rc 0 — indistinguishable
-                   # from "this blocking review has no body". The driver reaches
-                   # here precisely because it saw `state=blocked`, so that is
-                   # the one case where silence loses the only text there is.
-                   or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
-                   or ((.submitted_at | type) != "string" and .submitted_at != null)
-                   or (.submitted_at != null
-                       and (.submitted_at
-                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-                            | not))
-                   or ((.body | type) != "string" and .body != null))
+    out=$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg head "$head" "$RECORDLIB_JQ"'
+        pages_or_error
+        | [ .[][] ] as $all
+          # THE SHARED VALIDATOR. This helper suppresses output for anything that
+          # is not exactly CHANGES_REQUESTED, so a record it cannot read produced
+          # empty stdout and rc 0 — indistinguishable from "this blocking review
+          # has no body", which is the one case where silence loses the only text
+          # there is. Every field it checks was also written out in two other
+          # scripts; see recordlib.sh and issue #11.
+          | if any($all[]; valid_review_record | not)
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who and .commit_id == $head) ] as $mine
               # An unsubmitted draft DOMINATES, exactly as it does in the
@@ -276,8 +279,7 @@ cmd_blocked_body() {
                 then error("blocked review without a readable body")
                 else $latest.body
                 end
-            end
-        end' 2>/dev/null) || {
+            end' 2>/dev/null) || {
         echo "PR_FINDINGS pr=$pr status=error reason=reviews_unreadable" >&2
         return 2
     }

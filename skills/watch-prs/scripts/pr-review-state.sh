@@ -36,6 +36,22 @@
 # conventions.
 set -uo pipefail
 
+# The shared record validators. Three scripts read the same two endpoints, and
+# each used to re-implement the same field checks — which is why the same rule
+# kept having to be added a third and fourth time, and why `state` reached two
+# scripts and stopped. See recordlib.sh and issue #11.
+#
+# The status is taken: a helper whose validators failed to load would fall back
+# to whatever the jq programs below happen to do with undefined functions, which
+# is an error per call rather than a clear refusal here.
+_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+    echo "PR_REVIEW_STATE status=error reason=lib_dir_unresolvable" >&2; exit 2; }
+# shellcheck source=recordlib.sh
+. "$_RB_SELF_DIR/recordlib.sh" || {
+    echo "PR_REVIEW_STATE status=error reason=recordlib_unreadable" >&2; exit 2; }
+[ -n "${RECORDLIB_JQ:-}" ] || {
+    echo "PR_REVIEW_STATE status=error reason=recordlib_empty" >&2; exit 2; }
+
 # The STATUS is taken, not just the output. `git remote get-url origin` can print
 # a plausible URL and then exit non-zero — a partially-configured remote, a
 # permissions error mid-read — and command substitution keeps whatever it wrote.
@@ -105,10 +121,7 @@ REPO_SLUG="$HOST/$OWNER/$REPO"
 pr_head_oid() {
     local out
     out="$(gh pr view "$1" --repo "$REPO_SLUG" --json headRefOid --jq '.headRefOid' 2>/dev/null)" || return 1
-    case "$out" in
-        *[!0-9a-f]*|"") return 1 ;;
-    esac
-    [ "${#out}" -eq 40 ] || return 1
+    is_full_sha "$out" || return 1
     printf '%s' "$out"
 }
 
@@ -129,64 +142,20 @@ reviewer_reviews() {
     # The RECORDS matter as much as the containers: a successful `[{}]` page
     # produced `[]`, which every caller reads as "no review", so a marker or a
     # stale assumption could carry the merge off a payload that proved nothing.
-    printf '%s' "$raw" | jq -s --arg who "$who" '
-        if length == 0 then error("no pages")
-        elif any(.[]; type != "array") then error("non-array page")
-        else [ .[][] ] as $all
-          | if any($all[];
-                   type != "object"
-                   or (.user | type) != "object"
-                   or (.user.login | type) != "string"
-                   or (.id | type) != "number"
-                   or (.commit_id | type) != "string"
-                   # A short or non-SHA commit_id is filtered out as "another
-                   # head", so a malformed page reads as `state=none` — which the
-                   # merge gate answers by trusting an older signoff instead of
-                   # stopping.
-                   or (.commit_id | test("^[0-9a-f]{40}$") | not)
-                   # THE KNOWN SET, not merely "a string". `head_review_snapshot`
-                   # sends anything it does not recognise through its catch-all
-                   # as `dismissed` with status 0 — so a null or an unrecognised
-                   # value became an actionable "the review was withdrawn", and
-                   # the driver answers that by requesting another pass. A
-                   # malformed parse then drives a review loop instead of
-                   # stopping. This is the set `pr-round-count.sh` and
-                   # `pr-findings.sh` already enforce; the three cannot disagree
-                   # about what a review is.
-                   or (.state | type) != "string"
-                   or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
-                   # Not merely a string: `head_review_snapshot` sorts on this to
-                   # decide which review is authoritative, and the sort is
-                   # LEXICAL. `submitted_at:"zzzz"` sorts after every real ISO
-                   # timestamp, so a stale APPROVED record could outrank a current
-                   # CHANGES_REQUESTED and report clean.
-                   or ((.submitted_at | type) != "string" and .submitted_at != null)
-                   # ANCHORED at both ends: a prefix check let
-                   # `2026-01-02T00:00:00zzzz` through, and it sorts after the
-                   # real `2026-01-02T00:00:00Z` — the same lexical-sort hole the
-                   # prefix check was added to close.
-                   #
-                   # CANONICAL UTC ONLY — no numeric offset, no fractional
-                   # seconds. Both are valid ISO 8601, and accepting them put the
-                   # hole back in a subtler form, because the sort is lexical and
-                   # neither sorts chronologically:
-                   #
-                   #   03:00:00+02:00  is 01:00 UTC, yet sorts AFTER 02:30:00Z
-                   #   03:00:00.5Z     sorts BEFORE 03:00:00Z ('.' < 'Z')
-                   #
-                   # So an older APPROVED could outrank a newer
-                   # CHANGES_REQUESTED and report clean. GitHub returns canonical
-                   # `Z` timestamps here; anything else is unexpected enough to
-                   # be worth failing closed over, and failing closed is the
-                   # direction that cannot invent a signoff.
-                   or (.submitted_at != null
-                       and (.submitted_at
-                            | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-                            | not)))
+    printf '%s' "$raw" | jq -s --arg who "$who" "$RECORDLIB_JQ"'
+        pages_or_error
+        | [ .[][] ] as $all
+          # THE SHARED VALIDATOR. Every rule it applies was written out here and
+          # again in two other scripts, and `state` against the known set reached
+          # those two and never reached this one — for eleven rounds an
+          # unrecognised value fell through `head_review_snapshot`'"'"'s catch-all
+          # as `dismissed` with status 0, an actionable "the review was
+          # withdrawn" that the driver answers by requesting another pass. One
+          # definition, so the three cannot disagree about what a review is.
+          | if any($all[]; valid_review_record | not)
             then error("malformed review record")
             else [ $all[] | select(.user.login == $who) ]
-            end
-        end' 2>/dev/null || return 2
+            end' 2>/dev/null || return 2
 }
 
 # A reviewer's clean-pass signal delivered as a PR COMMENT, bound to this head.
@@ -218,17 +187,10 @@ clean_comment_for_head() {
     fi
     # Prints "<id>\t<created_at>": the caller needs the timestamp to place this
     # against the newest submitted review on the same head.
-    out="$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg h "${head:0:10}" '
-        if length == 0 then error("no pages")
-        elif any(.[]; type != "array") then error("non-array page")
-        else [ .[][] ] as $all
-          | if any($all[];
-                   type != "object"
-                   or (.user | type) != "object"
-                   or (.user.login | type) != "string"
-                   or (.id | type) != "number"
-                   or ((.created_at | type) != "string" and .created_at != null)
-                   or ((.body | type) != "string" and .body != null))
+    out="$(printf '%s' "$raw" | jq -s -r --arg who "$who" --arg h "${head:0:10}" "$RECORDLIB_JQ"'
+        pages_or_error
+        | [ .[][] ] as $all
+          | if any($all[]; valid_comment_record | not)
             then error("malformed comment record")
             else ( [ $all[]
                      | select(.user.login == $who)
@@ -249,20 +211,17 @@ clean_comment_for_head() {
                      | select((.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0]) == $h)
                    ] | sort_by(.id) | last ) as $c
               | if $c == null then ""
-                # The selected comment must carry the SAME canonical UTC stamp
-                # required of a review, because it is ordered against those. A
-                # `zzzz` sorts above every real timestamp and would override a
-                # newer CHANGES_REQUESTED, and a null would be treated as clean
-                # whenever no review existed. Unreadable ordering is not an
-                # ordering, so this fails closed rather than guessing.
-                elif ($c.created_at | type) != "string"
-                     or ($c.created_at
-                         | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-                         | not)
-                then error("clean comment without a canonical timestamp")
+                # The timestamp is NOT re-checked here. `valid_comment_record`
+                # above requires a canonical UTC `created_at` of every record on
+                # the page, so nothing reaching this point can lack one — and a
+                # second copy of the rule would be unreachable code shaped like a
+                # guard, which reads as protection while proving nothing. The
+                # reason the rule exists belongs with the rule: this value is
+                # ordered LEXICALLY against review timestamps, so a `zzzz` would
+                # sort above every real one and a null would read as clean
+                # whenever no review existed.
                 else (($c.id | tostring) + "\t" + $c.created_at) end
-            end
-        end' 2>/dev/null)" || return 2
+            end' 2>/dev/null)" || return 2
     case "$out" in
         "") return 1 ;;
     esac
@@ -361,10 +320,8 @@ review_comment_count() {
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
-    n=$(printf '%s' "$raw" | jq -s '
-        if length == 0 then error("no pages")
-        elif any(.[]; type != "array") then error("non-array page")
-        else [.[][]] | length end' 2>/dev/null) || return 2
+    n=$(printf '%s' "$raw" | jq -s "$RECORDLIB_JQ"'
+        pages_or_error | [.[][]] | length' 2>/dev/null) || return 2
     case "$n" in
         ""|*[!0-9]*) return 2 ;;
     esac
@@ -430,11 +387,8 @@ main() {
     # reviewer has not judged the head" rather than "you passed me nonsense". The
     # gate uses exactly that distinction to decide whether to fall back to the
     # recorded signoff.
-    case "$head" in
-        *[!0-9a-f]*|"") echo "PR_REVIEW_STATE pr=$pr status=error reason=bad_head" >&2; exit 2 ;;
-    esac
-    if [ "${#head}" -ne 40 ]; then
-        echo "PR_REVIEW_STATE pr=$pr status=error reason=head_not_full_sha" >&2
+    if ! _sha_why="$(sha_reason "$head")"; then
+        echo "PR_REVIEW_STATE pr=$pr status=error reason=$_sha_why" >&2
         exit 2
     fi
 

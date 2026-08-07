@@ -1,5 +1,62 @@
 # Changelog
 
+## [2.0.1] — 2026-08-07
+
+**One definition of a well-formed record** (issue #11).
+
+- **The field checks are shared rather than re-implemented.** Four helpers read
+  the same two endpoints and each carried its own copy of the same validation.
+  That is not a style complaint — it is a defect generator, and it produced real
+  findings four separate times: `commit_id` as 40-hex was added to one script,
+  then a second, then a third; a canonical UTC `submitted_at` followed the same
+  path; and the known review-state set reached two helpers and stopped. It sat
+  missing from `pr-review-state.sh` for eleven review rounds, where an
+  unrecognised value fell through `head_review_snapshot`'s catch-all as
+  `dismissed` with status 0 — an actionable "the review was withdrawn", which the
+  driver answers by requesting another pass. A malformed page drove a review loop.
+
+  `recordlib.sh` now defines `valid_review_record`, `valid_comment_record`,
+  `pages_or_error` and `is_full_sha` once, and the four helpers source it.
+
+- **A misplaced phase trailer is named as such, not reported as missing.** `git`
+  parses trailers from the LAST paragraph of a message only, so
+  `Review-Phase: copilot` written with a blank line above it is not a trailer —
+  the commit looks correct to anyone reading it, and the merge gate reported
+  `untagged_commit`, asking for a trailer that is plainly already there.
+  `pr-merge-range.sh` now distinguishes the two, and `SKILL.md` says where the
+  trailer has to go rather than only that it must exist. Found by making the
+  mistake while following the contract, which is the evidence that the contract
+  was insufficient.
+
+- **A comment without a canonical `created_at` is refused.** GitHub always sets
+  it, so a record without one is malformed — and `pr-round-count.sh` counts these
+  comments as rounds without reading the field, so a malformed record was
+  countable. That is the unsafe direction: an extra round pushes the count past
+  the operator check-in.
+
+- **A record without an `id` is refused.** GitHub always returns one, and the
+  watch compares it between polls to tell a new review from the one it already
+  reported — a record without it cannot be distinguished from another and must
+  not be counted as a pass. Two helpers previously accepted such a record.
+
+- **Every shell-side SHA check goes through the same rule too.** Three helpers
+  validated a head with a `case` plus a length test — the same rule spelled a
+  different way — and the first version of the drift guard reported clean because
+  it recognised only the jq regex. A guard that matches one spelling of a
+  duplicated rule has not found the duplication. `sha_reason` keeps the two
+  diagnostics (`bad_head` versus `head_not_full_sha`) that those sites reported
+  apart, so sharing the rule costs nothing an operator was reading.
+
+- **The same rule now covers `pr-watch.sh`.** It validates helper output rather
+  than API records, but a head that is not a real SHA is the input to every
+  subsequent probe; it carried two more hand-written copies of the shape check.
+
+- **The suite refuses re-implementation, rather than asking for restraint.**
+  `test-recordlib.sh` fails if any helper writes one of these rules inline, and
+  `pr-selfcheck.sh` now requires a test for the sourced libraries as well as for
+  `pr-*.sh` — a shared definition is the highest-leverage file in the tree, so it
+  cannot be the untested one.
+
 ## [2.0.0] — 2026-08-05
 
 **The local review bus is gone.** Both reviewers are first-party GitHub apps, so

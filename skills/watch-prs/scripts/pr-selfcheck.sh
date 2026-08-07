@@ -324,13 +324,20 @@ fi
 [ "$unpinned" -eq 0 ] && ok "every gh pr call in SKILL.md names the repository"
 
 # ── 4. every script has a test ─────────────────────────────────────────────
+#
+# The SOURCED LIBRARIES count too. They are not `pr-*.sh`, so the original glob
+# missed them — and they are the highest-leverage files in the tree: `testlib.sh`
+# bounds every fixture in the suite, and `recordlib.sh` now defines what a
+# well-formed record is for all four helpers at once. A bug in either is a bug
+# everywhere, which is exactly the argument for extracting them and exactly why
+# they cannot be the untested part.
 untested=0
-for f in "$SCRIPTS"/pr-*.sh; do
+for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/testlib.sh "$SCRIPTS"/recordlib.sh; do
     [ -e "$f" ] || continue
     b="$(basename "$f" .sh)"
     [ -f "$SCRIPTS/test-$b.sh" ] || { note untested_script "$b.sh has no test-$b.sh"; untested=1; }
 done
-[ "$untested" -eq 0 ] && ok "every pr-*.sh has a matching test"
+[ "$untested" -eq 0 ] && ok "every helper and shared library has a matching test"
 
 # ── 5. the suite passes ────────────────────────────────────────────────────
 suite_fail=0

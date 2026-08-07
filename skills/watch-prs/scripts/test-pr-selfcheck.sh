@@ -130,6 +130,34 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a script with no matching test is a finding" \
     || die "untested script not caught (rc=$rc out='$out')"
 
+# ── the SHARED LIBRARIES need tests too ────────────────────────────────────
+# The check globbed only `pr-*.sh`, so `testlib.sh` and `recordlib.sh` — the two
+# highest-leverage files in the tree — were the ones it could not see. A bug in
+# either is a bug in every helper at once, which is the argument for extracting
+# them and exactly why they cannot be the untested part.
+#
+# Asserted per library and in both directions: without its test the run must
+# report `untested_script`, and adding the test must clear it. Without the second
+# half, a check that flagged everything would satisfy the first.
+for lib in testlib.sh recordlib.sh; do
+    base="${lib%.sh}"
+    R="$(mkroot "$OK_SKILL")"
+    printf '#!/usr/bin/env bash\n: \n' > "$R/skills/watch-prs/scripts/$lib"
+    out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script'; } \
+        && pass "$lib with no matching test is a finding" \
+        || die "$lib was not required to have a test (rc=$rc out='$out')"
+    printf '%s' "$out" | grep -q "$base" \
+        && pass "…and the finding names it" \
+        || die "the finding did not name $lib: $out"
+    printf '#!/usr/bin/env bash\necho "RESULT: PASS"\n' > "$R/skills/watch-prs/scripts/test-$base.sh"
+    chmod +x "$R/skills/watch-prs/scripts/test-$base.sh"
+    out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+    printf '%s' "$out" | grep -q 'untested_script' \
+        && die "$lib still reported untested after its test was added: $out" \
+        || pass "…and adding test-$base.sh clears it"
+done
+
 # ── a failing test ─────────────────────────────────────────────────────────
 R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-thing.sh 'exit 0'
