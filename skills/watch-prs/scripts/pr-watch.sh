@@ -127,13 +127,21 @@ started="$(now_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadabl
 # `remaining_s` then handed the next probe a LARGER budget — `--timeout` exceeded
 # by the size of the correction, or extended without bound by repeated ones. Time
 # that runs backwards is not a clock this watch can measure a deadline with.
+# THE RESULT IS A VARIABLE, not stdout, because the monotonic state has to
+# SURVIVE the call. Every caller used `e="$(elapsed_s)"`, so the function ran in
+# a subshell and the `last_s` update was discarded the moment it returned: the
+# comparison was always against `$started`, so a clock going 100 → 110 → 105 was
+# accepted and the budget grew. Only a retreat past the start was caught, which
+# is the one case the first fixture happened to test.
 last_s="$started"
-elapsed_s() {
+ELAPSED=0
+elapsed_s() {   # sets $ELAPSED; non-zero when the clock cannot be trusted
     local t
     t="$(now_s)" || return 1
     [ "$t" -ge "$last_s" ] || return 1
     last_s="$t"
-    printf '%s' $(( t - started ))
+    ELAPSED=$(( t - started ))
+    return 0
 }
 
 # Run a probe under the REMAINING deadline.
@@ -237,25 +245,27 @@ timed_out() {
     # either way. That also means the fail-closed BEHAVIOUR is covered; this guard
     # closes the narrow window where the clock survives every earlier read and
     # fails only on this one. Kept for that, not because a test proves it.
-    local e
-    e="$(elapsed_s)" || {
+    elapsed_s || {
         echo "PR_REVIEW_WATCH pr=$PR reviewer=$WHO state=error reason=clock_unreadable" >&2
         exit 2
     }
-    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$e"
+    printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$ELAPSED"
     exit 1
 }
 
 # Seconds left before the deadline, at least 1 so a probe is always attempted.
-remaining_s() {
-    local e
-    e="$(elapsed_s)" || return 1
-    local r=$(( TIMEOUT - e ))
+# Also a VARIABLE, for the same reason: called through command substitution it
+# would carry `elapsed_s` into a subshell and lose the monotonic state again.
+REMAINING=0
+remaining_s() {   # sets $REMAINING; 1 = unreadable clock, 2 = deadline passed
+    elapsed_s || return 1
+    local r=$(( TIMEOUT - ELAPSED ))
     # An exhausted remainder is the TIMEOUT, not one more second. Clamping it let
     # a probe start after the deadline had already passed, and a verdict or
     # head-recheck begun there could still produce PR_REVIEW_READY.
     [ "$r" -lt 1 ] && return 2
-    printf '%s' "$r"
+    REMAINING="$r"
+    return 0
 }
 waited=0
 last=""
@@ -270,7 +280,7 @@ while :; do
     #
     # Resolved per POLL, not once per watch, so the watch still follows the head
     # when a push lands between polls — which is the case it is there to notice.
-    rem="$(remaining_s)"; rrc=$?
+    remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
@@ -283,7 +293,7 @@ while :; do
     fi
     want_sha="${head:0:7}"
 
-    rem="$(remaining_s)"; rrc=$?
+    remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
     line="$(probe "$rem" "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
@@ -343,7 +353,7 @@ while :; do
     if [ -n "$AFTER_REVIEW" ]; then
         case "$state" in
             reviewed|blocked|dismissed)
-                rem="$(remaining_s)"; rrc=$?
+                remaining_s; rrc=$?; rem="$REMAINING"
                 [ "$rrc" -eq 2 ] && timed_out
                 [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
                 cur="$(probe "$rem" "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
@@ -392,7 +402,7 @@ while :; do
         reviewed|blocked|dismissed)
             # Terminal. Report the verdict too, so the caller has the whole
             # answer without a second round-trip.
-            rem="$(remaining_s)"; rrc=$?
+            remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
             verdict="$(probe "$rem" "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
@@ -481,7 +491,8 @@ while :; do
                 # The next poll's state is about a review that has changed, so the
                 # change-suppression memory must not hide it.
                 last=""
-                waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+                elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+                waited="$ELAPSED"
                 if [ "$waited" -ge "$TIMEOUT" ]; then
                     printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
                     exit 1
@@ -505,7 +516,8 @@ while :; do
     # hammering the API until the clock expired and then reporting an ordinary
     # timeout — so a broken scheduler looked exactly like a slow review.
     sleep "$nap" || { echo "PR_REVIEW_WATCH state=error reason=sleep_failed" >&2; exit 2; }
-                waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+                elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+                waited="$ELAPSED"
                 continue
             fi
             # The head is re-resolved AFTER the verdict, and READY is withheld
@@ -523,7 +535,7 @@ while :; do
             # and the next poll should ask about the new head. So the loop
             # CONTINUES rather than exiting — the new head has no review yet, so
             # it reports `none` and goes back to waiting, which is the truth.
-            rem="$(remaining_s)"; rrc=$?
+            remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
             head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
@@ -549,7 +561,8 @@ while :; do
             ;;
     esac
 
-    waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    waited="$ELAPSED"
     if [ "$waited" -ge "$TIMEOUT" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=timeout waited_s=%s\n' "$PR" "$WHO" "$waited"
         exit 1
@@ -565,5 +578,6 @@ while :; do
     # hammering the API until the clock expired and then reporting an ordinary
     # timeout — so a broken scheduler looked exactly like a slow review.
     sleep "$nap" || { echo "PR_REVIEW_WATCH state=error reason=sleep_failed" >&2; exit 2; }
-    waited="$(elapsed_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    elapsed_s || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+    waited="$ELAPSED"
 done

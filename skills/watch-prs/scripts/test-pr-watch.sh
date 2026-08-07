@@ -1048,5 +1048,47 @@ out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
     && pass "a clock that steps backward is unreadable, not a longer deadline" \
     || die "backward clock gave rc=$rc out='$out'"
 
+# …AND a retreat that stays ABOVE the start time. The case above passes even when
+# the monotonic state is discarded, because the comparison then falls back to
+# `$started` and a value below it is still rejected — so it proved only the
+# trivial half. Every caller evaluated `elapsed_s` through command substitution,
+# which ran it in a subshell and threw the update away, so 100 → 110 → 105 was
+# accepted and the remaining budget GREW by the size of the correction. This is
+# the shape of a real NTP step: forward, then a small correction back.
+cat > "$BACKCLOCK/date" <<BACKSH
+#!/usr/bin/env bash
+n=\$(cat "\$BACK_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$BACK_N"
+# Climb, then retreat — but never below where it began, and by small enough
+# steps that the deadline is not reached before the retreat is. An earlier
+# version of this stub climbed by three a tick and timed out at the fourth read,
+# so the retreat never happened and the case passed on the wrong path.
+if [ "\$n" -le 4 ]; then printf '%d\n' \$((1754000000 + n))
+else printf '%d\n' \$((1754000000 + 2)); fi
+BACKSH
+chmod +x "$BACKCLOCK/date"
+rm -f "$TMP/back.n"; seq_set none
+out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
+        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+    && pass "…including a retreat that stays above the start time" \
+    || die "a retreat above the start was accepted (rc=$rc out='$out')"
+
+# The control: a clock that only ever moves FORWARD must not be rejected, or
+# "reject every clock" would satisfy both cases above.
+cat > "$BACKCLOCK/date" <<FWDSH
+#!/usr/bin/env bash
+n=\$(cat "\$BACK_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$BACK_N"
+printf '%d\n' \$((1754000000 + n))
+FWDSH
+chmod +x "$BACKCLOCK/date"
+rm -f "$TMP/back.n"; seq_set none
+out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
+        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 4 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'clock_unreadable' \
+    && die "a monotonically advancing clock was rejected: $out" \
+    || pass "…and a clock that only advances is accepted"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

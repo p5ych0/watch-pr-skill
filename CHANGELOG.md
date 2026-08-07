@@ -99,10 +99,12 @@ the plugin no longer runs a reviewer of its own.
   helper exiting 124 itself was reported as an ordinary timeout — which the
   driver re-arms indefinitely. A broken probe became "still in flight", forever.
 
-- **A clock that steps backward is refused.** A backward step produced a smaller
-  elapsed value while still succeeding, and the next probe got a LARGER budget:
-  `--timeout` exceeded by the size of the correction, or extended without bound
-  by repeated ones.
+- **A clock that steps backward is refused — including a step that stays above
+  the start.** The first attempt kept the last accepted epoch in `elapsed_s`, but
+  every caller evaluated it through command substitution, so the function ran in a
+  subshell and the update was discarded: the comparison always fell back to the
+  start time, and a clock going 100 → 110 → 105 was still accepted. `elapsed_s`
+  and `remaining_s` return through variables now, so the state survives the call.
 
 - **The identity guard checks a mixed line.** `$OWNER/$REPO` on a line caused the
   whole line to be skipped, so `REPO_SLUG="acme/widget"; echo "$OWNER/$REPO"`
