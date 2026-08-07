@@ -178,7 +178,13 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
     errf="$(mktemp)" || return 2
     rc=0
     out="$(awk '
-        FILENAME ~ /recordlib\.sh$/ { next }
+        # EXACT basename, not a suffix. `/recordlib\.sh$/` also matches a helper
+        # named `pr-recordlib.sh` — which the `pr-*.sh` glob below feeds straight
+        # into this scan — so such a file could re-implement every shared rule
+        # while the guard reported clean. The exemption is for one file, so it
+        # names one file.
+        { _base = FILENAME; sub(/^.*\//, "", _base) }
+        _base == "recordlib.sh" { next }
         /^[[:space:]]*#/ { next }
         /IN\("PENDING","APPROVED"/          { print FILENAME ":" FNR ": state set" }
         /\^\[0-9a-f\]\{40\}\$/              { print FILENAME ":" FNR ": commit_id shape (jq)" }
@@ -217,6 +223,18 @@ seen="$(scan_inline_rules "$DRIFT")"; drc=$?
 { [ "$drc" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-drifted.sh'; } \
     && pass "…and the scan catches a helper that re-implements one" \
     || die "the drift guard did not catch a planted inline rule (rc=$drc out='$seen')"
+# A helper whose name merely ENDS in the library's name is scanned, not exempted.
+# `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped
+# by a suffix exemption.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$h" in *[!0-9a-f]*|"") return 1 ;; esac\n'
+} > "$DRIFT/pr-recordlib.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc3=$?
+{ [ "$drc3" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-recordlib.sh'; } \
+    && pass "a helper merely named like the library is still scanned" \
+    || die "pr-recordlib.sh was exempted by a suffix match (rc=$drc3 out='$seen')"
+rm -f "$DRIFT/pr-recordlib.sh"
+
 # …in the SHELL spelling too. This is the case the first version of the guard
 # missed: three helpers already validated a SHA with `case` plus a length test,
 # and the scan reported clean because it only knew the jq regex.
