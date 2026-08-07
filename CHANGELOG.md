@@ -18,6 +18,12 @@
   `recordlib.sh` now defines `valid_review_record`, `valid_comment_record`,
   `pages_or_error` and `is_full_sha` once, and the four helpers source it.
 
+- **A comment without a canonical `created_at` is refused.** GitHub always sets
+  it, so a record without one is malformed — and `pr-round-count.sh` counts these
+  comments as rounds without reading the field, so a malformed record was
+  countable. That is the unsafe direction: an extra round pushes the count past
+  the operator check-in.
+
 - **A record without an `id` is refused.** GitHub always returns one, and the
   watch compares it between polls to tell a new review from the one it already
   reported — a record without it cannot be distinguished from another and must

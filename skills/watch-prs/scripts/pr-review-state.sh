@@ -211,14 +211,15 @@ clean_comment_for_head() {
                      | select((.body | [scan("(?m)^\\*\\*Reviewed commit:\\*\\* `([0-9a-f]{10})`")] | last // [""] | .[0]) == $h)
                    ] | sort_by(.id) | last ) as $c
               | if $c == null then ""
-                # The selected comment must carry the SAME canonical UTC stamp
-                # required of a review, because it is ordered against those. A
-                # `zzzz` sorts above every real timestamp and would override a
-                # newer CHANGES_REQUESTED, and a null would be treated as clean
-                # whenever no review existed. Unreadable ordering is not an
-                # ordering, so this fails closed rather than guessing.
-                elif ($c.created_at | canonical_utc | not)
-                then error("clean comment without a canonical timestamp")
+                # The timestamp is NOT re-checked here. `valid_comment_record`
+                # above requires a canonical UTC `created_at` of every record on
+                # the page, so nothing reaching this point can lack one — and a
+                # second copy of the rule would be unreachable code shaped like a
+                # guard, which reads as protection while proving nothing. The
+                # reason the rule exists belongs with the rule: this value is
+                # ordered LEXICALLY against review timestamps, so a `zzzz` would
+                # sort above every real one and a null would read as clean
+                # whenever no review existed.
                 else (($c.id | tostring) + "\t" + $c.created_at) end
             end' 2>/dev/null)" || return 2
     case "$out" in

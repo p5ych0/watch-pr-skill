@@ -95,7 +95,9 @@ crec() { jq -c -n '{user:{login:"bot"},id:2,body:"hello",
                     created_at:"2026-01-01T00:00:00Z"} + '"$1"; }
 want accept valid_comment_record "$(crec '{}')"                  "a well-formed comment record is accepted"
 want accept valid_comment_record "$(crec '{body:null}')"         "a comment with no body is accepted"
-want accept valid_comment_record "$(crec '{created_at:null}')"   "a comment with no created_at is accepted"
+want reject valid_comment_record "$(crec '{created_at:null}')"   "a comment with no created_at is rejected"
+want reject valid_comment_record "$(crec '{created_at:"zzzz"}')" "a comment with a junk created_at is rejected"
+want reject valid_comment_record "$(crec '{created_at:123}')"    "a comment with a numeric created_at is rejected"
 want reject valid_comment_record "$(crec '{id:null}')"           "a comment without an id is rejected"
 want reject valid_comment_record "$(crec '{body:123}')"          "a non-string comment body is rejected"
 want reject valid_comment_record "$(crec '{created_at:"zzzz"}')" "a junk comment timestamp is rejected"

@@ -96,12 +96,19 @@ def valid_review_record:
 # `body` may be null — GitHub returns that for a comment with no text — but a
 # non-null body must be a string, since it is scanned for the footer and the
 # clean-pass phrasing.
+#
+# `created_at` is REQUIRED, not string-or-null. GitHub always sets it, so a record
+# without one is malformed — and `pr-round-count.sh` counts these comments as
+# rounds without reading the field, so a malformed record was countable. That is
+# the unsafe direction: an extra round pushes the count past the operator
+# check-in. `pr-review-state.sh` also orders a clean comment against the newest
+# review by this timestamp, and a null there is not an ordering.
 def valid_comment_record:
     type == "object"
     and valid_actor
     and (.id | type) == "number"
     and (.body == null or (.body | type) == "string")
-    and (.created_at == null or (.created_at | canonical_utc));
+    and (.created_at | canonical_utc);
 
 # A page from a `--paginate` read, slurped with `-s`.
 #
