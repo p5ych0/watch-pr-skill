@@ -1162,7 +1162,13 @@ while IFS= read -r line; do
     stmt="${line#"${line%%[![:space:]]*}"}"
     first="${stmt%%;*}"; rest="${stmt#"$first"}"
     ok=1
+    # The permitted segment must be the helper call and NOTHING ELSE. Splitting on
+    # `;` alone left `… list N && gh api …` intact in `first`, where a prefix glob
+    # accepted it — the anchor was on the start of a segment rather than on the
+    # whole command. Control operators and command substitution chain a second
+    # command without a semicolon, so they are refused here.
     case "$first" in
+        *'&&'*|*'||'*|*'|'*|*'&'*|*'$('*|*'`'*) ok=0 ;;
         '"$RB_SCRIPTS"/pr-findings.sh '*) ;;
         *) ok=0 ;;
     esac
@@ -1389,6 +1395,18 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     grep -qiE '(naming any second copy[^.]{0,80}that this PR also changes|second copy[^.]{0,80}that this PR also changes(\*\*)?, say so)' <<<"$flat" \
         && pass "$name: a finding must NAME a second copy this PR also changes" \
         || die "$name: does not require naming an in-diff second copy"
+    # …with the polarity guarded, like the field checks beside it. "avoid naming
+    # any second copy that this PR also changes" matches the positive pattern
+    # exactly — the action and the boundary both present, the instruction
+    # inverted. This assertion was the one place that gained no negation scan when
+    # the others did.
+    sc_rc=0
+    grep -qiE '(do not|do n.t|never|avoid|refrain from)[^.]{0,30}(nam(e|ing)|mention(ing)?|list(ing)?)[^.]{0,40}second copy' <<<"$flat" || sc_rc=$?
+    case "$sc_rc" in
+        0) die "$name: tells the reviewer NOT to name an in-diff second copy" ;;
+        1) pass "…and does not tell the reviewer to omit it" ;;
+        *) die "$name: the second-copy negation scan could not be completed (rc=$sc_rc)" ;;
+    esac
     grep -qi 'proposal, not the finding' <<<"$flat" \
         && pass "$name: a code suggestion is a proposal, not the finding" \
         || die "$name: does not say a code suggestion is only a proposal"
