@@ -1591,16 +1591,57 @@ if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
     cln_rc=0
     run_limited 300 env CONTRACT_SCRATCH_PROBE=1 TMPDIR="$CTD" \
         bash "${BASH_SOURCE[0]}" >/dev/null 2>&1 || cln_rc=$?
-    cln_left="$(ls -A "$CTD" 2>/dev/null)" || cln_left='THE_SCAN_FAILED'
-    # The two ways this can go wrong are reported apart. Folded into one
-    # condition, a child that failed for a reason of its own — any other assertion
-    # in this file — was announced as a LEAK, which is a guard misnaming the defect
-    # it found. A failed child is inconclusive, not clean and not a leak.
-    case "$cln_rc" in
-        0) [ -z "$cln_left" ] \
-               && pass "a completed run removes its scratch tree rather than leaking it" \
-               || die "a run left its scratch tree behind ('$cln_left')" ;;
-        *) die "the cleanup probe's own run failed (rc=$cln_rc); the leak check proves nothing" ;;
+    # THREE ways this can go wrong, reported apart, and the scan has its own.
+    #
+    # Folded into one condition, a child that failed for a reason of its own — any
+    # other assertion in this file — was announced as a LEAK. Splitting the child
+    # out left the scan still folded in: `|| cln_left='THE_SCAN_FAILED'` turns an
+    # unreadable directory into an ENTRY, so a scan that could not run was reported
+    # as a leak of a file by that name, sending the reader to the EXIT trap instead
+    # of to the scanner. A substituted sentinel is only a sentinel if the branch
+    # reading it treats it as one; consumed as data it is a plausible value, which
+    # is the failure this whole file is about.
+    #
+    # `report_cleanup` returns the verdict, so every branch can be EXERCISED. The
+    # branch nobody runs is the branch that breaks — the same reason
+    # `test-testlib.sh` made its own reporting a function.
+    scan_scratch() {   # scan_scratch <dir> ; prints the entries, 2 if it could not
+        local out
+        out="$(ls -A "$1" 2>/dev/null)" || return 2
+        printf '%s' "$out"
+        return 0
+    }
+    report_cleanup() {   # <child rc> <dir> ; 0 clean, 1 leaked, 2 child failed, 3 scan failed
+        local rc="$1" left srx
+        [ "$rc" -eq 0 ] || return 2
+        srx=0
+        left="$(scan_scratch "$2")" || srx=$?
+        [ "$srx" -eq 0 ] || return 3
+        [ -n "$left" ] || return 0
+        printf '%s' "$left"
+        return 1
+    }
+    # Each verdict against a case that produces it. Without these the two
+    # inconclusive branches are unreachable code asserting nothing.
+    mkdir -p "$TMP_CL/probe/leaky/tmp.XXXXXX"
+    while IFS='|' read -r want crc where what; do
+        [ -n "$want" ] || continue
+        got=0; report_cleanup "$crc" "$TMP_CL/probe/$where" >/dev/null || got=$?
+        [ "$got" = "$want" ] \
+            && pass "the cleanup verdict for $what is its own, not a leak report" \
+            || die "the cleanup verdict for $what was $got, wanted $want"
+    done <<'CLCASES'
+1|0|leaky|a directory holding a leaked tree
+2|1|tdir|a child run that failed
+3|0|never-scanned|a directory that cannot be scanned
+CLCASES
+    cln_verdict=0
+    cln_left="$(report_cleanup "$cln_rc" "$CTD")" || cln_verdict=$?
+    case "$cln_verdict" in
+        0) pass "a completed run removes its scratch tree rather than leaking it" ;;
+        1) die "a run left its scratch tree behind ('$cln_left')" ;;
+        2) die "the cleanup probe's own run failed (rc=$cln_rc); the leak check proves nothing" ;;
+        *) die "the scratch directory could not be scanned; the leak check proves nothing" ;;
     esac
 fi
 cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
@@ -1650,8 +1691,19 @@ cl_req 'explains rather than accepts' \
     'says the at-the-site comment explains rather than accepts' \
     'still teaches that an author-created comment is authority'
 # The claims stated TWICE in this entry, counted rather than merely present.
-cl_count 'defect[^.]{0,40}(found nearby|stays out of scope)[^.]{0,20}' \
-         '\*{0,2}different pre-existing\*{0,2} defect (found nearby is not in scope|stays out of scope)' \
+# THE TOTAL RECOGNISES THE CLAIM BY ITS SUBJECT, NEVER BY ITS OUTCOME. This is the
+# counting equivalent of the polarity trap the whitelists replaced: a total pattern
+# reading `defect … stays out of scope` stops matching the moment the entry says
+# `stays IN scope`, so the reversed mention leaves BOTH counts, the survivors stay
+# equal, and the suite reports clean on a release note that now directs the session
+# to widen the PR. The total asks only "is the claim mentioned here"; the qualifier
+# asks "does this mention still say the right thing". A total that embeds the
+# answer cannot see the mention that got it wrong.
+#
+# Three mentions of the pre-existing boundary, not two — the `copy in an untouched
+# file` form was outside both patterns, so reversing that one counted as nothing.
+cl_count '\*{0,2}different pre-existing\*{0,2} (defect|copy)[^.]{0,60}' \
+         '\*{0,2}different pre-existing\*{0,2} (defect stays out of scope|copy in an untouched file stays out|defect found nearby is not in scope)' \
          'a different pre-existing defect is OUT of scope'
 # THREE mentions, not two. The third — "the same defect in another copy is the
 # same finding" — was outside both patterns, so it counted as neither claim nor
@@ -1659,10 +1711,19 @@ cl_count 'defect[^.]{0,40}(found nearby|stays out of scope)[^.]{0,20}' \
 # that boundary left the entry stating an unbounded scope rule with the mandatory
 # suite reporting clean. A count only guards the occurrences it can see, which is
 # the same "somewhere in the file" weakness one level up.
+# …and the qualifier requires the POSITIVE OUTCOME, not merely the boundary. Every
+# form here named where the copy is and none named what happens to it, so "is part
+# of the finding" flipping to "is NOT part of the finding" left the diff bound
+# intact, the counts equal at 3/3, and the entry telling the driver to skip an
+# in-diff twin — the one thing this rule exists to require.
 cl_count '(same defect in a copy|copy of the same defect|same defect in another copy)[^.]{0,80}' \
-         '(same defect in a copy this PR also changes|copy of the same defect \*\*that this PR also changes\*\*|same defect in another copy[^.]{0,60}only within what this PR already changes)[^.]{0,80}' \
-         'the second-copy requirement is bounded to the diff'
-cl_count 'a wrong reply (on an old thread )?is a finding[^.]{0,80}' \
+         '(same defect in a copy this PR also changes is part of the finding and gets fixed with it|A finding names[^.]{0,150}second copy of the same defect \*\*that this PR also changes\*\*|same defect in another copy is the same finding[^.]{0,40}only within what this PR already changes)' \
+         'the second-copy requirement is bounded to the diff AND in it'
+# The same polarity-free total here. `is a finding` embedded the outcome, so
+# `is not a finding` was invisible to the count — the identical defect one call
+# down, in a line this PR adds, which makes it part of this finding rather than a
+# separate one to defer.
+cl_count 'a wrong reply (on an old thread )?is[^.]{0,20}finding[^.]{0,80}' \
          'a wrong reply (on an old thread )?is a finding \*{0,2}only when (its error means )?the (changed )?code is still[[:space:]]*defective' \
          'a wrong reply is a finding only when the CODE is still defective'
 # …and the superseded wordings must be absent, because a qualifier present in one
