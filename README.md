@@ -1,13 +1,11 @@
 # watch-pr-skill
 
-**A team-grade code-review rhythm for solo developers.** You write the code; a
-second AI agent (Codex) reviews every pull request on a file-based bus, and your
-coding agent (Claude Code *or* Codex) works the fix → resolve → re-request loop
-until the review signs off — the review discipline of a team, with no teammates
-required.
+**A team-grade code-review rhythm for solo developers.** You write the code;
+GitHub's own reviewers — **Codex** and **Copilot** — review every pull request,
+and **Claude Code** works the fix → resolve → re-request loop until they sign
+off. The review discipline of a team, with no teammates required.
 
-One install serves every project on your machine, and it runs under **both Claude
-Code and Codex**.
+One install serves every project on your machine.
 
 ## Why
 
@@ -18,208 +16,287 @@ goes through the same gate a teammate's review would, automatically.
 
 ## What it is
 
-A file-based **review bus**:
+A driver for the **native** GitHub reviewers. Nothing runs on your machine.
 
-- A detached **watcher** reviews each pushed PR head with `codex exec` (in a
-  dedicated clone, on a per-SHA worktree) and writes a response file.
-- A **response monitor** emits a `<PREFIX>_REVIEW` line per response (plus live
-  `<PREFIX>_REVIEW_PROGRESS` lines while a review runs) to its log/stdout.
-- Your session consumes them and works the loop — reads the findings, fixes them,
-  commits, pushes, replies + resolves the threads, posts a round summary, and
-  re-requests — looping to a clean signoff, then merging. **Claude Code** surfaces
-  the lines into the chat automatically (a background Monitor); **Codex** (no such
-  tool) polls the monitor log.
-- Optional: a **GitHub Copilot** review pass after the Codex signoff.
+| Reviewer | Identity | Trigger |
+| --- | --- | --- |
+| Codex | `chatgpt-codex-connector[bot]` | a comment containing `@codex review`, or automatically on push |
+| Copilot | `copilot-pull-request-reviewer[bot]` | `gh pr edit <PR> --add-reviewer @copilot` |
+
+Your session requests the reviews, reads the findings, works the fix → reply →
+resolve → re-request loop, and gates the merge. Six small scripts answer the
+questions `gh` cannot answer safely on its own — whether a reviewer's review of
+the *current* head can carry a merge, whether everything pushed since the
+reviewed commit is a review fix, what the unresolved findings actually are, how
+many rounds this PR has had, when a verdict is ready to act on, and whether the
+change about to be pushed passes its own checks.
 
 Every review establishes the PR's **intended scope** first — from its description
 and its newest round-summary comment — and uses it for *relevance only*: work the
-PR never claimed to do is not filed as a defect of this PR, while a defect in
-what the PR did change stays a finding however the description frames it. That
-scope is untrusted context, so it establishes intent and can never waive a
-finding. This is built in as of 1.0.11 — projects no longer need to write the
-rule into their own `.review-bus.md`.
+PR never claimed to do is not a defect of this PR, while a defect in what the PR
+did change stays a finding however the description frames it. That scope is
+untrusted context: it establishes intent and can never waive a finding.
 
-There is currently **no dedicated channel for a non-blocking note**, so the
-prompt routes such observations rather than inventing one: every finding becomes
-a review thread the merge gate requires resolved, and the reviewer's `summary`
-reaches the PR only on a zero-finding review (giving it a real channel is
-tracked separately). A reviewer therefore carries an observation in `summary`
-only when it returns no findings, and otherwise omits it. Copilot's equivalent
-is its overall review body, which the bus does not count as findings.
+A problem the PR did not introduce has somewhere to go that is not a blocker.
+Every inline comment becomes a review thread the merge gate requires resolved, so
+an unrelated note filed inline would block a PR that is not responsible for it.
+The reviewers are told to put those in the **overall review body**, and to open a
+**GitHub issue** when the problem deserves tracking beyond the PR.
 
-Everything is derived from the repo's git `origin`, so it works in any project
-unchanged, and each project's bus is isolated under `/tmp/<owner>-<repo>-review-bus`.
-The daemons are `systemd --user` units scoped per repo
-(`review-bus-<owner>-<repo>-{watcher,monitor}`), so you can run the bus in several
-repos at once and they won't interfere — arming a second repo never stops the
-first repo's reviewer.
+> **Upgrading from 1.x?** v1 ran its own reviewer over a file-based bus with two
+> `systemd --user` daemons. All of it is removed — see the 2.0.0 entry in
+> [`CHANGELOG.md`](CHANGELOG.md) for why, and for the teardown commands.
 
 ## Prerequisites
 
 - `git`, `gh` (authenticated — `gh auth status`, `repo` scope), `jq`
-- `codex` CLI (`npm i -g @openai/codex`) — the reviewer engine
-- `inotify-tools` (`inotifywait`)
-- Linux with `systemd --user` for the persistent daemons (a `setsid` fallback is
-  used where systemd-user is unavailable)
+- The **Codex GitHub connector**, linked once per account at
+  [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
+  Until it is linked, `@codex` replies with a setup link instead of a review —
+  that reply is the diagnostic.
+- **Copilot code review available to the repository.** This is required, not
+  optional: the merge gate demands a clean verdict from *both* reviewers, and the
+  Copilot phase stops rather than skipping if the request cannot be made. On a
+  repository without Copilot the loop runs its Codex phase and then cannot
+  finish. There is deliberately no skip switch — a gate with a documented way
+  around it stops being a gate — so if you want a Codex-only loop, stop after the
+  Codex phase and merge by hand.
+
+No daemon, no `codex` CLI, no `inotify-tools`, no systemd.
+
+### Making reviews fast
+
+A review of shell and Markdown does not need an environment. Both instruction
+files tell the reviewers so explicitly — no setup, no dependency install, no test
+runs — because the alternative is a twenty-minute pass that says what a
+three-minute pass would have said, while the author waits either way.
+
+Two settings matter as much as the instructions:
+
+- **Codex → Environments**: if this repository has a setup script or automatic
+  dependency installation configured, remove it. Nothing here needs building.
+- **Exhaustive review**: keeps looking after the first problem. Worth it on a
+  behaviour change; if you want a fast pass on a docs-only PR, turn it off for
+  that round.
+
+### Codex review settings
+
+Per-repository behaviour lives on the Codex **Code review** settings page:
+
+| Setting | Suggested | Why |
+| --- | --- | --- |
+| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, with its summary already posted. On, the *push* triggers the pass, so the summary has to precede the push and no mention may be sent — a mention as well queues a second review of the same head. Note the per-repository column overrides this default, so check both. |
+| Review trigger | on every push | Only relevant with automatic review on. |
+| Exhaustive review | on | Keeps looking after the first problem. |
+| Credit usage | on, if you want reviews to continue past the rate limit | With it off, review simply stops when the limit is hit. |
 
 ## Platform support
 
-> **Linux only, for now.** The plugin is built and tested on Linux — the daemons
-> rely on `systemd --user` (with a `setsid` fallback) and the scripts assume a
-> POSIX shell + GNU coreutils. **macOS and Windows are not yet supported or
-> tested**; they need dedicated research + implementation (e.g. a `launchd` /
-> Windows service supervisor for the daemons, and coreutils/BSD-utils
-> differences). Contributions welcome.
+Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
+caveat is gone with the daemons it was about.
 
 ## Install
-
-**Claude Code:**
 
 ```
 /plugin marketplace add p5ych0/watch-pr-skill
 /plugin install watch-pr-skill@p5ych0-tools
 ```
 
-**Codex:**
+Install once at user scope; it is then available in every project.
 
-```
-codex plugin marketplace add p5ych0/watch-pr-skill
-codex plugin add watch-pr-skill@p5ych0-tools
-```
+**Claude Code only — and there is nothing to install for the reviewers.** v1
+shipped a Codex plugin because the review ran on this machine, through the
+`codex` CLI and a local bus. In v2 both reviewers are GitHub apps that run in
+GitHub's cloud: Codex answers an `@codex review` mention and Copilot answers a
+review request, neither of which involves anything installed here. What they read
+is committed to the repository — `AGENTS.md` and `.github/copilot-instructions.md`
+on the **base ref** — so the per-project setup below is the whole of it.
 
-(Older/newer Codex builds vary — some use `codex plugin install`; if `add` is
-missing, run `codex plugin --help`. The `@p5ych0-tools` marketplace suffix is
-required.)
-
-Install once per tool at user scope; it is then available in every project.
+What this plugin installs is the *driver*: the contract for the model running the
+loop, which watches for verdicts, closes rounds and gates the merge.
 
 ## Per-project setup
 
 1. Authenticate `gh` for the repo (`repo` scope).
-2. Add review conventions: copy [`.review-bus.example.md`](.review-bus.example.md)
-   to your project root as `.review-bus.md`, edit it for your stack, and commit it.
-   (A generic review is used if the file is absent.)
+2. Add review conventions the reviewers will actually read, from the base ref:
+   - **`AGENTS.md`** — Codex reads this natively, including in PR review.
+   - **`.github/copilot-instructions.md`** — Copilot reads only this file and
+     does not follow pointers, so restate the policy inline.
+
+   This repository's own copies are a working example: scope discipline, where
+   an out-of-scope problem goes, what counts as a blocking finding, and who can
+   waive one. A generic review is used if neither file exists.
 
 ## Usage
 
 Invoke the skill:
 
 - Claude Code: `/watch-pr-skill:watch-prs`
-- Codex: `/skills` → pick `watch-prs` (or type `$watch-prs`)
 
-It starts the watcher + response monitor (idempotent) and arms the session to
-surface reviews. Then:
+Then:
 
-1. Push your PR branch; request a review — the skill runs `review-bus-request.sh`
-   once its preflight gates pass (clean tree, head pushed, no unresolved threads,
-   a fresh round-summary comment).
-2. When Codex finishes, the monitor emits a `<PREFIX>_REVIEW` line. In **Claude
-   Code** it surfaces into the session automatically; in **Codex** (no watch tool),
-   poll the monitor log — `grep "<PREFIX>_REVIEW" "$BUS/.codex-logs/response-monitor.log" | tail` — to pick it up.
-3. The skill reads the findings, fixes them, commits `fix(review): …`, pushes,
-   then **closes the round in one command** —
-   `review-bus-close-round.sh N --summary <file>` resolves every open thread
-   (with a thread-level ack), posts the summary, re-enqueues the next Codex pass,
-   and acks the handled response.
-   (Push + comment alone does **not** re-trigger Codex — the round must be closed,
-   or the loop stalls on the unresolved-threads gate.)
-4. On a clean signoff it re-checks the merge gate (head unchanged, threads
-   resolved, required checks green) and admin-merges.
+1. **State the task on the PR.** The description says what the change does and
+   what it deliberately does not. The reviewers judge relevance against it, so
+   this is a precondition rather than paperwork.
+2. **Request the review — Codex first.** With automatic review **off** (the
+   recommended setting) that is a comment containing `@codex review`. With it
+   **on**, opening or pushing the PR has *already* queued a pass, so no mention is
+   sent — one would queue a duplicate review of the same head; post the context
+   comment without the mention and go straight to waiting. The loop is *phased*:
+   Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
+   Running both every round buys a Copilot pass on every intermediate commit and
+   mixes its findings into rounds that were not about them.
+3. **Wait — without hand-polling.** `pr-watch.sh` blocks until the reviewer's
+   state is actionable and prints one line when it changes. In Claude Code it
+   runs as the session's Monitor, so the verdict surfaces into the chat by
+   itself. It is armed and re-armed as part of each round without asking you —
+   see **Watching without prompts**. An unreadable state is a stop, never
+   "no findings".
+4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
+   (`pr-selfcheck.sh`), **check the round boundary**
+   (`pr-round-count.sh <PR> <reviewer>`), reply to each thread with what changed,
+   react 👍/👎, and resolve it. Then, **with automatic review off** (the
+   recommended setting), push and post **one comment** that opens with
+   `@codex review` and continues with the round summary — the mention *is* the
+   request, so the account of what changed and the request for the next pass are
+   the same comment. **With automatic review on** the push *is* the request, so
+   the summary must be posted **before** it and no mention is sent at all; a
+   mention would queue a second review of the same head. Either way the summary
+   says what was addressed and what was intentionally skipped, and both checks
+   come *before the push*: with Codex automatic
+   review enabled the push itself requests the next review, so a check placed
+   after it asks you about a round that has already started. A resolved thread is
+   not a record of a fix; the summary is.
+5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
+   until it is clean too. Fix commits here carry a `Review-Phase: copilot`
+   trailer, which is how the merge gate knows the head advanced only through
+   Copilot fixes and Codex's signoff still covers it — so Codex is not re-run.
+6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
+   everything against the *current* head — both verdicts, the reviewed range,
+   unresolved threads, required checks — and merges pinned to that head with
+   `--match-head-commit`, so a push landing mid-gate is rejected rather than
+   merged unreviewed.
 
-### Round check-in (the every-N-rounds pause)
+## Automatic review (opt-in per repo)
 
-A review loop can run many rounds. So it stays *your* decision to keep going —
-rather than rubber-stamping an endless back-and-forth — the bus pauses for a
-check-in every **N distinct pushed heads** for a PR (`N =
-CODEX_REVIEW_ROUND_THRESHOLD`, default `10`). At the boundary the next enqueue is
-withheld and you'll see:
+There is no local hook and nothing to start. If you want a review on every push
+without asking, turn **Automatic review** on for the repository on the Codex
+**Code review** settings page. Leaving it off means each round is requested
+deliberately with `@codex review`, which is cheaper and keeps the loop under your
+control.
 
-```
-REVIEW_BUS_THRESHOLD_PAUSE pr=<PR> rounds=<count> next_sha=<full sha>
-```
+## Configuration
 
-You then choose:
-
-- **Continue** — cross a single pause with `--continue-threshold`
-  (`review-bus-close-round.sh <PR> --summary <file> --continue-threshold`, or
-  re-run `review-bus-request.sh <PR> --continue-threshold`). The pause re-arms
-  for the *next* N rounds.
-- **Stop** — merge, leave the PR open, or abandon it — whatever the state calls for.
-- **Turn the pauses off** — `export CODEX_REVIEW_ROUND_THRESHOLD=0`.
-
-The count is over *distinct* enqueued head SHAs, so a same-SHA retry never
-double-counts, and the check-in fires on **both** the manual enqueue and the
-auto-discovered one (`CODEX_REVIEW_AUTO_OPEN_PRS=1`) — the polling watcher can't
-slip past the checkpoint. (A malformed threshold value is treated as the default
-`10`, never as "disabled", so a typo can't silently remove the check-in.)
-
-### Optional Copilot pass
-
-After a clean Codex signoff, the skill asks whether to run an optional GitHub Copilot review pass.
-
-- **If you opt in**, it runs Copilot review rounds until clean signoff, then merges.
-- **If you explicitly decline (skip Copilot)**, it merges on the clean Codex signoff (after final merge-gate checks).
-- **If you do not answer**, it holds and does not merge unattended.
-
-## Automatic arming (opt-in per repo)
-
-The plugin ships a `SessionStart` hook (both tools). In any repo that has a
-committed **`.review-bus.md`**, every new session automatically ensures the
-daemons are running (in the background) and prompts the agent to attach the
-session's review monitor — so you don't have to invoke the skill by hand. In
-repos **without** a `.review-bus.md` the hook is a silent no-op, so it never
-intrudes on unrelated work. Adding `.review-bus.md` is therefore both the review
-conventions *and* the on-switch. (You can still invoke the skill manually
-anytime.)
-
-The hook never arms the bus **inside a review**. The reviewer works in a
-detached worktree of the PR head, which carries your `.review-bus.md` — so the
-opt-in gate would otherwise pass for the reviewer itself and spend the pass on
-bus setup. It exits silently on either of two signals: `REVIEW_BUS_WORKER=1`,
-which the watcher exports into the review, or a `review-bus-worker` marker the
-watcher writes into the worktree's **git dir** (never the working tree, so it
-cannot reach the diff). The second signal covers a tool that does not forward
-environment variables to hook commands. Neither is a path test, so a custom
-`CODEX_REVIEW_WORKTREE_ROOT` is still recognised and an ordinary checkout that
-happens to sit under such a directory still arms normally.
-
-## Configuration (environment variables, all optional)
+v2 has no reviewer knobs of its own — model, reasoning effort, exhaustiveness,
+auto-review and credit use are Codex account/repository settings, not plugin
+settings.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CODEX_REVIEW_AUTO_OPEN_PRS` | `0` | `1` = watcher auto-discovers open PR heads |
-| `CODEX_REVIEW_MAX_ITERATIONS` | `0` | hard cap on total review rounds per PR (a runaway backstop); `0` = unlimited. Distinct from the periodic *pause* below — this is a stop, not a check-in |
-| `CODEX_REVIEW_ROUND_THRESHOLD` | `10` | round check-in cadence (see [Round check-in](#round-check-in-the-every-n-rounds-pause)); `0` = disable. `review-bus-request.sh` refuses to enqueue the next review (exit 3, `REVIEW_BUS_THRESHOLD_PAUSE`) every Nth **distinct enqueued SHA** per PR, so the driver pauses to ask. Cross with `--continue-threshold`. A non-integer value falls back to `10` (never silently disabled) |
-| `CODEX_REVIEW_ERROR_RETRY_MAX` | `5` | bound on auto-retries after a reviewer error |
-| `CODEX_REVIEW_MODEL` | `gpt-5.6-sol` | reviewer model |
-| `CODEX_REVIEW_REASONING_EFFORT` | `max` | reviewer reasoning effort (`minimal`…`xhigh`, `max`) |
-| `CODEX_REVIEW_COPILOT_TIMEOUT` | `300` | seconds to wait for a Copilot review |
-| `CODEX_REVIEW_PROGRESS` | `1` | `1` = emit live `${PREFIX}_REVIEW_PROGRESS` lines while a review runs; `0` = off |
-| `CODEX_REVIEW_PROGRESS_INTERVAL_SECONDS` | `30` | heartbeat cadence for an unchanged in-flight review |
-| `CODEX_REVIEW_PROGRESS_DETAIL` | `status` | `status` (counters + phase, safe default) · `summary` (adds a sanitized `note=`) · `off` |
+| `REVIEW_BUS_REMOTE` | `git remote get-url origin` | override the origin URL identity is derived from (tests) |
+| `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
+| `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
+| `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
 
-### Live review progress
+### Self-check before the push
 
-While Codex reviews, the watcher writes lifecycle state under `$BUS/progress/`
-(one atomic file per run, keyed by a unique `run_id` so same-SHA re-reviews stay
-distinct), and the response monitor surfaces it as throttled
-`${PREFIX}_REVIEW_PROGRESS` lines — a review start, phase changes
-(`queued` → `preparing_worktree` → `preparing_context` → `reviewing` →
-`validating_result` → `posting_comments`), and a periodic heartbeat — so the attached session sees a
-review begin and advance instead of waiting silently for the terminal
-`${PREFIX}_REVIEW` handoff. When the installed Codex supports `exec --json`, the
-watcher taps its structured event stream for live event/command counters (and
-falls back to lifecycle phases + elapsed-time heartbeats otherwise), always
-preserving Codex's real exit status. Progress lines are **never** a
-`${PREFIX}_REVIEW` handoff (only that triggers findings handling), are strictly
-repository-scoped, and — at the default `status` detail — carry only counters and
-phase, never raw chain-of-thought, command output, or secrets. A monitor that
-starts or restarts mid-review replays only the **currently active** run as
-`state=resumed`; completed history is never replayed.
+`pr-selfcheck.sh` runs over the plugin's own sources before a round is pushed:
+every variable `SKILL.md` uses is assigned in it, every script parses, every
+helper it drives is shipped, every script has a test, and the suite passes.
+
+It exists because this plugin's own PR took nineteen review rounds, and almost
+none of the findings were subtle. Rounds are the expensive part of the loop —
+each is a review pass, a fix, a summary and a wait — so a finding caught before
+the push is worth several caught after it. `SKILL.md § 5a` pairs it with a short
+list of the judgement checks a script cannot make.
+
+### `REVIEW_MERGE_STRICT`
+
+The merge uses `--admin` by default, and that is a deliberate trade.
+
+Branch protection normally requires an approving review **from another account**,
+and neither reviewer here is one — a Codex or Copilot review does not count
+towards "required approvals". For a solo maintainer with a protected `main`,
+dropping `--admin` would not tighten the gate; it would remove the merge path
+entirely, on every PR.
+
+What the default costs: every gate runs in this plugin, against data fetched a
+moment earlier, and `--match-head-commit` only proves the head has not moved. A
+review can be submitted or dismissed in the window between the last check and the
+merge without changing the head, and `--admin` is precisely what tells GitHub not
+to re-evaluate that.
+
+The trade-off is recorded in
+[`docs/decisions/2026-08-06-merge-admin-default.md`](docs/decisions/2026-08-06-merge-admin-default.md).
+
+Set `REVIEW_MERGE_STRICT=1` where the repository's protection rules are ones the
+loop can actually satisfy — a team repo, or required checks with no required
+human approval. GitHub then evaluates reviews, checks and conversations itself,
+atomically, which is the only place that race can genuinely be closed. If it
+refuses, the merge does not happen and you decide what to do.
+
+### Watching without prompts
+
+The whole point of `pr-watch.sh` is that you do not sit and poll, so the driver
+arms it as part of every round rather than asking you each time. In Claude Code
+that means the **`Monitor` tool**, which is *not* covered by a `Bash(…)`
+permission rule — it is a separate tool, so a session that allows every Bash
+command will still stop and ask before each watch. That turns an automatic loop
+back into a manual one, one prompt per round.
+
+Allow it once, in `.claude/settings.local.json`:
+
+```json
+{ "permissions": { "allow": ["Monitor", "TaskStop"] } }
+```
+
+`TaskStop` is what cancels a watch, so allowing one without the other leaves you
+prompted to stop what you were not prompted to start.
+
+This is deliberately **not** in the committed `.claude/settings.json`: that file
+enables the plugin for anyone who clones the repository, and granting a tool that
+runs background commands is a decision each user should make for their own
+checkout rather than inherit from a clone.
+
+A watch ends when it reports a verdict, so one arming covers one review. Re-arming
+is part of requesting the next review, not a separate question.
+
+### Round check-in
+
+A review loop can run many rounds, so it stays *your* decision to keep going
+rather than rubber-stamping an endless back-and-forth: every **10 distinct
+reviewed heads** on a PR, `pr-round-count.sh` exits 3 and the driver stops to ask
+— continue, stop and merge, stop and leave open, or abandon.
+
+It is counted **per reviewer**, because the Codex and Copilot phases are separate
+loops: a shared counter would let nine Codex rounds plus one Copilot round trip a
+pause that neither loop had reached. The count comes from GitHub each time, so it
+survives a new session or a new machine. Set
+`REVIEW_ROUND_THRESHOLD` to change the cadence, or `0` to disable it; a malformed
+value falls back to `10` rather than silently disabling a safety pause.
+
+**Saying "continue" is recorded on the PR.** The driver posts a comment carrying
+a `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` line, and the next
+check-in is a further `REVIEW_ROUND_THRESHOLD` heads past that number. It names
+the reviewer because the count does: the Codex and Copilot phases are separate
+loops with separate counts, and an unscoped marker acknowledging 41 Codex rounds
+is read by a Copilot phase with 5 as ahead of its count and refused permanently. Without it the gate would
+pause on every subsequent call, since it re-derives everything from GitHub and
+keeps nothing locally. Only repository owners, members and collaborators can
+write that marker, and one naming a round that has not happened yet is rejected:
+it records a decision you made, it cannot create permission on its own.
+
+The boundary is a **threshold crossed, not a multiple landed on**. It used to be
+`rounds % threshold == 0`, which silently assumes the count rises by one at a
+time — a single round can add several heads, and this repository's own PR #10 went
+from 35 to 41 across two rounds with the check-in at 40 never firing.
+
+A review record only counts as a round when GitHub reports a full commit SHA and
+a well-formed timestamp for it. If any record is unreadable the command exits 2
+and the driver stops, rather than counting the bad record as another head — an
+inflated count is the direction that sails past the boundary and skips the pause.
 
 ## Updating
-
-**Claude Code:**
 
 ```
 /plugin marketplace update p5ych0-tools
@@ -227,42 +304,33 @@ starts or restarts mid-review replays only the **currently active** run as
 /reload-plugins
 ```
 
-**Codex:**
-
-```
-codex plugin marketplace upgrade p5ych0-tools
-codex plugin add watch-pr-skill@p5ych0-tools
-```
-
-The `systemd --user` daemons keep running from the *previously* installed plugin
-path until relaunched — an update alone doesn't switch the live reviewer. After
-updating, relaunch them onto the new version:
-
-```
-systemctl --user stop review-bus-<owner>-<repo>-{watcher,monitor}
-```
-
-then invoke the skill again (or just start a new session in a repo with a
-`.review-bus.md` — the SessionStart hook relaunches them from the new path).
+Nothing to relaunch afterwards: v2 starts no background process, so the next
+session simply uses the new version.
 
 ## Tested versions
 
-Verified against Claude Code and Codex as of July 2026. **Both plugin systems are
-young and moving fast** (Codex's marketplace CLI is recent; `~/.codex/prompts`
-regressed once) — if install or invocation differs from the above, check each
-tool's current plugin docs and open an issue.
+Verified against Claude Code as of July 2026. **The plugin system is young and
+moving fast** — if install or invocation differs from the above, check the current
+plugin docs and open an issue.
 
 ## Troubleshooting
 
-- **No notifications:** re-invoke the skill (idempotent — it restarts the daemons)
-  and confirm `gh auth status`.
-- **Reviews target the wrong repo:** the bus derives identity from `git remote
-  get-url origin` — run from inside the intended checkout.
-- **Stale review after a push:** the merge gate blocks a moved head — post a fresh
+- **`@codex` answers with a setup link instead of reviewing:** the connector is
+  not linked for this account. Link it at
+  [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
+  That reply is the diagnostic — it is not a review that found nothing.
+- **No review arrives at all:** confirm `gh auth status`, that the mention is on
+  the PR (not on an issue), and that the repository is enabled on the Codex
+  **Code review** settings page.
+- **Review stops partway with a usage message:** the account hit its rate limit.
+  Either wait for the reset, or turn on credit use in the Codex code-review
+  settings.
+- **`--add-reviewer @copilot` fails:** Copilot review is not available to the
+  repository. That is not permission to skip the pass — decide explicitly.
+- **Reviews target the wrong repo:** identity derives from
+  `git remote get-url origin` — run from inside the intended checkout.
+- **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
-- **Daemons running old code after an update:** stop the `systemd --user` units
-  (`systemctl --user stop review-bus-<owner>-<repo>-{watcher,monitor}`) and
-  re-invoke the skill to relaunch from the new plugin path.
 
 ## License
 

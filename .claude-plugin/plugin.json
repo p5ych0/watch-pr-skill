@@ -1,8 +1,10 @@
 {
   "name": "watch-pr-skill",
-  "version": "1.0.11",
-  "description": "Automated PR review-bus loop with a Codex reviewer — a team-grade review rhythm for solo developers.",
-  "author": { "name": "p5ych0" },
+  "version": "2.0.0",
+  "description": "Native PR review loop — drives the Codex and Copilot GitHub reviewers to a clean signoff, then gates the merge.",
+  "author": {
+    "name": "p5ych0"
+  },
   "repository": "https://github.com/p5ych0/watch-pr-skill",
   "license": "GPL-2.0"
 }

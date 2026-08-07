@@ -1,5 +1,1441 @@
 # Changelog
 
+## [2.0.0] — 2026-08-05
+
+**The local review bus is gone.** Both reviewers are first-party GitHub apps, so
+the plugin no longer runs a reviewer of its own.
+
+- **Why this is a rewrite, not a refactor.** v1 opened by asserting that a Codex
+  review "would never match" a bot filter, because it arrived over a shared token
+  and was authored as the repository owner — and the entire file-based bus, the
+  two `systemd --user` daemons, the `/tmp` bus directory, the request/response
+  files and their digest markers existed to work around that. It is false: an
+  `@codex` mention is answered by `chatgpt-codex-connector[bot]`, a real Bot
+  account, in about seven seconds. Copilot has always been
+  `copilot-pull-request-reviewer[bot]`. With both reviewers reachable through
+  GitHub, the machinery had nothing left to do.
+
+- **Removed**: `review-bus-codex-watcher.sh`, `review-bus-response-monitor.sh`,
+  `review-bus-codex-start.sh`, `review-bus-request.sh`,
+  `review-bus-close-round.sh`, `review-bus-rounds.sh`, `review-bus-copilot.sh`,
+  the SessionStart hook, `.review-bus.md`, and eighteen suites that tested them.
+  Also gone with them: a second credit pool (the `codex exec` CLI, which ran out
+  mid-session), reviews authored as the repository owner instead of a bot, and a
+  daemon that could crash-loop under systemd.
+
+- **Kept, because they answer questions `gh` cannot answer safely.**
+  `pr-review-state.sh` decides whether a named reviewer's review of the *current*
+  head can carry a merge; `pr-merge-range.sh` decides whether every commit since
+  the reviewed SHA is a review-fix commit reachable from it. Both are now
+  reviewer-agnostic — the bot login is an argument — which is what native review
+  makes possible.
+
+- **The review-state logic is salvaged, not rewritten.** It carries every fix
+  found while it lived in the v1 Copilot helper: a state machine that judges the
+  latest submitted review rather than counting inline comments, so a dismissal,
+  a changes-requested review with no comments, and an in-flight re-review are
+  never mistaken for a signoff; a clean verdict re-checked against a second
+  snapshot, so a review that changes mid-decision cannot be judged on one and
+  counted on another; and every unreadable fetch failing closed instead of
+  reading as "no findings".
+
+- **The review policy moved to where the reviewers actually read it.**
+  `AGENTS.md` for Codex, `.github/copilot-instructions.md` for Copilot, both from
+  the base ref. They carry what v1's prompt injection carried — judge the PR
+  against what it set out to do, treat the PR narrative as intent and never as
+  permission, only a base-ref authority waives a finding, a resolved thread is
+  not proof of a fix — plus one thing v1 had no channel for: **an out-of-scope
+  problem should go in the review body or a GitHub issue, never an inline
+  comment**, because every inline comment becomes a thread the merge gate
+  requires resolved.
+
+- **Helper output is matched as a whole record, not by substring.** The state and
+  verdict lines were parsed by taking the last `state=` token, or by globbing for
+  `*verdict=clean*` — so rc-0 noise such as `warning: cached state=reviewed`, or a
+  line reading `verdict=cleaned`, was accepted. Under Monitor `PR_REVIEW_READY`
+  is the actionable signal, and in the merge gate the equivalent decides a
+  fallback, so both now require the exact `PR_REVIEW_STATE … state=<known>` /
+  `… verdict=<known>` shape. The merge gate also validates both reviewers'
+  verdict records rather than trusting the exit codes alone.
+
+- **A record's shape is not its identity.** Matching the whole record still left
+  `pr`, `sha` and `reviewer` as wildcards, so a well-formed line about *something
+  else* was accepted as an answer: a misrouted or cached
+  `PR_REVIEW_STATE pr=999 … state=reviewed` drove the watch into its terminal
+  path, and in the merge gate one clean record satisfied the check for either
+  reviewer — so a clean Copilot line, or a clean line for a stale SHA, could pass
+  as Codex's signoff and the gate would merge without the named reviewer ever
+  having approved the commit being merged. Every record is now compared to the PR,
+  reviewer and head it is supposed to describe, and `pr-watch.sh` additionally
+  requires the verdict to name the same SHA as the state it was paired with, so a
+  push landing between the two calls fails closed instead of pairing a fresh state
+  with a stale verdict.
+
+- **The round boundary is checked before the *push*, in automatic mode.** Placing
+  it before the mention was not enough: with automatic review on, the push itself
+  is the request, so a fix commit on the threshold-th round started the next pass
+  while the count had not yet run. Third placement of this check, and the first
+  that precedes every way a review can be triggered — the contract test now
+  treats the push as a triggering command rather than only the mention and
+  `--add-reviewer`.
+
+- **An in-flight auto-review is not permission to merge.** With auto-review on,
+  every Copilot-fix push also queues a Codex pass, and Codex exposes no review
+  record while that pass is queued — which the merge gate read as the same `none`
+  that means "nothing asked Codex about this head". It then fell back to the
+  pre-Copilot signoff and could merge before the queued pass reported anything,
+  including a body-only `CHANGES_REQUESTED` that leaves no unresolved thread for
+  the other gates to catch. "Not yet answered" is not "nothing to answer".
+
+- **An unrecognised review state is unreadable, not a dismissal.**
+  `head_review_snapshot` sent anything it did not recognise through its catch-all
+  as `dismissed` with status 0, so a null or unknown value became an actionable
+  "the review was withdrawn" — which the driver answers by requesting another
+  pass, turning a malformed parse into a review loop. This is the set the other
+  two helpers already enforced; `pr-review-state.sh` had drifted away from it.
+
+- **A helper that exits 124 is an unreadable probe, not a timeout.** 124 is the
+  watchdog's own expiry code, returned before any child status is read, so a
+  helper exiting 124 itself was reported as an ordinary timeout — which the
+  driver re-arms indefinitely. A broken probe became "still in flight", forever.
+
+- **A clock that steps backward is refused — including a step that stays above
+  the start.** The first attempt kept the last accepted epoch in `elapsed_s`, but
+  every caller evaluated it through command substitution, so the function ran in a
+  subshell and the update was discarded: the comparison always fell back to the
+  start time, and a clock going 100 → 110 → 105 was still accepted. `elapsed_s`
+  and `remaining_s` return through variables now, so the state survives the call.
+
+- **The identity guard checks a mixed line.** `$OWNER/$REPO` on a line caused the
+  whole line to be skipped, so `REPO_SLUG="acme/widget"; echo "$OWNER/$REPO"`
+  scanned clean — the guard asserting the repo-agnostic invariant while a runtime
+  script routed review traffic to a fixed repository.
+
+- **The epoch bound accepts what it claims to.** `N` question marks followed by
+  `*` matches every string of length N *or more*, so the eleven-`?` guard rejected
+  eleven-digit epochs — the ones it was written to allow — and every watch would
+  have exited `clock_unreadable` from 2286 onward. A ceiling that behaved as a
+  floor one digit lower, and the rejection fixtures passed either way.
+
+- **Every scratch directory in the suite is validated before anything is written
+  into it.** All thirteen sites used a bare `mktemp -d`. Unchecked, a failure
+  leaves `$TMP` empty, so `$TMP/bin` is `/bin` and `$TMP/broke` is `/broke` — and
+  the EXIT trap then runs `rm -rf` over exactly that, which in a root-run
+  container is `rm -rf /bin`. `mktemp` can also print a plausible path and then
+  fail. `mktemp_d` requires a non-empty absolute path that is not `/` and that
+  exists, the last being what proves the directory was actually created.
+
+- **A watchdog that cannot set itself up returns 125, not 2.** Two is a status the
+  bounded command legitimately returns and that several fixtures assert as their
+  primary expectation, so a broken watchdog satisfied them without ever running
+  the subject.
+
+- **An epoch outside Bash arithmetic is an unreadable clock.** All digits passed
+  the shape test and `t - started` then wrapped: a constant oversized value keeps
+  elapsed time at zero forever, so the watch never reaches its deadline, while one
+  appearing later produces an immediate ordinary timeout the driver re-arms.
+
+- **The portable watchdog reaps descendants, not just the process it started.**
+  `run_limited` killed only the leader, so a bounded command with children — the
+  `sh -c "sleep 30 & wait"` shape its own suite runs — returned 124 with its
+  `sleep` orphaned. A mandatory gate that leaks one process per run leaks one per
+  run forever. The command now goes in its own process group and the group is
+  killed, with the leader as a fallback where the group never formed.
+
+- **The suite is passable where GNU `timeout` is absent — the platform it claims
+  to support.** Fixtures prefixed their stubs onto the CALLER's `PATH`, so the
+  portable watchdog inherited them: it polls with its own `sleep`, reads with its
+  own `cat` and reads the clock with its own `date`, and a stubbed one killed the
+  harness instead of the subject. Seven fixtures across four files were affected —
+  the whole suite was unpassable on stock macOS while passing wherever `timeout`
+  exists, which is why it went unnoticed. The substitution now goes inside the
+  watchdog (`run_limited N env PATH=… cmd`), and a guard in `test-testlib.sh`
+  refuses the old shape.
+
+- **The suite no longer signals or matches on processes it did not start.** A
+  fixture asserting that a probe was reaped used `pgrep -f`/`pkill -f` over the
+  argv, which matches any `sleep 30` on the machine — and the suite is a mandatory
+  pre-push gate, so it could report a false leak from an unrelated command and
+  then kill it. The child publishes its own PID and only that PID is inspected.
+
+- **The none-configured checks diagnostic is matched whole, not searched for.**
+  `gh pr checks` has no dedicated status for "no required checks" — it documents
+  exit 8 for pending and nothing for this — so the message is the only signal, and
+  a substring test accepted the benign phrase inside a LARGER failure. A run that
+  printed it and then failed for an unrelated reason was classified as benign, and
+  the default administrator merge proceeded with no trusted checks result at all.
+
+- **A failed polling clock tears the probe down before returning.** The
+  fractional-sleep capability check has already succeeded on that path, so it is
+  reached with a live child: returning 125 alone left a `gh` process holding an
+  API call open after the watch exited, and every re-arm of a persistent watch
+  added another.
+
+- **The pause instruction reports each reviewer's own count.** Scoping the footer
+  to a reviewer was not enough while the message printed the COMBINED count beside
+  every login: with 41 Codex heads and 5 Copilot heads, an operator following the
+  emitted instruction literally wrote a Copilot acknowledgement of 41, which the
+  Copilot phase then refuses as ahead of its count — the same cross-phase block,
+  recreated one layer out through the instruction rather than the parser. A count
+  that cannot be established is not printed as a number to copy.
+
+- **A pause acknowledgement belongs to one reviewer's count.** The Codex and
+  Copilot phases are separate loops with separate counts — which is why the helper
+  takes a reviewer list at all — and the acknowledgement footer did not name one.
+  Acknowledging 41 Codex rounds was then read by a Copilot invocation with 5, trip
+  the ahead-of-count guard, and return status 2 permanently: the Copilot phase and
+  the merge gate behind it were blocked for good. This was not hypothetical. It
+  landed on this repository's own PR #10 within the hour, from the acknowledgement
+  that had just cleared the Codex pause. The footer now names the reviewer, the
+  login is compared rather than interpolated into a regex (`[bot]` is a character
+  class), and there is no unscoped form.
+
+- **The driver takes the gate's status before recording permission.** Reading the
+  count out of a pipeline hid it: a run that printed a plausible pause line and
+  then died some other way still yielded digits, `sed` still succeeded, and the
+  operator's permission was recorded from a probe that failed.
+
+- **The round check-in is a threshold crossed, not a multiple landed on.** The
+  pause fired only when `rounds % threshold == 0`, which assumes the counter rises
+  by exactly one per call. It does not: a single round can contribute several
+  countable heads, and this repository's own PR #10 went from 35 to 41 across two
+  rounds — the check-in at 40 was stepped over and never fired at all. A safety
+  pause a large enough step silently skips is not a safety pause.
+
+  The test is now `rounds >= acknowledged + threshold`, which no jump can walk
+  past, and the pause therefore STICKS until it is answered rather than clearing
+  itself on the next round. Saying "continue" is recorded on the PR — a
+  `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` footer, read back the
+  same way the
+  round count itself is derived, since local state was removed in v1 for
+  disappearing between machines. Only OWNER, MEMBER and COLLABORATOR comments are
+  read as acknowledgements, and one naming a round that has not happened yet is
+  refused rather than obeyed: it is the disable-forever shape, reachable by a typo
+  as easily as by anyone who can comment on the PR.
+
+- **A remote whose transport reaches no GitHub server is refused too.**
+  `file://github.com/srv/acme/widget.git` carries an authority, so the URL arm
+  accepted `github.com` as the host while the path split still yielded
+  `acme/widget` — the same wrong-public-repository outcome as a bare local path,
+  reached through the arm meant to be the safe one. Only `ssh`, `git`, `https`,
+  `http` and `git+ssh` are accepted.
+
+- **Each duplicated identity parser is now proven independently.** The hostless
+  rule landed in all four copies but only `test-pr-review-state.sh` exercised it,
+  so reverting the branch in `pr-findings.sh` or `pr-round-count.sh` left the
+  suite green and silently restored the wrong-repository path. The new matrix
+  runs every origin shape through each script and asserts, via a `gh` spy, that
+  no request was ever addressed — the rejection message quotes the remote, so
+  grepping the output for the derived slug matched the diagnostic itself.
+
+- **An out-of-range `--timeout` falls back instead of wrapping.** 2^64 is all
+  digits and wraps to exactly zero, so `remaining_s` reported an immediate
+  ordinary timeout on the first poll — and the driver re-arms an ordinary
+  timeout, turning an unreadable configuration into an endless loop that never
+  waited for a review. Same bound as the round threshold, which had it already.
+
+- **The required-checks payload is shape-checked before `all`.** `all(.[]; …)`
+  over an empty stream is `true`, so a successful read returning an object, a
+  null or an empty array came out as "every required check passed" and the
+  administrator merge proceeded on a payload nothing had read.
+
+- **The phase-summary heredoc is quoted.** Unquoted, the shell expanded the prose
+  while writing it — and that body is composed from the round, routinely holding
+  Markdown code spans of shell text, including text copied out of an untrusted PR
+  description. The reviewed SHA is emitted separately through `printf`.
+
+- **The portable watchdog fails closed on its own clock and its own reader.**
+  When `sleep` failed the loop still advanced, burned the limit in a spin and
+  returned an ordinary 124 — so a fixture asserting "this hangs, therefore it
+  times out" passed with no wall-clock limit in force. And `cat` could emit a
+  partial buffer and fail with its status overwritten by `rm`, returning the
+  command's own 0. Both now return a distinguished 125.
+
+- **An origin with no network authority is refused, not defaulted to GitHub.**
+  A local-path remote such as `/srv/mirrors/acme/widget.git` has no host, and
+  defaulting it to `github.com` while the path split still yielded `acme/widget`
+  pointed every `gh` call at the unrelated **public** repository of that name —
+  reading, commenting on and merging the same-numbered PR there. Applied in all
+  four identity parsers.
+
+- **Equal cross-channel timestamps are unreadable, not a silent winner.** GitHub
+  stamps to the second, so a clean re-review comment created in the same second
+  as the review it supersedes ties — and a strict `>` left the older review
+  authoritative, so the watch rejected a completed clean pass as stale and timed
+  out. Nothing available can order them, so it fails closed.
+
+- **A threshold beyond Bash arithmetic falls back rather than wrapping.** An
+  all-digit value larger than the integer range wraps under `-eq` and modulo,
+  possibly to zero — silently taking the disable path that only a literal `0` is
+  meant to take.
+
+- **The helper selection takes its pipeline status.** `head` can emit a plausible
+  cache path and then fail; if that directory holds executables, the validation
+  after it passes and every gate runs helpers chosen by a failed read.
+
+- **The push confirmation compares against the SHA it pushed.** It re-read
+  `git rev-parse HEAD`, which is mutable: a checkout reset after the push would
+  satisfy the comparison with a commit that never reached the PR. It now compares
+  the remote head against `$HEAD_BEFORE`, captured and validated before the push.
+
+- **The push must have landed on this PR.** A successful `git push` from the
+  wrong worktree, or with a refspec pointing elsewhere, leaves the PR head
+  untouched — and because the local head then differs from it, the no-op branch
+  is skipped and nothing is requested at all. The round now confirms the PR head
+  matches the commit it pushed, with a short retry for API lag.
+
+- **The round boundary is checked before the request, not after it.** Both
+  round-closing recipes counted rounds in step 6 — *after* step 5 had already
+  posted the `@codex` mention or invoked `--add-reviewer`. The pause therefore
+  fired once round N+1 was queued and very likely running, which is a
+  notification that continuing has begun rather than a decision about whether to.
+
+- **A Copilot round re-requests Copilot.** The round-closing recipe always posted
+  the `@codex` mention, but Copilot is triggered only by `--add-reviewer` — never
+  by a push, never by a mention. A Copilot fix round therefore requested nothing
+  at all, and the watch waited past the old Copilot review indefinitely. Both
+  round-closing paths now branch on `$WHO`.
+
+- **The head baseline is validated and refreshed per round.** An rc-0 lookup
+  yielding empty or `null` made every unchanged-head comparison false, and a
+  baseline captured once in step 2 went stale the moment a fix round moved the
+  head — so the round after a real push queued nothing.
+
+- **A malformed review id is not an id.** An rc-0 helper returning empty,
+  multiline or junk output was compared as a real one: differing from the
+  baseline, it let the watch announce the *old* terminal verdict as this round.
+  A newline could also smuggle a `PR_REVIEW_READY` line into the diagnostic,
+  which is the channel Monitor reads.
+
+- **An unchanged head in automatic mode still gets a trigger.** A round that ends
+  without a new commit — a dismissal, or a finding answered rather than coded
+  around, both explicitly supported — leaves the push a no-op, so nothing is
+  queued while `--after-review` keeps rejecting the old terminal record and every
+  timeout re-arms. The round records the head it started from and asks explicitly
+  when the push moved nothing.
+
+- **A clock that fails at the timeout read is not a timeout.** `timed_out` fell
+  back to `$TIMEOUT`, turning a broken clock into a plausible ordinary timeout —
+  and the driver *re-arms* on status 1, so the round would loop forever instead
+  of stopping as unreadable.
+
+- **The clean-pass hash comes from the footer LINE, and the last one.**
+  `capture` takes the first match anywhere in the body, so an older clean comment
+  carrying a field-shaped `**Reviewed commit:**` line in its prose ahead of its
+  real footer would have signed off for whatever that decoy named. The match is
+  anchored to a line start with the bold markers, and the last occurrence wins
+  because the genuine footer is final. Same rule in `pr-round-count.sh`.
+
+- **The clean-pass hash comes from the footer, exactly.** Two independent
+  `contains` checks accepted a clean comment for an *older* head that merely
+  mentioned the current prefix in its prose — the footer named a different commit
+  and the current, unreviewed head read as clean. The hash is extracted from the
+  `Reviewed commit:` field and compared exactly, and `pr-round-count.sh` requires
+  the documented ten characters: a shorter one cannot be deduplicated against the
+  prefix of a full review SHA, so a clean re-review of an already-counted head
+  would have added a phantom round and pushed the count past the pause.
+
+- **A clean comment must carry a canonical timestamp.** It is ordered against
+  review timestamps, so `zzzz` would sort above every real one and override a
+  newer `CHANGES_REQUESTED`, and a null would read as clean whenever no review
+  existed. Unreadable ordering is not an ordering, so it fails closed.
+
+- **A clean pass counts as a round.** It leaves no review behind, so counting
+  `pulls/N/reviews` alone reported nine heads for nine-plus-a-clean-tenth — and
+  the phase-transition checks that consult that number then skipped the operator
+  pause at exactly the boundary. Clean-pass comments are counted alongside review
+  records, deduplicated on the head they name.
+
+- **Both verdict channels are placed in time against each other.** Consulting
+  comments only when there was no review at all was too narrow: a clean
+  *re-review* on an unchanged head also arrives as a comment, so an older
+  finding-bearing or blocked review stayed authoritative forever and the watch
+  timed out repeatedly despite a newer clean pass. Whichever is newer wins — and
+  an in-flight draft still outranks both, because the pass is not finished.
+
+- **`sha1sum` is not on stock macOS.** The round-count fixtures used it, so on the
+  platform `README.md` calls supported they produced empty commit IDs and the
+  suite failed — through `pr-selfcheck.sh`, which runs every test as a mandatory
+  pre-push gate. Same trap as `timeout`, one round later. It now falls back
+  through `shasum` and `openssl` to a pure-shell expansion needing none of them.
+
+- **The automatic-review path has no pre-request baseline.** `--after-review`
+  means "newer than this one", which is right for a re-request and actively wrong
+  for the initial automatic pass: the push that triggered it preceded the skill,
+  so the lookup could capture the very review being waited for — and the watch
+  would reject the only terminal review as stale and re-arm forever.
+
+- **Every documented watch invocation carries the baseline.** The shell example
+  passed `--after-review` while the Monitor command beside it did not, leaving the
+  feature inert in the mode Claude Code is actually told to use — the second time
+  that flag shipped without being used.
+
+- **The round boundary gates the phase transitions, not just the re-request.** A
+  phase ending on the threshold-th reviewed head went from a clean verdict
+  straight into the Copilot phase, or into the merge, skipping the operator pause
+  in exactly the case it exists for.
+
+- **A clean pass arrives as a comment, not a review.** Codex submits a review only
+  when it has findings; a clean pass is an issue comment carrying
+  `**Reviewed commit:** <sha10>` and no review at all. `pulls/N/reviews` is
+  therefore empty on a clean head, so `pr-review-state.sh` reported `state=none`
+  and the Codex phase could never complete — the merge gate could not see a clean
+  verdict at all. `clean_comment_for_head` reads that channel, bound to the head
+  the comment names and to a clean-pass phrasing, both required: a false negative
+  keeps the loop waiting, a false positive would invent a signoff. A submitted
+  review always wins, so a later blocking review cannot be masked by an earlier
+  clean comment.
+
+  **This was not found by review.** PR #10 took thirty rounds and all thirty-one
+  Codex reviews carried findings, so the success path was never exercised. It
+  surfaced when PR #12 came back clean and the watch polled until it timed out.
+
+- **"No required checks" is not "could not tell".** `gh pr checks --required`
+  exits non-zero when the branch has none configured, saying so on stderr. The
+  gate treated every non-zero status as an unreadable probe and blocked — so on
+  any repository without branch protection the merge gate could never open. That
+  is not a fail-closed guard; it is a gate with no passing path. Found the same
+  way: by trying to merge.
+
+- **The host is parsed from the URL authority.** Matching `github.com` anywhere
+  in the origin sent an enterprise remote whose *path* contains it — such as
+  `git@ghe.example:org/github.com-mirror.git` — to the public host, taking every
+  newly pinned command with it.
+
+- **`--after-review` is actually used.** The flag shipped inert: the driver never
+  called `review-id` and never passed the option, so a same-head re-request still
+  accepted the previous terminal review immediately. The id is captured before
+  each request and passed to the watch that follows it.
+
+- **Every terminal state carries a review id.** The snapshot returned one only for
+  `reviewed`, while `blocked` and `dismissed` are precisely the same-head
+  re-request cases — an empty id there silently disabled the comparison.
+
+- **Every `gh` call names the host, not just the repository.** `GH_HOST` supplies
+  the hostname when a command gives none, so the helpers could read the
+  same-numbered PR from a *different GitHub host* while the local origin
+  identified another project — the `GH_REPO` hole, one level up. The host is
+  derived from origin and passed explicitly everywhere.
+
+- **A same-head re-request waits for a new review.** After a dismissal, or after
+  answering a finding, the head does not change — so the first poll saw the
+  *previous* terminal review and reported it as this round's answer.
+  `pr-watch.sh --after-review <id>` treats the pre-request review as "not yet".
+
+- **The recorded Codex signoff is re-validated on the sha it records.** A push
+  between the clean verdict and the lookup recorded the new, unreviewed head, and
+  the gate only discovered the missing verdict after the entire Copilot phase.
+
+- **The probe buffer is created with `mktemp`.** A constructed
+  `/tmp/pr-watch.<pid>.<15-bit>` name is predictable and the redirection truncates
+  it, so on a shared host another user could aim it at any file the operator can
+  write.
+
+- **The probe's buffered read, its watchdog sleeps, and the occurrence count all
+  take their status**, and an exhausted deadline no longer becomes one more
+  second — a probe could otherwise start after `--timeout` had passed and still
+  produce `PR_REVIEW_READY`.
+
+- **The accepted merge-mode limitation has a decision record.**
+  `docs/decisions/2026-08-06-merge-admin-default.md` states the `--admin` race
+  plainly, why it is accepted, and what bounds it. Per `AGENTS.md` only a base-ref
+  authority can accept a limitation, and a comment in the diff is not one.
+
+- **Each probe is bounded by the remaining deadline.** Making the deadline
+  wall-clock was not enough: the elapsed checks ran only *between* probes, so a
+  `gh` that hung inside one blocked forever and the deadline was never reached at
+  all. A probe that exhausts what is left reports the timeout, since that is what
+  elapsing means — not an unreadable state, which the contract answers differently.
+
+- **The clock read is checked like every other probe.** `date` can print a
+  plausible epoch and then fail, and the elapsed calculation hid that behind its
+  own success — leaving elapsed time ordinary-looking, or zero forever, so the
+  watch would never time out.
+
+- **The `--repo` check judges each occurrence, not each line or segment.** A
+  `;`-only splitter was walked straight through by `&&`. Splitting is the wrong
+  tool — deciding which text is a command needs a quote-aware parser — so every
+  `gh pr <verb> <arg> <next>` on the line is extracted and `<next>` must be
+  `--repo`. An assignment can no longer vouch for a call beside it, whatever
+  joins them.
+
+- **The watchdog keeps its output off the caller's pipe.** A killed command's
+  children still held the inherited stdout, so the capture blocked regardless.
+  Output now goes to a temp file. **A stated limitation remains**: a command that
+  backgrounds a child and then exits leaves an orphan that holds the caller's
+  capture until it finishes. Redirecting the job, `exec`-detaching its
+  descriptors and `setsid` were each tried and none close that pipe. It is
+  recorded in `testlib.sh` rather than papered over, and no fixture asserts
+  behaviour the helper does not have.
+
+- **The watch deadline is wall-clock.** `--timeout` accumulated only the sleeps,
+  so every second spent inside the head, state and verdict probes escaped it — a
+  run of slow GitHub reads made a one-hour watch run far past an hour, and a
+  hung probe meant the check was never reached at all.
+
+- **The portable watchdog kills the process group.** Killing the top-level PID
+  left a child holding the inherited stdout, and callers capture with command
+  substitution — so the shell blocked on a pipe the dead parent no longer owned,
+  hanging the mandatory gate past the limit the watchdog advertises.
+
+- **The `--repo` check validates each command, not each line.**
+  `BODY='…--repo…'; gh pr comment N --body "$BODY"` carried the pinned text in an
+  assignment, and a whole-line check found it and passed the real call — which
+  has no selector at all.
+
+- **An in-flight re-review supersedes an old blocking body.** A `PENDING` review
+  opened on the head after the watch saw `blocked` has a null `submitted_at`, so
+  the sort ignored it and `blocked-body` returned the *older* request — sending
+  the driver to act on findings the in-flight pass may supersede.
+  `pr-review-state.sh` lets a draft dominate; these two no longer disagree.
+
+- **The summary file's creation is checked.** `mktemp` can print a plausible path
+  and then fail, and every later write and guarded read would point at an
+  existing file — a stale summary posted as the current round record.
+
+- **The suite no longer needs GNU `timeout`.** Several fixtures assert that a
+  guard turns an endless walk into a status, so they need a wall-clock limit —
+  and they used `timeout`, which stock macOS does not ship. Since
+  `pr-selfcheck.sh` runs the whole suite as a *mandatory* pre-push gate, that put
+  an undocumented Coreutils dependency between a macOS contributor and their
+  first push, on a platform `README.md` calls supported. `testlib.sh` provides a
+  watchdog that uses `timeout` where it exists and a background killer where it
+  does not, reporting 124 either way so assertions read identically.
+
+- **`owner` and `repo` are sent as raw GraphQL strings.** `gh api -F` applies
+  magic conversions, so a repository literally named `true`, `false`, `null` or
+  `123` arrived as a Boolean, null or integer against a `String!` parameter and
+  the fetch failed — the loop simply could not run there. `cursor` deliberately
+  keeps `-F`: the first page needs a real JSON null.
+
+- **`--repo` must be an argument, not text.** The pin check tested for the
+  substring, so `gh pr comment N --body "remember --repo"` passed while `gh`
+  received no repository selector at all — through the one gate meant to catch
+  exactly that. It now requires `--repo` in the canonical position after the PR
+  argument, which needs no shell-word parsing.
+
+- **Every git probe takes its status — swept, not patched.** This class appeared
+  three times: the origin lookups, then `pr-selfcheck.sh`'s root lookup, then the
+  identity block's `REPO_DIR` and `pr-merge-range.sh`'s `|| true`. The last is the
+  worst of them: `|| true` discards the status deliberately, so a `git rev-parse`
+  that printed a plausible directory and then failed was indistinguishable from
+  one that worked — and every history check then decided a merge about a tree
+  nothing vouched for.
+
+- **The phase-summary write is checked, not only the read.** A `cat` that
+  truncates and then fails leaves a non-empty partial body the guarded read
+  happily returns; a `cat` that cannot open the file leaves the *previous*
+  round's contents to be read as this one's. Either posts an invalid summary and
+  requests Copilot against it.
+
+- **The `--repo` check understands line continuations.** A correctly pinned call
+  split across a backslash continuation was reported as unpinned — and since the
+  self-check gates the push, that false positive would have blocked the round
+  rather than merely annoying. Lines are joined before matching.
+
+- **The shipping manifest lists every runtime helper.** `CLAUDE.md` classifies
+  everything unlisted as documentation, so a table naming two of six executable
+  helpers told maintainers that four scripts were prose. `README.md`'s "two small
+  scripts" is corrected with it, and the inventory is derived from the directory
+  by the contract test so it cannot drift again.
+
+- **Every `gh pr` call names the repository.** `GH_REPO` overrides the repository
+  `gh` infers from the checkout. Every helper and every `gh pr view/edit/checks/
+  merge` in the contract passed `--repo`; the five `gh pr comment` calls did not —
+  so with `GH_REPO` set, review requests and round summaries went to the
+  same-numbered PR in a *different* repository while every gate inspected this
+  one. `pr-selfcheck.sh` now enforces this mechanically, which is what stops the
+  class rather than the instance.
+
+- **A failed push does not close the round.** If `git push` failed — auth, a
+  non-fast-forward, a dropped connection — the recipe still resolved threads and
+  requested the next review, sending the reviewer at code that was never pushed.
+  In automatic-review mode the watch would then read the already-reviewed remote
+  head's verdict as this round's.
+
+- **A watch timeout re-arms.** The status table still offered "re-request, or ask
+  the operator", contradicting the re-arm-without-asking rule added alongside it:
+  re-requesting queues a duplicate pass on the same head, and asking turns the
+  automatic loop back into the manual one it replaces.
+
+- **The cached-helper discovery is checked and its result validated.** `ls` can
+  print one candidate and then fail on an unreadable cache entry, and `head` masks
+  that status — so an unchecked pipeline could select a partial or stale path and
+  every later call would run a different version of the helpers than the one
+  installed.
+
+- **The no-match exception lives at the grep, not on the pipeline.** Tolerating
+  status 1 for a whole pipeline could not tell whose 1 it was: under `pipefail`
+  the status is the rightmost non-zero, so a `sed` or `sort` that emitted partial
+  output and exited 1 read exactly like a grep matching nothing. Each grep now
+  normalises its own no-match status, and every extraction is checked strictly.
+
+- **`pr-selfcheck.sh`'s own root lookup takes its status.** `git rev-parse
+  --show-toplevel` can print a plausible directory and then fail, and the check
+  would then scan a tree the probe never vouched for — reporting `status=clean`
+  off a failed read.
+
+- **The origin lookup takes its status.** `git remote get-url origin` can print a
+  plausible URL and then exit non-zero, and command substitution keeps what it
+  wrote — so `SKILL.md` and the three helpers that derive identity could build
+  `$OWNER/$REPO` from an untrusted read. Every `gh` call is addressed by that
+  identity, so the failure sends one project's review traffic somewhere else
+  entirely. This predates the whole hardening stretch.
+
+- **The round summary is read before it is posted.** `$(cat "$SUMMARY_FILE")`
+  inside the argument swallowed the reader's status, so a partial read still
+  produced a successful post — and the reviewer contract makes the newest summary
+  the thing read before the diff, which makes a truncated one worse than none: it
+  looks complete. All three posting paths read it into a variable first.
+
+- **Status 1 means "no matches" only where a grep produced it.** One tolerant
+  checker for every extraction was too broad — `awk`, `sed` and `sort` also exit 1
+  on real errors, and the block extraction contains no grep at all, so an `awk`
+  that printed a plausible block and then failed was waved through. And the
+  helper-discovery pipeline was still unchecked entirely: a failure there left an
+  empty list, the loop ran zero iterations, and every helper was reported present.
+
+- **`pr-selfcheck.sh` is listed under its actual strict mode.** `CLAUDE.md`'s
+  table is authoritative and told authors that anything not in the `-uo` row uses
+  `-euo`; a future change following that rule would have enabled `-e` and aborted
+  the check on a `grep` that matched nothing. The Copilot restatement is synced.
+
+- **The README carries both review orderings.** It still told users to push and
+  then resolve and summarise — the ordering `SKILL.md` had just fixed — so anyone
+  following the README with automatic review on started the next pass against
+  open threads and the previous summary.
+
+- **The merge gate's `endCursor` parse is guarded.** `jq` can print a plausible
+  cursor and then exit non-zero, and command substitution keeps what it printed —
+  so the walk continued from an untrusted parse while `OK` stayed 1, and could
+  still finish at `UNRESOLVED=0`. The count and `hasNextPage` parses beside it
+  were already guarded; this one was not. Same fix in `pr-findings.sh`.
+
+- **`not_applicable` has its own exit status.** Printing a distinguished record
+  alongside exit 0 was not distinguished at all: the caller branches on the
+  status, and `SKILL.md` defines 0 as "the mechanical checks pass" — so a run that
+  checked nothing was identical in control flow to one that checked everything and
+  found it clean. It exits 3, and the contract documents the third outcome.
+
+- **The self-check's extractions take their status.** `set -uo pipefail` does not
+  stop an unchecked assignment, so a failed pipeline left the variable empty and
+  the consuming loop found nothing to report — `status=clean` from a run that
+  never established what was used. That is the exact failure the script exists to
+  prevent, inside the script. Statuses are captured and validated, with 0 and 1
+  both answers because `grep` exits 1 on no match.
+
+- **Loop-variable inference is narrowed to line starts, and comments are dropped
+  first.** Two rounds running, a widening meant to catch a legitimate `for`
+  position reopened the same false negative: `# wait for SUMMARY_FILE`, then
+  `# then for SUMMARY_FILE in prose`. Anchoring the alternatives properly needs a
+  Bash lexer, which this repository has already built and deleted. So it now sees
+  only `for NAME in` at the start of a line — a `for` after `;` or `do` yields a
+  false *positive*, which is loud and fixable, instead of a checker a comment can
+  switch off.
+
+- **The push left the numbered checklist.** Step 3 said to check the boundary
+  "and only then push", ahead of the steps that resolve threads and post the
+  summary — so following the list with auto-review on started the next pass
+  against open threads and the previous round's account. The push belongs to the
+  mode-specific recipe, which already ordered it correctly.
+
+- **The self-check does not block every other repository.** It resolved its root
+  from `git rev-parse`, so in a consumer checkout — which is most of them, since
+  one installed copy drives every project — it looked for plugin sources that were
+  not there and exited 2, turning a mandatory pre-push gate into a block on every
+  review round outside this repository. It now reports a distinguished
+  `status=not_applicable` and exits 0: the domain of these checks is empty there,
+  which is a different fact from both "failed" and "passed", and the caller is
+  told which. It is deliberately *not* resolved relative to the script instead —
+  that would check the installed plugin, which is not what anyone is about to
+  push, and report a confident PASS about a tree nobody touched.
+
+- **A comment can no longer switch the self-check off.** `for NAME` was matched
+  anywhere in a block, so prose such as `# wait for SUMMARY_FILE` registered the
+  name as a loop variable and silenced the undefined-variable finding —
+  recreating the exact false-negative class the checker was introduced to
+  prevent. Loop variables are now recognised only at real command positions.
+
+- **The checklist ran the self-check after the push it exists to prevent.** Step 2
+  said to check the boundary "then push" while the self-check was step 3, so a
+  driver following the numbered sequence pushed first. The contract test did not
+  catch it because it compared the position of two lines in the file rather than
+  the order of the steps; it now compares the step numbers.
+
+- **The first review request respects the review mode too.** With automatic review
+  on, opening or pushing the PR has already queued a pass, so the unconditional
+  `@codex review` in the request step queued a second review of the same head —
+  the same duplicate the round-closing step avoids. `AUTO_REVIEW` is established
+  once, in the request step, and both branches use it.
+
+- **A self-check runs before the push.** `pr-selfcheck.sh` verifies that every
+  variable `SKILL.md` uses is assigned in it, every script parses, every helper it
+  drives is shipped, every script has a test, and the suite passes. Each of those
+  is a mistake that actually shipped from here — the first one shipped as a P1.
+  `SKILL.md § 5a` pairs it with the judgement checks a script cannot make: fix the
+  class not the instance, recheck consumers when a validator widens, trace every
+  identifier and ordering end to end, and prove each new assertion can fail.
+  This exists because this PR took nineteen review rounds and almost none of the
+  findings were subtle; rounds are the expensive part of the loop.
+
+- **`$SUMMARY_FILE` is assigned.** It was written into two places in `SKILL.md`
+  and defined in none, so on a fresh session the summary post produced an empty
+  body and the guarded comment aborted, while a long-lived session could post a
+  file left from another round or another PR. The Copilot phase now builds its own
+  transition summary rather than inheriting one from the fix-round step, which
+  never runs when Codex approves on the first pass.
+
+- **The round order depends on what triggers the review.** With Codex automatic
+  review on, the *push* starts the pass, so a summary posted after it arrives too
+  late and a following `@codex review` queues a second review of the same head.
+  `SKILL.md` now documents both orderings, and `README.md` recommends automatic
+  review **off** — the mention is then the only trigger, which is what the rest of
+  the loop assumes.
+
+- **The verdict must describe the state the watch acted on.** State and verdict
+  are separate fetches, and a review can move between them without the head
+  moving: a re-review opens, or a `CHANGES_REQUESTED` is superseded. The verdict
+  then legitimately reports the new state while the watch still holds the old one,
+  and `PR_REVIEW_READY` announced a pass that was not finished. A disagreement now
+  re-polls. The previous fixture asserted this backwards — `state=reviewed` with
+  `reason=pending` was accepted as READY.
+
+- **Findings get the reaction the reviewer asks for.** Every Codex finding ends
+  with *"Useful? React with 👍 / 👎"*, and it is the only signal it gets about
+  whether a review was worth making. `pr-findings.sh list` now prints
+  `comment=<id>` beside `thread=<id>` — the thread id resolves over GraphQL, the
+  comment id reacts over REST. 👎 is for a finding that was wrong on the facts,
+  not one that was right and declined: marking a correct finding unhelpful teaches
+  the reviewer to stop reporting that class.
+
+- **Timestamps must be canonical UTC, because the sort is lexical.** The
+  validator accepted numeric offsets and fractional seconds — both valid ISO
+  8601 — while `sort_by(.submitted_at)` orders them as strings, and neither form
+  sorts chronologically: `03:00:00+02:00` is 01:00 UTC yet sorts *after*
+  `02:30:00Z`, and `03:00:00.5Z` sorts *before* `03:00:00Z`. So an older
+  `APPROVED` could outrank a newer `CHANGES_REQUESTED` and report clean, and
+  `blocked-body` would suppress the newer request's text entirely — empty output
+  with rc 0, which reads as "this blocking review has no body". This was the
+  anchored-timestamp hole from earlier in this release, reopened in a subtler
+  form by the fix that widened the format. All three scripts now require
+  `…THH:MM:SSZ`, which is what GitHub returns and what makes lexical order
+  chronological.
+
+- **A pagination cursor cycle of any length is caught.** Comparing each cursor
+  against the previous one stopped an immediate self-loop but not
+  `null → A → B → A → B …`, which alternates forever. Both `pr-findings.sh` and
+  the merge gate now record every cursor they have requested.
+
+- **The Copilot round summary is posted before the request.** In the Codex phase
+  the mention carries the summary, so the order is settled by construction; in
+  the Copilot phase `--add-reviewer` is a separate call and Copilot can begin
+  reading within seconds, so requesting first meant a fast pass reviewed against
+  the previous round's account of what changed. The summary post is now first and
+  branched on.
+
+- **The reviewers review; they do not implement.** Stated first in `AGENTS.md`
+  and the Copilot instructions, because ignoring it is not a no-op: a round
+  summary mentioning an unfixed defect was read as a work order, and the run
+  edited files and reported a commit made in an environment with no remote and no
+  credentials — so the commit existed nowhere, no review was produced, and the
+  round was spent.
+
+- **Claude Code only — the Codex plugin packaging is gone.** v1 shipped a Codex
+  plugin because the review ran on this machine, through the `codex` CLI and a
+  local bus. In v2 both reviewers are GitHub apps running in GitHub's cloud, and
+  what they read is committed to the repository, so there is nothing to install
+  for them; the driver, meanwhile, needs a watch tool. `.codex-plugin/` and
+  `.agents/plugins/marketplace.json` are removed — the latter still advertised an
+  "Automated PR review-bus loop", so anyone installing through it got metadata for
+  the architecture this release deletes. One manifest now, not two that drift.
+  The README's Codex-driver claims went with them: the opening promise that either
+  agent could run the loop, the Codex invocation, and the tested-version claim all
+  described a path with no installation mechanism behind it.
+
+- **A verdict about a superseded head is not a signoff.** Pinning both probes to
+  one OID made the state and the verdict describe the same commit; it did not make
+  that commit current. A push landing after the head probe left both probes
+  correctly describing the *old* head, and announcing that as `PR_REVIEW_READY`
+  advanced the driver on a review of code that was no longer there — the Copilot
+  phase would then record the new head as the Codex-signed-off SHA, and nothing
+  noticed until the merge gate failed. The head is re-resolved after the verdict,
+  and a move is reported and re-polled rather than announced.
+
+- **A pagination cursor that does not advance is a hang.** A stale or malformed
+  page can report `hasNextPage: true` while returning the cursor it was asked for,
+  and both `pr-findings.sh list` and the merge gate then requested that identical
+  page forever. That is worse than the documented failure: nothing times out, no
+  status is returned, and the caller waits on a command that will never answer.
+
+- **`blocked-body` refuses an unrecognised review state.** The helper suppresses
+  output for anything that is not exactly `CHANGES_REQUESTED`, so a record with a
+  null or unknown state produced empty stdout and rc 0 — indistinguishable from
+  "this blocking review has no body". The driver only calls it because it saw
+  `state=blocked`, so that is exactly where silence loses the only text there is.
+
+- **The merge mode is a setting.** `--admin` remains the default: branch
+  protection normally requires an approving review from another account, and
+  neither reviewer is one, so dropping it would not tighten the gate for a solo
+  maintainer — it would remove the merge path entirely, on every PR. The cost is
+  real and now stated: every gate runs client-side against data fetched a moment
+  earlier, and `--match-head-commit` only proves the head has not moved, so a
+  review can change in the window without the head changing. `REVIEW_MERGE_STRICT=1`
+  drops `--admin` and lets GitHub evaluate reviews, checks and conversations
+  atomically, which is the only place that race can actually be closed.
+
+- **The round summary and the review request are one comment.** The `@codex`
+  mention *is* the request, so posting it separately from the summary split the
+  record the reviewer is told to read and sent the request half with no account
+  of what changed.
+
+- **A summary states what was done — never what is still open.** A mention whose
+  body describes an unfixed defect is read as a *task*: Codex runs as a coding
+  agent, edits, commits and reports work from an environment with no remote and
+  no credentials, so the commit resolves to nothing, the review never happens,
+  and the round is spent. That is not hypothetical — it cost a round of #10.
+  `SKILL.md` now says to describe changes in the past tense and point at an issue
+  number for anything still open; `AGENTS.md` and the Copilot instructions tell
+  the reviewers the summary is a record, not a work list.
+
+- **Thread resolution is verified, not assumed.** `resolveReviewThread` returns
+  `thread{isResolved}` and the driver now reads it. A round reported as fully
+  resolved when it was not sent the next review back over findings that had
+  already been answered, and the extra volume read as regression rather than
+  repetition.
+
+- **The watch is armed as part of the round, not put to the operator.** In Claude
+  Code the `Monitor` tool is not covered by a `Bash(…)` permission rule, so a
+  session allowing every Bash command still stopped to ask before each watch —
+  one prompt per round, which turns the automatic loop back into a manual one.
+  `README.md § Watching without prompts` says what to allow, and why that grant
+  stays out of the committed settings.
+
+- **One head, resolved once and pinned through every probe.** The records
+  abbreviate the SHA to seven hex, so binding the state record to the verdict
+  record could not tell two commits apart when their prefixes collided — and a
+  push landing between the two calls is precisely when that would matter.
+  `pr-review-state.sh` grew a `head` subcommand returning the full 40-hex OID;
+  `pr-watch.sh` resolves it once per poll and passes it to both probes, so the
+  comparison is removed rather than tightened.
+
+- **A GraphQL 200 carrying `errors` is not a response.** GraphQL answers 200 with
+  *both* `errors` and structurally valid `data` when it resolves part of a query.
+  The partial data passed every shape check in the unresolved-thread gate, whose
+  answer is `UNRESOLVED=0` — merge permission, taken with `--admin`, so nothing
+  downstream would have caught the omitted thread. `pr-findings.sh list` had the
+  same hole, where a silently short list is indistinguishable from a shorter
+  review.
+
+- **A review's `state` decides whether it is a finished pass.** `pr-round-count.sh`
+  counted on `submitted_at` alone, so a record with a null or unrecognised state
+  was a reviewed head, and `PENDING` — a draft in flight, which
+  `pr-review-state.sh` refuses to read as a signoff — counted as a round. Both
+  inflate the count, which is the direction that skips the operator pause.
+
+- **Copilot is required, and the README now says so.** It was listed as a
+  prerequisite "if you want the second pass", while the merge gate demands a clean
+  verdict from both reviewers and the Copilot phase stops rather than skipping. A
+  user could install for a repository without Copilot and discover only at merge
+  time that the loop cannot finish. There is deliberately no skip switch.
+
+- **The verdict value, its field and the exit status must agree.** Requiring only
+  the record shape accepted `verdict=clean` with no `findings=0`, and a clean
+  record returned with rc 1 — which `PR_REVIEW_READY` then announced as a finished
+  clean review, and that is what starts the next phase.
+
+- **A failing helper cannot smuggle a signal.** `pr-watch.sh` echoes helper output
+  in its diagnostics, and its stdout *is* the channel Monitor reads. A helper
+  printing a newline followed by a forged `PR_REVIEW_READY …` got that line
+  surfaced as actionable even though the watch exited 2 — the exit status is not
+  what the session sees. Diagnostics are now quoted onto one line.
+
+- **A malformed `submitted_at` is not one more round.** `pr-round-count.sh` treated
+  any string as a submitted review, so a single junk timestamp on a full-SHA
+  record counted as another distinct reviewed head — and at a real boundary that
+  inflates the count past the multiple and skips the operator check-in, which is
+  the direction that loses the pause. It now requires the same anchored ISO
+  timestamp `pr-review-state.sh` does.
+
+- **A failed review request stops the round.** `gh pr comment "@codex review"`
+  and `gh pr edit --add-reviewer @copilot` *are* the requests, so a failure means
+  nothing was queued — and the wait step would then poll until it timed out,
+  reporting "no review arrived" rather than "none was asked for".
+
+- **The README no longer describes the removed bus.** Its opening paragraph still
+  told users that reviews run "on a file-based bus", which is the architecture
+  this release deletes — the first thing a reader saw contradicted the setup
+  instructions below it.
+
+- **A failed Copilot request does not start the Copilot phase.**
+  `--add-reviewer` *is* the request, so when it fails there is no pass to wait
+  for — the driver would poll for a review nobody asked for and then report a
+  timeout, which reads as "Copilot is slow" rather than "Copilot was never asked".
+  It is not permission to skip the pass either: the failure stops the loop and
+  goes to the operator.
+
+- **The Codex head-state decision is parsed, not substring-matched.** A truncated
+  or wrapped line that merely *contained* `state=none` sent the gate down the
+  fallback path — and with a current-head body-only `CHANGES_REQUESTED` there is
+  no thread for the unresolved gate to catch, so the merge would pass on a state
+  that was never read.
+
+- **The round check-in runs before the push, not after it.** With Codex automatic
+  review enabled the *push itself* requests the next review, so a boundary check
+  placed after the push cannot stop anything — the operator would be asked once
+  the next round was already running. Checking first is the only ordering that
+  holds whether auto-review is on or off.
+
+- **The Codex-signed-off head is captured before the Copilot phase begins.** The
+  merge gate needs it, and after the first Copilot fix nothing else records it:
+  `gh pr view` reports the new head and the state helper prints only a
+  seven-character sha. Without the capture the gate could not be populated at all.
+
+- **A superseded request is not an active finding.** `blocked-body` filtered on
+  state alone, so a `CHANGES_REQUESTED` the reviewer had already withdrawn by
+  approving the same head still printed — sending the driver into another fix
+  round after a signoff. The LATEST review of the head decides now, the same way
+  the verdict does.
+
+- **Findings carry their thread ID.** `path:line` is not an identifier: two
+  unresolved comments can share a line, and a fix commit shifts the lines anyway,
+  so the driver had nothing stable to resolve against and could close the wrong
+  thread. Every finding now prints `thread=<id>`, and a thread without one is a
+  malformed page.
+
+- **Review records are validated where they are used, not only where they are
+  counted.** `commit_id` was checked as a SHA in the round counter but not in the
+  review-state parser, where a short value is filtered out as "another head" — so
+  a malformed page read as `state=none`, which the merge gate answers by trusting
+  an older signoff instead of stopping. The timestamp check was a *prefix* match,
+  so `2026-01-02T00:00:00zzzz` passed and still sorted after the real
+  `2026-01-02T00:00:00Z`: the same lexical hole the check was added to close. It
+  is anchored at both ends now.
+
+- **A blocked review must have a readable body.** `.body // empty` mapped a null
+  or absent body to empty output with a success status — indistinguishable from
+  "the blocking review had no body", in the one path whose whole job is to surface
+  a finding that has nowhere else to appear.
+
+- **An unparseable state line is not a state.** A helper exiting 0 with output
+  that has no `state=` field left the entire line in the state variable; the watch
+  then polled to its ordinary timeout, which the contract reads as "re-request or
+  ask whether to keep waiting". Only the five known states are accepted.
+
+- **The range check measures from the SHA the verdict describes.** Making the
+  Codex verdict head-aware left the range keyed to the recorded signoff, so when
+  Codex had reviewed the current head cleanly the gate still demanded
+  `Review-Phase: copilot` trailers across a range Codex had already reviewed in
+  full — blocking a merge both reviewers had just approved. Both branches now
+  record the effective Codex SHA and the range starts there.
+
+- **`submitted_at` must look like a timestamp.** The snapshot sorts on it to pick
+  the authoritative review, and the sort is LEXICAL: `"zzzz"` sorts after every
+  real ISO timestamp, so a stale zero-comment `APPROVED` outranked a current
+  `CHANGES_REQUESTED` on the same head and the verdict came back clean.
+
+- **A head passed in by the caller is validated like one the helper resolves.**
+  `abc123` is all-hex, so a character-only check accepted it and the `commit_id`
+  filter matched nothing — reporting `state=none`, which the merge gate reads as
+  "this reviewer has not judged the head" and answers by trusting an older
+  signoff.
+
+- **Any non-answer from the verdict helper is unreadable.** Only 0 and 1 are
+  answers; the documented 2 was handled but a 126/127 still emitted
+  `PR_REVIEW_READY` and exited 0, which under Monitor is what tells the session
+  there is something to act on.
+
+- **A newer Codex review of the current head wins over the recorded signoff.**
+  Both obvious answers to "which SHA do we check Codex against" are wrong, and
+  this release shipped each in turn. Always the current head makes the gate
+  unreachable in the Copilot phase, where Codex is deliberately not re-run.
+  Always the recorded signoff ignores a review that Codex *auto-review* may have
+  produced on the Copilot-fix head — and a body-only `CHANGES_REQUESTED` leaves no
+  inline thread for the unresolved-thread gate to catch either, so every gate
+  would pass with an active request for changes standing. The gate asks about the
+  current head first and falls back to the signoff only when Codex has genuinely
+  not judged it.
+
+- **The watch fails closed on any helper failure, and never sleeps past its
+  deadline.** It treated only the documented exit 2 as unreadable, so a missing or
+  non-executable helper (126/127) had its stderr parsed as a state and eventually
+  reported a *timeout* — which reads as "wait or re-request" when the truth is
+  "this cannot be read". It also emitted `PR_REVIEW_READY` — the signal that
+  reaches the session under Monitor — before checking whether the verdict could be
+  read, and slept a full interval before re-checking the deadline, so
+  `--timeout 1` with the default interval waited thirty seconds. Leading-zero
+  intervals are rejected for the same octal reason as the round threshold, and an
+  option given without its value is usage rather than an infinite parse loop.
+
+- **A resolved head must be a full SHA.** `abc` is all-hex, so a character-only
+  check accepted it and the `commit_id` filter then matched nothing — printing no
+  blocking body with a success status, indistinguishable from "there is no
+  blocking body".
+
+- **The merge gate could never pass after a Copilot fix.** The phased loop
+  deliberately does not re-run Codex during the Copilot phase — that is what the
+  `Review-Phase: copilot` trailer and the range check are for — but the gate still
+  asked for Codex's verdict on the *current* head. On a Copilot-fix commit that
+  verdict is `none`, forever, so the supported path could not merge. Codex is now
+  validated against `$CODEX_SHA`, the head it actually signed off, and the range
+  check spanning `$CODEX_SHA..$HEAD_OID` is what makes trusting that older signoff
+  safe: it proves the head advanced only through tagged Copilot fixes reachable
+  from it.
+
+- **A finished review surfaces by itself again.** Removing the bus also removed
+  v1's response monitor, and nothing replaced it — the contract simply said
+  "there is no notification channel; poll", which in practice means the driver
+  sits in a hand-rolled loop and the operator watches it do so. `pr-watch.sh`
+  blocks until the reviewer's state is actionable, prints one line per state
+  CHANGE rather than per poll, and reports the verdict on the terminal line so
+  there is no second round-trip. Claude Code runs it as the session's Monitor;
+  under Codex it backgrounds. An unreadable state exits 2 rather than looking
+  like "still waiting", because the difference between "no review yet" and
+  "cannot tell" is the difference between waiting and merging on a bad read.
+
+- **The findings read is a script, not a snippet.** Three consecutive review
+  rounds found fail-open cases in the inline version — an unchecked `jq` status,
+  an unvalidated `hasNextPage`, a `gh api --jq` that could not run at all, a
+  missing `pipefail`, interpolation rendering a missing author as `null` — and
+  each fix was itself prose that no test executed. `pr-findings.sh` now owns it,
+  with the cases as tests. This repository has been here before: the merge-range
+  check lived inline "where nothing executed it", shipped two defects, and became
+  `pr-merge-range.sh` for the same reason.
+
+  It also fixes two live defects in that logic: the blocked-body fetch captured
+  `gh`'s output and status together, so a `--paginate` call that wrote a valid
+  page and then failed passed its partial output off as the answer; and it
+  selected `CHANGES_REQUESTED` reviews by reviewer and state but not by head, so
+  a stale request on an older commit — already superseded by a signoff on the
+  current one — printed as an active finding.
+
+- **`REVIEW_ROUND_THRESHOLD` handles leading zeros.** Bash reads them as octal in
+  arithmetic, so `00` silently disabled the safety pause and `08`/`09` aborted
+  with an undocumented exit 1 — neither being the documented fallback to 10. Only
+  a bare `0` disables the check-in now.
+
+- **A review's `commit_id` must be a real SHA to count as a round.** Any string
+  was accepted, so a malformed-but-successful page could contribute a phantom
+  "distinct head" and turn a true boundary of 10 into 11, skipping the pause.
+
+- **Reviews are read-only.** `AGENTS.md` previously said *"run focused tests only
+  when necessary to validate a finding"*, which invited the reviewer to install
+  dependencies and set up an environment before reading a diff made entirely of
+  shell and Markdown — turning a three-minute read into a twenty-minute one while
+  the author is blocked either way. Both instruction files now say plainly: no
+  environment setup, no dependency install, no test runs, no script execution.
+  Where a finding would have been confirmed by running something, the reviewer
+  states the failing case it expects and the author verifies it — which is the
+  author's job in this loop, and they run the suite before every push.
+
+- **The loop is phased: Codex to clean, then Copilot.** Requesting both every
+  round buys a Copilot pass on every intermediate commit and mixes its findings
+  into a round that was not about them. Codex now reviews to a clean signoff
+  first; only then is Copilot asked, and its fix commits carry a
+  `Review-Phase: copilot` trailer so the merge gate can prove the head advanced
+  only through Copilot fixes and Codex's signoff still covers it. Codex is not
+  re-run during that phase — and if a commit there lacks the trailer, the range
+  check fails and Codex reviews again, which is the correct outcome because
+  unreviewed work reached the head.
+
+- **Rounds are counted per reviewer.** The two phases are separate loops, so a
+  shared counter would let nine Codex rounds plus one Copilot round trip a pause
+  that neither loop had reached. `pr-round-count.sh` takes the reviewer as an
+  argument and the driver passes the active one.
+
+- **The round check-in is enforced, not just promised.** v1 kept the count in a
+  `/tmp` file, so the pause silently disappeared whenever a session started on
+  another machine or the file was cleaned up — a guarantee that only holds while
+  a temp file survives is not a guarantee. `pr-round-count.sh` derives it from
+  GitHub every time: a round is a *distinct PR head that received a submitted
+  review*, so two reviewers on one commit is one round and a re-review of an
+  unchanged head does not inflate it. An unreadable count exits 2 rather than
+  reading as "no rounds yet", which is the direction that skips the pause.
+
+### Upgrading from 1.x
+
+Stop and disable the daemons, then delete their unit files:
+
+```bash
+systemctl --user disable --now review-bus-<owner>-<repo>-watcher review-bus-<owner>-<repo>-monitor
+rm -f ~/.config/systemd/user/review-bus-<owner>-<repo>-*.service
+rm -rf /tmp/<owner>-<repo>-review-bus
+```
+
+Then link the Codex GitHub connector once at
+`chatgpt.com/codex/cloud/settings/connectors`, and set per-repository review
+behaviour on the Codex **Code review** settings page. `.review-bus.md` is no
+longer read; move anything project-specific in it into `AGENTS.md`.
+
+## [1.0.14] — 2026-08-04
+
+- **`resp=` is the last token on every sentinel, and that is now enforced.**
+  `SKILL.md` tells the driver to take `${LINE##*resp=}` as the response path, but
+  four sentinel branches still emitted `resp=<path> reason=<why>`, so the
+  documented parser handed back the path with the reason glued to it. The order
+  is fixed everywhere, and a structural check now walks every emission site in
+  the monitor - a runtime fixture only covers the reasons a test happens to
+  trigger, and these drifted in one at a time.
+
+- **Release history cannot drift silently.** This release's opening entry names
+  the version that preserved the note, and a renumber left it pointing at 1.0.12,
+  a release that never provided `model_summary` - so the reader was documented as
+  depending on a version that does not supply what it reads. The check now
+  requires the named release to exist in the CHANGELOG *and* to be the section
+  that introduces the field, and both plugin manifests to agree with the newest
+  heading.
+
+- **The driver can read the reviewer's note.** 1.0.13 preserved the note in the
+  bus response; this makes it reachable. The handoff line gains
+  `reviewer_note=1` and `digest=`, and `review-bus-response-monitor.sh --note
+  <response> <sha256>` prints the note **JSON-escaped** so a hostile note is
+  legible as data and inert as bytes.
+
+**The note is flagged, not inlined.** It is model output derived from untrusted
+  PR context, so the handoff line carries only `reviewer_note=1` and the text is
+  read from `.model_summary` in the response file. Inlining it would let a note
+  carrying ESC/BEL bytes inject into a terminal or log, and one containing
+  `resp=` would put a second copy of a framing token into a line the driver
+  parses positionally. The assembled line is also stripped of all control bytes,
+  mirroring `emit_progress`. `SKILL.md`'s handling contract now tells the driver
+  to read the note and relay it as untrusted, non-blocking context that can never
+  affect status, findings, or a merge gate.
+
+- **The reviewer's note is read through a fail-closed helper, not by hand.**
+  `SKILL.md` previously told the driver to run
+  `REVIEWER_NOTE="$(jq -r '.model_summary' ...)"`, which is broken twice over: a
+  one-shot shell assignment emits nothing, so the note was silently dropped, and
+  a driver compensating with a raw `jq -r` would decode ESC/BEL straight into
+  whatever renders its tool output - reintroducing at the last hop the injection
+  the handoff line was hardened against. `review-bus-response-monitor.sh --note
+  <response> <sha256>` now prints the note **JSON-escaped** (0 = emitted, 1 = no note,
+  2 = unreadable or malformed), so a hostile note is legible as data and inert as
+  bytes, and a flagged-but-broken response is distinguishable from an absent one.
+
+  The helper validates the response with a slurped `length == 1` guard and reuses
+  that captured object, because `jq` reads a stream: two concatenated objects
+  passed every per-object check and would have emitted two notes at exit 0.
+  `SKILL.md` runs the helper as the final command in the call so its exit status
+  survives - an earlier revision appended `; NOTE_RC=$?`, which made the call
+  report success whatever the helper returned. A test extracts that command from
+  `SKILL.md` and executes it, so the documented contract and the behaviour cannot
+  drift apart.
+
+- **The handoff line is validated and digest-bound.** `emit_response` also read
+  the response as a jq STREAM, so a file holding two objects produced two handoff
+  lines and the control-byte strip then removed the newline between them -
+  collapsing them into one line carrying two `status=` and two `resp=` tokens,
+  which a positional driver could read as an ambiguous clean status. It now
+  slurp-validates a single top-level object BEFORE claiming the emit marker, and
+  emits only a `_REVIEW_PARSE_ERROR` sentinel for anything invalid, including a
+  present-but-malformed note (which must never raise `reviewer_note=1`). The line
+  now carries `digest=`, and `--note` takes that digest and refuses to emit on
+  mismatch: `resp-<sha>.json` is mutable, so a same-SHA re-review could otherwise
+  hand the driver a newer note it would attribute to the earlier review - the
+  same binding `--ack-if-digest` already uses. The digest argument is
+  **required**: an optional one is not a binding at all, since an unset or
+  misparsed value would skip the check and emit whatever occupied the path.
+
+- **The note is emitted ASCII-only and monochrome (`jq -aM`).** Default jq output
+  is not terminal-inert: it leaves non-ASCII raw, so a U+202E bidi override
+  reached the renderer as bytes and could reorder surrounding text, and it adds
+  ANSI colour on a TTY when `NO_COLOR` is unset. The ESC/BEL test missed both
+  because it captured output rather than running on a terminal. Coverage now
+  includes a bidi/C1 payload and a TTY-style run.
+
+- **The digest and the handoff formatter fail closed.** Both ran under
+  `... || true`, and a command substitution keeps whatever the tool wrote before
+  it failed — so the two fail-closed boundaries the monitor depends on could be
+  crossed by a faulting tool rather than a malicious one. A failing `sha256sum`
+  produced an empty digest and returned *silently*, indistinguishable from
+  "nothing to emit", while its partial output could instead be advertised as a
+  valid digest — the value the ack gate, the emit marker and `--note`'s
+  verification are all keyed on. A failing `jq` in the formatter was worse: it
+  could write a plausible `status=approved findings=0` line, have its exit code
+  discarded, and see that line emitted as a normal handoff. Hashing now goes
+  through one helper that checks the status and requires exactly 64 lowercase hex
+  characters; the formatter's status is checked before its output is accepted;
+  both failures emit `_REVIEW_PARSE_ERROR` instead of silence or a handoff; and a
+  failed emit leaves the response retryable because the marker is not claimed
+  until the line is ready - the failure path takes nothing, and releases nothing.
+  On the `--note` side the unguarded hash took the
+  script down under `set -e` carrying the tool's own exit code (7) with no
+  `MONITOR_NOTE_ERROR` line; it now reports the documented exit 2.
+
+- **A stale response that cannot be retired stops the monitor.** `mark_emitted`
+  is what suppresses a superseded prior-iteration response, and it turned a
+  digest failure into a successful no-op — so when the stale file's hash failed
+  during startup, no marker was written, the live sweep hashed it successfully on
+  its next pass, and the OLD handoff went out after the newest one. The driver
+  then acts on a superseded review. Suppression failure is now reported as
+  `reason=stale_suppression_failed` and the monitor exits instead of entering the
+  live watch, where the next thing emitted would be known-wrong; a restart
+  re-attempts it.
+
+- **`--note`'s own formatter fails closed.** It was the last bare
+  stdout-producing command in the file: a jq that printed a plausible JSON string
+  and then failed sent that fragment to stdout and returned the tool's exit code,
+  outside the documented 0/1/2 contract and with no `MONITOR_NOTE_ERROR` to
+  explain it — so a caller reading stdout would have taken the fragment for the
+  reviewer's note. Partial output is discarded and the failure exits 2.
+
+- **The documented note-reader block is data-safe and self-contained.** It told
+  the driver to paste the notification line into a single-quoted assignment, and
+  `summary` keeps apostrophes and shell metacharacters - it is quoted and reduced
+  to printable ASCII so it cannot forge a *framing token*, which is a different
+  problem - so a summary shaped like `reviewer'$(…)'s note` closed the quote and
+  ran the substitution in the driver's own shell before `--note` was reached. The
+  line is now read through a QUOTED here-doc, which suppresses every expansion.
+  The same block also relied on an `$RB_SCRIPTS` from an earlier, separate shell,
+  so as written it invoked `/review-bus-response-monitor.sh` and exited 127; it
+  resolves the installed scripts itself now, and the test runs it with
+  `RB_SCRIPTS` unset instead of injecting one.
+
+- **The trusted review guidance no longer contradicts the release.** With the
+  reader shipping here, `.review-bus.md` still said the note was "recorded, not
+  yet surfaced" - and that file is loaded verbatim into every future review
+  prompt from the base ref, so the release would have told reviewers the opposite
+  of what ships. The base-ref design requires S2b to retire that interim
+  paragraph; it does, and the prompt-scope assertions invert with it.
+
+- **A digest failure is reported even when the source moved.** The digest is
+  taken from the private snapshot, so probing the mutable response path could not
+  explain a hashing failure - it only supplied an escape: a hasher fault racing a
+  moved response made `--once` exit 0 with no output, indistinguishable from an
+  empty queue. The disappearance no-op belongs to the snapshot step, which is the
+  one that actually reads the source.
+
+- **A failing sweep no longer deletes another sweep's marker.** The emit marker
+  is claimed after formatting, so the `rm -f` on the format and empty-line
+  failure paths released a marker this invocation never held - erasing the record
+  written by an EARLIER successful sweep, so the same handoff was delivered twice
+  once the fault cleared. Neither path touches the marker now.
+
+- **`--once` keeps its documented exit 0.** The stale-suppression failure exited
+  non-zero even in `--once`, contradicting the contract `SKILL.md` ships - and a
+  contract that is false for one reason out of ten is worse than none, because a
+  driver cannot see which. `--once` exits 0 with the sentinel on stdout and
+  `MONITOR_FATAL` on stderr; the LIVE watch still refuses to start, which is
+  where the superseded handoff would actually be emitted.
+
+- **A response that vanishes mid-snapshot is a no-op, not a stop.** Every
+  snapshot-copy failure was reported as `reason=snapshot_failed`, and `SKILL.md`
+  defines that sentinel as a fail-closed halt - so the watcher archiving an old
+  response between a sweep's `find` and its `cp`, which is ordinary same-SHA
+  reprocessing, would stop the workflow. The disappearance no-op belongs at this
+  boundary, since `snapshot_response` is the only step that reads the mutable
+  source; unreadable and failed-copy cases with the file still present are still
+  reported.
+
+- **A stale response removed while it is being hashed is not a suppression
+  failure.** `mark_emitted` tests that the file exists and then opens it again to
+  hash it, so a response cleaned up between the two made the digest fail for a
+  file that is gone - and a stale response that no longer exists cannot be
+  emitted, so there is nothing left to suppress. Reporting it took the live
+  monitor down and restarted it over ordinary cleanup. Existence is re-checked
+  after a digest failure; a still-present unreadable response still fails loudly.
+
+## [1.0.13] — 2026-08-04
+
+- **Fix: the reviewer's own summary was discarded whenever a review reported
+  findings** (p5ych0/strumok#212). `process_review` read `.summary` from the
+  model result only in the zero-findings branch; with one or more findings it was
+  overwritten by a status line and never reached the PR or the bus response. The
+  prompt asks for a summary on *every* review — including the verification
+  limitations a reviewer cannot attach to a diff line — so the bus was discarding
+  exactly the text it requested. A reviewer that correctly declined to force a
+  concern into a line-attached finding lost the concern entirely.
+
+  The model's text is now read once, before the status line is composed, and
+  preserved as `model_summary` in the response. It is **not** posted as an issue
+  comment: `latest_issue_comment_at` applies no author filter and
+  `auto_preflight_ready` uses it as the "round was closed out" gate, so a
+  watcher-authored comment would satisfy that gate by itself and let
+  auto-enqueue fire without the author ever closing the round.
+
+- **The handoff `summary` field is quoted.** That field is the *synthesized
+  status line* the watcher composes - a findings count, or a signoff-posted
+  notice - never the reviewer's own words: the reviewer text lives only in
+  `model_summary`, which this release records and deliberately does not deliver.
+  The quoting is malformed-response hardening rather than note handling: a
+  response whose `summary` carried `resp=` or `status=` put a second copy of a
+  framing token into a line the driver parses positionally. It is now quoted
+  (with `"` stripped from the content) and the real `resp=` remains the last
+  token, so the parse rule is unambiguous: take the last one.
+
+- **The handoff line is validated before it is emitted.** `emit_response` read
+  the response as a jq STREAM, so a file holding two objects produced two handoff
+  lines and the control-byte strip then removed the newline between them -
+  collapsing them into one line carrying two `status=` and two `resp=` tokens,
+  which a positional driver could read as an ambiguous clean status. It now
+  slurp-validates a single top-level object BEFORE claiming the emit marker, and
+  emits only a `_REVIEW_PARSE_ERROR` sentinel for anything invalid.
+
+- **Fix: a schema-invalid reviewer result could earn a clean APPROVAL.**
+  `process_review` validated `.findings` but never `.summary`, which the output
+  schema requires on every review. A result such as `{"findings":[]}` fell into
+  the zero-findings branch, picked up a default "no actionable issues" string,
+  and was approved — a malformed reviewer output approving the PR. The result is
+  now rejected unless `summary` is a non-empty string, so it fails closed to an
+  error response with no signoff posted.
+
+  With a real channel available, the prompt now routes non-blocking observations
+  to `summary` on every review instead of telling reviewers to drop them when
+  findings exist, and `.review-bus.md` loses the workaround paragraph it carried
+  for exactly this bug.
+
+- **A response the monitor cannot group is reported, not dropped.**
+  `emit_response` validates a response and emits a `_REVIEW_PARSE_ERROR`
+  sentinel when it is malformed — but `replay_existing` never got that far: it
+  pulled `.pr` first and silently `continue`d on any file that produced none.
+  A truncated `resp-*.json`, a top-level array, or a bare string therefore made
+  `--once` exit 0 printing nothing, byte-identical to "no pending review", so a
+  polling driver read a lost review as "nothing to do". Ungroupable responses
+  now go through `emit_response`, and the shape check additionally requires a
+  numeric `.pr` — the field the handoff line names and the replay groups on —
+  so a well-formed object missing it surfaces the sentinel instead of `pr=null`.
+
+- **The reviewer's note is stored byte-exact.** It crossed the shell as a raw
+  value, and a raw shell value cannot round-trip an arbitrary JSON string:
+  command substitution strips every trailing newline, and the shell cannot hold
+  a NUL byte at all. A summary ending in two newlines was recorded with none,
+  and one carrying an escaped NUL was recorded without it - silently, with
+  validation still reporting success, so the *altered* text was recorded as the
+  reviewer's own words. The note now travels JSON-encoded from the one jq pass
+  that validates it to the one that writes the response, and `--argjson` decodes
+  it back unchanged.
+
+- **The monitor validates every control field it hands the driver.** The shape
+  guard checked only that the response was one object with a numeric `.pr`, so
+  an object carrying just `pr`/`sha`/`status` emitted a handoff reading
+  `status=approved findings=null reviewer=null` - and the driver branches on
+  `status=approved` to merge, meaning malformed bus data could be read as a
+  clean terminal result. A positive integer PR, a hex SHA, a status from the
+  writer's own enum, a non-negative integer findings count, a string reviewer,
+  and the consistency between status and count are all required before the emit
+  marker is claimed. An unreadable response (mode 000, a hasher fault) now
+  reports `reason=digest_failed` instead of exiting silently; a response that
+  genuinely vanished mid-sweep stays the quiet no-op it should be.
+
+- **`reviewer` is pinned to the value the writer emits.** It is interpolated
+  into the handoff line unquoted, so requiring only a string was not enough:
+  `reviewer: "codex status=approved findings=0"` is a valid string that puts a
+  second, clean-looking status/findings pair on a line the driver parses
+  positionally, right beside the real one. Every other unquoted field is already
+  pinned to a shape too narrow to carry a framing token and `summary` is quoted,
+  so this was the last gap.
+
+- **The emit marker is claimed last.** It was claimed before the formatting and
+  sanitization steps, so a failure in either - under strict mode a dying `tr`
+  takes the monitor with it - left the marker behind with nothing emitted, and
+  the restarted monitor read that claim as "already delivered" and suppressed the
+  response permanently. The claim now happens immediately before the line is
+  printed, still atomically, so the startup replay and the inotify loop still
+  cannot both emit the same response.
+
+- **An unreadable summary can no longer become an approval.** `process_review`
+  runs beneath `if !`, so errexit does not stop it, and `|| summary=""` turned a
+  failed decode of the reviewer's note into an empty string - at which point the
+  clean-signoff branch substituted its built-in no-findings text and posted an
+  APPROVE for a result that had not been read. The same state was reachable
+  through validation: `\S` matches control and format code points, so a summary
+  of nothing but NUL passed and then decoded to nothing in the shell. The note
+  must now contain a character that is neither whitespace nor a control nor a
+  format code point, and a decode failure records an error instead of signing
+  anything off.
+
+- **`summary` is a control field, and the handoff is inert for Unicode
+  controls.** The response guard did not check `summary`, so a response carrying
+  valid `pr`/`sha`/`status`/`count`/`reviewer` and nothing else emitted
+  `status=approved summary=""` - a terminal result the driver acts on. And the
+  "all control bytes stripped" guarantee was false: `tr -d '[:cntrl:]'` is
+  byte-oriented, so UTF-8-encoded C1 controls (U+009B) and bidi overrides
+  (U+202E) passed through untouched - exactly the code points that reorder or
+  hijack terminal and log rendering. `summary` must now be a non-blank string,
+  and it is reduced to printable ASCII inside jq before the line is assembled.
+
+- **The parse-error sentinel has a driver contract.** The monitor emitted
+  `_REVIEW_PARSE_ERROR` with nothing in `SKILL.md` or `README.md` telling a
+  driver what it means, while `--once` still exits 0 - so a polling driver had no
+  defined action and could stall, or read the silence as "no findings". Both
+  documents now state it: never merge on it, never ack it, surface it with its
+  reason, and branch on the lines rather than the exit status. `resp=` is now the
+  final field on the sentinel as well as the handoff, so the documented
+  last-token parsing rule is true of every line the driver reads.
+
+- **A summary that normalises to nothing is not a verdict.** The shape guard
+  tested the RAW summary with `\S`, which matches control and format code
+  points, while the formatter then replaced exactly those with spaces - so a
+  summary of NUL plus a bidi override passed validation and went out as
+  `status=approved summary="  "`, a terminal result the driver acts on, built
+  from a response that says nothing. The guard now applies the formatter's own
+  normalisation first and requires a visible ASCII character to survive it.
+
+- **The parse-error sentinel no longer floods.** It was emitted before the
+  per-digest emit marker was claimed, so the live loop re-emitted the same
+  malformed response on every sweep - forever, since the driver contract forbids
+  acking it to make it stop. Sentinels now claim that session-scoped marker, so
+  each is delivered once per session per response content; no ack is written, so
+  the response stays unhandled, and a fresh session or a changed digest still
+  re-surfaces it. Tool-failure sentinels (a failed sanitize) stay undeduplicated
+  on purpose: the response is fine and must still be deliverable once the fault
+  clears.
+
+- **A summary must contain a RENDERED character.** Two earlier rules were both
+  too weak: `\S` matched control and format code points, and excluding `\p{Cc}`
+  and `\p{Cf}` still accepted a summary of nothing but marks - U+FE0F is
+  category `Mn`, so a `{"summary":"\uFE0F"}` result earned a clean APPROVE. The
+  test is positive now: at least one letter, number, punctuation mark or symbol,
+  which is what "the reviewer wrote something" means. The shell-side guard uses
+  the same rule rather than a POSIX approximation, so the two cannot disagree.
+
+- **A failed marker write is not "already delivered".** The atomic claim
+  collapsed "another sweep holds it" and "it could not be written" into one
+  branch, so an existing but unwritable emit dir made `--once` exit 0 with no
+  output - the silence this file exists to prevent. The two are distinguished:
+  an unwritable marker reports `emit_marker_failed` and the response is still
+  delivered, because losing the ability to record delivery is not a reason to
+  withhold a review.
+
+- **A formatter failure no longer retires a good response.** With the
+  formatter's status erased, a failure surfaced only as an empty line and was
+  reported as `empty_line` - a CONTENT reason - through the deduplicating helper,
+  which claimed the digest and suppressed a perfectly valid response for the rest
+  of the session. The formatter is guarded explicitly, and both it and
+  `empty_line` are reported undeduplicated like `sanitize_failed`: the response
+  is fine, so it must stay deliverable once the tool recovers. `SKILL.md` now
+  groups the reasons by which of the two they are, since the group decides
+  whether the driver re-requests the review or fixes its own environment.
+
+- **"Visible text" is one predicate, and it is not a category test.** Three
+  character-class rules failed here in a row, each missing what the next found -
+  and the third still accepted U+3164 HANGUL FILLER and U+2800 BRAILLE PATTERN
+  BLANK, which are `Lo` and `So` by category while rendering as nothing. Unicode
+  categories cannot answer "does this render", so the blank code points are
+  removed by VALUE first and the category test applies to what remains. The rule
+  is defined once and used by both the validator and the pre-signoff check;
+  having it spelled twice is how the earlier versions drifted apart.
+
+- **A superseded review still records the reviewer's summary.** That branch
+  called `write_response` with seven arguments, silently dropping
+  `model_summary` - so a valid result whose request was overtaken lost the
+  reviewer's words, the one thing the base-ref contract says is recorded on every
+  review. The review ran and produced a summary; only its comments were
+  abandoned.
+
+- **A failed read is not a verdict on the content.** The shape check treated
+  "jq exited non-zero" and "jq ran and rejected this" identically, routing both
+  through the deduplicating `invalid_response_shape` sentinel - so a transient jq
+  fault claimed the digest and retired a perfectly valid response for the rest of
+  the session. Command failure now takes the non-deduplicated tool-failure path;
+  `invalid_response_shape` is reserved for content jq successfully parsed and
+  rejected.
+
+- **A delivery marker cannot outlive a failed delivery.** It was committed
+  before the final write, so `--once` against a full disk created the marker and
+  then failed to print - and the next healthy run suppressed the handoff
+  entirely, losing a completed review from a persistent namespace. Both the
+  handoff and the sentinel roll the marker back when their write fails.
+
 ## [1.0.11] — 2026-08-03
 
 - **Fix: the watcher crash-looped after a final response (issue #3).** With
