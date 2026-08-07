@@ -1348,19 +1348,76 @@ grep -q 'A \*different\* pre-existing defect' <<<"$skill_flat" \
 grep -qE 'A \*different\* pre-existing defect found while fixing this one is not in scope' <<<"$skill_flat" \
     && pass "…and that defect is stated to be OUT of scope" \
     || die "the contract does not state the out-of-scope outcome"
-# …and the CURRENT release entry must not describe these rules the old way. Four
-# stale copies have now been found in it, so the check is negative — the wrong
-# forms must be ABSENT — rather than positive: asserting that a qualified form
-# appears somewhere is satisfied by one occurrence while another sits unqualified
-# two paragraphs down, which is exactly how the last two survived.
+# ── the SIGPIPE hazard these scans avoid, demonstrated ────────────────────
+# Every scan in this file uses a herestring rather than `printf | grep`. This is
+# the fixture that shows why, and it was held back from the documentation PR
+# because it tests THIS FILE's idiom rather than anything the contract says.
 #
-# Scoped to the TOP entry only. Everything below it is history, and a release note
-# has to be able to quote a superseded rule to explain what was fixed.
+# With `pipefail` on, `grep -q` exits at the first match and the producer takes
+# SIGPIPE, so the pipeline reports the match as ABSENT — the fail-open direction,
+# where a guard reports clean exactly when it should fire.
+#
+# MEASURED, and the measurement bounds the claim: the race needs the match on an
+# early LINE with more lines behind it, so `grep` can exit before draining the
+# writer. Multi-line input reproduces it 5 runs out of 5; single-line input 0 out
+# of 5 at the same size, because `grep` must read the whole line before it can
+# match at all. The flattened variables here are single-line by construction, so
+# the pipeline form was not losing matches — the herestring removes the class
+# rather than relying on an invariant one edit could break.
+#
+# The construction reports separately from the result: `set -uo pipefail` has no
+# `-e`, so a failing `head`/`base64` would leave `multi` holding just "EARLYMATCH"
+# and both forms would match it, reporting success having built nothing. Exit 9 is
+# reserved for that.
+sigpipe_probe='set -uo pipefail
+    body="$(head -c 300000 /dev/urandom | base64)" || exit 9
+    [ "${#body}" -ge 200000 ] || exit 9
+    case "$body" in *"
+"*) ;; *) exit 9 ;; esac
+    multi="EARLYMATCH
+$body"'
+# PIPESTATUS, not the aggregate: on a runner where SIGPIPE is ignored `printf`
+# receives EPIPE and returns 1 rather than dying with 141 — the same phenomenon,
+# a different number — and a check accepting only 141 failed CI for four commits.
+# The producer losing while the consumer MATCHED is the race, whatever the
+# platform reports; a consumer that failed is something else and is not proof.
+#   0 no race · 9 unbuildable · 20 producer lost, consumer matched · 21 consumer failed
+sigpipe_rc=0
+bash -c "$sigpipe_probe"'
+    printf "%s" "$multi" | grep -q EARLYMATCH
+    rcs=("${PIPESTATUS[@]}")
+    prod=${rcs[0]}; cons=${rcs[1]}
+    [ "$cons" -eq 0 ] || exit 21
+    [ "$prod" -eq 0 ] && exit 0
+    exit 20' || sigpipe_rc=$?
+case "$sigpipe_rc" in
+    9)  die "the SIGPIPE probe could not be built; this case proves nothing" ;;
+    0)  pass "SKIPPED: the producer pipeline did not race on this platform" ;;
+    20) pass "a producer pipeline loses an early match under pipefail, on multi-line input" ;;
+    21) die "the probe consumer failed; the race was not what this case observed" ;;
+    *)  die "the SIGPIPE probe returned an unexpected status ($sigpipe_rc)" ;;
+esac
+here_rc=0
+bash -c "$sigpipe_probe"'
+    grep -q EARLYMATCH <<<"$multi"' || here_rc=$?
+case "$here_rc" in
+    9) die "the SIGPIPE probe could not be built; the herestring case proves nothing" ;;
+    0) pass "…and the herestring form finds it, which is why these scans use it" ;;
+    *) die "the herestring form lost an early match; every scan here is unsafe" ;;
+esac
+
 # ── the release entry does not teach a rejected account ────────────────────
-# Deliberately NOT the counting machinery — that was split out with the rest of
-# the changelog guards and belongs with them. These two claims are checked here
-# because both were corrected in `SKILL.md` and left stale in `CHANGELOG.md` in
-# the same round, which is the instance-not-class miss this whole change is about.
+# The counting machinery, held back from the documentation PR and restored here.
+# Four stale claims were found in this one entry across three rounds, and the
+# reason each survived was the same: a check for the PRESENCE of a qualified form
+# is satisfied by whichever mention still carries it, while another states the
+# rule the old way two paragraphs down.
+# PINNED to the entry that introduced these rules, not to whichever is on top: the
+# next release prepends its own, every count below would then find zero claims in
+# it, and this suite would fail while the 2.0.2 documentation stayed correct. A
+# guard that breaks on the next release is a guard that gets deleted rather than
+# fixed. Everything below that entry is history, and a release note has to be able
+# to quote a superseded rule to explain what was fixed.
 cl_202="$(awk -v want='## [2.0.2]' '
     index($0, want) == 1 { inb = 1; next }
     /^## \[/ { inb = 0 }
@@ -1370,12 +1427,68 @@ cl_202="$(awk -v want='## [2.0.2]' '
 # …and the scope account must carry the regression exception, which the entry
 # contradicted after SKILL.md gained it — the same instance-not-class miss, one
 # file over, for the second round running.
-grep -qF 'repairing a consumer a changed validator or producer breaks is finishing the change' <<<"$cl_202" \
-    && pass "the release entry keeps the regression exception to the scope rule" \
-    || die "the release entry would have a reader reject a required regression repair"
-grep -qF 'explains rather than accepts' <<<"$cl_202" \
-    && pass "the release entry says the at-the-site comment explains rather than accepts" \
-    || die "the release entry still teaches that an author-created comment is authority"
+# No-match is a count of ZERO, not a failed command: under this file's `-e` a grep
+# that matches nothing exits 1, and the assignment took the whole suite down —
+# so deleting a claim entirely terminated the run instead of reaching the branch
+# that names it. A real grep error (status > 1) is still a failure.
+count_claims() {   # count_claims <pattern> <text> ; prints the count, 2 on error
+    local out rc=0
+    out="$(grep -oiE "$1" <<<"$2")" || rc=$?
+    case "$rc" in
+        0) printf '%s' "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" ;;
+        1) printf '0' ;;
+        *) return 2 ;;
+    esac
+}
+# EVERY mention must carry the qualifier, so the two counts have to match. A
+# presence check passed while one of two bullets had lost it — the "somewhere in
+# the file" weakness reproduced inside a single entry.
+cl_count() {   # cl_count <claim-pattern> <qualified-pattern> <label>
+    local total qualified
+    total="$(count_claims "$1" "$cl_202")" \
+        || { die "the claim scan failed for: $3"; return 0; }
+    qualified="$(count_claims "$2" "$cl_202")" \
+        || { die "the qualifier scan failed for: $3"; return 0; }
+    [ "$total" -gt 0 ] || { die "the release entry no longer states: $3"; return 0; }
+    [ "$total" = "$qualified" ] \
+        && pass "every mention in the release entry is qualified: $3 ($qualified/$total)" \
+        || die "the release entry states $3 unqualified in $((total - qualified)) of $total places"
+}
+cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
+    grep -qF "$1" <<<"$cl_202" \
+        && pass "the release entry $2" \
+        || die "the release entry $3"
+}
+cl_absent() {   # cl_absent <pattern> <what its presence means>
+    local rc=0
+    grep -qiE "$1" <<<"$cl_202" || rc=$?
+    case "$rc" in
+        0) die "the release entry $2" ;;
+        1) pass "…and does not $2" ;;
+        *) die "the scan for '$2' could not be completed" ;;
+    esac
+}
+cl_req 'repairing a consumer a changed validator or producer breaks is finishing the change' \
+    'keeps the regression exception to the scope rule' \
+    'would have a reader reject a required regression repair'
+cl_req 'explains rather than accepts' \
+    'says the at-the-site comment explains rather than accepts' \
+    'still teaches that an author-created comment is authority'
+# The claims stated TWICE in this entry, counted rather than merely present.
+cl_count 'defect[^.]{0,40}(found nearby|stays out of scope)[^.]{0,20}' \
+         '\*{0,2}different pre-existing\*{0,2} defect (found nearby is not in scope|stays out of scope)' \
+         'a different pre-existing defect is OUT of scope'
+cl_count '(same defect in a copy|copy of the same defect)[^.]{0,80}' \
+         '(same defect in a copy this PR also changes|copy of the same defect \*\*that this PR also changes\*\*)[^.]{0,80}' \
+         'the second-copy requirement is bounded to the diff'
+cl_count 'a wrong reply (on an old thread )?is a finding[^.]{0,80}' \
+         'a wrong reply (on an old thread )?is a finding \*{0,2}only when (its error means )?the (changed )?code is still[[:space:]]*defective' \
+         'a wrong reply is a finding only when the CODE is still defective'
+# …and the superseded wordings must be absent, because a qualifier present in one
+# bullet says nothing about another two paragraphs down.
+cl_absent 'defect found nearby is never in scope' 'still says a nearby defect is never in scope'
+cl_absent 'a wrong reply is itself a finding'     'still says a wrong reply is itself a finding'
+cl_absent 'any second copy of the same defect[.,]( |$)' 'still requires naming a copy outside the diff'
 # THE POSITIVE ACCOUNT. Forbidding one phrasing is a blacklist, and "No operational
 # behavior changes; this only updates documentation" evades it while making exactly
 # the claim that was wrong. The entry has to SAY both halves: which layer is
