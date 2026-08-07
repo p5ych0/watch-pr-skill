@@ -79,6 +79,36 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **An in-flight auto-review is not permission to merge.** With auto-review on,
+  every Copilot-fix push also queues a Codex pass, and Codex exposes no review
+  record while that pass is queued — which the merge gate read as the same `none`
+  that means "nothing asked Codex about this head". It then fell back to the
+  pre-Copilot signoff and could merge before the queued pass reported anything,
+  including a body-only `CHANGES_REQUESTED` that leaves no unresolved thread for
+  the other gates to catch. "Not yet answered" is not "nothing to answer".
+
+- **An unrecognised review state is unreadable, not a dismissal.**
+  `head_review_snapshot` sent anything it did not recognise through its catch-all
+  as `dismissed` with status 0, so a null or unknown value became an actionable
+  "the review was withdrawn" — which the driver answers by requesting another
+  pass, turning a malformed parse into a review loop. This is the set the other
+  two helpers already enforced; `pr-review-state.sh` had drifted away from it.
+
+- **A helper that exits 124 is an unreadable probe, not a timeout.** 124 is the
+  watchdog's own expiry code, returned before any child status is read, so a
+  helper exiting 124 itself was reported as an ordinary timeout — which the
+  driver re-arms indefinitely. A broken probe became "still in flight", forever.
+
+- **A clock that steps backward is refused.** A backward step produced a smaller
+  elapsed value while still succeeding, and the next probe got a LARGER budget:
+  `--timeout` exceeded by the size of the correction, or extended without bound
+  by repeated ones.
+
+- **The identity guard checks a mixed line.** `$OWNER/$REPO` on a line caused the
+  whole line to be skipped, so `REPO_SLUG="acme/widget"; echo "$OWNER/$REPO"`
+  scanned clean — the guard asserting the repo-agnostic invariant while a runtime
+  script routed review traffic to a fixed repository.
+
 - **The epoch bound accepts what it claims to.** `N` question marks followed by
   `*` matches every string of length N *or more*, so the eleven-`?` guard rejected
   eleven-digit epochs — the ones it was written to allow — and every watch would

@@ -1012,6 +1012,25 @@ error: connection reset by peer")" = BLOCK ] \
         && pass "an unrelated failure blocks" || die "an unrelated failure opened the gate"
 fi
 
+# ── `none` is not permission while auto-review has a pass in flight ────────
+# With auto-review on, every Copilot-fix push queues a Codex pass, and Codex
+# exposes no review record while that pass is queued — which the merge gate read
+# as the same `none` that means "nothing asked Codex about this head". It then
+# fell back to the pre-Copilot signoff and could merge before the in-flight pass
+# reported, including a body-only CHANGES_REQUESTED that leaves no unresolved
+# thread for the other gates to catch.
+none_branch="$(awk '/^case "\$CODEX_STATE" in/ { c++ } c == 2 { print } c == 2 && /^esac/ { exit }' "$SKILL")"
+if [ -z "$none_branch" ]; then
+    die "the merge gate no longer has a CODEX_STATE dispatch — has it moved?"
+else
+    printf '%s' "$none_branch" | grep -q 'AUTO_REVIEW.*=.*yes' \
+        && pass "the merge gate distinguishes an in-flight auto-review from no review" \
+        || die "the none branch falls back to the signoff without checking AUTO_REVIEW"
+    printf '%s' "$none_branch" | grep -q 'merge blocked' \
+        && pass "…and blocks rather than trusting the pre-Copilot signoff" \
+        || die "the in-flight case does not block the merge"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

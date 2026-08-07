@@ -122,9 +122,17 @@ started="$(now_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadabl
 # Returns non-zero when the clock cannot be read, so callers branch rather than
 # silently treating a failed read as "no time has passed". `echo $(( … ))` hid
 # exactly that behind its own success.
+# The LAST accepted epoch, so a clock that steps BACKWARD is caught. A backward
+# step produced a smaller elapsed value while still returning success, and
+# `remaining_s` then handed the next probe a LARGER budget — `--timeout` exceeded
+# by the size of the correction, or extended without bound by repeated ones. Time
+# that runs backwards is not a clock this watch can measure a deadline with.
+last_s="$started"
 elapsed_s() {
     local t
     t="$(now_s)" || return 1
+    [ "$t" -ge "$last_s" ] || return 1
+    last_s="$t"
     printf '%s' $(( t - started ))
 }
 
@@ -188,8 +196,19 @@ probe() {   # probe <limit-seconds> <command...> ; stdout on stdout, 124 on limi
         return 124
     fi
     wait "$pid"; rc=$?
-    [ "$rc" -eq 124 ] && timed_out
-    [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
+    # THE CHILD'S 124 IS NOT THE WATCHDOG'S. Expiry returns 124 from the branch
+    # above, before this point; anything reaching here is the helper's own status.
+    # Treating a helper that exited 124 — because it was wrapped in `timeout`, or
+    # simply failed that way — as an ordinary timeout returned status 1, and
+    # `SKILL.md` re-arms status 1 indefinitely. A broken probe became "the review
+    # is still in flight", forever, which is the one outcome a fail-closed watch
+    # must not produce. Both 124 and 125 from the child mean the probe is
+    # unreadable.
+    if [ "$rc" -eq 124 ] || [ "$rc" -eq 125 ]; then
+        rm -f "$tmp" 2>/dev/null
+        echo "PR_REVIEW_WATCH state=error reason=probe_unreadable child_rc=$rc" >&2
+        exit 2
+    fi
     # The READ has its own status, captured before `rm` overwrites `$?`. A `cat`
     # that emitted a complete, plausible record and then failed would otherwise
     # come back as the child's success, and the caller would accept a state or a

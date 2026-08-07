@@ -144,7 +144,17 @@ reviewer_reviews() {
                    # merge gate answers by trusting an older signoff instead of
                    # stopping.
                    or (.commit_id | test("^[0-9a-f]{40}$") | not)
-                   or ((.state | type) != "string" and .state != null)
+                   # THE KNOWN SET, not merely "a string". `head_review_snapshot`
+                   # sends anything it does not recognise through its catch-all
+                   # as `dismissed` with status 0 — so a null or an unrecognised
+                   # value became an actionable "the review was withdrawn", and
+                   # the driver answers that by requesting another pass. A
+                   # malformed parse then drives a review loop instead of
+                   # stopping. This is the set `pr-round-count.sh` and
+                   # `pr-findings.sh` already enforce; the three cannot disagree
+                   # about what a review is.
+                   or (.state | type) != "string"
+                   or (.state | IN("PENDING","APPROVED","CHANGES_REQUESTED","COMMENTED","DISMISSED") | not)
                    # Not merely a string: `head_review_snapshot` sorts on this to
                    # decide which review is authoritative, and the sort is
                    # LEXICAL. `submitted_at:"zzzz"` sorts after every real ISO

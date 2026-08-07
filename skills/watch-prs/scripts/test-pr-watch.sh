@@ -1008,5 +1008,45 @@ for good in 1754000000 10000000000 99999999999; do
         || pass "a ${#good}-digit epoch ($good) is accepted as a clock"
 done
 
+# ── a helper that exits 124 is unreadable, not a timeout ───────────────────
+# 124 is the watchdog's OWN expiry code, returned before the child status is ever
+# read. A helper that exits 124 itself — wrapped in `timeout`, or simply failing
+# that way — was therefore reported as an ordinary timeout, status 1, which
+# `SKILL.md` re-arms indefinitely. A broken probe became "the review is still in
+# flight", forever.
+mkstub "$TMP/rc124.sh" <<'SH'
+[ "$1" = "head" ] && exit 0
+exit 124
+SH
+out="$(run_limited 20 env PR_WATCH_STATE_SCRIPT="$TMP/rc124.sh" SEQ_FILE="$TMP/seq" \
+        HEAD40="$HEAD40" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'probe_unreadable'; } \
+    && pass "a helper exiting 124 is an unreadable probe, not a timeout" \
+    || die "helper rc=124 gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'state=timeout' \
+    && die "…and it was reported as a timeout the driver would re-arm: $out" \
+    || pass "…so the driver stops instead of re-arming forever"
+
+# ── a clock that steps BACKWARD is not a clock ─────────────────────────────
+# A backward step produced a smaller elapsed value while still succeeding, and
+# `remaining_s` handed the next probe a LARGER budget — `--timeout` exceeded by
+# the size of the correction, or extended without bound by repeated ones.
+BACKCLOCK="$TMP/backclock"; mkdir -p "$BACKCLOCK"
+cat > "$BACKCLOCK/date" <<BACKSH
+#!/usr/bin/env bash
+n=\$(cat "\$BACK_N" 2>/dev/null || echo 0); n=\$((n + 1)); echo "\$n" > "\$BACK_N"
+# Forward for the first few reads, then a step backward — the shape of an NTP
+# correction landing mid-watch.
+if [ "\$n" -le 3 ]; then printf '1754000%03d\n' "\$n"; else printf '1753000000\n'; fi
+BACKSH
+chmod +x "$BACKCLOCK/date"
+rm -f "$TMP/back.n"; seq_set none
+out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
+        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+    && pass "a clock that steps backward is unreadable, not a longer deadline" \
+    || die "backward clock gave rc=$rc out='$out'"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

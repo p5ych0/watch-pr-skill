@@ -129,6 +129,34 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/other.json" run state 7 "$BOT" 2>&1)"
 printf '%s' "$out" | grep -q 'state=none' && pass "state: a review on another head does not count" \
     || die "state: an other-head review leaked in: $out"
 
+# ── an unrecognised state is unreadable, not a dismissal ──────────────────
+# `head_review_snapshot` sends anything it does not recognise through its
+# catch-all as `dismissed` with status 0, so a null or an unknown string became
+# an actionable "the review was withdrawn" — and the driver answers that by
+# requesting another pass. A malformed parse then drives a review loop rather
+# than stopping. The other two helpers already enforced this set; this one had
+# drifted, which is the divergence issue #11 is about.
+for badstate in 'null' '"WIBBLE"' '"approved"' '"APPROVED "' '123'; do
+    printf '[{"user":{"login":"%s"},"commit_id":"%s","state":%s,"submitted_at":"2026-01-01T00:00:00Z","id":31}]' \
+        "$BOT" "$HEAD40" "$badstate" > "$TMP/badstate.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badstate.json" run state 7 "$BOT" 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'status=error'; } \
+        && pass "state: $badstate is unreadable, not a dismissal" \
+        || die "state: $badstate gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'state=dismissed' \
+        && die "state: $badstate was reported as a withdrawn review: $out"
+done
+# The control: every value in the known set must still be accepted, or "reject
+# everything" would satisfy the cases above.
+for goodstate in APPROVED CHANGES_REQUESTED COMMENTED DISMISSED; do
+    printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"%s","submitted_at":"2026-01-01T00:00:00Z","id":32}]' \
+        "$BOT" "$HEAD40" "$goodstate" > "$TMP/goodstate.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/goodstate.json" run state 7 "$BOT" 2>&1)"
+    printf '%s' "$out" | grep -q 'status=error' \
+        && die "state: the valid state $goodstate was rejected: $out" \
+        || pass "state: $goodstate is still accepted"
+done
+
 # The LATEST submitted review is authoritative: an old clean review followed by a
 # dismissal is not a signoff, and the reverse still is.
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":21},{"user":{"login":"%s"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":22}]' \

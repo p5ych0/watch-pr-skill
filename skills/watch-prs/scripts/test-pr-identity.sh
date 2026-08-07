@@ -206,10 +206,17 @@ scan_hardcoded_identity() {   # <file...> ; prints hits; 2 if the scan failed
     rc=0
     out="$(awk '
         /^[[:space:]]*#/ { next }
-        /\$OWNER\/\$REPO/ { next }
-        /REPO_SLUG=("|'"'"')[A-Za-z0-9_.-]+\// ||
-        /--repo[= ]"?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/ ||
-        /p5ych0\// { print FILENAME ":" FNR ":" $0 }
+        # The derived reference is REMOVED, not used to skip the line. `next`
+        # threw away every line containing `$OWNER/$REPO`, so
+        # `REPO_SLUG="acme/widget"; echo "$OWNER/$REPO"` scanned clean — the guard
+        # asserting the repo-agnostic invariant while a runtime script routed
+        # the review traffic of another project to a fixed repository.
+        # (No apostrophe in this comment: the awk program is single-quoted in
+        # the shell, and one would terminate it.)
+        { line = $0; gsub(/\$OWNER\/\$REPO/, "", line) }
+        line ~ /REPO_SLUG=("|'"'"')[A-Za-z0-9_.-]+\// ||
+        line ~ /--repo[= ]"?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/ ||
+        line ~ /p5ych0\// { print FILENAME ":" FNR ":" $0 }
     ' "$@" 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -285,9 +292,16 @@ fi
 # direction, so a scan that finds nothing anywhere is not mistaken for a guard.
 rm -f "$UNREAD/pr-fake.sh"
 printf '#!/usr/bin/env bash\nREPO_SLUG="acme/widget"\n' > "$UNREAD/pr-offender.sh"
+# A MIXED line: the derived reference and a literal identity together. Skipping
+# the whole line on `$OWNER/$REPO` reported this clean, so the guard could assert
+# the repo-agnostic invariant while a runtime script routed review traffic to a
+# fixed repository. The derived token is removed from the line, not used to
+# discard it.
+printf '#!/usr/bin/env bash\nREPO_SLUG="acme/widget"; echo "$OWNER/$REPO"\n' > "$UNREAD/pr-mixed.sh"
 found="$(scan_hardcoded_identity "$UNREAD"/pr-*.sh)"; frc=$?
-if [ "$frc" -eq 0 ] && printf '%s' "$found" | grep -q 'pr-offender.sh'; then
-    echo "ok   - …and a script that does hard-code one is caught"
+if [ "$frc" -eq 0 ] && printf '%s' "$found" | grep -q 'pr-offender.sh' \
+   && printf '%s' "$found" | grep -q 'pr-mixed.sh'; then
+    echo "ok   - …and a script that does hard-code one is caught, even beside \$OWNER/\$REPO"
 else
     echo "FAIL - a hard-coded REPO_SLUG was not caught (rc=$frc out='$found')"
     rm -rf "$UNREAD"; echo "RESULT: FAIL"; exit 1

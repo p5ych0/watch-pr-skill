@@ -882,8 +882,23 @@ case "$CODEX_STATE" in
 esac
 case "$CODEX_STATE" in
     none)
-        # No Codex review of this head at all: the recorded signoff is the
-        # authority, and step (2) proves the delta since it is Copilot-only.
+        # `none` MEANS TWO DIFFERENT THINGS, and only one of them is permission.
+        #
+        # With auto-review OFF, nothing asked Codex about this head, so the
+        # recorded signoff is the authority and step (2) proves the delta is
+        # Copilot-only. That is the case this branch was written for.
+        #
+        # With auto-review ON, every Copilot-fix push ALSO queues a Codex pass —
+        # and Codex exposes no review record while that pass is queued or running,
+        # which reads here as exactly the same `none`. So the gate fell back to
+        # the pre-Copilot signoff and could merge before the in-flight pass
+        # reported anything, including a body-only CHANGES_REQUESTED that leaves
+        # no unresolved thread for the other gates to catch. "Not yet answered" is
+        # not "nothing to answer".
+        if [ "$AUTO_REVIEW" = yes ]; then
+            echo "merge blocked: auto-review queues a Codex pass on every push and this head has no verdict yet — wait for it rather than falling back to the signoff on $CODEX_SHA"
+            exit 0
+        fi
         CODEX_EFFECTIVE_SHA="$CODEX_SHA"
         CODEX_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); CODEX_RC=$? ;;
     *)
