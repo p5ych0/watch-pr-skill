@@ -111,5 +111,29 @@ if [ "$TOTAL" -eq "$TAGGED" ]; then
     exit 0
 fi
 
+# WHICH KIND of untagged, because the two need different fixes and the message is
+# the only thing the operator gets. `Review-Phase: copilot` written into the body
+# but separated from the final block by a blank line is NOT a trailer — git parses
+# only the last paragraph — so the commit looks correct to a human reading it and
+# is invisible here. That happened while developing this plugin, following this
+# plugin's own instructions, and cost a rewrite of an already-pushed commit.
+#
+# The status is taken: `grep -c` returns 1 for no matches, which is a real zero,
+# and anything else is a failed inspection that must not read as "none of them".
+body_rc=0
+INBODY="$(git -C "$REPO_DIR" log --format='%B' "${REVIEWED}..${HEAD_OID}" 2>/dev/null \
+          | grep -c '^Review-Phase:[[:space:]]*copilot[[:space:]]*$')" || body_rc=$?
+case "$body_rc" in
+    0) ;;
+    1) INBODY=0 ;;
+    *) echo "MERGE_RANGE status=error reason=body_scan_failed rc=$body_rc" >&2; exit 2 ;;
+esac
+if [ "$INBODY" -gt "$TAGGED" ]; then
+    echo "MERGE_RANGE status=blocked reason=trailer_not_in_trailer_block commits=$TOTAL tagged=$TAGGED in_body=$INBODY"
+    echo "A commit writes 'Review-Phase: copilot' in its message but not as a trailer." >&2
+    echo "git reads trailers from the LAST paragraph only, so it must sit in the same" >&2
+    echo "block as Co-Authored-By and friends, with no blank line before it." >&2
+    exit 1
+fi
 echo "MERGE_RANGE status=blocked reason=untagged_commit commits=$TOTAL tagged=$TAGGED"
 exit 1

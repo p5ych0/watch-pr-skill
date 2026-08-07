@@ -1031,6 +1031,19 @@ else
         || die "the in-flight case does not block the merge"
 fi
 
+# ── the phase trailer has to be documented as a TRAILER ────────────────────
+# `git` parses trailers from the last paragraph only, so `Review-Phase: copilot`
+# written with a blank line above it is not a trailer — the commit looks correct
+# to a reader and is invisible to the merge gate. The contract told the driver to
+# "carry the trailer" without saying where, and following it produced exactly that
+# commit while developing this plugin.
+grep -q 'LAST paragraph' "$SKILL" \
+    && pass "the contract says where the phase trailer has to go" \
+    || die "the contract asks for a trailer without saying it must be in the trailer block"
+grep -q 'trailer_not_in_trailer_block' "$SKILL" \
+    && pass "…and names the status the gate reports when it is misplaced" \
+    || die "the contract does not mention the misplaced-trailer status"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

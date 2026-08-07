@@ -18,6 +18,16 @@
   `recordlib.sh` now defines `valid_review_record`, `valid_comment_record`,
   `pages_or_error` and `is_full_sha` once, and the four helpers source it.
 
+- **A misplaced phase trailer is named as such, not reported as missing.** `git`
+  parses trailers from the LAST paragraph of a message only, so
+  `Review-Phase: copilot` written with a blank line above it is not a trailer —
+  the commit looks correct to anyone reading it, and the merge gate reported
+  `untagged_commit`, asking for a trailer that is plainly already there.
+  `pr-merge-range.sh` now distinguishes the two, and `SKILL.md` says where the
+  trailer has to go rather than only that it must exist. Found by making the
+  mistake while following the contract, which is the evidence that the contract
+  was insufficient.
+
 - **A comment without a canonical `created_at` is refused.** GitHub always sets
   it, so a record without one is malformed — and `pr-round-count.sh` counts these
   comments as rounds without reading the field, so a malformed record was
