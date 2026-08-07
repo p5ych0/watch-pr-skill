@@ -77,11 +77,26 @@ desc_pid="$(cat "$TMP/desc.pid" 2>/dev/null)"; desc_rc=$?
 [ "$desc_rc" -eq 0 ] || die "could not read the descendant PID marker (rc=$desc_rc)"
 case "$desc_pid" in
     ""|*[!0-9]*) die "the child never recorded a descendant PID ('$desc_pid')" ;;
-    *)  if kill -0 "$desc_pid" 2>/dev/null; then
+    *)  # POLLED, not sampled once. `SIGKILL` is delivered asynchronously and
+        # `run_limited` waits only for the group LEADER, so on a loaded machine
+        # the descendant can still be scheduled — or lingering as a zombie —
+        # when the call returns. An immediate `kill -0` therefore fails this
+        # mandatory test on timing rather than on the invariant, which is the
+        # scheduling-dependence this fixture was rewritten twice to remove.
+        #
+        # The grace period is bounded and the failure still fires: a descendant
+        # that never goes away is the leak, and five seconds is far longer than
+        # a delivery delay while far shorter than the thirty it would sleep.
+        desc_gone=0
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            kill -0 "$desc_pid" 2>/dev/null || { desc_gone=1; break; }
+            sleep 0.5 2>/dev/null || sleep 1
+        done
+        if [ "$desc_gone" -eq 1 ]; then
+            pass "…and its descendant is reaped with it, not orphaned"
+        else
             kill -9 "$desc_pid" 2>/dev/null
             die "the descendant (pid $desc_pid) outlived the watchdog"
-        else
-            pass "…and its descendant is reaped with it, not orphaned"
         fi ;;
 esac
 
@@ -227,38 +242,62 @@ esac
 scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
     local dir="$1" errf out rc msg mrc
     errf="$(mktemp)" || return 2
-    out="$(grep -nE 'PATH''=.*run_limited' "$dir"/test-*.sh 2>"$errf")"; rc=$?
+    # ONE pass, ONE status. This was a `grep` piped through two `grep -v`
+    # filters with `|| true` on the end, and every one of those could fail with
+    # no output — which is indistinguishable from "no fixture violates this", the
+    # answer that lets the guard report an invariant it never established. A
+    # pipeline whose failures are invisible is the defect; adding a status check
+    # to each stage would have kept the shape that caused it.
+    #
+    # The same pass joins continued lines, since the assignment and the call are
+    # routinely split across them, and that used to be a second unguarded scan.
+    out="$(awk '
+        FNR == 1 { buf = ""; start = 0 }
+        FILENAME ~ /test-testlib\.sh$/ { next }
+        {
+            if (start == 0) start = FNR
+            line = $0
+            sub(/\\$/, " ", line)
+            buf = buf line
+            if ($0 ~ /\\$/) next
+            if (buf ~ /PATH=/ && buf ~ /run_limited/ && buf !~ /run_limited [0-9]+ env /)
+                print FILENAME ":" start ": " buf
+            buf = ""; start = 0
+        }
+    ' "$dir"/test-*.sh 2>"$errf")"; rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
     [ "$mrc" -eq 0 ] || return 2
-    # grep exits 1 for NO MATCH and >1 for a real error. Collapsing those with
-    # `|| true` turned an unreadable fixture into an empty result — and an empty
-    # result is exactly what "no fixture violates this" looks like, so the guard
-    # could report its invariant held without having established anything.
-    [ "$rc" -le 1 ] || return 2
+    # awk exits non-zero only on a real error — unlike grep it has no "no match"
+    # status — so any non-zero is a failed scan, and anything on stderr is too.
+    [ "$rc" -eq 0 ] || return 2
     [ -z "$msg" ] || return 2
     printf '%s' "$out"
     return 0
 }
 bad="$(scan_watchdog_path_misuse "$SELF_DIR")"; scan_rc=$?
 [ "$scan_rc" -eq 0 ] || die "the fixture scan could not be completed (rc=$scan_rc)"
-bad="$(printf '%s' "$bad" \
-       | grep -v "^$SELF_DIR/test-testlib.sh:" \
-       | grep -v 'run_limited [0-9]* env ' || true)"
-# Continued lines count too: the assignment and the call are routinely split.
-# `test-testlib.sh` is skipped here for the same reason as above — its cases exist
-# to drive `run_limited` under a PATH with no `timeout` on it.
-bad2="$(awk 'FILENAME ~ /test-testlib\.sh$/ { next }
-             /PATH=/ && /\\$/ { prev = FILENAME ":" FNR ": " $0; next }
-             prev != "" && /run_limited/ && !/run_limited [0-9]+ env / { print prev }
-             { prev = "" }' "$SELF_DIR"/test-*.sh)"; scan2_rc=$?
-[ "$scan2_rc" -eq 0 ] || die "the continued-line fixture scan failed (rc=$scan2_rc)"
-if [ -z "$bad" ] && [ -z "$bad2" ]; then
+if [ -z "$bad" ]; then
     pass "no fixture prefixes an environment onto run_limited itself"
 else
     die "a fixture puts its environment on the watchdog's PATH, not the subject's:"
     printf '%s\n%s\n' "$bad" "$bad2" | sed '/^$/d; s/^/       /'
 fi
+
+# The scan must still SEE a violation, in both shapes — a guard proven only on
+# clean input is a guard proven on nothing.
+SEENTMP="$(mktemp -d)"
+printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-oneline.sh"
+printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" FOO=1 \\\n       run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-split.sh"
+seen="$(scan_watchdog_path_misuse "$SEENTMP")"; seen_rc=$?
+[ "$seen_rc" -eq 0 ] || die "the scan failed on the violation fixtures (rc=$seen_rc)"
+printf '%s' "$seen" | grep -q 'test-oneline.sh' \
+    && pass "the scan catches a single-line violation" \
+    || die "a single-line PATH-on-watchdog call was not caught: '$seen'"
+printf '%s' "$seen" | grep -q 'test-split.sh' \
+    && pass "…and one split across a continuation" \
+    || die "a continued-line PATH-on-watchdog call was not caught: '$seen'"
+rm -rf "$SEENTMP"
 
 # …and the scan's own failure path, exercised against a fixture it cannot read.
 SCANTMP="$(mktemp -d)"
