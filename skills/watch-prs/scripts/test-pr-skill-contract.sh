@@ -10,6 +10,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$SCRIPT_DIR/../SKILL.md"
 ROOT="$SCRIPT_DIR/../../.."
+# The shared fixture helpers. This was the one test file in the suite that never
+# sourced them, and it was the one still holding a bare `mktemp -d`.
+. "$SCRIPT_DIR/testlib.sh"
 
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
@@ -1468,7 +1471,97 @@ cl_count() {   # cl_count <claim-pattern> <qualified-pattern> <label>
         && pass "every mention in the release entry is qualified: $3 ($qualified/$total)" \
         || die "the release entry states $3 unqualified in $((total - qualified)) of $total places"
 }
-TMP_CL="$(mktemp -d)" || die "no scratch directory for the counter fixture"
+# The scratch directory for the fixtures below — through the VALIDATED helper,
+# and stopping rather than recording.
+#
+# This was a bare `mktemp -d` guarded by `die`, and `die` RETURNS 0: it records a
+# failure and lets the file carry on. So a full or read-only $TMPDIR left
+# `TMP_CL` empty, `CNTB` below became `/bin`, and the `mkdir -p` and `ln -sf`
+# that build the fixture wrote symlinks over the system binaries they were meant
+# to be shadowing inside a scratch tree.
+#
+# `die` is right for an assertion — every remaining check should still run — and
+# wrong here, because everything after this point dereferences the path. And a
+# status check alone is not enough: `mktemp` can print a plausible path and then
+# fail, or print one it never created, and command substitution keeps the output
+# either way. `mktemp_d` is the definition of "a path that was actually created".
+TMP_CL="$(mktemp_d)" || {
+    die "no scratch directory for the counter fixture"
+    echo "RESULT: FAIL"
+    exit 1
+}
+# …and it is removed. There was no cleanup here at all, so every run of the suite
+# left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
+# `mktemp_d` has already established the path is non-empty, absolute and not `/`.
+trap 'rm -rf "$TMP_CL"' EXIT
+
+# The stop is exercised, not merely written. The dangerous case is not "mktemp
+# failed" — a plain failure is caught by any status check — it is a `mktemp` that
+# PRINTS a plausible path, because command substitution keeps that output, so an
+# unvalidated caller proceeds with a directory that does not exist. Both shapes
+# are replayed, and each has to leave the filesystem untouched.
+MTP="$TMP_CL/mtprobe"; mkdir -p "$MTP/bin"
+mt_probe() {   # mt_probe <stub exit status> <what the case is>
+    local canary out rc
+    canary="$TMP_CL/canary$1"; rc=0
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\nexit %s\n' "$canary" "$1" \
+        > "$MTP/bin/mktemp"
+    chmod +x "$MTP/bin/mktemp"
+    out="$(PATH="$MTP/bin:$PATH" bash -c '
+set -Eeuo pipefail
+'"$(declare -f mktemp_d)"'
+d="$(mktemp_d)" || { echo STOPPED; exit 1; }
+mkdir -p "$d/bin"; echo "CONTINUED:$d"' 2>&1)" || rc=$?
+    { [ "$out" = STOPPED ] && [ "$rc" -eq 1 ]; } \
+        && pass "a mktemp that $2 stops the fixture setup" \
+        || die "a mktemp that $2 did not stop the setup (rc=$rc, '$out')"
+    [ ! -e "$canary" ] \
+        && pass "…and nothing is written under the path it printed" \
+        || die "the setup wrote under a path a mktemp that $2 merely printed"
+}
+mt_probe 1 'prints a plausible path and then fails'
+mt_probe 0 'prints a path it never created'
+rm -f "$MTP/bin/mktemp"
+
+# The CALL SITE, not just the helper. Everything above still passes if the two
+# lines that acquire `TMP_CL` are put back the way they were, because a working
+# `mktemp` never reaches the guard — the helper is proven and the caller is not.
+# So the guard is exercised where it lives: this file is run against a `mktemp`
+# that fails, and it has to stop before anything is written.
+#
+# `mkdir` and `ln` are stubbed to RECORD rather than act. What the unfixed form
+# does is write fixture symlinks into `/bin`, and performing that in order to
+# detect it is not a trade this suite can make; an empty record is the same
+# evidence at no risk. The child skips this block, so a regression that lets it
+# past the guard cannot recurse.
+if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
+    SPB="$TMP_CL/probe/bin"; WIT="$TMP_CL/probe/writes"
+    mkdir -p "$SPB"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$WIT" \
+        > "$SPB/mkdir"
+    cp "$SPB/mkdir" "$SPB/ln"
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$SPB/mktemp"
+    chmod +x "$SPB/mkdir" "$SPB/ln" "$SPB/mktemp"
+    # `run_limited <secs> env …`, so the stub PATH reaches the SUBJECT and not the
+    # watchdog. Written the other way round first, and `test-testlib.sh` caught
+    # it: `run_limited`'s own fallback shells out to `mktemp`, which here is a
+    # `mktemp` stubbed to fail — the watchdog would have returned 125 without
+    # running this file at all, and the guard would have been asserting about
+    # nothing. The environment belongs to the thing under test.
+    sp_rc=0
+    sp_out="$(run_limited 180 env CONTRACT_SCRATCH_PROBE=1 PATH="$SPB:$PATH" \
+        bash "${BASH_SOURCE[0]}" 2>&1)" || sp_rc=$?
+    { [ "$sp_rc" -ne 0 ] && [ "$sp_rc" -ne 124 ] && [ "$sp_rc" -ne 125 ] \
+        && grep -qF 'no scratch directory for the counter fixture' <<<"$sp_out" \
+        && grep -qF 'RESULT: FAIL' <<<"$sp_out"; } \
+        && pass "a failing mktemp stops this file rather than being recorded" \
+        || die "a failing mktemp did not stop this file (rc=$sp_rc)"
+    # The whole point: `die` would have let it carry on with an empty `TMP_CL`,
+    # and every `$TMP_CL/…` under it then resolves to an absolute system path.
+    [ ! -s "$WIT" ] \
+        && pass "…and it creates nothing, so no fixture path can resolve to a system one" \
+        || die "the run wrote after a failed mktemp: $(tr '\n' ';' <"$WIT")"
+fi
 cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
     grep -qF "$1" <<<"$cl_202" \
         && pass "the release entry $2" \
