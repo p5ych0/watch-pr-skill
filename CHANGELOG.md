@@ -79,6 +79,16 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The suite is passable where GNU `timeout` is absent — the platform it claims
+  to support.** Fixtures prefixed their stubs onto the CALLER's `PATH`, so the
+  portable watchdog inherited them: it polls with its own `sleep`, reads with its
+  own `cat` and reads the clock with its own `date`, and a stubbed one killed the
+  harness instead of the subject. Seven fixtures across four files were affected —
+  the whole suite was unpassable on stock macOS while passing wherever `timeout`
+  exists, which is why it went unnoticed. The substitution now goes inside the
+  watchdog (`run_limited N env PATH=… cmd`), and a guard in `test-testlib.sh`
+  refuses the old shape.
+
 - **The suite no longer signals or matches on processes it did not start.** A
   fixture asserting that a probe was reaped used `pgrep -f`/`pkill -f` over the
   argv, which matches any `sleep 30` on the machine — and the suite is a mandatory

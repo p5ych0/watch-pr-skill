@@ -195,7 +195,10 @@ chmod +x "$MRTMP/bin/git"
 # fail — that is the assertion. Without it the assignment aborts the script,
 # which then reports nothing at all.
 set +e
-out="$(cd "$MRTMP" && PATH="$MRTMP/bin:$PATH" run_limited 20 "$SCRIPT" \
+# `env` inside the watchdog rather than a PATH on its caller: where GNU `timeout`
+# is missing, `run_limited` polls with its own `sleep` and reads with its own
+# `cat`, so a stub prefixed here breaks the harness instead of the subject.
+out="$(cd "$MRTMP" && run_limited 20 env PATH="$MRTMP/bin:$PATH" "$SCRIPT" \
         1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 2>&1)"
 rc=$?
 set -e

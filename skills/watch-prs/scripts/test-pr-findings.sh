@@ -343,8 +343,13 @@ JQSH
 chmod +x "$FAKEBIN/jq"
 page true '"C1"' "$NODE_OK" > "$TMP/failcur.json"
 rm -f "$TMP/jq.n"
-out="$(PATH="$FAKEBIN:$PATH" JQ_N="$TMP/jq.n" GH_PAGE1="$TMP/failcur.json" \
-       REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' run_limited 20 "$SCRIPT" list 7 2>&1)"; rc=$?
+# `env` inside the watchdog, not a PATH on its caller: where GNU `timeout` is
+# missing, `run_limited` polls, reads and cleans up with its OWN `sleep`, `cat`,
+# `date`, `mktemp` and `rm`, so a stub prefixed here breaks the harness instead
+# of the subject — invisible wherever `timeout` exists.
+out="$(run_limited 20 env PATH="$FAKEBIN:$PATH" JQ_N="$TMP/jq.n" \
+       GH_PAGE1="$TMP/failcur.json" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+       "$SCRIPT" list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "list: an endCursor parse that prints then fails => 2" \
     || die "failing endCursor parse gave rc=$rc (124 = it walked on forever) out='$out'"

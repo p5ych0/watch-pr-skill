@@ -70,7 +70,9 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
         pr-findings.sh)     set -- list 7 ;;
         *)                  set -- 7 ;;
     esac
-    out="$(PATH="$IDTMP/bin:$PATH" run_limited 20 "$ROOT/$sc" "$@" 2>&1)"
+    # `env` inside the watchdog, never a PATH on its caller: where GNU `timeout`
+    # is missing, `run_limited` polls with its own `sleep` and would inherit it.
+    out="$(run_limited 20 env PATH="$IDTMP/bin:$PATH" "$ROOT/$sc" "$@" 2>&1)"
     rc=$?
     # The REASON, not just the status. Without the guard these scripts still exit
     # 2 — they simply fail further downstream, at the first `gh` call made against
@@ -129,7 +131,8 @@ GITSH
             *)                  set -- 7 ;;
         esac
         : > "$SHAPETMP/spy"
-        out="$(GH_SPY="$SHAPETMP/spy" PATH="$SHAPETMP/bin:$PATH" run_limited 20 "$ROOT/$sc" "$@" 2>&1)"; rc=$?
+        out="$(run_limited 20 env GH_SPY="$SHAPETMP/spy" PATH="$SHAPETMP/bin:$PATH" \
+                 "$ROOT/$sc" "$@" 2>&1)"; rc=$?
         if [ "$want" = "OK" ]; then
             # The negative control. A real GitHub remote must NOT be caught by
             # either rule — otherwise a matrix of rejections could be satisfied

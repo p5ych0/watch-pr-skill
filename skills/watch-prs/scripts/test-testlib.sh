@@ -173,5 +173,39 @@ case "$out" in
     *) die "failing reader gave '$out' (want rc=125 res=partial)" ;;
 esac
 
+# ── no fixture may put its stubs on the WATCHDOG's own PATH ────────────────
+# Owned by this file because the hazard belongs to `run_limited`: where GNU
+# `timeout` is missing it polls with its own `sleep`, so a stub prefixed onto the
+# CALLER's environment is inherited by the watchdog and breaks the harness rather
+# than the subject. Three assertions in two fixtures were affected, and the whole
+# suite was unpassable on stock macOS while passing wherever `timeout` exists —
+# invisible on the machine that wrote them.
+#
+# The correct shape puts the substitution inside: `run_limited N env VAR=… cmd`.
+# PATH specifically, not any variable: the others are inherited harmlessly, while
+# a prefixed PATH can shadow the very `sleep`, `cat`, `mktemp` or `kill` the
+# watchdog runs. The correct shape puts the substitution inside the watchdog:
+# `run_limited N env PATH=… cmd`.
+# The pattern is SPLIT so this line cannot match itself — a self-matching guard
+# reports a finding against its own source and never goes green, which reads as a
+# broken check rather than as the invariant it states.
+# THIS FILE is exempt, and only this one: its cases exist to drive `run_limited`
+# under a PATH with no `timeout` on it, which is the fallback they test. Every
+# other fixture stubs the SUBJECT and must not reach the watchdog.
+bad="$(grep -nE 'PATH''=.*run_limited' "$SELF_DIR"/test-*.sh 2>/dev/null \
+       | grep -v "^$SELF_DIR/test-testlib.sh:" \
+       | grep -v 'run_limited [0-9]* env ' || true)"
+# Continued lines count too: the assignment and the call are routinely split.
+bad2="$(awk 'FILENAME ~ /test-testlib\.sh$/ { next }
+             /PATH=/ && /\\$/ { prev = FILENAME ":" FNR ": " $0; next }
+             prev != "" && /run_limited/ && !/run_limited [0-9]+ env / { print prev }
+             { prev = "" }' "$SELF_DIR"/test-*.sh 2>/dev/null || true)"
+if [ -z "$bad" ] && [ -z "$bad2" ]; then
+    pass "no fixture prefixes an environment onto run_limited itself"
+else
+    die "a fixture puts its environment on the watchdog's PATH, not the subject's:"
+    printf '%s\n%s\n' "$bad" "$bad2" | sed '/^$/d; s/^/       /'
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

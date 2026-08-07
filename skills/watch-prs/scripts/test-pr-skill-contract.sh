@@ -271,9 +271,35 @@ grep -q '\[ "\$V_LINE" != "\$V_WANT" \]' "$SKILL" \
 # ── the round summary and the review request are ONE comment ───────────────
 # The mention IS the request, so splitting them divides the record the reviewer
 # is told to read and sends the request half with no account of what changed.
-grep -q 'SUMMARY_FILE' "$SKILL" \
-    && pass "the round summary is posted in the same comment as the @codex request" \
-    || die "the summary and the request are still two separate comments"
+# The assertion is on the REQUEST BODY, not on the file appearing somewhere in the
+# document. Matching `SUMMARY_FILE` anywhere passed while the round-closing
+# request interpolated nothing: the file was still created and read, and Codex
+# received a bare mention with no account of what changed — which the review
+# policy makes it read first. The definition and the use are separate things, and
+# only the use reaches the reviewer.
+#
+# The FIRST request is exempt and identified by its placeholder: it opens the PR,
+# so there is no prior round to summarise. Every other one closes a round.
+summary_req="$(awk '
+    /--body "@codex review/ { want = 3; body = ""; next }
+    want > 0 { body = body $0 "\n"; want--
+               if (want == 0) {
+                   if (body ~ /<one paragraph:/) { opening++ }
+                   else if (body ~ /\$SUMMARY/) { withsum++ }
+                   else { bare++ }
+               }
+             }
+    END { printf "opening=%d withsum=%d bare=%d", opening, withsum, bare }
+' "$SKILL")"; sreq_rc=$?
+[ "$sreq_rc" -eq 0 ] || die "could not scan SKILL.md for the review requests (rc=$sreq_rc)"
+case "$summary_req" in
+    *"bare=0"*) pass "every round-closing @codex request carries \$SUMMARY in its body" ;;
+    *) die "a round-closing @codex request has no summary in its body ($summary_req)" ;;
+esac
+case "$summary_req" in
+    *"withsum=0"*) die "no @codex request interpolates the summary at all ($summary_req)" ;;
+    *) pass "…and the summary reaches the reviewer in the same comment as the mention" ;;
+esac
 
 # A mention describing an UNFIXED defect is read as a task, not as context: Codex
 # then edits and commits in an environment with no remote and no credentials, so

@@ -552,8 +552,12 @@ elapsed=$(( $(date +%s) - start ))
 CLOCKBIN="$TMP/clockbin"; mkdir -p "$CLOCKBIN"
 printf '#!/usr/bin/env bash\nprintf "1700000000\\n"\nexit 1\n' > "$CLOCKBIN/date"
 chmod +x "$CLOCKBIN/date"
-out="$(PATH="$CLOCKBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+# Inside the watchdog: `run_limited` reads the clock with its own `date` on the
+# portable path, so a stub on the caller's PATH breaks the harness, not the
+# subject — and only where GNU `timeout` is missing, which is exactly the
+# platform this suite claims to support and never runs on.
+out="$(run_limited 30 env PATH="$CLOCKBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+       SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a clock read that prints and then fails => 2" \
     || die "failing clock gave rc=$rc out='$out'"
@@ -615,8 +619,11 @@ exec "$REAL_CAT" "\$@"
 CATSH
 chmod +x "$CATBIN/cat"
 seq_set reviewed
-out="$(PATH="$CATBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+# The `cat` stub goes inside the watchdog too: `run_limited` reads its own buffer
+# with `cat` on the portable path, so a stub on the caller's PATH broke the
+# harness instead of the subject wherever GNU `timeout` is absent.
+out="$(run_limited 30 env PATH="$CATBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+       SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a probe buffer read that prints and then fails => 2" \
     || die "failing buffer read gave rc=$rc out='$out'"
@@ -643,8 +650,14 @@ esac
 SLEEPSH
 chmod +x "$SLEEPBIN/sleep"
 seq_set none
-out="$(PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+# The stub goes inside `run_limited`, not on its caller's PATH. Where GNU
+# `timeout` is missing the watchdog polls with its OWN `sleep`, so a stub on the
+# harness PATH broke the harness: it killed the watch and returned 125 before the
+# assertion below could see the status it was written for. That made this
+# mandatory gate unpassable on stock macOS while passing everywhere `timeout`
+# exists — the same portability trap the watchdog itself was written to close.
+out="$(run_limited 30 env PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+       SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a failing sleep => 2, not a timeout the driver re-arms" \
     || die "failing sleep gave rc=$rc out='$out'"
@@ -692,8 +705,8 @@ printf '%s' "$out" | grep -q 'state=head_moved' \
 # Now fail whole-second sleeps only — `probe` polls in fractions and has its own
 # guard, so a sleep that always failed would exit there and prove nothing.
 rm -f "$TMP/movesleep.n"
-out="$(PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/movesleep.sh" MOVE_N="$TMP/movesleep.n" \
-       run_limited 40 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
+out="$(run_limited 40 env PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/movesleep.sh" \
+       MOVE_N="$TMP/movesleep.n" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a failing sleep on the moved-head path => 2 (not isolating; see note)" \
     || die "moved-head failing sleep gave rc=$rc out='$out'"
@@ -722,9 +735,13 @@ DATESH
 chmod +x "$LATECLOCK/date"
 seq_set none
 rm -f "$TMP/clk.n"
-out="$(PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=3 \
+# `env` inside the watchdog, not a PATH on its caller: where GNU `timeout` is
+# missing, `run_limited` polls, reads and cleans up with its OWN `sleep`, `cat`,
+# `date`, `mktemp` and `rm`, so a stub prefixed here breaks the harness instead
+# of the subject — invisible wherever `timeout` exists.
+out="$(run_limited 30 env PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=3 \
        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
+       "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a clock that fails at the timeout read => 2, not a re-armable timeout" \
     || die "late clock failure gave rc=$rc out='$out'"
@@ -737,9 +754,13 @@ printf '%s' "$out" | grep -q 'state=timeout' \
 
 # The control: with the clock intact, the same invocation IS an ordinary timeout.
 rm -f "$TMP/clk.n"
-out="$(PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=999 \
+# `env` inside the watchdog, not a PATH on its caller: where GNU `timeout` is
+# missing, `run_limited` polls, reads and cleans up with its OWN `sleep`, `cat`,
+# `date`, `mktemp` and `rm`, so a stub prefixed here breaks the harness instead
+# of the subject — invisible wherever `timeout` exists.
+out="$(run_limited 30 env PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=999 \
        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
-       run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
+       "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
     && pass "…while a working clock at the same deadline is a plain timeout" \
     || die "control case gave rc=$rc out='$out'"
@@ -880,15 +901,28 @@ printf '%s' "\$\$" > "$TMP/probe-started"
 exec "$REAL_SLEEP" 30
 SLOWSH
 rm -f "$TMP/probe-started"
-out="$(PATH="$ORPH:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/slowstate.sh" SEQ_FILE="$TMP/seq" \
-        HEAD40="$HEAD40" run_limited 30 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 25 2>&1)"; rc=$?
+# THE HARNESS KEEPS THE REAL PATH; only the watch under test gets the stub.
+# Where GNU `timeout` is missing — the portable fallback this suite exists to
+# support — `run_limited` polls with its OWN `sleep 1`, and putting the stub on
+# the caller's PATH fed it the broken clock too: it killed `pr-watch.sh` and
+# returned 125 instead of letting the inner probe answer, so this mandatory gate
+# was unpassable on stock macOS while passing here. `env` moves the substitution
+# inside the watchdog, where it belongs.
+out="$(run_limited 30 env PATH="$ORPH:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/slowstate.sh" \
+        SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 25 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a failed polling clock fails the watch closed" \
     || die "a failed polling clock gave rc=$rc: '$out'"
 # The teardown, asserted on THAT process and no other. An rc-only assertion passes
 # on the leaking version — the leak is invisible to the exit status, which is why
 # it survived — but the assertion must not be able to see anything except the
 # child this fixture started.
-probe_pid="$(cat "$TMP/probe-started" 2>/dev/null)"
+# The READ has its own status. A `cat` that emits a numeric PREFIX and then fails
+# — `12345` truncated to `123` — yields digits that satisfy the shape test, and
+# `kill -0 123` then reports no such process, so this gate records PASS while the
+# real probe is still leaked. Same class as every other guarded read here.
+probe_pid="$(cat "$TMP/probe-started" 2>/dev/null)"; pid_rc=$?
+[ "$pid_rc" -eq 0 ] || die "could not read the fixture child's PID marker (rc=$pid_rc)"
 case "$probe_pid" in
     ""|*[!0-9]*) die "the fixture child never published a PID ('$probe_pid')" ;;
     *)  if kill -0 "$probe_pid" 2>/dev/null; then
@@ -898,6 +932,21 @@ case "$probe_pid" in
             pass "…and reaps the probe rather than leaving it holding an API call"
         fi ;;
 esac
+
+# ── the PID-marker read is proven, not merely guarded ──────────────────────
+# The guard above cannot be reached with a real `cat`, so it is exercised here
+# against one that emits a numeric prefix and then fails — the exact shape that
+# made a truncated PID look like a reaped probe.
+PIDR="$TMP/pidr"; mkdir -p "$PIDR"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$PIDR/$b"
+done
+printf '#!/usr/bin/env bash\nprintf "123"\nexit 1\n' > "$PIDR/cat"; chmod +x "$PIDR/cat"
+: > "$TMP/pidmarker"
+out="$(PATH="$PIDR" bash -c 'v="$(cat "$1" 2>/dev/null)"; echo "rc=$? v=$v"' _ "$TMP/pidmarker")"
+[ "$out" = "rc=1 v=123" ] \
+    && pass "a truncated PID read is distinguishable by status, so the guard has something to catch" \
+    || die "the reader stub did not produce the prefix-then-fail shape ('$out')"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
