@@ -79,6 +79,12 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **The epoch bound accepts what it claims to.** `N` question marks followed by
+  `*` matches every string of length N *or more*, so the eleven-`?` guard rejected
+  eleven-digit epochs — the ones it was written to allow — and every watch would
+  have exited `clock_unreadable` from 2286 onward. A ceiling that behaved as a
+  floor one digit lower, and the rejection fixtures passed either way.
+
 - **Every scratch directory in the suite is validated before anything is written
   into it.** All thirteen sites used a bare `mktemp -d`. Unchecked, a failure
   leaves `$TMP` empty, so `$TMP/bin` is `/bin` and `$TMP/broke` is `/broke` — and

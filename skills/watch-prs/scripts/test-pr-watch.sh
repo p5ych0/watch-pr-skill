@@ -992,5 +992,21 @@ for big in 18446744073709551616 99999999999999999999; do
         || pass "…and not as an ordinary timeout"
 done
 
+# …and the bound must ACCEPT what it claims to. `N` question marks followed by
+# `*` matches length N or more, so an eleven-`?` pattern rejected eleven-digit
+# epochs — every watch would have exited `clock_unreadable` from 2286, a ceiling
+# that behaved as a floor one digit lower. The rejection cases above pass either
+# way, which is exactly why this direction has to be asserted separately.
+for good in 1754000000 10000000000 99999999999; do
+    printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$good" > "$BIGCLOCK/date"
+    chmod +x "$BIGCLOCK/date"
+    seq_set none
+    out="$(run_limited 20 env PATH="$BIGCLOCK:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+           SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
+    printf '%s' "$out" | grep -q 'clock_unreadable' \
+        && die "a valid epoch ($good, ${#good} digits) was rejected as unreadable: $out" \
+        || pass "a ${#good}-digit epoch ($good) is accepted as a clock"
+done
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

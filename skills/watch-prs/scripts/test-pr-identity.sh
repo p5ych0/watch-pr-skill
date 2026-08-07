@@ -192,14 +192,40 @@ echo "ok   - every pr-*.sh runtime script is covered by the guard"
 # project's PR reviews here. The shared PAT below cannot express that, because the
 # same literal is legitimate in the files it also scans.
 SCRIPT_PAT='p5ych0/|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"[[:space:]]*$'
-script_hits=""
-for f in "$ROOT"/pr-*.sh; do
-    [ -f "$f" ] || continue
-    h="$(grep -nHE 'REPO_SLUG=("|'"'"')[A-Za-z0-9_.-]+/|--repo[= ]"?[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+|p5ych0/' "$f" 2>/dev/null \
-         | grep -v '\$OWNER/\$REPO' | grep -v '^\s*#' || true)"
-    [ -n "$h" ] && script_hits="$script_hits$h
-"
-done
+# A SCAN THAT CANNOT READ ITS INPUT IS NOT A CLEAN SCAN. This was a `grep` piped
+# through two filters with `|| true` on the end: an unreadable script, or any
+# stage failing with no output, produced an empty result — and empty is exactly
+# what "no runtime script hard-codes an identity" looks like, so the guard could
+# report its invariant held without having read anything.
+#
+# One `awk` pass, one status. `awk` has no "no match" exit code, so any non-zero
+# is a real failure and there is nothing to normalise away.
+scan_hardcoded_identity() {   # <file...> ; prints hits; 2 if the scan failed
+    local errf out rc msg mrc
+    errf="$(mktemp)" || return 2
+    rc=0
+    out="$(awk '
+        /^[[:space:]]*#/ { next }
+        /\$OWNER\/\$REPO/ { next }
+        /REPO_SLUG=("|'"'"')[A-Za-z0-9_.-]+\// ||
+        /--repo[= ]"?[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/ ||
+        /p5ych0\// { print FILENAME ":" FNR ":" $0 }
+    ' "$@" 2>"$errf")" || rc=$?
+    msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
+    rm -f "$errf" 2>/dev/null
+    [ "$mrc" -eq 0 ] || return 2
+    [ "$rc" -eq 0 ] || return 2
+    [ -z "$msg" ] || return 2
+    printf '%s' "$out"
+    return 0
+}
+sh_rc=0
+script_hits="$(scan_hardcoded_identity "$ROOT"/pr-*.sh)" || sh_rc=$?
+if [ "$sh_rc" -ne 0 ]; then
+    echo "FAIL - the hard-coded-identity scan could not be completed (rc=$sh_rc)"
+    echo "RESULT: FAIL"
+    exit 1
+fi
 if [ -n "$script_hits" ]; then
     echo "FAIL - a runtime script hard-codes an owner/repo (identity must be derived):"
     printf '%s' "$script_hits" | sed 's/^/  /'
@@ -208,7 +234,23 @@ if [ -n "$script_hits" ]; then
 fi
 echo "ok   - no runtime script hard-codes an owner/repo, this plugin's own included"
 
-hits="$(grep -nHE "$PAT" "${FILES[@]}" 2>/dev/null || true)"
+# Same rule for the shared-pattern scan. `grep` exits 1 for no-match and >1 for
+# a real error; collapsing both with `|| true` made an unreadable file read as a
+# clean bill of health.
+pat_errf="$(mktemp)" || { echo "FAIL - no scratch file for the identity scan"; echo "RESULT: FAIL"; exit 1; }
+# `|| pat_rc=$?` rather than `|| true`: this file runs under `-e`, so a no-match
+# grep (status 1) would abort the script outright — which is why the suppression
+# was there. The status is captured instead of discarded, so "nothing matched"
+# and "could not read" stay distinguishable.
+pat_rc=0
+hits="$(grep -nHE "$PAT" "${FILES[@]}" 2>"$pat_errf")" || pat_rc=$?
+pat_msg="$(cat "$pat_errf" 2>/dev/null)"; pat_msg_rc=$?
+rm -f "$pat_errf" 2>/dev/null
+if [ "$pat_msg_rc" -ne 0 ] || [ "$pat_rc" -gt 1 ] || [ -n "$pat_msg" ]; then
+    echo "FAIL - the identity-literal scan could not be completed (rc=$pat_rc): $pat_msg"
+    echo "RESULT: FAIL"
+    exit 1
+fi
 if [ -n "$hits" ]; then
     echo "FAIL - hard-coded identity literal(s) found (identity must be derived):"
     printf '%s\n' "$hits" | sed 's/^/  /'
@@ -216,4 +258,40 @@ if [ -n "$hits" ]; then
     exit 1
 fi
 echo "ok   - no hard-coded owner/repo/bus identity in scripts or skill"
+
+# ── the scan itself fails closed on an input it cannot read ────────────────
+# The invariant this file owns is "no runtime script hard-codes an identity", and
+# an unreadable script used to yield the same empty result as a clean one — so the
+# guard could report the invariant held without having read the script at all.
+# Exercised against the production function rather than asserted about.
+set +e
+UNREAD="$(mktemp -d)" || { echo "FAIL - no scratch dir for the scan fixture"; echo "RESULT: FAIL"; exit 1; }
+printf '#!/usr/bin/env bash\n: \n' > "$UNREAD/pr-fake.sh"
+chmod 000 "$UNREAD/pr-fake.sh"
+if cat "$UNREAD/pr-fake.sh" >/dev/null 2>&1; then
+    # Root, or a filesystem that ignores the mode. Said out loud: the case did
+    # not run, so it proved nothing.
+    echo "ok   - SKIPPED: this user can read a mode-000 file, so the case cannot be built"
+else
+    scan_hardcoded_identity "$UNREAD"/pr-*.sh >/dev/null 2>&1
+    if [ "$?" -eq 2 ]; then
+        echo "ok   - a script the scan cannot read is a failure, not a clean result"
+    else
+        echo "FAIL - an unreadable runtime script was reported as carrying no identity"
+        rm -rf "$UNREAD"; echo "RESULT: FAIL"; exit 1
+    fi
+fi
+# The control, so "always fails" cannot satisfy the case above — and the positive
+# direction, so a scan that finds nothing anywhere is not mistaken for a guard.
+rm -f "$UNREAD/pr-fake.sh"
+printf '#!/usr/bin/env bash\nREPO_SLUG="acme/widget"\n' > "$UNREAD/pr-offender.sh"
+found="$(scan_hardcoded_identity "$UNREAD"/pr-*.sh)"; frc=$?
+if [ "$frc" -eq 0 ] && printf '%s' "$found" | grep -q 'pr-offender.sh'; then
+    echo "ok   - …and a script that does hard-code one is caught"
+else
+    echo "FAIL - a hard-coded REPO_SLUG was not caught (rc=$frc out='$found')"
+    rm -rf "$UNREAD"; echo "RESULT: FAIL"; exit 1
+fi
+rm -rf "$UNREAD"
+set -e
 echo "RESULT: PASS"

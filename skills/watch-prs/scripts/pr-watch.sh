@@ -106,10 +106,15 @@ now_s() {
     # forever, so the watch never reaches its deadline, and one appearing later
     # produces an immediate ordinary timeout — which the driver re-arms as though
     # the review were merely slow. Both are the clock failing silently, which is
-    # what this function exists to refuse. Eleven digits covers every epoch until
-    # the year 5138 and is far inside the range.
+    # what this function exists to refuse.
+    #
+    # TWELVE `?`, not eleven: `N` question marks followed by `*` matches every
+    # string of length N OR MORE, so the obvious eleven REJECTED eleven-digit
+    # epochs — the ones it was written to allow — and would have made every watch
+    # exit `clock_unreadable` from 2286 onward. A bound stated as a ceiling that
+    # behaved as a floor one digit lower. Eleven digits runs to the year 5138.
     case "$t" in
-        ""|*[!0-9]*|???????????*) return 1 ;;
+        ""|*[!0-9]*|????????????*) return 1 ;;
     esac
     printf '%s' "$t"
 }

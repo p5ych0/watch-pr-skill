@@ -110,12 +110,18 @@ MKD="$TMP/mkd"; mkdir -p "$MKD"
 for b in bash sh sleep date true false kill sed grep printf env cat rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$MKD/$b"
 done
+mkdir -p "$MKD/scratch"
 REAL_MKTEMP="$(command -v mktemp)"
 [ -n "$REAL_MKTEMP" ] || { printf 'FAIL - no mktemp on PATH\n'; echo "RESULT: FAIL"; exit 1; }
 mkd_case() {   # <stub-body> <label> <want: OK|REJECT>
     printf '#!/usr/bin/env bash\n%s\n' "$1" > "$MKD/mktemp"; chmod +x "$MKD/mktemp"
     local got
-    got="$(PATH="$MKD" bash -c '. "'"$SELF_DIR"'/testlib.sh"; d="$(mktemp_d)" && echo "OK:$d" || echo REJECT' 2>&1)"
+    # TMPDIR points inside this test's own scratch space, so the one case that
+    # reaches a real `mktemp -d` creates its directory where the EXIT trap will
+    # remove it. Without that, every run of this file left a directory behind in
+    # the system temp — a suite that leaks on each invocation, which is the
+    # complaint it makes about the code it tests.
+    got="$(PATH="$MKD" TMPDIR="$MKD/scratch" bash -c '. "'"$SELF_DIR"'/testlib.sh"; d="$(mktemp_d)" && echo "OK:$d" || echo REJECT' 2>&1)"
     case "$3:$got" in
         REJECT:REJECT) pass "mktemp_d refuses $2" ;;
         OK:OK:*)       pass "mktemp_d accepts $2" ;;
@@ -342,7 +348,11 @@ report_watchdog_path_misuse() {   # <dir> ; 0 clean, 1 offenders found, 2 scan f
     local dir="$1" found rc
     found="$(scan_watchdog_path_misuse "$dir")"; rc=$?
     [ "$rc" -eq 0 ] || return 2
-    found="$(printf '%s' "$found" | sed '/^$/d')"
+    # No cosmetic filter here. It was `printf | sed '/^$/d'` with no status taken,
+    # so a `sed` that failed after the scan HAD found an offender emptied `found`
+    # and the next line returned 0 — the guard reporting PASS out of a failed
+    # parse, which is the same shape as the pipeline this function replaced.
+    # Blank lines cannot occur: the scan prints only matched lines.
     [ -n "$found" ] || return 0
     printf '%s\n' "$found" | sed 's/^/       /'
     return 1
