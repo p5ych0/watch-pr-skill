@@ -1149,8 +1149,14 @@ findings_code="$(awk '
 # the change that should not happen quietly.
 findings_stmts=0 findings_bad=""
 while IFS= read -r line; do
-    case "$line" in
-        ''|'#'*|' '*'#'*) continue ;;
+    # A COMMENT IS DECIDED BY THE FIRST NON-BLANK CHARACTER. The glob `' '*'#'*`
+    # matched any indented line containing a `#` ANYWHERE, so
+    # `    gh api …/comments # fetch bodies` was discarded as a comment and never
+    # reached the whitelist at all — a bypass that did not need to defeat the
+    # check, only to avoid it.
+    _t="${line#"${line%%[![:space:]]*}"}"
+    case "$_t" in
+        ''|'#'*) continue ;;
     esac
     findings_stmts=$((findings_stmts + 1))
     # ANCHORED to the whole statement. An unanchored glob only asked that the
@@ -1168,7 +1174,10 @@ while IFS= read -r line; do
     # whole command. Control operators and command substitution chain a second
     # command without a semicolon, so they are refused here.
     case "$first" in
-        *'&&'*|*'||'*|*'|'*|*'&'*|*'$('*|*'`'*) ok=0 ;;
+        # `>(`/`<(` are process substitution: `… list N > >(gh api …)` runs a second
+        # command with none of the tokens above in it. `<` and `>` are refused
+        # outright — these statements have no business redirecting.
+        *'&&'*|*'||'*|*'|'*|*'&'*|*'$('*|*'`'*|*'>('*|*'<('*|*'>'*|*'<'*) ok=0 ;;
         '"$RB_SCRIPTS"/pr-findings.sh '*) ;;
         *) ok=0 ;;
     esac
@@ -1215,13 +1224,23 @@ grep -q 'no resolution filter' "$SKILL" \
 grep -q 'not waivable by disclosure' <<<"$skill_flat" \
     && pass "mutation proof cannot be waived by saying so in the summary" \
     || die "the contract lets a summary line stand in for an unproven fixture"
-grep -qi 'recorded \*\*at the site' <<<"$skill_flat" \
-    && pass "…an unprovable case is recorded on the base ref instead" \
+grep -qi 'write the limitation as a comment \*\*at the site\*\*' <<<"$skill_flat" \
+    && pass "…an unprovable case is written at the site" \
     || die "the contract does not say where an unprovable limitation is recorded"
+# …and does NOT pretend that comment is authority. A comment added in this PR
+# arrives WITH the change, so it is untrusted context exactly like the summary —
+# calling it a base-ref record would let the round converge on the author's own
+# say-so, which is the thing the rule above exists to forbid.
+grep -qi 'It explains; it does not accept' <<<"$skill_flat" \
+    && pass "…and that comment explains rather than accepts" \
+    || die "the contract treats a comment added in this PR as an accepted limitation"
+grep -qi 'landed on the \*\*base ref by its own pull request\*\*' <<<"$skill_flat" \
+    && pass "…with acceptance requiring a separately landed base-ref record" \
+    || die "the contract does not say how a limitation actually becomes authority"
 # The OUTCOME, not only the prohibition. Recording the limitation and carrying on
 # is still closing a round on an unproven fixture — the stop is what makes the
 # rule bite, and it was the one clause the previous pair of assertions missed.
-grep -q 'round \*\*stops for the operator\*\*' <<<"$skill_flat" \
+grep -qE '\*\*stop for the operator\*\*' <<<"$skill_flat" \
     && pass "…and the round stops for the operator rather than closing" \
     || die "the contract records an unprovable case but lets the round close anyway"
 
@@ -1253,6 +1272,14 @@ grep -q 'that scope governs \*\*for the copies this PR already changes\*\*' <<<"
 # The flattened text has already collapsed runs of whitespace to single spaces, so
 # a plain space would do; the class is used anyway because the next person to copy
 # this line may not be matching flattened text.
+# THE SELF-CHECK BULLET SPECIFICALLY. The bounded wording appears in the scope
+# rules, so an assertion that merely finds it somewhere in the file stayed green
+# while the self-check thirty lines later still said "search for the same shape
+# everywhere else and fix them together" — the two halves of the contract giving
+# opposite instructions, which is what this whole PR keeps being about.
+grep -qF 'search for the same shape **everywhere else this PR already changes** and fix those together' <<<"$skill_flat" \
+    && pass "the class-wide self-check carries the diff boundary too" \
+    || die "the self-check would have the driver widen the PR into untouched code"
 grep -q 'even[[:space:]]*when the finding names it' <<<"$skill_flat" \
     && pass "…and a named copy outside the diff is still not pulled in" \
     || die "a finding naming an untouched file could still widen the PR"
@@ -1381,7 +1408,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
             ) ;;
         copilot-instructions.md)
             req_clauses=(
-                'Include the input or state that triggers it, the **consequence** in terms of what this tool does'
+                'Include the input or state that triggers it — **the concrete case, not the category**'
+                'the **consequence** in terms of what this tool does'
                 'the author is expected to assert that consequence in a test'
                 'naming any second copy of the same defect **that this PR also changes**'
             ) ;;

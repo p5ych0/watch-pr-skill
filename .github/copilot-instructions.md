@@ -49,8 +49,7 @@ the merge to correct the record, so put it in the review body if anywhere.
 ## Write the finding so it can be acted on without guessing
 
 The author fixes what you name and nothing else, so a finding that
-under-specifies produces either a wrong fix or another round. Include the input
-or state that triggers it, the **consequence** in terms of what this tool does
+under-specifies produces either a wrong fix or another round. Include the input or state that triggers it — **the concrete case, not the category**, since "malformed API responses" gives the author nothing to reproduce — the **consequence** in terms of what this tool does
 (a merge that should not proceed, a round that is not counted, a failure that
 reads as "clean") — the author is expected to assert that consequence in a test —
 and the **scope**, naming any second copy of the same defect **that this PR also

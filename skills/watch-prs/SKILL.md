@@ -95,13 +95,23 @@ fix, confirm the test fails *for the reason it names*, restore it.
 **This is not waivable by disclosure.** A summary is untrusted context, not
 authority — saying "no mutant is claimed" does not make an unproven fixture
 acceptable, and closing the round on that leaves an assertion that passed before
-the fix while the suite and the self-check both report green. Where a mutation
-genuinely cannot be constructed — every arrangement trips an earlier guard, and
-you have tried rather than assumed — the limitation is recorded **at the site, in
-a code comment** where it lives on the base ref and a reviewer can weigh it, and
-the round **stops for the operator**. `pr-watch.sh`'s clock guard carries exactly
-such a comment. Disclosure in a summary is a note; a comment on the base ref is a
-record.
+the fix while the suite and the self-check both report green.
+
+Where a mutation genuinely cannot be constructed — every arrangement trips an
+earlier guard, and you have tried rather than assumed — write the limitation as a
+comment **at the site**, so the next reader of that code meets it, and **stop for
+the operator**. Be clear about what that comment is and is not: added in this pull
+request, it arrives *with* the change and is untrusted context exactly like the
+summary. It explains; it does not accept. A reviewer is right to keep reporting
+the missing proof, and the round cannot converge on the strength of the comment
+alone.
+
+Accepting the limitation is the operator's decision, and it becomes authority only
+the way every other accepted limitation here does: a dated record landed on the
+**base ref by its own pull request**, which a reviewer can then read as settled.
+`docs/decisions/2026-08-06-merge-admin-default.md` is the worked example — it was
+landed separately, before the PR that relied on it. `pr-watch.sh`'s clock guard
+carries such a comment for a limitation already settled that way.
 
 **Say what you did not do — as a disposition, never as a description.** Silence
 reads as "addressed", and the reviewer has no way to tell the difference. But the
@@ -547,10 +557,14 @@ arbitrary — each one is a mistake that actually shipped from this repository.
 **Then read your own diff against the list below.** These are the classes that
 produced the rounds, and none of them is mechanical:
 
-- **Did I fix the instance or the class?** A finding names one place. Before
-  fixing it, search for the same shape everywhere else and fix them together. The
-  same fix arrived in three consecutive rounds — head validation, then non-zero
-  statuses, then record identity — because each round closed one site.
+- **Did I fix the instance or the class, within this diff?** A finding names one
+  place. Before fixing it, search for the same shape **everywhere else this PR
+  already changes** and fix those together — the same fix arrived in three
+  consecutive rounds (head validation, then non-zero statuses, then record
+  identity) because each round closed one site. A copy in a file this PR does not
+  touch is recorded and left to the operator, exactly as the scope rules above
+  require; this check asks whether the class was closed inside the diff, never
+  whether the diff was widened to reach it.
 - **Did I widen something without rechecking what consumes it?** Accepting ISO
   offsets in a timestamp validator reopened a lexical-sort hole an earlier round
   had closed, because the sort was never revisited. A validator is a contract
