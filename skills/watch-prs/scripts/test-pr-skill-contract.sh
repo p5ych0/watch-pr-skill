@@ -1153,11 +1153,29 @@ while IFS= read -r line; do
         ''|'#'*|' '*'#'*) continue ;;
     esac
     findings_stmts=$((findings_stmts + 1))
-    case "$line" in
-        *'"$RB_SCRIPTS"/pr-findings.sh '*) ;;
-        *) findings_bad="$findings_bad
-       $line" ;;
+    # ANCHORED to the whole statement. An unanchored glob only asked that the
+    # permitted call appear SOMEWHERE, so `gh api …; "$RB_SCRIPTS"/pr-findings.sh
+    # list N` satisfied it — a whitelist carrying a blacklist's hole. The statement
+    # is split on `;`: the first command must BE the helper, and every following
+    # segment must be a status capture, which is the only other thing these lines
+    # do.
+    stmt="${line#"${line%%[![:space:]]*}"}"
+    first="${stmt%%;*}"; rest="${stmt#"$first"}"
+    ok=1
+    case "$first" in
+        '"$RB_SCRIPTS"/pr-findings.sh '*) ;;
+        *) ok=0 ;;
     esac
+    while [ -n "$rest" ] && [ "$ok" -eq 1 ]; do
+        rest="${rest#;}"; seg="${rest%%;*}"; rest="${rest#"$seg"}"
+        seg="${seg#"${seg%%[![:space:]]*}"}"; seg="${seg%"${seg##*[![:space:]]}"}"
+        case "$seg" in
+            ''|[A-Za-z_]*'=$?') ;;
+            *) ok=0 ;;
+        esac
+    done
+    [ "$ok" -eq 1 ] || findings_bad="$findings_bad
+       $line"
 done <<<"$findings_code"
 [ "$findings_stmts" -gt 0 ] \
     && pass "the findings-reading section has executable statements to check" \
@@ -1289,7 +1307,7 @@ for doc in "$SKILL" "$SCRIPT_DIR/../../../CLAUDE.md" "$SCRIPT_DIR/../../../READM
     # pattern to catch it would forbid the summary from doing its job.
     dir_rc=0
     grep -qiE \
-        'skipped, and why|summary explains why|explains? why it was (skipped|deferred|left)|and why it was (skipped|deferred|left)|(warranted|broader fix)[^.]{0,60}say so in the summary' \
+        'skipped, and why|summary explains why|explains? why it was (skipped|deferred|left)|and why it was (skipped|deferred|left)|(warranted|broader fix)[^.]{0,60}say so in the summary|(the )?(reason|rationale)[^.]{0,40}(not applied|was skipped|for skipping|it was left)' \
         <<<"$dflat" || dir_rc=$?
     case "$dir_rc" in
         0) die "$dname: still asks the summary to explain something that was not done" ;;
@@ -1323,10 +1341,25 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     grep -qi 'changed code is still[[:space:]]*defective' <<<"$flat" \
         && pass "$name: a wrong reply is a finding only if the code is still DEFECTIVE" \
         || die "$name: would have the reviewer block a merge to correct the record"
-    grep -qi 'consequence' <<<"$flat" \
+    # THE REQUIREMENT, not the field name. Searching for `consequence` passed when
+    # the instruction was reversed to "do not include the triggering input or
+    # consequence" — the words present, the direction inverted. Same
+    # subject-without-outcome defect as the guards above.
+    grep -qiE '(include|name|state)s?[^.]{0,140}consequence' <<<"$flat" \
         && pass "$name: a finding must state its consequence" \
         || die "$name: does not require a finding to state its consequence"
-    grep -qi 'triggering input\|input or state that triggers' <<<"$flat" \
+    # …and must not NEGATE it. "do not include the triggering input or consequence"
+    # contains every word the positive check looks for, which is the same
+    # subject-without-outcome hole in its last form: the verb is there, the
+    # polarity is not.
+    neg_rc=0
+    grep -qiE '(do not|do n.t|never|must not)[^.]{0,40}(include|name|state)[^.]{0,100}(consequence|triggering input|input or state that triggers)' <<<"$flat" || neg_rc=$?
+    case "$neg_rc" in
+        0) die "$name: tells the reviewer NOT to include a finding's required fields" ;;
+        1) pass "…and does not tell the reviewer to omit them" ;;
+        *) die "$name: the negation scan could not be completed (rc=$neg_rc)" ;;
+    esac
+    grep -qiE '(include|name|state)s?[^.]{0,80}(triggering input|input or state that triggers)' <<<"$flat" \
         && pass "$name: a finding must state the input that triggers it" \
         || die "$name: does not require a finding to state its triggering input"
     # DISTINGUISHING text again. Bare `scope` matched several pre-existing uses in
