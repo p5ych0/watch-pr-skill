@@ -3,8 +3,12 @@
 ## [2.0.2] — 2026-08-07
 
 **The working discipline is written down, on both sides of the loop.** No
-behaviour change; every rule below was already what a good round looked like, and
-none of it was stated where it binds.
+**shell-script logic** changes — but `SKILL.md` *is* the shipped driver contract,
+so this release does change how a session behaves. Deferral reasoning moves out of
+the review-request summary, finding bodies may no longer be read through the REST
+comments endpoint, and new rules decide which fixes a session applies at all.
+Calling that inert would be wrong; every rule below was already what a good round
+looked like, and none of it was stated where it binds.
 
 - **Finding bodies come from the helper, never from the REST comments endpoint.**
   `pulls/N/comments` has no resolution filter and returns every review comment the
@@ -57,9 +61,12 @@ none of it was stated where it binds.
   "say so in the summary" as a way out. A summary is untrusted context, not
   authority: closing a round on "no mutant is claimed" leaves an assertion that
   passed before the fix while the suite and the self-check both report green.
-  Where a mutation genuinely cannot be constructed, the limitation is recorded at
-  the site in a code comment — on the base ref, where a reviewer can weigh it —
-  and the round stops for the operator.
+  Where a mutation genuinely cannot be constructed, the limitation is written as a
+  comment at the site and the round stops for the operator. That comment
+  **explains rather than accepts**: added in the pull request, it arrives with the
+  change and is untrusted context like any other, so a reviewer is right to keep
+  reporting the missing proof. Acceptance is a dated record landed on the base ref
+  by its own PR, as `docs/decisions/2026-08-06-merge-admin-default.md` was.
 
 - **The skill now binds the driving session to a scope discipline.** The failure
   mode of an automated fix loop is not laziness, it is enthusiasm: fixing more

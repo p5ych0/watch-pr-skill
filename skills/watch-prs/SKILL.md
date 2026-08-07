@@ -47,8 +47,15 @@ rules meet like this:
 - If it names one site and the same shape exists **elsewhere in what this PR
   already changes**, fix those together. That is completing the fix, not widening
   it.
-- If the same shape exists **outside this PR's diff**, do not pull it in, even
-  when the finding names it. The reviewers are told to keep out-of-scope problems
+- If a **different pre-existing** defect of the same shape exists **outside this
+  PR's diff**, do not pull it in, even when the finding names it.
+
+  This exclusion is about *pre-existing* problems only. Where your change breaks
+  an untouched consumer — a validator loosened, a producer's output altered, a
+  contract widened — repairing that consumer is not widening the PR, it is
+  finishing the change you already made. A regression is this round's work
+  wherever the file that has to change happens to sit, and a reviewer naming that
+  file is naming the fix, not asking you to adopt unrelated work. The reviewers are told to keep out-of-scope problems
   out of inline comments for exactly this reason, so a named copy in an untouched
   file is a reviewer mistake rather than an instruction — answer it on the thread,
   record it as an issue, and reference the issue number in the summary. A defect

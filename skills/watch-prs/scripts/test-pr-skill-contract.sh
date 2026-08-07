@@ -1127,8 +1127,15 @@ findings_code="$(awk '
         while (substr(line, n + 1, 1) == ch) n++
         if (!inb) { inb = 1; fch = ch; fn = n; next }
         if (ch == fch && n >= fn && substr(line, n + 1) ~ /^[[:space:]]*$/) { inb = 0; next }
+        next
     }
-    inb { print }' "$SKILL")" \
+    inb { print; next }
+    # AN INDENTED BLOCK IS ALSO CODE. Markdown treats four spaces at the top level
+    # as a code block, and a fenced helper call elsewhere in the section kept
+    # `findings_code` non-empty — so a recipe hidden in an indented block was
+    # omitted while the whitelist reported clean. It never had to defeat the
+    # check, only to sit outside what the extractor looked at.
+    /^    [^ ]/ { sub(/^    /, ""); print }' "$SKILL")" \
     || die "could not extract the findings-reading section from SKILL.md"
 [ -n "$findings_code" ] \
     || die "the findings-reading section has no executable block; has it moved?"
@@ -1281,8 +1288,16 @@ grep -qF 'search for the same shape **everywhere else this PR already changes** 
     && pass "the class-wide self-check carries the diff boundary too" \
     || die "the self-check would have the driver widen the PR into untouched code"
 grep -q 'even[[:space:]]*when the finding names it' <<<"$skill_flat" \
-    && pass "…and a named copy outside the diff is still not pulled in" \
+    && pass "…and a named PRE-EXISTING copy outside the diff is still not pulled in" \
     || die "a finding naming an untouched file could still widen the PR"
+# …but an untouched file this PR BROKE is not an unrelated problem. A validator
+# loosened or a producer altered can break a consumer the diff never touched, and
+# repairing it finishes the change rather than widening it. Without this the rule
+# told the driver to leave a regression it had just caused, because the file
+# happened to sit outside the diff.
+grep -qF 'repairing that consumer is not widening the PR, it is' <<<"$skill_flat" \
+    && pass "…while repairing a consumer this PR broke stays in scope" \
+    || die "the contract would leave a regression it caused in an untouched file"
 # A REGRESSION THE FIX CAUSED BELONGS TO THIS ROUND. The rule said a different
 # defect found while fixing is "never in scope", which would have the driver defer
 # a defect it had just introduced — part of what this PR changed, and on its way to
@@ -1316,6 +1331,28 @@ grep -qE 'A \*different\* pre-existing defect found while fixing this one is not
 #
 # Scoped to the TOP entry only. Everything below it is history, and a release note
 # has to be able to quote a superseded rule to explain what was fixed.
+# ── the release entry does not teach a rejected account ────────────────────
+# Deliberately NOT the counting machinery — that was split out with the rest of
+# the changelog guards and belongs with them. These two claims are checked here
+# because both were corrected in `SKILL.md` and left stale in `CHANGELOG.md` in
+# the same round, which is the instance-not-class miss this whole change is about.
+cl_202="$(awk -v want='## [2.0.2]' '
+    index($0, want) == 1 { inb = 1; next }
+    /^## \[/ { inb = 0 }
+    inb { print }' "$SCRIPT_DIR/../../../CHANGELOG.md" | tr '\n' ' ' | tr -s ' ')" \
+    || die "could not extract the 2.0.2 CHANGELOG entry"
+[ -n "$cl_202" ] || die "the 2.0.2 CHANGELOG entry is missing or empty"
+grep -qF 'explains rather than accepts' <<<"$cl_202" \
+    && pass "the release entry says the at-the-site comment explains rather than accepts" \
+    || die "the release entry still teaches that an author-created comment is authority"
+cl_inert_rc=0
+grep -qiE 'no behaviour change; every rule' <<<"$cl_202" || cl_inert_rc=$?
+case "$cl_inert_rc" in
+    0) die "the release entry calls a driver-contract change operationally inert" ;;
+    1) pass "…and does not call a driver-contract change operationally inert" ;;
+    *) die "the release-entry scan could not be completed (rc=$cl_inert_rc)" ;;
+esac
+
 grep -q 'disposition, never as a description' "$SKILL" \
     && pass "deferrals are recorded as a disposition, not a description" \
     || die "the contract invites a summary that reads as a work order"
