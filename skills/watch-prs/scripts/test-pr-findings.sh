@@ -10,7 +10,7 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # mandatory pre-push gate.
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-findings.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
 fail=0

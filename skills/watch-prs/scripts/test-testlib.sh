@@ -10,7 +10,7 @@
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
 fail=0
@@ -98,6 +98,62 @@ case "$desc_pid" in
             kill -9 "$desc_pid" 2>/dev/null
             die "the descendant (pid $desc_pid) outlived the watchdog"
         fi ;;
+esac
+
+# ── the scratch directory is validated, not merely requested ──────────────
+# Every test file in this suite used a bare `mktemp -d`. Unchecked, a failure
+# leaves `$TMP` empty, so `$TMP/bin` is `/bin` and `$TMP/broke` is `/broke` — and
+# the EXIT trap that follows runs `rm -rf` over exactly that. In a root-run
+# container that is `rm -rf /bin`. `mktemp` can also print a plausible path and
+# then fail, which command substitution keeps.
+MKD="$TMP/mkd"; mkdir -p "$MKD"
+for b in bash sh sleep date true false kill sed grep printf env cat rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$MKD/$b"
+done
+REAL_MKTEMP="$(command -v mktemp)"
+[ -n "$REAL_MKTEMP" ] || { printf 'FAIL - no mktemp on PATH\n'; echo "RESULT: FAIL"; exit 1; }
+mkd_case() {   # <stub-body> <label> <want: OK|REJECT>
+    printf '#!/usr/bin/env bash\n%s\n' "$1" > "$MKD/mktemp"; chmod +x "$MKD/mktemp"
+    local got
+    got="$(PATH="$MKD" bash -c '. "'"$SELF_DIR"'/testlib.sh"; d="$(mktemp_d)" && echo "OK:$d" || echo REJECT' 2>&1)"
+    case "$3:$got" in
+        REJECT:REJECT) pass "mktemp_d refuses $2" ;;
+        OK:OK:*)       pass "mktemp_d accepts $2" ;;
+        *)             die "mktemp_d on $2 gave '$got' (want $3)" ;;
+    esac
+}
+mkd_case 'exit 1'                              'a failed request'                    REJECT
+mkd_case 'printf "/tmp/plausible-but-unmade\n"; exit 1' \
+                                               'a path printed before failing'       REJECT
+mkd_case 'printf "\n"'                         'an empty path'                       REJECT
+mkd_case 'printf "/\n"'                        'the filesystem root'                 REJECT
+mkd_case 'printf "relative/path\n"'            'a relative path'                     REJECT
+mkd_case 'printf "/tmp/definitely-not-created-%s\n" "$$"' \
+                                               'a path that was never created'       REJECT
+# ABSOLUTE path, resolved before the PATH is reduced. Writing this as
+# `exec env mktemp -d` made the stub re-find ITSELF through the stubbed PATH and
+# recurse without bound — I ran it, and it had to be killed. A stub that shadows
+# a tool must never invoke that tool by name.
+mkd_case "exec '$REAL_MKTEMP' -d"              'a real scratch directory'            OK
+
+# ── a watchdog that cannot set itself up says so distinctly ───────────────
+# The buffer allocation returned 2, which is ALSO a status the bounded command
+# legitimately returns and which several fixtures in this suite assert as their
+# primary expectation — so a watchdog that never ran the subject at all satisfied
+# them. 125 is the distinguished "the watchdog failed", already used by the clock
+# and reader paths.
+MKT="$TMP/mkt"; mkdir -p "$MKT"
+for b in bash sh sleep date true false kill sed grep printf env cat rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$MKT/$b"
+done
+printf '#!/usr/bin/env bash\nexit 1\n' > "$MKT/mktemp"; chmod +x "$MKT/mktemp"
+# The command would exit 2 on its own, so a status-2 setup failure would be
+# indistinguishable from it — that is the whole point of the case.
+out="$(PATH="$MKT" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 5 sh -c "exit 2"; echo "rc=$?"' 2>&1)"
+case "$out" in
+    *"rc=125"*) pass "a watchdog that cannot allocate its buffer returns 125" ;;
+    *"rc=2"*)   die "the setup failure was indistinguishable from the command's own status 2" ;;
+    *)          die "failing mktemp gave '$out' (want rc=125)" ;;
 esac
 
 # ── a command that finishes in time keeps its own status ───────────────────
@@ -277,18 +333,41 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
 }
 bad="$(scan_watchdog_path_misuse "$SELF_DIR")"; scan_rc=$?
 [ "$scan_rc" -eq 0 ] || die "the fixture scan could not be completed (rc=$scan_rc)"
-if [ -z "$bad" ]; then
-    pass "no fixture prefixes an environment onto run_limited itself"
-else
-    die "a fixture puts its environment on the watchdog's PATH, not the subject's:"
-    printf '%s\n%s\n' "$bad" "$bad2" | sed '/^$/d; s/^/       /'
-fi
+# The REPORTING is a function too, so the failure branch can be exercised. It
+# still expanded `$bad2` after that variable's assignment was removed — under
+# `set -u` this file aborts with an unbound-variable error, which means the guard
+# would have died exactly when it found something, never printing the offender it
+# was written to name. The branch nobody runs is the branch that breaks.
+report_watchdog_path_misuse() {   # <dir> ; 0 clean, 1 offenders found, 2 scan failed
+    local dir="$1" found rc
+    found="$(scan_watchdog_path_misuse "$dir")"; rc=$?
+    [ "$rc" -eq 0 ] || return 2
+    found="$(printf '%s' "$found" | sed '/^$/d')"
+    [ -n "$found" ] || return 0
+    printf '%s\n' "$found" | sed 's/^/       /'
+    return 1
+}
+report_watchdog_path_misuse "$SELF_DIR" > "$TMP/misuse.out"; misuse_rc=$?
+case "$misuse_rc" in
+    0) pass "no fixture prefixes an environment onto run_limited itself" ;;
+    1) die "a fixture puts its environment on the watchdog's PATH, not the subject's:"
+       cat "$TMP/misuse.out" ;;
+    *) die "the fixture scan could not be completed (rc=$misuse_rc)" ;;
+esac
 
 # The scan must still SEE a violation, in both shapes — a guard proven only on
 # clean input is a guard proven on nothing.
-SEENTMP="$(mktemp -d)"
+SEENTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-oneline.sh"
 printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" FOO=1 \\\n       run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-split.sh"
+# The whole reporting path, not just the scan: this is the branch that aborted.
+report_watchdog_path_misuse "$SEENTMP" > "$TMP/seen.out"; rep_rc=$?
+[ "$rep_rc" -eq 1 ] \
+    && pass "an offending fixture is reported, not an unbound-variable abort" \
+    || die "the offender branch returned $rep_rc instead of 1"
+grep -q 'test-oneline.sh' "$TMP/seen.out" \
+    && pass "…and the report names the offender" \
+    || die "the offender was not named in the report: $(cat "$TMP/seen.out")"
 seen="$(scan_watchdog_path_misuse "$SEENTMP")"; seen_rc=$?
 [ "$seen_rc" -eq 0 ] || die "the scan failed on the violation fixtures (rc=$seen_rc)"
 printf '%s' "$seen" | grep -q 'test-oneline.sh' \
@@ -300,7 +379,7 @@ printf '%s' "$seen" | grep -q 'test-split.sh' \
 rm -rf "$SEENTMP"
 
 # …and the scan's own failure path, exercised against a fixture it cannot read.
-SCANTMP="$(mktemp -d)"
+SCANTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 printf '#!/usr/bin/env bash\n: \n' > "$SCANTMP/test-unreadable.sh"
 chmod 000 "$SCANTMP/test-unreadable.sh"
 if cat "$SCANTMP/test-unreadable.sh" >/dev/null 2>&1; then

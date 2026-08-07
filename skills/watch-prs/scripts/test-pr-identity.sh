@@ -47,7 +47,7 @@ done
 # invocation aborts the script, which then reports nothing at all.
 idfail=0
 set +e
-IDTMP="$(mktemp -d)"
+IDTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 mkdir -p "$IDTMP/bin"
 REAL_GIT="$(command -v git)"
 cat > "$IDTMP/bin/git" <<GITSH
@@ -103,7 +103,7 @@ done
 # naming no GitHub server, so the failure they cause is not an error — it is
 # every `gh` call landing on the unrelated PUBLIC repository of that name.
 set +e
-SHAPETMP="$(mktemp -d)"
+SHAPETMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 mkdir -p "$SHAPETMP/bin"
 # `gh` records what it was asked to do. The rejection message necessarily quotes
 # the remote, so grepping the OUTPUT for the derived slug matches the diagnostic

@@ -79,6 +79,24 @@ the plugin no longer runs a reviewer of its own.
   treats the push as a triggering command rather than only the mention and
   `--add-reviewer`.
 
+- **Every scratch directory in the suite is validated before anything is written
+  into it.** All thirteen sites used a bare `mktemp -d`. Unchecked, a failure
+  leaves `$TMP` empty, so `$TMP/bin` is `/bin` and `$TMP/broke` is `/broke` — and
+  the EXIT trap then runs `rm -rf` over exactly that, which in a root-run
+  container is `rm -rf /bin`. `mktemp` can also print a plausible path and then
+  fail. `mktemp_d` requires a non-empty absolute path that is not `/` and that
+  exists, the last being what proves the directory was actually created.
+
+- **A watchdog that cannot set itself up returns 125, not 2.** Two is a status the
+  bounded command legitimately returns and that several fixtures assert as their
+  primary expectation, so a broken watchdog satisfied them without ever running
+  the subject.
+
+- **An epoch outside Bash arithmetic is an unreadable clock.** All digits passed
+  the shape test and `t - started` then wrapped: a constant oversized value keeps
+  elapsed time at zero forever, so the watch never reaches its deadline, while one
+  appearing later produces an immediate ordinary timeout the driver re-arms.
+
 - **The portable watchdog reaps descendants, not just the process it started.**
   `run_limited` killed only the leader, so a bounded command with children — the
   `sh -c "sleep 30 & wait"` shape its own suite runs — returned 124 with its

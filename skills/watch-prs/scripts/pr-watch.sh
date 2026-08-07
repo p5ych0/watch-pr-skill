@@ -101,8 +101,15 @@ q() { printf '%q' "$1"; }
 now_s() {
     local t
     t="$(date +%s 2>/dev/null)" || return 1
+    # BOUNDED, not merely all-digit. A value past Bash's integer range wraps
+    # inside `t - started`: a constant oversized epoch keeps elapsed time at zero
+    # forever, so the watch never reaches its deadline, and one appearing later
+    # produces an immediate ordinary timeout — which the driver re-arms as though
+    # the review were merely slow. Both are the clock failing silently, which is
+    # what this function exists to refuse. Eleven digits covers every epoch until
+    # the year 5138 and is far inside the range.
     case "$t" in
-        ""|*[!0-9]*) return 1 ;;
+        ""|*[!0-9]*|???????????*) return 1 ;;
     esac
     printf '%s' "$t"
 }

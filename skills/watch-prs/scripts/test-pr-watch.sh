@@ -11,7 +11,7 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # mandatory pre-push gate.
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-watch.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
 fail=0
@@ -970,6 +970,27 @@ read_pid_marker "$1"' _ "$TMP/pidmarker" 2>&1)"
 [ "$pidout" = 99999 ] \
     && pass "…and accepts a complete one" \
     || die "the marker read rejected a good PID ('$pidout')"
+
+# ── an epoch outside Bash arithmetic is an unreadable clock ────────────────
+# All digits, so the shape test accepted it, and `t - started` then wraps. A
+# CONSTANT oversized value keeps elapsed time at zero forever — the watch never
+# reaches its deadline and the caller waits indefinitely — while one appearing
+# after startup produces an immediate ordinary timeout, which the driver re-arms
+# as though the review were merely slow. Both are the clock failing silently.
+BIGCLOCK="$TMP/bigclock"; mkdir -p "$BIGCLOCK"
+for big in 18446744073709551616 99999999999999999999; do
+    printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$big" > "$BIGCLOCK/date"
+    chmod +x "$BIGCLOCK/date"
+    seq_set none
+    out="$(run_limited 20 env PATH="$BIGCLOCK:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
+           SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+        && pass "an out-of-range epoch ($big) is an unreadable clock, not a deadline" \
+        || die "epoch $big gave rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'state=timeout' \
+        && die "…and it was reported as a timeout the driver would re-arm: $out" \
+        || pass "…and not as an ordinary timeout"
+done
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

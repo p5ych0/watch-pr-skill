@@ -43,8 +43,13 @@ run_limited() {
     # So the child never gets the pipe at all: output goes to a temp file and is
     # printed by THIS shell once the command is done or killed. Nothing the
     # command spawns can hold the capture open, whatever survives.
+    # 125 for a watchdog that could not set itself up — NOT 2. Two is a status the
+    # bounded command legitimately returns and that several fixtures assert as
+    # their primary expectation, so a broken watchdog satisfied them without ever
+    # running the subject. It joins the failed-clock and failed-read paths below,
+    # which already use 125 for exactly this reason.
     local tmp
-    tmp="$(mktemp)" || return 2
+    tmp="$(mktemp 2>/dev/null)" || return 125
     # `exec` the redirections FIRST, inside the subshell, and detach stdin too.
     # Redirecting the job itself still left a window between fork and redirect in
     # which the child held the substitution pipe, and anything it spawned kept
@@ -114,4 +119,31 @@ run_limited() {
     # the same way, so the two paths still read alike.
     [ "$read_rc" -eq 0 ] || return 125
     return "$rc"
+}
+
+# A scratch directory, or the caller stops. Never a bare `mktemp -d`.
+#
+#   dir="$(mktemp_d)" || exit 1
+#
+# `mktemp` can fail — a full or read-only $TMPDIR — and it can print a plausible
+# path before failing. Command substitution keeps both, and an UNCHECKED
+# assignment then leaves the caller with an empty or untrusted `$TMP`: every
+# `$TMP/bin`, `$TMP/broke`, `$TMP/catf` under it resolves to `/bin`, `/broke`,
+# `/catf` instead of inside a fixture, and the EXIT trap that follows runs
+# `rm -rf` over whatever that turned out to be. Every test file in this suite had
+# the bare form, which in a root-run container is a `rm -rf /bin`.
+#
+# So the path is required to be non-empty, absolute, not `/`, and an existing
+# directory — the last one is what proves `mktemp` actually created it rather
+# than merely having printed something.
+mktemp_d() {
+    local d
+    d="$(mktemp -d 2>/dev/null)" || return 1
+    case "$d" in
+        ""|/|/.|/..) return 1 ;;
+        /*) ;;
+        *)  return 1 ;;
+    esac
+    [ -d "$d" ] || return 1
+    printf '%s' "$d"
 }

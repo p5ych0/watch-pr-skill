@@ -17,7 +17,7 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 SCRIPT="$SELF_DIR/pr-merge-range.sh"
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
 fail=0
@@ -180,7 +180,7 @@ run "$BASE" "$ZERO_HEAD"
 # `|| true` discarded the probe's status, so a `git rev-parse` that printed a
 # plausible directory and then failed was indistinguishable from one that
 # worked — and every history check then ran against a tree nothing vouched for.
-MRTMP="$(mktemp -d)"; mkdir -p "$MRTMP/bin"
+MRTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }; mkdir -p "$MRTMP/bin"
 MR_REAL_GIT="$(command -v git)"
 cat > "$MRTMP/bin/git" <<GITSH
 #!/usr/bin/env bash

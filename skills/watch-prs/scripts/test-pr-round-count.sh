@@ -8,8 +8,11 @@
 # skips the pause.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# `mktemp_d`: a bare `mktemp -d` that fails leaves $TMP empty and the cleanup
+# trap then runs `rm -rf` over paths at the filesystem root.
+. "$SELF_DIR/testlib.sh"
 SCRIPT="$SELF_DIR/pr-round-count.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
 fail=0
