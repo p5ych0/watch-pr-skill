@@ -359,9 +359,17 @@ fi
 # well-formed record is for all four helpers at once. A bug in either is a bug
 # everywhere, which is exactly the argument for extracting them and exactly why
 # they cannot be the untested part.
+# …and they are DISCOVERED, not listed. The list named `testlib.sh` and
+# `recordlib.sh`, so `identitylib.sh` — added later, and the file that decides
+# which repository every `gh` call addresses — was outside the gate entirely:
+# deleting `test-identitylib.sh` left this reporting that every shared library has
+# a matching test. A list of the files a rule covers goes stale silently, and
+# silently is the direction that turns a guard into a green tick over nothing.
 untested=0
-for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/testlib.sh "$SCRIPTS"/recordlib.sh; do
+for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/*lib.sh; do
     [ -e "$f" ] || continue
+    # `*lib.sh` also matches `test-testlib.sh`, and a test does not need a test.
+    case "$(basename "$f")" in test-*) continue ;; esac
     b="$(basename "$f" .sh)"
     [ -f "$SCRIPTS/test-$b.sh" ] || { note untested_script "$b.sh has no test-$b.sh"; untested=1; }
 done

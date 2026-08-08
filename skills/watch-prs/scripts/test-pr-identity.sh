@@ -111,6 +111,57 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
     fi
 done
 
+# ── a STALE parser definition does not satisfy the load check ──────────────
+# Bash exports functions through the environment. A caller that had run
+# `export -f rb_identity` leaves one defined in the helper's shell before it
+# sources the library — and a library that is empty, or truncated above the
+# definition, still sources SUCCESSFULLY. The `type -t` guard then finds the
+# inherited function, reports the parser loaded, and every `gh` call is addressed
+# by whatever that stale version derives. The exported stub here derives
+# `someone-else/other-repo`, so the assertion is that no request carries it.
+set +e
+STALETMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$STALETMP/lib" "$STALETMP/bin"
+: > "$STALETMP/lib/identitylib.sh"          # sources cleanly, defines nothing
+cat > "$STALETMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_SPY"
+exit 1
+GHSH
+chmod +x "$STALETMP/bin/gh"
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    case "$sc" in
+        pr-review-state.sh) set -- state 7 somebody ;;
+        pr-findings.sh)     set -- list 7 ;;
+        *)                  set -- 7 ;;
+    esac
+    # The helper is run from a copy whose identitylib.sh is empty, with a stale
+    # `rb_identity` exported into its environment. `recordlib.sh` and the helper
+    # itself are symlinked in, so the ONLY thing this changes is the parser.
+    rm -rf "$STALETMP/run"; mkdir -p "$STALETMP/run"
+    for g in "$ROOT"/*.sh; do ln -sf "$g" "$STALETMP/run/$(basename "$g")"; done
+    ln -sf "$STALETMP/lib/identitylib.sh" "$STALETMP/run/identitylib.sh"
+    : > "$STALETMP/spy"
+    out="$(run_limited 20 env GH_SPY="$STALETMP/spy" PATH="$STALETMP/bin:$PATH" \
+             bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
+                      export -f rb_identity
+                      exec "$1" "${@:2}"' _ "$STALETMP/run/$sc" "$@" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
+        echo "ok   - $sc refuses an empty library even with a parser already defined"
+    else
+        echo "FAIL - $sc accepted an inherited parser (rc=$rc out='$out')"; idfail=1
+    fi
+    if [ -s "$STALETMP/spy" ]; then
+        echo "FAIL - $sc addressed a request from a stale parser: $(tr '\n' ';' < "$STALETMP/spy")"
+        idfail=1
+    else
+        echo "ok   - …and addressed no request with what it derived"
+    fi
+done
+rm -rf "$STALETMP"
+set -e
+
 # ── the origin SHAPE matrix, run against each parser independently ─────────
 # The three scripts and `SKILL.md` each carry their own copy of the identity
 # parser. The hostless and file-transport rules landed in all four, but the only

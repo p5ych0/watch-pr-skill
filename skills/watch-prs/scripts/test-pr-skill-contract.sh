@@ -592,6 +592,16 @@ awk '/^RB_SCRIPTS=/ {r=NR}
     | grep -q ok \
     && pass "…and the helpers are located before the parser is loaded from them" \
     || die "SKILL.md sources identitylib.sh before RB_SCRIPTS is resolved"
+# …and any INHERITED definition is cleared before that source. Bash exports
+# functions through the environment, so a session that had already defined
+# `rb_identity` leaves one here — and an empty or truncated library still sources
+# successfully, at which point the `type -t` guard finds the inherited function,
+# reports the parser loaded, and every call is addressed by whatever it derives.
+awk '/^unset -f rb_identity/ {u=NR}
+     /^\. "\$RB_SCRIPTS\/identitylib\.sh"/ {if (u && u < NR) {print "ok"; exit}}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and a stale parser definition is cleared before the library loads" \
+    || die "an inherited rb_identity would satisfy SKILL.md's parser-load check"
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
     && pass "…and the GraphQL calls pass it explicitly" \
     || die "a graphql call does not pass --hostname"

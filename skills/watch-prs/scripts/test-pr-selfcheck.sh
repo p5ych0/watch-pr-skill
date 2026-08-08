@@ -170,6 +170,34 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a library SKILL.md sources but does not ship is an error" \
     || die "a missing sourced library did not fail closed (rc=$rc out=$out)"
 
+# ── a shared library with no matching test ────────────────────────────────
+# The gate listed the libraries it covered, so `identitylib.sh` — added after that
+# list was written, and the file that decides which repository every `gh` call
+# addresses — sat outside it: deleting its test left the check reporting that
+# every shared library has one. The libraries are discovered now, and this is the
+# fixture that says so.
+LIBTEST_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+RB_SCRIPTS=/tmp/s
+echo "$OWNER/$REPO $RB_SCRIPTS"
+```
+'
+R="$(mkroot "$LIBTEST_SKILL")"
+addscript "$R" widgetlib.sh 'true'
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script.*widgetlib'; } \
+    && pass "a shared library with no matching test is a finding" \
+    || die "an untested library was not reported (rc=$rc out=$out)"
+# …and adding the test clears it, so the finding tracks the missing test rather
+# than the mere presence of a library.
+addtest "$R" test-widgetlib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "…and shipping its test clears the finding" \
+    || die "an untested-library finding survived its test being added (rc=$rc out=$out)"
+
 # ── a helper SKILL.md drives but does not ship ─────────────────────────────
 R="$(mkroot '# skill
 ```bash

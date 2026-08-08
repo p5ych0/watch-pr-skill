@@ -48,6 +48,21 @@ rule can no longer hold in one copy and not another. Issue #18.
   a list goes stale silently; a library named but not readable is an error, since
   an empty set of assignments would reinstate exactly the false findings.
 
+- **An inherited definition no longer satisfies the parser-load check.** Bash
+  exports functions through the environment, so a caller that had run
+  `export -f rb_identity` leaves one defined before the `.` — and a library that
+  is empty or truncated above the definition still sources *successfully*. The
+  `type -t` guard then found the inherited function, reported the parser loaded,
+  and every `gh` call was addressed by whatever that stale version derived. All
+  four callers clear it first, so the check proves what it claims: that **this**
+  library defined it.
+
+- **The matching-test gate discovers the libraries instead of listing them.** The
+  list named `testlib.sh` and `recordlib.sh`, so `identitylib.sh` sat outside the
+  gate entirely and deleting its test left `pr-selfcheck.sh` reporting that every
+  shared library has one. A list of the files a rule covers goes stale silently,
+  and silently is the direction that turns a guard into a green tick over nothing.
+
 - **A branch that had never been exercised now is.** `origin_host_unparseable`
   had no fixture in any of the four copies: a mutant removing the check survived
   the entire suite. An `ssh://` URL with no authority, and an SCP-style remote
