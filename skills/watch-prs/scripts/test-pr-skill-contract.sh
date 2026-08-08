@@ -210,6 +210,27 @@ awk '/^\*\*Automatic review ON\*\*/ {inb=1}
 gate_fn="$(sed -n '/^ci_gate() {/,/^}/p' "$SKILL")"; gate_rc=$?
 [ "$gate_rc" -eq 0 ] && [ -n "$gate_fn" ] \
     || die "the ci_gate function could not be extracted from SKILL.md (rc=$gate_rc)"
+# EVERYTHING IT ASSIGNS IS ITS OWN. `SKILL.md`'s blocks run in the driving
+# session's shell, so a name this function forgets to declare `local` is written
+# into that session — clobbering whatever was there and being clobbered in turn,
+# which for a loop counter or a sleep interval is a bug nobody would look for
+# here. `nap` was such a name.
+#
+# `PR_CI_*` is excluded: those are documented inputs, and the one that appears at
+# the start of a line is a command PREFIX — `PR_CI_PROBE_TIMEOUT="$b" cmd …` — not
+# an assignment to a variable of this function's.
+gate_assigned="$(printf '%s\n' "$gate_fn" \
+    | grep -oE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' | tr -d ' =' | sort -u)" || gate_assigned=""
+gate_local="$(printf '%s\n' "$gate_fn" | grep -E '^[[:space:]]*local ' \
+    | sed -E 's/^[[:space:]]*local //; s/=[^ ]*//g' | tr ' ' '\n' | sort -u)" || gate_local=""
+gate_leaks=""
+for v in $gate_assigned; do
+    case "$v" in PR_CI_*) continue ;; esac
+    printf '%s\n' "$gate_local" | grep -qx "$v" || gate_leaks="$gate_leaks $v"
+done
+[ -z "$gate_leaks" ] \
+    && pass "every name the CI gate assigns is declared local to it" \
+    || die "the CI gate writes into the driving session:$gate_leaks"
 # THE CHILD SKIPS THESE. The cleanup probe further down re-runs this whole file to
 # watch it remove its scratch tree, and these cases are the slow part — every one
 # of them waits on real `sleep`s. Re-running them inside that child doubled the
@@ -1129,7 +1150,10 @@ awk '/^\*\*Automatic review ON\*\*/ {inb=1}
      inb && e && /^(el)?if / {print "conditional"; exit}' "$SKILL" | grep -q '^ok$' \
     && pass "automatic mode requests a review whether or not the push moved the head" \
     || die "the automatic request is conditional again; a no-op push queues nothing"
-grep -q 'could not request the review that carries this round.s summary' "$SKILL" \
+# `-F`, not a `.` standing in for the apostrophe. A wildcard where an exact
+# character belongs matches variants nobody wrote, and the point of asserting a
+# message contract is that the message is that message.
+grep -qF "could not request the review that carries this round's summary" "$SKILL" \
     && pass "…and says what that request is for" \
     || die "the automatic path does not branch on its own request failing"
 

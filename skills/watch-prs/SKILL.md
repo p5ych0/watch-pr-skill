@@ -232,7 +232,7 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 unset -f ci_gate 2>/dev/null \
     || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
 ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
-    local pr="$1" oid="$2" rc elapsed budget stable_rc="" stable_since=0
+    local pr="$1" oid="$2" rc elapsed budget nap stable_rc="" stable_since=0
     local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
     # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
     # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
