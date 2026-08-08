@@ -223,21 +223,51 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 # Defined once and called from both push sites, because two copies of a gate is
 # how one of them comes to be missing a rule the other has.
 #
-# PENDING IS NOT GREEN. The checks start when the push lands, so asking
-# immediately always finds them running; treating that as a pass would close every
-# round before its own CI had said anything, which is the defect with an extra
-# step. It waits, and a wait that never ends is a hang, so it is bounded.
-ci_gate() {   # ci_gate <pr> ; 0 carry on, 1 stop
-    local waited=0 rc iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}"
+# The stale definition is cleared first and the clearing is CHECKED, exactly as
+# for `rb_identity` above: this runs in the driving session's own shell, where an
+# earlier block may have defined `ci_gate`, and `readonly -f` makes the unset fail
+# while leaving the old function installed. A stale gate that returns 0 lets a red
+# head close its round — the defect this whole gate exists to prevent, arriving
+# through the gate itself.
+unset -f ci_gate 2>/dev/null \
+    || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
+ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
+    local pr="$1" oid="$2" waited=0 none_for=0 rc
+    local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
+    # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
+    # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
+    # seconds and leaves `waited` at zero forever, and a non-numeric
+    # `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every iteration — either
+    # one turns the supposedly bounded gate into an unbounded API-polling loop.
+    # Leading zeros are rejected rather than accepted as digits: Bash reads them
+    # as octal in arithmetic, so `08` aborts and `00` is zero.
+    case "$iv" in  ""|0|0*|*[!0-9]*|??????*) iv=30 ;; esac
+    case "$tmo" in ""|0*|*[!0-9]*|??????*)   tmo=1800 ;; esac
+    case "$grace" in ""|0*|*[!0-9]*|??????*) grace=90 ;; esac
     while :; do
-        "$RB_SCRIPTS"/pr-ci-state.sh "$1"; rc=$?
+        # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
+        # number, and the API can still be serving the PREVIOUS head for a moment
+        # after a push — the head confirmation below already retries for exactly
+        # that lag. Asking without the OID meant a green answer about the head
+        # from the round before, which is the last round's answer to this round's
+        # question, and it reads as permission to close.
+        "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
         case "$rc" in
             0) return 0 ;;
-            4) echo "note: no checks are configured; the CI gate has nothing to assert"
-               return 0 ;;
             1) echo "ABORT: the head you just pushed is RED. Fix it and push again; do not close this round."
                return 1 ;;
-            3) ;;   # still running — wait
+            3|5) none_for=0 ;;   # still running, or the API has not caught up yet
+            4) # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a
+               # moment after the head moves, so the first probe after a push
+               # legitimately reports "none" on a repository that does have CI —
+               # and taking that as permission to close reproduces the red-head
+               # closure with an extra step. It has to hold for `grace` seconds
+               # before it is believed.
+               if [ "$none_for" -ge "$grace" ]; then
+                   echo "note: no checks are configured; the CI gate has nothing to assert"
+                   return 0
+               fi
+               none_for=$((none_for + iv)) ;;
             *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
                return 1 ;;
         esac
@@ -253,6 +283,11 @@ ci_gate() {   # ci_gate <pr> ; 0 carry on, 1 stop
         waited=$((waited + iv))
     done
 }
+# …and the definition that ended up installed is the one just written. A `.`-style
+# failure or a surviving readonly copy is caught above; this catches the case
+# where nothing is defined at all.
+[ "$(type -t ci_gate 2>/dev/null)" = function ] \
+    || { echo "ABORT: the CI gate is not defined"; exit 1; }
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
 # inline mangles it. Freshly created per PR and per session, because a reused
@@ -653,11 +688,16 @@ summary and the push is inert:
 # Branched on: if the push fails — auth, a non-fast-forward, a dropped
 # connection — the fixes are not on the PR, and closing the round anyway resolves
 # threads and requests a review of code that was never sent.
+# The SHA this round is pushing, captured before the push and status-checked, so
+# the gate can be asked about this commit rather than about whatever the API
+# currently calls the PR's head.
+HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; do not close or re-request this round."; exit 0; }
 # The checks on what was just pushed, BEFORE anything else in this round. Threads
 # resolved and a summary posted against a red head are a round closed on code that
-# does not build.
-ci_gate N || exit 0
+# does not build — and in this mode nothing has been resolved or posted yet, so a
+# red head leaves the round genuinely open.
+ci_gate N "$HEAD_PUSHED" || exit 0
 # reply + resolve threads here
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
@@ -757,10 +797,29 @@ PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.hea
 [[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the round baseline head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
-# The push has already started the pass here, so this gate does not prevent a
-# review of a red head — it prevents the round being CLOSED as if it had been
-# green, which is what let four red commits accumulate.
-ci_gate N || exit 0
+# WHAT THIS GATE CAN AND CANNOT DO IN THIS MODE, stated rather than implied.
+#
+# With automatic review on, the push IS the request, and everything the reviewer
+# reads has to be in place before it — so by the time the checks can be consulted,
+# the threads are resolved, the summary is posted and the pass has started. This
+# gate cannot unresolve or unpost any of that.
+#
+# Pushing first instead would fix the ordering and cost more than it buys: the
+# triggered pass would then read open threads and no summary, which is the
+# re-reporting this sequence is arranged to prevent, and a second explicit pass to
+# give it the summary would duplicate every finding of the first.
+#
+# So what it does here is stop the LOOP and correct the RECORD. The summary above
+# claims a round that a red head does not support, and a summary left standing
+# unchallenged is what a later reviewer — and the merge gate's author — reads as
+# a green round. Recorded as an issue for the base ref rather than argued in a
+# round summary. The manual path above has no such constraint and gates before
+# anything is closed.
+if ! ci_gate N "$HEAD_BEFORE"; then
+    gh pr comment N --repo $HOST/$OWNER/$REPO --body "**This round is not closed.** The checks on \`$HEAD_BEFORE\` are not green, so the summary above does not describe a round that passed. The next push fixes that head; nothing here should be read as a completed round." \
+        || echo "ABORT: the round is red AND the retraction could not be posted."
+    exit 0
+fi
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }

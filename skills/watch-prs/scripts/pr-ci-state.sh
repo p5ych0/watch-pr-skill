@@ -3,11 +3,14 @@
 #
 #   pr-ci-state.sh <pr> [--required]
 #
-#   0  green   — every check considered passed
-#   1  failed  — at least one failed or was cancelled
-#   3  pending — at least one is still running and none has failed
-#   4  none    — no checks are configured; there is nothing to be green
-#   2  error   — could not be established; fail closed
+#   pr-ci-state.sh <pr> [--required] [--head <oid>]
+#
+#   0  green    — every check considered passed
+#   1  failed   — at least one failed or was cancelled
+#   3  pending  — at least one is still running and none has failed
+#   4  none     — no checks are configured; there is nothing to be green
+#   5  stale    — the PR head is not the OID asked about; ask again shortly
+#   2  error    — could not be established; fail closed
 #
 # WHY THIS EXISTS
 #
@@ -41,6 +44,13 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # See identitylib.sh.
 unset -f rb_identity 2>/dev/null || {
     echo "PR_CI_STATE status=error reason=identitylib_stale_definition" >&2; exit 2; }
+# `sha_reason` — one definition of "a full commit SHA" across the plugin, used
+# below to validate both the OID asked about and the one the API returns.
+# shellcheck source=recordlib.sh
+. "$_RB_SELF_DIR/recordlib.sh" || {
+    echo "PR_CI_STATE status=error reason=recordlib_unreadable" >&2; exit 2; }
+[ "$(type -t sha_reason 2>/dev/null)" = function ] || {
+    echo "PR_CI_STATE status=error reason=recordlib_empty" >&2; exit 2; }
 # shellcheck source=identitylib.sh
 . "$_RB_SELF_DIR/identitylib.sh" || {
     echo "PR_CI_STATE status=error reason=identitylib_unreadable" >&2; exit 2; }
@@ -51,16 +61,46 @@ rb_identity || {
 
 PR="${1:-}"
 case "$PR" in
-    ""|*[!0-9]*) echo "usage: $0 <pr> [--required]" >&2; exit 2 ;;
+    ""|*[!0-9]*) echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2 ;;
 esac
 shift
-REQUIRED=""
+REQUIRED=""; WANT_HEAD=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --required) REQUIRED="--required"; shift ;;
-        *) echo "usage: $0 <pr> [--required]" >&2; exit 2 ;;
+        --head)
+            # A missing value is usage, not something to recover from: `shift 2`
+            # on a one-element list leaves the flag consuming nothing and the
+            # check silently unpinned.
+            [ "$#" -ge 2 ] || { echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2; }
+            WANT_HEAD="$2"; shift 2 ;;
+        *) echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2 ;;
     esac
 done
+if [ -n "$WANT_HEAD" ]; then
+    # THE CHECKS ARE ASKED ABOUT A PR, NOT A COMMIT. `gh pr checks` takes a PR
+    # number and answers about whatever the API currently calls its head — and
+    # for a moment after a push that is still the PREVIOUS head. A green answer
+    # then describes the commit from the round before, which is the last round's
+    # answer to this round's question and reads as permission to close.
+    #
+    # So the head is confirmed first, and a mismatch is its own verdict rather
+    # than an error: the caller's correct response is to wait, not to stop.
+    _reason="$(sha_reason "$WANT_HEAD")" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$WANT_HEAD" >&2; exit 2; }
+    HEAD_NOW="$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid \
+                  --jq '.headRefOid' 2>/dev/null)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable" >&2; exit 2; }
+    # Anything `gh` printed before failing is not data, and the shape is checked
+    # rather than trusted: a partial read that happened to equal the wanted OID
+    # would otherwise unpin the check it was added to pin.
+    _reason="$(sha_reason "$HEAD_NOW")" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$HEAD_NOW" >&2; exit 2; }
+    if [ "$HEAD_NOW" != "$WANT_HEAD" ]; then
+        echo "PR_CI_STATE pr=$PR status=stale head=$HEAD_NOW want=$WANT_HEAD"
+        exit 5
+    fi
+fi
 
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks` exits NON-ZERO when
 # there is nothing to report, saying so on stderr — not because anything failed.
@@ -122,7 +162,21 @@ rm -f "$ERRF" 2>/dev/null
 # or absent, so the status alone does not classify anything — the parsed value
 # does, and the status only matters where there is no value to trust.
 case "$OUT" in
-    green)   echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
+    # GREEN REQUIRES A CLEAN STATUS. `gh` can emit a complete, valid green result
+    # and then exit non-zero because the request failed part-way, and command
+    # substitution keeps what it printed — so the one verdict that opens a gate
+    # was the one being taken on trust. In the merge gate that is an
+    # administrator merge on an untrusted partial response.
+    #
+    # `failed` and `pending` are accepted whatever the status, because both are
+    # directions the caller stops or waits in: a wrong `failed` costs a round, a
+    # wrong `green` costs the gate.
+    green)
+        [ "$RC" -eq 0 ] || {
+            echo "PR_CI_STATE pr=$PR status=error reason=green_from_failed_probe rc=$RC" >&2
+            exit 2
+        }
+        echo "PR_CI_STATE pr=$PR status=green";   exit 0 ;;
     failed)  echo "PR_CI_STATE pr=$PR status=failed";  exit 1 ;;
     pending) echo "PR_CI_STATE pr=$PR status=pending"; exit 3 ;;
 esac

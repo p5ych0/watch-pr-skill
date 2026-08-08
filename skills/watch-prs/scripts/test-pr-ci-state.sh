@@ -167,6 +167,74 @@ grep -qF -- '--required' "$TMP/args" \
     && pass "…while --required is passed through for the merge gate" \
     || die "--required was dropped: $(cat "$TMP/args")"
 
+# ── green is only green from a probe that SUCCEEDED ────────────────────────
+# `gh` can emit a complete, valid green result and then exit non-zero because the
+# request failed part-way, and command substitution keeps what it printed. Green
+# is the one verdict that opens a gate, so it is the one that may not be taken on
+# trust — in the merge gate that is an administrator merge on an untrusted partial
+# response. `failed` and `pending` are accepted whatever the status, because both
+# are directions the caller stops or waits in.
+case_is green   '' 1 2 error   'green from a probe that then failed is an error'
+case_is failed  '' 0 1 failed  'a failure verdict is trusted whatever the status'
+case_is pending '' 0 3 pending 'a pending verdict is trusted whatever the status'
+
+# ── the checks are asked about a COMMIT, not just a PR ─────────────────────
+# `gh pr checks` is addressed by PR number and answers about whatever the API
+# currently calls the head — and for a moment after a push that is still the
+# PREVIOUS head. A green answer then describes the commit from the round before:
+# the last round's answer to this round's question, and it reads as permission to
+# close. A mismatch is its own verdict, because the caller's correct response is
+# to wait rather than to stop.
+WANT=0123456789abcdef0123456789abcdef01234567
+OTHER=fedcba9876543210fedcba9876543210fedcba98
+mkgh_head() {   # mkgh_head <headRefOid> <checks verdict>
+    printf '%s' "$1" > "$TMP/head"
+    printf '%s' "$2" > "$TMP/gh.out"
+    printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
+    cat > "$TMP/bin/gh" <<GHSH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$TMP/args"
+case "\$2" in
+    view) cat "$TMP/head" ;;
+    *)    cat "$TMP/gh.out" ;;
+esac
+exit 0
+GHSH
+    chmod +x "$TMP/bin/gh"
+}
+mkgh_head "$WANT" green
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 0 ] && grep -qF 'status=green' <<<"${got#*|}"; } \
+    && pass "the checks are read when the PR head is the OID asked about" \
+    || die "a matching head was not accepted ('$got')"
+mkgh_head "$OTHER" green
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 5 ] && grep -qF 'status=stale' <<<"${got#*|}"; } \
+    && pass "…and a head the API has not caught up with is stale, not green" \
+    || die "a green answer about a different head was accepted ('$got')"
+# …and the checks were never asked. Reporting stale while still consulting the
+# previous head's result leaves the wrong answer available to anything that reads
+# stdout rather than the status.
+grep -q 'checks' "$TMP/args" \
+    && die "the checks were read for a head that does not match: $(cat "$TMP/args")" \
+    || pass "…without reading the checks of the head it found"
+# A head that is not a full OID is an error either way round: one the caller
+# supplied, and one `gh` printed before failing.
+mkgh_head "$WANT" green
+got="$(run 7 --head not-a-sha)"
+[ "${got%%|*}" = 2 ] \
+    && pass "an OID the caller supplied is shape-checked" \
+    || die "a malformed --head value was accepted ('$got')"
+mkgh_head 'deadbeef' green
+got="$(run 7 --head "$WANT")"
+[ "${got%%|*}" = 2 ] \
+    && pass "…and so is the one the API returned" \
+    || die "a malformed head from the API was accepted ('$got')"
+got="$(run 7 --head)"
+[ "${got%%|*}" = 2 ] \
+    && pass "…and --head with no value is usage, not an unpinned check" \
+    || die "--head with no value silently unpinned the check ('$got')"
+
 # ── usage, and an identity that cannot be derived ──────────────────────────
 for bad in '' abc 7x --required; do
     got="$(run "$bad")"; rc="${got%%|*}"

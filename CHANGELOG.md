@@ -27,6 +27,44 @@ operator had to point at the checks tab. Issue #16.
   extra step. The gate waits, and because a wait that never ends is a hang, it is
   bounded by `PR_CI_TIMEOUT` (default 1800s, polled every `PR_CI_INTERVAL`).
 
+- **The gate is asked about the commit it pushed, not about the PR.**
+  `gh pr checks` is addressed by PR number and answers about whatever the API
+  currently calls the head — and for a moment after a push that is still the
+  *previous* head. A green answer then describes the commit from the round
+  before: the last round's answer to this round's question, and it reads as
+  permission to close. `--head <oid>` reports `stale` for that, and the gate waits.
+
+- **Green requires a probe that succeeded.** `gh` can emit a complete, valid green
+  result and then exit non-zero because the request failed part-way, and command
+  substitution keeps what it printed. Green is the one verdict that opens a gate,
+  so it is the one that may not be taken on trust — in the merge gate that is an
+  administrator merge on an untrusted partial response.
+
+- **"No checks yet" is not "no checks".** A workflow run is registered a moment
+  after the head moves, so the first probe after a push legitimately reports
+  `none` on a repository that does have CI. Taking that as permission to close
+  reproduces the red-head closure with an extra step, so it has to hold for
+  `PR_CI_GRACE` seconds before it is believed.
+
+- **The polling bounds are validated.** `PR_CI_INTERVAL=0` sleeps zero seconds and
+  leaves the elapsed count at zero forever; a non-numeric `PR_CI_TIMEOUT` makes
+  the comparison fail on every iteration. Either one turns the supposedly bounded
+  gate into an unbounded API-polling loop, so both fall back to their defaults.
+
+- **A stale `ci_gate` cannot satisfy the gate.** It runs in the driving session's
+  own shell, where `readonly -f` makes a redefinition fail while leaving the old
+  function installed — and a stale gate that returns 0 lets a red head close its
+  round, the defect arriving through the gate itself. Cleared and checked, exactly
+  as `rb_identity` is.
+
+- **What the gate cannot do in automatic-review mode is stated.** There the push
+  *is* the request, so by the time the checks can be consulted the threads are
+  resolved and the summary posted. Pushing first would fix the ordering and cost
+  more than it buys — the triggered pass would read open threads and no summary.
+  So it stops the loop and posts an explicit retraction, rather than leaving a
+  summary standing that claims a round a red head does not support. The manual
+  path has no such constraint and gates before anything is closed.
+
 - **An unrecognised bucket is malformed, not benign.** `pass` and `skipping` are
   green, `fail` and `cancel` are failures, `pending` is pending — and anything
   else is an error rather than falling through a catch-all, which is the shape

@@ -140,19 +140,43 @@ grep -q '^ci_gate() {' "$SKILL" \
 # EVERY push site calls it. One that does not is a round closed on an unknown
 # state, and the two sites exist precisely because the ordering differs — which is
 # how one of them comes to be missing a step the other has.
-pushes="$(grep -c '^git push ||' "$SKILL")"
-gates="$(grep -c '^ci_gate N || exit 0' "$SKILL")"
+# `|| …=0`: `grep -c` exits 1 when nothing matches, and this file runs under `-e`,
+# so an unguarded count terminated the suite at the first call-form change instead
+# of reporting the mismatch it exists to report.
+pushes="$(grep -c '^git push ||' "$SKILL")" || pushes=0
+gates="$(grep -cE '^(if ! )?ci_gate N ' "$SKILL")" || gates=0
 [ "${pushes:-0}" -gt 0 ] && [ "$gates" = "$pushes" ] \
     && pass "…and every push site passes through it ($gates/$pushes)" \
     || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
+# …AND IT IS ASKED ABOUT THE COMMIT THIS ROUND PUSHED. `gh pr checks` is addressed
+# by PR number and the API can still be serving the previous head for a moment
+# after a push, so an unpinned call can return the previous round's green as this
+# round's answer. Every call site passes an OID.
+oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$HEAD_[A-Z]+"' "$SKILL")" || oid_gates=0
+[ "$oid_gates" = "$gates" ] \
+    && pass "…naming the pushed OID, not just the PR" \
+    || die "$((gates - oid_gates)) CI gate call(s) do not pin the head they ask about"
 # …AFTER the push and BEFORE the review is requested. Asking before the push reads
 # the previous head's result, which is the last round's answer to this round's
 # question; asking after the request means the pass is already running.
 awk '/^git push \|\|/ {p=NR}
-     /^ci_gate N \|\| exit 0/ {if (p && p < NR) g=NR}
+     /^(if ! )?ci_gate N "\$HEAD_/ {if (p && p < NR) g=NR}
      /gh pr comment N/ {if (g && g < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "…between the push and the request, so it answers about this head" \
     || die "the CI gate does not sit between the push and the review request"
+# THE MANUAL PATH GATES BEFORE ANYTHING IS CLOSED. Where the mention is the
+# trigger, nothing has been resolved or posted when the gate runs, so a red head
+# leaves the round genuinely open — that ordering is the whole value and it is the
+# one a later edit would most easily invert.
+awk '/^ci_gate N "\$HEAD_PUSHED"/ {g=NR}
+     g && /^SUMMARY="\$\(cat "\$SUMMARY_FILE"\)"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "…and in the manual path it precedes the summary, so a red round stays open" \
+    || die "the manual path posts its summary before knowing whether the head is green"
+# The automatic path cannot: the push IS the request there, so the summary must
+# already be posted. What it must not do is leave that summary standing unchallenged.
+grep -q 'This round is not closed' "$SKILL" \
+    && pass "…and the automatic path retracts a summary its head does not support" \
+    || die "a red head in the automatic path leaves a summary claiming a passed round"
 # PENDING IS NOT GREEN — AND THE GATE IS RUN TO PROVE IT. The checks start when
 # the push lands, so an immediate ask always finds them running; treating that as a
 # pass closes every round before its own CI has said anything, which is the
@@ -178,27 +202,32 @@ if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
 rc="$(head -1 "$GATE_Q")"
 tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
 echo "call" >> "$GATE_CALLS"
-# An EXHAUSTED queue answers "pending" forever, so the timeout case is stopped by
-# the bound and by nothing else. Defaulting to an error ended that case through the
-# unreadable-state branch instead, and an unbounded wait passed it.
+# An EXHAUSTED queue REPEATS ITS LAST ANSWER, which is what a real check state
+# does — it does not change into something else because the fixture ran out of
+# script. A fixed default of "pending" made the `none` grace case unreachable: the
+# single `4` was followed by `3`s, the grace counter reset every poll, and a
+# repository that genuinely has no checks could never close a round.
+if [ -n "$rc" ]; then printf '%s\n' "$rc" > "$GATE_LAST"; else rc="$(cat "$GATE_LAST" 2>/dev/null)"; fi
 exit "${rc:-3}"
 STUBSH
     chmod +x "$GATETMP/s/pr-ci-state.sh"
-    gate_case() {   # gate_case <queue> <want rc> <want calls> <label>
-        local out rc=0 calls
-        printf '%s\n' "$1" > "$GATETMP/q"; : > "$GATETMP/calls"
+    gate_case() {   # gate_case <queue> <want rc> <want calls> <label> [env…]
+        local out rc=0 calls q="$1" want="$2" mincalls="$3" label="$4"
+        shift 4
+        printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
+        : > "$GATETMP/last"
         out="$(run_limited 60 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
-            RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 \
+            GATE_LAST="$GATETMP/last" \
+            RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
             bash -c "$gate_fn"'
-                ci_gate 7' 2>&1)" || rc=$?
+                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
         calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
-        { [ "$rc" = "$2" ] && [ "${calls:-0}" -ge "$3" ]; } \
-            && pass "$4" \
-            || die "$4 — rc=$rc calls=$calls out='$out' (wanted $2 / >=$3 calls)"
+        { [ "$rc" = "$want" ] && [ "${calls:-0}" -ge "$mincalls" ]; } \
+            && pass "$label" \
+            || die "$label — rc=$rc calls=$calls out='$out' (wanted $want / >=$mincalls calls)"
     }
     gate_case '0'     0 1 "a green head lets the round close"
     gate_case '1'     1 1 "a red head stops the round"
-    gate_case '4'     0 1 "a repository with no checks has nothing to assert"
     gate_case '2'     1 1 "an unreadable check state stops the round"
     # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
     gate_case '3
@@ -207,6 +236,53 @@ STUBSH
     # …and the wait is bounded, because a wait that never ends is a hang. The queue
     # runs out and the stub then answers 3 forever.
     gate_case '3'         1 2 "…and stops once the checks have not settled in time"
+    # A HEAD THE API HAS NOT CAUGHT UP WITH IS NOT AN ANSWER. `gh pr checks` is
+    # addressed by PR number and can serve the previous head for a moment after a
+    # push; the helper reports 5 for it and the gate waits, because the correct
+    # response to "ask again shortly" is not to stop and is certainly not to close.
+    gate_case '5
+5
+0'                    0 3 "a head the API has not caught up with is waited on"
+    # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a moment after
+    # the head moves, so the first probe after a push legitimately reports `none` on
+    # a repository that does have CI. Taking that as permission to close reproduces
+    # the red-head closure with an extra step.
+    gate_case '4
+4
+3
+1'                    1 4 "a transient 'none' followed by a real failure still stops the round"
+    # …and a repository that genuinely has no checks is not blocked forever: once
+    # `none` has held for the grace period it is believed.
+    gate_case '4'         0 2 "a repository with no checks has nothing to assert, once that is stable"
+    # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
+    # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
+    # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
+    # comparison fail on every iteration. Both fall back to the default, which the
+    # watchdog would otherwise have to kill — so `rc=124` here is a failure.
+    # A BAD BOUND MUST NOT BECOME AN UNBOUNDED POLLING LOOP. `PR_CI_INTERVAL=0`
+    # sleeps zero seconds and leaves the elapsed count at zero forever; a
+    # non-numeric `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every
+    # iteration. Both fall back to the defaults, and what that is observable as is
+    # PACING: with the fallback interval the gate manages a couple of polls in the
+    # window below, and without it, hundreds. The exit status cannot be the
+    # assertion — falling back to a thirty-minute timeout is the CORRECT
+    # behaviour, so the watchdog stopping the run is expected, not a failure.
+    gate_spin() {   # gate_spin <max calls> <label> [env…]
+        local out rc=0 calls maxc="$1" label="$2"
+        shift 2
+        printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
+        out="$(run_limited 12 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+            GATE_LAST="$GATETMP/last" RB_SCRIPTS="$GATETMP/s" "$@" \
+            bash -c "$gate_fn"'
+                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
+        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
+        [ "${calls:-0}" -le "$maxc" ] \
+            && pass "$label" \
+            || die "$label — $calls polls in 12s (at most $maxc); the bound was not applied"
+    }
+    gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
+    gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
+    gate_spin 4 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
     rm -rf "$GATETMP"
 fi
 
@@ -729,18 +805,46 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # `-e`, and the probe is EXPECTED to fail — that is the assertion — so an
     # unguarded assignment terminates the suite here instead of asserting anything.
     setup_rc=0
-    setup_out="$(cd "$SETUPTMP/repo" && run_limited 60 env CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
-        bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
-                 readonly -f rb_identity
-                 eval "$1"
-                 echo "CONTINUED:$OWNER"' _ "$setup_block" 2>&1)" || setup_rc=$?
-    case "$setup_out" in
-        *CONTINUED*) die "the driver continued past a parser it could not clear ($setup_out)" ;;
-        *) pass "…and a definition that cannot be cleared stops the driver" ;;
-    esac
-    [ "$setup_rc" -ne 0 ] \
-        && pass "…reporting a failure rather than an abort message alone" \
-        || die "the setup block refused the parser but exited 0 (out='$setup_out')"
+    # EVERY function the setup block defines for itself, not just the parser. A
+    # stale `ci_gate` that returns 0 lets a red head close its round — the defect
+    # the gate exists to prevent, arriving through the gate itself — and it is
+    # reachable in exactly the persistent-shell state the parser is cleared for.
+    # EACH CASE GETS THE LIBRARY IT NEEDS, AND MUST ABORT FOR ITS OWN REASON.
+    #
+    # Written with one shared empty `identitylib.sh`, the `ci_gate` case passed
+    # while proving nothing: the block aborted at the empty parser, long before it
+    # reached the gate, and "the driver stopped" was true for a reason that had
+    # nothing to do with what was being tested. So the parser case gets an empty
+    # library and the gate case gets the real one — and the expected abort message
+    # is asserted, so a stop for some other reason cannot be mistaken for this one
+    # again.
+    for stale_case in 'rb_identity:empty:could not be cleared' \
+                      'ci_gate:real:a pre-existing ci_gate could not be cleared'; do
+        stale_fn="${stale_case%%:*}"; stale_rest="${stale_case#*:}"
+        stale_lib="${stale_rest%%:*}"; stale_msg="${stale_rest#*:}"
+        if [ "$stale_lib" = empty ]; then
+            : > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+        else
+            cat "$SCRIPT_DIR/identitylib.sh" \
+                > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+        fi
+        setup_rc=0
+        setup_out="$(cd "$SETUPTMP/repo" && run_limited 60 env CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
+            bash -c 'eval "$1() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }"
+                     readonly -f "$1"
+                     eval "$2"
+                     echo "CONTINUED:$OWNER"' _ "$stale_fn" "$setup_block" 2>&1)" || setup_rc=$?
+        case "$setup_out" in
+            *CONTINUED*) die "the driver continued past a $stale_fn it could not clear ($setup_out)" ;;
+            *) pass "…and a $stale_fn that cannot be cleared stops the driver" ;;
+        esac
+        grep -qF "$stale_msg" <<<"$setup_out" \
+            && pass "…stopping for that reason and not another" \
+            || die "$stale_fn stopped the driver, but not as '$stale_msg' (out='$setup_out')"
+        [ "$setup_rc" -ne 0 ] \
+            && pass "…reporting a failure rather than an abort message alone" \
+            || die "the setup block refused $stale_fn but exited 0 (out='$setup_out')"
+    done
     rm -rf "$SETUPTMP"
 fi
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \

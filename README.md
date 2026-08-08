@@ -272,6 +272,7 @@ settings.
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
+| `PR_CI_GRACE` | `90` | how long "no checks configured" must hold before it is believed, since a run is registered a moment after the head moves |
 
 ### The pushed head has to be green
 
