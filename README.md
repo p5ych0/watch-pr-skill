@@ -275,6 +275,7 @@ settings.
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
 | `PR_CI_GRACE` | `90` | how long a round-closing verdict must hold before it is believed, since a workflow run is registered a moment after the head moves |
+| `PR_CI_PROBE_TIMEOUT` | `60` | per-request bound on each `gh` call the check probe makes, so a hung connection cannot outlast the gate's own timeout |
 
 ### The pushed head has to be green
 

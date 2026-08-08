@@ -97,6 +97,25 @@ operator had to point at the checks tab. Issue #16.
   round, the defect arriving through the gate itself. Cleared and checked, exactly
   as `rb_identity` is.
 
+- **Every path that accepts a head has seen its checks, not only the paths that
+  pushed.** The gate lived at the two push sites, and a PR whose reviews were
+  clean from the start never pushes anything — so it went through both phases and
+  into a merge gate that reads only *required* checks, which a failing optional
+  one is not. The phase transition and the merge gate run the all-checks gate too.
+
+- **Each probe is bounded.** A `gh` call that hangs on a dead connection never
+  returns, and `PR_CI_TIMEOUT` is then not a bound at all: the gate cannot reach
+  its own deadline check. Every request runs under `PR_CI_PROBE_TIMEOUT` through
+  the portable watchdog, which makes `testlib.sh` a runtime dependency rather than
+  a second copy of ninety tested lines.
+
+- **The review baseline is taken after the push, not before it.** In automatic
+  mode the push starts a pass that can *finish* during the CI wait — the gate
+  waits for checks, and a Codex pass on a small diff can be quicker. A baseline
+  captured before the push accepted that early pass as the answer to the request
+  made after it, so the loop could advance to Copilot, or to the merge gate, while
+  the summary-aware pass was still running.
+
 - **An unrecognised bucket is malformed, not benign.** `pass` and `skipping` are
   green, `fail` and `cancel` are failures, `pending` is pending — and anything
   else is an error rather than falling through a catch-all, which is the shape

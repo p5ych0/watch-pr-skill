@@ -143,18 +143,30 @@ grep -q '^ci_gate() {' "$SKILL" \
 # `|| …=0`: `grep -c` exits 1 when nothing matches, and this file runs under `-e`,
 # so an unguarded count terminated the suite at the first call-form change instead
 # of reporting the mismatch it exists to report.
+# EVERY push site, and every other point that accepts a head. A PR whose reviews
+# were clean from the start never pushes anything, so gating only the push sites
+# left it never checked at all — through both phases and into a merge gate that
+# looks at REQUIRED checks only, which a failing optional one is not.
 pushes="$(grep -c '^git push ||' "$SKILL")" || pushes=0
 gates="$(grep -cE '^(if ! )?ci_gate N ' "$SKILL")" || gates=0
-[ "${pushes:-0}" -gt 0 ] && [ "$gates" = "$pushes" ] \
-    && pass "…and every push site passes through it ($gates/$pushes)" \
+[ "${pushes:-0}" -gt 0 ] && [ "$gates" -ge "$pushes" ] \
+    && pass "…and every push site passes through it ($gates gates, $pushes pushes)" \
     || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
-# …AND IT IS ASKED ABOUT THE COMMIT THIS ROUND PUSHED. `gh pr checks` is addressed
-# by PR number and the API can still be serving the previous head for a moment
-# after a push, so an unpinned call can return the previous round's green as this
-# round's answer. Every call site passes an OID.
-oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$HEAD_[A-Z]+"' "$SKILL")" || oid_gates=0
+# The two paths that accept a verdict WITHOUT a push: the Codex→Copilot phase
+# transition, and the merge gate. Named individually, because a count alone is
+# satisfied by two gates on the same site.
+grep -q '^ci_gate N "\$CODEX_SHA"' "$SKILL" \
+    && pass "…and a clean verdict does not open the Copilot phase unchecked" \
+    || die "a PR that never pushed can enter the Copilot phase with a red head"
+grep -q '^ci_gate N "\$HEAD_OID"' "$SKILL" \
+    && pass "…nor reach the merge with only its required checks read" \
+    || die "the merge gate reads only required checks; a failing optional one passes"
+# …AND EVERY ONE IS ASKED ABOUT A COMMIT. `gh pr checks` is addressed by PR number
+# and the API can still be serving the previous head for a moment after a push, so
+# an unpinned call can return the previous round's green as this round's answer.
+oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
 [ "$oid_gates" = "$gates" ] \
-    && pass "…naming the pushed OID, not just the PR" \
+    && pass "…naming an OID, not just the PR ($oid_gates/$gates)" \
     || die "$((gates - oid_gates)) CI gate call(s) do not pin the head they ask about"
 # …AFTER the push and BEFORE the review is requested. Asking before the push reads
 # the previous head's result, which is the last round's answer to this round's
@@ -1081,6 +1093,38 @@ awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1}
      w && /^else$/ {print "outside"; exit}' <<<"$auto_block" | grep -q '^ok$' \
     && pass "…in the Copilot branch, because the Codex mention carries it instead" \
     || die "the standalone summary post is not the Copilot branch's"
+# ── the review baseline is taken AFTER the push ───────────────────────────
+# In automatic mode the push starts a pass that can FINISH during the CI wait —
+# the gate waits for checks, and a Codex pass on a small diff can be quicker. A
+# baseline captured before the push then accepts that early pass as the answer to
+# the request made after it, and the loop can advance to Copilot, or to the merge
+# gate, while the summary-aware pass is still running.
+[ "$(grep -c 'PRIOR_REVIEW=' <<<"$auto_block")" -ge 1 ] \
+    && pass "the automatic path takes a review baseline before its request" \
+    || die "the automatic path requests a review with no baseline to tell passes apart"
+awk '/^git push \|\|/ {p=NR}
+     p && /PRIOR_REVIEW=/ {print "ok"; exit}
+     !p && /PRIOR_REVIEW=/ {print "early"; exit}' <<<"$auto_block" | grep -q '^ok$' \
+    && pass "…taken after the push, so the pass the push started cannot answer it" \
+    || die "the automatic baseline predates the push; an early pass satisfies the request"
+# IN EACH BRANCH, not once anywhere. The two requests are made in different
+# branches, so a single baseline satisfies a count and an ordering check while the
+# other branch requests a review with nothing to tell the passes apart — which is
+# exactly what removing the Codex one leaves behind.
+for br in copilot codex; do
+    case "$br" in
+        copilot) got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {b=1; next}
+                             b && /^else$/ {exit}
+                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
+        *)       got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
+                             w && /^else$/ {b=1; next}
+                             b && /@codex review/ {exit}
+                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
+    esac
+    [ "$got" = ok ] \
+        && pass "…and the $br branch takes its own, before its own request" \
+        || die "the $br branch requests a review with no baseline of its own"
+done
 # The stale-baseline defect is gone by construction rather than by refreshing:
 # with the request unconditional there is no comparison for a stale baseline to
 # make false. What replaced it has to stay stated, or the next reader restores the

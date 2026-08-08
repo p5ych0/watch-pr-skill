@@ -44,6 +44,20 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # See identitylib.sh.
 unset -f rb_identity 2>/dev/null || {
     echo "PR_CI_STATE status=error reason=identitylib_stale_definition" >&2; exit 2; }
+# `run_limited` — the portable watchdog. A `gh` call that hangs on a dead
+# connection never returns, and the caller's `PR_CI_TIMEOUT` is then not a bound at
+# all: the round gate waits forever on a probe that is the thing being bounded.
+# Stock macOS ships no GNU `timeout`, which is why this is a shared helper rather
+# than a one-line wrapper.
+#
+# `testlib.sh` is the fixture watchdog by history and is a runtime dependency now.
+# The alternative was a second copy of ninety lines that already exist and are
+# already tested, which is the duplication issues #11 and #18 were opened for.
+# shellcheck source=testlib.sh
+. "$_RB_SELF_DIR/testlib.sh" || {
+    echo "PR_CI_STATE status=error reason=testlib_unreadable" >&2; exit 2; }
+[ "$(type -t run_limited 2>/dev/null)" = function ] || {
+    echo "PR_CI_STATE status=error reason=testlib_empty" >&2; exit 2; }
 # `sha_reason` — one definition of "a full commit SHA" across the plugin, used
 # below to validate both the OID asked about and the one the API returns.
 # shellcheck source=recordlib.sh
@@ -64,7 +78,11 @@ case "$PR" in
     ""|*[!0-9]*) echo "usage: $0 <pr> [--required] [--head <oid>]" >&2; exit 2 ;;
 esac
 shift
-REQUIRED=""; WANT_HEAD=""
+REQUIRED=""; WANT_HEAD=""; DEADLINE="${PR_CI_PROBE_TIMEOUT:-60}"
+# A malformed bound falls back to the default rather than removing the watchdog:
+# a typo must not turn a bounded probe into an unbounded one. Leading zeros are
+# rejected because Bash reads them as octal in arithmetic.
+case "$DEADLINE" in ""|0|0*|*[!0-9]*|??????*) DEADLINE=60 ;; esac
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --required) REQUIRED="--required"; shift ;;
@@ -88,8 +106,8 @@ if [ -n "$WANT_HEAD" ]; then
     # than an error: the caller's correct response is to wait, not to stop.
     _reason="$(sha_reason "$WANT_HEAD")" || {
         echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$WANT_HEAD" >&2; exit 2; }
-    HEAD_NOW="$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid \
-                  --jq '.headRefOid' 2>/dev/null)" || {
+    HEAD_NOW="$(run_limited "$DEADLINE" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
+                  --json headRefOid --jq '.headRefOid' 2>/dev/null)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable" >&2; exit 2; }
     # Anything `gh` printed before failing is not data, and the shape is checked
     # rather than trusted: a partial read that happened to equal the wanted OID
@@ -146,7 +164,7 @@ ERRF="$(mktemp 2>/dev/null)" || {
 # that reached `dismissed` through a catch-all and drove a review loop. See
 # recordlib.sh.
 RC=0
-OUT="$(gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
+OUT="$(run_limited "$DEADLINE" gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
          --jq 'if type != "array" or length == 0 then "malformed"
                elif any(.[]; type != "object" or (.bucket | type) != "string") then "malformed"
                elif any(.[]; .bucket | IN("fail","cancel")) then "failed"
@@ -176,8 +194,8 @@ rm -f "$ERRF" 2>/dev/null
 # bounds it to the moment rather than to the whole checks request, and any movement
 # is reported as `stale`, which the caller waits on and which resets the grace.
 if [ -n "$WANT_HEAD" ]; then
-    HEAD_AFTER="$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid \
-                    --jq '.headRefOid' 2>/dev/null)" || {
+    HEAD_AFTER="$(run_limited "$DEADLINE" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
+                    --json headRefOid --jq '.headRefOid' 2>/dev/null)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable_after" >&2; exit 2; }
     _reason="$(sha_reason "$HEAD_AFTER")" || {
         echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$HEAD_AFTER" >&2; exit 2; }

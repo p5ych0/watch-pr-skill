@@ -805,11 +805,13 @@ what is *irreversible*:
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-# The authoritative review id BEFORE the request, so the watch can tell the new
-# pass from the old one on an unchanged head. Empty is a legitimate answer (no
-# review yet); only a failed read is fatal.
-PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+# NO REVIEW BASELINE IS TAKEN HERE. It used to be, and the push that follows can
+# start a pass that FINISHES during the CI wait — the gate waits for checks, and a
+# Codex pass on a small diff can be quicker. A baseline captured before the push
+# then accepts that early pass as the answer to the request made after it, and the
+# loop can advance to Copilot, or to the merge gate, while the summary-aware pass
+# is still running. The baseline is taken immediately before the explicit request
+# instead, so whatever the push started is already behind it.
 
 # The push is the trigger — but ONLY when it moves the head. A round that ends
 # without a new commit (a dismissal, or a finding answered rather than coded
@@ -884,6 +886,9 @@ fi
 # head skipped `--add-reviewer` entirely, and the watch waited past the old
 # Copilot result for a pass nobody had asked for.
 if [ "$WHO" = "$COPILOT_BOT" ]; then
+    # Same baseline rule, taken before this branch's own request.
+    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
     # Copilot's request carries no body, so the summary is its own comment — and
     # it comes FIRST, because `--add-reviewer` starts the pass and the contract
     # says the summary is there to be read before the diff.
@@ -894,6 +899,12 @@ if [ "$WHO" = "$COPILOT_BOT" ]; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
 else
+    # THE BASELINE IS TAKEN HERE, after the push-triggered pass has had its chance
+    # to land, so `--after-review` cannot mistake it for the answer to this
+    # request. Empty is a legitimate answer (no review yet); only a failed read is
+    # fatal.
+    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
     # Codex is asked EXPLICITLY, in this mode too, and the mention CARRIES the
     # summary — one comment, one round.
     #
@@ -1044,6 +1055,13 @@ fi
 if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
 fi
+# THE CHECKS ON THAT HEAD, TOO. The CI gate lives at the two push sites in step 5,
+# and a PR whose first review is clean never enters step 5 at all — so a head with
+# a failing check could pass through both phases untouched, and the merge gate
+# looks only at REQUIRED checks, which a failing optional one is not. Every path
+# that accepts a verdict as phase-completing has to have seen the checks, not just
+# the paths that pushed something.
+ci_gate N "$CODEX_SHA" || exit 0
 
 # THE SUMMARY GOES FIRST, and its post is branched on.
 #
@@ -1349,6 +1367,17 @@ while :; do
   CURSOR="$NEXT"
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
+
+# (3b) EVERY check on the head being merged, not only the required ones.
+#
+# The round loop's gate lives at the push sites, and a PR whose reviews were clean
+# from the start never pushed anything — so nothing had looked at its checks by
+# the time it arrived here, and the required-checks probe below is blind to a
+# failing OPTIONAL check. A repository with no branch protection has no required
+# checks at all, which makes that probe blind to everything.
+#
+# The same gate, on the head the merge is pinned to.
+ci_gate N "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 0; }
 
 # (4) Required checks green — through the same helper the round loop uses.
 #

@@ -25,6 +25,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is — one definition, sourced by every helper that reads the API. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
+| `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. A fixture helper by history; `pr-ci-state.sh` bounds its `gh` calls with it, so it ships at runtime too. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog the fixtures run under. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |

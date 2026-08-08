@@ -257,6 +257,44 @@ got="$(run 7 --head)"
     && pass "…and --head with no value is usage, not an unpinned check" \
     || die "--head with no value silently unpinned the check ('$got')"
 
+# ── a probe that hangs is stopped, not waited on ───────────────────────────
+# A `gh` call that never returns on a dead connection makes the CALLER's timeout
+# meaningless: the round gate cannot reach its own deadline check, so the
+# documented bound is not a bound and both round-closing paths hang. Each probe
+# runs under its own watchdog.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nsleep 300\n' "$TMP/args" > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+hang_rc=0
+hang_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=2 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)" || hang_rc=$?
+# 124 is the fixture's OWN watchdog killing the run — which is the failure, not
+# the result: it means the script never stopped by itself.
+{ [ "$hang_rc" -eq 2 ] && grep -q 'status=error' <<<"$hang_out"; } \
+    && pass "a probe that hangs is stopped by the script's own watchdog" \
+    || die "a hung probe was waited on (rc=$hang_rc '$hang_out')"
+# …and the same holds for the head lookup, which is a separate call.
+: > "$TMP/args"
+hang_rc=0
+hang_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=2 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 \
+    --head 0123456789abcdef0123456789abcdef01234567 2>&1)" || hang_rc=$?
+{ [ "$hang_rc" -eq 2 ] && grep -q 'reason=head_unreadable' <<<"$hang_out"; } \
+    && pass "…including the head lookup that precedes it" \
+    || die "a hung head lookup was waited on (rc=$hang_rc '$hang_out')"
+# A malformed bound falls back to the default rather than removing the watchdog.
+for bad in 0 '' notanumber 007; do
+    : > "$TMP/args"
+    b_rc=0
+    b_out="$(run_limited 20 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT="$bad" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)" || b_rc=$?
+    # The default is 60s and the fixture's watchdog is 20s, so being killed at 20
+    # is the CORRECT outcome here: it proves the bad value did not become the
+    # bound. An immediate return would mean the value was used.
+    [ "$b_rc" -eq 124 ] \
+        && pass "PR_CI_PROBE_TIMEOUT='$bad' falls back rather than becoming the bound" \
+        || die "PR_CI_PROBE_TIMEOUT='$bad' was used as the bound (rc=$b_rc)"
+done
+
 # ── usage, and an identity that cannot be derived ──────────────────────────
 for bad in '' abc 7x --required; do
     got="$(run "$bad")"; rc="${got%%|*}"
