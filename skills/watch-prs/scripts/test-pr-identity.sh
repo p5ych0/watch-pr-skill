@@ -28,6 +28,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-watch.sh
         "$ROOT"/pr-selfcheck.sh
         "$ROOT"/identitylib.sh
+        "$ROOT"/loadlib.sh
         "$ROOT"/recordlib.sh
         "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
@@ -195,28 +196,146 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
     || { echo "FAIL - the unchecked form did not reproduce the defect ('$mech2')"; idfail=1; }
 # EVERY caller branches on it. The mechanism above is about Bash; this is about
 # whether the four files that clear the parser actually take the status.
-# Positively, not as the absence of one spelling: `|| true` forbidden by name is a
-# blacklist, and `|| :` or no handler at all walks straight through it. The unset
-# has to be JOINED to a branch that exits. Continuations are flattened first,
-# since the branch sits on the following line.
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
+# THE RULE MOVED, SO THE ASSERTION FOLLOWS IT. Each script used to write the
+# clear-source-verify sequence out for itself, and this checked that each one
+# branched on its own `unset`. They call `rb_load` now, so what has to hold is
+# that they call it — and that `rb_load` is the thing that takes the status.
+# Checking the scripts for an `unset` they no longer contain would pass by
+# vacuity, which is the failure mode this file exists to avoid.
+# `pr-watch.sh` is in this list too. It loads `recordlib.sh` rather than the
+# identity parser, so the identity clause skips it — but the BOOTSTRAP rule is
+# about loading anything at all, and `pr-watch.sh` is the caller the invariant was
+# written to cover and did not: it sourced `recordlib.sh` by hand, without
+# clearing `is_full_sha`, while CLAUDE.md said every helper went through the
+# loader. An invariant is only as true as its least-checked caller.
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-watch.sh; do
     [ -f "$ROOT/$sc" ] || continue
-    # The branch must EXIT, and `{` is not evidence that it does — accepting the
-    # brace let `|| { :; }` through, which is the handler emptied and the defect
-    # back. The unset line is joined with the two that follow it, because the
-    # branch is a brace group across lines rather than a backslash continuation,
-    # and the joined text has to carry both the `||` and the exit.
-    coupled="$(awk '
-        /unset -f rb_identity/ { j = $0; n = 2; next }
+    if [ "$sc" = pr-watch.sh ]; then
+        # It loads `recordlib.sh`, not the parser — the message says which, because
+        # a fixture that reports the wrong thing passing is how a gap hides.
+        if grep -q 'rb_load "\$_RB_SELF_DIR" recordlib is_full_sha' "$ROOT/$sc"; then
+            echo "ok   - $sc loads the shape rules through the shared loader"
+        else
+            echo "FAIL - $sc loads recordlib some other way"; idfail=1
+        fi
+    elif grep -q 'rb_load "\$_RB_SELF_DIR" identitylib rb_identity' "$ROOT/$sc"; then
+        echo "ok   - $sc loads the identity parser through the shared loader"
+    else
+        echo "FAIL - $sc loads identitylib some other way"; idfail=1
+    fi
+    # …and nowhere writes the sequence out again. A copy re-introduced beside the
+    # call is how the four copies happened the first time.
+    # NOT ANCHORED AT COLUMN ONE. The source line was matched with `^\.`, so a
+    # re-introduced load indented by so much as one space — inside an `if`, or
+    # simply reformatted — walked past the guard and the duplication came back
+    # with the check still green. Leading whitespace is allowed, and `source` is
+    # matched as well as `.`: the rule is about loading a library by hand, not
+    # about which of the two spellings was used.
+    if grep -qE 'unset -f (rb_identity|is_full_sha|sha_reason|run_limited)' "$ROOT/$sc" \
+       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh' "$ROOT/$sc"; then
+        echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
+    else
+        echo "ok   - …and carries no second copy of the loading rule"
+    fi
+    # THE BOOTSTRAP OBEYS THE RULE TOO. The loader cannot load itself, so those
+    # lines are written out — and that is not a licence to load it carelessly. An
+    # exported `rb_load` plus an empty `loadlib.sh` leaves a STALE LOADER doing
+    # the clearing and verifying for every other library, which is the one way to
+    # make every subsequent load look clean.
+    bs="$(awk '
+        /unset -f rb_load/ { j = $0; n = 2; next }
         n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
     ' "$ROOT/$sc" | grep -cE '\|\|.*exit 2')"
-    if [ "${coupled:-0}" -ge 1 ]; then
-        echo "ok   - $sc couples the unset to a failing load branch"
+    if [ "${bs:-0}" -ge 1 ]; then
+        echo "ok   - …and clears the loader itself, with the status taken"
     else
-        echo "FAIL - $sc does not branch on the unset status"; idfail=1
+        echo "FAIL - $sc sources loadlib.sh over whatever it inherited"; idfail=1
     fi
 done
+# The loader is where the clearing and its status now live, and it is joined to a
+# branch that returns. Read positively: forbidding one spelling is a blacklist.
+coupled="$(awk '
+    /unset -f "\$sym"/ { j = $0; n = 2; next }
+    n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
+' "$ROOT/loadlib.sh" | grep -cE '\|\|.*return 2')"
+if [ "${coupled:-0}" -ge 1 ]; then
+    echo "ok   - the loader couples the clear to a failing load branch"
+else
+    echo "FAIL - the loader does not branch on the unset status"; idfail=1
+fi
 rm -rf "$STALETMP"
+set -e
+
+# ── EVERY bootstrap, at the outcome level ──────────────────────────────────
+# The structural check above recognises each caller's `unset` branch, and
+# `pr-ci-state.sh` is exercised end-to-end — which leaves the other four bootstraps
+# with no evidence of what they DO when the loader is stale. They are duplicated
+# code by necessity (a helper cannot load the file that defines it), and
+# duplicated code needs duplicated coverage: that is the comment this file already
+# carries about the identity parser, and it applies to its own bootstrap.
+#
+# The state is the dangerous one: an exported PERMISSIVE `rb_load` that returns 0
+# without loading anything, plus an empty `loadlib.sh`. Every library after it is
+# then unloaded and unchecked.
+set +e
+BSTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$BSTMP/bin" "$BSTMP/run"
+cat > "$BSTMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_SPY"
+exit 1
+GHSH
+chmod +x "$BSTMP/bin/gh"
+for g in "$ROOT"/*.sh; do ln -sf "$g" "$BSTMP/run/$(basename "$g")"; done
+rm -f "$BSTMP/run/loadlib.sh"; : > "$BSTMP/run/loadlib.sh"
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-watch.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    case "$sc" in
+        pr-review-state.sh) set -- state 7 somebody ;;
+        pr-findings.sh)     set -- list 7 ;;
+        pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
+        *)                  set -- 7 ;;
+    esac
+    : > "$BSTMP/spy"
+    bs_out="$(run_limited 20 env GH_SPY="$BSTMP/spy" PATH="$BSTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        bash -c 'rb_load() { return 0; }
+                 export -f rb_load
+                 exec "$1" "${@:2}"' _ "$BSTMP/run/$sc" "$@" 2>&1)"; bs_rc=$?
+    if [ "$bs_rc" -eq 2 ] && printf '%s' "$bs_out" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc refuses an empty loader even with rb_load already defined"
+    else
+        echo "FAIL - $sc accepted an inherited loader (rc=$bs_rc out='$bs_out')"; idfail=1
+    fi
+    # THE CALLER'S OWN SENTINEL, because that is what its consumers branch on: a
+    # refusal addressed as somebody else's is a failure nobody is listening for.
+    case "$sc" in
+        pr-watch.sh) bs_want='PR_REVIEW_WATCH state=error' ;;
+        pr-review-state.sh) bs_want='PR_REVIEW_STATE status=error' ;;
+        pr-findings.sh) bs_want='PR_FINDINGS status=error' ;;
+        pr-round-count.sh) bs_want='PR_ROUND_COUNT status=error' ;;
+        *) bs_want='PR_CI_STATE status=error' ;;
+    esac
+    if printf '%s' "$bs_out" | grep -qF "$bs_want"; then
+        echo "ok   - …addressed in its own words"
+    else
+        echo "FAIL - $sc did not report as '$bs_want' (out='$bs_out')"; idfail=1
+    fi
+    # …and the consequence: nothing was asked, and nothing was reported ready. An
+    # rc-only assertion passes on a script that acted first and failed afterwards.
+    if [ -s "$BSTMP/spy" ]; then
+        echo "FAIL - $sc addressed a request after a failed load: $(tr '\n' ';' < "$BSTMP/spy")"
+        idfail=1
+    else
+        echo "ok   - …and addressed no request"
+    fi
+    if printf '%s' "$bs_out" | grep -q 'PR_REVIEW_READY'; then
+        echo "FAIL - $sc reported a verdict ready after a failed load"; idfail=1
+    else
+        echo "ok   - …and reported nothing ready"
+    fi
+done
+rm -rf "$BSTMP"
 set -e
 
 # ── the origin SHAPE matrix, run against each parser independently ─────────

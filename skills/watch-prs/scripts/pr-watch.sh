@@ -27,11 +27,21 @@ set -uo pipefail
 # own jq copy. See recordlib.sh and issue #11.
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_REVIEW_WATCH state=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# shellcheck source=recordlib.sh
-. "$_RB_SELF_DIR/recordlib.sh" || {
-    echo "PR_REVIEW_WATCH state=error reason=recordlib_unreadable" >&2; exit 2; }
-command -v is_full_sha >/dev/null 2>&1 || {
-    echo "PR_REVIEW_WATCH state=error reason=recordlib_incomplete" >&2; exit 2; }
+# The library loader — and it obeys its own rule. A helper cannot load the file
+# that defines it, so this sequence is written out here; an exported `rb_load`
+# survives into this shell and an empty `loadlib.sh` still sources successfully,
+# so without the clear the type check accepts the inherited function — and a stale
+# loader is the one thing that can make every OTHER load look clean. See
+# loadlib.sh and issue #22.
+unset -f rb_load 2>/dev/null || {
+    echo "PR_REVIEW_WATCH state=error reason=loadlib_stale_definition" >&2; exit 2; }
+. "$_RB_SELF_DIR/loadlib.sh" || {
+    echo "PR_REVIEW_WATCH state=error reason=loadlib_unreadable" >&2; exit 2; }
+[ "$(type -t rb_load 2>/dev/null)" = function ] || {
+    echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2; exit 2; }
+# `state=` rather than `status=`, which is this script's own sentinel shape — the
+# loader takes the prefix precisely so each caller keeps its own.
+rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"

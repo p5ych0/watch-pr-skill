@@ -1090,5 +1090,50 @@ printf '%s' "$out" | grep -q 'clock_unreadable' \
     && die "a monotonically advancing clock was rejected: $out" \
     || pass "…and a clock that only advances is accepted"
 
+# ── AN INHERITED VALIDATOR DOES NOT MAKE A LOADED LIBRARY ──────────────────
+# The shape rules are what stand between a configured `PR_WATCH_STATE_SCRIPT` and
+# this script trusting its output. Sourced by hand, an exported `is_full_sha` plus
+# an EMPTY `recordlib.sh` passed the old `command -v` check — a permissive stale
+# validator admitting malformed output, and the watch reporting PR_REVIEW_READY on
+# a verdict nothing validated.
+#
+# Asserted at the WATCH LEVEL, not only as the shape of the source lines. The
+# loader has its own tests and `test-pr-identity.sh` checks the wiring, but
+# neither says what this script DOES in that state — and "it stops" is the claim
+# that matters here. The stub validator returns 0 for everything, which is what a
+# permissive one looks like.
+IVTMP="$TMP/inherit"; mkdir -p "$IVTMP"
+for g in "$SELF_DIR"/*.sh; do ln -sf "$g" "$IVTMP/$(basename "$g")"; done
+rm -f "$IVTMP/recordlib.sh"; : > "$IVTMP/recordlib.sh"
+# A state script whose output is malformed in the one way the validator exists to
+# catch: a `sha=` that is not a full OID.
+cat > "$TMP/loose.sh" <<'LOOSESH'
+#!/usr/bin/env bash
+case "$1" in
+    head) printf 'not-a-sha
+' ;;
+    *)    echo "PR_REVIEW_STATE pr=7 sha=not-a-sha reviewer=x state=reviewed verdict=clean findings=0" ;;
+esac
+exit 0
+LOOSESH
+chmod +x "$TMP/loose.sh"
+iv_rc=0
+iv_out="$(run_limited 20 env PR_WATCH_STATE_SCRIPT="$TMP/loose.sh" \
+    bash -c 'is_full_sha() { return 0; }
+             export -f is_full_sha
+             exec "$1" 7 "$2" --interval 1 --timeout 3' _ "$IVTMP/pr-watch.sh" "$BOT" 2>&1)" || iv_rc=$?
+[ "$iv_rc" -eq 2 ] \
+    && pass "an empty recordlib is refused even with is_full_sha already defined" \
+    || die "the watch ran with an inherited validator (rc=$iv_rc out='$iv_out')"
+# The CONSEQUENCE, not just the status: nothing may have been reported ready. An
+# rc-only assertion passes on a watch that emitted READY and then failed for some
+# other reason on its way out.
+printf '%s' "$iv_out" | grep -q 'PR_REVIEW_READY' \
+    && die "the watch reported READY on output an inherited validator accepted" \
+    || pass "…and nothing was reported ready"
+printf '%s' "$iv_out" | grep -q 'reason=recordlib_empty' \
+    && pass "…and it says which library failed to load" \
+    || die "the refusal does not name the library (out='$iv_out')"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -30,11 +30,20 @@ set -uo pipefail
 # is an error per call rather than a clear refusal here.
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_ROUND_COUNT status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# shellcheck source=recordlib.sh
-. "$_RB_SELF_DIR/recordlib.sh" || {
-    echo "PR_ROUND_COUNT status=error reason=recordlib_unreadable" >&2; exit 2; }
-[ -n "${RECORDLIB_JQ:-}" ] || {
-    echo "PR_ROUND_COUNT status=error reason=recordlib_empty" >&2; exit 2; }
+# The library loader — and it obeys its own rule. A helper cannot load the file
+# that defines it, so this sequence is written out here; that asymmetry is
+# irreducible, but it is not a licence to load the loader carelessly. An exported
+# `rb_load` survives into this shell and an empty `loadlib.sh` still sources
+# successfully, so without the clear the type check below accepts the inherited
+# function — and a stale loader is the one thing that can make every OTHER load
+# look clean. See loadlib.sh and issue #22.
+unset -f rb_load 2>/dev/null || {
+    echo "PR_ROUND_COUNT status=error reason=loadlib_stale_definition" >&2; exit 2; }
+. "$_RB_SELF_DIR/loadlib.sh" || {
+    echo "PR_ROUND_COUNT status=error reason=loadlib_unreadable" >&2; exit 2; }
+[ "$(type -t rb_load 2>/dev/null)" = function ] || {
+    echo "PR_ROUND_COUNT status=error reason=loadlib_empty" >&2; exit 2; }
+rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ "PR_ROUND_COUNT status=error" var || exit 2
 
 THRESHOLD="${REVIEW_ROUND_THRESHOLD:-10}"
 # A malformed threshold falls back to the default rather than disabling the
@@ -81,13 +90,7 @@ esac
 # existed. An `unset -f` of a name that is not defined returns 0, so the only
 # thing a non-zero status here means is that a definition survived — which is the
 # one condition this line exists to rule out.
-unset -f rb_identity 2>/dev/null || {
-    echo "PR_ROUND_COUNT status=error reason=identitylib_stale_definition" >&2; exit 2; }
-# shellcheck source=identitylib.sh
-. "$_RB_SELF_DIR/identitylib.sh" || {
-    echo "PR_ROUND_COUNT status=error reason=identitylib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_identity 2>/dev/null)" = function ] || {
-    echo "PR_ROUND_COUNT status=error reason=identitylib_empty" >&2; exit 2; }
+rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_ROUND_COUNT status=error" || exit 2
 rb_identity || {
     echo "PR_ROUND_COUNT status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"

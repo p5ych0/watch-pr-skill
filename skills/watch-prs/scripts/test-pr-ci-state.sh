@@ -400,7 +400,13 @@ done
 # loaded: a stale watchdog without the kill behaviour lets a hung `gh` outlive
 # every bound this script advertises. The same holds for `sha_reason`.
 mkgh green '' 0
-for lib_case in 'testlib.sh:run_limited:testlib_empty' 'recordlib.sh:sha_reason:recordlib_empty'; do
+# `loadlib.sh` is in this list because the LOADER obeys its own rule. A stale
+# loader is the one that can make every other load look clean: it is what clears
+# and verifies the rest, so an inherited one satisfying its own check leaves every
+# library after it unchecked.
+for lib_case in 'loadlib.sh:rb_load:loadlib_empty' \
+                'testlib.sh:run_limited:testlib_empty' \
+                'recordlib.sh:sha_reason:recordlib_empty'; do
     lib="${lib_case%%:*}"; rest="${lib_case#*:}"
     fn="${rest%%:*}"; want="${rest##*:}"
     rm -rf "$TMP/run"; mkdir -p "$TMP/run"
