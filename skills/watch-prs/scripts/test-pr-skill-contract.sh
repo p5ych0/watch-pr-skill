@@ -10,6 +10,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$SCRIPT_DIR/../SKILL.md"
 ROOT="$SCRIPT_DIR/../../.."
+# The shared fixture helpers. This was the one test file in the suite that never
+# sourced them, and it was the one still holding a bare `mktemp -d`.
+. "$SCRIPT_DIR/testlib.sh"
 
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
@@ -1348,19 +1351,76 @@ grep -q 'A \*different\* pre-existing defect' <<<"$skill_flat" \
 grep -qE 'A \*different\* pre-existing defect found while fixing this one is not in scope' <<<"$skill_flat" \
     && pass "…and that defect is stated to be OUT of scope" \
     || die "the contract does not state the out-of-scope outcome"
-# …and the CURRENT release entry must not describe these rules the old way. Four
-# stale copies have now been found in it, so the check is negative — the wrong
-# forms must be ABSENT — rather than positive: asserting that a qualified form
-# appears somewhere is satisfied by one occurrence while another sits unqualified
-# two paragraphs down, which is exactly how the last two survived.
+# ── the SIGPIPE hazard these scans avoid, demonstrated ────────────────────
+# Every scan in this file uses a herestring rather than `printf | grep`. This is
+# the fixture that shows why, and it was held back from the documentation PR
+# because it tests THIS FILE's idiom rather than anything the contract says.
 #
-# Scoped to the TOP entry only. Everything below it is history, and a release note
-# has to be able to quote a superseded rule to explain what was fixed.
+# With `pipefail` on, `grep -q` exits at the first match and the producer takes
+# SIGPIPE, so the pipeline reports the match as ABSENT — the fail-open direction,
+# where a guard reports clean exactly when it should fire.
+#
+# MEASURED, and the measurement bounds the claim: the race needs the match on an
+# early LINE with more lines behind it, so `grep` can exit before draining the
+# writer. Multi-line input reproduces it 5 runs out of 5; single-line input 0 out
+# of 5 at the same size, because `grep` must read the whole line before it can
+# match at all. The flattened variables here are single-line by construction, so
+# the pipeline form was not losing matches — the herestring removes the class
+# rather than relying on an invariant one edit could break.
+#
+# The construction reports separately from the result: `set -uo pipefail` has no
+# `-e`, so a failing `head`/`base64` would leave `multi` holding just "EARLYMATCH"
+# and both forms would match it, reporting success having built nothing. Exit 9 is
+# reserved for that.
+sigpipe_probe='set -uo pipefail
+    body="$(head -c 300000 /dev/urandom | base64)" || exit 9
+    [ "${#body}" -ge 200000 ] || exit 9
+    case "$body" in *"
+"*) ;; *) exit 9 ;; esac
+    multi="EARLYMATCH
+$body"'
+# PIPESTATUS, not the aggregate: on a runner where SIGPIPE is ignored `printf`
+# receives EPIPE and returns 1 rather than dying with 141 — the same phenomenon,
+# a different number — and a check accepting only 141 failed CI for four commits.
+# The producer losing while the consumer MATCHED is the race, whatever the
+# platform reports; a consumer that failed is something else and is not proof.
+#   0 no race · 9 unbuildable · 20 producer lost, consumer matched · 21 consumer failed
+sigpipe_rc=0
+bash -c "$sigpipe_probe"'
+    printf "%s" "$multi" | grep -q EARLYMATCH
+    rcs=("${PIPESTATUS[@]}")
+    prod=${rcs[0]}; cons=${rcs[1]}
+    [ "$cons" -eq 0 ] || exit 21
+    [ "$prod" -eq 0 ] && exit 0
+    exit 20' || sigpipe_rc=$?
+case "$sigpipe_rc" in
+    9)  die "the SIGPIPE probe could not be built; this case proves nothing" ;;
+    0)  pass "SKIPPED: the producer pipeline did not race on this platform" ;;
+    20) pass "a producer pipeline loses an early match under pipefail, on multi-line input" ;;
+    21) die "the probe consumer failed; the race was not what this case observed" ;;
+    *)  die "the SIGPIPE probe returned an unexpected status ($sigpipe_rc)" ;;
+esac
+here_rc=0
+bash -c "$sigpipe_probe"'
+    grep -q EARLYMATCH <<<"$multi"' || here_rc=$?
+case "$here_rc" in
+    9) die "the SIGPIPE probe could not be built; the herestring case proves nothing" ;;
+    0) pass "…and the herestring form finds it, which is why these scans use it" ;;
+    *) die "the herestring form lost an early match; every scan here is unsafe" ;;
+esac
+
 # ── the release entry does not teach a rejected account ────────────────────
-# Deliberately NOT the counting machinery — that was split out with the rest of
-# the changelog guards and belongs with them. These two claims are checked here
-# because both were corrected in `SKILL.md` and left stale in `CHANGELOG.md` in
-# the same round, which is the instance-not-class miss this whole change is about.
+# The counting machinery, held back from the documentation PR and restored here.
+# Four stale claims were found in this one entry across three rounds, and the
+# reason each survived was the same: a check for the PRESENCE of a qualified form
+# is satisfied by whichever mention still carries it, while another states the
+# rule the old way two paragraphs down.
+# PINNED to the entry that introduced these rules, not to whichever is on top: the
+# next release prepends its own, every count below would then find zero claims in
+# it, and this suite would fail while the 2.0.2 documentation stayed correct. A
+# guard that breaks on the next release is a guard that gets deleted rather than
+# fixed. Everything below that entry is history, and a release note has to be able
+# to quote a superseded rule to explain what was fixed.
 cl_202="$(awk -v want='## [2.0.2]' '
     index($0, want) == 1 { inb = 1; next }
     /^## \[/ { inb = 0 }
@@ -1370,12 +1430,323 @@ cl_202="$(awk -v want='## [2.0.2]' '
 # …and the scope account must carry the regression exception, which the entry
 # contradicted after SKILL.md gained it — the same instance-not-class miss, one
 # file over, for the second round running.
-grep -qF 'repairing a consumer a changed validator or producer breaks is finishing the change' <<<"$cl_202" \
-    && pass "the release entry keeps the regression exception to the scope rule" \
-    || die "the release entry would have a reader reject a required regression repair"
-grep -qF 'explains rather than accepts' <<<"$cl_202" \
-    && pass "the release entry says the at-the-site comment explains rather than accepts" \
-    || die "the release entry still teaches that an author-created comment is authority"
+# No-match is a count of ZERO, not a failed command: under this file's `-e` a grep
+# that matches nothing exits 1, and the assignment took the whole suite down —
+# so deleting a claim entirely terminated the run instead of reaching the branch
+# that names it. A real grep error (status > 1) is still a failure.
+count_claims() {   # count_claims <pattern> <text> ; prints the count, 2 on error
+    local out rc=0
+    out="$(grep -oiE "$1" <<<"$2")" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) printf '0'; return 0 ;;
+        *) return 2 ;;
+    esac
+    # COUNTED IN THE SHELL, with no pipeline and no external command. `wc` or `tr`
+    # can emit a plausible number and then exit non-zero, and
+    # `printf "%s" "$( … | wc -l | tr -d ' ')"` swallowed that status — a failed
+    # parse returning success with a bogus count, which is the "a call that printed
+    # before failing is not data" rule one layer in.
+    #
+    # Guarding that status would have worked only because this file sets
+    # `pipefail`: without it the pipeline reports `tr`'s success and the failure is
+    # invisible again. Counting here removes the failure mode instead of detecting
+    # it, and cannot be reintroduced by copying the function somewhere with
+    # different shell options.
+    local n=0 _line
+    while IFS= read -r _line; do n=$((n + 1)); done <<<"$out"
+    printf '%s' "$n"
+}
+# EVERY mention must carry the qualifier, so the two counts have to match. A
+# presence check passed while one of two bullets had lost it — the "somewhere in
+# the file" weakness reproduced inside a single entry.
+cl_count() {   # cl_count <claim-pattern> <qualified-pattern> <label>
+    local total qualified
+    total="$(count_claims "$1" "$cl_202")" \
+        || { die "the claim scan failed for: $3"; return 0; }
+    qualified="$(count_claims "$2" "$cl_202")" \
+        || { die "the qualifier scan failed for: $3"; return 0; }
+    [ "$total" -gt 0 ] || { die "the release entry no longer states: $3"; return 0; }
+    [ "$total" = "$qualified" ] \
+        && pass "every mention in the release entry is qualified: $3 ($qualified/$total)" \
+        || die "the release entry states $3 unqualified in $((total - qualified)) of $total places"
+}
+# The scratch directory for the fixtures below — through the VALIDATED helper,
+# and stopping rather than recording.
+#
+# This was a bare `mktemp -d` guarded by `die`, and `die` RETURNS 0: it records a
+# failure and lets the file carry on. So a full or read-only $TMPDIR left
+# `TMP_CL` empty, `CNTB` below became `/bin`, and the `mkdir -p` and `ln -sf`
+# that build the fixture wrote symlinks over the system binaries they were meant
+# to be shadowing inside a scratch tree.
+#
+# `die` is right for an assertion — every remaining check should still run — and
+# wrong here, because everything after this point dereferences the path. And a
+# status check alone is not enough: `mktemp` can print a plausible path and then
+# fail, or print one it never created, and command substitution keeps the output
+# either way. `mktemp_d` is the definition of "a path that was actually created".
+TMP_CL="$(mktemp_d)" || {
+    die "no scratch directory for the counter fixture"
+    echo "RESULT: FAIL"
+    exit 1
+}
+# …and it is removed. There was no cleanup here at all, so every run of the suite
+# left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
+# `mktemp_d` has already established the path is non-empty, absolute and not `/`.
+trap 'rm -rf "$TMP_CL"' EXIT
+
+# The stop is exercised, not merely written. The dangerous case is not "mktemp
+# failed" — a plain failure is caught by any status check — it is a `mktemp` that
+# PRINTS a plausible path, because command substitution keeps that output, so an
+# unvalidated caller proceeds with a directory that does not exist. Both shapes
+# are replayed, and each has to leave the filesystem untouched.
+MTP="$TMP_CL/mtprobe"; mkdir -p "$MTP/bin"
+mt_probe() {   # mt_probe <stub exit status> <what the case is>
+    local canary out rc
+    canary="$TMP_CL/canary$1"; rc=0
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\nexit %s\n' "$canary" "$1" \
+        > "$MTP/bin/mktemp"
+    chmod +x "$MTP/bin/mktemp"
+    out="$(PATH="$MTP/bin:$PATH" bash -c '
+set -Eeuo pipefail
+'"$(declare -f mktemp_d)"'
+d="$(mktemp_d)" || { echo STOPPED; exit 1; }
+mkdir -p "$d/bin"; echo "CONTINUED:$d"' 2>&1)" || rc=$?
+    { [ "$out" = STOPPED ] && [ "$rc" -eq 1 ]; } \
+        && pass "a mktemp that $2 stops the fixture setup" \
+        || die "a mktemp that $2 did not stop the setup (rc=$rc, '$out')"
+    [ ! -e "$canary" ] \
+        && pass "…and nothing is written under the path it printed" \
+        || die "the setup wrote under a path a mktemp that $2 merely printed"
+}
+mt_probe 1 'prints a plausible path and then fails'
+mt_probe 0 'prints a path it never created'
+rm -f "$MTP/bin/mktemp"
+
+# The CALL SITE, not just the helper. Everything above still passes if the two
+# lines that acquire `TMP_CL` are put back the way they were, because a working
+# `mktemp` never reaches the guard — the helper is proven and the caller is not.
+# So the guard is exercised where it lives: this file is re-run against a `mktemp`
+# it cannot trust, and it has to stop before anything is written.
+#
+# BOTH untrustworthy shapes, because only one of them separates the two
+# regressions. A `mktemp` that FAILS is rejected by a bare `mktemp -d` with a
+# status guard just as well as by `mktemp_d`, so that case alone leaves the
+# status-guarded bare form indistinguishable from the fix. A `mktemp` that prints
+# an absolute path it never created and returns 0 is the one only validation
+# catches — and it is not hypothetical, it is what a `mktemp` racing a cleaner or
+# a broken $TMPDIR does.
+#
+# `mkdir` and `ln` are stubbed to RECORD rather than act. What the unfixed form
+# does is write fixture symlinks into `/bin`, and performing that in order to
+# detect it is not a trade this suite can make; an empty record is the same
+# evidence at no risk. The child skips this block, so a regression that lets it
+# past the guard cannot recurse.
+if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
+    SPB="$TMP_CL/probe/bin"; mkdir -p "$SPB"
+    sp_probe() {   # sp_probe <stub exit status> <what the case is>
+        local wit out rc
+        wit="$TMP_CL/probe/writes$1"; rc=0
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nexit 0\n' "$wit" \
+            > "$SPB/mkdir"
+        cp "$SPB/mkdir" "$SPB/ln"
+        # The path the stub prints is absolute, plausible, and NEVER CREATED —
+        # the whole point of the second case.
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s"\nexit %s\n' \
+            "$TMP_CL/probe/never-made" "$1" > "$SPB/mktemp"
+        chmod +x "$SPB/mkdir" "$SPB/ln" "$SPB/mktemp"
+        # `run_limited <secs> env …`, so the stub PATH reaches the SUBJECT and not
+        # the watchdog. Written the other way round first, and `test-testlib.sh`
+        # caught it: `run_limited`'s own fallback shells out to `mktemp`, which
+        # here is a stubbed one — the watchdog would have returned 125 without
+        # running this file at all, and the guard would have been asserting about
+        # nothing. The environment belongs to the thing under test.
+        out="$(run_limited 300 env CONTRACT_SCRATCH_PROBE=1 PATH="$SPB:$PATH" \
+            bash "${BASH_SOURCE[0]}" 2>&1)" || rc=$?
+        { [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 125 ] \
+            && grep -qF 'no scratch directory for the counter fixture' <<<"$out" \
+            && grep -qF 'RESULT: FAIL' <<<"$out"; } \
+            && pass "a mktemp that $2 stops this file rather than being recorded" \
+            || die "a mktemp that $2 did not stop this file (rc=$rc)"
+        # The whole point: `die` would have let it carry on with an unusable
+        # `TMP_CL`, and every `$TMP_CL/…` under it then resolves somewhere else.
+        [ ! -s "$wit" ] \
+            && pass "…and it creates nothing under a path it was handed" \
+            || die "the run wrote after a mktemp that $2: $(tr '\n' ';' <"$wit")"
+    }
+    sp_probe 1 'prints a plausible path and then fails'
+    sp_probe 0 'prints a path it never created and succeeds'
+
+    # THE CLEANUP, observed rather than assumed. Nothing above looks at `$TMP_CL`
+    # after the process is gone, so deleting the EXIT trap — or making it a no-op —
+    # left the suite green while every run leaked a scratch tree again. Cleanup was
+    # a deliberate change in this commit, so it gets an assertion like any other.
+    #
+    # The child is given its own $TMPDIR, which is the only way to learn where its
+    # scratch went without the child having to report it: whatever `mktemp` gave it
+    # is under this directory, so "the trap ran" and "this directory is empty" are
+    # the same statement. It runs to completion with a real `mktemp` — that is the
+    # path where a leak actually happens.
+    CTD="$TMP_CL/tdir"; mkdir -p "$CTD"
+    cln_rc=0
+    run_limited 300 env CONTRACT_SCRATCH_PROBE=1 TMPDIR="$CTD" \
+        bash "${BASH_SOURCE[0]}" >/dev/null 2>&1 || cln_rc=$?
+    # THREE ways this can go wrong, reported apart, and the scan has its own.
+    #
+    # Folded into one condition, a child that failed for a reason of its own — any
+    # other assertion in this file — was announced as a LEAK. Splitting the child
+    # out left the scan still folded in: `|| cln_left='THE_SCAN_FAILED'` turns an
+    # unreadable directory into an ENTRY, so a scan that could not run was reported
+    # as a leak of a file by that name, sending the reader to the EXIT trap instead
+    # of to the scanner. A substituted sentinel is only a sentinel if the branch
+    # reading it treats it as one; consumed as data it is a plausible value, which
+    # is the failure this whole file is about.
+    #
+    # `report_cleanup` returns the verdict, so every branch can be EXERCISED. The
+    # branch nobody runs is the branch that breaks — the same reason
+    # `test-testlib.sh` made its own reporting a function.
+    scan_scratch() {   # scan_scratch <dir> ; prints the entries, 2 if it could not
+        local out
+        out="$(ls -A "$1" 2>/dev/null)" || return 2
+        printf '%s' "$out"
+        return 0
+    }
+    report_cleanup() {   # <child rc> <dir> ; 0 clean, 1 leaked, 2 child failed, 3 scan failed
+        local rc="$1" left srx
+        [ "$rc" -eq 0 ] || return 2
+        srx=0
+        left="$(scan_scratch "$2")" || srx=$?
+        [ "$srx" -eq 0 ] || return 3
+        [ -n "$left" ] || return 0
+        printf '%s' "$left"
+        return 1
+    }
+    # THE DIAGNOSTIC IS THE PRODUCT, so it is what gets asserted. A numeric verdict
+    # checked in isolation leaves the dispatch below untested: swap the scan-failure
+    # text for the leak text and every status still matches, while an unreadable
+    # directory once again sends the author to the EXIT trap. The whole point of
+    # this round's split was WHICH CAUSE IS NAMED — so the fixture reads the name.
+    cleanup_diagnostic() {   # <verdict> <child rc> <entries> ; the message, 0 if clean
+        case "$1" in
+            0) printf 'a completed run removes its scratch tree rather than leaking it'
+               return 0 ;;
+            1) printf "a run left its scratch tree behind ('%s')" "$3"; return 1 ;;
+            2) printf "the cleanup probe's own run failed (rc=%s); the leak check proves nothing" "$2"
+               return 1 ;;
+            *) printf 'the scratch directory could not be scanned; the leak check proves nothing'
+               return 1 ;;
+        esac
+    }
+    # One entry point, used by the fixture and by the real check alike — otherwise
+    # the fixture exercises a copy of the dispatch rather than the dispatch.
+    cleanup_verdict() {   # <child rc> <dir> ; prints the diagnostic, 0 if clean
+        local v left
+        v=0
+        left="$(report_cleanup "$1" "$2")" || v=$?
+        cleanup_diagnostic "$v" "$1" "$left"
+    }
+    mkdir -p "$TMP_CL/probe/leaky/tmp.XXXXXX" "$TMP_CL/probe/emptied"
+    while IFS='|' read -r want crc where needle what; do
+        [ -n "$want" ] || continue
+        got=0; msg="$(cleanup_verdict "$crc" "$TMP_CL/probe/$where")" || got=$?
+        { [ "$got" = "$want" ] && grep -qF "$needle" <<<"$msg"; } \
+            && pass "$what is named as itself, not as another cause" \
+            || die "$what reported rc=$got '$msg' (wanted $want naming '$needle')"
+    done <<'CLCASES'
+0|0|emptied|removes its scratch tree|a run that cleaned up
+1|0|leaky|left its scratch tree behind ('tmp.XXXXXX')|a directory holding a leaked tree
+1|1|tdir|own run failed (rc=1)|a child run that failed
+1|0|never-scanned|could not be scanned|a directory that cannot be scanned
+CLCASES
+    cln_msg="$(cleanup_verdict "$cln_rc" "$CTD")" && pass "$cln_msg" || die "$cln_msg"
+fi
+cl_req() {   # cl_req <fixed-string> <what it guarantees> <what its absence means>
+    grep -qF "$1" <<<"$cl_202" \
+        && pass "the release entry $2" \
+        || die "the release entry $3"
+}
+cl_absent() {   # cl_absent <pattern> <what its presence means>
+    local rc=0
+    grep -qiE "$1" <<<"$cl_202" || rc=$?
+    case "$rc" in
+        0) die "the release entry $2" ;;
+        1) pass "…and does not $2" ;;
+        *) die "the scan for '$2' could not be completed" ;;
+    esac
+}
+# …and that guard is exercised, not merely written. A counter that prints a
+# plausible number before failing is the shape that made this fail open, so the
+# fixture runs `count_claims` under exactly that.
+CNTB="$TMP_CL/bin"; mkdir -p "$CNTB"
+for b in bash sh grep printf cat rm; do
+    _p="$(command -v "$b" 2>/dev/null)" && ln -sf "$_p" "$CNTB/$b"
+done
+# The class is REMOVED, so the fixture proves independence rather than detection:
+# with no `wc` and no `tr` on the PATH at all, the count must still be right. A
+# guard against a failing counter would only have held under `pipefail`; not
+# needing the counter holds everywhere.
+cnt_out="$(PATH="$CNTB" bash -c '
+'"$(declare -f count_claims)"'
+count_claims "defect" "a defect and another defect"; echo "|rc=$?"' 2>&1)"
+case "$cnt_out" in
+    '2|rc=0') pass "the count needs no external counter, so a failing one cannot corrupt it" ;;
+    *) die "count_claims depends on an external counter ('$cnt_out')" ;;
+esac
+# The control: with a working counter the same call must still count.
+cnt_ok="$(bash -c '
+'"$(declare -f count_claims)"'
+count_claims "defect" "a defect and another defect"' 2>&1)"
+[ "$cnt_ok" = "2" ] \
+    && pass "…while a working counter still counts both mentions" \
+    || die "count_claims miscounted a known input ('$cnt_ok')"
+
+cl_req 'repairing a consumer a changed validator or producer breaks is finishing the change' \
+    'keeps the regression exception to the scope rule' \
+    'would have a reader reject a required regression repair'
+cl_req 'explains rather than accepts' \
+    'says the at-the-site comment explains rather than accepts' \
+    'still teaches that an author-created comment is authority'
+# The claims stated TWICE in this entry, counted rather than merely present.
+# THE TOTAL RECOGNISES THE CLAIM BY ITS SUBJECT, NEVER BY ITS OUTCOME. This is the
+# counting equivalent of the polarity trap the whitelists replaced: a total pattern
+# reading `defect … stays out of scope` stops matching the moment the entry says
+# `stays IN scope`, so the reversed mention leaves BOTH counts, the survivors stay
+# equal, and the suite reports clean on a release note that now directs the session
+# to widen the PR. The total asks only "is the claim mentioned here"; the qualifier
+# asks "does this mention still say the right thing". A total that embeds the
+# answer cannot see the mention that got it wrong.
+#
+# Three mentions of the pre-existing boundary, not two — the `copy in an untouched
+# file` form was outside both patterns, so reversing that one counted as nothing.
+cl_count '\*{0,2}different pre-existing\*{0,2} (defect|copy)[^.]{0,60}' \
+         '\*{0,2}different pre-existing\*{0,2} (defect stays out of scope|copy in an untouched file stays out|defect found nearby is not in scope)' \
+         'a different pre-existing defect is OUT of scope'
+# THREE mentions, not two. The third — "the same defect in another copy is the
+# same finding" — was outside both patterns, so it counted as neither claim nor
+# qualifier and the two recognised mentions stayed equal: removing or reversing
+# that boundary left the entry stating an unbounded scope rule with the mandatory
+# suite reporting clean. A count only guards the occurrences it can see, which is
+# the same "somewhere in the file" weakness one level up.
+# …and the qualifier requires the POSITIVE OUTCOME, not merely the boundary. Every
+# form here named where the copy is and none named what happens to it, so "is part
+# of the finding" flipping to "is NOT part of the finding" left the diff bound
+# intact, the counts equal at 3/3, and the entry telling the driver to skip an
+# in-diff twin — the one thing this rule exists to require.
+cl_count '(same defect in a copy|copy of the same defect|same defect in another copy)[^.]{0,80}' \
+         '(same defect in a copy this PR also changes is part of the finding and gets fixed with it|A finding names[^.]{0,150}second copy of the same defect \*\*that this PR also changes\*\*|same defect in another copy is the same finding[^.]{0,40}only within what this PR already changes)' \
+         'the second-copy requirement is bounded to the diff AND in it'
+# The same polarity-free total here. `is a finding` embedded the outcome, so
+# `is not a finding` was invisible to the count — the identical defect one call
+# down, in a line this PR adds, which makes it part of this finding rather than a
+# separate one to defer.
+cl_count 'a wrong reply (on an old thread )?is[^.]{0,20}finding[^.]{0,80}' \
+         'a wrong reply (on an old thread )?is a finding \*{0,2}only when (its error means )?the (changed )?code is still[[:space:]]*defective' \
+         'a wrong reply is a finding only when the CODE is still defective'
+# …and the superseded wordings must be absent, because a qualifier present in one
+# bullet says nothing about another two paragraphs down.
+cl_absent 'defect found nearby is never in scope' 'still says a nearby defect is never in scope'
+cl_absent 'a wrong reply is itself a finding'     'still says a wrong reply is itself a finding'
+cl_absent 'any second copy of the same defect[.,]( |$)' 'still requires naming a copy outside the diff'
 # THE POSITIVE ACCOUNT. Forbidding one phrasing is a blacklist, and "No operational
 # behavior changes; this only updates documentation" evades it while making exactly
 # the claim that was wrong. The entry has to SAY both halves: which layer is
