@@ -14,12 +14,21 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).
 PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok)-|/home/[^ ]*/(pulse|strumok)\b|owner=.?p5ych0|repo=.?(pulse|strumok)|(PULSE|STRUMOK)_REVIEW'
 
+# The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
+# reaches no file named `*lib.sh` — so when the identity parser moved out of the
+# three helpers and into `identitylib.sh`, the one file that now decides which
+# repository every `gh` call addresses would have left the guard's coverage
+# entirely, and the guard would have gone on reporting that no runtime script
+# hard-codes an identity. A rule that follows the code has to follow it here too.
 FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
-        "$ROOT"/pr-selfcheck.sh )
+        "$ROOT"/pr-selfcheck.sh
+        "$ROOT"/identitylib.sh
+        "$ROOT"/recordlib.sh
+        "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it
 # is always there, so it is always linted.
@@ -29,9 +38,20 @@ SKILL="$ROOT/../SKILL.md"
 # The list above must not go stale: a new runtime script that talks to GitHub is
 # exactly where a hard-coded owner/repo would appear, and a guard that silently
 # omits it reports PASS while its stated invariant is unverified.
+# What the guard must cover, derived rather than listed: every runtime helper and
+# every shared library, and NOT the test files. `*lib.sh` also matches
+# `test-testlib.sh`, and a test file is where a concrete `acme/widget` is supposed
+# to appear — sweeping those in would make the scan below fail on its own
+# fixtures, which is a guard that has to be deleted rather than one that holds.
+RUNTIME=()
+for f in "$ROOT"/pr-*.sh "$ROOT"/*lib.sh; do
+    [ -f "$f" ] || continue
+    case "$(basename "$f")" in test-*) continue ;; esac
+    RUNTIME+=( "$f" )
+done
+[ "${#RUNTIME[@]}" -gt 0 ] || { echo "FAIL - no runtime scripts found to guard"; echo "RESULT: FAIL"; exit 1; }
 missing=""
-for f in "$ROOT"/pr-*.sh; do
-    case "$f" in *"/pr-"*) ;; *) continue ;; esac
+for f in "${RUNTIME[@]}"; do
     covered=0
     for g in "${FILES[@]}"; do [ "$g" = "$f" ] && covered=1; done
     [ "$covered" -eq 1 ] || missing="$missing $(basename "$f")"
@@ -90,6 +110,113 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
         echo "ok   - $sc did not derive an identity from it"
     fi
 done
+
+# ── a STALE parser definition does not satisfy the load check ──────────────
+# Bash exports functions through the environment. A caller that had run
+# `export -f rb_identity` leaves one defined in the helper's shell before it
+# sources the library — and a library that is empty, or truncated above the
+# definition, still sources SUCCESSFULLY. The `type -t` guard then finds the
+# inherited function, reports the parser loaded, and every `gh` call is addressed
+# by whatever that stale version derives. The exported stub here derives
+# `someone-else/other-repo`, so the assertion is that no request carries it.
+set +e
+STALETMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$STALETMP/lib" "$STALETMP/bin"
+: > "$STALETMP/lib/identitylib.sh"          # sources cleanly, defines nothing
+cat > "$STALETMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_SPY"
+exit 1
+GHSH
+chmod +x "$STALETMP/bin/gh"
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    case "$sc" in
+        pr-review-state.sh) set -- state 7 somebody ;;
+        pr-findings.sh)     set -- list 7 ;;
+        *)                  set -- 7 ;;
+    esac
+    # The helper is run from a copy whose identitylib.sh is empty, with a stale
+    # `rb_identity` exported into its environment. `recordlib.sh` and the helper
+    # itself are symlinked in, so the ONLY thing this changes is the parser.
+    rm -rf "$STALETMP/run"; mkdir -p "$STALETMP/run"
+    for g in "$ROOT"/*.sh; do ln -sf "$g" "$STALETMP/run/$(basename "$g")"; done
+    ln -sf "$STALETMP/lib/identitylib.sh" "$STALETMP/run/identitylib.sh"
+    : > "$STALETMP/spy"
+    : > "$STALETMP/spy"
+    out="$(run_limited 20 env GH_SPY="$STALETMP/spy" PATH="$STALETMP/bin:$PATH" \
+             bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
+                      export -f rb_identity
+                      exec "$1" "${@:2}"' _ "$STALETMP/run/$sc" "$@" 2>&1)"; rc=$?
+    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
+        echo "ok   - $sc refuses an empty library even with a parser already defined"
+    else
+        echo "FAIL - $sc accepted an inherited parser (rc=$rc out='$out')"; idfail=1
+    fi
+    if [ -s "$STALETMP/spy" ]; then
+        echo "FAIL - $sc addressed a request from a stale parser: $(tr '\n' ';' < "$STALETMP/spy")"
+        idfail=1
+    else
+        echo "ok   - …and addressed no request with what it derived"
+    fi
+done
+
+# ── a definition that CANNOT be cleared is a load failure ──────────────────
+# `readonly -f rb_identity` makes `unset -f` fail and leaves the function
+# installed, so `unset -f … || true` made a definition that could not be removed
+# read exactly like one that was never there.
+#
+# WHERE THIS IS REACHABLE, stated rather than implied. The readonly attribute does
+# NOT survive function export: a child process receives the definition and can
+# unset it, which is why the three helpers above are exercised with an EXPORTED
+# parser and not a readonly one — a fixture marking it readonly would prove
+# nothing about them, because they never see it. The case is real for `SKILL.md`,
+# whose bash runs in the driving session's own shell, where an earlier block or
+# the session itself may have marked it readonly.
+#
+# So the mechanism is proven directly, in one shell, and the contract test
+# asserts SKILL.md branches on the status. Both halves are needed: the mechanism
+# alone does not say the callers adopted it, and the text alone does not say it
+# works.
+mech="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
+    unset -f rb_identity 2>/dev/null || { echo REFUSED; exit 2; }
+    echo "CLEARED:$(type -t rb_identity)"' 2>&1)"; mech_rc=$?
+{ [ "$mech_rc" -eq 2 ] && [ "$mech" = REFUSED ]; } \
+    && echo "ok   - a readonly parser definition cannot be cleared, and the status says so" \
+    || { echo "FAIL - clearing a readonly definition did not report failure (rc=$mech_rc '$mech')"; idfail=1; }
+# …and the unchecked form is what it was: the function survives and the shell
+# carries on, which is the whole defect in one line.
+mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
+    unset -f rb_identity 2>/dev/null || true
+    echo "CONTINUED:$(type -t rb_identity)"' 2>&1)"
+[ "$mech2" = "CONTINUED:function" ] \
+    && echo "ok   - …and discarding that status leaves the stale definition installed" \
+    || { echo "FAIL - the unchecked form did not reproduce the defect ('$mech2')"; idfail=1; }
+# EVERY caller branches on it. The mechanism above is about Bash; this is about
+# whether the four files that clear the parser actually take the status.
+# Positively, not as the absence of one spelling: `|| true` forbidden by name is a
+# blacklist, and `|| :` or no handler at all walks straight through it. The unset
+# has to be JOINED to a branch that exits. Continuations are flattened first,
+# since the branch sits on the following line.
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    # The branch must EXIT, and `{` is not evidence that it does — accepting the
+    # brace let `|| { :; }` through, which is the handler emptied and the defect
+    # back. The unset line is joined with the two that follow it, because the
+    # branch is a brace group across lines rather than a backslash continuation,
+    # and the joined text has to carry both the `||` and the exit.
+    coupled="$(awk '
+        /unset -f rb_identity/ { j = $0; n = 2; next }
+        n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
+    ' "$ROOT/$sc" | grep -cE '\|\|.*exit 2')"
+    if [ "${coupled:-0}" -ge 1 ]; then
+        echo "ok   - $sc couples the unset to a failing load branch"
+    else
+        echo "FAIL - $sc does not branch on the unset status"; idfail=1
+    fi
+done
+rm -rf "$STALETMP"
+set -e
 
 # ── the origin SHAPE matrix, run against each parser independently ─────────
 # The three scripts and `SKILL.md` each carry their own copy of the identity
@@ -183,7 +310,7 @@ if [ -n "$missing" ]; then
     echo "RESULT: FAIL"
     exit 1
 fi
-echo "ok   - every pr-*.sh runtime script is covered by the guard"
+echo "ok   - every runtime script and shared library is covered by the guard"
 
 # A RUNTIME script must derive identity even for THIS repository. CLAUDE.md
 # exempts the plugin's own metadata and install docs from the invariant - that is
@@ -227,7 +354,7 @@ scan_hardcoded_identity() {   # <file...> ; prints hits; 2 if the scan failed
     return 0
 }
 sh_rc=0
-script_hits="$(scan_hardcoded_identity "$ROOT"/pr-*.sh)" || sh_rc=$?
+script_hits="$(scan_hardcoded_identity "${RUNTIME[@]}")" || sh_rc=$?
 if [ "$sh_rc" -ne 0 ]; then
     echo "FAIL - the hard-coded-identity scan could not be completed (rc=$sh_rc)"
     echo "RESULT: FAIL"

@@ -59,65 +59,37 @@ case "$THRESHOLD" in
     ??????????*) THRESHOLD=10 ;;
 esac
 
-# The STATUS is taken, not just the output. `git remote get-url origin` can print
-# a plausible URL and then exit non-zero — a partially-configured remote, a
-# permissions error mid-read — and command substitution keeps whatever it wrote.
-# `$OWNER/$REPO` derived from that drives every `gh` call below, so an untrusted
-# identity here sends one project's review traffic somewhere else entirely.
+# The shared identity parser. This 60-line block sat here byte-identical to the
+# copies in the other two helpers and in SKILL.md, so both the hostless-origin
+# and file-transport rules had to be written four times and proven twice. See
+# identitylib.sh and issue #18.
 #
-# Only the DERIVED lookup is guarded this way: an explicit REVIEW_BUS_REMOTE is
-# the caller stating the identity, and has no status to check.
-if [ -n "${REVIEW_BUS_REMOTE:-}" ]; then
-    REMOTE="$REVIEW_BUS_REMOTE"
-else
-    REMOTE="$(git remote get-url origin 2>/dev/null)" || REMOTE=""
-fi
-if [ -z "$REMOTE" ]; then
-    echo "PR_ROUND_COUNT status=error reason=no_origin" >&2
-    exit 2
-fi
-_p="${REMOTE%.git}"; REPO="${REVIEW_BUS_REPO:-${_p##*/}}"; _p="${_p%/*}"
-OWNER="${REVIEW_BUS_OWNER:-${_p##*[:/]}}"
-# The HOST is derived from origin too, and passed explicitly. `gh` takes the
-# hostname from `GH_HOST` when a command supplies none, so with that set these
-# calls could read the same-numbered PR from a different GitHub host while the
-# local origin identifies another project entirely — the same class as the
-# `GH_REPO` hole, one level up.
-# The AUTHORITY is parsed, then compared. Matching `github.com` anywhere in the
-# URL sent an enterprise origin such as
-# `git@ghe.example:org/github.com-mirror.git` to the public host, and a userless
-# SCP-style enterprise origin fell through to the same default — so every pinned
-# command would act on the wrong GitHub entirely.
-# A remote with NO NETWORK AUTHORITY is not an identity, and must not be given
-# one. A local-path origin such as `/srv/mirrors/acme/widget.git` or
-# `../acme/widget.git` has no host, and defaulting it to github.com while the
-# path split still yields `acme/widget` pointed every `gh` call at the unrelated
-# PUBLIC repository of that name — reading, commenting on, and merging the
-# same-numbered PR there.
-# The TRANSPORT is checked, not only the authority. `file://github.com/srv/acme/widget.git`
-# is a file-transport remote that carries an authority, so parsing it as a URL
-# yielded HOST=github.com while the path split yielded `acme/widget` — the same
-# wrong-public-repository outcome as a bare local path, reached through the arm
-# that was supposed to be the safe one. Only transports that actually reach a
-# GitHub server are accepted; anything else names no reviewable identity.
-case "$REMOTE" in
-    ssh://*|git://*|https://*|http://*|git+ssh://*)
-            _h="${REMOTE#*://}"; _h="${_h#*@}"; HOST="${_h%%[:/]*}" ;;
-    *://*)
-        echo "PR_ROUND_COUNT status=error reason=origin_transport_unsupported remote=$REMOTE" >&2
-        exit 2 ;;
-    *@*:*)  _h="${REMOTE#*@}";   HOST="${_h%%:*}" ;;
-    /*|.*|~*)
-        echo "PR_ROUND_COUNT status=error reason=origin_has_no_host remote=$REMOTE" >&2
-        exit 2 ;;
-    *:*/*)  HOST="${REMOTE%%:*}" ;;
-    *)
-        echo "PR_ROUND_COUNT status=error reason=origin_has_no_host remote=$REMOTE" >&2
-        exit 2 ;;
-esac
-case "$HOST" in
-    ""|*/*|*:*) echo "PR_ROUND_COUNT status=error reason=origin_host_unparseable remote=$REMOTE" >&2; exit 2 ;;
-esac
+# The status is taken, like recordlib above: a helper whose identity parser
+# failed to load would fall through to an undefined function per call rather
+# than refusing clearly here.
+# THE STALE DEFINITION IS CLEARED FIRST, AND THE CLEARING IS CHECKED. Bash
+# exports functions through the environment, so a caller that had run
+# `export -f rb_identity` leaves one defined in this shell before the `.` — and a
+# library that is empty or truncated ABOVE the definition still sources
+# successfully. The `type -t` check then finds the inherited function and reports
+# the parser loaded, and the driver goes on addressing `gh` calls with whatever
+# that stale version derives.
+#
+# `|| true` on the `unset` reopened exactly that: `readonly -f rb_identity` makes
+# the unset FAIL and leaves the function installed, and the discarded status made
+# a definition that could not be cleared indistinguishable from one that never
+# existed. An `unset -f` of a name that is not defined returns 0, so the only
+# thing a non-zero status here means is that a definition survived — which is the
+# one condition this line exists to rule out.
+unset -f rb_identity 2>/dev/null || {
+    echo "PR_ROUND_COUNT status=error reason=identitylib_stale_definition" >&2; exit 2; }
+# shellcheck source=identitylib.sh
+. "$_RB_SELF_DIR/identitylib.sh" || {
+    echo "PR_ROUND_COUNT status=error reason=identitylib_unreadable" >&2; exit 2; }
+[ "$(type -t rb_identity 2>/dev/null)" = function ] || {
+    echo "PR_ROUND_COUNT status=error reason=identitylib_empty" >&2; exit 2; }
+rb_identity || {
+    echo "PR_ROUND_COUNT status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"
 
 PR="${1:-}"

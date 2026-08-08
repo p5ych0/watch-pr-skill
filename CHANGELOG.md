@@ -1,5 +1,107 @@
 # Changelog
 
+## [2.0.3] — 2026-08-08
+
+**The identity parser lives in one file.** The ~60 lines that turn
+`git remote get-url origin` into `$HOST/$OWNER/$REPO` existed in **four** places —
+`pr-findings.sh`, `pr-review-state.sh`, `pr-round-count.sh` and `SKILL.md` —
+byte-identical in the three scripts apart from the sentinel in their error lines.
+No behaviour changes for a correctly-configured checkout; what changes is that a
+rule can no longer hold in one copy and not another. Issue #18.
+
+- **Why four copies was a defect and not a style complaint.** Both the
+  hostless-origin rule and the file-transport rule had to be written into all
+  four, and the fixtures proving them had to be built a **second** time afterwards
+  to cover the copies that had silently missed one — `test-pr-identity.sh` still
+  carries the comment recording it: *a rule proven in one copy is unproven in the
+  others*. What a drifted copy costs is not an error: an origin whose host cannot
+  be derived, defaulted to `github.com` while the path split still yields a
+  plausible `acme/widget`, points every `gh` call at the unrelated **public**
+  repository of that name — reading, commenting on and merging there.
+
+- **`rb_identity` sets `HOST`, `OWNER` and `REPO` rather than printing them.** The
+  obvious signature, `id="$(rb_identity)"`, runs in a subshell and has to
+  serialise three values through one string. Any delimiter is then a value a
+  remote can contain, and a remote carrying it shifts the fields — OWNER read as a
+  host, REPO read as an owner — which is precisely the wrong-repository failure
+  the parser exists to prevent. The transport does not get to reintroduce it.
+
+- **`SKILL.md` locates the helpers before it loads the parser.** The driver's own
+  copy was written out above the helper-path discovery, so delegating meant
+  reordering: `RB_SCRIPTS` is resolved and validated first, and the contract test
+  asserts that order — sourcing from an unset path aborts at step zero on every
+  repository, which is a tool nobody can run.
+
+- **The drift guards follow the code.** `test-pr-identity.sh` scanned
+  `pr-*.sh`, a glob that reaches no file named `*lib.sh` — so the one file that
+  now decides which repository every call addresses would have left its coverage
+  entirely while it went on reporting that no runtime script hard-codes an
+  identity. It scans the shared libraries too now, and the contract test fails if
+  `SKILL.md` grows its own copy of the parser back.
+
+- **`pr-selfcheck.sh` follows what `SKILL.md` sources.** Its undefined-variable
+  scan read only the skill's own text, so `HOST`, `OWNER` and `REPO` — assigned by
+  the library the skill sources — were all reported as used-but-never-assigned.
+  That is the check being wrong about the skill rather than the skill about
+  itself, and a check that fires on correct code is a check that gets switched
+  off. The libraries are discovered from the `.` lines rather than listed, because
+  a list goes stale silently; a library named but not readable is an error, since
+  an empty set of assignments would reinstate exactly the false findings.
+
+- **An inherited definition no longer satisfies the parser-load check.** Bash
+  exports functions through the environment, so a caller that had run
+  `export -f rb_identity` leaves one defined before the `.` — and a library that
+  is empty or truncated above the definition still sources *successfully*. The
+  `type -t` guard then found the inherited function, reported the parser loaded,
+  and every `gh` call was addressed by whatever that stale version derived. All
+  four callers clear it first, so the check proves what it claims: that **this**
+  library defined it.
+
+- **…and a definition that cannot be *cleared* is a load failure too.** The first
+  fix was `unset -f rb_identity 2>/dev/null || true`, and `readonly -f` makes that
+  unset fail while leaving the function installed — so a discarded status made a
+  definition that could not be removed read exactly like one that was never there.
+  Unsetting a name that is not defined returns 0, so a non-zero status there means
+  only one thing. Reachable in `SKILL.md`, whose bash runs in the driving
+  session's own shell; the readonly attribute does not survive function export, so
+  a separate helper process never inherits one.
+
+- **A sourced library DECLARES what it assigns; `pr-selfcheck.sh` reads it.**
+  Inferring from the body was tried three ways and each was wrong in the quiet
+  direction: every assignment in the file credited `unused() { TOKEN=x; }`, which
+  sourcing never runs; restricting to called functions still credited an
+  assignment after a `return`, and one inside an untaken branch. Deciding that
+  statically is a reachability analysis, and a wrong answer reads as "this
+  variable is fine" — so `$TOKEN` in `SKILL.md` came out assigned and the gate
+  reported clean over a value the driver expands and nothing ever sets. That is
+  the false-clean direction, reached through the branch added to remove a false
+  *finding*. `identitylib.sh` carries an `# rb-assigns:` line instead, a library
+  with no declaration is an error, and `test-identitylib.sh` proves the
+  declaration true in both directions: every declared name is set by a successful
+  call, and a call sets no global the declaration does not name.
+
+- **The matching-test gate discovers the libraries instead of listing them.** The
+  list named `testlib.sh` and `recordlib.sh`, so `identitylib.sh` sat outside the
+  gate entirely and deleting its test left `pr-selfcheck.sh` reporting that every
+  shared library has one. A list of the files a rule covers goes stale silently,
+  and silently is the direction that turns a guard into a green tick over nothing.
+
+- **A refused origin leaves the identity untouched.** The parse ran straight into
+  the globals: `OWNER` and `REPO` were set for every input before any check, and
+  the `ssh://` arm set `HOST` to an empty string and only then returned
+  `origin_host_unparseable` — so a refused origin left a half-derived identity
+  behind, which is the opposite of what a failing call is supposed to
+  communicate. A caller that exits on the non-zero never sees it; one reading the
+  values after a guard it got wrong sees a plausible `acme/widget` with an empty
+  host. Everything parses into locals and the globals are written once, after all
+  validation.
+
+- **A branch that had never been exercised now is.** `origin_host_unparseable`
+  had no fixture in any of the four copies: a mutant removing the check survived
+  the entire suite. An `ssh://` URL with no authority, and an SCP-style remote
+  with nothing before the colon, both reach it — and both would otherwise hand
+  every `gh --hostname` call an empty host.
+
 ## [2.0.2] — 2026-08-07
 
 **The working discipline is written down, on both sides of the loop.** No

@@ -572,9 +572,96 @@ grep -q 'CODEX_RECHECK' "$SKILL" \
 # ── every gh call names the host as well as the repository ────────────────
 # `GH_HOST` supplies the hostname when a command gives none, so an unpinned call
 # can act on the same-numbered PR on another GitHub host.
-grep -q 'HOST=' "$SKILL" \
-    && pass "the host is derived from origin" \
+# THE ASSERTION FOLLOWS THE RULE, not the text that used to state it. This was
+# `grep -q 'HOST='` over SKILL.md, which held only while the parser was written
+# out there; the parser is `identitylib.sh` now, and a text check left pointing at
+# SKILL.md would have gone on passing against a driver that derived nothing at
+# all. So: the driver must DELEGATE, and the parser must derive.
+grep -q '^rb_identity \\$' "$SKILL" \
+    && pass "the driver derives its identity through the shared parser" \
+    || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
+grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \
+    && pass "…and the parser derives the host from origin" \
     || die "the host is not derived; GH_HOST can redirect every call"
+# …and the parser is sourced only after the helper directory is known. Written the
+# other way round the `.` reads an unset path, which under this driver's rules is
+# an abort — but a driver that aborts at step zero on every repository is a tool
+# nobody can run, and it would be found by trying rather than by reading.
+awk '/^RB_SCRIPTS=/ {r=NR}
+     /^\. "\$RB_SCRIPTS\/identitylib\.sh"/ {if (r && r < NR) {print "ok"; exit}}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and the helpers are located before the parser is loaded from them" \
+    || die "SKILL.md sources identitylib.sh before RB_SCRIPTS is resolved"
+# …and any INHERITED definition is cleared before that source. Bash exports
+# functions through the environment, so a session that had already defined
+# `rb_identity` leaves one here — and an empty or truncated library still sources
+# successfully, at which point the `type -t` guard finds the inherited function,
+# reports the parser loaded, and every call is addressed by whatever it derives.
+awk '/^unset -f rb_identity/ {u=NR}
+     /^\. "\$RB_SCRIPTS\/identitylib\.sh"/ {if (u && u < NR) {print "ok"; exit}}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and a stale parser definition is cleared before the library loads" \
+    || die "an inherited rb_identity would satisfy SKILL.md's parser-load check"
+# …and the clearing's own status is taken. `readonly -f rb_identity` makes the
+# unset FAIL and leaves the function installed, so a discarded status made a
+# definition that could not be cleared indistinguishable from one that was never
+# there.
+#
+# ASSERTED AS A COUPLING, NOT AS THE ABSENCE OF ONE SPELLING. The first version
+# forbade the literal `|| true` — a blacklist, and a blacklist is always one
+# spelling behind: `|| :`, or deleting the handler outright, passed it while the
+# defect returned in full. This repository has already replaced a lexical
+# blacklist with a whitelist once, for exactly that reason. So the requirement is
+# positive: the unset must be joined to a branch that EXITS. Continuations are
+# flattened first, because the branch is on the next line.
+#
+# AND IT IS RUN, not matched. A regex requiring the token `exit 1` accepts
+# `|| echo "exit 1"` — the exit inside quoted data, the handler printing a word and
+# the driver carrying on with the stale parser. That is the whitelist repeating the
+# blacklist's mistake at one remove: recognising the SPELLING of the guarantee
+# instead of the guarantee. So the setup block is extracted from SKILL.md and
+# EXECUTED against the state it is supposed to refuse — a readonly `rb_identity`
+# that cannot be cleared, and an `identitylib.sh` that is empty.
+#
+# The block is run in a throwaway git checkout with `CLAUDE_PLUGIN_ROOT` pointed at
+# a scripts directory holding an empty parser and an executable `pr-review-state.sh`
+# — the two things its own validation looks for — so everything before the parser
+# load succeeds and the refusal under test is the only thing that can stop it.
+setup_block="$(awk '/^## Derive identity$/ {sec=1}
+                    sec && /^```bash$/ {inb=1; next}
+                    inb && /^```$/ {exit}
+                    inb' "$SKILL")"
+[ -n "$setup_block" ] || die "the Derive identity block could not be extracted"
+SETUPTMP="$(mktemp_d)" || { die "no scratch directory for the setup probe"; SETUPTMP=""; }
+if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
+    mkdir -p "$SETUPTMP/repo" "$SETUPTMP/plugin/skills/watch-prs/scripts"
+    : > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+    printf '#!/usr/bin/env bash\nexit 0\n' \
+        > "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
+    chmod +x "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
+    ( cd "$SETUPTMP/repo" && git init -q && git remote add origin git@github.com:acme/widget.git ) \
+        >/dev/null 2>&1 || die "the setup probe's checkout could not be created"
+    # A readonly definition, in the SAME shell the block runs in — which is the
+    # driver's situation, and the only place the case is reachable. `readonly -f`
+    # does not survive a process boundary.
+    # The status is captured at the point it is produced. This file runs under
+    # `-e`, and the probe is EXPECTED to fail — that is the assertion — so an
+    # unguarded assignment terminates the suite here instead of asserting anything.
+    setup_rc=0
+    setup_out="$(cd "$SETUPTMP/repo" && run_limited 60 env CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
+        bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
+                 readonly -f rb_identity
+                 eval "$1"
+                 echo "CONTINUED:$OWNER"' _ "$setup_block" 2>&1)" || setup_rc=$?
+    case "$setup_out" in
+        *CONTINUED*) die "the driver continued past a parser it could not clear ($setup_out)" ;;
+        *) pass "…and a definition that cannot be cleared stops the driver" ;;
+    esac
+    [ "$setup_rc" -ne 0 ] \
+        && pass "…reporting a failure rather than an abort message alone" \
+        || die "the setup block refused the parser but exited 0 (out='$setup_out')"
+    rm -rf "$SETUPTMP"
+fi
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
     && pass "…and the GraphQL calls pass it explicitly" \
     || die "a graphql call does not pass --hostname"
@@ -767,9 +854,16 @@ awk '/^if \[ "\$HEAD_BEFORE" != "\$HEAD_AFTER" \]; then$/ {inb=1}
     || pass "…comparing against the pushed SHA rather than re-reading HEAD"
 
 # ── a hostless origin is refused, not defaulted to GitHub ─────────────────
-grep -q 'names no host; refusing to guess one' "$SKILL" \
+grep -q 'origin_has_no_host' "$SCRIPT_DIR/identitylib.sh" \
     && pass "an origin with no network authority is refused" \
     || die "a local-path origin would be treated as github.com"
+# THE RE-DRIFT GUARD. Four copies of this parser is what issue #18 was about, and
+# nothing stops a later edit writing the rules back into the driver "for clarity"
+# — at which point the two disagree silently, which is how both the hostless and
+# the file-transport rules came to exist in some copies and not others.
+grep -qE 'refusing to guess one|origin_transport_unsupported' "$SKILL" \
+    && die "SKILL.md has grown its own copy of the origin parser again" \
+    || pass "…and the driver carries no second copy of the rule"
 
 # ── the helper selection takes its pipeline status ────────────────────────
 # `head` can emit a plausible path and then fail; if that directory holds
@@ -949,9 +1043,9 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SKILL" 
 # `SKILL.md` carries its own copy of the parser, and it is the copy the driver
 # runs. `test-pr-identity.sh` can execute the three scripts' copies but not this
 # one, so the structural assertion is what covers it.
-grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SKILL" \
-    && pass "SKILL.md accepts only GitHub network transports" \
-    || die "SKILL.md parses any URL scheme as a GitHub identity"
+grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
+    && pass "the identity parser accepts only GitHub network transports" \
+    || die "the parser reads any URL scheme as a GitHub identity"
 grep -q 'reaches no GitHub server' "$SKILL" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "SKILL.md has no rejection path for an unsupported transport"

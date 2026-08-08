@@ -140,46 +140,12 @@ never as a work order** below has the full rule and the incident it came from.
 ## Derive identity
 
 ```bash
-# The STATUS, not just the output: `git remote get-url origin` can print a
-# plausible URL and then fail, and command substitution keeps what it printed.
-# Every `gh` call below is addressed by the identity derived here, so an
-# untrusted one sends this project's review traffic somewhere else.
-REMOTE=$(git remote get-url origin 2>/dev/null) || REMOTE=""
-[ -n "$REMOTE" ] || { echo "ABORT: cwd is not a git checkout with a readable origin"; exit 1; }
-_p="${REMOTE%.git}"; REPO="${_p##*/}"; _p="${_p%/*}"; OWNER="${_p##*[:/]}"
-# The host is derived too. `gh` takes the hostname from `GH_HOST` when a command
-# supplies none, so an unpinned call could act on the same-numbered PR on another
-# GitHub host while every gate inspects this one.
-# The authority is PARSED, not matched: `github.com` appearing anywhere in an
-# enterprise URL — `git@ghe.example:org/github.com-mirror.git` — would otherwise
-# send every pinned command to the public host.
-# A remote with NO NETWORK AUTHORITY is not an identity. A local-path origin
-# such as `/srv/mirrors/acme/widget.git` has no host, and defaulting it to
-# github.com while the path split still yields `acme/widget` would point every
-# `gh` call at the unrelated PUBLIC repository of that name.
-# The TRANSPORT is checked, not only the authority. `file://github.com/srv/acme/widget.git`
-# is a file-transport remote that carries an authority, so parsing it as a URL
-# yielded HOST=github.com while the path split yielded `acme/widget` — the same
-# wrong-public-repository outcome as a bare local path, reached through the arm
-# that was supposed to be the safe one. Only transports that actually reach a
-# GitHub server are accepted; anything else names no reviewable identity.
-case "$REMOTE" in
-    ssh://*|git://*|https://*|http://*|git+ssh://*)
-            _hh="${REMOTE#*://}"; _hh="${_hh#*@}"; HOST="${_hh%%[:/]*}" ;;
-    *://*)
-        echo "ABORT: origin '$REMOTE' uses a transport that reaches no GitHub server."; exit 1 ;;
-    *@*:*)  _hh="${REMOTE#*@}";   HOST="${_hh%%:*}" ;;
-    /*|.*|~*) echo "ABORT: origin '$REMOTE' names no host; refusing to guess one."; exit 1 ;;
-    *:*/*)  HOST="${REMOTE%%:*}" ;;
-    *)      echo "ABORT: origin '$REMOTE' names no host; refusing to guess one."; exit 1 ;;
-esac
-case "$HOST" in
-    ""|*/*|*:*) echo "ABORT: could not parse a host from origin '$REMOTE'."; exit 1 ;;
-esac
-# Same rule as the origin lookup above: the status is taken. This path is handed
-# to `pr-merge-range.sh`, which inspects history in it to decide whether every
-# commit since the reviewed SHA is a review fix — so a directory retained from a
-# failed probe is a merge decision made about the wrong tree.
+# THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
+#
+# Same rule as every probe here: the status is taken. This path is handed to
+# `pr-merge-range.sh`, which inspects history in it to decide whether every commit
+# since the reviewed SHA is a review fix — so a directory retained from a failed
+# probe is a merge decision made about the wrong tree.
 REPO_DIR="$(git rev-parse --show-toplevel)" \
     || { echo "ABORT: could not resolve the repository root"; exit 1; }
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
@@ -204,6 +170,45 @@ fi
 # a plausible-looking path that is missing them fails later, one call at a time.
 [ -d "$RB_SCRIPTS" ] && [ -x "$RB_SCRIPTS/pr-review-state.sh" ] \
     || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
+
+# THE IDENTITY COMES FROM THE SHARED PARSER, not from a copy written out here.
+#
+# This was ~35 lines of origin parsing inline, and the same rules again in three
+# helper scripts. Both the hostless-origin rule and the file-transport rule had to
+# be written into all four, and the fixtures proving them had to be built a second
+# time to cover the copies that had silently missed one. A rule proven in one copy
+# is unproven in the others. See `identitylib.sh` and issue #18.
+#
+# What a drifted copy costs: an origin whose host cannot be derived, defaulted to
+# github.com while the path split still yields a plausible `acme/widget`, points
+# every `gh` call at the unrelated PUBLIC repository of that name — reading,
+# commenting on and merging there. So the parser refuses rather than guessing: an
+# origin that names no host, or one whose transport reaches no GitHub server, is
+# not an identity.
+#
+# `.` and not a subshell: `rb_identity` SETS `HOST`, `OWNER` and `REPO` rather than
+# printing them, because serialising three values through one string makes any
+# delimiter a value a remote can contain — and a remote carrying it shifts the
+# fields, which is the wrong-repository failure the parser exists to prevent.
+# The stale definition is cleared first, and the CLEARING IS CHECKED. Bash
+# exports functions through the environment, so a session that had already
+# defined `rb_identity` leaves one here before the `.` — and a library that is
+# empty or truncated above the definition still sources successfully. The check
+# below would then find the inherited function and report the parser loaded,
+# with every `gh` call addressed by whatever that stale version derives.
+#
+# `|| true` reopened it: `readonly -f rb_identity` makes the unset FAIL and
+# leaves the function installed, and a discarded status makes a definition that
+# could not be cleared look like one that was never there. Unsetting a name that
+# is not defined returns 0, so a non-zero status here means only one thing.
+unset -f rb_identity 2>/dev/null \
+    || { echo "ABORT: a pre-existing rb_identity could not be cleared"; exit 1; }
+. "$RB_SCRIPTS/identitylib.sh" \
+    || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
+[ "$(type -t rb_identity 2>/dev/null)" = function ] \
+    || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
+rb_identity \
+    || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it

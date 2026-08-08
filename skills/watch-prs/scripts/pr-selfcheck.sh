@@ -153,6 +153,56 @@ if [ -f "$SKILL" ]; then
     assigned="$(printf '%s\n' "$code" \
         | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
         | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+    # …plus the variables a SOURCED library assigns. SKILL.md loads
+    # `identitylib.sh` and calls `rb_identity`, which SETS `HOST`, `OWNER` and
+    # `REPO` rather than printing them — so those names are assigned, just not in
+    # this file. Reading only the skill's own text reported the driver's identity
+    # variables as undefined, which is this check being wrong about the skill
+    # rather than the skill being wrong.
+    #
+    # The libraries are DISCOVERED from the `.` lines, never listed here. A list
+    # goes stale the first time another library is sourced, and it goes stale
+    # SILENTLY: the findings it stops reporting are indistinguishable from a clean
+    # run, which is the one direction this script may not fail in.
+    #
+    # A library named but not readable is an ERROR, not an empty set of
+    # assignments — an empty set would silently reinstate the false findings this
+    # branch exists to remove, and a missing library is a broken install besides.
+    sourced="$(printf '%s\n' "$code" \
+        | nomatch grep -oE '^\.[[:space:]]+"\$RB_SCRIPTS/[A-Za-z0-9_.-]+"' \
+        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk sourced $?
+    for lib in $sourced; do
+        if [ ! -f "$SCRIPTS/$lib" ]; then
+            echo "PR_SELFCHECK status=error reason=sourced_lib_missing lib=$lib" >&2
+            exit 2
+        fi
+        # THE LIBRARY DECLARES WHAT IT ASSIGNS; nothing is inferred from its body.
+        #
+        # Three inferences were tried and each was wrong in the QUIET direction.
+        # Every assignment in the file credited `unused() { TOKEN=x; }`, which
+        # sourcing never runs. Restricting to called functions still credited an
+        # assignment after a `return`, and one inside an untaken branch. Deciding
+        # that statically is a reachability analysis, and a wrong answer here reads
+        # as "this variable is fine" — the false-clean direction this script exists
+        # to close, reached through the branch added to remove a false finding.
+        #
+        # A declaration has no such failure mode: it is read, not deduced. The
+        # library's own test proves the declaration matches what a successful call
+        # sets, so a drifted one fails the suite rather than quietly widening what
+        # is accepted here.
+        #
+        # A sourced library with NO declaration is an ERROR. Crediting nothing
+        # would reinstate exactly the false findings this branch removes, and
+        # report them as defects in the skill.
+        libassigned="$(nomatch grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SCRIPTS/$lib" \
+            | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' \
+            | nomatch grep -vE '^$' | sort -u)"; chk lib_assigned $?
+        if [ -z "$libassigned" ]; then
+            echo "PR_SELFCHECK status=error reason=lib_declares_no_assignments lib=$lib" >&2
+            exit 2
+        fi
+        assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
+    done
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #
@@ -331,9 +381,17 @@ fi
 # well-formed record is for all four helpers at once. A bug in either is a bug
 # everywhere, which is exactly the argument for extracting them and exactly why
 # they cannot be the untested part.
+# …and they are DISCOVERED, not listed. The list named `testlib.sh` and
+# `recordlib.sh`, so `identitylib.sh` — added later, and the file that decides
+# which repository every `gh` call addresses — was outside the gate entirely:
+# deleting `test-identitylib.sh` left this reporting that every shared library has
+# a matching test. A list of the files a rule covers goes stale silently, and
+# silently is the direction that turns a guard into a green tick over nothing.
 untested=0
-for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/testlib.sh "$SCRIPTS"/recordlib.sh; do
+for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/*lib.sh; do
     [ -e "$f" ] || continue
+    # `*lib.sh` also matches `test-testlib.sh`, and a test does not need a test.
+    case "$(basename "$f")" in test-*) continue ;; esac
     b="$(basename "$f" .sh)"
     [ -f "$SCRIPTS/test-$b.sh" ] || { note untested_script "$b.sh has no test-$b.sh"; untested=1; }
 done

@@ -110,6 +110,147 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a script that does not parse is a finding" \
     || die "unparseable script not caught (rc=$rc out='$out')"
 
+# ── a variable assigned by a SOURCED library is assigned ───────────────────
+# `rb_identity` SETS `HOST`, `OWNER` and `REPO` rather than printing them, so
+# after SKILL.md moved to the shared parser those names had no assignment in the
+# skill's own text and every one of them was reported undefined. The check was
+# wrong about the skill, not the skill about itself — and a check that fires on
+# correct code is a check that gets switched off.
+LIB_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST/$OWNER/$REPO"
+```
+'
+R="$(mkroot "$LIB_SKILL")"
+# Written as a real library is: assignments at the start of a line and after a
+# `;`, which are the two positions the scan recognises. A `{ HOST=h; … }`
+# one-liner would be missed — the same deliberate narrowness as the skill's own
+# scan, and in the same safe direction, since the result is a loud false finding
+# rather than a silent gap.
+addscript "$R" identitylib.sh '# rb-assigns: HOST OWNER REPO
+rb_identity() {
+    HOST=h; OWNER=o
+    REPO=r
+}'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "a variable assigned by a sourced library is not reported undefined" \
+    || die "a sourced library assignment was not seen (rc=$rc out=$out)"
+
+# …and the reach is BOUNDED to what the library actually assigns. A branch that
+# simply suppressed every unassigned name once any library was sourced would pass
+# the case above while removing the check this whole script exists for.
+BOUND_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST $SUMMARY_FILE"
+```
+'
+R="$(mkroot "$BOUND_SKILL")"
+addscript "$R" identitylib.sh '# rb-assigns: HOST
+rb_identity() { HOST=h; }'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+    && pass "…and a name no library assigns is still a finding" \
+    || die "sourcing a library suppressed an unrelated undefined variable (rc=$rc out=$out)"
+
+# …and ONLY WHAT THE LIBRARY DECLARES. Sourcing defines a library's functions; it
+# does not run their bodies, and within a body an assignment can sit after a
+# `return` or inside a branch nothing takes. Every attempt to infer which ones a
+# call actually performs was wrong in the quiet direction — `$TOKEN` looked
+# assigned and the gate reported clean over a value the driver expands and nothing
+# sets. The library states what it sets instead, and the body is not consulted:
+# the fixture below assigns `TOKEN` in a called function and still expects the
+# finding, because `TOKEN` is not declared.
+UNCALLED_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST $TOKEN"
+```
+'
+R="$(mkroot "$UNCALLED_SKILL")"
+addscript "$R" identitylib.sh '# rb-assigns: HOST
+rb_identity() {
+    HOST=h
+    return 0
+    TOKEN=x
+}
+unused() {
+    TOKEN=x
+}'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'TOKEN'; } \
+    && pass "an undeclared name is not credited, wherever the body assigns it" \
+    || die "a never-executed assignment was credited (rc=$rc out=$out)"
+# …and the called function's assignment still is, so the rule is about reachability
+# and not about being inside a function at all.
+printf '%s' "$out" | grep -q 'uses \$HOST' \
+    && die "an assignment in a function the skill DOES call was dropped: $out" \
+    || pass "…while a called function's assignment still is"
+
+# ── a sourced library that DECLARES NOTHING is an error ────────────────────
+# Crediting nothing would reinstate exactly the false findings the declaration
+# removes, and report them as defects in the skill rather than in the library that
+# forgot to say what it sets.
+R="$(mkroot "$LIB_SKILL")"
+addscript "$R" identitylib.sh 'rb_identity() {
+    HOST=h; OWNER=o; REPO=r
+}'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=lib_declares_no_assignments'; } \
+    && pass "a sourced library that declares no assignments is an error" \
+    || die "an undeclared library did not fail closed (rc=$rc out=$out)"
+
+# ── a sourced library that is not there is an ERROR, not an empty set ──────
+# An unreadable library yielding "no assignments" reinstates exactly the false
+# findings the branch above removes, and reports them as defects in the skill.
+# Wrong in both directions and silent in both, so it fails closed instead.
+R="$(mkroot "$LIB_SKILL")"
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=sourced_lib_missing'; } \
+    && pass "a library SKILL.md sources but does not ship is an error" \
+    || die "a missing sourced library did not fail closed (rc=$rc out=$out)"
+
+# ── a shared library with no matching test ────────────────────────────────
+# The gate listed the libraries it covered, so `identitylib.sh` — added after that
+# list was written, and the file that decides which repository every `gh` call
+# addresses — sat outside it: deleting its test left the check reporting that
+# every shared library has one. The libraries are discovered now, and this is the
+# fixture that says so.
+LIBTEST_SKILL='# skill
+```bash
+OWNER=acme
+REPO=widget
+RB_SCRIPTS=/tmp/s
+echo "$OWNER/$REPO $RB_SCRIPTS"
+```
+'
+R="$(mkroot "$LIBTEST_SKILL")"
+addscript "$R" widgetlib.sh 'true'
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script.*widgetlib'; } \
+    && pass "a shared library with no matching test is a finding" \
+    || die "an untested library was not reported (rc=$rc out=$out)"
+# …and adding the test clears it, so the finding tracks the missing test rather
+# than the mere presence of a library.
+addtest "$R" test-widgetlib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "…and shipping its test clears the finding" \
+    || die "an untested-library finding survived its test being added (rc=$rc out=$out)"
+
 # ── a helper SKILL.md drives but does not ship ─────────────────────────────
 R="$(mkroot '# skill
 ```bash
