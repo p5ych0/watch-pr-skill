@@ -138,15 +138,33 @@ REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER='other' \
     || die "the overrides were ignored (rc=${ov_rc:-?} got '$HOST/$OWNER/$REPO')"
 
 # ── a failure does not leave a half-set identity behind ────────────────────
-# The caller exits on a non-zero return, but a parser that had already assigned
-# `OWNER` and `REPO` before refusing leaves them set for anything that does not.
-# The REASON is what a failing call communicates, so it must be the only thing
-# that changed.
-HOST='SENTINEL'; RB_IDENTITY_REASON=''
-REVIEW_BUS_REMOTE='/srv/mirrors/acme/widget.git' rb_identity && hs_rc=0 || hs_rc=$?
-{ [ "${hs_rc:-0}" -eq 2 ] && [ "$HOST" = 'SENTINEL' ]; } \
-    && pass "a refused origin leaves HOST untouched rather than half-derived" \
-    || die "a refused origin overwrote HOST (rc=${hs_rc:-?} HOST='$HOST')"
+# The caller exits on a non-zero return, but a parser that assigned before
+# refusing leaves the values set for anything that does not — and a caller reading
+# them after a guard it got wrong sees a plausible `acme/widget` with an empty
+# host. The REASON is what a failing call communicates, so it must be the only
+# thing that changed.
+#
+# ALL THREE NAMES, ON EVERY REFUSING PATH. The first version checked `HOST` after
+# one local-path remote, which is the single case where `HOST` was never reached:
+# `OWNER` and `REPO` were assigned before any validation and were overwritten on
+# that very case, and the `ssh://` arm set `HOST` to an empty string before
+# returning `origin_host_unparseable`. An assertion that names one variable and one
+# input reads like a guarantee and is not one.
+for hs_remote in '/srv/mirrors/acme/widget.git' '../acme/widget.git' \
+                 'file://github.com/srv/acme/widget.git' 'ssh:///acme/widget.git' \
+                 ':acme/widget.git' 'acme-widget'; do
+    HOST='SENTINEL_H'; OWNER='SENTINEL_O'; REPO='SENTINEL_R'; RB_IDENTITY_REASON=''
+    hs_rc=0
+    REVIEW_BUS_REMOTE="$hs_remote" rb_identity || hs_rc=$?
+    { [ "$hs_rc" -eq 2 ] \
+        && [ "$HOST" = 'SENTINEL_H' ] && [ "$OWNER" = 'SENTINEL_O' ] \
+        && [ "$REPO" = 'SENTINEL_R' ]; } \
+        && pass "a refused '$hs_remote' leaves the identity untouched" \
+        || die "'$hs_remote' left a half-derived identity (rc=$hs_rc $HOST/$OWNER/$REPO)"
+    [ -n "$RB_IDENTITY_REASON" ] \
+        && pass "…and reports why through RB_IDENTITY_REASON alone" \
+        || die "'$hs_remote' refused without setting a reason"
+done
 
 # ── the `rb-assigns:` declaration is TRUE ──────────────────────────────────
 # `pr-selfcheck.sh` reads that line to decide which of SKILL.md's variables this

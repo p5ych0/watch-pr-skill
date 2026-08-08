@@ -63,8 +63,17 @@
 # sets nothing else. A declaration that drifts fails the suite rather than quietly
 # widening what the selfcheck will accept.
 # rb-assigns: HOST OWNER REPO RB_IDENTITY_REASON
+# NOTHING IS ASSIGNED UNTIL EVERYTHING VALIDATES. The parse ran straight into the
+# globals: `OWNER` and `REPO` were set for every input before any check, and the
+# `ssh://` arm set `HOST` to an empty string and only then returned
+# `origin_host_unparseable` — so a refused origin left a half-derived identity
+# behind, which is the opposite of what a failing call is supposed to communicate.
+# A caller that exits on the non-zero never sees it; one that does not, or one
+# reading the values after a guard it got wrong, sees a plausible `acme/widget`
+# with an empty host. The locals make "the call failed" and "the identity is
+# untouched" the same statement.
 rb_identity() {
-    local remote p h
+    local remote p h _host _owner _repo
     RB_IDENTITY_REASON=''
     # The STATUS is taken, not just the output. `git remote get-url origin` can
     # print a plausible URL and then exit non-zero — a partially-configured
@@ -83,8 +92,8 @@ rb_identity() {
         RB_IDENTITY_REASON='no_origin'
         return 2
     fi
-    p="${remote%.git}"; REPO="${REVIEW_BUS_REPO:-${p##*/}}"; p="${p%/*}"
-    OWNER="${REVIEW_BUS_OWNER:-${p##*[:/]}}"
+    p="${remote%.git}"; _repo="${REVIEW_BUS_REPO:-${p##*/}}"; p="${p%/*}"
+    _owner="${REVIEW_BUS_OWNER:-${p##*[:/]}}"
     # The HOST is derived from origin too, and passed explicitly to every call.
     # `gh` takes the hostname from `GH_HOST` when a command supplies none, so
     # with that set these calls could read the same-numbered PR from a different
@@ -112,23 +121,26 @@ rb_identity() {
     # accepted; anything else names no reviewable identity.
     case "$remote" in
         ssh://*|git://*|https://*|http://*|git+ssh://*)
-                h="${remote#*://}"; h="${h#*@}"; HOST="${h%%[:/]*}" ;;
+                h="${remote#*://}"; h="${h#*@}"; _host="${h%%[:/]*}" ;;
         *://*)
             RB_IDENTITY_REASON="origin_transport_unsupported remote=$remote"
             return 2 ;;
-        *@*:*)  h="${remote#*@}";   HOST="${h%%:*}" ;;
+        *@*:*)  h="${remote#*@}";   _host="${h%%:*}" ;;
         /*|.*|~*)
             RB_IDENTITY_REASON="origin_has_no_host remote=$remote"
             return 2 ;;
-        *:*/*)  HOST="${remote%%:*}" ;;
+        *:*/*)  _host="${remote%%:*}" ;;
         *)
             RB_IDENTITY_REASON="origin_has_no_host remote=$remote"
             return 2 ;;
     esac
-    case "$HOST" in
+    case "$_host" in
         ""|*/*|*:*)
             RB_IDENTITY_REASON="origin_host_unparseable remote=$remote"
             return 2 ;;
     esac
+    # The only place the globals are written, and only once everything above has
+    # passed. `rb-assigns:` above names exactly these.
+    HOST="$_host"; OWNER="$_owner"; REPO="$_repo"
     return 0
 }

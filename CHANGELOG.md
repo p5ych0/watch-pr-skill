@@ -86,6 +86,16 @@ rule can no longer hold in one copy and not another. Issue #18.
   shared library has one. A list of the files a rule covers goes stale silently,
   and silently is the direction that turns a guard into a green tick over nothing.
 
+- **A refused origin leaves the identity untouched.** The parse ran straight into
+  the globals: `OWNER` and `REPO` were set for every input before any check, and
+  the `ssh://` arm set `HOST` to an empty string and only then returned
+  `origin_host_unparseable` — so a refused origin left a half-derived identity
+  behind, which is the opposite of what a failing call is supposed to
+  communicate. A caller that exits on the non-zero never sees it; one reading the
+  values after a guard it got wrong sees a plausible `acme/widget` with an empty
+  host. Everything parses into locals and the globals are written once, after all
+  validation.
+
 - **A branch that had never been exercised now is.** `origin_host_unparseable`
   had no fixture in any of the four copies: a mutant removing the check survived
   the entire suite. An `ssh://` URL with no authority, and an SCP-style remote
