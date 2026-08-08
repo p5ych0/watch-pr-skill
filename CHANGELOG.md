@@ -42,13 +42,14 @@ of the last three.
 
 - **The bootstrap obeys the rule it cannot use.** An exported `rb_load` plus an
   empty `loadlib.sh` leaves a *stale loader* doing the clearing and verifying for
-  every other library — the one way to make every subsequent load look clean. The
-  three lines are four: clear, source, verify, with the clearing's status taken.
+  every other library — the one way to make every subsequent load look clean. All
+  four lines, clearing included, with the clearing's status taken.
 
-- **The bootstrap is the one thing that cannot use it.** Every caller still writes
-  three lines to load `loadlib.sh`, because a helper cannot load the file that
-  defines it. That is stated where it lives rather than left for a reader to
-  rediscover.
+- **The bootstrap is the one thing that cannot use it.** Every caller writes four
+  lines to load `loadlib.sh` — clear, take the clear's status, source, verify —
+  because a helper cannot load the file that defines it. Four and not three
+  deliberately: taking the clearing's status is a separate part of the invariant,
+  and calling it three anywhere is how that step comes to be collapsed.
 
 ## [2.0.4] — 2026-08-08
 

@@ -260,6 +260,78 @@ fi
 rm -rf "$STALETMP"
 set -e
 
+# ── EVERY bootstrap, at the outcome level ──────────────────────────────────
+# The structural check above recognises each caller's `unset` branch, and
+# `pr-ci-state.sh` is exercised end-to-end — which leaves the other four bootstraps
+# with no evidence of what they DO when the loader is stale. They are duplicated
+# code by necessity (a helper cannot load the file that defines it), and
+# duplicated code needs duplicated coverage: that is the comment this file already
+# carries about the identity parser, and it applies to its own bootstrap.
+#
+# The state is the dangerous one: an exported PERMISSIVE `rb_load` that returns 0
+# without loading anything, plus an empty `loadlib.sh`. Every library after it is
+# then unloaded and unchecked.
+set +e
+BSTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$BSTMP/bin" "$BSTMP/run"
+cat > "$BSTMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$GH_SPY"
+exit 1
+GHSH
+chmod +x "$BSTMP/bin/gh"
+for g in "$ROOT"/*.sh; do ln -sf "$g" "$BSTMP/run/$(basename "$g")"; done
+rm -f "$BSTMP/run/loadlib.sh"; : > "$BSTMP/run/loadlib.sh"
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-watch.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    case "$sc" in
+        pr-review-state.sh) set -- state 7 somebody ;;
+        pr-findings.sh)     set -- list 7 ;;
+        pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
+        *)                  set -- 7 ;;
+    esac
+    : > "$BSTMP/spy"
+    bs_out="$(run_limited 20 env GH_SPY="$BSTMP/spy" PATH="$BSTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        bash -c 'rb_load() { return 0; }
+                 export -f rb_load
+                 exec "$1" "${@:2}"' _ "$BSTMP/run/$sc" "$@" 2>&1)"; bs_rc=$?
+    if [ "$bs_rc" -eq 2 ] && printf '%s' "$bs_out" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc refuses an empty loader even with rb_load already defined"
+    else
+        echo "FAIL - $sc accepted an inherited loader (rc=$bs_rc out='$bs_out')"; idfail=1
+    fi
+    # THE CALLER'S OWN SENTINEL, because that is what its consumers branch on: a
+    # refusal addressed as somebody else's is a failure nobody is listening for.
+    case "$sc" in
+        pr-watch.sh) bs_want='PR_REVIEW_WATCH state=error' ;;
+        pr-review-state.sh) bs_want='PR_REVIEW_STATE status=error' ;;
+        pr-findings.sh) bs_want='PR_FINDINGS status=error' ;;
+        pr-round-count.sh) bs_want='PR_ROUND_COUNT status=error' ;;
+        *) bs_want='PR_CI_STATE status=error' ;;
+    esac
+    if printf '%s' "$bs_out" | grep -qF "$bs_want"; then
+        echo "ok   - …addressed in its own words"
+    else
+        echo "FAIL - $sc did not report as '$bs_want' (out='$bs_out')"; idfail=1
+    fi
+    # …and the consequence: nothing was asked, and nothing was reported ready. An
+    # rc-only assertion passes on a script that acted first and failed afterwards.
+    if [ -s "$BSTMP/spy" ]; then
+        echo "FAIL - $sc addressed a request after a failed load: $(tr '\n' ';' < "$BSTMP/spy")"
+        idfail=1
+    else
+        echo "ok   - …and addressed no request"
+    fi
+    if printf '%s' "$bs_out" | grep -q 'PR_REVIEW_READY'; then
+        echo "FAIL - $sc reported a verdict ready after a failed load"; idfail=1
+    else
+        echo "ok   - …and reported nothing ready"
+    fi
+done
+rm -rf "$BSTMP"
+set -e
+
 # ── the origin SHAPE matrix, run against each parser independently ─────────
 # The three scripts and `SKILL.md` each carry their own copy of the identity
 # parser. The hostless and file-transport rules landed in all four, but the only

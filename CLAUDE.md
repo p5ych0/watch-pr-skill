@@ -113,7 +113,7 @@ category; do not "fix" a script into a stricter mode.
   `test-recordlib.sh` carries a drift guard that fails if a helper re-implements a
   rule inline; when you need a new field check, add it there.
 
-- **Libraries are loaded through `rb_load`, never by hand.** Clearing an inherited
+- **Runtime scripts load libraries through `rb_load`, never by hand.** Clearing an inherited
   symbol, taking the *clearing's* status, and verifying the library defined
   anything were each added after a copy was found missing them. `rb_load` takes
   the KIND, because a variable and a function need different clears and different
@@ -122,8 +122,17 @@ category; do not "fix" a script into a stricter mode.
   too: `pr-watch.sh` says `state=error` where the others say `status=error`. The
   four lines that load `loadlib.sh` itself are the one thing that cannot use it —
   and they still clear, source and verify, because a stale loader is what makes
-  every other load look clean. `test-pr-identity.sh` fails if a caller loads a
-  library by hand.
+  every other load look clean. `test-pr-identity.sh` fails if a `pr-*.sh` script
+  loads a library by hand.
+
+  **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the
+  driving session's own shell and aborts with prose rather than a
+  `PR_X status=error` line, so it does not share the callers' contract — and
+  `rb_load` lives in a directory the driver has to locate before it can source
+  anything at all. It clears, sources and verifies `identitylib.sh` by hand, and
+  `test-pr-skill-contract.sh` requires that block and executes it against a
+  readonly definition and an empty library. Do not "fix" it into a `rb_load`
+  call.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
 - Every behaviour change ships its test in the same PR.

@@ -25,10 +25,13 @@
 # empty library costs differs per case — the wrong repository, an unvalidated
 # record, a watchdog that does not kill — but the loading rule is identical.
 #
-# THE BOOTSTRAP IS THE ONE THING THAT CANNOT USE THIS. Every caller still writes
-# three lines to load `loadlib.sh` itself, because a helper cannot load the file
-# that defines it. That asymmetry is irreducible; it is stated here so the next
-# reader does not spend time looking for the trick that removes it.
+# THE BOOTSTRAP IS THE ONE THING THAT CANNOT USE THIS. Every caller writes FOUR
+# lines to load `loadlib.sh` itself — clear, take the clear's status, source,
+# verify — because a helper cannot load the file that defines it. The count is
+# four and not three deliberately: taking the CLEARING's status is a separate part
+# of the invariant, and calling it three lines somewhere else is how it comes to
+# be the step that gets collapsed. The asymmetry is irreducible; it is stated here
+# so the next reader does not spend time looking for the trick that removes it.
 
 # Load a library and prove it loaded.
 #
