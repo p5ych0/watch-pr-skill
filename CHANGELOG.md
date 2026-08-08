@@ -46,6 +46,19 @@ operator had to point at the checks tab. Issue #16.
   reproduces the red-head closure with an extra step, so it has to hold for
   `PR_CI_GRACE` seconds before it is believed.
 
+- **A verdict that would close the round has to hold.** Both `green` and `none`
+  can be true of an incomplete picture: a push that triggers two workflows can
+  have the fast one registered and passing before the second is registered at
+  all. Closing on that reproduces the red-head closure with an extra step — the
+  later workflow appears and fails after the round is already closed. So either
+  verdict must still be the answer `PR_CI_GRACE` seconds later, and anything else
+  restarts the count, because the picture changed.
+
+- **The timeout is a duration, not a sum of sleeps.** Counting only the sleeps
+  excluded however long each probe took, so two slow `gh` calls per iteration
+  silently turned the documented thirty-minute bound into ninety. It is measured
+  from elapsed wall time around the probes.
+
 - **The polling bounds are validated.** `PR_CI_INTERVAL=0` sleeps zero seconds and
   leaves the elapsed count at zero forever; a non-numeric `PR_CI_TIMEOUT` makes
   the comparison fail on every iteration. Either one turns the supposedly bounded

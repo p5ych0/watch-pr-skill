@@ -272,7 +272,7 @@ settings.
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
 | `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
 | `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
-| `PR_CI_GRACE` | `90` | how long "no checks configured" must hold before it is believed, since a run is registered a moment after the head moves |
+| `PR_CI_GRACE` | `90` | how long a round-closing verdict must hold before it is believed, since a workflow run is registered a moment after the head moves |
 
 ### The pushed head has to be green
 
@@ -282,9 +282,14 @@ purpose: that one runs the suite *here*, and cannot see a failure that only
 happens on the runner. One did, and CI stayed red for four consecutive rounds
 before anyone looked at the checks tab.
 
-A still-running check is not a pass; the gate waits, bounded by `PR_CI_TIMEOUT`. A
-repository with no checks configured has nothing to be green, and says so rather
-than blocking.
+A still-running check is not a pass; the gate waits, bounded by `PR_CI_TIMEOUT`
+measured as real elapsed time. A repository with no checks configured has nothing
+to be green, and says so rather than blocking.
+
+An answer that would close the round — green, or nothing configured — has to still
+be the answer `PR_CI_GRACE` seconds later. A push that starts two workflows can
+have the fast one passing before the second is registered at all, so the first
+look is green about an incomplete picture.
 
 ### Self-check before the push
 

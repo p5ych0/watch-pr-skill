@@ -201,6 +201,9 @@ if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
 # GNU-only, and stock macOS runs this suite as a mandatory pre-push gate.
 rc="$(head -1 "$GATE_Q")"
 tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
+# A SLOW PROBE, when asked for. The timeout has to be a real duration bound, and
+# counting only the sleeps excluded however long each probe took.
+[ -n "${GATE_DELAY:-}" ] && sleep "$GATE_DELAY"
 echo "call" >> "$GATE_CALLS"
 # An EXHAUSTED queue REPEATS ITS LAST ANSWER, which is what a real check state
 # does — it does not change into something else because the fixture ran out of
@@ -226,7 +229,24 @@ STUBSH
             && pass "$label" \
             || die "$label — rc=$rc calls=$calls out='$out' (wanted $want / >=$mincalls calls)"
     }
-    gate_case '0'     0 1 "a green head lets the round close"
+    # GREEN MUST HOLD, TOO. A push that triggers two workflows can have the fast
+    # one registered and passing before the second is registered at all, so the
+    # first probe is green about an incomplete picture — and the later workflow
+    # then appears and fails after the round is closed. The same registration
+    # grace that `none` needs.
+    gate_case '0'     0 2 "a green head lets the round close, once that is stable"
+    gate_case '0
+0
+3
+1'                    1 4 "…and a green that turns pending then fails still stops the round"
+    # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
+    # pending, then green again is not two seconds of stable green — it is a new
+    # answer, and the run that made it pending is the one nobody has seen finish.
+    # Without the reset the second green inherits the first one's age and closes
+    # immediately, which is the incomplete-picture close this grace exists for.
+    gate_case '0
+3
+0'                    0 5 "a verdict interrupted by a change starts its grace again"
     gate_case '1'     1 1 "a red head stops the round"
     gate_case '2'     1 1 "an unreadable check state stops the round"
     # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
@@ -283,6 +303,17 @@ STUBSH
     gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
     gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
     gate_spin 4 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
+    # THE TIMEOUT IS A DURATION, NOT A SUM OF SLEEPS. Counting only the sleeps
+    # excluded the probe time, so two slow `gh` calls per iteration turned a
+    # documented thirty-minute bound into ninety. With a 3s probe and a 1s
+    # interval, a 4s bound is reached on the second poll; counting sleeps alone it
+    # would take five.
+    gate_case '3'         1 1 "the timeout counts the probe's own time, not just the sleeps" \
+        PR_CI_TIMEOUT=4 GATE_DELAY=3
+    gate_slow_calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || gate_slow_calls=0
+    [ "${gate_slow_calls:-0}" -le 3 ] \
+        && pass "…so a slow probe cannot stretch the bound ($gate_slow_calls polls)" \
+        || die "a slow probe stretched the timeout: $gate_slow_calls polls for a 4s bound"
     rm -rf "$GATETMP"
 fi
 

@@ -232,11 +232,11 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 unset -f ci_gate 2>/dev/null \
     || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
 ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
-    local pr="$1" oid="$2" waited=0 none_for=0 rc
+    local pr="$1" oid="$2" rc elapsed stable_rc="" stable_since=0
     local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
     # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
     # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
-    # seconds and leaves `waited` at zero forever, and a non-numeric
+    # seconds and leaves the elapsed count unchanged forever, and a non-numeric
     # `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every iteration — either
     # one turns the supposedly bounded gate into an unbounded API-polling loop.
     # Leading zeros are rejected rather than accepted as digits: Bash reads them
@@ -244,6 +244,12 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
     case "$iv" in  ""|0|0*|*[!0-9]*|??????*) iv=30 ;; esac
     case "$tmo" in ""|0*|*[!0-9]*|??????*)   tmo=1800 ;; esac
     case "$grace" in ""|0*|*[!0-9]*|??????*) grace=90 ;; esac
+    # ELAPSED WALL TIME, not the sum of the sleeps. Counting only the sleeps
+    # excludes however long each probe took, so two slow `gh` calls per iteration
+    # silently turned a documented thirty-minute bound into ninety. `$SECONDS` is
+    # wall time and needs no external command; the baseline is a local, so nothing
+    # else in the session has its own reading disturbed.
+    local t0=$SECONDS
     while :; do
         # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
         # number, and the API can still be serving the PREVIOUS head for a moment
@@ -252,35 +258,44 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
         # from the round before, which is the last round's answer to this round's
         # question, and it reads as permission to close.
         "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
+        elapsed=$((SECONDS - t0))
         case "$rc" in
-            0) return 0 ;;
+            0|4)
+                # A GOOD ANSWER HAS TO HOLD. Both of these close the round, and
+                # both can be true of an incomplete picture: a push that triggers
+                # two workflows can have the fast one registered and passing
+                # before the second is registered at all, and a run is registered
+                # a moment after the head moves, so the first probe reports `none`
+                # on a repository that does have CI. Closing on either reproduces
+                # the red-head closure with an extra step — the later workflow
+                # appears and fails after the round is already closed.
+                #
+                # So a verdict that would close the round must still be the answer
+                # `grace` seconds later. Anything else resets it, because the
+                # picture changed.
+                if [ "$rc" = "$stable_rc" ] && [ $((elapsed - stable_since)) -ge "$grace" ]; then
+                    if [ "$rc" -eq 4 ]; then
+                        echo "note: no checks are configured; the CI gate has nothing to assert"
+                    fi
+                    return 0
+                fi
+                if [ "$rc" != "$stable_rc" ]; then stable_rc="$rc"; stable_since="$elapsed"; fi ;;
             1) echo "ABORT: the head you just pushed is RED. Fix it and push again; do not close this round."
                return 1 ;;
-            3|5) none_for=0 ;;   # still running, or the API has not caught up yet
-            4) # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a
-               # moment after the head moves, so the first probe after a push
-               # legitimately reports "none" on a repository that does have CI —
-               # and taking that as permission to close reproduces the red-head
-               # closure with an extra step. It has to hold for `grace` seconds
-               # before it is believed.
-               if [ "$none_for" -ge "$grace" ]; then
-                   echo "note: no checks are configured; the CI gate has nothing to assert"
-                   return 0
-               fi
-               none_for=$((none_for + iv)) ;;
+            3|5) stable_rc=""; stable_since=0 ;;   # running, or the API has not caught up
             *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
                return 1 ;;
         esac
-        if [ "$waited" -ge "$tmo" ]; then
+        if [ "$elapsed" -ge "$tmo" ]; then
             echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
             return 1
         fi
         # `sleep` takes its status like every other call here. A `sleep` that
         # returned immediately — interrupted, or missing — would spin this loop
-        # against the API until the timeout, and the elapsed count would be a
-        # fiction rather than a duration.
+        # against the API until the timeout, and with the elapsed count now taken
+        # from the clock the loop would still be bounded but would poll hard for
+        # the whole of it.
         sleep "$iv" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
-        waited=$((waited + iv))
     done
 }
 # …and the definition that ended up installed is the one just written. A `.`-style
