@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.5] — 2026-08-08
+
+**How a shared library is loaded lives in one place.** The clear-source-verify
+sequence existed in four scripts, and every rule in it was added *after* a copy
+was found missing it. Closes #22 and #20. No behaviour changes for a correctly
+installed plugin; what changes is that the next library cannot repeat the history
+of the last three.
+
+- **Each rule arrived late, in whichever copy was under review.** Clearing an
+  inherited symbol, because Bash exports functions through the environment and an
+  empty library still sources successfully — the verification then finds the
+  inherited symbol and reports the library loaded. Taking the *clearing's* status,
+  because `readonly` makes the unset fail while leaving the old definition
+  installed. Verifying the library defined anything, rather than treating a
+  successful `.` as a loaded library. What a stale library costs differs per case —
+  the wrong repository, an unvalidated record, a watchdog that does not kill — but
+  the loading rule is identical.
+
+- **`rb_load` takes the KIND, and getting it wrong is refused rather than
+  guessed.** `RECORDLIB_JQ` is a variable, and an exported one satisfied its
+  `[ -n … ]` check against an empty library exactly as an exported function
+  satisfies `type -t` — that hole was still open in three scripts (#20). A
+  variable needs `unset` and a non-empty test; a function needs `unset -f` and
+  `type -t`. Guessing from the name would be silent when wrong: a variable checked
+  as a function is always absent and a function checked as non-empty is always
+  empty, so both refuse everything, which is a tool nobody can run rather than one
+  that fails closed.
+
+- **The bootstrap is the one thing that cannot use it.** Every caller still writes
+  three lines to load `loadlib.sh`, because a helper cannot load the file that
+  defines it. That is stated where it lives rather than left for a reader to
+  rediscover.
+
 ## [2.0.4] — 2026-08-08
 
 **A round is no longer closed on a red head.** CI was red for four consecutive

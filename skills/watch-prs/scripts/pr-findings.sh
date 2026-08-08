@@ -34,11 +34,14 @@ set -uo pipefail
 # is an error per call rather than a clear refusal here.
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_FINDINGS status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# shellcheck source=recordlib.sh
-. "$_RB_SELF_DIR/recordlib.sh" || {
-    echo "PR_FINDINGS status=error reason=recordlib_unreadable" >&2; exit 2; }
-[ -n "${RECORDLIB_JQ:-}" ] || {
-    echo "PR_FINDINGS status=error reason=recordlib_empty" >&2; exit 2; }
+# The library loader. Three lines, because a helper cannot load the file that
+# defines it — the one asymmetry in this scheme, stated rather than hidden. See
+# loadlib.sh and issue #22.
+. "$_RB_SELF_DIR/loadlib.sh" || {
+    echo "PR_FINDINGS status=error reason=loadlib_unreadable" >&2; exit 2; }
+[ "$(type -t rb_load 2>/dev/null)" = function ] || {
+    echo "PR_FINDINGS status=error reason=loadlib_empty" >&2; exit 2; }
+rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ PR_FINDINGS var || exit 2
 
 # The shared identity parser. This 60-line block sat here byte-identical to the
 # copies in the other two helpers and in SKILL.md, so both the hostless-origin
@@ -62,13 +65,7 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # existed. An `unset -f` of a name that is not defined returns 0, so the only
 # thing a non-zero status here means is that a definition survived — which is the
 # one condition this line exists to rule out.
-unset -f rb_identity 2>/dev/null || {
-    echo "PR_FINDINGS status=error reason=identitylib_stale_definition" >&2; exit 2; }
-# shellcheck source=identitylib.sh
-. "$_RB_SELF_DIR/identitylib.sh" || {
-    echo "PR_FINDINGS status=error reason=identitylib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_identity 2>/dev/null)" = function ] || {
-    echo "PR_FINDINGS status=error reason=identitylib_empty" >&2; exit 2; }
+rb_load "$_RB_SELF_DIR" identitylib rb_identity PR_FINDINGS || exit 2
 rb_identity || {
     echo "PR_FINDINGS status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"

@@ -28,6 +28,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-watch.sh
         "$ROOT"/pr-selfcheck.sh
         "$ROOT"/identitylib.sh
+        "$ROOT"/loadlib.sh
         "$ROOT"/recordlib.sh
         "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
@@ -195,27 +196,38 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
     || { echo "FAIL - the unchecked form did not reproduce the defect ('$mech2')"; idfail=1; }
 # EVERY caller branches on it. The mechanism above is about Bash; this is about
 # whether the four files that clear the parser actually take the status.
-# Positively, not as the absence of one spelling: `|| true` forbidden by name is a
-# blacklist, and `|| :` or no handler at all walks straight through it. The unset
-# has to be JOINED to a branch that exits. Continuations are flattened first,
-# since the branch sits on the following line.
+# THE RULE MOVED, SO THE ASSERTION FOLLOWS IT. Each script used to write the
+# clear-source-verify sequence out for itself, and this checked that each one
+# branched on its own `unset`. They call `rb_load` now, so what has to hold is
+# that they call it — and that `rb_load` is the thing that takes the status.
+# Checking the scripts for an `unset` they no longer contain would pass by
+# vacuity, which is the failure mode this file exists to avoid.
 for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     [ -f "$ROOT/$sc" ] || continue
-    # The branch must EXIT, and `{` is not evidence that it does — accepting the
-    # brace let `|| { :; }` through, which is the handler emptied and the defect
-    # back. The unset line is joined with the two that follow it, because the
-    # branch is a brace group across lines rather than a backslash continuation,
-    # and the joined text has to carry both the `||` and the exit.
-    coupled="$(awk '
-        /unset -f rb_identity/ { j = $0; n = 2; next }
-        n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
-    ' "$ROOT/$sc" | grep -cE '\|\|.*exit 2')"
-    if [ "${coupled:-0}" -ge 1 ]; then
-        echo "ok   - $sc couples the unset to a failing load branch"
+    if grep -q 'rb_load "\$_RB_SELF_DIR" identitylib rb_identity' "$ROOT/$sc"; then
+        echo "ok   - $sc loads the identity parser through the shared loader"
     else
-        echo "FAIL - $sc does not branch on the unset status"; idfail=1
+        echo "FAIL - $sc loads identitylib some other way"; idfail=1
+    fi
+    # …and nowhere writes the sequence out again. A copy re-introduced beside the
+    # call is how the four copies happened the first time.
+    if grep -q 'unset -f rb_identity' "$ROOT/$sc"; then
+        echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
+    else
+        echo "ok   - …and carries no second copy of the loading rule"
     fi
 done
+# The loader is where the clearing and its status now live, and it is joined to a
+# branch that returns. Read positively: forbidding one spelling is a blacklist.
+coupled="$(awk '
+    /unset -f "\$sym"/ { j = $0; n = 2; next }
+    n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
+' "$ROOT/loadlib.sh" | grep -cE '\|\|.*return 2')"
+if [ "${coupled:-0}" -ge 1 ]; then
+    echo "ok   - the loader couples the clear to a failing load branch"
+else
+    echo "FAIL - the loader does not branch on the unset status"; idfail=1
+fi
 rm -rf "$STALETMP"
 set -e
 

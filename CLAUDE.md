@@ -25,6 +25,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is — one definition, sourced by every helper that reads the API. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
+| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
@@ -101,9 +102,16 @@ category; do not "fix" a script into a stricter mode.
 
 - **A rule that applies to more than one helper lives in a shared library, not
   in each of them.** `recordlib.sh` holds what a well-formed API record is;
-  `identitylib.sh` holds which repository this checkout is. Both exist because
-  the rule was written out three or four times and then found missing from at
-  least one copy. Every field check there was originally written out in two or
+  `identitylib.sh` holds which repository this checkout is; `loadlib.sh` holds how
+  a library is loaded at all. Each exists because the rule was written out three
+  or four times and then found missing from at least one copy.
+- **Libraries are loaded through `rb_load`, never by hand.** Clearing an inherited
+  symbol, taking the *clearing's* status, and verifying the library defined
+  anything were each added after a copy was found missing them. `rb_load` takes
+  the KIND, because a variable and a function need different clears and different
+  verifications, and an exported value satisfies a `[ -n … ]` test exactly as an
+  exported function satisfies `type -t`. The three lines that load `loadlib.sh`
+  itself are the one thing that cannot use it. Every field check there was originally written out in two or
   three scripts, and every one of them was found missing from at least one — the
   known review-state set reached two helpers and sat missing from the third for
   eleven review rounds, where an unrecognised value was reported as a *withdrawn
