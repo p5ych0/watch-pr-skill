@@ -324,6 +324,46 @@ for bad in 0 '' notanumber 007; do
         || die "PR_CI_PROBE_TIMEOUT='$bad' was used as the bound (rc=$b_rc)"
 done
 
+# ── a `none` diagnostic from a probe that DIED is not a verdict ────────────
+# `gh` reports "nothing to report" by exiting 1 with that message on stderr. A
+# probe that printed the same message and then HUNG carries identical text and
+# means something else entirely — and `none` is accepted by the round gate after
+# its grace and by the merge gate at once, so ignoring the status turned a hung
+# request into merge permission.
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "%s"\nprintf "no checks reported on the '"'"'main'"'"' branch\\n" >&2\nsleep 300\n' \
+    "$TMP/args" > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"
+dh_rc=0
+dh_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=2 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)" || dh_rc=$?
+{ [ "$dh_rc" -eq 2 ] && ! grep -qF 'status=none' <<<"$dh_out"; } \
+    && pass "the no-checks message from a probe that then hung is an error, not 'none'" \
+    || die "a hung probe was read as 'no checks configured' (rc=$dh_rc '$dh_out')"
+
+# ── the helper's deadline is shared, not granted per call ──────────────────
+# Up to three sequential requests are made. Given the full allowance each, a
+# five-second budget could be spent three times over — a slow-but-successful head
+# lookup, then a checks request that hangs, then a confirmation that hangs — and
+# the caller's bound is not a bound. One deadline, decremented.
+#
+# The stub is slow on its FIRST call and hangs afterwards, so a per-call limit
+# would let the run last far longer than the budget. The fixture's own watchdog is
+# what would catch that, and being caught by it is the failure.
+printf '#!/usr/bin/env bash\nn=0\n[ -f "%s" ] && read -r n < "%s"\nn=$((n + 1))\nprintf "%%s\\n" "$n" > "%s"\nif [ "$n" -eq 1 ]; then sleep 3; printf "0123456789abcdef0123456789abcdef01234567\\n"; exit 0; fi\nsleep 300\n' \
+    "$TMP/ghn" "$TMP/ghn" "$TMP/ghn" > "$TMP/bin/gh"
+chmod +x "$TMP/bin/gh"; : > "$TMP/ghn"
+sd_rc=0
+# The watchdog is chosen to SEPARATE the two behaviours, not merely to be
+# generous: shared, the run ends around six seconds (three slow, then whatever is
+# left of the budget); per-call, it would be three plus six and get killed here. A
+# twenty-second watchdog let both finish and the case proved nothing.
+sd_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 \
+    --head 0123456789abcdef0123456789abcdef01234567 2>&1)" || sd_rc=$?
+{ [ "$sd_rc" -ne 124 ] && [ "$sd_rc" -ne 0 ]; } \
+    && pass "a slow probe followed by a hung one still finishes inside one deadline" \
+    || die "the per-call limit outlasted the helper's own budget (rc=$sd_rc)"
+
 # ── an inherited definition does not satisfy a load check ──────────────────
 # Bash exports functions through the environment, so a caller that had run
 # `export -f run_limited` leaves one defined here before the `.` — and a library

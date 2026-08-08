@@ -160,7 +160,7 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 
 | Setting | Suggested | Why |
 | --- | --- | --- |
-| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, with its summary already posted. On, the *push* triggers the pass, so the summary has to precede the push and no mention may be sent — a mention as well queues a second review of the same head. Note the per-repository column overrides this default, so check both. |
+| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, and a red head stops it before anything is resolved or posted. On, the *push* also triggers a pass — one that necessarily reads open threads and no summary, since the checks on what was pushed are what decide whether the round may close at all. The driver waits that pass out and supersedes it with an explicit mention carrying the summary, so a round costs two Codex passes instead of one. Note the per-repository column overrides this default, so check both. |
 | Review trigger | on every push | Only relevant with automatic review on. |
 | Exhaustive review | on | Keeps looking after the first problem. |
 | Credit usage | on, if you want reviews to continue past the rate limit | With it off, review simply stops when the limit is hit. |

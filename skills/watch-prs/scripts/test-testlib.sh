@@ -258,6 +258,27 @@ printf '%s' "$out" | grep -q 'rc=124' \
     && die "the child ran to completion; the watchdog never had a live command to bound" \
     || pass "…and was still running when the clock failed"
 
+# ── a command that IGNORES TERM is still killed ────────────────────────────
+# The GNU arm sent TERM and stopped there: `timeout --help` says plainly that a
+# caught or blocked TERM does not kill the command and that `--kill-after` is
+# needed to follow with KILL. So a hung wrapper — or a child that traps TERM —
+# outlived the limit, and every bound built on this watchdog was advisory. The
+# fallback already escalated; this is the arm that runs wherever GNU coreutils do,
+# which is to say almost everywhere.
+term_start=$SECONDS
+term_rc=0
+run_limited 2 bash -c 'trap "" TERM; sleep 60' >/dev/null 2>&1 || term_rc=$?
+term_took=$((SECONDS - term_start))
+# The limit is 2s and the escalation follows 5s later, so anything under about 15
+# means it was killed rather than waited out; 60 would mean the command simply
+# finished.
+[ "$term_took" -lt 15 ] \
+    && pass "a command that ignores TERM is killed at the limit (${term_took}s)" \
+    || die "a TERM-ignoring command outlived the watchdog (${term_took}s)"
+[ "$term_rc" -ne 0 ] \
+    && pass "…and the watchdog reports that it did not finish" \
+    || die "a killed command was reported as successful"
+
 # ── a reader that emits and then fails is not a successful run ─────────────
 # `cat` can write a partial buffer and exit non-zero; its status was overwritten
 # by `rm` and the COMMAND's 0 returned, so a caller comparing a prefix or

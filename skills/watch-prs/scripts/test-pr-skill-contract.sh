@@ -1034,9 +1034,32 @@ grep -q 'pr-watch.sh N "\$WHO" --after-review "\$PUSH_BASE"' "$SKILL" \
 # than by a constant. `if false` around it satisfies a grep for the wait itself,
 # and a no-op push starts nothing, so waiting unconditionally is a guaranteed
 # timeout — the condition is the whole of it.
-grep -q '^if \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
+grep -q '\[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]' "$SKILL" \
     && pass "…only when the push actually moved the head" \
     || die "the serialising wait is unconditional, or its condition was replaced"
+# …AND ONLY IN THE CODEX PHASE. A push never triggers Copilot, so there is no pass
+# to wait for there — and waiting anyway meant every Copilot round that moved the
+# head sat until the watch timed out and exited BEFORE `--add-reviewer` was ever
+# reached. The phase where automatic review does nothing is the phase where
+# serialising it stalls everything.
+grep -q '^if \[ "\$WHO" != "\$COPILOT_BOT" \] && \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
+    && pass "…and never in the Copilot phase, which no push triggers" \
+    || die "a Copilot round that moved the head waits for a pass nothing started"
+# ── the operator instructions match the workflow ──────────────────────────
+# README told operators that with automatic review on the summary must precede the
+# push and that no mention may be sent, which is the opposite of what the driver
+# does now. A settings page is the one place a user decides this, and a
+# contradiction there is not a stale note — it is instructions that cannot be
+# followed. `SKILL.md` and README are separate files with no mechanism keeping
+# them in step, which is what this assertion is.
+if [ -f "$ROOT/README.md" ]; then
+    grep -q 'no mention may be sent' "$ROOT/README.md" \
+        && die "README still says automatic mode sends no mention; the driver always does" \
+        || pass "README does not contradict the automatic-mode ordering"
+    grep -q 'two Codex passes' "$ROOT/README.md" \
+        && pass "…and says what automatic review actually costs" \
+        || die "README does not tell the operator that automatic mode costs a second pass"
+fi
 # …and a wait that TIMED OUT is not permission to continue. Taking a baseline
 # while that pass is still in flight is the race this block removes, with an extra
 # step: the pass lands a moment later and answers the wrong request.

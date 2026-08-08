@@ -902,7 +902,13 @@ fi
 #
 # So it is serialised. Only when the head moved — a no-op push starts nothing, and
 # waiting for a pass nobody triggered is a guaranteed timeout.
-if [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
+#
+# CODEX ONLY. A push never triggers Copilot — the skill establishes that at the
+# top — so in the Copilot phase there is no pass to wait for, and waiting anyway
+# meant every Copilot round that moved the head sat until the watch timed out and
+# then exited BEFORE `--add-reviewer` was ever reached. The phase where automatic
+# review does nothing is the phase where serialising it stalls everything.
+if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
     # A TIMEOUT IS NOT PERMISSION TO CONTINUE. If that pass has not terminated,
     # taking a baseline now is exactly the race this block exists to remove — the

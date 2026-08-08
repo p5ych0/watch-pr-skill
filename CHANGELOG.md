@@ -127,6 +127,30 @@ operator had to point at the checks tab. Issue #16.
   serialised, only when the push actually moved the head, and a wait that times
   out stops the round rather than continuing.
 
+- **The GNU `timeout` arm escalates to KILL.** It sent TERM and stopped there;
+  `timeout --help` says plainly that a caught or blocked TERM does not kill the
+  command. A hung wrapper, or a child that traps TERM, outlived the limit — and
+  that is the arm that runs wherever GNU coreutils exist, which is to say almost
+  everywhere. The `-k` support is probed once and cached, because not every
+  `timeout` takes it and a usage error is indistinguishable from the command
+  failing.
+
+- **A `none` verdict from a probe that died is not a verdict.** `gh` reports
+  "nothing to report" by exiting 1 with that message on stderr; a probe that
+  printed the same message and then hung carries identical text. `none` is
+  accepted by the round gate after its grace and by the merge gate at once, so
+  ignoring the status turned a hung request into merge permission.
+
+- **The helper's deadline is shared across its probes, not granted per call.** It
+  makes up to three sequential requests; with the full allowance each, a
+  five-second budget could be spent three times over.
+
+- **The push-triggered pass is waited out in the Codex phase only.** A push never
+  triggers Copilot, so there was nothing to wait for — and waiting anyway meant
+  every Copilot round that moved the head sat until the watch timed out and exited
+  *before* `--add-reviewer` was reached. The phase where automatic review does
+  nothing is the phase where serialising it stalls everything.
+
 - **Each probe is bounded by the gate's remaining time**, not only by its own
   default: with `PR_CI_TIMEOUT=1` a hung request ran for the full sixty seconds
   before the loop could look at the clock. A bound the callee does not know about

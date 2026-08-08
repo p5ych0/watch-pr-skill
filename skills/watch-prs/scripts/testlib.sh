@@ -24,7 +24,28 @@
 run_limited() {
     local secs="$1"; shift
     if command -v timeout >/dev/null 2>&1; then
-        timeout "$secs" "$@"
+        # `-k`, because plain `timeout` sends TERM and stops there: a command that
+        # traps or ignores TERM — or a wrapper whose child does — survives the
+        # limit and the call never returns, which defeats every bound built on
+        # this. The fallback below already escalates to KILL; this arm did not,
+        # and it is the arm that runs wherever GNU coreutils exist.
+        #
+        # The capability is probed ONCE and cached: not every `timeout` in the
+        # wild takes `-k`, and a usage error would otherwise be indistinguishable
+        # from the command failing. `true` returns immediately, so the probe costs
+        # nothing despite the one-second arguments.
+        if [ -z "${_RB_TIMEOUT_KILL_AFTER:-}" ]; then
+            if timeout -k 1 1 true >/dev/null 2>&1; then
+                _RB_TIMEOUT_KILL_AFTER=yes
+            else
+                _RB_TIMEOUT_KILL_AFTER=no
+            fi
+        fi
+        if [ "$_RB_TIMEOUT_KILL_AFTER" = yes ]; then
+            timeout -k 5 "$secs" "$@"
+        else
+            timeout "$secs" "$@"
+        fi
         return $?
     fi
     # No `timeout`. Two things have to hold, and the second is what the
