@@ -258,6 +258,50 @@ printf '%s' "$out" | grep -q 'rc=124' \
     && die "the child ran to completion; the watchdog never had a live command to bound" \
     || pass "…and was still running when the clock failed"
 
+# ── a command that IGNORES TERM is still killed ────────────────────────────
+# The GNU arm sent TERM and stopped there: `timeout --help` says plainly that a
+# caught or blocked TERM does not kill the command and that `--kill-after` is
+# needed to follow with KILL. So a hung wrapper — or a child that traps TERM —
+# outlived the limit, and every bound built on this watchdog was advisory. The
+# fallback already escalated; this is the arm that runs wherever GNU coreutils do,
+# which is to say almost everywhere.
+term_start=$SECONDS
+term_rc=0
+run_limited 2 bash -c 'trap "" TERM; sleep 60' >/dev/null 2>&1 || term_rc=$?
+term_took=$((SECONDS - term_start))
+# The limit is 2s and the escalation follows 5s later, so anything under about 15
+# means it was killed rather than waited out; 60 would mean the command simply
+# finished.
+[ "$term_took" -lt 15 ] \
+    && pass "a command that ignores TERM is killed at the limit (${term_took}s)" \
+    || die "a TERM-ignoring command outlived the watchdog (${term_took}s)"
+[ "$term_rc" -ne 0 ] \
+    && pass "…and the watchdog reports that it did not finish" \
+    || die "a killed command was reported as successful"
+
+# …AND A `timeout` THAT CANNOT ESCALATE IS NOT USED. Falling back to a plain
+# `timeout` when `-k` is unsupported restores the very defect the escalation
+# exists to fix: TERM, no KILL, and a command that traps it runs on. The portable
+# path polls and kills itself, so it is strictly better than a watchdog that
+# cannot — `-k` is the only reason to prefer the external one.
+NOK="$TMP/nok"; mkdir -p "$NOK"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm cat; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$NOK/$b"
+done
+# A `timeout` that refuses `-k`, exactly as a stripped-down implementation would.
+printf '#!/usr/bin/env bash\ncase "$1" in -k) echo "timeout: unrecognized option -k" >&2; exit 125 ;; esac\nshift\nexec "$@"\n' \
+    > "$NOK/timeout"; chmod +x "$NOK/timeout"
+nok_out="$(PATH="$NOK" bash -c '
+    . "'"$SELF_DIR"'/testlib.sh"
+    start=$SECONDS
+    run_limited 2 bash -c "trap \"\" TERM; sleep 60" >/dev/null 2>&1
+    rc=$?
+    echo "rc=$rc took=$((SECONDS - start))"' 2>&1)"
+nok_took="${nok_out##*took=}"
+{ [ -n "$nok_took" ] && [ "$nok_took" -lt 15 ]; } \
+    && pass "a timeout without -k is not used; the escalating path kills anyway ($nok_out)" \
+    || die "a TERM-only timeout was used and the command outlived it ($nok_out)"
+
 # ── a reader that emits and then fails is not a successful run ─────────────
 # `cat` can write a partial buffer and exit non-zero; its status was overwritten
 # by `rm` and the COMMAND's 0 returned, so a caller comparing a prefix or
@@ -268,10 +312,48 @@ for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$CATF/$b"
 done
 printf '#!/usr/bin/env bash\nprintf "partial"\nexit 1\n' > "$CATF/cat"; chmod +x "$CATF/cat"
-out="$(PATH="$CATF" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>&1)"
+# STDERR IS DISCARDED HERE, deliberately. The fallback replays the bounded
+# command's stderr as well as its stdout, so the stubbed `cat` runs twice and its
+# second "partial" lands on stderr — folding that into the capture with `2>&1`
+# made this exact comparison fail against correct behaviour. What this case is
+# about is the STDOUT reader's status, so stdout is what it reads.
+out="$(PATH="$CATF" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>/dev/null)"
 case "$out" in
     "rc=125 res=partial") pass "a reader that emits and then fails returns 125" ;;
     *) die "failing reader gave '$out' (want rc=125 res=partial)" ;;
+esac
+# …and the STDERR replay has its own status, for the same reason: a `cat` that
+# emits a partial diagnostic and then fails hands the caller a truncated message
+# to match against, and `pr-ci-state.sh` decides "no checks configured" by
+# matching a diagnostic whole. Here stdout reads cleanly and only stderr fails.
+CATE="$TMP/cate"; mkdir -p "$CATE"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$CATE/$b"
+done
+# The two replays are `cat "$tmp"` and `cat "$tmperr"`, both `mktemp` paths, so
+# the argument cannot tell them apart — the stub counts instead and fails on the
+# SECOND call. The real `cat` is resolved to an absolute path BEFORE the PATH is
+# reduced, or the stub re-finds itself through the reduced PATH and recurses.
+REAL_CAT="$(command -v cat)" || { printf 'FAIL - no cat on PATH\n'; echo "RESULT: FAIL"; exit 1; }
+# Builtins only for the counter: the PATH below is reduced to a handful of
+# symlinks, and the first version reached for `head`, which is not among them —
+# so the count never advanced past one and the case passed against a `cat` that
+# never failed. A stub that cannot count is a fixture asserting nothing.
+cat > "$CATE/cat" <<CATSH
+#!/usr/bin/env bash
+n=0
+[ -f "$TMP/catn" ] && read -r n < "$TMP/catn"
+n=\$((n + 1))
+printf '%s\\n' "\$n" > "$TMP/catn"
+if [ "\$n" -eq 2 ]; then printf 'partial'; exit 1; fi
+exec "$REAL_CAT" "\$@"
+CATSH
+chmod +x "$CATE/cat"
+: > "$TMP/catn"
+eout="$(PATH="$CATE" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>/dev/null)"
+case "$eout" in
+    "rc=125 res=whole") pass "…and a stderr replay that fails returns 125 too" ;;
+    *) die "failing stderr replay gave '$eout' (want rc=125 res=whole)" ;;
 esac
 
 # ── no fixture may put its stubs on the WATCHDOG's own PATH ────────────────

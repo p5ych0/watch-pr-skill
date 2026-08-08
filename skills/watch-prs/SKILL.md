@@ -210,6 +210,133 @@ unset -f rb_identity 2>/dev/null \
 rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+# THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
+#
+# CI was red for four consecutive commits on one PR and neither the round loop nor
+# the pre-push self-check noticed: every round was closed as green on the strength
+# of a local suite run, and the operator had to point at the checks tab.
+# `pr-selfcheck.sh` runs the suite HERE, before the push — it cannot see a failure
+# that only happens on the runner, and that one only happened there. "The suite
+# passes here" and "the checks pass there" are different claims, and only the
+# first was ever being made.
+#
+# Defined once and called from both push sites, because two copies of a gate is
+# how one of them comes to be missing a rule the other has.
+#
+# The stale definition is cleared first and the clearing is CHECKED, exactly as
+# for `rb_identity` above: this runs in the driving session's own shell, where an
+# earlier block may have defined `ci_gate`, and `readonly -f` makes the unset fail
+# while leaving the old function installed. A stale gate that returns 0 lets a red
+# head close its round — the defect this whole gate exists to prevent, arriving
+# through the gate itself.
+unset -f ci_gate 2>/dev/null \
+    || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
+ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
+    local pr="$1" oid="$2" rc elapsed budget nap stable_rc="" stable_since=0
+    local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
+    # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
+    # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
+    # seconds and leaves the elapsed count unchanged forever, and a non-numeric
+    # `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every iteration — either
+    # one turns the supposedly bounded gate into an unbounded API-polling loop.
+    # Leading zeros are rejected rather than accepted as digits: Bash reads them
+    # as octal in arithmetic, so `08` aborts and `00` is zero.
+    case "$iv" in  ""|0|0*|*[!0-9]*|??????*) iv=30 ;; esac
+    case "$tmo" in ""|0*|*[!0-9]*|??????*)   tmo=1800 ;; esac
+    case "$grace" in ""|0*|*[!0-9]*|??????*) grace=90 ;; esac
+    local probe="${PR_CI_PROBE_TIMEOUT:-60}"
+    case "$probe" in ""|0|0*|*[!0-9]*|??????*) probe=60 ;; esac
+    # ELAPSED WALL TIME, not the sum of the sleeps. Counting only the sleeps
+    # excludes however long each probe took, so two slow `gh` calls per iteration
+    # silently turned a documented thirty-minute bound into ninety. `$SECONDS` is
+    # wall time and needs no external command; the baseline is a local, so nothing
+    # else in the session has its own reading disturbed.
+    local t0=$SECONDS
+    while :; do
+        # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
+        # number, and the API can still be serving the PREVIOUS head for a moment
+        # after a push — the head confirmation below already retries for exactly
+        # that lag. Asking without the OID meant a green answer about the head
+        # from the round before, which is the last round's answer to this round's
+        # question, and it reads as permission to close.
+        # EACH PROBE IS BOUNDED BY WHAT IS LEFT, not only by its own default. The
+        # helper watchdogs its `gh` calls, but at sixty seconds each — so with
+        # `PR_CI_TIMEOUT=1` a hung request ran for a minute before this loop could
+        # look at the clock at all. A bound the callee does not know about is not
+        # a bound; the remaining budget is passed down.
+        elapsed=$((SECONDS - t0))
+        # AN EXPIRED DEADLINE IS NOT A SHORT DEADLINE. Clamping an exhausted
+        # budget up to one second started another probe past the bound — and each
+        # of those can take its second plus the watchdog's five-second escalation,
+        # so the clamp turned the timeout into a floor. The clock is checked
+        # BEFORE the probe as well as after it, because a sleep that lands exactly
+        # on the deadline would otherwise buy one more request.
+        if [ "$elapsed" -ge "$tmo" ]; then
+            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
+            return 1
+        fi
+        budget=$((tmo - elapsed))
+        [ "$budget" -gt "$probe" ] && budget="$probe"
+        PR_CI_PROBE_TIMEOUT="$budget" "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
+        elapsed=$((SECONDS - t0))
+        # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With
+        # the check at the bottom of the loop, a `PR_CI_TIMEOUT` shorter than
+        # `PR_CI_GRACE` — or simply a probe that returned green after the deadline
+        # — closed the round past its own bound, which is a bound that does not
+        # bind. A gate that has run out of time has no verdict, whatever the last
+        # answer was.
+        if [ "$elapsed" -ge "$tmo" ]; then
+            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
+            return 1
+        fi
+        case "$rc" in
+            0|4)
+                # A GOOD ANSWER HAS TO HOLD. Both of these close the round, and
+                # both can be true of an incomplete picture: a push that triggers
+                # two workflows can have the fast one registered and passing
+                # before the second is registered at all, and a run is registered
+                # a moment after the head moves, so the first probe reports `none`
+                # on a repository that does have CI. Closing on either reproduces
+                # the red-head closure with an extra step — the later workflow
+                # appears and fails after the round is already closed.
+                #
+                # So a verdict that would close the round must still be the answer
+                # `grace` seconds later. Anything else resets it, because the
+                # picture changed.
+                if [ "$rc" = "$stable_rc" ] && [ $((elapsed - stable_since)) -ge "$grace" ]; then
+                    if [ "$rc" -eq 4 ]; then
+                        echo "note: no checks are configured; the CI gate has nothing to assert"
+                    fi
+                    return 0
+                fi
+                if [ "$rc" != "$stable_rc" ]; then stable_rc="$rc"; stable_since="$elapsed"; fi ;;
+            1) echo "ABORT: the head you just pushed is RED. Fix it and push again; do not close this round."
+               return 1 ;;
+            3|5) stable_rc=""; stable_since=0 ;;   # running, or the API has not caught up
+            *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
+               return 1 ;;
+        esac
+        # THE SLEEP IS CAPPED AT WHAT IS LEFT. Sleeping a full interval when less
+        # than that remains means the gate cannot report its own deadline until
+        # after it has passed — `PR_CI_TIMEOUT=1` with the default 30-second
+        # interval took thirty seconds to say it had run out of one. The bound is
+        # then only ever approximately the bound, and the smaller it is set the
+        # more approximate it gets.
+        nap=$((tmo - elapsed))
+        [ "$nap" -gt "$iv" ] && nap="$iv"
+        # `sleep` takes its status like every other call here. A `sleep` that
+        # returned immediately — interrupted, or missing — would spin this loop
+        # against the API until the timeout, and with the elapsed count now taken
+        # from the clock the loop would still be bounded but would poll hard for
+        # the whole of it.
+        sleep "$nap" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
+    done
+}
+# …and the definition that ended up installed is the one just written. A `.`-style
+# failure or a surviving readonly copy is caught above; this catches the case
+# where nothing is defined at all.
+[ "$(type -t ci_gate 2>/dev/null)" = function ] \
+    || { echo "ABORT: the CI gate is not defined"; exit 1; }
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
 # inline mangles it. Freshly created per PR and per session, because a reused
@@ -277,14 +404,11 @@ WHO="$CODEX_BOT"
 # There is nothing to capture before the trigger, because the trigger preceded
 # us. So the automatic path waits on any terminal review, and only the explicit
 # re-requests in step 5 carry a baseline.
-# The head this round started from, so the automatic path can tell a real push
-# from a no-op one.
-PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not read the current head."; exit 0; }
-# Validated, not merely fetched. An rc-0 call yielding empty or `null` would make
-# every unchanged-head comparison below false, so automatic mode would assume the
-# no-op push queued a review, queue nothing, and re-arm forever.
-[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the current head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
+# No head baseline is captured here. One used to be, so the automatic path could
+# tell a real push from a no-op one and send a mention only for the second — and
+# the request is unconditional now, so nothing reads it. Left in place it would be
+# a `gh pr view` whose transient failure or malformed answer ABORTS this step
+# before any context is posted or any wait begins: a call that can only cost.
 
 if [ "$AUTO_REVIEW" = "yes" ]; then
     PRIOR_REVIEW=""
@@ -506,10 +630,8 @@ resolving it. Then, in one pass:
    precede the push: with Codex automatic review enabled the *push itself*
    requests the next review, so a boundary check after it cannot stop anything
    and a self-check after it has already let the round start. **The push is not
-   here** — it belongs to the mode-specific recipe below, because with
-   auto-review on it must come after the threads are resolved and the summary is
-   posted, or the pass it triggers reads the previous round's account against
-   threads that are still open;
+   here** — it belongs to the mode-specific recipe below, because the checks on
+   what it pushes decide whether this round may be closed at all;
 4. reply to each thread with what changed, **react to it**, and resolve it — and
    **verify the resolve succeeded** rather than assuming it did.
    `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
@@ -534,9 +656,17 @@ resolving it. Then, in one pass:
 
    A failed reaction is a note, not an abort: it is feedback, and losing it must
    not stop a round from closing;
-4. **post the summary and re-request `$WHO`** — in an order that depends on what
-   actually triggers the next pass. See below: with automatic review on, the
-   *push* is the trigger, so steps 3 and 4 move ahead of it.
+4. **post the summary and re-request `$WHO`** — after the push, and after the
+   CI gate has said the pushed head is green. Resolving a thread and posting a
+   summary are the irreversible parts of closing a round, so they come last: a
+   comment saying "that round did not really close" is a record, not a retraction,
+   and it is itself a call that can fail.
+
+   With automatic review on the push also *starts* a pass, and that one cannot be
+   held back. It reads open threads and no summary, so it may re-report what this
+   round already answered — which is why the explicit request at the end is sent
+   in that mode too, and is the pass that carries the summary. A wasted pass is
+   recoverable; a round closed on a red head is not.
 
 ### 5a. Self-check before the push
 
@@ -610,7 +740,16 @@ summary and the push is inert:
 # Branched on: if the push fails — auth, a non-fast-forward, a dropped
 # connection — the fixes are not on the PR, and closing the round anyway resolves
 # threads and requests a review of code that was never sent.
+# The SHA this round is pushing, captured before the push and status-checked, so
+# the gate can be asked about this commit rather than about whatever the API
+# currently calls the PR's head.
+HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; do not close or re-request this round."; exit 0; }
+# The checks on what was just pushed, BEFORE anything else in this round. Threads
+# resolved and a summary posted against a red head are a round closed on code that
+# does not build — and in this mode nothing has been resolved or posted yet, so a
+# red head leaves the round genuinely open.
+ci_gate N "$HEAD_PUSHED" || exit 0
 # reply + resolve threads here
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
@@ -656,32 +795,43 @@ $SUMMARY"; then
 fi
 ```
 
-**Automatic review ON** — the push starts the pass, so everything the reviewer is
-told to read must already be there, and **no mention is sent at all**:
+**Automatic review ON** — the push starts the pass, so the ordering is decided by
+what is *irreversible*:
 
 ```bash
-# reply + resolve threads FIRST: a pass that starts against threads still open
-# re-reports findings that were already answered, and the volume reads as
-# regression rather than repetition.
-# Then the summary, branched on, and only then the push.
-# The summary is READ with its status taken, before any of it is posted.
+# NOTHING IRREVERSIBLE HAPPENS BEFORE THE CHECKS ARE KNOWN.
+#
+# This sequence used to close the round first — resolve the threads, post the
+# summary — and push last, so that the pass the push starts would find both
+# already in place. That ordering cannot be gated: by the time the checks on the
+# pushed commit can be consulted, the threads are resolved and the summary is
+# posted, and neither can be taken back. A later comment saying "this round is not
+# closed" is a record, not a retraction, and it is itself a call that can fail.
+#
+# So the push comes first and the closure comes after the verdict. THE COST IS
+# REAL and is not hidden: the pass the push starts reads open threads and no
+# summary, so it can re-report findings this round already answered. That pass is
+# superseded by the explicit request at the end, which is sent in this mode
+# precisely because the automatic one ran too early to see anything.
+#
+# The trade is between a wasted pass and a round that closes on a red head. Only
+# one of those two can be undone by the next round.
+#
+# The summary is READ here, with its status taken, but posted later — a round that
+# cannot produce its own summary should not push either.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read
 # still produced a successful `gh pr comment` — and the reviewer contract makes
 # the newest summary the thing read before the diff, so a truncated one is worse
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
-    echo "ABORT: could not post the round summary — do not push yet."; exit 0
-fi
-# THIS is the request, so a failed push means no review was queued AND the fixes
-# are not on the PR — the watch would then observe the already-reviewed remote
-# head and read its old verdict as this round's.
-# The authoritative review id BEFORE the request, so the watch can tell the new
-# pass from the old one on an unchanged head. Empty is a legitimate answer (no
-# review yet); only a failed read is fatal.
-PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+# NO REVIEW BASELINE IS TAKEN HERE. It used to be, and the push that follows can
+# start a pass that FINISHES during the CI wait — the gate waits for checks, and a
+# Codex pass on a small diff can be quicker. A baseline captured before the push
+# then accepts that early pass as the answer to the request made after it, and the
+# loop can advance to Copilot, or to the merge gate, while the summary-aware pass
+# is still running. The baseline is taken immediately before the explicit request
+# instead, so whatever the push started is already behind it.
 
 # The push is the trigger — but ONLY when it moves the head. A round that ends
 # without a new commit (a dismissal, or a finding answered rather than coded
@@ -701,15 +851,38 @@ case "$ROUNDS_RC" in
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
 esac
 
-# The REMOTE baseline is re-read at the start of every round, not carried from
-# step 2. After a fix round moved the head from A to B, a `PRIOR_HEAD` still
-# holding A made the unchanged-head comparison false on the NEXT round — so a
-# dismissal or an answered-without-code round queued nothing and re-armed forever.
-PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not re-read the head for this round."; exit 0; }
-[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the round baseline head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
+# No `PRIOR_HEAD` baseline any more. It existed to decide whether the push had
+# moved anything, because the `@codex review` mention was sent only when it had
+# not — a no-op push queues no pass, and `--after-review` then rejects the old
+# record forever. The request is unconditional now, so there is nothing to decide:
+# a round that moved the head and a round that did not both end with an explicit
+# ask, and the question the baseline answered no longer arises.
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
+# THE REMOTE HEAD AND THE TERMINAL REVIEW ID, BEFORE THE PUSH — and used, which
+# is the difference from the baseline that was removed. A push that moves the head
+# starts a Codex pass, and that pass can FINISH while the CI gate is still waiting
+# for checks. These two are what let the pass be waited on afterwards: the head to
+# know one was started at all, the review id to recognise its result. Without
+# them, `--after-review` on the explicit request accepts the earlier pass and the
+# loop advances while the summary-aware one is still running.
+PUSH_FROM=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not read the head this push starts from."; exit 0; }
+[[ "$PUSH_FROM" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pre-push head is not a full OID ('$PUSH_FROM')."; exit 0; }
+# CODEX ONLY, like the wait it feeds. Read unconditionally, a transient failure on
+# a Copilot round aborted before the push AND before `--add-reviewer` — a round
+# stalled by a probe for a pass that phase never has. Only the wait was made
+# Codex-only the first time; its input has to be too, or the guard moves the
+# failure rather than removing it.
+PUSH_BASE=""
+if [ "$WHO" != "$COPILOT_BOT" ]; then
+    PUSH_BASE=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the review id before the push."; exit 0; }
+fi
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
+# The gate, before anything that cannot be taken back. A red head stops here with
+# the threads still open and no summary posted, so the round is genuinely still
+# open and the next push is its continuation rather than a correction.
+ci_gate N "$HEAD_BEFORE" || exit 0
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
@@ -734,6 +907,47 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
     [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] \
         || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, pushed $HEAD_BEFORE) — wrong branch or worktree?"; exit 0; }
 fi
+# THE PUSH-TRIGGERED PASS IS WAITED OUT FIRST.
+#
+# If the push moved the head it started a Codex pass, and that pass can still be
+# running here — CI settling in ninety seconds while a review takes a hundred and
+# twenty is an ordinary shape. The explicit request below is answered with
+# `--after-review "$PRIOR_REVIEW"`, and a `PRIOR_REVIEW` taken while that pass is
+# in flight is the id BEFORE it: the pass then lands, satisfies the wait, and the
+# loop advances to Copilot or to the merge while the request it was supposed to
+# answer is still queued.
+#
+# So it is serialised. Only when the head moved — a no-op push starts nothing, and
+# waiting for a pass nobody triggered is a guaranteed timeout.
+#
+# CODEX ONLY. A push never triggers Copilot — the skill establishes that at the
+# top — so in the Copilot phase there is no pass to wait for, and waiting anyway
+# meant every Copilot round that moved the head sat until the watch timed out and
+# then exited BEFORE `--add-reviewer` was ever reached. The phase where automatic
+# review does nothing is the phase where serialising it stalls everything.
+if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
+    "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
+    # A TIMEOUT IS NOT PERMISSION TO CONTINUE. If that pass has not terminated,
+    # taking a baseline now is exactly the race this block exists to remove — the
+    # pass lands a moment later and answers the wrong request.
+    case "$PUSHPASS_RC" in
+        0) ;;
+        1) echo "ABORT: the pass the push started has not finished; its result would answer the next request."; exit 0 ;;
+        *) echo "ABORT: could not observe the pass the push started (rc=$PUSHPASS_RC)"; exit 0 ;;
+    esac
+fi
+
+# ONLY NOW is the round closed. The head is confirmed and its checks are green, so
+# resolving a thread and posting a summary are claims that are true when made.
+# reply + resolve threads here
+#
+# THE SUMMARY IS POSTED ONCE, by whichever branch below carries it. Posting it
+# here as well produced two identical round-summary comments on every Codex round
+# — and the reviewer contract makes the NEWEST summary the one read before the
+# diff, so a duplicated one is a record with two answers to the same question.
+# Worse, if the request that follows failed, the standalone comment had already
+# recorded a closure that no superseding pass was coming for.
+
 # WHICH reviewer comes FIRST, before any question about the head.
 #
 # A push never triggers Copilot — the skill establishes that at the top — so in
@@ -742,19 +956,40 @@ fi
 # head skipped `--add-reviewer` entirely, and the watch waited past the old
 # Copilot result for a pass nobody had asked for.
 if [ "$WHO" = "$COPILOT_BOT" ]; then
+    # Same baseline rule, taken before this branch's own request.
+    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+    # Copilot's request carries no body, so the summary is its own comment — and
+    # it comes FIRST, because `--add-reviewer` starts the pass and the contract
+    # says the summary is there to be read before the diff.
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+        echo "ABORT: could not post the round summary."; exit 0
+    fi
     if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
-elif [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
-    # Codex, same head as the last round: the push queued nothing, so ask.
+else
+    # THE BASELINE IS TAKEN HERE, after the push-triggered pass has had its chance
+    # to land, so `--after-review` cannot mistake it for the answer to this
+    # request. Empty is a legitimate answer (no review yet); only a failed read is
+    # fatal.
+    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
+    # Codex is asked EXPLICITLY, in this mode too, and the mention CARRIES the
+    # summary — one comment, one round.
+    #
+    # This used to be sent only when the push moved nothing, on the grounds that a
+    # push that does move the head already asked. That was true and is no longer
+    # sufficient: the automatic pass now starts before the threads are resolved
+    # and before the summary exists, so it reviews without the two things the
+    # reviewer contract says it reads first. The explicit request is what queues
+    # the pass that has them.
     if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
-        echo "ABORT: could not request a review for an unchanged head."; exit 0
+        echo "ABORT: could not request the review that carries this round's summary."; exit 0
     fi
 fi
-# Otherwise no `@codex review` comment: the push already asked Codex, and sending
-# one too queues a duplicate pass over the same head.
 ```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
@@ -890,6 +1125,13 @@ fi
 if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
     echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
 fi
+# THE CHECKS ON THAT HEAD, TOO. The CI gate lives at the two push sites in step 5,
+# and a PR whose first review is clean never enters step 5 at all — so a head with
+# a failing check could pass through both phases untouched, and the merge gate
+# looks only at REQUIRED checks, which a failing optional one is not. Every path
+# that accepts a verdict as phase-completing has to have seen the checks, not just
+# the paths that pushed something.
+ci_gate N "$CODEX_SHA" || exit 0
 
 # THE SUMMARY GOES FIRST, and its post is branched on.
 #
@@ -1196,76 +1438,45 @@ while :; do
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
 
-# (4) Required checks green. Capture the STATUS separately: `gh pr checks` can
-# print `true` and then exit non-zero, and command substitution keeps the output —
-# so comparing the string alone lets an errored probe read as "all green". In the
-# default mode the merge below uses `--admin`, which bypasses branch protection,
-# so this probe is the only thing standing between a failed read and an unchecked
-# merge.
+# (3b) EVERY check on the head being merged, not only the required ones.
+#
+# The round loop's gate lives at the push sites, and a PR whose reviews were clean
+# from the start never pushed anything — so nothing had looked at its checks by
+# the time it arrived here, and the required-checks probe below is blind to a
+# failing OPTIONAL check. A repository with no branch protection has no required
+# checks at all, which makes that probe blind to everything.
+#
+# The same gate, on the head the merge is pinned to.
+ci_gate N "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 0; }
+
+# (4) Required checks green — through the same helper the round loop uses.
+#
+# This was about seventy lines inline here, and the round loop needed the same
+# question answered. A second copy is the defect issues #11 and #18 were both
+# opened for, so both call `pr-ci-state.sh` and `--required` is what separates the
+# two questions: this gate asks whether branch protection is satisfied; the round
+# gate asks whether the commit just pushed is broken, where a failing
+# non-required check still counts.
+#
+# In the default mode the merge below uses `--admin`, which bypasses branch
+# protection, so this probe is the only thing standing between a failed read and
+# an unchecked merge — which is why anything that is not an explicit green or an
+# explicit "nothing configured" blocks.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
-# NON-ZERO when the branch has no required checks at all, saying so on stderr —
-# not because anything failed. Treating every non-zero status as unreadable
-# therefore blocked the merge on every repository without branch protection,
-# permanently. That is not a fail-closed guard, it is a gate that never opens,
-# and it was found by trying to merge rather than by reading the code.
-#
-# stderr is captured separately from stdout, so the distinguishing message is
-# available without polluting the value being compared.
-# THE WHOLE DIAGNOSTIC IS MATCHED, not searched for a phrase. `gh pr checks` has
-# no dedicated status for "none configured" — it documents exit 8 for pending and
-# nothing for this — so the message is the only signal, and a substring test
-# accepted it inside a LARGER failure: a run that printed the benign line and then
-# failed for an unrelated reason was classified as benign, and the default
-# administrator merge proceeded with no trusted checks result at all. Matching the
-# entire message means an extra line, an extra sentence or a wrapped error all
-# fall through to the blocking branch, which is the direction that cannot be
-# wrong.
-#
-# Both wordings are accepted because `gh` drops "required" when the branch has no
-# checks whatsoever, and both mean the same thing here: nothing to be green.
-checks_msg_is_none_configured() {
-    case "$1" in
-        *"
-"*) return 1 ;;                       # more than one line is more than one thing
-    esac
-    case "$1" in
-        "no checks reported on the '"*"' branch"|"no required checks reported on the '"*"' branch")
-            return 0 ;;
-    esac
-    return 1
-}
-CHECKS_RC=0
-CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
-# THE CONTAINER IS VALIDATED BEFORE `all`. `all(.[]; …)` over an empty stream is
-# `true` by definition, so a successful read that returned an object, a null or
-# an empty array — anything that is not a list of bucket records — came out as
-# "every required check passed" and the administrator merge proceeded on a
-# checks payload nothing had actually read. The shape is asserted first and a
-# distinguished `malformed` emitted otherwise, which the equality test below
-# already refuses.
-CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket \
-             --jq 'if type != "array" or length == 0 then "malformed"
-                   elif any(.[]; type != "object" or (.bucket | type) != "string") then "malformed"
-                   else all(.[]; .bucket == "pass") end' 2>"$CHECKS_ERR") || CHECKS_RC=$?
-# The READ has its own status, taken before `rm` overwrites it. A `cat` that
-# emitted text containing "no required checks" and then failed would otherwise be
-# classified as the benign none-configured case — turning a failed probe into a
-# merge with no trusted checks result at all.
-CHECKS_MSG="$(cat "$CHECKS_ERR" 2>/dev/null)"; CHECKS_MSG_RC=$?
-rm -f "$CHECKS_ERR" 2>/dev/null
-[ "$CHECKS_MSG_RC" -eq 0 ] || { echo "merge blocked: could not read the checks diagnostic (rc=$CHECKS_MSG_RC)"; exit 0; }
-if [ "$CHECKS_RC" -eq 0 ]; then
-    # A real answer: every required check must be a pass.
-    [ "$CHECKS" = "true" ] || { echo "merge blocked: a required check is not green (out='$CHECKS')"; exit 0; }
-elif checks_msg_is_none_configured "$CHECKS_MSG"; then
-    # No required checks are configured. There is nothing to be green, so this
-    # gate has nothing to say — and says so, rather than passing silently or
-    # blocking forever. The other gates still apply.
-    echo "note: no required checks configured on this branch; the checks gate has nothing to assert"
-else
-    echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC out='$CHECKS' err='$CHECKS_MSG')"; exit 0
-fi
+# non-zero when the branch has no required checks at all, not because anything
+# failed. Treating that as unreadable blocked the merge on every repository
+# without branch protection, permanently — not a fail-closed guard but a gate that
+# never opens, and it was found by trying to merge rather than by reading the
+# code. The helper distinguishes the two and reports 4 for it.
+"$RB_SCRIPTS"/pr-ci-state.sh N --required; CHECKS_RC=$?
+case "$CHECKS_RC" in
+    0) ;;
+    4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
+    1) echo "merge blocked: a required check is not green"; exit 0 ;;
+    3) echo "merge blocked: the required checks have not finished"; exit 0 ;;
+    *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 0 ;;
+esac
 
 # (4b) The round boundary, once more. A clean Copilot verdict on the threshold-th
 # head would otherwise walk straight into a merge without the operator being

@@ -129,6 +129,294 @@ grep -q 'CHECKS_RC' "$SKILL" \
     && pass "the required-checks probe checks its exit status" \
     || die "the required-checks probe compares output without its status"
 
+# ── the pushed head is checked before the round is closed ─────────────────
+# CI was red for four consecutive commits and nothing noticed: every round was
+# closed on a local suite run, and `pr-selfcheck.sh` runs BEFORE the push, so it
+# cannot see a failure that only happens on the runner. "The suite passes here"
+# and "the checks pass there" are different claims. Issue #16.
+grep -q '^ci_gate() {' "$SKILL" \
+    && pass "the driver has a CI gate for the head it pushed" \
+    || die "nothing checks whether the pushed head is green"
+# EVERY push site calls it. One that does not is a round closed on an unknown
+# state, and the two sites exist precisely because the ordering differs — which is
+# how one of them comes to be missing a step the other has.
+# `|| …=0`: `grep -c` exits 1 when nothing matches, and this file runs under `-e`,
+# so an unguarded count terminated the suite at the first call-form change instead
+# of reporting the mismatch it exists to report.
+# EVERY push site, and every other point that accepts a head. A PR whose reviews
+# were clean from the start never pushes anything, so gating only the push sites
+# left it never checked at all — through both phases and into a merge gate that
+# looks at REQUIRED checks only, which a failing optional one is not.
+pushes="$(grep -c '^git push ||' "$SKILL")" || pushes=0
+gates="$(grep -cE '^(if ! )?ci_gate N ' "$SKILL")" || gates=0
+[ "${pushes:-0}" -gt 0 ] && [ "$gates" -ge "$pushes" ] \
+    && pass "…and every push site passes through it ($gates gates, $pushes pushes)" \
+    || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
+# The two paths that accept a verdict WITHOUT a push: the Codex→Copilot phase
+# transition, and the merge gate. Named individually, because a count alone is
+# satisfied by two gates on the same site.
+grep -q '^ci_gate N "\$CODEX_SHA"' "$SKILL" \
+    && pass "…and a clean verdict does not open the Copilot phase unchecked" \
+    || die "a PR that never pushed can enter the Copilot phase with a red head"
+grep -q '^ci_gate N "\$HEAD_OID"' "$SKILL" \
+    && pass "…nor reach the merge with only its required checks read" \
+    || die "the merge gate reads only required checks; a failing optional one passes"
+# …AND EVERY ONE IS ASKED ABOUT A COMMIT. `gh pr checks` is addressed by PR number
+# and the API can still be serving the previous head for a moment after a push, so
+# an unpinned call can return the previous round's green as this round's answer.
+oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
+[ "$oid_gates" = "$gates" ] \
+    && pass "…naming an OID, not just the PR ($oid_gates/$gates)" \
+    || die "$((gates - oid_gates)) CI gate call(s) do not pin the head they ask about"
+# …AFTER the push and BEFORE the review is requested. Asking before the push reads
+# the previous head's result, which is the last round's answer to this round's
+# question; asking after the request means the pass is already running.
+awk '/^git push \|\|/ {p=NR}
+     /^(if ! )?ci_gate N "\$HEAD_/ {if (p && p < NR) g=NR}
+     /gh pr comment N/ {if (g && g < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "…between the push and the request, so it answers about this head" \
+    || die "the CI gate does not sit between the push and the review request"
+# THE MANUAL PATH GATES BEFORE ANYTHING IS CLOSED. Where the mention is the
+# trigger, nothing has been resolved or posted when the gate runs, so a red head
+# leaves the round genuinely open — that ordering is the whole value and it is the
+# one a later edit would most easily invert.
+awk '/^ci_gate N "\$HEAD_PUSHED"/ {g=NR}
+     g && /^SUMMARY="\$\(cat "\$SUMMARY_FILE"\)"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "…and in the manual path it precedes the summary, so a red round stays open" \
+    || die "the manual path posts its summary before knowing whether the head is green"
+# AND SO DOES THE AUTOMATIC PATH. It used to close first and push last, so that
+# the pass the push starts would find the summary already there — an ordering that
+# cannot be gated, because by the time the checks can be consulted the threads are
+# resolved and the summary is posted. A later "this round is not closed" comment is
+# a record, not a retraction, and is itself a call that can fail. The push moved
+# ahead of the closure; what that costs is a pass reading open threads, and that is
+# recoverable in a way a closed round is not.
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^ci_gate N "\$HEAD_BEFORE"/ {g=NR}
+     inb && g && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and in the automatic path the gate precedes the summary too" \
+    || die "the automatic path posts its summary before knowing whether the head is green"
+# PENDING IS NOT GREEN — AND THE GATE IS RUN TO PROVE IT. The checks start when
+# the push lands, so an immediate ask always finds them running; treating that as a
+# pass closes every round before its own CI has said anything, which is the
+# original defect with an extra step.
+#
+# A grep for `PR_CI_TIMEOUT` passed while the pending arm returned 0 — the presence
+# of a timeout says nothing about what is done with a pending verdict. So the
+# function is extracted and executed against a stubbed `pr-ci-state.sh` that
+# answers on a script, the same reason the parser-clear branch is executed rather
+# than matched.
+gate_fn="$(sed -n '/^ci_gate() {/,/^}/p' "$SKILL")"; gate_rc=$?
+[ "$gate_rc" -eq 0 ] && [ -n "$gate_fn" ] \
+    || die "the ci_gate function could not be extracted from SKILL.md (rc=$gate_rc)"
+# EVERYTHING IT ASSIGNS IS ITS OWN. `SKILL.md`'s blocks run in the driving
+# session's shell, so a name this function forgets to declare `local` is written
+# into that session — clobbering whatever was there and being clobbered in turn,
+# which for a loop counter or a sleep interval is a bug nobody would look for
+# here. `nap` was such a name.
+#
+# `PR_CI_*` is excluded: those are documented inputs, and the one that appears at
+# the start of a line is a command PREFIX — `PR_CI_PROBE_TIMEOUT="$b" cmd …` — not
+# an assignment to a variable of this function's.
+gate_assigned="$(printf '%s\n' "$gate_fn" \
+    | grep -oE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' | tr -d ' =' | sort -u)" || gate_assigned=""
+gate_local="$(printf '%s\n' "$gate_fn" | grep -E '^[[:space:]]*local ' \
+    | sed -E 's/^[[:space:]]*local //; s/=[^ ]*//g' | tr ' ' '\n' | sort -u)" || gate_local=""
+gate_leaks=""
+for v in $gate_assigned; do
+    case "$v" in PR_CI_*) continue ;; esac
+    printf '%s\n' "$gate_local" | grep -qx "$v" || gate_leaks="$gate_leaks $v"
+done
+[ -z "$gate_leaks" ] \
+    && pass "every name the CI gate assigns is declared local to it" \
+    || die "the CI gate writes into the driving session:$gate_leaks"
+# THE CHILD SKIPS THESE. The cleanup probe further down re-runs this whole file to
+# watch it remove its scratch tree, and these cases are the slow part — every one
+# of them waits on real `sleep`s. Re-running them inside that child doubled the
+# file's cost for nothing and, run after the other ten suites, pushed the child
+# past its own watchdog: the leak check then reported that its run had failed,
+# which is true and useless. The child needs the file to COMPLETE, not to re-prove
+# the gate.
+GATETMP=""
+if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
+    GATETMP="$(mktemp_d)" || { die "no scratch directory for the CI gate probe"; GATETMP=""; }
+fi
+if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
+    mkdir -p "$GATETMP/s"
+    # Answers come from a queue, one per call, so a gate that polls is
+    # distinguishable from one that decides on the first answer.
+    cat > "$GATETMP/s/pr-ci-state.sh" <<'STUBSH'
+#!/usr/bin/env bash
+# `tail -n +2`, not `sed -i` — in-place editing without a suffix argument is
+# GNU-only, and stock macOS runs this suite as a mandatory pre-push gate.
+# The bound it was handed, recorded — the gate is supposed to pass its REMAINING
+# time, not let the helper use its own sixty-second default.
+printf '%s\n' "${PR_CI_PROBE_TIMEOUT:-unset}" >> "$GATE_PROBE"
+rc="$(head -1 "$GATE_Q")"
+tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
+# A SLOW PROBE, when asked for. The timeout has to be a real duration bound, and
+# counting only the sleeps excluded however long each probe took.
+[ -n "${GATE_DELAY:-}" ] && sleep "$GATE_DELAY"
+echo "call" >> "$GATE_CALLS"
+# An EXHAUSTED queue REPEATS ITS LAST ANSWER, which is what a real check state
+# does — it does not change into something else because the fixture ran out of
+# script. A fixed default of "pending" made the `none` grace case unreachable: the
+# single `4` was followed by `3`s, the grace counter reset every poll, and a
+# repository that genuinely has no checks could never close a round.
+if [ -n "$rc" ]; then printf '%s\n' "$rc" > "$GATE_LAST"; else rc="$(cat "$GATE_LAST" 2>/dev/null)"; fi
+exit "${rc:-3}"
+STUBSH
+    chmod +x "$GATETMP/s/pr-ci-state.sh"
+    gate_case() {   # gate_case <queue> <want rc> <want calls> <label> [env…]
+        local out rc=0 calls q="$1" want="$2" mincalls="$3" label="$4"
+        shift 4
+        printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
+        : > "$GATETMP/last"
+        : > "$GATETMP/probe"
+        out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" \
+            RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
+            bash -c "$gate_fn"'
+                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
+        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
+        { [ "$rc" = "$want" ] && [ "${calls:-0}" -ge "$mincalls" ]; } \
+            && pass "$label" \
+            || die "$label — rc=$rc calls=$calls out='$out' (wanted $want / >=$mincalls calls)"
+    }
+    # GREEN MUST HOLD, TOO. A push that triggers two workflows can have the fast
+    # one registered and passing before the second is registered at all, so the
+    # first probe is green about an incomplete picture — and the later workflow
+    # then appears and fails after the round is closed. The same registration
+    # grace that `none` needs.
+    gate_case '0'     0 2 "a green head lets the round close, once that is stable"
+    gate_case '0
+0
+3
+1'                    1 4 "…and a green that turns pending then fails still stops the round"
+    # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
+    # pending, then green again is not two seconds of stable green — it is a new
+    # answer, and the run that made it pending is the one nobody has seen finish.
+    # Without the reset the second green inherits the first one's age and closes
+    # immediately, which is the incomplete-picture close this grace exists for.
+    gate_case '0
+3
+0'                    0 5 "a verdict interrupted by a change starts its grace again" PR_CI_TIMEOUT=10
+    # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
+    # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
+    # round past its own bound — and a bound that a verdict can step over is not a
+    # bound. Here the grace can never be earned inside the timeout.
+    gate_case '0'         1 1 "a verdict that stabilises after the deadline is refused" \
+        PR_CI_TIMEOUT=2 PR_CI_GRACE=60
+    # THE SLEEP MAY NOT OUTRUN THE DEADLINE. Sleeping a full interval when less
+    # than that remains means the gate cannot report its own bound until after the
+    # bound has passed: a one-second timeout with the default thirty-second
+    # interval took thirty seconds to say it had run out of one. The watchdog here
+    # is shorter than that interval, so an uncapped sleep is killed rather than
+    # reporting anything.
+    gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
+        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
+    # NO PROBE STARTS AFTER THE DEADLINE. Clamping an exhausted budget up to one
+    # second bought another request past the bound, and each of those can take its
+    # second plus the watchdog's escalation — the clamp turning the timeout into a
+    # floor. With a one-second bound and a one-second interval, the second poll
+    # would land exactly on the deadline: there must not be one.
+    gate_case '3'         1 1 "no probe is started once the deadline has passed" \
+        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
+    probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
+    # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
+    # deadline, probe again, and only then notice — so `-le 2` accepted the defect
+    # it was written to catch. The bound is checked before the second probe, so
+    # there is no second probe.
+    [ "${probes_after:-0}" -le 1 ] \
+        && pass "…so an expired gate makes no further requests ($probes_after)" \
+        || die "the gate kept probing past its deadline ($probes_after requests)"
+    # …AND NEITHER DOES A PROBE. The helper bounds its own `gh` calls, but at its
+    # own default — so with a one-second gate timeout a hung request ran for a
+    # minute before this loop could look at the clock. A bound the callee does not
+    # know about is not a bound. The stub here reads what it was given and reports
+    # it, so the assertion is on the value passed down rather than on a duration.
+    gate_case '0
+0'                    0 2 "the gate still closes on a stable green" PR_CI_GRACE=1
+    first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
+    { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
+        && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
+        || die "the probe bound was '$first', not capped at the 5s the gate had left"
+    gate_case '1'     1 1 "a red head stops the round"
+    gate_case '2'     1 1 "an unreadable check state stops the round"
+    # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
+    # A LONGER BOUND FOR THE CASES THAT MUST REACH ACCEPTANCE. Five seconds left
+    # these one second clear of the deadline, so a probe taking any measurable
+    # time pushed them over and they failed as timeouts — a fixture that passes on
+    # a fast machine and reports a defect on a slow one is testing the machine.
+    gate_case '3
+3
+0'                    0 3 "a pending result is waited on, never read as a pass" PR_CI_TIMEOUT=10
+    # …and the wait is bounded, because a wait that never ends is a hang. The queue
+    # runs out and the stub then answers 3 forever.
+    gate_case '3'         1 2 "…and stops once the checks have not settled in time"
+    # A HEAD THE API HAS NOT CAUGHT UP WITH IS NOT AN ANSWER. `gh pr checks` is
+    # addressed by PR number and can serve the previous head for a moment after a
+    # push; the helper reports 5 for it and the gate waits, because the correct
+    # response to "ask again shortly" is not to stop and is certainly not to close.
+    gate_case '5
+5
+0'                    0 3 "a head the API has not caught up with is waited on" PR_CI_TIMEOUT=10
+    # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a moment after
+    # the head moves, so the first probe after a push legitimately reports `none` on
+    # a repository that does have CI. Taking that as permission to close reproduces
+    # the red-head closure with an extra step.
+    gate_case '4
+4
+3
+1'                    1 4 "a transient 'none' followed by a real failure still stops the round"
+    # …and a repository that genuinely has no checks is not blocked forever: once
+    # `none` has held for the grace period it is believed.
+    gate_case '4'         0 2 "a repository with no checks has nothing to assert, once that is stable"
+    # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
+    # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
+    # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
+    # comparison fail on every iteration. Both fall back to the default, which the
+    # watchdog would otherwise have to kill — so `rc=124` here is a failure.
+    # A BAD BOUND MUST NOT BECOME AN UNBOUNDED POLLING LOOP. `PR_CI_INTERVAL=0`
+    # sleeps zero seconds and leaves the elapsed count at zero forever; a
+    # non-numeric `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every
+    # iteration. Both fall back to the defaults, and what that is observable as is
+    # PACING: with the fallback interval the gate manages a couple of polls in the
+    # window below, and without it, hundreds. The exit status cannot be the
+    # assertion — falling back to a thirty-minute timeout is the CORRECT
+    # behaviour, so the watchdog stopping the run is expected, not a failure.
+    gate_spin() {   # gate_spin <max calls> <label> [env…]
+        local out rc=0 calls maxc="$1" label="$2"
+        shift 2
+        printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
+        : > "$GATETMP/probe"
+        out="$(run_limited 12 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" RB_SCRIPTS="$GATETMP/s" "$@" \
+            bash -c "$gate_fn"'
+                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
+        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
+        [ "${calls:-0}" -le "$maxc" ] \
+            && pass "$label" \
+            || die "$label — $calls polls in 12s (at most $maxc); the bound was not applied"
+    }
+    gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
+    gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
+    gate_spin 4 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
+    # THE TIMEOUT IS A DURATION, NOT A SUM OF SLEEPS. Counting only the sleeps
+    # excluded the probe time, so two slow `gh` calls per iteration turned a
+    # documented thirty-minute bound into ninety. With a 3s probe and a 1s
+    # interval, a 4s bound is reached on the second poll; counting sleeps alone it
+    # would take five.
+    gate_case '3'         1 1 "the timeout counts the probe's own time, not just the sleeps" \
+        PR_CI_TIMEOUT=4 GATE_DELAY=3
+    gate_slow_calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || gate_slow_calls=0
+    [ "${gate_slow_calls:-0}" -le 3 ] \
+        && pass "…so a slow probe cannot stretch the bound ($gate_slow_calls polls)" \
+        || die "a slow probe stretched the timeout: $gate_slow_calls polls for a 4s bound"
+    rm -rf "$GATETMP"
+fi
+
 # ── the loop is PHASED: Codex to clean, then Copilot ───────────────────────
 # Asking both every round buys a Copilot pass on every intermediate commit and
 # mixes its findings into a round that was not about them.
@@ -417,12 +705,15 @@ grep -q 'The push is not' "$SKILL" \
     && pass "…and says where the push actually belongs" \
     || die "the checklist does not say where the push belongs"
 
-# In the auto-review branch, the push must come AFTER the summary post.
+# In the auto-review branch, the push must come BEFORE the summary post — the
+# reverse of what it was. Nothing irreversible may precede the checks verdict, and
+# the summary post is irreversible.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
-     inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
-    || die "the auto-review recipe pushes before the summary exists"
+     inb && /^git push/ {p=NR}
+     inb && p && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "with auto-review on, the push precedes the summary the checks decide about" \
+    || die "the auto-review recipe closes the round before the checks can be read"
 
 # ── the self-check's third outcome is handled ─────────────────────────────
 # `not_applicable` shares no exit status with "checks passed": the same code
@@ -648,18 +939,46 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # `-e`, and the probe is EXPECTED to fail — that is the assertion — so an
     # unguarded assignment terminates the suite here instead of asserting anything.
     setup_rc=0
-    setup_out="$(cd "$SETUPTMP/repo" && run_limited 60 env CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
-        bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
-                 readonly -f rb_identity
-                 eval "$1"
-                 echo "CONTINUED:$OWNER"' _ "$setup_block" 2>&1)" || setup_rc=$?
-    case "$setup_out" in
-        *CONTINUED*) die "the driver continued past a parser it could not clear ($setup_out)" ;;
-        *) pass "…and a definition that cannot be cleared stops the driver" ;;
-    esac
-    [ "$setup_rc" -ne 0 ] \
-        && pass "…reporting a failure rather than an abort message alone" \
-        || die "the setup block refused the parser but exited 0 (out='$setup_out')"
+    # EVERY function the setup block defines for itself, not just the parser. A
+    # stale `ci_gate` that returns 0 lets a red head close its round — the defect
+    # the gate exists to prevent, arriving through the gate itself — and it is
+    # reachable in exactly the persistent-shell state the parser is cleared for.
+    # EACH CASE GETS THE LIBRARY IT NEEDS, AND MUST ABORT FOR ITS OWN REASON.
+    #
+    # Written with one shared empty `identitylib.sh`, the `ci_gate` case passed
+    # while proving nothing: the block aborted at the empty parser, long before it
+    # reached the gate, and "the driver stopped" was true for a reason that had
+    # nothing to do with what was being tested. So the parser case gets an empty
+    # library and the gate case gets the real one — and the expected abort message
+    # is asserted, so a stop for some other reason cannot be mistaken for this one
+    # again.
+    for stale_case in 'rb_identity:empty:could not be cleared' \
+                      'ci_gate:real:a pre-existing ci_gate could not be cleared'; do
+        stale_fn="${stale_case%%:*}"; stale_rest="${stale_case#*:}"
+        stale_lib="${stale_rest%%:*}"; stale_msg="${stale_rest#*:}"
+        if [ "$stale_lib" = empty ]; then
+            : > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+        else
+            cat "$SCRIPT_DIR/identitylib.sh" \
+                > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+        fi
+        setup_rc=0
+        setup_out="$(cd "$SETUPTMP/repo" && run_limited 60 env CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
+            bash -c 'eval "$1() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }"
+                     readonly -f "$1"
+                     eval "$2"
+                     echo "CONTINUED:$OWNER"' _ "$stale_fn" "$setup_block" 2>&1)" || setup_rc=$?
+        case "$setup_out" in
+            *CONTINUED*) die "the driver continued past a $stale_fn it could not clear ($setup_out)" ;;
+            *) pass "…and a $stale_fn that cannot be cleared stops the driver" ;;
+        esac
+        grep -qF "$stale_msg" <<<"$setup_out" \
+            && pass "…stopping for that reason and not another" \
+            || die "$stale_fn stopped the driver, but not as '$stale_msg' (out='$setup_out')"
+        [ "$setup_rc" -ne 0 ] \
+            && pass "…reporting a failure rather than an abort message alone" \
+            || die "the setup block refused $stale_fn but exited 0 (out='$setup_out')"
+    done
     rm -rf "$SETUPTMP"
 fi
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
@@ -699,7 +1018,7 @@ grep -q 'no required checks' "$SKILL" \
 grep -q 'the required-checks probe failed' "$SKILL" \
     && pass "…and a genuinely failed probe still blocks" \
     || die "the checks probe no longer blocks on a real failure"
-grep -q 'CHECKS_ERR' "$SKILL" \
+grep -q 'ERRF' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…using stderr, so the message does not pollute the compared value" \
     || die "the checks probe does not capture stderr separately"
 
@@ -731,11 +1050,67 @@ grep -q 'before merging' "$SKILL" \
 # ── EVERY documented watch invocation carries the baseline ────────────────
 # The shell example passed --after-review while the Monitor command beside it did
 # not, leaving the feature inert in the mode Claude Code is told to use.
+# The baseline is a VARIABLE now, not one name: the automatic path waits out the
+# pass its own push started, and that wait's baseline is the id from before the
+# push rather than the one for the request that follows. What must never happen is
+# a watch with no baseline at all.
 watch_calls="$(grep -c 'pr-watch.sh N "\$WHO"' "$SKILL")"
-watch_pinned="$(grep -c 'pr-watch.sh N "\$WHO" --after-review "\$PRIOR_REVIEW"' "$SKILL")"
+watch_pinned="$(grep -cE 'pr-watch.sh N "\$WHO" --after-review "\$[A-Z_]+"' "$SKILL")"
 [ "$watch_calls" -eq "$watch_pinned" ] \
-    && pass "every documented watch invocation passes the review baseline" \
+    && pass "every documented watch invocation passes a review baseline" \
     || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review"
+# …and the one that waits out the push-triggered pass uses the PRE-PUSH id, not
+# the one taken for the request that follows it. Using the same variable for both
+# is the race with an extra step: the wait would be satisfied by whatever the
+# request is about to ask for.
+grep -q 'pr-watch.sh N "\$WHO" --after-review "\$PUSH_BASE"' "$SKILL" \
+    && pass "…and the push-triggered pass is waited out against the id from before it" \
+    || die "the push-triggered pass is not serialised before the next baseline is taken"
+# …GUARDED BY WHETHER A PASS WAS ACTUALLY STARTED, and by that comparison rather
+# than by a constant. `if false` around it satisfies a grep for the wait itself,
+# and a no-op push starts nothing, so waiting unconditionally is a guaranteed
+# timeout — the condition is the whole of it.
+grep -q '\[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]' "$SKILL" \
+    && pass "…only when the push actually moved the head" \
+    || die "the serialising wait is unconditional, or its condition was replaced"
+# …AND ONLY IN THE CODEX PHASE. A push never triggers Copilot, so there is no pass
+# to wait for there — and waiting anyway meant every Copilot round that moved the
+# head sat until the watch timed out and exited BEFORE `--add-reviewer` was ever
+# reached. The phase where automatic review does nothing is the phase where
+# serialising it stalls everything.
+grep -q '^if \[ "\$WHO" != "\$COPILOT_BOT" \] && \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
+    && pass "…and never in the Copilot phase, which no push triggers" \
+    || die "a Copilot round that moved the head waits for a pass nothing started"
+# …AND NEITHER IS ITS INPUT READ THERE. Guarding only the wait left the baseline
+# lookup running on every Copilot round, where a transient failure aborts before
+# the push AND before `--add-reviewer` — the same stall, moved one line up. A
+# guard that stops the consumer and not the producer relocates the failure.
+awk '/^PUSH_BASE=""$/ {z=NR}
+     z && /^if \[ "\$WHO" != "\$COPILOT_BOT" \]; then$/ {w=NR}
+     w && /pr-review-state.sh review-id N "\$WHO"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "…and the baseline it needs is only read in that phase too" \
+    || die "the pre-push review-id lookup runs on Copilot rounds that never use it"
+# ── the operator instructions match the workflow ──────────────────────────
+# README told operators that with automatic review on the summary must precede the
+# push and that no mention may be sent, which is the opposite of what the driver
+# does now. A settings page is the one place a user decides this, and a
+# contradiction there is not a stale note — it is instructions that cannot be
+# followed. `SKILL.md` and README are separate files with no mechanism keeping
+# them in step, which is what this assertion is.
+if [ -f "$ROOT/README.md" ]; then
+    grep -q 'no mention may be sent' "$ROOT/README.md" \
+        && die "README still says automatic mode sends no mention; the driver always does" \
+        || pass "README does not contradict the automatic-mode ordering"
+    grep -q 'two Codex passes' "$ROOT/README.md" \
+        && pass "…and says what automatic review actually costs" \
+        || die "README does not tell the operator that automatic mode costs a second pass"
+fi
+# …and a wait that TIMED OUT is not permission to continue. Taking a baseline
+# while that pass is still in flight is the race this block removes, with an extra
+# step: the pass lands a moment later and answers the wrong request.
+grep -q 'the pass the push started has not finished' "$SKILL" \
+    && pass "…and a pass that has not finished stops the round" \
+    || die "a timed-out wait for the push-triggered pass is treated as done"
 
 # ── the automatic path has no pre-request baseline ────────────────────────
 # The trigger preceded the skill, so a lookup can capture the very pass being
@@ -748,28 +1123,39 @@ grep -q 'PRIOR_REVIEW=""' "$SKILL" \
 # A `cat` that emitted text containing "no required checks" and then failed would
 # be classified as the benign none-configured case, letting the default admin
 # merge proceed with no trusted checks result at all.
-grep -q 'CHECKS_MSG_RC' "$SKILL" \
+grep -q 'MSG_RC' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "the checks diagnostic read takes its own status" \
     || die "a failed diagnostic read can be classified as 'no required checks'"
-grep -q 'could not read the checks diagnostic' "$SKILL" \
-    && pass "…and blocks the merge when it fails" \
+grep -q 'reason=diagnostic_unreadable' "$SCRIPT_DIR/pr-ci-state.sh" \
+    && pass "…and reports an error rather than a verdict" \
     || die "a failed diagnostic read does not block"
 
-# ── an unchanged head in automatic mode still gets a trigger ──────────────
+# ── automatic mode asks EXPLICITLY, whatever the push did ─────────────────
 # A round that ends without a new commit — a dismissal, or a finding answered
 # rather than coded around — leaves the push a no-op, so nothing is queued and
-# `--after-review` rejects the old record forever.
-grep -q 'PRIOR_HEAD' "$SKILL" \
-    && pass "the round records the head it started from" \
-    || die "automatic mode cannot tell a real push from a no-op one"
-# The CONDITION, not just the variable. Asserting the name alone survived
-# rewriting the test to `if false`, which is the whole behaviour.
-grep -q '\[ "\$HEAD_BEFORE" = "\$HEAD_AFTER" \] && \[ "\$PRIOR_HEAD" = "\$HEAD_AFTER" \]' "$SKILL" \
-    && pass "…and compares it against the head after the push" \
-    || die "the unchanged-head branch does not actually compare the heads"
-grep -q 'could not request a review for an unchanged head' "$SKILL" \
-    && pass "…and asks explicitly when the push moved nothing" \
-    || die "an unchanged head in automatic mode queues no review at all"
+# `--after-review` rejects the old record forever. That used to be handled by
+# comparing three heads and asking only when they matched, which is a condition
+# that can be got wrong; and it became insufficient anyway once the push moved
+# ahead of the summary, because the pass a moving push starts now reads open
+# threads and no summary. An unconditional ask covers both, and there is no
+# condition left to invert.
+#
+# The CONDITION is what is asserted, not the presence of a mention: a mention
+# inside a branch is not an unconditional ask, and the branch is exactly what was
+# removed.
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
+     inb && w && /^else$/ {e=1; next}
+     inb && e && /@codex review/ {print "ok"; exit}
+     inb && e && /^(el)?if / {print "conditional"; exit}' "$SKILL" | grep -q '^ok$' \
+    && pass "automatic mode requests a review whether or not the push moved the head" \
+    || die "the automatic request is conditional again; a no-op push queues nothing"
+# `-F`, not a `.` standing in for the apostrophe. A wildcard where an exact
+# character belongs matches variants nobody wrote, and the point of asserting a
+# message contract is that the message is that message.
+grep -qF "could not request the review that carries this round's summary" "$SKILL" \
+    && pass "…and says what that request is for" \
+    || die "the automatic path does not branch on its own request failing"
 
 # ── the re-request depends on WHICH reviewer the round was about ──────────
 # Copilot is never triggered by a push and never by an `@codex` mention — only by
@@ -785,15 +1171,82 @@ grep -q 'could not re-request Copilot' "$SKILL" \
 # ── the fetched heads are validated, not merely fetched ───────────────────
 # An rc-0 call yielding empty or `null` makes every unchanged-head comparison
 # false, so automatic mode assumes the no-op push queued a review.
-[ "$(grep -c 'PRIOR_HEAD" =~ \^\[0-9a-f\]{40}\$' "$SKILL")" -ge 2 ] \
-    && pass "the head baseline is validated as a full OID, each time it is read" \
-    || die "a fetched head is used as a baseline without validation"
+# NO `PRIOR_HEAD` AT ALL. It existed to decide whether the push had moved
+# anything, so a mention could be sent only when it had not; the request is
+# unconditional now and nothing reads it. Left in place it is a `gh pr view` whose
+# transient failure aborts a step before any context is posted — a call that can
+# only cost. The assertion is that there are ZERO assignments, because "one is
+# still validated" is what a half-finished removal looks like.
+[ "$(grep -c '^PRIOR_HEAD=' "$SKILL")" -eq 0 ] \
+    && pass "the obsolete head baseline is gone, not merely unused" \
+    || die "a PRIOR_HEAD baseline is still fetched and can abort a step for nothing"
 grep -q 'HEAD_AFTER" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
-    && pass "…and so is the head after the push" \
+    && pass "…and the head after the push is validated, not merely fetched" \
     || die "the pushed head is not validated"
-grep -q 'could not re-read the head for this round' "$SKILL" \
-    && pass "…and the baseline is refreshed per round, not carried from step 2" \
-    || die "a stale baseline makes the unchanged-head check false after a fix round"
+# ── the round summary is posted ONCE ──────────────────────────────────────
+# The automatic path posted it standalone and then again inside the `@codex
+# review` mention, so every Codex round left two identical round-summary comments
+# — and the contract makes the NEWEST summary the one read before the diff, so a
+# duplicate is a record with two answers to the same question. The count is per
+# BRANCH, since each reviewer takes a different route to the same single post.
+# BOUNDED TO ITS OWN FENCED BLOCK. Extracting from the heading to end-of-file
+# swept in the Copilot phase's own summary post three sections later, so the count
+# was two and the assertion failed against correct code — a guard that cannot say
+# where the thing it counts lives counts something else.
+auto_block="$(awk '/^\*\*Automatic review ON\*\*/ {inb=1; next}
+                   inb && /^```bash$/ {code=1; next}
+                   inb && code && /^```$/ {exit}
+                   inb && code' "$SKILL")"
+[ "$(grep -c 'gh pr comment N --repo \$HOST/\$OWNER/\$REPO --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
+    && pass "the automatic path posts a standalone summary exactly once" \
+    || die "the automatic path posts the round summary more than once, or not at all"
+# …and that one is inside the Copilot branch, whose request carries no body. The
+# Codex mention carries the summary itself, so a standalone post there duplicates
+# it — which is the shape the count above would still allow if it moved.
+awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1}
+     w && /--body "\$SUMMARY"/ {print "ok"; exit}
+     w && /^else$/ {print "outside"; exit}' <<<"$auto_block" | grep -q '^ok$' \
+    && pass "…in the Copilot branch, because the Codex mention carries it instead" \
+    || die "the standalone summary post is not the Copilot branch's"
+# ── the review baseline is taken AFTER the push ───────────────────────────
+# In automatic mode the push starts a pass that can FINISH during the CI wait —
+# the gate waits for checks, and a Codex pass on a small diff can be quicker. A
+# baseline captured before the push then accepts that early pass as the answer to
+# the request made after it, and the loop can advance to Copilot, or to the merge
+# gate, while the summary-aware pass is still running.
+[ "$(grep -c 'PRIOR_REVIEW=' <<<"$auto_block")" -ge 1 ] \
+    && pass "the automatic path takes a review baseline before its request" \
+    || die "the automatic path requests a review with no baseline to tell passes apart"
+awk '/^git push \|\|/ {p=NR}
+     p && /PRIOR_REVIEW=/ {print "ok"; exit}
+     !p && /PRIOR_REVIEW=/ {print "early"; exit}' <<<"$auto_block" | grep -q '^ok$' \
+    && pass "…taken after the push, so the pass the push started cannot answer it" \
+    || die "the automatic baseline predates the push; an early pass satisfies the request"
+# IN EACH BRANCH, not once anywhere. The two requests are made in different
+# branches, so a single baseline satisfies a count and an ordering check while the
+# other branch requests a review with nothing to tell the passes apart — which is
+# exactly what removing the Codex one leaves behind.
+for br in copilot codex; do
+    case "$br" in
+        copilot) got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {b=1; next}
+                             b && /^else$/ {exit}
+                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
+        *)       got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
+                             w && /^else$/ {b=1; next}
+                             b && /@codex review/ {exit}
+                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
+    esac
+    [ "$got" = ok ] \
+        && pass "…and the $br branch takes its own, before its own request" \
+        || die "the $br branch requests a review with no baseline of its own"
+done
+# The stale-baseline defect is gone by construction rather than by refreshing:
+# with the request unconditional there is no comparison for a stale baseline to
+# make false. What replaced it has to stay stated, or the next reader restores the
+# comparison and the baseline together.
+grep -q 'No .PRIOR_HEAD. baseline any more' "$SKILL" \
+    && pass "…and the automatic path says why it no longer keeps one" \
+    || die "the automatic path dropped its baseline without saying what replaced it"
 
 # ── the boundary is checked BEFORE the request, in both recipes ───────────
 # Counting afterwards meant the pause fired once round N+1 was already queued and
@@ -832,10 +1285,11 @@ done
 # ── Copilot is re-requested regardless of whether the head moved ──────────
 # A push never triggers Copilot, so branching on the head first skipped
 # `--add-reviewer` on any Copilot round that DID change the head.
-awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
-     /HEAD_BEFORE" = "\$HEAD_AFTER/ {if (w && w < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "the reviewer is checked before the head in the automatic recipe" \
-    || die "a Copilot round that changed the head skips --add-reviewer"
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
+     inb && w && /@codex review/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "the reviewer is checked before the Codex mention in the automatic recipe" \
+    || die "a Copilot round would be sent the Codex mention"
 
 # ── the push must have landed on THIS PR ──────────────────────────────────
 # A successful `git push` from the wrong worktree, or with a refspec pointing at
@@ -1032,10 +1486,10 @@ fi
 # `all(.[]; …)` over an empty stream is `true`, so an object, a null, or an empty
 # array from a SUCCESSFUL read came out as "every required check passed" and the
 # default administrator merge proceeded on a payload nothing had read.
-grep -q 'if type != "array" or length == 0 then "malformed"' "$SKILL" \
+grep -q 'if type != "array" or length == 0 then "malformed"' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass 'the checks payload must be a non-empty array before all() runs' \
     || die 'the checks jq computes all() without validating its container'
-grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SKILL" \
+grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…and each element must actually carry a bucket string" \
     || die "the checks jq does not validate the bucket records"
 
@@ -1066,48 +1520,28 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
     || die "the acknowledgement footer is unscoped and will cross between phases"
 
 # ── the none-configured checks message is matched whole, not searched ──────
-# `gh pr checks` has no dedicated status for "no required checks" — it documents
-# exit 8 for pending and nothing for this — so the message is the only signal.
-# A substring test therefore accepted the benign phrase inside a LARGER failure:
-# a run that printed it and then failed for an unrelated reason was classified as
-# benign, and the default administrator merge proceeded with no trusted checks
-# result. The helper is extracted so this can be executed rather than read.
-# The EXTRACTION has its own status. `sed` can print a plausible complete helper
-# and then fail, and command substitution keeps it — all six cases below would
-# then pass on a source read that never finished, which is a mandatory gate
-# reporting coverage it does not have.
-CHK="$(sed -n '/^checks_msg_is_none_configured() {/,/^}/p' "$SKILL")"; chk_rc=$?
-# …and the helper must be the one the GATE actually calls. Six passing cases prove
-# nothing if the merge condition still greps for a substring beside an unused
-# function — the definition and the call site are separate things, and only the
-# second decides whether the merge proceeds.
-if [ "$chk_rc" -ne 0 ]; then
-    die "could not read SKILL.md to extract the checks helper (rc=$chk_rc)"
-elif [ -z "$CHK" ]; then
-    die "no checks-diagnostic helper in SKILL.md — has the merge gate moved?"
-elif ! grep -q 'elif checks_msg_is_none_configured "\$CHECKS_MSG"; then' "$SKILL"; then
-    die "the merge gate does not call checks_msg_is_none_configured; the helper is dead code"
-else
-    chk() { bash -c "$CHK"'
-checks_msg_is_none_configured "$1" && echo BENIGN || echo BLOCK' _ "$1"; }
-    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
-        && pass "the exact none-configured message opens the gate" \
-        || die "the real gh diagnostic was not recognised"
-    [ "$(chk "no checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
-        && pass "…including the wording gh uses when there are no checks at all" \
-        || die "the no-checks-whatsoever wording blocks forever"
-    # The finding: the phrase followed by a real error.
-    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch
-error: connection reset by peer")" = BLOCK ] \
-        && pass "the phrase followed by an error blocks the merge" \
-        || die "a failed probe containing the benign phrase was treated as benign"
-    [ "$(chk "warning: no required checks reported on the '"'"'main'"'"' branch, and the API call failed")" = BLOCK ] \
-        && pass "…and so does the phrase embedded in a larger message" \
-        || die "an embedded phrase was treated as the whole diagnostic"
-    [ "$(chk "")" = BLOCK ] && pass "an empty diagnostic blocks" || die "an empty diagnostic opened the gate"
-    [ "$(chk "some other failure entirely")" = BLOCK ] \
-        && pass "an unrelated failure blocks" || die "an unrelated failure opened the gate"
-fi
+# ── the none-configured diagnostic is matched WHOLE ───────────────────────
+# `gh` has no dedicated status for "nothing to report", so the message is the only
+# signal — and a substring test accepted it inside a LARGER failure: a run that
+# printed the benign line and then failed for an unrelated reason was classified
+# as benign, and the default administrator merge proceeded with no trusted checks
+# result at all.
+#
+# The six cases that prove it moved to `test-pr-ci-state.sh` with the helper, and
+# they are EXECUTED there rather than read. What remains here is the question only
+# this file can answer: that the merge gate reaches that helper at all. A helper
+# with perfect coverage decides nothing if the gate stopped calling it.
+grep -q '"\$RB_SCRIPTS"/pr-ci-state.sh N --required' "$SKILL" \
+    && pass "the merge gate asks the checks helper, not a second copy of it" \
+    || die "the merge gate no longer calls pr-ci-state.sh"
+# …and it distinguishes "nothing configured" from "could not tell". Collapsing
+# them blocked the merge on every repository without branch protection,
+# permanently — a gate that never opens rather than one that fails closed.
+awk '/pr-ci-state.sh N --required/ {c=NR}
+     c && /^ *4\) echo "note: no required checks configured/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and treats 'nothing configured' as its own answer" \
+    || die "a repo with no required checks cannot pass the merge gate"
 
 # ── `none` is not permission while auto-review has a pass in flight ────────
 # With auto-review on, every Copilot-fix push queues a Codex pass, and Codex

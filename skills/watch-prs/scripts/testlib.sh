@@ -24,8 +24,33 @@
 run_limited() {
     local secs="$1"; shift
     if command -v timeout >/dev/null 2>&1; then
-        timeout "$secs" "$@"
-        return $?
+        # `-k`, because plain `timeout` sends TERM and stops there: a command that
+        # traps or ignores TERM — or a wrapper whose child does — survives the
+        # limit and the call never returns, which defeats every bound built on
+        # this. The fallback below already escalates to KILL; this arm did not,
+        # and it is the arm that runs wherever GNU coreutils exist.
+        #
+        # The capability is probed ONCE and cached: not every `timeout` in the
+        # wild takes `-k`, and a usage error would otherwise be indistinguishable
+        # from the command failing. `true` returns immediately, so the probe costs
+        # nothing despite the one-second arguments.
+        if [ -z "${_RB_TIMEOUT_KILL_AFTER:-}" ]; then
+            if timeout -k 1 1 true >/dev/null 2>&1; then
+                _RB_TIMEOUT_KILL_AFTER=yes
+            else
+                _RB_TIMEOUT_KILL_AFTER=no
+            fi
+        fi
+        # A `timeout` WITHOUT `-k` IS NOT USED AT ALL. Falling back to plain
+        # `timeout` there restored exactly the defect this branch exists to fix:
+        # TERM, no escalation, and a command that traps it runs on. The portable
+        # path below polls and then sends KILL itself, so it is strictly better
+        # than a watchdog that cannot. `-k` is the reason to prefer the external
+        # one; without it there is no reason left.
+        if [ "$_RB_TIMEOUT_KILL_AFTER" = yes ]; then
+            timeout -k 5 "$secs" "$@"
+            return $?
+        fi
     fi
     # No `timeout`. Two things have to hold, and the second is what the
     # earlier versions kept getting wrong:
@@ -76,8 +101,18 @@ run_limited() {
     # `sh -c "sleep 30 & wait"` case here returns 124 with its `sleep` orphaned,
     # and a mandatory suite that leaks a process per run leaks one per run forever.
     # The group is what has to die, not the process that happened to lead it.
+    # STDERR STAYS SEPARATE. It used to be folded into the stdout file, which is
+    # invisible while every caller was a fixture capturing `2>&1` anyway — and
+    # then a RUNTIME caller appeared that distinguishes them. `pr-ci-state.sh`
+    # decides "no checks are configured" by matching the whole `gh` diagnostic on
+    # stderr; merged, its own `2>` capture received nothing, the exact-message
+    # branch could never fire, and on any platform without GNU `timeout` a
+    # repository with no checks blocked every round and every merge. The fallback
+    # is the only path there, so the bug was invisible wherever `timeout` exists.
+    local tmperr
+    tmperr="$(mktemp 2>/dev/null)" || { rm -f "$tmp" 2>/dev/null; return 125; }
     set -m
-    ( "$@" ) >"$tmp" 2>&1 </dev/null &
+    ( "$@" ) >"$tmp" 2>"$tmperr" </dev/null &
     local pid=$!
     set +m
     local waited=0
@@ -92,7 +127,7 @@ run_limited() {
         if ! sleep 1; then
             kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
             wait "$pid" 2>/dev/null
-            rm -f "$tmp" 2>/dev/null
+            rm -f "$tmp" "$tmperr" 2>/dev/null
             return 125
         fi
         waited=$((waited + 1))
@@ -113,7 +148,12 @@ run_limited() {
     # that expectation is a prefix or a `grep`, it still matched, and a mandatory
     # gate reported PASS on output it never finished reading.
     cat "$tmp"; local read_rc=$?
-    rm -f "$tmp" 2>/dev/null
+    # The stderr replay has its own status for the same reason the stdout read
+    # does: a `cat` that emits a partial diagnostic and then fails hands the
+    # caller a truncated message it will match against.
+    cat "$tmperr" >&2; local read_err_rc=$?
+    rm -f "$tmp" "$tmperr" 2>/dev/null
+    [ "$read_err_rc" -eq 0 ] || return 125
     # 125 for "the watchdog itself could not do its job", distinct from 124 (the
     # limit was hit) and from the command's own status. GNU `timeout` uses 125
     # the same way, so the two paths still read alike.

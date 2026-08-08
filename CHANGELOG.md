@@ -1,5 +1,186 @@
 # Changelog
 
+## [2.0.4] — 2026-08-08
+
+**A round is no longer closed on a red head.** CI was red for four consecutive
+commits on one PR and neither the round loop nor the pre-push self-check noticed:
+every round was closed as green on the strength of a local suite run, and the
+operator had to point at the checks tab. Issue #16.
+
+- **"The suite passes here" and "the checks pass there" are different claims, and
+  only the first was being made.** `pr-selfcheck.sh` runs the suite before the
+  push; it cannot see a failure that only happens on the runner — and that one
+  only happened there, because GitHub Actions ignores `SIGPIPE`, so a `printf`
+  losing a pipe race returned 1 instead of dying with 141. `gh pr checks` *was*
+  consulted, but only in the merge gate, which on that PR was many rounds away.
+
+- **`pr-ci-state.sh`, called by both gates.** The merge gate already asked this
+  question in about seventy lines inline; writing them out again for the round
+  loop is the defect issues #11 and #18 were both opened for. `--required`
+  separates the two questions: the merge gate asks whether branch protection is
+  satisfied, and the round gate asks whether the commit just pushed is broken —
+  where a failing *non-required* check still counts.
+
+- **Pending is not green.** The checks start when the push lands, so asking
+  immediately always finds them running; treating that as a pass would close every
+  round before its own CI had said anything, which is the original defect with an
+  extra step. The gate waits, and because a wait that never ends is a hang, it is
+  bounded by `PR_CI_TIMEOUT` (default 1800s, polled every `PR_CI_INTERVAL`).
+
+- **The gate is asked about the commit it pushed, not about the PR.**
+  `gh pr checks` is addressed by PR number and answers about whatever the API
+  currently calls the head — and for a moment after a push that is still the
+  *previous* head. A green answer then describes the commit from the round
+  before: the last round's answer to this round's question, and it reads as
+  permission to close. `--head <oid>` reports `stale` for that, and the gate waits.
+
+- **Green requires a probe that succeeded.** `gh` can emit a complete, valid green
+  result and then exit non-zero because the request failed part-way, and command
+  substitution keeps what it printed. Green is the one verdict that opens a gate,
+  so it is the one that may not be taken on trust — in the merge gate that is an
+  administrator merge on an untrusted partial response.
+
+- **"No checks yet" is not "no checks".** A workflow run is registered a moment
+  after the head moves, so the first probe after a push legitimately reports
+  `none` on a repository that does have CI. Taking that as permission to close
+  reproduces the red-head closure with an extra step, so it has to hold for
+  `PR_CI_GRACE` seconds before it is believed.
+
+- **A verdict that would close the round has to hold.** Both `green` and `none`
+  can be true of an incomplete picture: a push that triggers two workflows can
+  have the fast one registered and passing before the second is registered at
+  all. Closing on that reproduces the red-head closure with an extra step — the
+  later workflow appears and fails after the round is already closed. So either
+  verdict must still be the answer `PR_CI_GRACE` seconds later, and anything else
+  restarts the count, because the picture changed.
+
+- **The timeout is a duration, not a sum of sleeps.** Counting only the sleeps
+  excluded however long each probe took, so two slow `gh` calls per iteration
+  silently turned the documented thirty-minute bound into ninety. It is measured
+  from elapsed wall time around the probes.
+
+- **The deadline outranks a stable verdict.** With the timeout checked at the
+  bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` — or simply a
+  probe returning green after the deadline — closed the round past its own bound.
+  A bound a verdict can step over is not a bound.
+
+- **The checks response is bound to the head, not merely preceded by a check of
+  it.** The confirmation and the checks call are two requests, and a push landing
+  between them means the answer describes a commit nobody verified — a head that
+  had almost finished earning its grace hands it to a different commit whose own
+  checks are not registered yet. The head is read again afterwards and any
+  movement is `stale`, which resets the grace.
+
+- **Nothing irreversible happens before the verdict, in either mode.** The
+  automatic path used to close the round first — resolve the threads, post the
+  summary — and push last, so the pass the push starts would find both in place.
+  That ordering cannot be gated: by the time the checks can be consulted, both
+  are done, and a later "this round is not closed" comment is a record rather
+  than a retraction — and itself a call that can fail. The push moved ahead of the
+  closure.
+
+  **What that costs is stated:** the pass the push starts reads open threads and
+  no summary, so it may re-report what the round already answered. It is
+  superseded by an explicit `@codex review` — now sent in automatic mode too,
+  which also removes the three-head comparison that used to decide whether a
+  no-op push needed one. A wasted pass is recoverable; a round closed on a red
+  head is not.
+
+- **The polling bounds are validated.** `PR_CI_INTERVAL=0` sleeps zero seconds and
+  leaves the elapsed count at zero forever; a non-numeric `PR_CI_TIMEOUT` makes
+  the comparison fail on every iteration. Either one turns the supposedly bounded
+  gate into an unbounded API-polling loop, so both fall back to their defaults.
+
+- **A stale `ci_gate` cannot satisfy the gate.** It runs in the driving session's
+  own shell, where `readonly -f` makes a redefinition fail while leaving the old
+  function installed — and a stale gate that returns 0 lets a red head close its
+  round, the defect arriving through the gate itself. Cleared and checked, exactly
+  as `rb_identity` is.
+
+- **Every path that accepts a head has seen its checks, not only the paths that
+  pushed.** The gate lived at the two push sites, and a PR whose reviews were
+  clean from the start never pushes anything — so it went through both phases and
+  into a merge gate that reads only *required* checks, which a failing optional
+  one is not. The phase transition and the merge gate run the all-checks gate too.
+
+- **Each probe is bounded.** A `gh` call that hangs on a dead connection never
+  returns, and `PR_CI_TIMEOUT` is then not a bound at all: the gate cannot reach
+  its own deadline check. Every request runs under `PR_CI_PROBE_TIMEOUT` through
+  the portable watchdog, which makes `testlib.sh` a runtime dependency rather than
+  a second copy of ninety tested lines.
+
+- **A `run_limited` fallback that merged stderr into stdout.** Folding them was
+  invisible while every caller was a fixture capturing `2>&1` anyway — and then a
+  runtime caller appeared that distinguishes them. `pr-ci-state.sh` decides "no
+  checks are configured" by matching the whole `gh` diagnostic on stderr; merged,
+  its own capture received nothing, so on any platform **without GNU `timeout`** —
+  stock macOS — a repository with no checks blocked every round and every merge.
+  The fallback is the only path there, so the defect was invisible wherever
+  `timeout` exists.
+
+- **The push-triggered pass is waited out before the next baseline is taken.** In
+  automatic mode a push that moves the head starts a Codex pass, and it can still
+  be running when the CI gate returns — CI settling in ninety seconds while a
+  review takes a hundred and twenty is ordinary. A baseline taken then is the id
+  *before* that pass, so it lands, satisfies `--after-review`, and the loop
+  advances while the request it was meant to answer is still queued. It is
+  serialised, only when the push actually moved the head, and a wait that times
+  out stops the round rather than continuing.
+
+- **An expired deadline is not a short deadline.** Both new clamps turned an
+  exhausted budget into a fresh second, and each of those calls can take that
+  second plus the watchdog's five-second escalation — the bound becoming a floor.
+  The gate checks the clock before starting a probe as well as after, and the
+  helper refuses rather than renewing.
+
+- **A `timeout` that cannot escalate is not used at all.** Falling back to a plain
+  `timeout` when `-k` is unsupported restored exactly the defect the escalation
+  exists to fix. The portable path polls and sends KILL itself, so it is strictly
+  better than a watchdog that cannot; `-k` is the only reason to prefer the
+  external one.
+
+- **The GNU `timeout` arm escalates to KILL.** It sent TERM and stopped there;
+  `timeout --help` says plainly that a caught or blocked TERM does not kill the
+  command. A hung wrapper, or a child that traps TERM, outlived the limit — and
+  that is the arm that runs wherever GNU coreutils exist, which is to say almost
+  everywhere. The `-k` support is probed once and cached, because not every
+  `timeout` takes it and a usage error is indistinguishable from the command
+  failing.
+
+- **A `none` verdict from a probe that died is not a verdict.** `gh` reports
+  "nothing to report" by exiting 1 with that message on stderr; a probe that
+  printed the same message and then hung carries identical text. `none` is
+  accepted by the round gate after its grace and by the merge gate at once, so
+  ignoring the status turned a hung request into merge permission.
+
+- **The helper's deadline is shared across its probes, not granted per call.** It
+  makes up to three sequential requests; with the full allowance each, a
+  five-second budget could be spent three times over.
+
+- **The push-triggered pass is waited out in the Codex phase only.** A push never
+  triggers Copilot, so there was nothing to wait for — and waiting anyway meant
+  every Copilot round that moved the head sat until the watch timed out and exited
+  *before* `--add-reviewer` was reached. The phase where automatic review does
+  nothing is the phase where serialising it stalls everything.
+
+- **Each probe is bounded by the gate's remaining time**, not only by its own
+  default: with `PR_CI_TIMEOUT=1` a hung request ran for the full sixty seconds
+  before the loop could look at the clock. A bound the callee does not know about
+  is not a bound.
+
+- **The review baseline is taken after the push, not before it.** In automatic
+  mode the push starts a pass that can *finish* during the CI wait — the gate
+  waits for checks, and a Codex pass on a small diff can be quicker. A baseline
+  captured before the push accepted that early pass as the answer to the request
+  made after it, so the loop could advance to Copilot, or to the merge gate, while
+  the summary-aware pass was still running.
+
+- **An unrecognised bucket is malformed, not benign.** `pass` and `skipping` are
+  green, `fail` and `cancel` are failures, `pending` is pending — and anything
+  else is an error rather than falling through a catch-all, which is the shape
+  that let an unknown review state be reported as a withdrawal and drive a review
+  loop.
+
 ## [2.0.3] — 2026-08-08
 
 **The identity parser lives in one file.** The ~60 lines that turn

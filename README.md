@@ -24,12 +24,14 @@ A driver for the **native** GitHub reviewers. Nothing runs on your machine.
 | Copilot | `copilot-pull-request-reviewer[bot]` | `gh pr edit <PR> --add-reviewer @copilot` |
 
 Your session requests the reviews, reads the findings, works the fix → reply →
-resolve → re-request loop, and gates the merge. Six small scripts answer the
+resolve → re-request loop, and gates the merge. Seven small scripts answer the
 questions `gh` cannot answer safely on its own — whether a reviewer's review of
 the *current* head can carry a merge, whether everything pushed since the
 reviewed commit is a review fix, what the unresolved findings actually are, how
-many rounds this PR has had, when a verdict is ready to act on, and whether the
-change about to be pushed passes its own checks.
+many rounds this PR has had, when a verdict is ready to act on, whether the
+change about to be pushed passes its own checks *here*, and whether the commit
+that was pushed is green *there*. The last two are different questions: a suite
+that passes locally can fail on the runner, and one did — for four rounds.
 
 Every review establishes the PR's **intended scope** first — from its description
 and its newest round-summary comment — and uses it for *relevance only*: work the
@@ -158,7 +160,7 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 
 | Setting | Suggested | Why |
 | --- | --- | --- |
-| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, with its summary already posted. On, the *push* triggers the pass, so the summary has to precede the push and no mention may be sent — a mention as well queues a second review of the same head. Note the per-repository column overrides this default, so check both. |
+| Automatic review | **off** | The `@codex review` mention is then the only trigger, which is what the loop assumes: each round is requested deliberately, and a red head stops it before anything is resolved or posted. On, the *push* also triggers a pass — one that necessarily reads open threads and no summary, since the checks on what was pushed are what decide whether the round may close at all. The driver waits that pass out and supersedes it with an explicit mention carrying the summary, so a round costs two Codex passes instead of one. Note the per-repository column overrides this default, so check both. |
 | Review trigger | on every push | Only relevant with automatic review on. |
 | Exhaustive review | on | Keeps looking after the first problem. |
 | Credit usage | on, if you want reviews to continue past the rate limit | With it off, review simply stops when the limit is hit. |
@@ -270,6 +272,27 @@ settings.
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
+| `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
+| `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
+| `PR_CI_GRACE` | `90` | how long a round-closing verdict must hold before it is believed, since a workflow run is registered a moment after the head moves |
+| `PR_CI_PROBE_TIMEOUT` | `60` | per-request bound on each `gh` call the check probe makes, so a hung connection cannot outlast the gate's own timeout |
+
+### The pushed head has to be green
+
+A round is not closed until the checks on the commit it pushed have finished and
+passed. This is separate from the pre-push self-check below, and it is separate on
+purpose: that one runs the suite *here*, and cannot see a failure that only
+happens on the runner. One did, and CI stayed red for four consecutive rounds
+before anyone looked at the checks tab.
+
+A still-running check is not a pass; the gate waits, bounded by `PR_CI_TIMEOUT`
+measured as real elapsed time. A repository with no checks configured has nothing
+to be green, and says so rather than blocking.
+
+An answer that would close the round — green, or nothing configured — has to still
+be the answer `PR_CI_GRACE` seconds later. A push that starts two workflows can
+have the fast one passing before the second is registered at all, so the first
+look is green about an incomplete picture.
 
 ### Self-check before the push
 
@@ -404,6 +427,14 @@ plugin docs and open an issue.
   `git remote get-url origin` — run from inside the intended checkout.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
+- **A round stops with "the head you just pushed is RED":** working as intended.
+  The suite passing locally and the checks passing on the runner are different
+  claims — GitHub Actions ignores `SIGPIPE`, runs a different shell, and has no
+  credentials — so the round will not be closed on a commit whose CI is failing.
+  Fix it, push again, and the round continues.
+- **A round waits on "pending":** the checks start when the push lands, so it
+  waits for them rather than reading "still running" as a pass. Set
+  `PR_CI_TIMEOUT` if your CI takes longer than thirty minutes.
 
 ## License
 
