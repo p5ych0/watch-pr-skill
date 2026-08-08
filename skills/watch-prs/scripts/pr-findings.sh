@@ -47,7 +47,7 @@ unset -f rb_load 2>/dev/null || {
     echo "PR_FINDINGS status=error reason=loadlib_unreadable" >&2; exit 2; }
 [ "$(type -t rb_load 2>/dev/null)" = function ] || {
     echo "PR_FINDINGS status=error reason=loadlib_empty" >&2; exit 2; }
-rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ PR_FINDINGS var || exit 2
+rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ "PR_FINDINGS status=error" var || exit 2
 
 # The shared identity parser. This 60-line block sat here byte-identical to the
 # copies in the other two helpers and in SKILL.md, so both the hostless-origin
@@ -71,7 +71,7 @@ rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ PR_FINDINGS var || exit 2
 # existed. An `unset -f` of a name that is not defined returns 0, so the only
 # thing a non-zero status here means is that a definition survived — which is the
 # one condition this line exists to rule out.
-rb_load "$_RB_SELF_DIR" identitylib rb_identity PR_FINDINGS || exit 2
+rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_FINDINGS status=error" || exit 2
 rb_identity || {
     echo "PR_FINDINGS status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"

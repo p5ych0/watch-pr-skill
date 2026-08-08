@@ -60,11 +60,11 @@ unset -f rb_load 2>/dev/null || {
 # `testlib.sh` is the fixture watchdog by history and is a runtime dependency now.
 # The alternative was a second copy of ninety lines that already exist and are
 # already tested, which is the duplication issues #11 and #18 were opened for.
-rb_load "$_RB_SELF_DIR" testlib run_limited PR_CI_STATE || exit 2
+rb_load "$_RB_SELF_DIR" testlib run_limited "PR_CI_STATE status=error" || exit 2
 # `sha_reason` — one definition of "a full commit SHA" across the plugin, used
 # below to validate both the OID asked about and the one the API returns.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason PR_CI_STATE || exit 2
-rb_load "$_RB_SELF_DIR" identitylib rb_identity PR_CI_STATE || exit 2
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_CI_STATE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_CI_STATE status=error" || exit 2
 rb_identity || {
     echo "PR_CI_STATE status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 

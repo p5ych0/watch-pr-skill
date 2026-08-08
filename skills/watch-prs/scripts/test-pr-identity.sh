@@ -202,16 +202,31 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
+# `pr-watch.sh` is in this list too. It loads `recordlib.sh` rather than the
+# identity parser, so the identity clause skips it — but the BOOTSTRAP rule is
+# about loading anything at all, and `pr-watch.sh` is the caller the invariant was
+# written to cover and did not: it sourced `recordlib.sh` by hand, without
+# clearing `is_full_sha`, while CLAUDE.md said every helper went through the
+# loader. An invariant is only as true as its least-checked caller.
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-watch.sh; do
     [ -f "$ROOT/$sc" ] || continue
-    if grep -q 'rb_load "\$_RB_SELF_DIR" identitylib rb_identity' "$ROOT/$sc"; then
+    if [ "$sc" = pr-watch.sh ]; then
+        # It loads `recordlib.sh`, not the parser — the message says which, because
+        # a fixture that reports the wrong thing passing is how a gap hides.
+        if grep -q 'rb_load "\$_RB_SELF_DIR" recordlib is_full_sha' "$ROOT/$sc"; then
+            echo "ok   - $sc loads the shape rules through the shared loader"
+        else
+            echo "FAIL - $sc loads recordlib some other way"; idfail=1
+        fi
+    elif grep -q 'rb_load "\$_RB_SELF_DIR" identitylib rb_identity' "$ROOT/$sc"; then
         echo "ok   - $sc loads the identity parser through the shared loader"
     else
         echo "FAIL - $sc loads identitylib some other way"; idfail=1
     fi
     # …and nowhere writes the sequence out again. A copy re-introduced beside the
     # call is how the four copies happened the first time.
-    if grep -q 'unset -f rb_identity' "$ROOT/$sc"; then
+    if grep -qE 'unset -f (rb_identity|is_full_sha|sha_reason|run_limited)' "$ROOT/$sc" \
+       || grep -qE '^\. "\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh"' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - …and carries no second copy of the loading rule"

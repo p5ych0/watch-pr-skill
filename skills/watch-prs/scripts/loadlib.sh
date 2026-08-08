@@ -32,12 +32,18 @@
 
 # Load a library and prove it loaded.
 #
-#   rb_load <dir> <lib-basename> <symbol> <sentinel> [func|var]
+#   rb_load <dir> <lib-basename> <symbol> <error-prefix> [func|var]
 #
-#   rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ PR_FINDINGS var || exit 2
+#   rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ "PR_FINDINGS status=error" var || exit 2
 #
-# Prints `<sentinel> status=error reason=<lib>_<what>` to stderr and returns 2 on
-# any failure; returns 0 with the library loaded otherwise.
+# Prints `<error-prefix> reason=<lib>_<what>` to stderr and returns 2 on any
+# failure; returns 0 with the library loaded otherwise.
+#
+# THE WHOLE PREFIX IS THE CALLER'S, not just its name. `pr-watch.sh` reports
+# `state=error` where the others report `status=error`, and a loader that supplied
+# the key would either impose one spelling on a script whose every other line uses
+# the other, or emit `state=error status=error`. It knows the reason; the caller
+# knows how it says "this failed".
 #
 # THE KIND MATTERS, and getting it wrong is silent. A function is cleared with
 # `unset -f` and verified with `type -t`; a variable is cleared with `unset` and
@@ -46,30 +52,30 @@
 # function satisfies a `type -t` — which is issue #20, and is why this takes the
 # kind rather than guessing from the name.
 rb_load() {
-    local dir="$1" lib="$2" sym="$3" sentinel="$4" kind="${5:-func}"
+    local dir="$1" lib="$2" sym="$3" prefix="$4" kind="${5:-func}"
     case "$kind" in
         func|var) ;;
-        *) echo "$sentinel status=error reason=${lib}_bad_kind kind=$kind" >&2; return 2 ;;
+        *) echo "$prefix reason=${lib}_bad_kind kind=$kind" >&2; return 2 ;;
     esac
     # Cleared BEFORE the source, and the clearing is checked. `unset` of a name
     # that is not set returns 0, so the only thing a non-zero status here means is
     # that something survived — which is exactly the condition to refuse on.
     if [ "$kind" = func ]; then
         unset -f "$sym" 2>/dev/null || {
-            echo "$sentinel status=error reason=${lib}_stale_definition" >&2; return 2; }
+            echo "$prefix reason=${lib}_stale_definition" >&2; return 2; }
     else
         unset "$sym" 2>/dev/null || {
-            echo "$sentinel status=error reason=${lib}_stale_definition" >&2; return 2; }
+            echo "$prefix reason=${lib}_stale_definition" >&2; return 2; }
     fi
     # shellcheck disable=SC1090
     . "$dir/$lib.sh" || {
-        echo "$sentinel status=error reason=${lib}_unreadable" >&2; return 2; }
+        echo "$prefix reason=${lib}_unreadable" >&2; return 2; }
     if [ "$kind" = func ]; then
         [ "$(type -t "$sym" 2>/dev/null)" = function ] || {
-            echo "$sentinel status=error reason=${lib}_empty" >&2; return 2; }
+            echo "$prefix reason=${lib}_empty" >&2; return 2; }
     else
         [ -n "${!sym:-}" ] || {
-            echo "$sentinel status=error reason=${lib}_empty" >&2; return 2; }
+            echo "$prefix reason=${lib}_empty" >&2; return 2; }
     fi
     return 0
 }

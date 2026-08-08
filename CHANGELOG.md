@@ -28,6 +28,18 @@ of the last three.
   empty, so both refuse everything, which is a tool nobody can run rather than one
   that fails closed.
 
+- **`pr-watch.sh` was the caller the invariant did not cover.** It sourced
+  `recordlib.sh` by hand, without clearing `is_full_sha`, while CLAUDE.md said
+  every helper went through the loader — an invariant is only as true as its
+  least-checked caller. It goes through `rb_load` now, and the coverage list
+  includes it.
+
+- **The error prefix is the caller's, whole.** `pr-watch.sh` reports `state=error`
+  where the others report `status=error`, so a loader supplying the key would
+  either impose one spelling on a script whose every other line uses the other, or
+  emit `state=error status=error`. It knows the reason; the caller knows how it
+  says "this failed".
+
 - **The bootstrap obeys the rule it cannot use.** An exported `rb_load` plus an
   empty `loadlib.sh` leaves a *stale loader* doing the clearing and verifying for
   every other library — the one way to make every subsequent load look clean. The

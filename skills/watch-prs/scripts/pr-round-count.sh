@@ -43,7 +43,7 @@ unset -f rb_load 2>/dev/null || {
     echo "PR_ROUND_COUNT status=error reason=loadlib_unreadable" >&2; exit 2; }
 [ "$(type -t rb_load 2>/dev/null)" = function ] || {
     echo "PR_ROUND_COUNT status=error reason=loadlib_empty" >&2; exit 2; }
-rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ PR_ROUND_COUNT var || exit 2
+rb_load "$_RB_SELF_DIR" recordlib RECORDLIB_JQ "PR_ROUND_COUNT status=error" var || exit 2
 
 THRESHOLD="${REVIEW_ROUND_THRESHOLD:-10}"
 # A malformed threshold falls back to the default rather than disabling the
@@ -90,7 +90,7 @@ esac
 # existed. An `unset -f` of a name that is not defined returns 0, so the only
 # thing a non-zero status here means is that a definition survived — which is the
 # one condition this line exists to rule out.
-rb_load "$_RB_SELF_DIR" identitylib rb_identity PR_ROUND_COUNT || exit 2
+rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_ROUND_COUNT status=error" || exit 2
 rb_identity || {
     echo "PR_ROUND_COUNT status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 REPO_SLUG="$HOST/$OWNER/$REPO"
