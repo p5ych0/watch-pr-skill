@@ -225,8 +225,14 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     fi
     # …and nowhere writes the sequence out again. A copy re-introduced beside the
     # call is how the four copies happened the first time.
+    # NOT ANCHORED AT COLUMN ONE. The source line was matched with `^\.`, so a
+    # re-introduced load indented by so much as one space — inside an `if`, or
+    # simply reformatted — walked past the guard and the duplication came back
+    # with the check still green. Leading whitespace is allowed, and `source` is
+    # matched as well as `.`: the rule is about loading a library by hand, not
+    # about which of the two spellings was used.
     if grep -qE 'unset -f (rb_identity|is_full_sha|sha_reason|run_limited)' "$ROOT/$sc" \
-       || grep -qE '^\. "\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh"' "$ROOT/$sc"; then
+       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - …and carries no second copy of the loading rule"
