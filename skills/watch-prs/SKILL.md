@@ -232,7 +232,7 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 unset -f ci_gate 2>/dev/null \
     || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
 ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
-    local pr="$1" oid="$2" rc elapsed stable_rc="" stable_since=0
+    local pr="$1" oid="$2" rc elapsed budget stable_rc="" stable_since=0
     local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
     # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
     # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
@@ -244,6 +244,8 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
     case "$iv" in  ""|0|0*|*[!0-9]*|??????*) iv=30 ;; esac
     case "$tmo" in ""|0*|*[!0-9]*|??????*)   tmo=1800 ;; esac
     case "$grace" in ""|0*|*[!0-9]*|??????*) grace=90 ;; esac
+    local probe="${PR_CI_PROBE_TIMEOUT:-60}"
+    case "$probe" in ""|0|0*|*[!0-9]*|??????*) probe=60 ;; esac
     # ELAPSED WALL TIME, not the sum of the sleeps. Counting only the sleeps
     # excludes however long each probe took, so two slow `gh` calls per iteration
     # silently turned a documented thirty-minute bound into ninety. `$SECONDS` is
@@ -257,7 +259,16 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
         # that lag. Asking without the OID meant a green answer about the head
         # from the round before, which is the last round's answer to this round's
         # question, and it reads as permission to close.
-        "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
+        # EACH PROBE IS BOUNDED BY WHAT IS LEFT, not only by its own default. The
+        # helper watchdogs its `gh` calls, but at sixty seconds each — so with
+        # `PR_CI_TIMEOUT=1` a hung request ran for a minute before this loop could
+        # look at the clock at all. A bound the callee does not know about is not
+        # a bound; the remaining budget is passed down.
+        elapsed=$((SECONDS - t0))
+        budget=$((tmo - elapsed))
+        [ "$budget" -lt 1 ] && budget=1
+        [ "$budget" -gt "$probe" ] && budget="$probe"
+        PR_CI_PROBE_TIMEOUT="$budget" "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
         elapsed=$((SECONDS - t0))
         # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With
         # the check at the bottom of the loop, a `PR_CI_TIMEOUT` shorter than
@@ -838,6 +849,18 @@ esac
 # a round that moved the head and a round that did not both end with an explicit
 # ask, and the question the baseline answered no longer arises.
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
+# THE REMOTE HEAD AND THE TERMINAL REVIEW ID, BEFORE THE PUSH — and used, which
+# is the difference from the baseline that was removed. A push that moves the head
+# starts a Codex pass, and that pass can FINISH while the CI gate is still waiting
+# for checks. These two are what let the pass be waited on afterwards: the head to
+# know one was started at all, the review id to recognise its result. Without
+# them, `--after-review` on the explicit request accepts the earlier pass and the
+# loop advances while the summary-aware one is still running.
+PUSH_FROM=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not read the head this push starts from."; exit 0; }
+[[ "$PUSH_FROM" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pre-push head is not a full OID ('$PUSH_FROM')."; exit 0; }
+PUSH_BASE=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    || { echo "ABORT: could not read the review id before the push."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
 # The gate, before anything that cannot be taken back. A red head stops here with
 # the threads still open and no summary posted, so the round is genuinely still
@@ -867,6 +890,30 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
     [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] \
         || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, pushed $HEAD_BEFORE) — wrong branch or worktree?"; exit 0; }
 fi
+# THE PUSH-TRIGGERED PASS IS WAITED OUT FIRST.
+#
+# If the push moved the head it started a Codex pass, and that pass can still be
+# running here — CI settling in ninety seconds while a review takes a hundred and
+# twenty is an ordinary shape. The explicit request below is answered with
+# `--after-review "$PRIOR_REVIEW"`, and a `PRIOR_REVIEW` taken while that pass is
+# in flight is the id BEFORE it: the pass then lands, satisfies the wait, and the
+# loop advances to Copilot or to the merge while the request it was supposed to
+# answer is still queued.
+#
+# So it is serialised. Only when the head moved — a no-op push starts nothing, and
+# waiting for a pass nobody triggered is a guaranteed timeout.
+if [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
+    "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
+    # A TIMEOUT IS NOT PERMISSION TO CONTINUE. If that pass has not terminated,
+    # taking a baseline now is exactly the race this block exists to remove — the
+    # pass lands a moment later and answers the wrong request.
+    case "$PUSHPASS_RC" in
+        0) ;;
+        1) echo "ABORT: the pass the push started has not finished; its result would answer the next request."; exit 0 ;;
+        *) echo "ABORT: could not observe the pass the push started (rc=$PUSHPASS_RC)"; exit 0 ;;
+    esac
+fi
+
 # ONLY NOW is the round closed. The head is confirmed and its checks are green, so
 # resolving a thread and posting a summary are claims that are true when made.
 # reply + resolve threads here

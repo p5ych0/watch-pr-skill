@@ -53,6 +53,13 @@ unset -f rb_identity 2>/dev/null || {
 # `testlib.sh` is the fixture watchdog by history and is a runtime dependency now.
 # The alternative was a second copy of ninety lines that already exist and are
 # already tested, which is the duplication issues #11 and #18 were opened for.
+# Cleared first and the clearing checked, exactly as for `rb_identity`: an
+# exported `run_limited` survives into this shell, an empty library still sources
+# cleanly, and `readonly -f` makes the clearing fail while leaving the old one
+# installed. A stale watchdog without the kill behaviour lets a hung `gh` outlive
+# every bound here.
+unset -f run_limited 2>/dev/null || {
+    echo "PR_CI_STATE status=error reason=testlib_stale_definition" >&2; exit 2; }
 # shellcheck source=testlib.sh
 . "$_RB_SELF_DIR/testlib.sh" || {
     echo "PR_CI_STATE status=error reason=testlib_unreadable" >&2; exit 2; }
@@ -60,6 +67,8 @@ unset -f rb_identity 2>/dev/null || {
     echo "PR_CI_STATE status=error reason=testlib_empty" >&2; exit 2; }
 # `sha_reason` — one definition of "a full commit SHA" across the plugin, used
 # below to validate both the OID asked about and the one the API returns.
+unset -f sha_reason 2>/dev/null || {
+    echo "PR_CI_STATE status=error reason=recordlib_stale_definition" >&2; exit 2; }
 # shellcheck source=recordlib.sh
 . "$_RB_SELF_DIR/recordlib.sh" || {
     echo "PR_CI_STATE status=error reason=recordlib_unreadable" >&2; exit 2; }

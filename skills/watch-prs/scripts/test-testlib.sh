@@ -268,10 +268,48 @@ for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$CATF/$b"
 done
 printf '#!/usr/bin/env bash\nprintf "partial"\nexit 1\n' > "$CATF/cat"; chmod +x "$CATF/cat"
-out="$(PATH="$CATF" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>&1)"
+# STDERR IS DISCARDED HERE, deliberately. The fallback replays the bounded
+# command's stderr as well as its stdout, so the stubbed `cat` runs twice and its
+# second "partial" lands on stderr — folding that into the capture with `2>&1`
+# made this exact comparison fail against correct behaviour. What this case is
+# about is the STDOUT reader's status, so stdout is what it reads.
+out="$(PATH="$CATF" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>/dev/null)"
 case "$out" in
     "rc=125 res=partial") pass "a reader that emits and then fails returns 125" ;;
     *) die "failing reader gave '$out' (want rc=125 res=partial)" ;;
+esac
+# …and the STDERR replay has its own status, for the same reason: a `cat` that
+# emits a partial diagnostic and then fails hands the caller a truncated message
+# to match against, and `pr-ci-state.sh` decides "no checks configured" by
+# matching a diagnostic whole. Here stdout reads cleanly and only stderr fails.
+CATE="$TMP/cate"; mkdir -p "$CATE"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$CATE/$b"
+done
+# The two replays are `cat "$tmp"` and `cat "$tmperr"`, both `mktemp` paths, so
+# the argument cannot tell them apart — the stub counts instead and fails on the
+# SECOND call. The real `cat` is resolved to an absolute path BEFORE the PATH is
+# reduced, or the stub re-finds itself through the reduced PATH and recurses.
+REAL_CAT="$(command -v cat)" || { printf 'FAIL - no cat on PATH\n'; echo "RESULT: FAIL"; exit 1; }
+# Builtins only for the counter: the PATH below is reduced to a handful of
+# symlinks, and the first version reached for `head`, which is not among them —
+# so the count never advanced past one and the case passed against a `cat` that
+# never failed. A stub that cannot count is a fixture asserting nothing.
+cat > "$CATE/cat" <<CATSH
+#!/usr/bin/env bash
+n=0
+[ -f "$TMP/catn" ] && read -r n < "$TMP/catn"
+n=\$((n + 1))
+printf '%s\\n' "\$n" > "$TMP/catn"
+if [ "\$n" -eq 2 ]; then printf 'partial'; exit 1; fi
+exec "$REAL_CAT" "\$@"
+CATSH
+chmod +x "$CATE/cat"
+: > "$TMP/catn"
+eout="$(PATH="$CATE" bash -c '. "'"$SELF_DIR"'/testlib.sh"; res="$(run_limited 5 sh -c "echo whole")"; echo "rc=$? res=$res"' 2>/dev/null)"
+case "$eout" in
+    "rc=125 res=whole") pass "…and a stderr replay that fails returns 125 too" ;;
+    *) die "failing stderr replay gave '$eout' (want rc=125 res=whole)" ;;
 esac
 
 # ── no fixture may put its stubs on the WATCHDOG's own PATH ────────────────

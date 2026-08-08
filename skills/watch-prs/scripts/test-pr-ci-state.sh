@@ -257,6 +257,35 @@ got="$(run 7 --head)"
     && pass "…and --head with no value is usage, not an unpinned check" \
     || die "--head with no value silently unpinned the check ('$got')"
 
+# ── the diagnostic survives the NO-`timeout` path ──────────────────────────
+# Every case above runs wherever GNU `timeout` exists, which is the arm of
+# `run_limited` that hands stdout and stderr straight through. Stock macOS has no
+# `timeout`, and the fallback used to fold the bounded command's stderr into its
+# stdout — so this script's own `2>` capture received nothing, the exact-message
+# branch could never fire, and a repository with no checks blocked every round and
+# every merge on that platform alone.
+#
+# The PATH is reduced to a directory with no `timeout` in it, which is the only
+# way to reach that arm on a machine that has one.
+NOTO="$TMP/noto"; mkdir -p "$NOTO"
+# `dirname`, `jq` and the rest are here because the script resolves its own
+# directory and parses with them — a PATH missing those fails long before the
+# branch under test, which is a fixture proving the fixture.
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm cat head tail wc dirname jq pwd; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$NOTO/$b"
+done
+[ ! -e "$NOTO/timeout" ] \
+    && pass "the no-timeout fixture really has no timeout to find" \
+    || die "the fixture linked a timeout in; it would test the wrong arm"
+mkgh '' "no checks reported on the 'main' branch" 1
+ln -sf "$TMP/bin/gh" "$NOTO/gh"
+noto_rc=0
+noto_out="$(run_limited 30 env PATH="$NOTO" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$SCRIPT" 7 2>&1)" || noto_rc=$?
+{ [ "$noto_rc" -eq 4 ] && grep -qF 'status=none' <<<"$noto_out"; } \
+    && pass "…and 'no checks configured' is still recognised without GNU timeout" \
+    || die "the none-configured diagnostic was lost on the fallback path (rc=$noto_rc '$noto_out')"
+
 # ── a probe that hangs is stopped, not waited on ───────────────────────────
 # A `gh` call that never returns on a dead connection makes the CALLER's timeout
 # meaningless: the round gate cannot reach its own deadline check, so the
@@ -293,6 +322,35 @@ for bad in 0 '' notanumber 007; do
     [ "$b_rc" -eq 124 ] \
         && pass "PR_CI_PROBE_TIMEOUT='$bad' falls back rather than becoming the bound" \
         || die "PR_CI_PROBE_TIMEOUT='$bad' was used as the bound (rc=$b_rc)"
+done
+
+# ── an inherited definition does not satisfy a load check ──────────────────
+# Bash exports functions through the environment, so a caller that had run
+# `export -f run_limited` leaves one defined here before the `.` — and a library
+# that is empty or truncated above the definition still sources SUCCESSFULLY. The
+# `type -t` guard then finds the inherited function and reports the library
+# loaded: a stale watchdog without the kill behaviour lets a hung `gh` outlive
+# every bound this script advertises. The same holds for `sha_reason`.
+mkgh green '' 0
+for lib_case in 'testlib.sh:run_limited:testlib_empty' 'recordlib.sh:sha_reason:recordlib_empty'; do
+    lib="${lib_case%%:*}"; rest="${lib_case#*:}"
+    fn="${rest%%:*}"; want="${rest##*:}"
+    rm -rf "$TMP/run"; mkdir -p "$TMP/run"
+    for g in "$SELF_DIR"/*.sh; do ln -sf "$g" "$TMP/run/$(basename "$g")"; done
+    rm -f "$TMP/run/$lib"; : > "$TMP/run/$lib"
+    : > "$TMP/args"
+    li_rc=0
+    li_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        bash -c 'eval "$1() { printf stale; }"
+                 export -f "$1"
+                 exec "$2" 7' _ "$fn" "$TMP/run/pr-ci-state.sh" 2>&1)" || li_rc=$?
+    { [ "$li_rc" -eq 2 ] && grep -qF "reason=$want" <<<"$li_out"; } \
+        && pass "an empty $lib is refused even with $fn already defined" \
+        || die "an inherited $fn satisfied the $lib load check (rc=$li_rc '$li_out')"
+    [ ! -s "$TMP/args" ] \
+        && pass "…and nothing was asked with it" \
+        || die "a request was made after an inherited $fn: $(cat "$TMP/args")"
 done
 
 # ── usage, and an identity that cannot be derived ──────────────────────────

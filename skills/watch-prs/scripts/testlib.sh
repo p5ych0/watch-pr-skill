@@ -76,8 +76,18 @@ run_limited() {
     # `sh -c "sleep 30 & wait"` case here returns 124 with its `sleep` orphaned,
     # and a mandatory suite that leaks a process per run leaks one per run forever.
     # The group is what has to die, not the process that happened to lead it.
+    # STDERR STAYS SEPARATE. It used to be folded into the stdout file, which is
+    # invisible while every caller was a fixture capturing `2>&1` anyway — and
+    # then a RUNTIME caller appeared that distinguishes them. `pr-ci-state.sh`
+    # decides "no checks are configured" by matching the whole `gh` diagnostic on
+    # stderr; merged, its own `2>` capture received nothing, the exact-message
+    # branch could never fire, and on any platform without GNU `timeout` a
+    # repository with no checks blocked every round and every merge. The fallback
+    # is the only path there, so the bug was invisible wherever `timeout` exists.
+    local tmperr
+    tmperr="$(mktemp 2>/dev/null)" || { rm -f "$tmp" 2>/dev/null; return 125; }
     set -m
-    ( "$@" ) >"$tmp" 2>&1 </dev/null &
+    ( "$@" ) >"$tmp" 2>"$tmperr" </dev/null &
     local pid=$!
     set +m
     local waited=0
@@ -92,7 +102,7 @@ run_limited() {
         if ! sleep 1; then
             kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
             wait "$pid" 2>/dev/null
-            rm -f "$tmp" 2>/dev/null
+            rm -f "$tmp" "$tmperr" 2>/dev/null
             return 125
         fi
         waited=$((waited + 1))
@@ -113,7 +123,12 @@ run_limited() {
     # that expectation is a prefix or a `grep`, it still matched, and a mandatory
     # gate reported PASS on output it never finished reading.
     cat "$tmp"; local read_rc=$?
-    rm -f "$tmp" 2>/dev/null
+    # The stderr replay has its own status for the same reason the stdout read
+    # does: a `cat` that emits a partial diagnostic and then fails hands the
+    # caller a truncated message it will match against.
+    cat "$tmperr" >&2; local read_err_rc=$?
+    rm -f "$tmp" "$tmperr" 2>/dev/null
+    [ "$read_err_rc" -eq 0 ] || return 125
     # 125 for "the watchdog itself could not do its job", distinct from 124 (the
     # limit was hit) and from the command's own status. GNU `timeout` uses 125
     # the same way, so the two paths still read alike.

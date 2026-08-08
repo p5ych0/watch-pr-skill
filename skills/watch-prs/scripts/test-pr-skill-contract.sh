@@ -229,6 +229,9 @@ if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
 #!/usr/bin/env bash
 # `tail -n +2`, not `sed -i` — in-place editing without a suffix argument is
 # GNU-only, and stock macOS runs this suite as a mandatory pre-push gate.
+# The bound it was handed, recorded — the gate is supposed to pass its REMAINING
+# time, not let the helper use its own sixty-second default.
+printf '%s\n' "${PR_CI_PROBE_TIMEOUT:-unset}" >> "$GATE_PROBE"
 rc="$(head -1 "$GATE_Q")"
 tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
 # A SLOW PROBE, when asked for. The timeout has to be a real duration bound, and
@@ -249,8 +252,9 @@ STUBSH
         shift 4
         printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
         : > "$GATETMP/last"
+        : > "$GATETMP/probe"
         out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
-            GATE_LAST="$GATETMP/last" \
+            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" \
             RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
             bash -c "$gate_fn"'
                 ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
@@ -276,7 +280,7 @@ STUBSH
     # immediately, which is the incomplete-picture close this grace exists for.
     gate_case '0
 3
-0'                    0 5 "a verdict interrupted by a change starts its grace again"
+0'                    0 5 "a verdict interrupted by a change starts its grace again" PR_CI_TIMEOUT=10
     # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
     # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
     # round past its own bound — and a bound that a verdict can step over is not a
@@ -291,12 +295,27 @@ STUBSH
     # reporting anything.
     gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
         PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
+    # …AND NEITHER DOES A PROBE. The helper bounds its own `gh` calls, but at its
+    # own default — so with a one-second gate timeout a hung request ran for a
+    # minute before this loop could look at the clock. A bound the callee does not
+    # know about is not a bound. The stub here reads what it was given and reports
+    # it, so the assertion is on the value passed down rather than on a duration.
+    gate_case '0
+0'                    0 2 "the gate still closes on a stable green" PR_CI_GRACE=1
+    first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
+    { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
+        && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
+        || die "the probe bound was '$first', not capped at the 5s the gate had left"
     gate_case '1'     1 1 "a red head stops the round"
     gate_case '2'     1 1 "an unreadable check state stops the round"
     # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
+    # A LONGER BOUND FOR THE CASES THAT MUST REACH ACCEPTANCE. Five seconds left
+    # these one second clear of the deadline, so a probe taking any measurable
+    # time pushed them over and they failed as timeouts — a fixture that passes on
+    # a fast machine and reports a defect on a slow one is testing the machine.
     gate_case '3
 3
-0'                    0 3 "a pending result is waited on, never read as a pass"
+0'                    0 3 "a pending result is waited on, never read as a pass" PR_CI_TIMEOUT=10
     # …and the wait is bounded, because a wait that never ends is a hang. The queue
     # runs out and the stub then answers 3 forever.
     gate_case '3'         1 2 "…and stops once the checks have not settled in time"
@@ -306,7 +325,7 @@ STUBSH
     # response to "ask again shortly" is not to stop and is certainly not to close.
     gate_case '5
 5
-0'                    0 3 "a head the API has not caught up with is waited on"
+0'                    0 3 "a head the API has not caught up with is waited on" PR_CI_TIMEOUT=10
     # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a moment after
     # the head moves, so the first probe after a push legitimately reports `none` on
     # a repository that does have CI. Taking that as permission to close reproduces
@@ -335,8 +354,9 @@ STUBSH
         local out rc=0 calls maxc="$1" label="$2"
         shift 2
         printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
+        : > "$GATETMP/probe"
         out="$(run_limited 12 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
-            GATE_LAST="$GATETMP/last" RB_SCRIPTS="$GATETMP/s" "$@" \
+            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" RB_SCRIPTS="$GATETMP/s" "$@" \
             bash -c "$gate_fn"'
                 ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
         calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
@@ -994,11 +1014,35 @@ grep -q 'before merging' "$SKILL" \
 # ── EVERY documented watch invocation carries the baseline ────────────────
 # The shell example passed --after-review while the Monitor command beside it did
 # not, leaving the feature inert in the mode Claude Code is told to use.
+# The baseline is a VARIABLE now, not one name: the automatic path waits out the
+# pass its own push started, and that wait's baseline is the id from before the
+# push rather than the one for the request that follows. What must never happen is
+# a watch with no baseline at all.
 watch_calls="$(grep -c 'pr-watch.sh N "\$WHO"' "$SKILL")"
-watch_pinned="$(grep -c 'pr-watch.sh N "\$WHO" --after-review "\$PRIOR_REVIEW"' "$SKILL")"
+watch_pinned="$(grep -cE 'pr-watch.sh N "\$WHO" --after-review "\$[A-Z_]+"' "$SKILL")"
 [ "$watch_calls" -eq "$watch_pinned" ] \
-    && pass "every documented watch invocation passes the review baseline" \
+    && pass "every documented watch invocation passes a review baseline" \
     || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review"
+# …and the one that waits out the push-triggered pass uses the PRE-PUSH id, not
+# the one taken for the request that follows it. Using the same variable for both
+# is the race with an extra step: the wait would be satisfied by whatever the
+# request is about to ask for.
+grep -q 'pr-watch.sh N "\$WHO" --after-review "\$PUSH_BASE"' "$SKILL" \
+    && pass "…and the push-triggered pass is waited out against the id from before it" \
+    || die "the push-triggered pass is not serialised before the next baseline is taken"
+# …GUARDED BY WHETHER A PASS WAS ACTUALLY STARTED, and by that comparison rather
+# than by a constant. `if false` around it satisfies a grep for the wait itself,
+# and a no-op push starts nothing, so waiting unconditionally is a guaranteed
+# timeout — the condition is the whole of it.
+grep -q '^if \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
+    && pass "…only when the push actually moved the head" \
+    || die "the serialising wait is unconditional, or its condition was replaced"
+# …and a wait that TIMED OUT is not permission to continue. Taking a baseline
+# while that pass is still in flight is the race this block removes, with an extra
+# step: the pass lands a moment later and answers the wrong request.
+grep -q 'the pass the push started has not finished' "$SKILL" \
+    && pass "…and a pass that has not finished stops the round" \
+    || die "a timed-out wait for the push-triggered pass is treated as done"
 
 # ── the automatic path has no pre-request baseline ────────────────────────
 # The trigger preceded the skill, so a lookup can capture the very pass being

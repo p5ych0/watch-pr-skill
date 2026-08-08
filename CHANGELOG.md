@@ -109,6 +109,29 @@ operator had to point at the checks tab. Issue #16.
   the portable watchdog, which makes `testlib.sh` a runtime dependency rather than
   a second copy of ninety tested lines.
 
+- **A `run_limited` fallback that merged stderr into stdout.** Folding them was
+  invisible while every caller was a fixture capturing `2>&1` anyway — and then a
+  runtime caller appeared that distinguishes them. `pr-ci-state.sh` decides "no
+  checks are configured" by matching the whole `gh` diagnostic on stderr; merged,
+  its own capture received nothing, so on any platform **without GNU `timeout`** —
+  stock macOS — a repository with no checks blocked every round and every merge.
+  The fallback is the only path there, so the defect was invisible wherever
+  `timeout` exists.
+
+- **The push-triggered pass is waited out before the next baseline is taken.** In
+  automatic mode a push that moves the head starts a Codex pass, and it can still
+  be running when the CI gate returns — CI settling in ninety seconds while a
+  review takes a hundred and twenty is ordinary. A baseline taken then is the id
+  *before* that pass, so it lands, satisfies `--after-review`, and the loop
+  advances while the request it was meant to answer is still queued. It is
+  serialised, only when the push actually moved the head, and a wait that times
+  out stops the round rather than continuing.
+
+- **Each probe is bounded by the gate's remaining time**, not only by its own
+  default: with `PR_CI_TIMEOUT=1` a hung request ran for the full sixty seconds
+  before the loop could look at the clock. A bound the callee does not know about
+  is not a bound.
+
 - **The review baseline is taken after the push, not before it.** In automatic
   mode the push starts a pass that can *finish* during the CI wait — the gate
   waits for checks, and a Codex pass on a small diff can be quicker. A baseline
