@@ -66,14 +66,19 @@ rule can no longer hold in one copy and not another. Issue #18.
   session's own shell; the readonly attribute does not survive function export, so
   a separate helper process never inherits one.
 
-- **`pr-selfcheck.sh` credits only what sourcing plus the calls reaches.**
-  Importing every assignment in a sourced library credited
-  `unused() { TOKEN=x; }` — sourcing that defines a function and assigns nothing —
-  so `$TOKEN` in `SKILL.md` came out as assigned and the gate reported clean over a
-  value the driver expands and nothing ever sets. That is the false-clean
-  direction, reached through the branch added to remove a false *finding*. It
-  imports the library's top level plus the bodies of the functions `SKILL.md`
-  actually calls.
+- **A sourced library DECLARES what it assigns; `pr-selfcheck.sh` reads it.**
+  Inferring from the body was tried three ways and each was wrong in the quiet
+  direction: every assignment in the file credited `unused() { TOKEN=x; }`, which
+  sourcing never runs; restricting to called functions still credited an
+  assignment after a `return`, and one inside an untaken branch. Deciding that
+  statically is a reachability analysis, and a wrong answer reads as "this
+  variable is fine" — so `$TOKEN` in `SKILL.md` came out assigned and the gate
+  reported clean over a value the driver expands and nothing ever sets. That is
+  the false-clean direction, reached through the branch added to remove a false
+  *finding*. `identitylib.sh` carries an `# rb-assigns:` line instead, a library
+  with no declaration is an error, and `test-identitylib.sh` proves the
+  declaration true in both directions: every declared name is set by a successful
+  call, and a call sets no global the declaration does not name.
 
 - **The matching-test gate discovers the libraries instead of listing them.** The
   list named `testlib.sh` and `recordlib.sh`, so `identitylib.sh` sat outside the

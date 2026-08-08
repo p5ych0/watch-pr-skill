@@ -176,45 +176,31 @@ if [ -f "$SKILL" ]; then
             echo "PR_SELFCHECK status=error reason=sourced_lib_missing lib=$lib" >&2
             exit 2
         fi
-        # ONLY WHAT SOURCING PLUS THE CALLS ACTUALLY REACHES. Importing every
-        # assignment in the file credits `unused() { TOKEN=x; }` — sourcing that
-        # defines a function and assigns nothing — so `$TOKEN` in SKILL.md came
-        # out as assigned and the gate reported clean over a value the driver
-        # expands and nothing ever sets. That is the false-clean direction this
-        # whole script exists to close, reached through the branch added to
-        # remove a false finding.
+        # THE LIBRARY DECLARES WHAT IT ASSIGNS; nothing is inferred from its body.
         #
-        # So: the library's TOP LEVEL, which sourcing does run, plus the bodies of
-        # the functions SKILL.md CALLS. A call is recognised only at the start of a
-        # line, the same narrowness as the loop-variable scan above and for the
-        # same reason — a name inside a string or an argument list is not a call,
-        # and the cost of missing a real one is a loud false finding rather than a
-        # silent gap.
+        # Three inferences were tried and each was wrong in the QUIET direction.
+        # Every assignment in the file credited `unused() { TOKEN=x; }`, which
+        # sourcing never runs. Restricting to called functions still credited an
+        # assignment after a `return`, and one inside an untaken branch. Deciding
+        # that statically is a reachability analysis, and a wrong answer here reads
+        # as "this variable is fine" — the false-clean direction this script exists
+        # to close, reached through the branch added to remove a false finding.
         #
-        # Function bodies are delimited by `name() {` and a `}` in column ONE,
-        # which is how every library here is written. A closing brace indented
-        # differently would leave the scan inside the function, crediting nothing
-        # further — again the loud direction.
-        libfns="$(nomatch grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$SCRIPTS/$lib" \
-            | sed 's/()$//' | sort -u)"; chk lib_fns $?
-        called=""
-        for fn in $libfns; do
-            # A herestring, never `printf | grep -q`: the early exit makes the
-            # producer take SIGPIPE, and under `pipefail` the match is reported
-            # ABSENT. Every scan in this repository uses this form for that reason.
-            if grep -qE "^[[:space:]]*$fn([[:space:]]|\$)" <<<"$code"; then
-                called="$called $fn"
-            fi
-        done
-        libassigned="$(awk -v called=" $called " '
-            /^[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{/ {
-                fn = $0; sub(/\(\).*/, "", fn); infn = fn; next
-            }
-            /^\}/ { infn = ""; next }
-            { if (infn == "" || index(called, " " infn " ") > 0) print }
-        ' "$SCRIPTS/$lib" \
-            | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-            | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk lib_assigned $?
+        # A declaration has no such failure mode: it is read, not deduced. The
+        # library's own test proves the declaration matches what a successful call
+        # sets, so a drifted one fails the suite rather than quietly widening what
+        # is accepted here.
+        #
+        # A sourced library with NO declaration is an ERROR. Crediting nothing
+        # would reinstate exactly the false findings this branch removes, and
+        # report them as defects in the skill.
+        libassigned="$(nomatch grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SCRIPTS/$lib" \
+            | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' \
+            | nomatch grep -vE '^$' | sort -u)"; chk lib_assigned $?
+        if [ -z "$libassigned" ]; then
+            echo "PR_SELFCHECK status=error reason=lib_declares_no_assignments lib=$lib" >&2
+            exit 2
+        fi
         assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
     done
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and

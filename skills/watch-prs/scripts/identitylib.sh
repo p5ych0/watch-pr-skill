@@ -48,6 +48,21 @@
 # `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` override the
 # derivation so tests can supply an identity without a real remote. See CLAUDE.md
 # § Repo-agnostic invariant.
+#
+# THE DECLARATION BELOW IS A CONTRACT, not a comment. `pr-selfcheck.sh` reads it to
+# know which of `SKILL.md`'s variables this library assigns; without it, the only
+# alternative is inferring from the body, and every inference was wrong in the
+# quiet direction — an assignment inside a function nobody calls, then one after a
+# `return`, then one inside an untaken branch, each crediting a name that sourcing
+# plus the call never sets while the gate reported clean. Deciding that statically
+# is a reachability analysis, and this repository has already built and deleted one
+# structural checker that reported PASS while its stated invariant was false.
+#
+# So the library STATES what it sets, and `test-identitylib.sh` proves the
+# statement: every declared name is set by a successful call, and a successful call
+# sets nothing else. A declaration that drifts fails the suite rather than quietly
+# widening what the selfcheck will accept.
+# rb-assigns: HOST OWNER REPO RB_IDENTITY_REASON
 rb_identity() {
     local remote p h
     RB_IDENTITY_REASON=''

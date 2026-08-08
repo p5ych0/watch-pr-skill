@@ -148,6 +148,64 @@ REVIEW_BUS_REMOTE='/srv/mirrors/acme/widget.git' rb_identity && hs_rc=0 || hs_rc
     && pass "a refused origin leaves HOST untouched rather than half-derived" \
     || die "a refused origin overwrote HOST (rc=${hs_rc:-?} HOST='$HOST')"
 
+# ── the `rb-assigns:` declaration is TRUE ──────────────────────────────────
+# `pr-selfcheck.sh` reads that line to decide which of SKILL.md's variables this
+# library assigns, and it reads it rather than deducing it because every attempt
+# to deduce reachability from the body was wrong in the quiet direction. A
+# declaration is only safe while it is accurate, so accuracy is what this proves —
+# otherwise the contract is just a comment that widens what the selfcheck accepts.
+declared="$(grep -oE '^# rb-assigns:[A-Za-z0-9_ ]*' "$SELF_DIR/identitylib.sh" \
+    | sed -E 's/^# rb-assigns:[[:space:]]*//' | tr ' ' '\n' | grep -vE '^$' | sort -u)"
+[ -n "$declared" ] \
+    && pass "identitylib.sh declares the names it assigns" \
+    || die "identitylib.sh carries no rb-assigns declaration"
+
+# EVERY DECLARED NAME IS SET by a successful call. A declaration naming something
+# the parser never touches is the exact hole this replaces: the selfcheck would
+# credit it and the driver would expand an unset value.
+for n in $declared; do
+    case "$n" in RB_IDENTITY_REASON) continue ;; esac   # set on failure, cleared on success
+    unset "$n"
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' rb_identity >/dev/null 2>&1
+    [ -n "${!n-}" ] \
+        && pass "…and a successful call sets $n" \
+        || die "$n is declared but a successful call leaves it unset"
+done
+# …and the failure name is set on the path that reports one.
+unset RB_IDENTITY_REASON
+# `|| true`: this file runs under `-e` and the call is EXPECTED to fail — that is
+# the assertion. Without it the script aborts here and reports nothing at all.
+REVIEW_BUS_REMOTE='/srv/mirrors/acme/widget.git' rb_identity >/dev/null 2>&1 || true
+[ -n "${RB_IDENTITY_REASON-}" ] \
+    && pass "…and a refused call sets RB_IDENTITY_REASON" \
+    || die "RB_IDENTITY_REASON is declared but a refused call leaves it unset"
+
+# AND NOTHING ELSE. A call that quietly set a fourth global would leave the
+# declaration incomplete in the other direction: `pr-selfcheck.sh` would report
+# that name undefined in SKILL.md, which is the loud direction — but it also means
+# the library is doing something its contract does not say, and the next reader
+# would have no way to know. The environment is snapshotted around the call, so
+# this needs no list to keep in step.
+#
+# IN A FRESH SHELL. Snapshotting around a call in THIS shell proves nothing: the
+# cases above have already called `rb_identity` many times, so anything it sets is
+# in the "before" picture too, and a mutant adding an undeclared global survived
+# the whole suite. The comparison has to happen where the call is the first one.
+# `REVIEW_BUS_REMOTE` is set before the snapshot rather than as a command prefix,
+# because a prefix assignment on a FUNCTION call stays in effect afterwards in
+# bash and would read as a global the call had set.
+extra="$(bash -c '
+    . "'"$SELF_DIR"'/identitylib.sh"
+    REVIEW_BUS_REMOTE="git@github.com:acme/widget.git"
+    before="$(compgen -v | grep -E "^[A-Z][A-Z0-9_]*$" | sort)"
+    rb_identity >/dev/null 2>&1
+    compgen -v | grep -E "^[A-Z][A-Z0-9_]*$" | sort \
+        | comm -13 <(printf "%s\n" "$before") -' 2>&1 \
+    | grep -vxF -f <(printf '%s\n' "$declared") || true)"
+[ -z "$extra" ] \
+    && pass "…and a call sets no global the declaration does not name" \
+    || die "rb_identity sets undeclared globals: $(printf '%s' "$extra" | tr '\n' ' ')"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
