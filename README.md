@@ -270,6 +270,20 @@ settings.
 | `REVIEW_BUS_OWNER` / `REVIEW_BUS_REPO` | derived | override the derived owner/repo (tests) |
 | `REVIEW_ROUND_THRESHOLD` | `10` | reviewed-head cadence for the round check-in; `0` disables it |
 | `REVIEW_MERGE_STRICT` | unset | `1` drops `--admin` from the merge, so GitHub enforces branch protection itself |
+| `PR_CI_INTERVAL` | `30` | seconds between polls while the pushed head's checks are still running |
+| `PR_CI_TIMEOUT` | `1800` | how long to wait for those checks before stopping rather than guessing |
+
+### The pushed head has to be green
+
+A round is not closed until the checks on the commit it pushed have finished and
+passed. This is separate from the pre-push self-check below, and it is separate on
+purpose: that one runs the suite *here*, and cannot see a failure that only
+happens on the runner. One did, and CI stayed red for four consecutive rounds
+before anyone looked at the checks tab.
+
+A still-running check is not a pass; the gate waits, bounded by `PR_CI_TIMEOUT`. A
+repository with no checks configured has nothing to be green, and says so rather
+than blocking.
 
 ### Self-check before the push
 
@@ -404,6 +418,14 @@ plugin docs and open an issue.
   `git remote get-url origin` — run from inside the intended checkout.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
+- **A round stops with "the head you just pushed is RED":** working as intended.
+  The suite passing locally and the checks passing on the runner are different
+  claims — GitHub Actions ignores `SIGPIPE`, runs a different shell, and has no
+  credentials — so the round will not be closed on a commit whose CI is failing.
+  Fix it, push again, and the round continues.
+- **A round waits on "pending":** the checks start when the push lands, so it
+  waits for them rather than reading "still running" as a pass. Set
+  `PR_CI_TIMEOUT` if your CI takes longer than thirty minutes.
 
 ## License
 

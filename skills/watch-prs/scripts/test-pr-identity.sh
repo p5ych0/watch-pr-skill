@@ -21,6 +21,7 @@ PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok
 # entirely, and the guard would have gone on reporting that no runtime script
 # hard-codes an identity. A rule that follows the code has to follow it here too.
 FILES=( "$ROOT"/pr-review-state.sh
+        "$ROOT"/pr-ci-state.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh
@@ -83,12 +84,12 @@ chmod +x "$IDTMP/bin/git"
 # credentials — and so that its failure is distinguishable from the guarded one.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$IDTMP/bin/gh"
 chmod +x "$IDTMP/bin/gh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     [ -f "$ROOT/$sc" ] || continue
     case "$sc" in
         pr-review-state.sh) set -- state 7 somebody ;;
         pr-findings.sh)     set -- list 7 ;;
-        *)                  set -- 7 ;;
+        *)                  set -- 7 ;;   # pr-round-count.sh, pr-ci-state.sh
     esac
     # `env` inside the watchdog, never a PATH on its caller: where GNU `timeout`
     # is missing, `run_limited` polls with its own `sleep` and would inherit it.
@@ -129,12 +130,12 @@ printf '%s\n' "$*" >> "$GH_SPY"
 exit 1
 GHSH
 chmod +x "$STALETMP/bin/gh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     [ -f "$ROOT/$sc" ] || continue
     case "$sc" in
         pr-review-state.sh) set -- state 7 somebody ;;
         pr-findings.sh)     set -- list 7 ;;
-        *)                  set -- 7 ;;
+        *)                  set -- 7 ;;   # pr-round-count.sh, pr-ci-state.sh
     esac
     # The helper is run from a copy whose identitylib.sh is empty, with a stale
     # `rb_identity` exported into its environment. `recordlib.sh` and the helper
@@ -198,7 +199,7 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # blacklist, and `|| :` or no handler at all walks straight through it. The unset
 # has to be JOINED to a branch that exits. Continuations are flattened first,
 # since the branch sits on the following line.
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     [ -f "$ROOT/$sc" ] || continue
     # The branch must EXIT, and `{` is not evidence that it does — accepting the
     # brace let `|| { :; }` through, which is the handler emptied and the defect
@@ -250,7 +251,7 @@ if [ "\$1" = "remote" ]; then printf '%s\n' '$remote'; exit 0; fi
 exec "$REAL_GIT" "\$@"
 GITSH
     chmod +x "$SHAPETMP/bin/git"
-    for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
         [ -f "$ROOT/$sc" ] || continue
         case "$sc" in
             pr-review-state.sh) set -- state 7 somebody ;;

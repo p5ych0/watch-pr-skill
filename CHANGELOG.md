@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.4] — 2026-08-08
+
+**A round is no longer closed on a red head.** CI was red for four consecutive
+commits on one PR and neither the round loop nor the pre-push self-check noticed:
+every round was closed as green on the strength of a local suite run, and the
+operator had to point at the checks tab. Issue #16.
+
+- **"The suite passes here" and "the checks pass there" are different claims, and
+  only the first was being made.** `pr-selfcheck.sh` runs the suite before the
+  push; it cannot see a failure that only happens on the runner — and that one
+  only happened there, because GitHub Actions ignores `SIGPIPE`, so a `printf`
+  losing a pipe race returned 1 instead of dying with 141. `gh pr checks` *was*
+  consulted, but only in the merge gate, which on that PR was many rounds away.
+
+- **`pr-ci-state.sh`, called by both gates.** The merge gate already asked this
+  question in about seventy lines inline; writing them out again for the round
+  loop is the defect issues #11 and #18 were both opened for. `--required`
+  separates the two questions: the merge gate asks whether branch protection is
+  satisfied, and the round gate asks whether the commit just pushed is broken —
+  where a failing *non-required* check still counts.
+
+- **Pending is not green.** The checks start when the push lands, so asking
+  immediately always finds them running; treating that as a pass would close every
+  round before its own CI had said anything, which is the original defect with an
+  extra step. The gate waits, and because a wait that never ends is a hang, it is
+  bounded by `PR_CI_TIMEOUT` (default 1800s, polled every `PR_CI_INTERVAL`).
+
+- **An unrecognised bucket is malformed, not benign.** `pass` and `skipping` are
+  green, `fail` and `cancel` are failures, `pending` is pending — and anything
+  else is an error rather than falling through a catch-all, which is the shape
+  that let an unknown review state be reported as a withdrawal and drive a review
+  loop.
+
 ## [2.0.3] — 2026-08-08
 
 **The identity parser lives in one file.** The ~60 lines that turn

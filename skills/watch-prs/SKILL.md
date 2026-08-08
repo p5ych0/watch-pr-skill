@@ -210,6 +210,49 @@ unset -f rb_identity 2>/dev/null \
 rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+# THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
+#
+# CI was red for four consecutive commits on one PR and neither the round loop nor
+# the pre-push self-check noticed: every round was closed as green on the strength
+# of a local suite run, and the operator had to point at the checks tab.
+# `pr-selfcheck.sh` runs the suite HERE, before the push — it cannot see a failure
+# that only happens on the runner, and that one only happened there. "The suite
+# passes here" and "the checks pass there" are different claims, and only the
+# first was ever being made.
+#
+# Defined once and called from both push sites, because two copies of a gate is
+# how one of them comes to be missing a rule the other has.
+#
+# PENDING IS NOT GREEN. The checks start when the push lands, so asking
+# immediately always finds them running; treating that as a pass would close every
+# round before its own CI had said anything, which is the defect with an extra
+# step. It waits, and a wait that never ends is a hang, so it is bounded.
+ci_gate() {   # ci_gate <pr> ; 0 carry on, 1 stop
+    local waited=0 rc iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}"
+    while :; do
+        "$RB_SCRIPTS"/pr-ci-state.sh "$1"; rc=$?
+        case "$rc" in
+            0) return 0 ;;
+            4) echo "note: no checks are configured; the CI gate has nothing to assert"
+               return 0 ;;
+            1) echo "ABORT: the head you just pushed is RED. Fix it and push again; do not close this round."
+               return 1 ;;
+            3) ;;   # still running — wait
+            *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
+               return 1 ;;
+        esac
+        if [ "$waited" -ge "$tmo" ]; then
+            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
+            return 1
+        fi
+        # `sleep` takes its status like every other call here. A `sleep` that
+        # returned immediately — interrupted, or missing — would spin this loop
+        # against the API until the timeout, and the elapsed count would be a
+        # fiction rather than a duration.
+        sleep "$iv" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
+        waited=$((waited + iv))
+    done
+}
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
 # inline mangles it. Freshly created per PR and per session, because a reused
@@ -611,6 +654,10 @@ summary and the push is inert:
 # connection — the fixes are not on the PR, and closing the round anyway resolves
 # threads and requests a review of code that was never sent.
 git push || { echo "ABORT: push failed; do not close or re-request this round."; exit 0; }
+# The checks on what was just pushed, BEFORE anything else in this round. Threads
+# resolved and a summary posted against a red head are a round closed on code that
+# does not build.
+ci_gate N || exit 0
 # reply + resolve threads here
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
@@ -710,6 +757,10 @@ PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.hea
 [[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the round baseline head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
+# The push has already started the pass here, so this gate does not prevent a
+# review of a red head — it prevents the round being CLOSED as if it had been
+# green, which is what let four red commits accumulate.
+ci_gate N || exit 0
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
@@ -1196,76 +1247,34 @@ while :; do
 done
 if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresolved=$UNRESOLVED ok=$OK"; exit 0; fi
 
-# (4) Required checks green. Capture the STATUS separately: `gh pr checks` can
-# print `true` and then exit non-zero, and command substitution keeps the output —
-# so comparing the string alone lets an errored probe read as "all green". In the
-# default mode the merge below uses `--admin`, which bypasses branch protection,
-# so this probe is the only thing standing between a failed read and an unchecked
-# merge.
+# (4) Required checks green — through the same helper the round loop uses.
+#
+# This was about seventy lines inline here, and the round loop needed the same
+# question answered. A second copy is the defect issues #11 and #18 were both
+# opened for, so both call `pr-ci-state.sh` and `--required` is what separates the
+# two questions: this gate asks whether branch protection is satisfied; the round
+# gate asks whether the commit just pushed is broken, where a failing
+# non-required check still counts.
+#
+# In the default mode the merge below uses `--admin`, which bypasses branch
+# protection, so this probe is the only thing standing between a failed read and
+# an unchecked merge — which is why anything that is not an explicit green or an
+# explicit "nothing configured" blocks.
 #
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks --required` exits
-# NON-ZERO when the branch has no required checks at all, saying so on stderr —
-# not because anything failed. Treating every non-zero status as unreadable
-# therefore blocked the merge on every repository without branch protection,
-# permanently. That is not a fail-closed guard, it is a gate that never opens,
-# and it was found by trying to merge rather than by reading the code.
-#
-# stderr is captured separately from stdout, so the distinguishing message is
-# available without polluting the value being compared.
-# THE WHOLE DIAGNOSTIC IS MATCHED, not searched for a phrase. `gh pr checks` has
-# no dedicated status for "none configured" — it documents exit 8 for pending and
-# nothing for this — so the message is the only signal, and a substring test
-# accepted it inside a LARGER failure: a run that printed the benign line and then
-# failed for an unrelated reason was classified as benign, and the default
-# administrator merge proceeded with no trusted checks result at all. Matching the
-# entire message means an extra line, an extra sentence or a wrapped error all
-# fall through to the blocking branch, which is the direction that cannot be
-# wrong.
-#
-# Both wordings are accepted because `gh` drops "required" when the branch has no
-# checks whatsoever, and both mean the same thing here: nothing to be green.
-checks_msg_is_none_configured() {
-    case "$1" in
-        *"
-"*) return 1 ;;                       # more than one line is more than one thing
-    esac
-    case "$1" in
-        "no checks reported on the '"*"' branch"|"no required checks reported on the '"*"' branch")
-            return 0 ;;
-    esac
-    return 1
-}
-CHECKS_RC=0
-CHECKS_ERR="$(mktemp)" || { echo "merge blocked: no scratch file for the checks probe"; exit 0; }
-# THE CONTAINER IS VALIDATED BEFORE `all`. `all(.[]; …)` over an empty stream is
-# `true` by definition, so a successful read that returned an object, a null or
-# an empty array — anything that is not a list of bucket records — came out as
-# "every required check passed" and the administrator merge proceeded on a
-# checks payload nothing had actually read. The shape is asserted first and a
-# distinguished `malformed` emitted otherwise, which the equality test below
-# already refuses.
-CHECKS=$(gh pr checks N --repo $HOST/$OWNER/$REPO --required --json bucket \
-             --jq 'if type != "array" or length == 0 then "malformed"
-                   elif any(.[]; type != "object" or (.bucket | type) != "string") then "malformed"
-                   else all(.[]; .bucket == "pass") end' 2>"$CHECKS_ERR") || CHECKS_RC=$?
-# The READ has its own status, taken before `rm` overwrites it. A `cat` that
-# emitted text containing "no required checks" and then failed would otherwise be
-# classified as the benign none-configured case — turning a failed probe into a
-# merge with no trusted checks result at all.
-CHECKS_MSG="$(cat "$CHECKS_ERR" 2>/dev/null)"; CHECKS_MSG_RC=$?
-rm -f "$CHECKS_ERR" 2>/dev/null
-[ "$CHECKS_MSG_RC" -eq 0 ] || { echo "merge blocked: could not read the checks diagnostic (rc=$CHECKS_MSG_RC)"; exit 0; }
-if [ "$CHECKS_RC" -eq 0 ]; then
-    # A real answer: every required check must be a pass.
-    [ "$CHECKS" = "true" ] || { echo "merge blocked: a required check is not green (out='$CHECKS')"; exit 0; }
-elif checks_msg_is_none_configured "$CHECKS_MSG"; then
-    # No required checks are configured. There is nothing to be green, so this
-    # gate has nothing to say — and says so, rather than passing silently or
-    # blocking forever. The other gates still apply.
-    echo "note: no required checks configured on this branch; the checks gate has nothing to assert"
-else
-    echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC out='$CHECKS' err='$CHECKS_MSG')"; exit 0
-fi
+# non-zero when the branch has no required checks at all, not because anything
+# failed. Treating that as unreadable blocked the merge on every repository
+# without branch protection, permanently — not a fail-closed guard but a gate that
+# never opens, and it was found by trying to merge rather than by reading the
+# code. The helper distinguishes the two and reports 4 for it.
+"$RB_SCRIPTS"/pr-ci-state.sh N --required; CHECKS_RC=$?
+case "$CHECKS_RC" in
+    0) ;;
+    4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
+    1) echo "merge blocked: a required check is not green"; exit 0 ;;
+    3) echo "merge blocked: the required checks have not finished"; exit 0 ;;
+    *) echo "merge blocked: the required-checks probe failed (rc=$CHECKS_RC)"; exit 0 ;;
+esac
 
 # (4b) The round boundary, once more. A clean Copilot verdict on the threshold-th
 # head would otherwise walk straight into a merge without the operator being

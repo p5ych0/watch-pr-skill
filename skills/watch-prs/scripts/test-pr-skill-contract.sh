@@ -129,6 +129,87 @@ grep -q 'CHECKS_RC' "$SKILL" \
     && pass "the required-checks probe checks its exit status" \
     || die "the required-checks probe compares output without its status"
 
+# ── the pushed head is checked before the round is closed ─────────────────
+# CI was red for four consecutive commits and nothing noticed: every round was
+# closed on a local suite run, and `pr-selfcheck.sh` runs BEFORE the push, so it
+# cannot see a failure that only happens on the runner. "The suite passes here"
+# and "the checks pass there" are different claims. Issue #16.
+grep -q '^ci_gate() {' "$SKILL" \
+    && pass "the driver has a CI gate for the head it pushed" \
+    || die "nothing checks whether the pushed head is green"
+# EVERY push site calls it. One that does not is a round closed on an unknown
+# state, and the two sites exist precisely because the ordering differs — which is
+# how one of them comes to be missing a step the other has.
+pushes="$(grep -c '^git push ||' "$SKILL")"
+gates="$(grep -c '^ci_gate N || exit 0' "$SKILL")"
+[ "${pushes:-0}" -gt 0 ] && [ "$gates" = "$pushes" ] \
+    && pass "…and every push site passes through it ($gates/$pushes)" \
+    || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
+# …AFTER the push and BEFORE the review is requested. Asking before the push reads
+# the previous head's result, which is the last round's answer to this round's
+# question; asking after the request means the pass is already running.
+awk '/^git push \|\|/ {p=NR}
+     /^ci_gate N \|\| exit 0/ {if (p && p < NR) g=NR}
+     /gh pr comment N/ {if (g && g < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "…between the push and the request, so it answers about this head" \
+    || die "the CI gate does not sit between the push and the review request"
+# PENDING IS NOT GREEN — AND THE GATE IS RUN TO PROVE IT. The checks start when
+# the push lands, so an immediate ask always finds them running; treating that as a
+# pass closes every round before its own CI has said anything, which is the
+# original defect with an extra step.
+#
+# A grep for `PR_CI_TIMEOUT` passed while the pending arm returned 0 — the presence
+# of a timeout says nothing about what is done with a pending verdict. So the
+# function is extracted and executed against a stubbed `pr-ci-state.sh` that
+# answers on a script, the same reason the parser-clear branch is executed rather
+# than matched.
+gate_fn="$(sed -n '/^ci_gate() {/,/^}/p' "$SKILL")"; gate_rc=$?
+[ "$gate_rc" -eq 0 ] && [ -n "$gate_fn" ] \
+    || die "the ci_gate function could not be extracted from SKILL.md (rc=$gate_rc)"
+GATETMP="$(mktemp_d)" || { die "no scratch directory for the CI gate probe"; GATETMP=""; }
+if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
+    mkdir -p "$GATETMP/s"
+    # Answers come from a queue, one per call, so a gate that polls is
+    # distinguishable from one that decides on the first answer.
+    cat > "$GATETMP/s/pr-ci-state.sh" <<'STUBSH'
+#!/usr/bin/env bash
+# `tail -n +2`, not `sed -i` — in-place editing without a suffix argument is
+# GNU-only, and stock macOS runs this suite as a mandatory pre-push gate.
+rc="$(head -1 "$GATE_Q")"
+tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
+echo "call" >> "$GATE_CALLS"
+# An EXHAUSTED queue answers "pending" forever, so the timeout case is stopped by
+# the bound and by nothing else. Defaulting to an error ended that case through the
+# unreadable-state branch instead, and an unbounded wait passed it.
+exit "${rc:-3}"
+STUBSH
+    chmod +x "$GATETMP/s/pr-ci-state.sh"
+    gate_case() {   # gate_case <queue> <want rc> <want calls> <label>
+        local out rc=0 calls
+        printf '%s\n' "$1" > "$GATETMP/q"; : > "$GATETMP/calls"
+        out="$(run_limited 60 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+            RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 \
+            bash -c "$gate_fn"'
+                ci_gate 7' 2>&1)" || rc=$?
+        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
+        { [ "$rc" = "$2" ] && [ "${calls:-0}" -ge "$3" ]; } \
+            && pass "$4" \
+            || die "$4 — rc=$rc calls=$calls out='$out' (wanted $2 / >=$3 calls)"
+    }
+    gate_case '0'     0 1 "a green head lets the round close"
+    gate_case '1'     1 1 "a red head stops the round"
+    gate_case '4'     0 1 "a repository with no checks has nothing to assert"
+    gate_case '2'     1 1 "an unreadable check state stops the round"
+    # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
+    gate_case '3
+3
+0'                    0 3 "a pending result is waited on, never read as a pass"
+    # …and the wait is bounded, because a wait that never ends is a hang. The queue
+    # runs out and the stub then answers 3 forever.
+    gate_case '3'         1 2 "…and stops once the checks have not settled in time"
+    rm -rf "$GATETMP"
+fi
+
 # ── the loop is PHASED: Codex to clean, then Copilot ───────────────────────
 # Asking both every round buys a Copilot pass on every intermediate commit and
 # mixes its findings into a round that was not about them.
@@ -699,7 +780,7 @@ grep -q 'no required checks' "$SKILL" \
 grep -q 'the required-checks probe failed' "$SKILL" \
     && pass "…and a genuinely failed probe still blocks" \
     || die "the checks probe no longer blocks on a real failure"
-grep -q 'CHECKS_ERR' "$SKILL" \
+grep -q 'ERRF' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…using stderr, so the message does not pollute the compared value" \
     || die "the checks probe does not capture stderr separately"
 
@@ -748,11 +829,11 @@ grep -q 'PRIOR_REVIEW=""' "$SKILL" \
 # A `cat` that emitted text containing "no required checks" and then failed would
 # be classified as the benign none-configured case, letting the default admin
 # merge proceed with no trusted checks result at all.
-grep -q 'CHECKS_MSG_RC' "$SKILL" \
+grep -q 'MSG_RC' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "the checks diagnostic read takes its own status" \
     || die "a failed diagnostic read can be classified as 'no required checks'"
-grep -q 'could not read the checks diagnostic' "$SKILL" \
-    && pass "…and blocks the merge when it fails" \
+grep -q 'reason=diagnostic_unreadable' "$SCRIPT_DIR/pr-ci-state.sh" \
+    && pass "…and reports an error rather than a verdict" \
     || die "a failed diagnostic read does not block"
 
 # ── an unchanged head in automatic mode still gets a trigger ──────────────
@@ -1032,10 +1113,10 @@ fi
 # `all(.[]; …)` over an empty stream is `true`, so an object, a null, or an empty
 # array from a SUCCESSFUL read came out as "every required check passed" and the
 # default administrator merge proceeded on a payload nothing had read.
-grep -q 'if type != "array" or length == 0 then "malformed"' "$SKILL" \
+grep -q 'if type != "array" or length == 0 then "malformed"' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass 'the checks payload must be a non-empty array before all() runs' \
     || die 'the checks jq computes all() without validating its container'
-grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SKILL" \
+grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…and each element must actually carry a bucket string" \
     || die "the checks jq does not validate the bucket records"
 
@@ -1066,48 +1147,28 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
     || die "the acknowledgement footer is unscoped and will cross between phases"
 
 # ── the none-configured checks message is matched whole, not searched ──────
-# `gh pr checks` has no dedicated status for "no required checks" — it documents
-# exit 8 for pending and nothing for this — so the message is the only signal.
-# A substring test therefore accepted the benign phrase inside a LARGER failure:
-# a run that printed it and then failed for an unrelated reason was classified as
-# benign, and the default administrator merge proceeded with no trusted checks
-# result. The helper is extracted so this can be executed rather than read.
-# The EXTRACTION has its own status. `sed` can print a plausible complete helper
-# and then fail, and command substitution keeps it — all six cases below would
-# then pass on a source read that never finished, which is a mandatory gate
-# reporting coverage it does not have.
-CHK="$(sed -n '/^checks_msg_is_none_configured() {/,/^}/p' "$SKILL")"; chk_rc=$?
-# …and the helper must be the one the GATE actually calls. Six passing cases prove
-# nothing if the merge condition still greps for a substring beside an unused
-# function — the definition and the call site are separate things, and only the
-# second decides whether the merge proceeds.
-if [ "$chk_rc" -ne 0 ]; then
-    die "could not read SKILL.md to extract the checks helper (rc=$chk_rc)"
-elif [ -z "$CHK" ]; then
-    die "no checks-diagnostic helper in SKILL.md — has the merge gate moved?"
-elif ! grep -q 'elif checks_msg_is_none_configured "\$CHECKS_MSG"; then' "$SKILL"; then
-    die "the merge gate does not call checks_msg_is_none_configured; the helper is dead code"
-else
-    chk() { bash -c "$CHK"'
-checks_msg_is_none_configured "$1" && echo BENIGN || echo BLOCK' _ "$1"; }
-    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
-        && pass "the exact none-configured message opens the gate" \
-        || die "the real gh diagnostic was not recognised"
-    [ "$(chk "no checks reported on the '"'"'main'"'"' branch")" = BENIGN ] \
-        && pass "…including the wording gh uses when there are no checks at all" \
-        || die "the no-checks-whatsoever wording blocks forever"
-    # The finding: the phrase followed by a real error.
-    [ "$(chk "no required checks reported on the '"'"'main'"'"' branch
-error: connection reset by peer")" = BLOCK ] \
-        && pass "the phrase followed by an error blocks the merge" \
-        || die "a failed probe containing the benign phrase was treated as benign"
-    [ "$(chk "warning: no required checks reported on the '"'"'main'"'"' branch, and the API call failed")" = BLOCK ] \
-        && pass "…and so does the phrase embedded in a larger message" \
-        || die "an embedded phrase was treated as the whole diagnostic"
-    [ "$(chk "")" = BLOCK ] && pass "an empty diagnostic blocks" || die "an empty diagnostic opened the gate"
-    [ "$(chk "some other failure entirely")" = BLOCK ] \
-        && pass "an unrelated failure blocks" || die "an unrelated failure opened the gate"
-fi
+# ── the none-configured diagnostic is matched WHOLE ───────────────────────
+# `gh` has no dedicated status for "nothing to report", so the message is the only
+# signal — and a substring test accepted it inside a LARGER failure: a run that
+# printed the benign line and then failed for an unrelated reason was classified
+# as benign, and the default administrator merge proceeded with no trusted checks
+# result at all.
+#
+# The six cases that prove it moved to `test-pr-ci-state.sh` with the helper, and
+# they are EXECUTED there rather than read. What remains here is the question only
+# this file can answer: that the merge gate reaches that helper at all. A helper
+# with perfect coverage decides nothing if the gate stopped calling it.
+grep -q '"\$RB_SCRIPTS"/pr-ci-state.sh N --required' "$SKILL" \
+    && pass "the merge gate asks the checks helper, not a second copy of it" \
+    || die "the merge gate no longer calls pr-ci-state.sh"
+# …and it distinguishes "nothing configured" from "could not tell". Collapsing
+# them blocked the merge on every repository without branch protection,
+# permanently — a gate that never opens rather than one that fails closed.
+awk '/pr-ci-state.sh N --required/ {c=NR}
+     c && /^ *4\) echo "note: no required checks configured/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and treats 'nothing configured' as its own answer" \
+    || die "a repo with no required checks cannot pass the merge gate"
 
 # ── `none` is not permission while auto-review has a pass in flight ────────
 # With auto-review on, every Copilot-fix push queues a Codex pass, and Codex
