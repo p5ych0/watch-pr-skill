@@ -66,6 +66,15 @@ rule can no longer hold in one copy and not another. Issue #18.
   session's own shell; the readonly attribute does not survive function export, so
   a separate helper process never inherits one.
 
+- **`pr-selfcheck.sh` credits only what sourcing plus the calls reaches.**
+  Importing every assignment in a sourced library credited
+  `unused() { TOKEN=x; }` — sourcing that defines a function and assigns nothing —
+  so `$TOKEN` in `SKILL.md` came out as assigned and the gate reported clean over a
+  value the driver expands and nothing ever sets. That is the false-clean
+  direction, reached through the branch added to remove a false *finding*. It
+  imports the library's top level plus the bodies of the functions `SKILL.md`
+  actually calls.
+
 - **The matching-test gate discovers the libraries instead of listing them.** The
   list named `testlib.sh` and `recordlib.sh`, so `identitylib.sh` sat outside the
   gate entirely and deleting its test left `pr-selfcheck.sh` reporting that every

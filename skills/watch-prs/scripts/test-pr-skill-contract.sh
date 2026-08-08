@@ -603,11 +603,22 @@ awk '/^unset -f rb_identity/ {u=NR}
     && pass "…and a stale parser definition is cleared before the library loads" \
     || die "an inherited rb_identity would satisfy SKILL.md's parser-load check"
 # …and the clearing's own status is taken. `readonly -f rb_identity` makes the
-# unset FAIL and leaves the function installed, so `|| true` made a definition
-# that could not be cleared indistinguishable from one that was never there.
-grep -q 'unset -f rb_identity 2>/dev/null || true' "$SKILL" \
-    && die "SKILL.md discards the status of the unset; a readonly parser survives it" \
-    || pass "…and a definition that cannot be cleared is a load failure"
+# unset FAIL and leaves the function installed, so a discarded status made a
+# definition that could not be cleared indistinguishable from one that was never
+# there.
+#
+# ASSERTED AS A COUPLING, NOT AS THE ABSENCE OF ONE SPELLING. The first version
+# forbade the literal `|| true` — a blacklist, and a blacklist is always one
+# spelling behind: `|| :`, or deleting the handler outright, passed it while the
+# defect returned in full. This repository has already replaced a lexical
+# blacklist with a whitelist once, for exactly that reason. So the requirement is
+# positive: the unset must be joined to a branch that EXITS. Continuations are
+# flattened first, because the branch is on the next line.
+unset_coupled="$(awk '{ sub(/[[:space:]]*\\$/, " "); printf "%s", $0; if ($0 !~ / $/) printf "\n" }' "$SKILL" \
+    | grep -cE 'unset -f rb_identity[^|]*\|\|[^|]*exit 1')"
+[ "${unset_coupled:-0}" -ge 1 ] \
+    && pass "…and a definition that cannot be cleared aborts the driver" \
+    || die "SKILL.md's unset is not coupled to an exiting failure branch"
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
     && pass "…and the GraphQL calls pass it explicitly" \
     || die "a graphql call does not pass --hostname"

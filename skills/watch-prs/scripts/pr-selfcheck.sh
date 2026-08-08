@@ -176,8 +176,44 @@ if [ -f "$SKILL" ]; then
             echo "PR_SELFCHECK status=error reason=sourced_lib_missing lib=$lib" >&2
             exit 2
         fi
-        libassigned="$(nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
-            "$SCRIPTS/$lib" \
+        # ONLY WHAT SOURCING PLUS THE CALLS ACTUALLY REACHES. Importing every
+        # assignment in the file credits `unused() { TOKEN=x; }` — sourcing that
+        # defines a function and assigns nothing — so `$TOKEN` in SKILL.md came
+        # out as assigned and the gate reported clean over a value the driver
+        # expands and nothing ever sets. That is the false-clean direction this
+        # whole script exists to close, reached through the branch added to
+        # remove a false finding.
+        #
+        # So: the library's TOP LEVEL, which sourcing does run, plus the bodies of
+        # the functions SKILL.md CALLS. A call is recognised only at the start of a
+        # line, the same narrowness as the loop-variable scan above and for the
+        # same reason — a name inside a string or an argument list is not a call,
+        # and the cost of missing a real one is a loud false finding rather than a
+        # silent gap.
+        #
+        # Function bodies are delimited by `name() {` and a `}` in column ONE,
+        # which is how every library here is written. A closing brace indented
+        # differently would leave the scan inside the function, crediting nothing
+        # further — again the loud direction.
+        libfns="$(nomatch grep -oE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$SCRIPTS/$lib" \
+            | sed 's/()$//' | sort -u)"; chk lib_fns $?
+        called=""
+        for fn in $libfns; do
+            # A herestring, never `printf | grep -q`: the early exit makes the
+            # producer take SIGPIPE, and under `pipefail` the match is reported
+            # ABSENT. Every scan in this repository uses this form for that reason.
+            if grep -qE "^[[:space:]]*$fn([[:space:]]|\$)" <<<"$code"; then
+                called="$called $fn"
+            fi
+        done
+        libassigned="$(awk -v called=" $called " '
+            /^[A-Za-z_][A-Za-z0-9_]*\(\)[[:space:]]*\{/ {
+                fn = $0; sub(/\(\).*/, "", fn); infn = fn; next
+            }
+            /^\}/ { infn = ""; next }
+            { if (infn == "" || index(called, " " infn " ") > 0) print }
+        ' "$SCRIPTS/$lib" \
+            | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
             | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk lib_assigned $?
         assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
     done

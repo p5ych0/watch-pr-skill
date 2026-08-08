@@ -194,12 +194,25 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
     || { echo "FAIL - the unchecked form did not reproduce the defect ('$mech2')"; idfail=1; }
 # EVERY caller branches on it. The mechanism above is about Bash; this is about
 # whether the four files that clear the parser actually take the status.
+# Positively, not as the absence of one spelling: `|| true` forbidden by name is a
+# blacklist, and `|| :` or no handler at all walks straight through it. The unset
+# has to be JOINED to a branch that exits. Continuations are flattened first,
+# since the branch sits on the following line.
 for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
     [ -f "$ROOT/$sc" ] || continue
-    if grep -q 'unset -f rb_identity 2>/dev/null || true' "$ROOT/$sc"; then
-        echo "FAIL - $sc discards the status of the unset"; idfail=1
+    # The branch must EXIT, and `{` is not evidence that it does — accepting the
+    # brace let `|| { :; }` through, which is the handler emptied and the defect
+    # back. The unset line is joined with the two that follow it, because the
+    # branch is a brace group across lines rather than a backslash continuation,
+    # and the joined text has to carry both the `||` and the exit.
+    coupled="$(awk '
+        /unset -f rb_identity/ { j = $0; n = 2; next }
+        n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
+    ' "$ROOT/$sc" | grep -cE '\|\|.*exit 2')"
+    if [ "${coupled:-0}" -ge 1 ]; then
+        echo "ok   - $sc couples the unset to a failing load branch"
     else
-        echo "ok   - $sc treats a definition it cannot clear as a load failure"
+        echo "FAIL - $sc does not branch on the unset status"; idfail=1
     fi
 done
 rm -rf "$STALETMP"

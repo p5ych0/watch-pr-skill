@@ -159,6 +159,38 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "…and a name no library assigns is still a finding" \
     || die "sourcing a library suppressed an unrelated undefined variable (rc=$rc out=$out)"
 
+# …and an assignment SOURCING NEVER PERFORMS is not an assignment. Sourcing a
+# library defines its functions; it does not run their bodies. Crediting every
+# assignment in the file meant `unused() { TOKEN=x; }` made `$TOKEN` look assigned,
+# and the gate reported clean over a value the driver expands and nothing sets —
+# the false-clean direction, reached through the branch added to remove a false
+# finding.
+UNCALLED_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST $TOKEN"
+```
+'
+R="$(mkroot "$UNCALLED_SKILL")"
+addscript "$R" identitylib.sh 'rb_identity() {
+    HOST=h
+}
+unused() {
+    TOKEN=x
+}'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'TOKEN'; } \
+    && pass "an assignment in an uncalled library function is not credited" \
+    || die "a never-executed assignment was credited (rc=$rc out=$out)"
+# …and the called function's assignment still is, so the rule is about reachability
+# and not about being inside a function at all.
+printf '%s' "$out" | grep -q 'uses \$HOST' \
+    && die "an assignment in a function the skill DOES call was dropped: $out" \
+    || pass "…while a called function's assignment still is"
+
 # ── a sourced library that is not there is an ERROR, not an empty set ──────
 # An unreadable library yielding "no assignments" reinstates exactly the false
 # findings the branch above removes, and reports them as defects in the skill.
