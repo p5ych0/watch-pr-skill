@@ -105,18 +105,25 @@ category; do not "fix" a script into a stricter mode.
   `identitylib.sh` holds which repository this checkout is; `loadlib.sh` holds how
   a library is loaded at all. Each exists because the rule was written out three
   or four times and then found missing from at least one copy.
+
+  Every field check in `recordlib.sh` was originally written out in two or three
+  scripts, and every one of them was found missing from at least one — the known
+  review-state set reached two helpers and sat missing from the third for eleven
+  review rounds, where an unrecognised value was reported as a *withdrawn review*.
+  `test-recordlib.sh` carries a drift guard that fails if a helper re-implements a
+  rule inline; when you need a new field check, add it there.
+
 - **Libraries are loaded through `rb_load`, never by hand.** Clearing an inherited
   symbol, taking the *clearing's* status, and verifying the library defined
   anything were each added after a copy was found missing them. `rb_load` takes
   the KIND, because a variable and a function need different clears and different
   verifications, and an exported value satisfies a `[ -n … ]` test exactly as an
-  exported function satisfies `type -t`. The three lines that load `loadlib.sh`
-  itself are the one thing that cannot use it. Every field check there was originally written out in two or
-  three scripts, and every one of them was found missing from at least one — the
-  known review-state set reached two helpers and sat missing from the third for
-  eleven review rounds, where an unrecognised value was reported as a *withdrawn
-  review*. `test-recordlib.sh` carries a drift guard that fails if a helper
-  re-implements a rule inline; when you need a new one, add it there.
+  exported function satisfies `type -t`. It takes the caller's whole error prefix
+  too: `pr-watch.sh` says `state=error` where the others say `status=error`. The
+  four lines that load `loadlib.sh` itself are the one thing that cannot use it —
+  and they still clear, source and verify, because a stale loader is what makes
+  every other load look clean. `test-pr-identity.sh` fails if a caller loads a
+  library by hand.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
 - Every behaviour change ships its test in the same PR.
