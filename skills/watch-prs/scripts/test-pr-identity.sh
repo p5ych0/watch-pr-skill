@@ -14,12 +14,21 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).
 PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok)-|/home/[^ ]*/(pulse|strumok)\b|owner=.?p5ych0|repo=.?(pulse|strumok)|(PULSE|STRUMOK)_REVIEW'
 
+# The SHARED LIBRARIES are in this list too. The glob below is `pr-*.sh`, which
+# reaches no file named `*lib.sh` — so when the identity parser moved out of the
+# three helpers and into `identitylib.sh`, the one file that now decides which
+# repository every `gh` call addresses would have left the guard's coverage
+# entirely, and the guard would have gone on reporting that no runtime script
+# hard-codes an identity. A rule that follows the code has to follow it here too.
 FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
-        "$ROOT"/pr-selfcheck.sh )
+        "$ROOT"/pr-selfcheck.sh
+        "$ROOT"/identitylib.sh
+        "$ROOT"/recordlib.sh
+        "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it
 # is always there, so it is always linted.
@@ -29,9 +38,20 @@ SKILL="$ROOT/../SKILL.md"
 # The list above must not go stale: a new runtime script that talks to GitHub is
 # exactly where a hard-coded owner/repo would appear, and a guard that silently
 # omits it reports PASS while its stated invariant is unverified.
+# What the guard must cover, derived rather than listed: every runtime helper and
+# every shared library, and NOT the test files. `*lib.sh` also matches
+# `test-testlib.sh`, and a test file is where a concrete `acme/widget` is supposed
+# to appear — sweeping those in would make the scan below fail on its own
+# fixtures, which is a guard that has to be deleted rather than one that holds.
+RUNTIME=()
+for f in "$ROOT"/pr-*.sh "$ROOT"/*lib.sh; do
+    [ -f "$f" ] || continue
+    case "$(basename "$f")" in test-*) continue ;; esac
+    RUNTIME+=( "$f" )
+done
+[ "${#RUNTIME[@]}" -gt 0 ] || { echo "FAIL - no runtime scripts found to guard"; echo "RESULT: FAIL"; exit 1; }
 missing=""
-for f in "$ROOT"/pr-*.sh; do
-    case "$f" in *"/pr-"*) ;; *) continue ;; esac
+for f in "${RUNTIME[@]}"; do
     covered=0
     for g in "${FILES[@]}"; do [ "$g" = "$f" ] && covered=1; done
     [ "$covered" -eq 1 ] || missing="$missing $(basename "$f")"
@@ -183,7 +203,7 @@ if [ -n "$missing" ]; then
     echo "RESULT: FAIL"
     exit 1
 fi
-echo "ok   - every pr-*.sh runtime script is covered by the guard"
+echo "ok   - every runtime script and shared library is covered by the guard"
 
 # A RUNTIME script must derive identity even for THIS repository. CLAUDE.md
 # exempts the plugin's own metadata and install docs from the invariant - that is
@@ -227,7 +247,7 @@ scan_hardcoded_identity() {   # <file...> ; prints hits; 2 if the scan failed
     return 0
 }
 sh_rc=0
-script_hits="$(scan_hardcoded_identity "$ROOT"/pr-*.sh)" || sh_rc=$?
+script_hits="$(scan_hardcoded_identity "${RUNTIME[@]}")" || sh_rc=$?
 if [ "$sh_rc" -ne 0 ]; then
     echo "FAIL - the hard-coded-identity scan could not be completed (rc=$sh_rc)"
     echo "RESULT: FAIL"

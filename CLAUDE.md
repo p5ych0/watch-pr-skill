@@ -23,6 +23,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. |
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is — one definition, sourced by every helper that reads the API. |
+| `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog the fixtures run under. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
@@ -74,10 +75,21 @@ category; do not "fix" a script into a stricter mode.
 - It does **not** cover this repository's own metadata or its installation
   documentation. `.claude-plugin/` and the install commands in `README.md`
   necessarily name `p5ych0/watch-pr-skill` — that is this plugin's own identity.
-- Identity derives from `git remote get-url origin`. `REVIEW_BUS_REMOTE`,
-  `REVIEW_BUS_OWNER`, and `REVIEW_BUS_REPO` override it so tests can supply an
-  identity without a real remote. `test-pr-identity.sh` enforces this by scanning
-  the scripts and `SKILL.md`.
+- Identity derives from `git remote get-url origin`, in **one place**:
+  `rb_identity` in `identitylib.sh`, which every helper and `SKILL.md` sources.
+  It sets `HOST`, `OWNER` and `REPO` rather than printing them — serialising three
+  values through one string makes any delimiter a value a remote can contain, and
+  a remote carrying it shifts the fields, which is the wrong-repository failure
+  the parser exists to prevent. `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, and
+  `REVIEW_BUS_REPO` override it so tests can supply an identity without a real
+  remote. `test-identitylib.sh` proves the parser's rules; `test-pr-identity.sh`
+  proves every caller is wired to it and scans the scripts, the libraries and
+  `SKILL.md` for a hard-coded identity.
+- **A second copy of the parser is a defect, not a convenience.** It lived in
+  four files, both the hostless-origin and file-transport rules had to be written
+  into all four, and the fixtures proving them had to be built a second time to
+  cover the copies that had silently missed one. The contract test fails if
+  `SKILL.md` grows its own copy back.
 
 ## Tests
 
@@ -86,8 +98,11 @@ category; do not "fix" a script into a stricter mode.
   definition is the highest-leverage file in the tree, so it cannot be the
   untested one.
 
-- **A rule that applies to more than one helper lives in `recordlib.sh`, not in
-  each of them.** Every field check there was originally written out in two or
+- **A rule that applies to more than one helper lives in a shared library, not
+  in each of them.** `recordlib.sh` holds what a well-formed API record is;
+  `identitylib.sh` holds which repository this checkout is. Both exist because
+  the rule was written out three or four times and then found missing from at
+  least one copy. Every field check there was originally written out in two or
   three scripts, and every one of them was found missing from at least one — the
   known review-state set reached two helpers and sat missing from the third for
   eleven review rounds, where an unrecognised value was reported as a *withdrawn

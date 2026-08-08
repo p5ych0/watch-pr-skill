@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# The shared identity parser: `rb_identity` in identitylib.sh.
+#
+# Every rule here was previously asserted only through the three helper scripts
+# that each carried their own copy — which is why a rule reverted in one copy left
+# the suite green. The rules are proven against the definition now, and
+# `test-pr-identity.sh` proves each caller is wired to it. Issue #18.
+set -Eeuo pipefail
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+. "$SELF_DIR/testlib.sh"
+. "$SELF_DIR/identitylib.sh"
+
+fail=0
+pass() { printf 'ok   - %s\n' "$1"; }
+die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
+
+[ "$(type -t rb_identity 2>/dev/null)" = function ] \
+    || { die "identitylib.sh does not define rb_identity"; echo "RESULT: FAIL"; exit 1; }
+
+# Every case goes through the SAME entry point the callers use, with the remote
+# supplied through the documented override rather than a stubbed `git` — the
+# override is part of the contract (CLAUDE.md § Repo-agnostic invariant) and a
+# stub would additionally be testing the stub.
+#
+# `HOST`, `OWNER` and `REPO` are cleared first. The parser sets them, so a case
+# that failed to set one would otherwise be checked against the PREVIOUS case's
+# value and pass — the fixture reporting a rule held using an answer from another
+# input entirely.
+id_case() {   # id_case <remote> <want: HOST/OWNER/REPO | reason-token> <label>
+    local remote="$1" want="$2" label="$3" rc got
+    HOST=''; OWNER=''; REPO=''; RB_IDENTITY_REASON=''
+    rc=0
+    REVIEW_BUS_REMOTE="$remote" rb_identity || rc=$?
+    case "$want" in
+        */*)
+            got="$HOST/$OWNER/$REPO"
+            { [ "$rc" -eq 0 ] && [ "$got" = "$want" ]; } \
+                && pass "$label derives $want" \
+                || die "$label gave rc=$rc '$got' (wanted 0 and '$want')" ;;
+        *)
+            # THE REASON, not merely a non-zero status. Several of these remotes
+            # would fail later anyway, at the first `gh` call against the wrong
+            # repository — so an rc-only assertion passes on a parser that never
+            # refused, having already addressed a request somewhere else.
+            { [ "$rc" -eq 2 ] && case "$RB_IDENTITY_REASON" in "$want"*) true ;; *) false ;; esac; } \
+                && pass "$label is refused as $want" \
+                || die "$label gave rc=$rc reason='$RB_IDENTITY_REASON' (wanted 2 and $want)" ;;
+    esac
+}
+
+# ── the shapes that must be REFUSED ────────────────────────────────────────
+# Each of these derives a plausible `acme/widget` from its path while naming no
+# GitHub server, so the failure it causes is not an error: it is every `gh` call
+# landing on the unrelated PUBLIC repository of that name.
+id_case '/srv/mirrors/acme/widget.git' origin_has_no_host 'an absolute local path'
+id_case '../acme/widget.git'           origin_has_no_host 'a relative local path'
+id_case '~/mirrors/acme/widget.git'    origin_has_no_host 'a tilde local path'
+id_case 'acme-widget'                  origin_has_no_host 'a bare name with no path at all'
+id_case 'file://github.com/srv/acme/widget.git' origin_transport_unsupported \
+        'a file:// URL carrying a github.com authority'
+id_case 'ftp://github.com/acme/widget.git' origin_transport_unsupported \
+        'a transport that reaches no GitHub server'
+
+# A URL whose transport IS accepted but which carries no authority at all. This
+# branch had no fixture in any copy of the parser before it was extracted, and a
+# mutant that removed the check survived the whole suite: the arm above yields an
+# EMPTY host, and an empty host is what every `gh --hostname` call would then be
+# given. Both spellings reach it — an ssh:// URL with nothing between the slashes,
+# and an SCP-style remote with nothing before the colon.
+id_case 'ssh:///acme/widget.git' origin_host_unparseable 'an ssh:// URL with no authority'
+id_case ':acme/widget.git'       origin_host_unparseable 'an SCP-style remote with no host'
+
+# ── the shapes that must be ACCEPTED, and what they derive ─────────────────
+# The negative controls. Without them a matrix of refusals is satisfied by a
+# parser that refuses everything, which is not the invariant — and a parser that
+# refuses every remote makes the whole tool inoperable rather than safe.
+id_case 'git@github.com:acme/widget.git'       'github.com/acme/widget' 'an SCP-style GitHub remote'
+id_case 'https://github.com/acme/widget.git'   'github.com/acme/widget' 'an https GitHub remote'
+id_case 'https://github.com/acme/widget'       'github.com/acme/widget' 'an https remote without .git'
+id_case 'ssh://git@github.com/acme/widget.git' 'github.com/acme/widget' 'an ssh:// GitHub remote'
+id_case 'git://github.com/acme/widget.git'     'github.com/acme/widget' 'a git:// GitHub remote'
+id_case 'git+ssh://git@github.com/acme/widget.git' 'github.com/acme/widget' 'a git+ssh:// remote'
+# The ENTERPRISE cases, which are the reason the authority is parsed rather than
+# matched. `github.com` appearing anywhere in the URL sent these to the public
+# host — and the public host holds a different `org/repo` of that name.
+id_case 'git@ghe.example:org/github.com-mirror.git' 'ghe.example/org/github.com-mirror' \
+        'an enterprise remote whose PATH contains github.com'
+id_case 'https://ghe.example/org/widget.git' 'ghe.example/org/widget' 'an enterprise https remote'
+id_case 'ghe.example:org/widget.git' 'ghe.example/org/widget' 'a userless SCP-style enterprise remote'
+
+# ── an origin lookup that PRINTED and then failed is not an identity ───────
+# `git remote get-url origin` can write a plausible URL and exit non-zero, and
+# command substitution keeps what it wrote. This is the only rule here that
+# cannot be reached through the override — the override IS the caller stating an
+# identity, and has no status to take — so it needs a stubbed `git`.
+IDTMP="$(mktemp_d)" || { die "could not create a scratch directory"; echo "RESULT: FAIL"; exit 1; }
+trap 'rm -rf "$IDTMP"' EXIT
+mkdir -p "$IDTMP/bin"
+REAL_GIT="$(command -v git)" || { die "no git on PATH"; echo "RESULT: FAIL"; exit 1; }
+cat > "$IDTMP/bin/git" <<GITSH
+#!/usr/bin/env bash
+if [ "\$1" = "remote" ]; then
+    printf 'git@github.com:someone-else/other-repo.git\n'
+    exit 1
+fi
+exec "$REAL_GIT" "\$@"
+GITSH
+chmod +x "$IDTMP/bin/git"
+# A subshell, so the stubbed PATH and the unset override cannot leak into the
+# cases above or below. `run_limited … env`, never a PATH on the watchdog: where
+# GNU `timeout` is missing, `run_limited` polls with its own `sleep`.
+probe="$(run_limited 20 env PATH="$IDTMP/bin:$PATH" bash -c '
+    . "'"$SELF_DIR"'/identitylib.sh"
+    unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
+    rb_identity && printf "ACCEPTED:%s/%s/%s" "$HOST" "$OWNER" "$REPO" \
+        || printf "REFUSED:%s" "$RB_IDENTITY_REASON"' 2>&1)" || true
+case "$probe" in
+    'REFUSED:no_origin') pass "an origin lookup that printed and then failed is refused" ;;
+    *) die "a failed origin lookup was accepted ('$probe')" ;;
+esac
+# …and the untrusted value it printed was not used. The reason line does not
+# quote the remote in this case, so a message-only assertion would prove nothing:
+# the check is that the derived identity never appears at all.
+case "$probe" in
+    *someone-else*) die "the parser derived an identity from a failed lookup" ;;
+    *) pass "…and nothing was derived from what it printed" ;;
+esac
+
+# ── the explicit overrides ─────────────────────────────────────────────────
+# These exist so tests can supply an identity without a real remote. A parser
+# that ignored them would make every fixture in this suite depend on the checkout
+# it happens to run in.
+HOST=''; OWNER=''; REPO=''
+REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER='other' \
+    REVIEW_BUS_REPO='thing' rb_identity && ov_rc=0 || ov_rc=$?
+{ [ "${ov_rc:-1}" -eq 0 ] && [ "$HOST/$OWNER/$REPO" = 'github.com/other/thing' ]; } \
+    && pass "REVIEW_BUS_OWNER and REVIEW_BUS_REPO override the derived path" \
+    || die "the overrides were ignored (rc=${ov_rc:-?} got '$HOST/$OWNER/$REPO')"
+
+# ── a failure does not leave a half-set identity behind ────────────────────
+# The caller exits on a non-zero return, but a parser that had already assigned
+# `OWNER` and `REPO` before refusing leaves them set for anything that does not.
+# The REASON is what a failing call communicates, so it must be the only thing
+# that changed.
+HOST='SENTINEL'; RB_IDENTITY_REASON=''
+REVIEW_BUS_REMOTE='/srv/mirrors/acme/widget.git' rb_identity && hs_rc=0 || hs_rc=$?
+{ [ "${hs_rc:-0}" -eq 2 ] && [ "$HOST" = 'SENTINEL' ]; } \
+    && pass "a refused origin leaves HOST untouched rather than half-derived" \
+    || die "a refused origin overwrote HOST (rc=${hs_rc:-?} HOST='$HOST')"
+
+if [ "$fail" -ne 0 ]; then
+    echo "RESULT: FAIL"
+    exit 1
+fi
+echo "RESULT: PASS"

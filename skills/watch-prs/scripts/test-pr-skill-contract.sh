@@ -572,9 +572,26 @@ grep -q 'CODEX_RECHECK' "$SKILL" \
 # ── every gh call names the host as well as the repository ────────────────
 # `GH_HOST` supplies the hostname when a command gives none, so an unpinned call
 # can act on the same-numbered PR on another GitHub host.
-grep -q 'HOST=' "$SKILL" \
-    && pass "the host is derived from origin" \
+# THE ASSERTION FOLLOWS THE RULE, not the text that used to state it. This was
+# `grep -q 'HOST='` over SKILL.md, which held only while the parser was written
+# out there; the parser is `identitylib.sh` now, and a text check left pointing at
+# SKILL.md would have gone on passing against a driver that derived nothing at
+# all. So: the driver must DELEGATE, and the parser must derive.
+grep -q '^rb_identity \\$' "$SKILL" \
+    && pass "the driver derives its identity through the shared parser" \
+    || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
+grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \
+    && pass "…and the parser derives the host from origin" \
     || die "the host is not derived; GH_HOST can redirect every call"
+# …and the parser is sourced only after the helper directory is known. Written the
+# other way round the `.` reads an unset path, which under this driver's rules is
+# an abort — but a driver that aborts at step zero on every repository is a tool
+# nobody can run, and it would be found by trying rather than by reading.
+awk '/^RB_SCRIPTS=/ {r=NR}
+     /^\. "\$RB_SCRIPTS\/identitylib\.sh"/ {if (r && r < NR) {print "ok"; exit}}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and the helpers are located before the parser is loaded from them" \
+    || die "SKILL.md sources identitylib.sh before RB_SCRIPTS is resolved"
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
     && pass "…and the GraphQL calls pass it explicitly" \
     || die "a graphql call does not pass --hostname"
@@ -767,9 +784,16 @@ awk '/^if \[ "\$HEAD_BEFORE" != "\$HEAD_AFTER" \]; then$/ {inb=1}
     || pass "…comparing against the pushed SHA rather than re-reading HEAD"
 
 # ── a hostless origin is refused, not defaulted to GitHub ─────────────────
-grep -q 'names no host; refusing to guess one' "$SKILL" \
+grep -q 'origin_has_no_host' "$SCRIPT_DIR/identitylib.sh" \
     && pass "an origin with no network authority is refused" \
     || die "a local-path origin would be treated as github.com"
+# THE RE-DRIFT GUARD. Four copies of this parser is what issue #18 was about, and
+# nothing stops a later edit writing the rules back into the driver "for clarity"
+# — at which point the two disagree silently, which is how both the hostless and
+# the file-transport rules came to exist in some copies and not others.
+grep -qE 'refusing to guess one|origin_transport_unsupported' "$SKILL" \
+    && die "SKILL.md has grown its own copy of the origin parser again" \
+    || pass "…and the driver carries no second copy of the rule"
 
 # ── the helper selection takes its pipeline status ────────────────────────
 # `head` can emit a plausible path and then fail; if that directory holds
@@ -949,9 +973,9 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SKILL" 
 # `SKILL.md` carries its own copy of the parser, and it is the copy the driver
 # runs. `test-pr-identity.sh` can execute the three scripts' copies but not this
 # one, so the structural assertion is what covers it.
-grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SKILL" \
-    && pass "SKILL.md accepts only GitHub network transports" \
-    || die "SKILL.md parses any URL scheme as a GitHub identity"
+grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
+    && pass "the identity parser accepts only GitHub network transports" \
+    || die "the parser reads any URL scheme as a GitHub identity"
 grep -q 'reaches no GitHub server' "$SKILL" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "SKILL.md has no rejection path for an unsupported transport"

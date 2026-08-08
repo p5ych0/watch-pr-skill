@@ -153,6 +153,34 @@ if [ -f "$SKILL" ]; then
     assigned="$(printf '%s\n' "$code" \
         | nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
         | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk assigned $?
+    # …plus the variables a SOURCED library assigns. SKILL.md loads
+    # `identitylib.sh` and calls `rb_identity`, which SETS `HOST`, `OWNER` and
+    # `REPO` rather than printing them — so those names are assigned, just not in
+    # this file. Reading only the skill's own text reported the driver's identity
+    # variables as undefined, which is this check being wrong about the skill
+    # rather than the skill being wrong.
+    #
+    # The libraries are DISCOVERED from the `.` lines, never listed here. A list
+    # goes stale the first time another library is sourced, and it goes stale
+    # SILENTLY: the findings it stops reporting are indistinguishable from a clean
+    # run, which is the one direction this script may not fail in.
+    #
+    # A library named but not readable is an ERROR, not an empty set of
+    # assignments — an empty set would silently reinstate the false findings this
+    # branch exists to remove, and a missing library is a broken install besides.
+    sourced="$(printf '%s\n' "$code" \
+        | nomatch grep -oE '^\.[[:space:]]+"\$RB_SCRIPTS/[A-Za-z0-9_.-]+"' \
+        | sed -E 's#^.*/##; s/"$//' | sort -u)"; chk sourced $?
+    for lib in $sourced; do
+        if [ ! -f "$SCRIPTS/$lib" ]; then
+            echo "PR_SELFCHECK status=error reason=sourced_lib_missing lib=$lib" >&2
+            exit 2
+        fi
+        libassigned="$(nomatch grep -oE '(^|;)[[:space:]]*(local[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' \
+            "$SCRIPTS/$lib" \
+            | sed -E 's/^[;[:space:]]*(local[[:space:]]+)?//; s/=$//' | sort -u)"; chk lib_assigned $?
+        assigned="$(printf '%s\n%s\n' "$assigned" "$libassigned" | sort -u)"; chk merge_lib $?
+    done
     # Loop variables, ONLY at the START OF A LINE. This is the third version, and
     # the narrowness is the point.
     #

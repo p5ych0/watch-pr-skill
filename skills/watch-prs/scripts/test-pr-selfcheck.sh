@@ -110,6 +110,66 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a script that does not parse is a finding" \
     || die "unparseable script not caught (rc=$rc out='$out')"
 
+# ── a variable assigned by a SOURCED library is assigned ───────────────────
+# `rb_identity` SETS `HOST`, `OWNER` and `REPO` rather than printing them, so
+# after SKILL.md moved to the shared parser those names had no assignment in the
+# skill's own text and every one of them was reported undefined. The check was
+# wrong about the skill, not the skill about itself — and a check that fires on
+# correct code is a check that gets switched off.
+LIB_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST/$OWNER/$REPO"
+```
+'
+R="$(mkroot "$LIB_SKILL")"
+# Written as a real library is: assignments at the start of a line and after a
+# `;`, which are the two positions the scan recognises. A `{ HOST=h; … }`
+# one-liner would be missed — the same deliberate narrowness as the skill's own
+# scan, and in the same safe direction, since the result is a loud false finding
+# rather than a silent gap.
+addscript "$R" identitylib.sh 'rb_identity() {
+    HOST=h; OWNER=o
+    REPO=r
+}'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "a variable assigned by a sourced library is not reported undefined" \
+    || die "a sourced library assignment was not seen (rc=$rc out=$out)"
+
+# …and the reach is BOUNDED to what the library actually assigns. A branch that
+# simply suppressed every unassigned name once any library was sourced would pass
+# the case above while removing the check this whole script exists for.
+BOUND_SKILL='# skill
+```bash
+RB_SCRIPTS=/tmp/s
+. "$RB_SCRIPTS/identitylib.sh"
+rb_identity
+echo "$HOST $SUMMARY_FILE"
+```
+'
+R="$(mkroot "$BOUND_SKILL")"
+addscript "$R" identitylib.sh 'rb_identity() { HOST=h; }'
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+    && pass "…and a name no library assigns is still a finding" \
+    || die "sourcing a library suppressed an unrelated undefined variable (rc=$rc out=$out)"
+
+# ── a sourced library that is not there is an ERROR, not an empty set ──────
+# An unreadable library yielding "no assignments" reinstates exactly the false
+# findings the branch above removes, and reports them as defects in the skill.
+# Wrong in both directions and silent in both, so it fails closed instead.
+R="$(mkroot "$LIB_SKILL")"
+addtest "$R" test-identitylib.sh
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=sourced_lib_missing'; } \
+    && pass "a library SKILL.md sources but does not ship is an error" \
+    || die "a missing sourced library did not fail closed (rc=$rc out=$out)"
+
 # ── a helper SKILL.md drives but does not ship ─────────────────────────────
 R="$(mkroot '# skill
 ```bash
