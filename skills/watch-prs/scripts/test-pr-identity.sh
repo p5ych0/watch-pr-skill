@@ -216,6 +216,20 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     else
         echo "ok   - …and carries no second copy of the loading rule"
     fi
+    # THE BOOTSTRAP OBEYS THE RULE TOO. The loader cannot load itself, so those
+    # lines are written out — and that is not a licence to load it carelessly. An
+    # exported `rb_load` plus an empty `loadlib.sh` leaves a STALE LOADER doing
+    # the clearing and verifying for every other library, which is the one way to
+    # make every subsequent load look clean.
+    bs="$(awk '
+        /unset -f rb_load/ { j = $0; n = 2; next }
+        n > 0 { j = j " " $0; n--; if (n == 0) print j; next }
+    ' "$ROOT/$sc" | grep -cE '\|\|.*exit 2')"
+    if [ "${bs:-0}" -ge 1 ]; then
+        echo "ok   - …and clears the loader itself, with the status taken"
+    else
+        echo "FAIL - $sc sources loadlib.sh over whatever it inherited"; idfail=1
+    fi
 done
 # The loader is where the clearing and its status now live, and it is joined to a
 # branch that returns. Read positively: forbidding one spelling is a blacklist.

@@ -38,9 +38,15 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_CI_STATE status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The library loader. Three lines, because a helper cannot load the file that
-# defines it — the one asymmetry in this scheme, stated rather than hidden. See
-# loadlib.sh and issue #22.
+# The library loader — and it obeys its own rule. A helper cannot load the file
+# that defines it, so this sequence is written out here; that asymmetry is
+# irreducible, but it is not a licence to load the loader carelessly. An exported
+# `rb_load` survives into this shell and an empty `loadlib.sh` still sources
+# successfully, so without the clear the type check below accepts the inherited
+# function — and a stale loader is the one thing that can make every OTHER load
+# look clean. See loadlib.sh and issue #22.
+unset -f rb_load 2>/dev/null || {
+    echo "PR_CI_STATE status=error reason=loadlib_stale_definition" >&2; exit 2; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_CI_STATE status=error reason=loadlib_unreadable" >&2; exit 2; }
 [ "$(type -t rb_load 2>/dev/null)" = function ] || {

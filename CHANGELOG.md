@@ -28,6 +28,11 @@ of the last three.
   empty, so both refuse everything, which is a tool nobody can run rather than one
   that fails closed.
 
+- **The bootstrap obeys the rule it cannot use.** An exported `rb_load` plus an
+  empty `loadlib.sh` leaves a *stale loader* doing the clearing and verifying for
+  every other library — the one way to make every subsequent load look clean. The
+  three lines are four: clear, source, verify, with the clearing's status taken.
+
 - **The bootstrap is the one thing that cannot use it.** Every caller still writes
   three lines to load `loadlib.sh`, because a helper cannot load the file that
   defines it. That is stated where it lives rather than left for a reader to
