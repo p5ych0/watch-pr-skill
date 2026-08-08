@@ -296,12 +296,20 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
             *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
                return 1 ;;
         esac
+        # THE SLEEP IS CAPPED AT WHAT IS LEFT. Sleeping a full interval when less
+        # than that remains means the gate cannot report its own deadline until
+        # after it has passed — `PR_CI_TIMEOUT=1` with the default 30-second
+        # interval took thirty seconds to say it had run out of one. The bound is
+        # then only ever approximately the bound, and the smaller it is set the
+        # more approximate it gets.
+        nap=$((tmo - elapsed))
+        [ "$nap" -gt "$iv" ] && nap="$iv"
         # `sleep` takes its status like every other call here. A `sleep` that
         # returned immediately — interrupted, or missing — would spin this loop
         # against the API until the timeout, and with the elapsed count now taken
         # from the clock the loop would still be bounded but would poll hard for
         # the whole of it.
-        sleep "$iv" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
+        sleep "$nap" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
     done
 }
 # …and the definition that ended up installed is the one just written. A `.`-style
@@ -376,14 +384,11 @@ WHO="$CODEX_BOT"
 # There is nothing to capture before the trigger, because the trigger preceded
 # us. So the automatic path waits on any terminal review, and only the explicit
 # re-requests in step 5 carry a baseline.
-# The head this round started from, so the automatic path can tell a real push
-# from a no-op one.
-PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not read the current head."; exit 0; }
-# Validated, not merely fetched. An rc-0 call yielding empty or `null` would make
-# every unchanged-head comparison below false, so automatic mode would assume the
-# no-op push queued a review, queue nothing, and re-arm forever.
-[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the current head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
+# No head baseline is captured here. One used to be, so the automatic path could
+# tell a real push from a no-op one and send a mention only for the second — and
+# the request is unconditional now, so nothing reads it. Left in place it would be
+# a `gh pr view` whose transient failure or malformed answer ABORTS this step
+# before any context is posted or any wait begins: a call that can only cost.
 
 if [ "$AUTO_REVIEW" = "yes" ]; then
     PRIOR_REVIEW=""
@@ -863,9 +868,13 @@ fi
 # ONLY NOW is the round closed. The head is confirmed and its checks are green, so
 # resolving a thread and posting a summary are claims that are true when made.
 # reply + resolve threads here
-if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
-    echo "ABORT: could not post the round summary."; exit 0
-fi
+#
+# THE SUMMARY IS POSTED ONCE, by whichever branch below carries it. Posting it
+# here as well produced two identical round-summary comments on every Codex round
+# — and the reviewer contract makes the NEWEST summary the one read before the
+# diff, so a duplicated one is a record with two answers to the same question.
+# Worse, if the request that follows failed, the standalone comment had already
+# recorded a closure that no superseding pass was coming for.
 
 # WHICH reviewer comes FIRST, before any question about the head.
 #
@@ -875,11 +884,18 @@ fi
 # head skipped `--add-reviewer` entirely, and the watch waited past the old
 # Copilot result for a pass nobody had asked for.
 if [ "$WHO" = "$COPILOT_BOT" ]; then
+    # Copilot's request carries no body, so the summary is its own comment — and
+    # it comes FIRST, because `--add-reviewer` starts the pass and the contract
+    # says the summary is there to be read before the diff.
+    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+        echo "ABORT: could not post the round summary."; exit 0
+    fi
     if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
 else
-    # Codex is asked EXPLICITLY, in this mode too.
+    # Codex is asked EXPLICITLY, in this mode too, and the mention CARRIES the
+    # summary — one comment, one round.
     #
     # This used to be sent only when the push moved nothing, on the grounds that a
     # push that does move the head already asked. That was true and is no longer

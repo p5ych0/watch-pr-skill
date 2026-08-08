@@ -97,14 +97,6 @@ operator had to point at the checks tab. Issue #16.
   round, the defect arriving through the gate itself. Cleared and checked, exactly
   as `rb_identity` is.
 
-- **What the gate cannot do in automatic-review mode is stated.** There the push
-  *is* the request, so by the time the checks can be consulted the threads are
-  resolved and the summary posted. Pushing first would fix the ordering and cost
-  more than it buys — the triggered pass would read open threads and no summary.
-  So it stops the loop and posts an explicit retraction, rather than leaving a
-  summary standing that claims a round a red head does not support. The manual
-  path has no such constraint and gates before anything is closed.
-
 - **An unrecognised bucket is malformed, not benign.** `pass` and `skipping` are
   green, `fail` and `cancel` are failures, `pending` is pending — and anything
   else is an error rather than falling through a catch-all, which is the shape

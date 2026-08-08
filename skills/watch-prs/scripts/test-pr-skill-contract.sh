@@ -198,7 +198,17 @@ awk '/^\*\*Automatic review ON\*\*/ {inb=1}
 gate_fn="$(sed -n '/^ci_gate() {/,/^}/p' "$SKILL")"; gate_rc=$?
 [ "$gate_rc" -eq 0 ] && [ -n "$gate_fn" ] \
     || die "the ci_gate function could not be extracted from SKILL.md (rc=$gate_rc)"
-GATETMP="$(mktemp_d)" || { die "no scratch directory for the CI gate probe"; GATETMP=""; }
+# THE CHILD SKIPS THESE. The cleanup probe further down re-runs this whole file to
+# watch it remove its scratch tree, and these cases are the slow part — every one
+# of them waits on real `sleep`s. Re-running them inside that child doubled the
+# file's cost for nothing and, run after the other ten suites, pushed the child
+# past its own watchdog: the leak check then reported that its run had failed,
+# which is true and useless. The child needs the file to COMPLETE, not to re-prove
+# the gate.
+GATETMP=""
+if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
+    GATETMP="$(mktemp_d)" || { die "no scratch directory for the CI gate probe"; GATETMP=""; }
+fi
 if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
     mkdir -p "$GATETMP/s"
     # Answers come from a queue, one per call, so a gate that polls is
@@ -227,7 +237,7 @@ STUBSH
         shift 4
         printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
         : > "$GATETMP/last"
-        out="$(run_limited 60 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+        out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
             GATE_LAST="$GATETMP/last" \
             RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
             bash -c "$gate_fn"'
@@ -261,6 +271,14 @@ STUBSH
     # bound. Here the grace can never be earned inside the timeout.
     gate_case '0'         1 1 "a verdict that stabilises after the deadline is refused" \
         PR_CI_TIMEOUT=2 PR_CI_GRACE=60
+    # THE SLEEP MAY NOT OUTRUN THE DEADLINE. Sleeping a full interval when less
+    # than that remains means the gate cannot report its own bound until after the
+    # bound has passed: a one-second timeout with the default thirty-second
+    # interval took thirty seconds to say it had run out of one. The watchdog here
+    # is shorter than that interval, so an uncapped sleep is killed rather than
+    # reporting anything.
+    gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
+        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
     gate_case '1'     1 1 "a red head stops the round"
     gate_case '2'     1 1 "an unreadable check state stops the round"
     # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
@@ -1026,16 +1044,43 @@ grep -q 'could not re-request Copilot' "$SKILL" \
 # ── the fetched heads are validated, not merely fetched ───────────────────
 # An rc-0 call yielding empty or `null` makes every unchanged-head comparison
 # false, so automatic mode assumes the no-op push queued a review.
-# One `PRIOR_HEAD` now, not two: the automatic path's baseline existed only to
-# decide whether the push had moved anything, and the request it gated is
-# unconditional. The remaining one is the verdict wait's, and it is still read
-# from the API and still has to be a real OID.
-[ "$(grep -c 'PRIOR_HEAD" =~ \^\[0-9a-f\]{40}\$' "$SKILL")" -ge 1 ] \
-    && pass "the head baseline is validated as a full OID, each time it is read" \
-    || die "a fetched head is used as a baseline without validation"
+# NO `PRIOR_HEAD` AT ALL. It existed to decide whether the push had moved
+# anything, so a mention could be sent only when it had not; the request is
+# unconditional now and nothing reads it. Left in place it is a `gh pr view` whose
+# transient failure aborts a step before any context is posted — a call that can
+# only cost. The assertion is that there are ZERO assignments, because "one is
+# still validated" is what a half-finished removal looks like.
+[ "$(grep -c '^PRIOR_HEAD=' "$SKILL")" -eq 0 ] \
+    && pass "the obsolete head baseline is gone, not merely unused" \
+    || die "a PRIOR_HEAD baseline is still fetched and can abort a step for nothing"
 grep -q 'HEAD_AFTER" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
-    && pass "…and so is the head after the push" \
+    && pass "…and the head after the push is validated, not merely fetched" \
     || die "the pushed head is not validated"
+# ── the round summary is posted ONCE ──────────────────────────────────────
+# The automatic path posted it standalone and then again inside the `@codex
+# review` mention, so every Codex round left two identical round-summary comments
+# — and the contract makes the NEWEST summary the one read before the diff, so a
+# duplicate is a record with two answers to the same question. The count is per
+# BRANCH, since each reviewer takes a different route to the same single post.
+# BOUNDED TO ITS OWN FENCED BLOCK. Extracting from the heading to end-of-file
+# swept in the Copilot phase's own summary post three sections later, so the count
+# was two and the assertion failed against correct code — a guard that cannot say
+# where the thing it counts lives counts something else.
+auto_block="$(awk '/^\*\*Automatic review ON\*\*/ {inb=1; next}
+                   inb && /^```bash$/ {code=1; next}
+                   inb && code && /^```$/ {exit}
+                   inb && code' "$SKILL")"
+[ "$(grep -c 'gh pr comment N --repo \$HOST/\$OWNER/\$REPO --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
+    && pass "the automatic path posts a standalone summary exactly once" \
+    || die "the automatic path posts the round summary more than once, or not at all"
+# …and that one is inside the Copilot branch, whose request carries no body. The
+# Codex mention carries the summary itself, so a standalone post there duplicates
+# it — which is the shape the count above would still allow if it moved.
+awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1}
+     w && /--body "\$SUMMARY"/ {print "ok"; exit}
+     w && /^else$/ {print "outside"; exit}' <<<"$auto_block" | grep -q '^ok$' \
+    && pass "…in the Copilot branch, because the Codex mention carries it instead" \
+    || die "the standalone summary post is not the Copilot branch's"
 # The stale-baseline defect is gone by construction rather than by refreshing:
 # with the request unconditional there is no comparison for a stale baseline to
 # make false. What replaced it has to stay stated, or the next reader restores the
