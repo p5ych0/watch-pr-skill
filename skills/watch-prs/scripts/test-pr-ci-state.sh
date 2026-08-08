@@ -187,16 +187,27 @@ case_is pending '' 0 3 pending 'a pending verdict is trusted whatever the status
 # to wait rather than to stop.
 WANT=0123456789abcdef0123456789abcdef01234567
 OTHER=fedcba9876543210fedcba9876543210fedcba98
-mkgh_head() {   # mkgh_head <headRefOid> <checks verdict>
-    printf '%s' "$1" > "$TMP/head"
+# The heads come from a QUEUE, one per `gh pr view`, so a push landing between the
+# confirmation and the checks call can be replayed. A stub that answered the same
+# head twice could never distinguish "verified before the request" from "bound to
+# the request", which is the whole difference the second read exists to make.
+mkgh_head() {   # mkgh_head <headRefOid…newline-separated> <checks verdict>
+    printf '%s\n' "$1" > "$TMP/heads"
     printf '%s' "$2" > "$TMP/gh.out"
     printf '' > "$TMP/gh.err"; printf '0' > "$TMP/gh.rc"; : > "$TMP/gh.json"
     cat > "$TMP/bin/gh" <<GHSH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$TMP/args"
 case "\$2" in
-    view) cat "$TMP/head" ;;
-    *)    cat "$TMP/gh.out" ;;
+    view)
+        h="\$(head -1 "$TMP/heads")"
+        # An exhausted queue repeats its last answer; \`tail -n +2\`, not \`sed -i\`,
+        # which is GNU-only without a suffix argument.
+        if [ "\$(wc -l < "$TMP/heads")" -gt 1 ]; then
+            tail -n +2 "$TMP/heads" > "$TMP/heads.next" && mv "$TMP/heads.next" "$TMP/heads"
+        fi
+        printf '%s\n' "\$h" ;;
+    *)  cat "$TMP/gh.out" ;;
 esac
 exit 0
 GHSH
@@ -218,6 +229,17 @@ got="$(run 7 --head "$WANT")"
 grep -q 'checks' "$TMP/args" \
     && die "the checks were read for a head that does not match: $(cat "$TMP/args")" \
     || pass "…without reading the checks of the head it found"
+# …AND A PUSH LANDING DURING THE CHECKS REQUEST IS CAUGHT. Confirming the head only
+# BEFORE the request leaves a window: the answer then describes a commit nobody
+# verified, and in the round loop a head that had almost finished earning its grace
+# hands that grace to a different commit whose own checks are not registered yet.
+mkgh_head "$WANT
+$OTHER" green
+got="$(run 7 --head "$WANT")"
+{ [ "${got%%|*}" = 5 ] && grep -qF 'moved=during_checks' <<<"${got#*|}"; } \
+    && pass "a head that moves during the checks request is stale, not green" \
+    || die "a green answer about a head that moved mid-request was accepted ('$got')"
+
 # A head that is not a full OID is an error either way round: one the caller
 # supplied, and one `gh` printed before failing.
 mkgh_head "$WANT" green

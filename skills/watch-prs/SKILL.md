@@ -259,6 +259,16 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
         # question, and it reads as permission to close.
         "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
         elapsed=$((SECONDS - t0))
+        # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With
+        # the check at the bottom of the loop, a `PR_CI_TIMEOUT` shorter than
+        # `PR_CI_GRACE` — or simply a probe that returned green after the deadline
+        # — closed the round past its own bound, which is a bound that does not
+        # bind. A gate that has run out of time has no verdict, whatever the last
+        # answer was.
+        if [ "$elapsed" -ge "$tmo" ]; then
+            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
+            return 1
+        fi
         case "$rc" in
             0|4)
                 # A GOOD ANSWER HAS TO HOLD. Both of these close the round, and
@@ -286,10 +296,6 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
             *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
                return 1 ;;
         esac
-        if [ "$elapsed" -ge "$tmo" ]; then
-            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
-            return 1
-        fi
         # `sleep` takes its status like every other call here. A `sleep` that
         # returned immediately — interrupted, or missing — would spin this loop
         # against the API until the timeout, and with the elapsed count now taken
@@ -599,10 +605,8 @@ resolving it. Then, in one pass:
    precede the push: with Codex automatic review enabled the *push itself*
    requests the next review, so a boundary check after it cannot stop anything
    and a self-check after it has already let the round start. **The push is not
-   here** — it belongs to the mode-specific recipe below, because with
-   auto-review on it must come after the threads are resolved and the summary is
-   posted, or the pass it triggers reads the previous round's account against
-   threads that are still open;
+   here** — it belongs to the mode-specific recipe below, because the checks on
+   what it pushes decide whether this round may be closed at all;
 4. reply to each thread with what changed, **react to it**, and resolve it — and
    **verify the resolve succeeded** rather than assuming it did.
    `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
@@ -627,9 +631,17 @@ resolving it. Then, in one pass:
 
    A failed reaction is a note, not an abort: it is feedback, and losing it must
    not stop a round from closing;
-4. **post the summary and re-request `$WHO`** — in an order that depends on what
-   actually triggers the next pass. See below: with automatic review on, the
-   *push* is the trigger, so steps 3 and 4 move ahead of it.
+4. **post the summary and re-request `$WHO`** — after the push, and after the
+   CI gate has said the pushed head is green. Resolving a thread and posting a
+   summary are the irreversible parts of closing a round, so they come last: a
+   comment saying "that round did not really close" is a record, not a retraction,
+   and it is itself a call that can fail.
+
+   With automatic review on the push also *starts* a pass, and that one cannot be
+   held back. It reads open threads and no summary, so it may re-report what this
+   round already answered — which is why the explicit request at the end is sent
+   in that mode too, and is the pass that carries the summary. A wasted pass is
+   recoverable; a round closed on a red head is not.
 
 ### 5a. Self-check before the push
 
@@ -758,27 +770,36 @@ $SUMMARY"; then
 fi
 ```
 
-**Automatic review ON** — the push starts the pass, so everything the reviewer is
-told to read must already be there, and **no mention is sent at all**:
+**Automatic review ON** — the push starts the pass, so the ordering is decided by
+what is *irreversible*:
 
 ```bash
-# reply + resolve threads FIRST: a pass that starts against threads still open
-# re-reports findings that were already answered, and the volume reads as
-# regression rather than repetition.
-# Then the summary, branched on, and only then the push.
-# The summary is READ with its status taken, before any of it is posted.
+# NOTHING IRREVERSIBLE HAPPENS BEFORE THE CHECKS ARE KNOWN.
+#
+# This sequence used to close the round first — resolve the threads, post the
+# summary — and push last, so that the pass the push starts would find both
+# already in place. That ordering cannot be gated: by the time the checks on the
+# pushed commit can be consulted, the threads are resolved and the summary is
+# posted, and neither can be taken back. A later comment saying "this round is not
+# closed" is a record, not a retraction, and it is itself a call that can fail.
+#
+# So the push comes first and the closure comes after the verdict. THE COST IS
+# REAL and is not hidden: the pass the push starts reads open threads and no
+# summary, so it can re-report findings this round already answered. That pass is
+# superseded by the explicit request at the end, which is sent in this mode
+# precisely because the automatic one ran too early to see anything.
+#
+# The trade is between a wasted pass and a round that closes on a red head. Only
+# one of those two can be undone by the next round.
+#
+# The summary is READ here, with its status taken, but posted later — a round that
+# cannot produce its own summary should not push either.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read
 # still produced a successful `gh pr comment` — and the reviewer contract makes
 # the newest summary the thing read before the diff, so a truncated one is worse
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
-    echo "ABORT: could not post the round summary — do not push yet."; exit 0
-fi
-# THIS is the request, so a failed push means no review was queued AND the fixes
-# are not on the PR — the watch would then observe the already-reviewed remote
-# head and read its old verdict as this round's.
 # The authoritative review id BEFORE the request, so the watch can tell the new
 # pass from the old one on an unchanged head. Empty is a legitimate answer (no
 # review yet); only a failed read is fatal.
@@ -803,38 +824,18 @@ case "$ROUNDS_RC" in
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
 esac
 
-# The REMOTE baseline is re-read at the start of every round, not carried from
-# step 2. After a fix round moved the head from A to B, a `PRIOR_HEAD` still
-# holding A made the unchanged-head comparison false on the NEXT round — so a
-# dismissal or an answered-without-code round queued nothing and re-armed forever.
-PRIOR_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not re-read the head for this round."; exit 0; }
-[[ "$PRIOR_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the round baseline head is not a full OID ('$PRIOR_HEAD')."; exit 0; }
+# No `PRIOR_HEAD` baseline any more. It existed to decide whether the push had
+# moved anything, because the `@codex review` mention was sent only when it had
+# not — a no-op push queues no pass, and `--after-review` then rejects the old
+# record forever. The request is unconditional now, so there is nothing to decide:
+# a round that moved the head and a round that did not both end with an explicit
+# ask, and the question the baseline answered no longer arises.
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 0; }
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
-# WHAT THIS GATE CAN AND CANNOT DO IN THIS MODE, stated rather than implied.
-#
-# With automatic review on, the push IS the request, and everything the reviewer
-# reads has to be in place before it — so by the time the checks can be consulted,
-# the threads are resolved, the summary is posted and the pass has started. This
-# gate cannot unresolve or unpost any of that.
-#
-# Pushing first instead would fix the ordering and cost more than it buys: the
-# triggered pass would then read open threads and no summary, which is the
-# re-reporting this sequence is arranged to prevent, and a second explicit pass to
-# give it the summary would duplicate every finding of the first.
-#
-# So what it does here is stop the LOOP and correct the RECORD. The summary above
-# claims a round that a red head does not support, and a summary left standing
-# unchallenged is what a later reviewer — and the merge gate's author — reads as
-# a green round. Recorded as an issue for the base ref rather than argued in a
-# round summary. The manual path above has no such constraint and gates before
-# anything is closed.
-if ! ci_gate N "$HEAD_BEFORE"; then
-    gh pr comment N --repo $HOST/$OWNER/$REPO --body "**This round is not closed.** The checks on \`$HEAD_BEFORE\` are not green, so the summary above does not describe a round that passed. The next push fixes that head; nothing here should be read as a completed round." \
-        || echo "ABORT: the round is red AND the retraction could not be posted."
-    exit 0
-fi
+# The gate, before anything that cannot be taken back. A red head stops here with
+# the threads still open and no summary posted, so the round is genuinely still
+# open and the next push is its continuation rather than a correction.
+ci_gate N "$HEAD_BEFORE" || exit 0
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
@@ -859,6 +860,13 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
     [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] \
         || { echo "ABORT: the push did not update PR N (head is $HEAD_AFTER, pushed $HEAD_BEFORE) — wrong branch or worktree?"; exit 0; }
 fi
+# ONLY NOW is the round closed. The head is confirmed and its checks are green, so
+# resolving a thread and posting a summary are claims that are true when made.
+# reply + resolve threads here
+if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+    echo "ABORT: could not post the round summary."; exit 0
+fi
+
 # WHICH reviewer comes FIRST, before any question about the head.
 #
 # A push never triggers Copilot — the skill establishes that at the top — so in
@@ -870,16 +878,21 @@ if [ "$WHO" = "$COPILOT_BOT" ]; then
     if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
-elif [ "$HEAD_BEFORE" = "$HEAD_AFTER" ] && [ "$PRIOR_HEAD" = "$HEAD_AFTER" ]; then
-    # Codex, same head as the last round: the push queued nothing, so ask.
+else
+    # Codex is asked EXPLICITLY, in this mode too.
+    #
+    # This used to be sent only when the push moved nothing, on the grounds that a
+    # push that does move the head already asked. That was true and is no longer
+    # sufficient: the automatic pass now starts before the threads are resolved
+    # and before the summary exists, so it reviews without the two things the
+    # reviewer contract says it reads first. The explicit request is what queues
+    # the pass that has them.
     if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
 
 $SUMMARY"; then
-        echo "ABORT: could not request a review for an unchanged head."; exit 0
+        echo "ABORT: could not request the review that carries this round's summary."; exit 0
     fi
 fi
-# Otherwise no `@codex review` comment: the push already asked Codex, and sending
-# one too queues a duplicate pass over the same head.
 ```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,

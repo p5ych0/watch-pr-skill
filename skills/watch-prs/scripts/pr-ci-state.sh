@@ -101,6 +101,10 @@ if [ -n "$WANT_HEAD" ]; then
         exit 5
     fi
 fi
+# The head is confirmed AGAIN after the checks are read, below. Confirming only
+# before leaves a window: a push landing between the two calls means the checks
+# describe a head nobody verified, and its first `none` inherits the grace the
+# previous head had almost finished earning.
 
 # "NONE CONFIGURED" IS NOT "COULD NOT TELL". `gh pr checks` exits NON-ZERO when
 # there is nothing to report, saying so on stderr — not because anything failed.
@@ -161,6 +165,28 @@ rm -f "$ERRF" 2>/dev/null
 # `gh pr checks` exits non-zero when a check FAILED as well as when it is pending
 # or absent, so the status alone does not classify anything — the parsed value
 # does, and the status only matters where there is no value to trust.
+# THE RESPONSE IS BOUND TO THE HEAD, not merely preceded by a check of it. The
+# confirmation above and the checks call are two requests, and a push landing
+# between them means the answer describes a commit nobody verified — in the round
+# loop, a head that had almost finished earning its grace hands that grace to a
+# different commit, whose own checks have not been registered yet.
+#
+# So the head is read once more and must still be the one asked about. This cannot
+# close the window entirely — a push can always land after the last read — but it
+# bounds it to the moment rather than to the whole checks request, and any movement
+# is reported as `stale`, which the caller waits on and which resets the grace.
+if [ -n "$WANT_HEAD" ]; then
+    HEAD_AFTER="$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid \
+                    --jq '.headRefOid' 2>/dev/null)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable_after" >&2; exit 2; }
+    _reason="$(sha_reason "$HEAD_AFTER")" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$HEAD_AFTER" >&2; exit 2; }
+    if [ "$HEAD_AFTER" != "$WANT_HEAD" ]; then
+        echo "PR_CI_STATE pr=$PR status=stale head=$HEAD_AFTER want=$WANT_HEAD moved=during_checks"
+        exit 5
+    fi
+fi
+
 case "$OUT" in
     # GREEN REQUIRES A CLEAN STATUS. `gh` can emit a complete, valid green result
     # and then exit non-zero because the request failed part-way, and command

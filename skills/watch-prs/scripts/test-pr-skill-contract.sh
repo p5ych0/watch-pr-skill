@@ -172,11 +172,19 @@ awk '/^ci_gate N "\$HEAD_PUSHED"/ {g=NR}
      g && /^SUMMARY="\$\(cat "\$SUMMARY_FILE"\)"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
     && pass "…and in the manual path it precedes the summary, so a red round stays open" \
     || die "the manual path posts its summary before knowing whether the head is green"
-# The automatic path cannot: the push IS the request there, so the summary must
-# already be posted. What it must not do is leave that summary standing unchallenged.
-grep -q 'This round is not closed' "$SKILL" \
-    && pass "…and the automatic path retracts a summary its head does not support" \
-    || die "a red head in the automatic path leaves a summary claiming a passed round"
+# AND SO DOES THE AUTOMATIC PATH. It used to close first and push last, so that
+# the pass the push starts would find the summary already there — an ordering that
+# cannot be gated, because by the time the checks can be consulted the threads are
+# resolved and the summary is posted. A later "this round is not closed" comment is
+# a record, not a retraction, and is itself a call that can fail. The push moved
+# ahead of the closure; what that costs is a pass reading open threads, and that is
+# recoverable in a way a closed round is not.
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^ci_gate N "\$HEAD_BEFORE"/ {g=NR}
+     inb && g && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "…and in the automatic path the gate precedes the summary too" \
+    || die "the automatic path posts its summary before knowing whether the head is green"
 # PENDING IS NOT GREEN — AND THE GATE IS RUN TO PROVE IT. The checks start when
 # the push lands, so an immediate ask always finds them running; treating that as a
 # pass closes every round before its own CI has said anything, which is the
@@ -247,6 +255,12 @@ STUBSH
     gate_case '0
 3
 0'                    0 5 "a verdict interrupted by a change starts its grace again"
+    # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
+    # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
+    # round past its own bound — and a bound that a verdict can step over is not a
+    # bound. Here the grace can never be earned inside the timeout.
+    gate_case '0'         1 1 "a verdict that stabilises after the deadline is refused" \
+        PR_CI_TIMEOUT=2 PR_CI_GRACE=60
     gate_case '1'     1 1 "a red head stops the round"
     gate_case '2'     1 1 "an unreadable check state stops the round"
     # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
@@ -605,12 +619,15 @@ grep -q 'The push is not' "$SKILL" \
     && pass "…and says where the push actually belongs" \
     || die "the checklist does not say where the push belongs"
 
-# In the auto-review branch, the push must come AFTER the summary post.
+# In the auto-review branch, the push must come BEFORE the summary post — the
+# reverse of what it was. Nothing irreversible may precede the checks verdict, and
+# the summary post is irreversible.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
-     inb && /^git push/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "with auto-review on, the summary is posted before the push that triggers the pass" \
-    || die "the auto-review recipe pushes before the summary exists"
+     inb && /^git push/ {p=NR}
+     inb && p && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+    | grep -q ok \
+    && pass "with auto-review on, the push precedes the summary the checks decide about" \
+    || die "the auto-review recipe closes the round before the checks can be read"
 
 # ── the self-check's third outcome is handled ─────────────────────────────
 # `not_applicable` shares no exit status with "checks passed": the same code
@@ -971,21 +988,29 @@ grep -q 'reason=diagnostic_unreadable' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…and reports an error rather than a verdict" \
     || die "a failed diagnostic read does not block"
 
-# ── an unchanged head in automatic mode still gets a trigger ──────────────
+# ── automatic mode asks EXPLICITLY, whatever the push did ─────────────────
 # A round that ends without a new commit — a dismissal, or a finding answered
 # rather than coded around — leaves the push a no-op, so nothing is queued and
-# `--after-review` rejects the old record forever.
-grep -q 'PRIOR_HEAD' "$SKILL" \
-    && pass "the round records the head it started from" \
-    || die "automatic mode cannot tell a real push from a no-op one"
-# The CONDITION, not just the variable. Asserting the name alone survived
-# rewriting the test to `if false`, which is the whole behaviour.
-grep -q '\[ "\$HEAD_BEFORE" = "\$HEAD_AFTER" \] && \[ "\$PRIOR_HEAD" = "\$HEAD_AFTER" \]' "$SKILL" \
-    && pass "…and compares it against the head after the push" \
-    || die "the unchanged-head branch does not actually compare the heads"
-grep -q 'could not request a review for an unchanged head' "$SKILL" \
-    && pass "…and asks explicitly when the push moved nothing" \
-    || die "an unchanged head in automatic mode queues no review at all"
+# `--after-review` rejects the old record forever. That used to be handled by
+# comparing three heads and asking only when they matched, which is a condition
+# that can be got wrong; and it became insufficient anyway once the push moved
+# ahead of the summary, because the pass a moving push starts now reads open
+# threads and no summary. An unconditional ask covers both, and there is no
+# condition left to invert.
+#
+# The CONDITION is what is asserted, not the presence of a mention: a mention
+# inside a branch is not an unconditional ask, and the branch is exactly what was
+# removed.
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
+     inb && w && /^else$/ {e=1; next}
+     inb && e && /@codex review/ {print "ok"; exit}
+     inb && e && /^(el)?if / {print "conditional"; exit}' "$SKILL" | grep -q '^ok$' \
+    && pass "automatic mode requests a review whether or not the push moved the head" \
+    || die "the automatic request is conditional again; a no-op push queues nothing"
+grep -q 'could not request the review that carries this round.s summary' "$SKILL" \
+    && pass "…and says what that request is for" \
+    || die "the automatic path does not branch on its own request failing"
 
 # ── the re-request depends on WHICH reviewer the round was about ──────────
 # Copilot is never triggered by a push and never by an `@codex` mention — only by
@@ -1001,15 +1026,23 @@ grep -q 'could not re-request Copilot' "$SKILL" \
 # ── the fetched heads are validated, not merely fetched ───────────────────
 # An rc-0 call yielding empty or `null` makes every unchanged-head comparison
 # false, so automatic mode assumes the no-op push queued a review.
-[ "$(grep -c 'PRIOR_HEAD" =~ \^\[0-9a-f\]{40}\$' "$SKILL")" -ge 2 ] \
+# One `PRIOR_HEAD` now, not two: the automatic path's baseline existed only to
+# decide whether the push had moved anything, and the request it gated is
+# unconditional. The remaining one is the verdict wait's, and it is still read
+# from the API and still has to be a real OID.
+[ "$(grep -c 'PRIOR_HEAD" =~ \^\[0-9a-f\]{40}\$' "$SKILL")" -ge 1 ] \
     && pass "the head baseline is validated as a full OID, each time it is read" \
     || die "a fetched head is used as a baseline without validation"
 grep -q 'HEAD_AFTER" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
     && pass "…and so is the head after the push" \
     || die "the pushed head is not validated"
-grep -q 'could not re-read the head for this round' "$SKILL" \
-    && pass "…and the baseline is refreshed per round, not carried from step 2" \
-    || die "a stale baseline makes the unchanged-head check false after a fix round"
+# The stale-baseline defect is gone by construction rather than by refreshing:
+# with the request unconditional there is no comparison for a stale baseline to
+# make false. What replaced it has to stay stated, or the next reader restores the
+# comparison and the baseline together.
+grep -q 'No .PRIOR_HEAD. baseline any more' "$SKILL" \
+    && pass "…and the automatic path says why it no longer keeps one" \
+    || die "the automatic path dropped its baseline without saying what replaced it"
 
 # ── the boundary is checked BEFORE the request, in both recipes ───────────
 # Counting afterwards meant the pause fired once round N+1 was already queued and
@@ -1048,10 +1081,11 @@ done
 # ── Copilot is re-requested regardless of whether the head moved ──────────
 # A push never triggers Copilot, so branching on the head first skipped
 # `--add-reviewer` on any Copilot round that DID change the head.
-awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
-     /HEAD_BEFORE" = "\$HEAD_AFTER/ {if (w && w < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "the reviewer is checked before the head in the automatic recipe" \
-    || die "a Copilot round that changed the head skips --add-reviewer"
+awk '/^\*\*Automatic review ON\*\*/ {inb=1}
+     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
+     inb && w && /@codex review/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "the reviewer is checked before the Codex mention in the automatic recipe" \
+    || die "a Copilot round would be sent the Codex mention"
 
 # ── the push must have landed on THIS PR ──────────────────────────────────
 # A successful `git push` from the wrong worktree, or with a refspec pointing at

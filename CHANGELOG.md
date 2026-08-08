@@ -59,6 +59,33 @@ operator had to point at the checks tab. Issue #16.
   silently turned the documented thirty-minute bound into ninety. It is measured
   from elapsed wall time around the probes.
 
+- **The deadline outranks a stable verdict.** With the timeout checked at the
+  bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` — or simply a
+  probe returning green after the deadline — closed the round past its own bound.
+  A bound a verdict can step over is not a bound.
+
+- **The checks response is bound to the head, not merely preceded by a check of
+  it.** The confirmation and the checks call are two requests, and a push landing
+  between them means the answer describes a commit nobody verified — a head that
+  had almost finished earning its grace hands it to a different commit whose own
+  checks are not registered yet. The head is read again afterwards and any
+  movement is `stale`, which resets the grace.
+
+- **Nothing irreversible happens before the verdict, in either mode.** The
+  automatic path used to close the round first — resolve the threads, post the
+  summary — and push last, so the pass the push starts would find both in place.
+  That ordering cannot be gated: by the time the checks can be consulted, both
+  are done, and a later "this round is not closed" comment is a record rather
+  than a retraction — and itself a call that can fail. The push moved ahead of the
+  closure.
+
+  **What that costs is stated:** the pass the push starts reads open threads and
+  no summary, so it may re-report what the round already answered. It is
+  superseded by an explicit `@codex review` — now sent in automatic mode too,
+  which also removes the three-head comparison that used to decide whether a
+  no-op push needed one. A wasted pass is recoverable; a round closed on a red
+  head is not.
+
 - **The polling bounds are validated.** `PR_CI_INTERVAL=0` sleeps zero seconds and
   leaves the elapsed count at zero forever; a non-numeric `PR_CI_TIMEOUT` makes
   the comparison fail on every iteration. Either one turns the supposedly bounded
