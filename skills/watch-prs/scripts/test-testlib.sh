@@ -279,6 +279,29 @@ term_took=$((SECONDS - term_start))
     && pass "…and the watchdog reports that it did not finish" \
     || die "a killed command was reported as successful"
 
+# …AND A `timeout` THAT CANNOT ESCALATE IS NOT USED. Falling back to a plain
+# `timeout` when `-k` is unsupported restores the very defect the escalation
+# exists to fix: TERM, no KILL, and a command that traps it runs on. The portable
+# path polls and kills itself, so it is strictly better than a watchdog that
+# cannot — `-k` is the only reason to prefer the external one.
+NOK="$TMP/nok"; mkdir -p "$NOK"
+for b in bash sh sleep date true false kill sed grep printf env mktemp rm cat; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$NOK/$b"
+done
+# A `timeout` that refuses `-k`, exactly as a stripped-down implementation would.
+printf '#!/usr/bin/env bash\ncase "$1" in -k) echo "timeout: unrecognized option -k" >&2; exit 125 ;; esac\nshift\nexec "$@"\n' \
+    > "$NOK/timeout"; chmod +x "$NOK/timeout"
+nok_out="$(PATH="$NOK" bash -c '
+    . "'"$SELF_DIR"'/testlib.sh"
+    start=$SECONDS
+    run_limited 2 bash -c "trap \"\" TERM; sleep 60" >/dev/null 2>&1
+    rc=$?
+    echo "rc=$rc took=$((SECONDS - start))"' 2>&1)"
+nok_took="${nok_out##*took=}"
+{ [ -n "$nok_took" ] && [ "$nok_took" -lt 15 ]; } \
+    && pass "a timeout without -k is not used; the escalating path kills anyway ($nok_out)" \
+    || die "a TERM-only timeout was used and the command outlived it ($nok_out)"
+
 # ── a reader that emits and then fails is not a successful run ─────────────
 # `cat` can write a partial buffer and exit non-zero; its status was overwritten
 # by `rm` and the COMMAND's 0 returned, so a caller comparing a prefix or

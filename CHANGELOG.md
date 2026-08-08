@@ -127,6 +127,18 @@ operator had to point at the checks tab. Issue #16.
   serialised, only when the push actually moved the head, and a wait that times
   out stops the round rather than continuing.
 
+- **An expired deadline is not a short deadline.** Both new clamps turned an
+  exhausted budget into a fresh second, and each of those calls can take that
+  second plus the watchdog's five-second escalation — the bound becoming a floor.
+  The gate checks the clock before starting a probe as well as after, and the
+  helper refuses rather than renewing.
+
+- **A `timeout` that cannot escalate is not used at all.** Falling back to a plain
+  `timeout` when `-k` is unsupported restored exactly the defect the escalation
+  exists to fix. The portable path polls and sends KILL itself, so it is strictly
+  better than a watchdog that cannot; `-k` is the only reason to prefer the
+  external one.
+
 - **The GNU `timeout` arm escalates to KILL.** It sent TERM and stopped there;
   `timeout --help` says plainly that a caught or blocked TERM does not kill the
   command. A hung wrapper, or a child that traps TERM, outlived the limit — and

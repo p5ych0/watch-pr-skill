@@ -295,6 +295,21 @@ STUBSH
     # reporting anything.
     gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
         PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
+    # NO PROBE STARTS AFTER THE DEADLINE. Clamping an exhausted budget up to one
+    # second bought another request past the bound, and each of those can take its
+    # second plus the watchdog's escalation — the clamp turning the timeout into a
+    # floor. With a one-second bound and a one-second interval, the second poll
+    # would land exactly on the deadline: there must not be one.
+    gate_case '3'         1 1 "no probe is started once the deadline has passed" \
+        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
+    probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
+    # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
+    # deadline, probe again, and only then notice — so `-le 2` accepted the defect
+    # it was written to catch. The bound is checked before the second probe, so
+    # there is no second probe.
+    [ "${probes_after:-0}" -le 1 ] \
+        && pass "…so an expired gate makes no further requests ($probes_after)" \
+        || die "the gate kept probing past its deadline ($probes_after requests)"
     # …AND NEITHER DOES A PROBE. The helper bounds its own `gh` calls, but at its
     # own default — so with a one-second gate timeout a hung request ran for a
     # minute before this loop could look at the clock. A bound the callee does not
@@ -1045,6 +1060,15 @@ grep -q '\[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]' "$SKILL" \
 grep -q '^if \[ "\$WHO" != "\$COPILOT_BOT" \] && \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
     && pass "…and never in the Copilot phase, which no push triggers" \
     || die "a Copilot round that moved the head waits for a pass nothing started"
+# …AND NEITHER IS ITS INPUT READ THERE. Guarding only the wait left the baseline
+# lookup running on every Copilot round, where a transient failure aborts before
+# the push AND before `--add-reviewer` — the same stall, moved one line up. A
+# guard that stops the consumer and not the producer relocates the failure.
+awk '/^PUSH_BASE=""$/ {z=NR}
+     z && /^if \[ "\$WHO" != "\$COPILOT_BOT" \]; then$/ {w=NR}
+     w && /pr-review-state.sh review-id N "\$WHO"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
+    && pass "…and the baseline it needs is only read in that phase too" \
+    || die "the pre-push review-id lookup runs on Copilot rounds that never use it"
 # ── the operator instructions match the workflow ──────────────────────────
 # README told operators that with automatic review on the summary must precede the
 # push and that no mention may be sent, which is the opposite of what the driver

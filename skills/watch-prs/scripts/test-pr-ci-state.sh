@@ -364,6 +364,34 @@ sd_out="$(run_limited 8 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=6 \
     && pass "a slow probe followed by a hung one still finishes inside one deadline" \
     || die "the per-call limit outlasted the helper's own budget (rc=$sd_rc)"
 
+# ── an exhausted deadline is refused, not renewed ──────────────────────────
+# Clamping a non-positive remainder up to one second granted a fresh allowance to
+# every remaining call, each of which can then take that second plus the
+# watchdog's five-second escalation: the bound became a floor.
+#
+# TESTED AS ARITHMETIC, because it cannot be reached through the CLI. Every call
+# is already bounded by the remainder, so a call that SUCCEEDS always returns
+# before the deadline and leaves something behind — the branch exists for the
+# boundary instant, which no stub can land on reliably. A racy fixture that passes
+# most of the time is worse than one that says what it covers. The function is
+# extracted and driven with a baseline placed in the past.
+rb_left_fn="$(sed -n '/^rb_left() {/,/^}/p' "$SCRIPT")"; rbl_rc=$?
+{ [ "$rbl_rc" -eq 0 ] && [ -n "$rb_left_fn" ]; } \
+    && pass "the remaining-time helper could be extracted" \
+    || die "rb_left could not be read out of the script (rc=$rbl_rc)"
+for rbl_case in '10:5:refused' '10:20:granted'; do
+    age="${rbl_case%%:*}"; rest="${rbl_case#*:}"
+    dl="${rest%%:*}"; want="${rest##*:}"
+    got="$(bash -c "$rb_left_fn"'
+        DEADLINE='"$dl"'
+        _RB_T0=$((SECONDS - '"$age"'))
+        v="$(rb_left)" && echo "granted:$v" || echo "refused"' 2>&1)"
+    case "$got" in
+        "$want"*) pass "a deadline $age s old against a ${dl}s budget is $want" ;;
+        *) die "a deadline $age s old against a ${dl}s budget gave '$got', wanted $want" ;;
+    esac
+done
+
 # ── an inherited definition does not satisfy a load check ──────────────────
 # Bash exports functions through the environment, so a caller that had run
 # `export -f run_limited` leaves one defined here before the `.` — and a library

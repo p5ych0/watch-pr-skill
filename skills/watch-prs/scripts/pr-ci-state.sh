@@ -98,12 +98,15 @@ case "$DEADLINE" in ""|0|0*|*[!0-9]*|??????*) DEADLINE=60 ;; esac
 # then a checks request that hung for five, then a confirmation that hung for five
 # more. The caller's bound is then not a bound at all.
 _RB_T0=$SECONDS
-# What is left, never less than one — a zero or negative limit makes `timeout`
-# either refuse or run unbounded, and both are worse than one last short attempt.
+# What is left — and NOTHING when the deadline has passed. Clamping an exhausted
+# budget up to one second granted a fresh allowance to every remaining call, each
+# of which can then take that second plus the watchdog's five-second escalation:
+# the bound turned into a floor. An expired deadline is not a short deadline.
 rb_left() {
     local left=$((DEADLINE - (SECONDS - _RB_T0)))
-    [ "$left" -lt 1 ] && left=1
+    [ "$left" -ge 1 ] || return 1
     printf '%s' "$left"
+    return 0
 }
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -128,7 +131,9 @@ if [ -n "$WANT_HEAD" ]; then
     # than an error: the caller's correct response is to wait, not to stop.
     _reason="$(sha_reason "$WANT_HEAD")" || {
         echo "PR_CI_STATE pr=$PR status=error reason=$_reason head=$WANT_HEAD" >&2; exit 2; }
-    HEAD_NOW="$(run_limited "$(rb_left)" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
+    _left_head="$(rb_left)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
+    HEAD_NOW="$(run_limited "$_left_head" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
                   --json headRefOid --jq '.headRefOid' 2>/dev/null)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable" >&2; exit 2; }
     # Anything `gh` printed before failing is not data, and the shape is checked
@@ -186,7 +191,9 @@ ERRF="$(mktemp 2>/dev/null)" || {
 # that reached `dismissed` through a catch-all and drove a review loop. See
 # recordlib.sh.
 RC=0
-OUT="$(run_limited "$(rb_left)" gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
+_left_checks="$(rb_left)" || {
+    echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
+OUT="$(run_limited "$_left_checks" gh pr checks "$PR" --repo "$HOST/$OWNER/$REPO" $REQUIRED --json bucket \
          --jq 'if type != "array" or length == 0 then "malformed"
                elif any(.[]; type != "object" or (.bucket | type) != "string") then "malformed"
                elif any(.[]; .bucket | IN("fail","cancel")) then "failed"
@@ -216,7 +223,9 @@ rm -f "$ERRF" 2>/dev/null
 # bounds it to the moment rather than to the whole checks request, and any movement
 # is reported as `stale`, which the caller waits on and which resets the grace.
 if [ -n "$WANT_HEAD" ]; then
-    HEAD_AFTER="$(run_limited "$(rb_left)" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
+    _left_after="$(rb_left)" || {
+        echo "PR_CI_STATE pr=$PR status=error reason=deadline_exhausted" >&2; exit 2; }
+    HEAD_AFTER="$(run_limited "$_left_after" gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" \
                     --json headRefOid --jq '.headRefOid' 2>/dev/null)" || {
         echo "PR_CI_STATE pr=$PR status=error reason=head_unreadable_after" >&2; exit 2; }
     _reason="$(sha_reason "$HEAD_AFTER")" || {

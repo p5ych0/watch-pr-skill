@@ -41,12 +41,16 @@ run_limited() {
                 _RB_TIMEOUT_KILL_AFTER=no
             fi
         fi
+        # A `timeout` WITHOUT `-k` IS NOT USED AT ALL. Falling back to plain
+        # `timeout` there restored exactly the defect this branch exists to fix:
+        # TERM, no escalation, and a command that traps it runs on. The portable
+        # path below polls and then sends KILL itself, so it is strictly better
+        # than a watchdog that cannot. `-k` is the reason to prefer the external
+        # one; without it there is no reason left.
         if [ "$_RB_TIMEOUT_KILL_AFTER" = yes ]; then
             timeout -k 5 "$secs" "$@"
-        else
-            timeout "$secs" "$@"
+            return $?
         fi
-        return $?
     fi
     # No `timeout`. Two things have to hold, and the second is what the
     # earlier versions kept getting wrong:

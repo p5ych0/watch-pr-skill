@@ -265,8 +265,17 @@ ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
         # look at the clock at all. A bound the callee does not know about is not
         # a bound; the remaining budget is passed down.
         elapsed=$((SECONDS - t0))
+        # AN EXPIRED DEADLINE IS NOT A SHORT DEADLINE. Clamping an exhausted
+        # budget up to one second started another probe past the bound — and each
+        # of those can take its second plus the watchdog's five-second escalation,
+        # so the clamp turned the timeout into a floor. The clock is checked
+        # BEFORE the probe as well as after it, because a sleep that lands exactly
+        # on the deadline would otherwise buy one more request.
+        if [ "$elapsed" -ge "$tmo" ]; then
+            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
+            return 1
+        fi
         budget=$((tmo - elapsed))
-        [ "$budget" -lt 1 ] && budget=1
         [ "$budget" -gt "$probe" ] && budget="$probe"
         PR_CI_PROBE_TIMEOUT="$budget" "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
         elapsed=$((SECONDS - t0))
@@ -859,8 +868,16 @@ HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local hea
 PUSH_FROM=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the head this push starts from."; exit 0; }
 [[ "$PUSH_FROM" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pre-push head is not a full OID ('$PUSH_FROM')."; exit 0; }
-PUSH_BASE=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-    || { echo "ABORT: could not read the review id before the push."; exit 0; }
+# CODEX ONLY, like the wait it feeds. Read unconditionally, a transient failure on
+# a Copilot round aborted before the push AND before `--add-reviewer` — a round
+# stalled by a probe for a pass that phase never has. Only the wait was made
+# Codex-only the first time; its input has to be too, or the guard moves the
+# failure rather than removing it.
+PUSH_BASE=""
+if [ "$WHO" != "$COPILOT_BOT" ]; then
+    PUSH_BASE=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+        || { echo "ABORT: could not read the review id before the push."; exit 0; }
+fi
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 0; }
 # The gate, before anything that cannot be taken back. A red head stops here with
 # the threads still open and no summary posted, so the round is genuinely still
