@@ -60,14 +60,22 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # The status is taken, like recordlib above: a helper whose identity parser
 # failed to load would fall through to an undefined function per call rather
 # than refusing clearly here.
-# THE STALE DEFINITION IS CLEARED FIRST. Bash exports functions through the
-# environment, so a caller that had run `export -f rb_identity` leaves one defined
-# in this shell before the `.` — and a library that is empty or truncated ABOVE
-# the definition still sources successfully. The `type -t` check then finds the
-# inherited function and reports the parser loaded, and the driver goes on
-# addressing `gh` calls with whatever that stale version derives. `unset -f` makes
-# the check prove what it claims: that THIS library defined it.
-unset -f rb_identity 2>/dev/null || true
+# THE STALE DEFINITION IS CLEARED FIRST, AND THE CLEARING IS CHECKED. Bash
+# exports functions through the environment, so a caller that had run
+# `export -f rb_identity` leaves one defined in this shell before the `.` — and a
+# library that is empty or truncated ABOVE the definition still sources
+# successfully. The `type -t` check then finds the inherited function and reports
+# the parser loaded, and the driver goes on addressing `gh` calls with whatever
+# that stale version derives.
+#
+# `|| true` on the `unset` reopened exactly that: `readonly -f rb_identity` makes
+# the unset FAIL and leaves the function installed, and the discarded status made
+# a definition that could not be cleared indistinguishable from one that never
+# existed. An `unset -f` of a name that is not defined returns 0, so the only
+# thing a non-zero status here means is that a definition survived — which is the
+# one condition this line exists to rule out.
+unset -f rb_identity 2>/dev/null || {
+    echo "PR_REVIEW_STATE status=error reason=identitylib_stale_definition" >&2; exit 2; }
 # shellcheck source=identitylib.sh
 . "$_RB_SELF_DIR/identitylib.sh" || {
     echo "PR_REVIEW_STATE status=error reason=identitylib_unreadable" >&2; exit 2; }

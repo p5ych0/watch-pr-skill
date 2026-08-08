@@ -190,13 +190,19 @@ fi
 # printing them, because serialising three values through one string makes any
 # delimiter a value a remote can contain — and a remote carrying it shifts the
 # fields, which is the wrong-repository failure the parser exists to prevent.
-# The stale definition is cleared first. Bash exports functions through the
-# environment, so a session that had already defined `rb_identity` leaves one
-# here before the `.` — and a library that is empty or truncated above the
-# definition still sources successfully. The check below would then find the
-# inherited function and report the parser loaded, with every `gh` call
-# addressed by whatever that stale version derives.
-unset -f rb_identity 2>/dev/null || true
+# The stale definition is cleared first, and the CLEARING IS CHECKED. Bash
+# exports functions through the environment, so a session that had already
+# defined `rb_identity` leaves one here before the `.` — and a library that is
+# empty or truncated above the definition still sources successfully. The check
+# below would then find the inherited function and report the parser loaded,
+# with every `gh` call addressed by whatever that stale version derives.
+#
+# `|| true` reopened it: `readonly -f rb_identity` makes the unset FAIL and
+# leaves the function installed, and a discarded status makes a definition that
+# could not be cleared look like one that was never there. Unsetting a name that
+# is not defined returns 0, so a non-zero status here means only one thing.
+unset -f rb_identity 2>/dev/null \
+    || { echo "ABORT: a pre-existing rb_identity could not be cleared"; exit 1; }
 . "$RB_SCRIPTS/identitylib.sh" \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \

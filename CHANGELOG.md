@@ -57,6 +57,15 @@ rule can no longer hold in one copy and not another. Issue #18.
   four callers clear it first, so the check proves what it claims: that **this**
   library defined it.
 
+- **…and a definition that cannot be *cleared* is a load failure too.** The first
+  fix was `unset -f rb_identity 2>/dev/null || true`, and `readonly -f` makes that
+  unset fail while leaving the function installed — so a discarded status made a
+  definition that could not be removed read exactly like one that was never there.
+  Unsetting a name that is not defined returns 0, so a non-zero status there means
+  only one thing. Reachable in `SKILL.md`, whose bash runs in the driving
+  session's own shell; the readonly attribute does not survive function export, so
+  a separate helper process never inherits one.
+
 - **The matching-test gate discovers the libraries instead of listing them.** The
   list named `testlib.sh` and `recordlib.sh`, so `identitylib.sh` sat outside the
   gate entirely and deleting its test left `pr-selfcheck.sh` reporting that every

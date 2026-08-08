@@ -143,6 +143,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
     for g in "$ROOT"/*.sh; do ln -sf "$g" "$STALETMP/run/$(basename "$g")"; done
     ln -sf "$STALETMP/lib/identitylib.sh" "$STALETMP/run/identitylib.sh"
     : > "$STALETMP/spy"
+    : > "$STALETMP/spy"
     out="$(run_limited 20 env GH_SPY="$STALETMP/spy" PATH="$STALETMP/bin:$PATH" \
              bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
                       export -f rb_identity
@@ -157,6 +158,48 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
         idfail=1
     else
         echo "ok   - …and addressed no request with what it derived"
+    fi
+done
+
+# ── a definition that CANNOT be cleared is a load failure ──────────────────
+# `readonly -f rb_identity` makes `unset -f` fail and leaves the function
+# installed, so `unset -f … || true` made a definition that could not be removed
+# read exactly like one that was never there.
+#
+# WHERE THIS IS REACHABLE, stated rather than implied. The readonly attribute does
+# NOT survive function export: a child process receives the definition and can
+# unset it, which is why the three helpers above are exercised with an EXPORTED
+# parser and not a readonly one — a fixture marking it readonly would prove
+# nothing about them, because they never see it. The case is real for `SKILL.md`,
+# whose bash runs in the driving session's own shell, where an earlier block or
+# the session itself may have marked it readonly.
+#
+# So the mechanism is proven directly, in one shell, and the contract test
+# asserts SKILL.md branches on the status. Both halves are needed: the mechanism
+# alone does not say the callers adopted it, and the text alone does not say it
+# works.
+mech="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
+    unset -f rb_identity 2>/dev/null || { echo REFUSED; exit 2; }
+    echo "CLEARED:$(type -t rb_identity)"' 2>&1)"; mech_rc=$?
+{ [ "$mech_rc" -eq 2 ] && [ "$mech" = REFUSED ]; } \
+    && echo "ok   - a readonly parser definition cannot be cleared, and the status says so" \
+    || { echo "FAIL - clearing a readonly definition did not report failure (rc=$mech_rc '$mech')"; idfail=1; }
+# …and the unchecked form is what it was: the function survives and the shell
+# carries on, which is the whole defect in one line.
+mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
+    unset -f rb_identity 2>/dev/null || true
+    echo "CONTINUED:$(type -t rb_identity)"' 2>&1)"
+[ "$mech2" = "CONTINUED:function" ] \
+    && echo "ok   - …and discarding that status leaves the stale definition installed" \
+    || { echo "FAIL - the unchecked form did not reproduce the defect ('$mech2')"; idfail=1; }
+# EVERY caller branches on it. The mechanism above is about Bash; this is about
+# whether the four files that clear the parser actually take the status.
+for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    if grep -q 'unset -f rb_identity 2>/dev/null || true' "$ROOT/$sc"; then
+        echo "FAIL - $sc discards the status of the unset"; idfail=1
+    else
+        echo "ok   - $sc treats a definition it cannot clear as a load failure"
     fi
 done
 rm -rf "$STALETMP"

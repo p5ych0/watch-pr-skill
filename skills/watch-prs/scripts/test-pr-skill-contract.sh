@@ -602,6 +602,12 @@ awk '/^unset -f rb_identity/ {u=NR}
     | grep -q ok \
     && pass "…and a stale parser definition is cleared before the library loads" \
     || die "an inherited rb_identity would satisfy SKILL.md's parser-load check"
+# …and the clearing's own status is taken. `readonly -f rb_identity` makes the
+# unset FAIL and leaves the function installed, so `|| true` made a definition
+# that could not be cleared indistinguishable from one that was never there.
+grep -q 'unset -f rb_identity 2>/dev/null || true' "$SKILL" \
+    && die "SKILL.md discards the status of the unset; a readonly parser survives it" \
+    || pass "…and a definition that cannot be cleared is a load failure"
 grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
     && pass "…and the GraphQL calls pass it explicitly" \
     || die "a graphql call does not pass --hostname"
