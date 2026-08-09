@@ -63,7 +63,11 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   A name in the scan but not in the job is covered by text alone; a name in neither
   is covered by nothing, which is how `shred` — GNU coreutils, absent from stock
   macOS — sat uncovered by both. It is in both lists now, and the containment is
-  asserted rather than asserted-about.
+  asserted rather than asserted-about. The `g`-prefixed Homebrew spellings are
+  exempt, for a reason that was measured rather than assumed: they were added to
+  the job on the theory that hiding a tool the runner lacks is a harmless no-op,
+  and Ubuntu's `awk` is a symlink chain ending at `/usr/bin/gawk`, so hiding
+  `gawk` removed `awk` itself and every scan died with `command not found`.
 
 - **A `<<` is a redirection only where the shell sees one.** A quoted word
   carrying the characters is a string, and matching the raw text took it as an

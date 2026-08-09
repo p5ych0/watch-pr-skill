@@ -102,13 +102,15 @@ jobs:
           # `test-portability.sh` now CHECKS this containment rather than trusting
           # this comment: every scanned name must appear here.
           #
-          # The `g`-prefixed spellings are the Homebrew names a macOS contributor
-          # may reach for. They are not installed on the runner, so hiding them is
-          # a no-op — and they are listed anyway, because a list that is equal to
-          # the other one needs no rule about which entries are exempt from it.
+          # THE `g`-PREFIXED SPELLINGS ARE NOT HERE, and the reason was measured
+          # rather than assumed. They were added on the theory that hiding a tool
+          # the runner does not have is a harmless no-op; Ubuntu's `awk` is a
+          # symlink chain ending at `/usr/bin/gawk`, so hiding `gawk` removed `awk`
+          # itself and every scan in the suite died with `command not found`.
+          # They are the Homebrew names a macOS contributor may reach for, and the
+          # text scan is what covers them.
           tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors numfmt shred
-                 gsed gawk gdate gcp gln gsort gtimeout gnproc"
+                 stdbuf truncate dircolors numfmt shred"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool

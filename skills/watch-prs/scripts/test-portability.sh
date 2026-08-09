@@ -914,8 +914,27 @@ if [ -f "$PORT_WF" ]; then
     if [ -z "$wf_tools" ]; then
         die "the portability job's tool list could not be read"
     else
+        # THE `g`-PREFIXED SPELLINGS ARE EXEMPT, and the reason was measured. They
+        # were added to the job's list on the theory that hiding a tool the runner
+        # does not have is a harmless no-op. Ubuntu's `awk` is a symlink chain
+        # ending at `/usr/bin/gawk`, so hiding `gawk` removed `awk` itself and
+        # every scan in the suite died with `command not found` — both portability
+        # jobs red, for the check rather than for the code. A Homebrew spelling is
+        # covered by the text scan; the job cannot cover it without removing the
+        # system tool it aliases.
+        PORT_WF_EXEMPT='gsed gawk gdate gcp gln gsort gtimeout gnproc'
+        # A stale exemption is loud: a name here that has left `GNU_ONLY_NAMES` is
+        # excusing something the scan no longer looks for.
+        stale_wf=""
+        for e in $PORT_WF_EXEMPT; do
+            printf '%s\n' $GNU_ONLY_NAMES | grep -qxF "$e" || stale_wf="$stale_wf $e"
+        done
+        [ -z "$stale_wf" ] \
+            && pass "…and every workflow exemption still names a scanned tool" \
+            || die "workflow exemption(s) no longer in the scan:$stale_wf"
         missing=""
         for n in $GNU_ONLY_NAMES; do
+            printf '%s\n' $PORT_WF_EXEMPT | grep -qxF "$n" && continue
             # The quotes go first: the last name is adjacent to the closing one,
             # so `gnproc"` was a token that matched nothing — the check reporting a
             # gap in the list rather than in the code.
