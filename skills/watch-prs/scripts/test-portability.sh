@@ -158,17 +158,22 @@ SCAN_PROLOGUE='
     # spelling written in an inline comment is still reported, which is the safe
     # direction: a rule that excused everything after a `#` would be excused by any
     # line that ended in one.
-    function strip_comment(l, i, ch, q, prev) {
-        q = ""
+    # A BACKSLASH ESCAPES OUTSIDE QUOTES TOO, and the boundary check reads the
+    # previous SOURCE character rather than the previous word. In `\)#` the
+    # parenthesis is an escaped literal, so the `#` continues the word instead of
+    # starting a comment — and treating it as one stripped a real `<<EOF` and read
+    # the document body as shell.
+    function strip_comment(l, i, ch, q, prev, esc) {
+        q = ""; esc = 0
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
-            if (q == "\042" && ch == "\134") { i++; continue }
+            if ((q == "\042" || q == "") && ch == "\134") { i++; esc = 1; continue }
             if (q == "") {
-                if (ch == "\047" || ch == "\042") { q = ch; continue }
                 # A `#` STARTS A COMMENT ONLY AT THE START OF A WORD. `x=a#b` is a
                 # value and `${x#p}` is an expansion; both keep their `#`.
                 if (ch == "#") {
                     prev = (i == 1) ? " " : substr(l, i - 1, 1)
+                    if (esc) prev = "x"
                     # `)` IS A CONTROL OPERATOR TOO, and `(:)# <<EOF` is the
                     # spelling that needs it — a subshell closed, then a comment
                     # with no space in front of it. The class is the operators that
@@ -179,7 +184,9 @@ SCAN_PROLOGUE='
                     # as the Bash 4 case terminator it is elsewhere.
                     if (prev ~ /[[:space:]&;|()]/) return substr(l, 1, i - 1)
                 }
+                if (ch == "\047" || ch == "\042") { q = ch; esc = 0; continue }
             } else if (ch == q) { q = "" }
+            esc = 0
         }
         return l
     }
@@ -339,7 +346,11 @@ SCAN_PROLOGUE='
         q = ""; st = 1
         while (st <= length(l)) {
             ch = substr(l, st, 1)
-            if (q == "\042" && ch == "\134") { st += 2; continue }
+            # An UNQUOTED backslash escapes too: `\$` is a literal dollar, and the
+            # quote after it opens an ORDINARY single-quoted span rather than an
+            # ANSI-C one. Reading the pair as an opener decoded `\\s` to one
+            # backslash and rejected a portable command.
+            if ((q == "\042" || q == "") && ch == "\134") { st += 2; continue }
             if (q == "") {
                 if (substr(l, st, 2) == "$\047") {
                     en = ansic_span_end(l, st + 2)
@@ -1416,6 +1427,20 @@ aq_hits="$(scan "$RULE_A" "$PTMP/ansicq.sh")" || aq_hits=SCANFAIL
     && pass "an escaped quote does not end the ANSI-C span" \
     || die "the span stopped at an escaped quote ('$aq_hits')"
 
+# ── AN ESCAPED BOUNDARY CHARACTER IS PART OF THE WORD ──────────────────────
+# In `printf … \)# <<EOF` the parenthesis is an escaped literal, so the `#`
+# continues the word rather than starting a comment — and the redirection after it
+# is REAL. Reading the previous source character alone stripped it, and the
+# document body was then scanned as shell.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'printf %s \\)# <<EOF\n' "'%s\\n'"
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/escparen.sh"
+ep_hits="$(scan "$RULE_A" "$PTMP/escparen.sh")" || ep_hits=SCANFAIL
+{ [ "$ep_hits" != SCANFAIL ] && [ -z "$ep_hits" ]; } \
+    && pass "an escaped boundary character does not start a comment" \
+    || die "an escaped ) let the # strip a real redirection ('$ep_hits')"
+
 # ── AN ANSI-C OPENER IS ONE ONLY OUTSIDE QUOTES ────────────────────────────
 # A command can carry the two characters twice: once as data inside double quotes,
 # once opening a real span. Taking the first as an opener paired it with the
@@ -1426,6 +1451,16 @@ ad_hits="$(scan "$RULE_A" "$PTMP/ansicdq.sh")" || ad_hits=SCANFAIL
 { [ "$ad_hits" != SCANFAIL ] && [ -n "$ad_hits" ]; } \
     && pass "a quoted \$' is data, and the real span is still decoded" \
     || die "a quoted \$' consumed the real ANSI-C span ('$ad_hits')"
+
+# ── AN ESCAPED DOLLAR IS NOT AN OPENER ─────────────────────────────────────
+# In `grep \$'\\s' f` the dollar is an escaped literal, so the quote after it opens
+# an ORDINARY single-quoted span: grep receives two backslashes, which is portable.
+# Reading the pair as an ANSI-C opener decoded them to one and rejected it.
+printf '#!/usr/bin/env bash\ngrep \\$%s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/escdollar.sh"
+ed_hits="$(scan "$RULE_A" "$PTMP/escdollar.sh")" || ed_hits=SCANFAIL
+{ [ "$ed_hits" != SCANFAIL ] && [ -z "$ed_hits" ]; } \
+    && pass "an escaped dollar opens no ANSI-C span" \
+    || die "an escaped dollar was read as an opener ('$ed_hits')"
 
 # ── AN INLINE COMMENT OPENS NOTHING ────────────────────────────────────────
 # `: # <<EOF` is a comment to bash. Removing only FULL-LINE comments queued `EOF`,

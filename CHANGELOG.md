@@ -100,6 +100,15 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **A backslash escapes outside quotes too.** Two walkers read the previous
+  *source* character rather than the previous word. In `\)#` the parenthesis is an
+  escaped literal, so the `#` continues the word instead of starting a comment —
+  and stripping it took a real `<<EOF` with it, after which the document body was
+  read as shell. In `grep \$'\\s' f` the dollar is escaped, so the quote after it
+  opens an ordinary single-quoted span and grep receives two backslashes, which is
+  portable; reading the pair as an ANSI-C opener decoded them to one and rejected
+  it.
+
 - **An inline comment opens nothing.** `: # <<EOF` is a comment to bash and was a
   here-document to a scanner that removed only full-line ones: `EOF` was queued, no
   terminator came, and the rest of the file was skipped. Only the redirection scan
