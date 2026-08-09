@@ -81,6 +81,17 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   violation. Three contexts, one rule each: single-quoted keeps the run,
   double-quoted keeps ceil(n/2), unquoted keeps floor(n/2).
 
+- **ANSI-C quoting looks single-quoted and is not.** `grep $'\\s' f` collapses the
+  pair the way double quotes do and hands the engine the GNU `\s`; read as
+  ordinary single quoting, both backslashes survived the count and an
+  incompatible script passed the gate.
+
+- **A symbolic arithmetic shift is not a redirection.** `mask=$((value << shift))`
+  queued `shift` as a here-document delimiter, and unless a later line was exactly
+  that word, every line to EOF was skipped — one expression excusing the rest of
+  the file. Excluding a digit operand covered `1 << 2` and nothing symbolic, so
+  the expansion is removed before the redirections are read.
+
 - **Every document a command opens is queued.** `cat <<ONE <<TWO` opens both, in
   the order written; recording only the first meant the second body was read as
   shell as soon as the first terminator arrived.

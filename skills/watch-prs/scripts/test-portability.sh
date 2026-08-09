@@ -135,6 +135,34 @@ SCAN_PROLOGUE='
     }
     # True when the operator appears outside quotes anywhere on the line.
     function unquoted(l, pat) { return unquoted_pos(l, pat) > 0 }
+    # `$(( … ))` REMOVED, because its left-shift is spelled `<<` and its right
+    # operand is a WORD. `mask=$((value << shift))` queued `shift` as a delimiter,
+    # and unless some later line was exactly `shift`, every line to EOF was
+    # skipped — one arithmetic expression excusing the rest of the file. Excluding
+    # only a digit operand covered `1 << 2` and nothing symbolic.
+    #
+    # The span is replaced by a space rather than deleted, so nothing on either
+    # side joins up. It is not a lexer: an arithmetic expansion containing a quote
+    # would take its quoting out of the line with it, which is a direction that
+    # makes a rule report rather than excuse.
+    function strip_arith(l, out, i, ch, d) {
+        out = ""; i = 1
+        while (i <= length(l)) {
+            if (substr(l, i, 3) == "$((") {
+                d = 2; i += 3
+                while (i <= length(l) && d > 0) {
+                    ch = substr(l, i, 1)
+                    if (ch == "(") d++
+                    else if (ch == ")") d--
+                    i++
+                }
+                out = out " "
+                continue
+            }
+            out = out substr(l, i, 1); i++
+        }
+        return out
+    }
     # True when a letter from `set` reaches the regex engine ESCAPED — which is a
     # question about what the shell hands over, not about what the source looks
     # like. `grep "\\s" f` writes two backslashes and passes ONE, because double
@@ -144,6 +172,11 @@ SCAN_PROLOGUE='
     #
     # THREE CONTEXTS, ONE RULE EACH, and the surface is closed at three:
     #   single-quoted — nothing is removed, so the run survives: odd escapes.
+    #   $'…'          — ANSI-C quoting, which LOOKS single-quoted and behaves like
+    #                   the double-quoted case: `$'\\s'` collapses the pair and
+    #                   hands the engine `\s`. Reading it as ordinary single
+    #                   quoting preserved both backslashes and called the script
+    #                   clean.
     #   double-quoted — each pair becomes one, and a lone backslash before an
     #                   ordinary letter is KEPT, so ceil(n/2) survive.
     #   unquoted      — each pair becomes one and a lone backslash is REMOVED
@@ -159,9 +192,9 @@ SCAN_PROLOGUE='
                 while (substr(l, i, 1) == "\134") { n++; i++ }
                 ch = substr(l, i, 1)
                 if (ch == "") return 0
-                if (q == "\047")      kept = n
-                else if (q == "\042") kept = int((n + 1) / 2)
-                else                  kept = int(n / 2)
+                if (q == "\047")                    kept = n
+                else if (q == "\042" || q == "$") kept = int((n + 1) / 2)
+                else                              kept = int(n / 2)
                 if (kept % 2 == 1 && index(set, ch) > 0) return 1
                 # The character that ENDED the run may be a quote, and whether it
                 # opens or closes one depends on whether the run escaped it — which
@@ -169,12 +202,19 @@ SCAN_PROLOGUE='
                 if (ch == "\047" || ch == "\042") {
                     if (q == "\047" || n % 2 == 0) {
                         if (q == "") q = ch
+                        else if (q == "$" && ch == "\047") q = ""
                         else if (q == ch) q = ""
                     }
                 }
                 continue
             }
-            if (q == "") { if (ch == "\047" || ch == "\042") q = ch }
+            if (q == "") {
+                # `$'…'` FIRST, because it looks like a `$` followed by an ordinary
+                # single quote and is neither: the escapes inside are processed.
+                if (ch == "$" && substr(l, i + 1, 1) == "\047") { q = "$"; i++ }
+                else if (ch == "\047" || ch == "\042") q = ch
+            }
+            else if (q == "$") { if (ch == "\047") q = "" }
             else if (ch == q) q = ""
         }
         return 0
@@ -218,7 +258,7 @@ SCAN_PROLOGUE='
       # state across the whole line, which is the same not-a-lexer trade the split
       # makes: a line whose quoting is unbalanced mid-way is read as more code than
       # it is, so a rule REPORTS rather than excuses.
-      hdrest = raw
+      hdrest = strip_arith(raw)
       while ((hp = unquoted_pos(hdrest, "<<")) > 0) {
           hdtail = substr(hdrest, hp)
           # `<<<` is a here-STRING and has no terminator. The pattern could begin
@@ -1098,6 +1138,60 @@ dt_hits="$(scan "$RULE_A" "$PTMP/dashterm.sh")" || dt_hits=SCANFAIL
 { [ "$dt_hits" != SCANFAIL ] && [ -n "$dt_hits" ]; } \
     && pass "…while <<- ends on a tab-indented terminator, as bash does" \
     || die "a <<- here-document never ended ('$dt_hits')"
+
+# ── ANSI-C QUOTING LOOKS SINGLE-QUOTED AND IS NOT ──────────────────────────
+# `grep $'\\s' f` collapses the pair the way double quotes do and hands the engine
+# the GNU `\s`. Read as ordinary single quoting, both backslashes survived the
+# count and the gate called an incompatible script clean.
+printf '#!/usr/bin/env bash\ngrep $%s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/ansic.sh"
+ac_hits="$(scan "$RULE_A" "$PTMP/ansic.sh")" || ac_hits=SCANFAIL
+{ [ "$ac_hits" != SCANFAIL ] && [ -n "$ac_hits" ]; } \
+    && pass "ANSI-C quoting collapses the pair, like double quotes" \
+    || die "a \$'..' escape was read as portable ('$ac_hits')"
+# …and three backslashes inside it are a literal backslash again, so it is the
+# arithmetic that differs from single quoting rather than the direction.
+printf '#!/usr/bin/env bash\ngrep $%s%ss%s "$f"\n' "'" "$three_bs" "'" > "$PTMP/ansicodd.sh"
+ao_hits="$(scan "$RULE_A" "$PTMP/ansicodd.sh")" || ao_hits=SCANFAIL
+{ [ "$ao_hits" != SCANFAIL ] && [ -z "$ao_hits" ]; } \
+    && pass "…while three inside it are a literal backslash" \
+    || die "a literal backslash in \$'..' was reported ('$ao_hits')"
+
+# ── A SYMBOLIC SHIFT IS NOT A HERE-DOCUMENT ────────────────────────────────
+# `mask=$((value << shift))` queued `shift` as a delimiter, and unless some later
+# line was exactly `shift`, every line to EOF was skipped — one arithmetic
+# expression excusing the rest of the file. Excluding only a digit operand covered
+# `1 << 2` and nothing symbolic.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'mask=$((value << shift))\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/symshift.sh"
+ss_hits="$(scan "$RULE_A" "$PTMP/symshift.sh")" || ss_hits=SCANFAIL
+{ [ "$ss_hits" != SCANFAIL ] && [ -n "$ss_hits" ]; } \
+    && pass "a symbolic arithmetic shift does not open a here-document" \
+    || die "a symbolic shift swallowed the rest of the file ('$ss_hits')"
+# …and a real here-document on the SAME line as one still works, so the removal
+# takes out the expansion rather than the line.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'mask=$((value << shift)); cat <<EOF\n'
+  printf 'grep -P is example text\n'
+  printf 'EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/shiftdoc.sh"
+sd_hits="$(scan "$RULE_A" "$PTMP/shiftdoc.sh")" || sd_hits=SCANFAIL
+{ [ "$sd_hits" != SCANFAIL ] && [ -n "$sd_hits" ]; } \
+    && pass "…while a real document beside one is still tracked" \
+    || die "a here-document beside a shift was lost ('$sd_hits')"
+
+# …and what precedes the expansion survives it. Replacing the whole line rather
+# than the span dropped a here-document opened BEFORE the shift, and its body was
+# then read as shell — a fixture with the two in the other order is what tells the
+# two spellings apart.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<EOF; mask=$((value << shift))\n'
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/docthenshift.sh"
+ds_hits="$(scan "$RULE_A" "$PTMP/docthenshift.sh")" || ds_hits=SCANFAIL
+{ [ "$ds_hits" != SCANFAIL ] && [ -z "$ds_hits" ]; } \
+    && pass "…and a document opened before the expansion is not lost with it" \
+    || die "removing the expansion took the earlier redirection too ('$ds_hits')"
 
 # ── ONE COMMAND, TWO DOCUMENTS ─────────────────────────────────────────────
 # `cat <<ONE <<TWO` opens both, in the order written. Recording only the first
