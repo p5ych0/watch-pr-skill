@@ -86,11 +86,25 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   ordinary single quoting, both backslashes survived the count and an
   incompatible script passed the gate.
 
+- **A backslash can be synthesised.** Inside `$'…'` the escapes are decoded, so
+  `$'\134s'` contains no `\s` anywhere in its source — octal 134 *is* the
+  backslash — and the engine receives the GNU `\s`. The producers are a closed
+  set: `\\`, `\134`, `\0134`, `\x5c`, `\u005c`, `\U0000005c`. Each becomes one
+  backslash and the run is counted as anywhere else.
+
+- **The diagnostics file is one the run owns.** It is opened with `2>`, which
+  truncates, and removed afterwards. Asking `mktemp` for it meant accepting
+  whatever came back: requiring the path to be absolute and to exist establishes
+  neither freshness nor ownership, and under root that is somebody else's file.
+  It is a name inside the scratch directory this run allocated, and a scan with
+  nowhere of its own to write fails closed rather than writing elsewhere.
+
 - **A symbolic arithmetic shift is not a redirection.** `mask=$((value << shift))`
   queued `shift` as a here-document delimiter, and unless a later line was exactly
   that word, every line to EOF was skipped — one expression excusing the rest of
   the file. Excluding a digit operand covered `1 << 2` and nothing symbolic, so
-  the expansion is removed before the redirections are read.
+  the expansion is removed before the redirections are read — both spellings of
+  it, since `(( … ))` is the command form of the same expression.
 
 - **Every document a command opens is queued.** `cat <<ONE <<TWO` opens both, in
   the order written; recording only the first meant the second body was read as

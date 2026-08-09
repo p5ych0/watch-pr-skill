@@ -145,11 +145,16 @@ SCAN_PROLOGUE='
     # side joins up. It is not a lexer: an arithmetic expansion containing a quote
     # would take its quoting out of the line with it, which is a direction that
     # makes a rule report rather than excuse.
+    # BOTH SPELLINGS. `$(( … ))` is the expansion and `(( … ))` is the arithmetic
+    # COMMAND — `(( mask = value << shift )) || :` — and stripping only the first
+    # left the second queueing `shift` as a delimiter, which is the same
+    # swallow-the-file failure with a different two characters in front of it.
     function strip_arith(l, out, i, ch, d) {
         out = ""; i = 1
         while (i <= length(l)) {
-            if (substr(l, i, 3) == "$((") {
-                d = 2; i += 3
+            if (substr(l, i, 3) == "$((" || substr(l, i, 2) == "((") {
+                d = 2
+                i += (substr(l, i, 3) == "$((") ? 3 : 2
                 while (i <= length(l) && d > 0) {
                     ch = substr(l, i, 1)
                     if (ch == "(") d++
@@ -183,7 +188,64 @@ SCAN_PROLOGUE='
     #                   along with nothing else, so floor(n/2) survive.
     # In each case the letter is escaped when an odd number of backslashes reaches
     # the engine.
+    # A BACKSLASH CAN BE SYNTHESISED. Inside `$'…'` the escapes are DECODED, so
+    # `$'\134s'` is octal 134 — a backslash — followed by `s`, and the engine
+    # receives the GNU `\s` while the source contains no `\s` at all. Counting
+    # literal backslashes saw `\1` and called it clean.
+    #
+    # The producers are a CLOSED SET, which is what makes this a rule rather than
+    # another parser: the ANSI-C escapes that yield a backslash are `\\`, octal
+    # `\134` and `\0134`, hex `\x5c`, and the unicode `\`/`\U0000005c`. Each
+    # becomes one backslash; then the run is counted as anywhere else, because an
+    # unrecognised escape such as `\s` is kept by bash as backslash-plus-letter.
+    #
+    # `\\` IS REPLACED FIRST, so `$'\\134'` is a literal backslash followed by the
+    # digits rather than an octal escape — which is what bash does with it.
+    # WALKED, NOT `gsub`-ED. Reconstructing a backslash through a gsub REPLACEMENT
+    # means writing one into the replacement string, where `\` is itself the escape
+    # character — the first version produced no backslash at all and reported a
+    # literal one as a GNU escape. Walking the span has no replacement string.
+    function ansic_decode(seg, out, i, ch, nx) {
+        out = ""; i = 1
+        while (i <= length(seg)) {
+            ch = substr(seg, i, 1)
+            if (ch != "\134") { out = out ch; i++; continue }
+            nx = substr(seg, i + 1)
+            # `\\` FIRST, so `$'\\134'` is a literal backslash and then digits
+            # rather than an octal escape — which is what bash does with it.
+            if (substr(nx, 1, 1) == "\134")   { out = out "\134"; i += 2; continue }
+            if (nx ~ /^0134/)                 { out = out "\134"; i += 5; continue }
+            if (nx ~ /^134/)                  { out = out "\134"; i += 4; continue }
+            if (nx ~ /^x5[cC]/)               { out = out "\134"; i += 4; continue }
+            if (nx ~ /^u005[cC]/)             { out = out "\134"; i += 6; continue }
+            if (nx ~ /^U0000005[cC]/)         { out = out "\134"; i += 10; continue }
+            # An UNRECOGNISED escape is kept as backslash-plus-character, which is
+            # what bash does — and is why `$'\s'` reaches the engine as `\s`.
+            out = out ch substr(nx, 1, 1); i += 2
+        }
+        return out
+    }
+    # True when a decoded `$'…'` span escapes a letter from `set`. The span ends at
+    # the first quote: an escaped one inside it — `$'\''` — closes it early here,
+    # which reads the tail as ordinary shell and makes a rule REPORT rather than
+    # excuse, the same direction the split takes.
+    function ansic_hit(l, set, seg, i, n, ch) {
+        while (match(l, /\$\047[^\047]*\047/)) {
+            seg = ansic_decode(substr(l, RSTART + 2, RLENGTH - 3))
+            for (i = 1; i <= length(seg); i++) {
+                if (substr(seg, i, 1) != "\134") continue
+                n = 0
+                while (substr(seg, i, 1) == "\134") { n++; i++ }
+                ch = substr(seg, i, 1)
+                if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
+                i--
+            }
+            l = substr(l, RSTART + RLENGTH)
+        }
+        return 0
+    }
     function esc_class(l, set, i, n, ch, q, kept) {
+        if (ansic_hit(l, set)) return 1
         q = ""
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
@@ -193,7 +255,12 @@ SCAN_PROLOGUE='
                 ch = substr(l, i, 1)
                 if (ch == "") return 0
                 if (q == "\047")                    kept = n
-                else if (q == "\042" || q == "$") kept = int((n + 1) / 2)
+                else if (q == "\042")               kept = int((n + 1) / 2)
+                # `$'…'` IS DECODED ELSEWHERE, by `ansic_hit`, because a backslash
+                # there can be SYNTHESISED from `\134` or `\x5c` and no count of
+                # the source characters can see one. Judging it twice, by two
+                # different rules, is how the two answers come to disagree.
+                else if (q == "$")                  kept = 0
                 else                              kept = int(n / 2)
                 if (kept % 2 == 1 && index(set, ch) > 0) return 1
                 # The character that ENDED the run may be a quote, and whether it
@@ -291,14 +358,20 @@ SCAN_EPILOGUE='
 scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     local prog="$1"; shift
     local errf out rc msg mrc
-    # THE ERROR FILE IS VALIDATED TOO, and it is the one that matters most: this
-    # file is where a failed scan reports itself, and a path `mktemp` printed
-    # without creating makes the `2>` redirection fail — the diagnostic is lost and
-    # the scan reads as clean. `mktemp_d` covers directories; a file needs the same
-    # check, which is three lines rather than a helper for one caller.
-    errf="$(mktemp 2>/dev/null)" || return 2
-    case "$errf" in /*) ;; *) return 2 ;; esac
-    [ -f "$errf" ] && [ -w "$errf" ] || return 2
+    # INSIDE THE SCRATCH DIRECTORY THIS FILE OWNS, not wherever `mktemp` points.
+    # Existence and writability do not establish OWNERSHIP: a `mktemp` handing back
+    # an existing writable path — a stub, a hostile `TMPDIR`, a collision — gives
+    # the scan a file it truncates with `2>` and deletes on the way out, which
+    # under root is somebody else's file. Validating the path was the wrong repair;
+    # not asking for one is the right one. The directory is already allocated and
+    # already validated, so a name inside it needs no second check.
+    #
+    # It is where a failed scan REPORTS ITSELF, which is why this fails closed
+    # rather than falling back to the current directory: no diagnostics file means
+    # a failure that looks like a clean result.
+    [ -n "${PORT_TMPDIR:-}" ] && [ -d "$PORT_TMPDIR" ] || return 2
+    errf="$PORT_TMPDIR/scan-stderr"
+    : > "$errf" 2>/dev/null || return 2
     rc=0
     # The body is wrapped in a function so the END block can run it on a trailing
     # unterminated continuation — a file whose last line ends in a backslash would
@@ -1058,33 +1131,35 @@ else
     die "the portability workflow is not where this check expects it"
 fi
 
-# ── A TEMPORARY PATH IS VALIDATED BEFORE IT IS USED ────────────────────────
-# `mktemp` can print a path it did not create and still exit zero. For the scan's
-# stderr file that is not an abstract risk: a RELATIVE path is redirected into
-# whatever the current directory happens to be, so a mandatory pre-push gate writes
-# a file into the tree it is checking and then deletes it. The path is required to
-# be absolute and to exist before anything is redirected into it.
-mkdir -p "$PTMP/stub" "$PTMP/cwd"
+# ── THE DIAGNOSTICS FILE IS ONE THIS RUN OWNS ──────────────────────────────
+# The scan's stderr file is where a failed scan reports itself, and it is opened
+# with `2>`, which TRUNCATES, and removed afterwards. Asking `mktemp` for it meant
+# taking whatever it returned: an earlier repair required the path to be absolute
+# and to exist, and neither establishes ownership — a stub, a hostile `TMPDIR` or
+# a collision hands back a real file, and under root that is somebody else's.
+#
+# So the path is a name inside the scratch directory this run allocated. What is
+# left to prove is that a scan with nowhere of its own to write FAILS rather than
+# writing somewhere else: no diagnostics file means a failure indistinguishable
+# from a clean result.
 printf '#!/usr/bin/env bash\ngrep -qE "\\s" "$f"\n' > "$PTMP/needstmp.sh"
-# A RELATIVE path that EXISTS. Only the absolute-path test rejects this one: the
-# file is there and writable, so a check for those alone is satisfied — and the
-# gate then writes its diagnostics into whatever directory it was run from.
-printf '#!/usr/bin/env bash\n: > relative-errfile\nprintf %%s relative-errfile\n' > "$PTMP/stub/mktemp"
-chmod +x "$PTMP/stub/mktemp"
 mk_rc=0
-( cd "$PTMP/cwd" && PATH="$PTMP/stub:$PATH" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
+( PORT_TMPDIR="$PTMP/no-such-directory" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
 [ "$mk_rc" -eq 2 ] \
-    && pass "a relative path from mktemp is refused, even when it exists" \
-    || die "the scan redirected into a relative temporary path (rc=$mk_rc)"
-# An ABSOLUTE path that was NOT created — the failure shape `mktemp` actually has.
-# Only the existence test rejects this one, because `2>` would create the file and
-# the scan would run as if nothing were wrong.
-printf '#!/usr/bin/env bash\nprintf %%s "%s/uncreated-errfile"\n' "$PTMP" > "$PTMP/stub/mktemp"
+    && pass "a scan with no scratch directory of its own fails closed" \
+    || die "the scan ran without owned scratch space (rc=$mk_rc)"
 mk_rc=0
-( PATH="$PTMP/stub:$PATH" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
+( PORT_TMPDIR="" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
 [ "$mk_rc" -eq 2 ] \
-    && pass "…and so is an absolute path mktemp printed without creating" \
-    || die "the scan used a path mktemp never created (rc=$mk_rc)"
+    && pass "…and an unset one is refused rather than defaulted" \
+    || die "an empty PORT_TMPDIR was accepted (rc=$mk_rc)"
+# …and nothing is written into the working directory in either case, which is what
+# a relative path from an unvalidated `mktemp` used to do.
+mkdir -p "$PTMP/cwd"
+( cd "$PTMP/cwd" && PORT_TMPDIR="" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || true
+[ -z "$(ls -A "$PTMP/cwd" 2>/dev/null)" ] \
+    && pass "…and nothing is written into the working directory" \
+    || die "a refused scan left files in the current directory"
 
 # ── AN OPERAND EXEMPTION THAT CANNOT SAY WHERE THE OPERAND ENDS ────────────
 # `grep -e -x -e PATTERN f` passes TWO patterns. The exemption that used to cover
@@ -1155,6 +1230,41 @@ ao_hits="$(scan "$RULE_A" "$PTMP/ansicodd.sh")" || ao_hits=SCANFAIL
 { [ "$ao_hits" != SCANFAIL ] && [ -z "$ao_hits" ]; } \
     && pass "…while three inside it are a literal backslash" \
     || die "a literal backslash in \$'..' was reported ('$ao_hits')"
+
+# ── A BACKSLASH CAN BE SYNTHESISED ─────────────────────────────────────────
+# `grep $'\134s' f` contains no `\s` anywhere in its source: octal 134 IS the
+# backslash, and ANSI-C quoting decodes it before grep sees the GNU `\s`. Counting
+# literal backslashes saw `\1` and called the script clean.
+printf '#!/usr/bin/env bash\ngrep $%s\\134s%s "$f"\n' "'" "'" > "$PTMP/ansicoct.sh"
+oc_hits="$(scan "$RULE_A" "$PTMP/ansicoct.sh")" || oc_hits=SCANFAIL
+{ [ "$oc_hits" != SCANFAIL ] && [ -n "$oc_hits" ]; } \
+    && pass "an octal backslash inside \$'..' still escapes the letter" \
+    || die "\$'\\134s' was read as portable ('$oc_hits')"
+# …and the hex spelling of the same character.
+printf '#!/usr/bin/env bash\ngrep $%s\\x5cs%s "$f"\n' "'" "'" > "$PTMP/ansichex.sh"
+hx_hits="$(scan "$RULE_A" "$PTMP/ansichex.sh")" || hx_hits=SCANFAIL
+{ [ "$hx_hits" != SCANFAIL ] && [ -n "$hx_hits" ]; } \
+    && pass "…and the hex spelling of it" \
+    || die "\$'\\x5cs' was read as portable ('$hx_hits')"
+# …while `\\134` is a literal backslash followed by DIGITS, because the pair is
+# consumed first — which is what bash does, and the reason the order matters.
+printf '#!/usr/bin/env bash\ngrep $%s\\\\134s%s "$f"\n' "'" "'" > "$PTMP/ansicesc.sh"
+ae_hits="$(scan "$RULE_A" "$PTMP/ansicesc.sh")" || ae_hits=SCANFAIL
+{ [ "$ae_hits" != SCANFAIL ] && [ -z "$ae_hits" ]; } \
+    && pass "…while an escaped backslash before the digits is not an octal escape" \
+    || die "\$'\\\\134s' was read as an escape ('$ae_hits')"
+
+# ── THE ARITHMETIC COMMAND IS ARITHMETIC TOO ───────────────────────────────
+# `(( mask = value << shift ))` is the command form of the same expression, and
+# stripping only `$(( … ))` left it queueing `shift` as a delimiter — the same
+# swallow-the-file failure with two fewer characters in front of it.
+{ printf '#!/usr/bin/env bash\n'
+  printf '(( mask = value << shift )) || :\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/arithcmd.sh"
+ax_hits="$(scan "$RULE_A" "$PTMP/arithcmd.sh")" || ax_hits=SCANFAIL
+{ [ "$ax_hits" != SCANFAIL ] && [ -n "$ax_hits" ]; } \
+    && pass "the arithmetic COMMAND form does not open a here-document either" \
+    || die "(( … << … )) swallowed the rest of the file ('$ax_hits')"
 
 # ── A SYMBOLIC SHIFT IS NOT A HERE-DOCUMENT ────────────────────────────────
 # `mask=$((value << shift))` queued `shift` as a delimiter, and unless some later
