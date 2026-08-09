@@ -94,6 +94,11 @@ SCAN_PROLOGUE='
         n = 1; SEG[1] = ""; q = ""
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
+            # Inside DOUBLE quotes a backslash escapes the next character, so
+            # `"a\"b"` closed at the escaped quote and reopened at the real one —
+            # every operator after it read as quoted. Single quotes have no escape,
+            # which is why this only applies to the double-quoted state.
+            if (q == "\042" && ch == "\134") { SEG[n] = SEG[n] ch substr(l, i+1, 1); i++; continue }
             if (q == "") {
                 if (ch == "\047" || ch == "\042") { q = ch; SEG[n] = SEG[n] ch; continue }
                 rest = substr(l, i, 2)
@@ -109,6 +114,7 @@ SCAN_PROLOGUE='
         q = ""
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
+            if (q == "\042" && ch == "\134") { i++; continue }
             if (q == "") {
                 if (ch == "\047" || ch == "\042") { q = ch; continue }
                 rest = substr(l, i, length(pat))
@@ -360,7 +366,7 @@ RULE_D='
         report("associative arrays are Bash 4: " line); return }
     if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
-    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKaUuL]\}/) {
+    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKakUuL]\}/) {
         report("parameter transformation is Bash 4.4: " line); return }
     # On WHOLE, and only in the first segment, because the operator is what the
     # split removed and every segment would otherwise report the same line.
@@ -492,6 +498,12 @@ c_rc=0; c_hits="$(scan "$RULE_C" "${TARGETS[@]}")" || c_rc=$?
 $c_hits"
 
 # Rule B is per file, because the guard it requires is per file.
+# The count, as a function so the failing path can be reached. Inline, a stubbed
+# counter could not be put in front of it, and the branch that treats a broken
+# count as a clean answer would be unreachable code asserting nothing.
+count_hits() {   # count_hits <text> ; prints the count, non-zero if it could not
+    printf '%s\n' "$1" | grep -c ':'
+}
 unguarded=""
 for f in "${TARGETS[@]}"; do
     b="$(basename "$f")"
@@ -510,8 +522,17 @@ for f in "${TARGETS[@]}"; do
                 allowed="$(printf '%s' "$GNU_EXEMPT" | tr -s '[:space:]' '\n' \
                     | sed -n "s|^$b:$c:||p")" ;;
         esac
-        found="$(printf '%s\n' "$b_hits" | grep -c ':')" || found=0
-        [ "${found:-0}" = "${allowed:-0}" ] && continue
+        # A COUNTER THAT FAILED IS NOT A COUNT OF ZERO. `|| found=0` turned a
+        # broken count into the same value an ordinary unexempted command has —
+        # `allowed` is 0 for those — so the equality below matched and the hit was
+        # discarded. A failed parse must not look like a clean answer.
+        fcount=0
+        found="$(count_hits "$b_hits")" || fcount=$?
+        if [ "$fcount" -ne 0 ]; then
+            die "the occurrence count failed for $c in $b (rc=$fcount)"
+            continue
+        fi
+        [ "${found:-x}" = "${allowed:-0}" ] && continue
         unguarded="$unguarded
 ($found occurrence(s), $allowed approved)$b_hits"
     done
@@ -616,6 +637,12 @@ plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option
 plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
 plant declra   "declare -r -A M"                    D "an associative array declared with a separated option"
 plant declar2  "declare -Ar M"                      D "…and with the options run together"
+plant transk   "printf '%s' \"\${items[@]@k}\""      D "the lowercase @k transformation"
+# The escape matters to the SPLIT as well as to the operator test: without it the
+# walker closes at the escaped quote, the `;` inside the string reads as a
+# separator, and the command is cut away from its own pattern.
+plant qsep2    'grep "a\";\s" "$f"'                      A "a GNU escape behind an escaped quote"
+plant escq     "printf '%s' \"a\\\"b\" |& cat"          D "a real |& after an escaped quote"
 plant transU   "printf '%s' \"\${name@U}\""            D "the @U transformation"
 plant transL   "printf '%s' \"\${name@L}\""            D "the @L transformation"
 plant casearm  "case x in x) seq 1 5; : ;; esac"    B "a GNU command at the start of a case arm" seq
@@ -727,6 +754,54 @@ cd_hits="$(scan "$RULE_D" "$PTMP/contd.sh")" || cd_hits=SCANFAIL
 { [ "$cd_hits" != SCANFAIL ] && [ -n "$cd_hits" ]; } \
     && pass "…and so does rule D" \
     || die "a continued declare -A was missed ('$cd_hits')"
+
+# ── A COUNTER THAT WRITES AND THEN FAILS IS NOT A COUNT ────────────────────
+# `|| found=0` turned a broken count into the same value an ordinary unexempted
+# command has, so the equality that follows matched and the hit was discarded — the
+# gate reporting clean after its own counter failed.
+CNTMP="$PTMP/counter"; mkdir -p "$CNTMP/bin"
+printf '#!/usr/bin/env bash\nprintf "5\\n"\nexit 1\n' > "$CNTMP/bin/grep"
+chmod +x "$CNTMP/bin/grep"
+cnt_fn="$(sed -n '/^count_hits() {/,/^}/p' "${BASH_SOURCE[0]}")"
+cnt_rc=0
+cnt_out="$(PATH="$CNTMP/bin:$PATH" bash -c '
+    set -o pipefail
+    '"$cnt_fn"'
+    count_hits "a:b"' 2>&1)" || cnt_rc=$?
+{ [ "$cnt_rc" -ne 0 ] && [ -n "$cnt_out" ]; } \
+    && pass "a counter that printed a plausible number and then failed is not a count" \
+    || die "a failed counter was accepted (rc=$cnt_rc out='$cnt_out')"
+# …AND THE CALL SITE TAKES THAT STATUS. The mechanism above is behavioural; this is
+# the adoption, and it is a spelling check because the branch cannot be reached
+# from here — stubbing `grep` for the production loop would break every other scan
+# in the same run. Both halves are needed: the mechanism alone does not say the
+# loop reads the status, and the spelling alone does not say a failure propagates.
+# Against the PRODUCTION half, not the whole file: this assertion's own line
+# contains the literal it looks for, so grepping the file it lives in it found
+# itself and passed no matter what the loop did — a check whose subject is its own
+# text. `$PORT_SELF` is everything above the fixture marker.
+grep -qF 'found="$(count_hits "$b_hits")" || fcount=$?' "$PORT_SELF" \
+    && pass "…and the counting loop captures that status rather than defaulting" \
+    || die "the count's status is not taken where it is produced"
+
+# ── AN EXTRACTOR THAT WRITES AND THEN FAILS IS NOT AN EXTRACTOR ────────────
+# `awk` can emit a valid prefix and then fail on an I/O error, and a non-empty test
+# alone turned that into success — this file scanning a TRUNCATED copy of its own
+# implementation and reporting clean on the part it never read.
+EXTMP="$PTMP/extractor"; mkdir -p "$EXTMP/bin"
+printf '#!/usr/bin/env bash\nprintf "a partial prefix\\n"\nexit 1\n' > "$EXTMP/bin/awk"
+chmod +x "$EXTMP/bin/awk"
+ex_fn="$(sed -n '/^port_production() {/,/^}/p' "${BASH_SOURCE[0]}")"
+ex_out="$(PATH="$EXTMP/bin:$PATH" bash -c '
+    PORT_SPLIT="x"
+    '"$ex_fn"'
+    if port_production "'"$EXTMP"'/out"; then echo ACCEPTED; else echo REFUSED; fi
+    printf " wrote=%s" "$(wc -c < "'"$EXTMP"'/out" | tr -d " ")"' 2>&1)"
+case "$ex_out" in
+    REFUSED*wrote=0) die "the extractor fixture wrote nothing; non-empty was never in question" ;;
+    REFUSED*) pass "an extractor that wrote a prefix and then failed is refused" ;;
+    *) die "a failed extractor was accepted ('$ex_out')" ;;
+esac
 
 # ── the scan fails closed on input it cannot read ──────────────────────────
 # An unreadable file yielding no hits is indistinguishable from a clean one, which

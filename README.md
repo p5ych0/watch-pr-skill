@@ -180,9 +180,11 @@ that introduces it.
 Two checks now, because one cannot cover both halves:
 
 - `test-portability.sh` reads the text for constructs BSD rejects but GNU
-  accepts — `\s` and friends in a `grep`, any `sed -i`, `readlink -f` — and for
-  Bash 4 constructs, since stock macOS ships Bash 3.2. Nothing fails at runtime on
-  Linux for these, so only text can find them.
+  accepts — `\s` and friends in a `grep`, the *detached* `sed -i` forms,
+  `readlink -f` — and for Bash 4 constructs, since stock macOS ships Bash 3.2.
+  Nothing fails at runtime on Linux for these, so only text can find them.
+  (`sed -ibak`, a suffix attached, works on both and is accepted; bare `-i` and
+  `-i ''` are the ones that cannot be spelled portably.)
 - A **portability CI job** runs the entire suite with the GNU-only tools removed
   from `PATH`. Text cannot see a command name assembled at runtime; absence can.
   It runs in parallel with the normal job, so it extends CI by the difference
