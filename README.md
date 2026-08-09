@@ -179,12 +179,16 @@ that introduces it.
 
 Two checks now, because one cannot cover both halves:
 
-- `test-portability.sh` reads the text for constructs BSD rejects but GNU
-  accepts — `\s` and friends in a `grep`, the *detached* `sed -i` forms,
-  `readlink -f` — and for Bash 4 constructs, since stock macOS ships Bash 3.2.
+- `test-portability.sh` reads the text for three things whose surfaces are
+  **closed**: GNU regex escapes in a `grep`/`sed`/`awk` pattern (POSIX defines no
+  backslash-class escapes, so the set cannot grow), constructs newer than the Bash
+  3.2 macOS ships, and the names of GNU-only tools that cannot occur in prose.
   Nothing fails at runtime on Linux for these, so only text can find them.
-  (`sed -ibak`, a suffix attached, works on both and is accepted; bare `-i` and
-  `-i ''` are the ones that cannot be spelled portably.)
+
+  It does **not** check GNU-only *flags* — `sed -i`, `readlink -f`, `grep -P`,
+  `date -d`. Those need an option parser, which does not terminate: eight review
+  rounds produced clusters, long forms, equals forms, operands and quoted option
+  words, each fix revealing the next. They are review's job.
 - A **portability CI job** runs the entire suite with the GNU-only tools removed
   from `PATH`. Text cannot see a command name assembled at runtime; absence can.
   It runs in parallel with the normal job, so it extends CI by the difference

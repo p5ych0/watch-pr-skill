@@ -27,7 +27,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
 | `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
-| `skills/watch-prs/scripts/test-portability.sh` | What BSD rejects and GNU accepts — the half of portability that only text can catch. |
+| `skills/watch-prs/scripts/test-portability.sh` | The three portability rules with closed surfaces: GNU regex escapes, Bash 4 constructs, GNU-only tool names. Flags are review's job — see the note in the file. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
@@ -140,10 +140,12 @@ category; do not "fix" a script into a stricter mode.
   suite is a mandatory pre-push gate, so a GNU-only construct blocks a macOS
   contributor while Ubuntu CI stays green — invisible on the machine that
   introduced it, which is why review kept being what caught it.
-  `test-portability.sh` reads the text for what BSD rejects and GNU accepts
-  (`\s` in a `grep`, `sed -i` with no suffix, `readlink -f`); the **portability CI
-  job** runs the whole suite with the GNU-only tools removed from `PATH`, which is
-  the only thing that sees a command name built at runtime. A tool stock macOS
+  `test-portability.sh` reads the text for the three things whose surfaces are
+  CLOSED — GNU regex escapes, Bash 4 constructs, and GNU-only tool names — and
+  deliberately not for GNU-only flags, which need an option parser and do not
+  terminate; the **portability CI job** runs the whole suite with the GNU-only
+  tools removed from `PATH`, which is the only thing that sees a command name
+  built at runtime. A tool stock macOS
   lacks is still usable — probe it with `command -v` and provide a fallback, as
   `testlib.sh` does for `timeout`.
 

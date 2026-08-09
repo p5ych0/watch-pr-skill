@@ -315,74 +315,32 @@ GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
 # shape, so a third — a second, unguarded use — fails.
 GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 
-# ── RULE C: GNU-only flags on commands that do exist ───────────────────────
+# ── RULE C WAS REMOVED, AND THIS RECORDS WHY ───────────────────────────────
 #
-# Also a blacklist, and one flag behind. Absence cannot catch these at all: the
-# commands are present everywhere, and GNU accepts the flag — only BSD rejects it.
+# It rejected GNU-only FLAGS on commands that exist everywhere: `sed -i`,
+# `readlink -f`, `grep -P`, `date -d`, `stat -c`, `xargs -r`, `sort -h`, `echo -e`.
+# Absence cannot catch those — the command is present on both platforms and only
+# BSD rejects the option — so it had to be read from the text.
 #
-#   sed -i        THE DETACHED FORMS have no portable spelling. BSD requires a
-#                 suffix argument, so `sed -i 's/a/b/' f` eats the script as the
-#                 suffix; GNU documents `-i[SUFFIX]` as ATTACHED, so
-#                 `sed -i '' 's/a/b/' f` makes the empty string the script. Neither
-#                 bare `-i` nor `-i ''` works on both. Write a temp file and `mv`.
+# Reading an option from text means parsing one, and over eight review rounds that
+# meant: the flag anywhere in a cluster (`grep -Pc`), after another option
+# (`grep -n -P`), after an option taking an OPERAND (`grep -m 1 -P`), its long
+# alias (`--perl-regexp`), the equals form (`--in-place=.bak`), the operand of `-e`
+# which is not a flag at all (`grep -e -P`), fixed-string mode where the rule does
+# not apply (`grep -F`), a quoted option word (`grep '-P'`), and an attached suffix
+# that is portable where the bare form is not (`sed -ibak`). Each was a real hole,
+# and each fix revealed the next.
 #
-#                 `-ibak` — a nonempty suffix ATTACHED — does work on both, and is
-#                 accepted. The flag is therefore matched only when `i` ENDS the
-#                 cluster: `sed -ni` is `-n` and a bare `-i`, while `sed -ibak` is
-#                 `-i` carrying its suffix. That is the one flag where "anywhere in
-#                 the cluster" is wrong, because what follows it is data.
-#   sed -r        GNU spelling of `-E`, which is the portable one.
-#   readlink -f   BSD readlink has no -f.
-#   grep -P       PCRE, GNU-only.
-#   date -d       BSD date uses -v and -j -f.
-#   stat -c       BSD stat uses -f.
-#   xargs -r      BSD xargs does not run empty by default, so -r is both
-#                 unsupported and unnecessary.
-#   sort -h       GNU-only.
+# THE RULES THAT REMAIN HAVE CLOSED SURFACES. POSIX defines no backslash-class
+# escapes, so rule A's set cannot grow. Bash 3.2's missing features are a finite
+# list. A command name is a name. Rule C's surface was option syntax, which is not
+# closed — and this repository already records a structural checker built and
+# deleted six times for exactly that reason.
 #
-# THE FLAG NEED NOT END THE CLUSTER EITHER. `grep -Pc` is `-P` and `-c` run
-# together, and a pattern requiring the letter to be last missed it — found in
-# the checker's own plumbing once that came into scope.
-#
-# THE FORBIDDEN FLAG NEED NOT COME FIRST. `grep -n -P`, `sed -n -r`, `stat -L -c`:
-# each rule reads through the whole option sequence, because a version that
-# examined only the first option word reported those clean — and the portability
-# job cannot help, since `grep`, `sed` and `stat` are present everywhere and only
-# BSD rejects the flag.
-#   echo -e       Not portable in any shell; `printf` is.
-RULE_C='
-    # QUOTES AROUND AN OPTION WORD ARE REMOVED BEFORE THE COMMAND SEES IT, so
-    # `grep '-P' x` is the same invocation as `grep -P x`. They are stripped for
-    # this rule only: it matches command names and option words, where a quote
-    # carries no meaning. Rule A must NOT do this — there the quotes are what
-    # separate a pattern from an option, and the escapes it hunts live inside them.
-    gsub(/["'"'"']/, "", line)
-    # THE OPERAND OF `-e`/`-f` IS NOT A FLAG, here as in Rule A: `grep -e -P file`
-    # searches for the literal `-P`. First, because the operand looks exactly like
-    # what every clause below is hunting for.
-    if (line ~ /(^|[^a-zA-Z_-])(grep|sed)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*[ef][[:space:]]+-/) return
-    # NO `line = $0` HERE. The prologue hands these rules a LOGICAL line; taking
-    # `$0` again threw the join away, so `grep -m 1 \` + `-P …` and `declare \` +
-    # `-A M` reported clean while Rule A, which never reassigned, caught its own
-    # continued case. A shared prologue only helps the rules that let it.
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z0-9]*i)([[:space:]]|$)/) {
-        report("sed -i has no portable spelling; write a temp file and mv: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)(=[^[:space:]]*)?|-[A-Za-z0-9]*r[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("sed -r is the GNU spelling of -E: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)(=[^[:space:]]*)?|-[A-Za-z0-9]*f[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("readlink -f is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)(=[^[:space:]]*)?|-[A-Za-z0-9]*P[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("grep -P is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)(=[^[:space:]]*)?|-[A-Za-z0-9]*d[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("date -d is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)(=[^[:space:]]*)?|-[A-Za-z0-9]*c[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("stat -c is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)(=[^[:space:]]*)?|-[A-Za-z0-9]*r[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("xargs -r is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)(=[^[:space:]]*)?|-[A-Za-z0-9]*h[A-Za-z0-9]*)([[:space:]]|$)/) {
-        report("sort -h is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/) {
-        report("echo -e is not portable; use printf: " line); return }'
+# WHAT THIS GIVES UP, plainly: nothing catches `sed -i`, `readlink -f`, `grep -P`,
+# `date -d`, `stat -c`, `xargs -r`, `sort -h` or `echo -e` now. They are review's
+# job. A real loss, traded for a check that terminates.
+
 
 # ── RULE D: Bash 4 constructs, on a platform whose /bin/bash is 3.2 ────────
 #
@@ -577,15 +535,6 @@ d_rc=0; d_hits="$(scan "$RULE_D" "${TARGETS[@]}")" || d_rc=$?
     || die "Bash 4+ construct(s):
 $d_hits"
 
-c_rc=0; c_hits="$(scan "$RULE_C" "${TARGETS[@]}")" || c_rc=$?
-[ "$c_rc" -eq 0 ] \
-    && pass "the GNU-flag scan completed" \
-    || die "the GNU-flag scan could not be completed (rc=$c_rc)"
-[ -z "$c_hits" ] \
-    && pass "no command is given a GNU-only flag" \
-    || die "GNU-only flag(s):
-$c_hits"
-
 # Rule B is per file, because the guard it requires is per file.
 # The count, as a function so the failing path can be reached. Inline, a stubbed
 # counter could not be put in front of it, and the branch that treats a broken
@@ -674,7 +623,6 @@ plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
     local hits rc=0
     case "$3" in
         A) hits="$(scan "$RULE_A" "$PTMP/$1.sh")" || rc=$? ;;
-        C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
         D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
         # THROUGH THE PRODUCTION LIST, not a regex built from the fixture's own
         # name. Constructed fresh, a planted `realpath` reported a hit even if
@@ -695,7 +643,6 @@ plant escape  "grep -qE '^[a-z]+\\s+[0-9]' \"\$f\"" A "the \\s that reached this
 plant worddig "sed -n 's/\\d//p' \"\$f\""           A "a \\d in a sed pattern"
 plant sha1sum "printf x | sha1sum"                  B "an unguarded sha1sum"
 plant realpath "realpath ./x"                       B "realpath, which stock macOS lacks"
-plant quotedP  "grep '-P' x \"\$f\""                   C "a quoted -P, which the shell unquotes before grep sees it"
 plant numfmt  "numfmt --from=iec 1K"                B "numfmt, a coreutils tool macOS does not ship"
 plant tac     "tac < \"\$f\""                        B "tac"
 plant gsed    "gsed -E 's/a/b/' x"                  B "a g-prefixed GNU tool"
@@ -711,15 +658,6 @@ plant casearm2 "case x in x) tac f; : ;; esac"      B "…at the start of a case
 plant ifcond2  "if tac f; then :; fi"               B "…as an if condition"        tac
 plant assignp  "if LC_ALL=C tac f; then :; fi"      B "…behind an assignment prefix" tac
 plant cmdwrap2 "if command tac f; then :; fi"       B "…through the command builtin" tac
-plant inplace "sed -i 's/a/b/' \"\$f\""             C "sed -i with no suffix"
-plant readl   "readlink -f \"\$f\""                 C "readlink -f"
-plant pcre    "grep -P '\\t' \"\$f\""               C "grep -P"
-plant echoe   "echo -e 'a\\tb'"                     C "echo -e"
-plant sedr    "sed -r 's/a+/b/' \"\$f\""              C "sed -r, the GNU spelling of -E"
-plant dated   "date -d '2026-01-01' +%s"            C "date -d"
-plant statc   "stat -c '%s' \"\$f\""                 C "stat -c"
-plant xargsr  "printf '' | xargs -r rm"             C "xargs -r"
-plant sorth   "sort -h < \"\$f\""                    C "sort -h"
 plant awky    "awk '/\\yfoo\\y/ { print }' \"\$f\""  A "gawk's \\y word boundary"
 plant awklt   "awk '/\\<foo\\>/ { print }' \"\$f\""  A "gawk's \\< and \\> boundaries"
 plant mapf     "mapfile -t X < <(printf 'a\\n')"     D "the mapfile that reached this very file"
@@ -730,21 +668,9 @@ plant upperpos "norm() { printf '%s' \"\${1^^}\"; }"   D "…on a positional par
 plant transf   "printf '%s' \"\${x@Q}\""              D "a Bash 4.4 parameter transformation"
 plant coprocp  "coproc CAT { cat; }"                D "coproc"
 plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
-plant grepPc   "grep -Pc ':' \"$f\""                 C "grep -Pc, where the flag is not last in its cluster"
-plant sedni    "sed -ni 'p' x"                        C "sed -ni, the same for -i"
-plant grepnp   "grep -n -P '\\d' \"\$f\""             C "grep -P after another option"
-plant grepmp   "grep -m 1 -P '\\d' \"\$f\""           C "grep -P after an option that takes an operand"
-plant greplong "grep --perl-regexp 'x' \"\$f\""       C "grep --perl-regexp, the long form of -P"
-plant sedlong  "sed --regexp-extended 's/a+/b/' x"  C "sed --regexp-extended"
-plant sortlong "sort --human-numeric-sort x"        C "sort --human-numeric-sort"
-plant sedilong "sed --in-place 's/a/b/' x"          C "sed --in-place"
 plant fallthru "case \"\$x\" in a) f ;& b) g ;; esac" D "the Bash 4 ;& case terminator"
 plant appendboth "cmd &>> log"                      D "the Bash 4 &>> redirection"
 plant pipeboth "cmd |& other"                       D "the Bash 4 |& pipeline"
-plant sedieq   "sed --in-place=.bak 's/a/b/' x"     C "sed --in-place=SUFFIX"
-plant dateeq   "date --date=2026-01-01 +%s"         C "date --date=TIME"
-plant stateq   "stat --format=%s x"                 C "stat --format=FORMAT"
-plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option operand"
 plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
 plant declra   "declare -r -A M"                    D "an associative array declared with a separated option"
 plant declar2  "declare -Ar M"                      D "…and with the options run together"
@@ -761,8 +687,6 @@ plant qsep2    'grep "a\";\s" "$f"'                      A "a GNU escape behind 
 plant escq     "printf '%s' \"a\\\"b\" |& cat"          D "a real |& after an escaped quote"
 plant transU   "printf '%s' \"\${name@U}\""            D "the @U transformation"
 plant transL   "printf '%s' \"\${name@L}\""            D "the @L transformation"
-plant sednr    "sed -n -r 's/a+/b/p' \"\$f\""        C "sed -r after another option"
-plant statlc   "stat -L -c '%s' \"\$f\""             C "stat -c after another option"
 plant upperpat "printf '%s' \"\${name^^[a-z]}\""     D "case conversion with a pattern operand"
 
 # ── …and does NOT fire on the correct forms ────────────────────────────────
@@ -773,7 +697,6 @@ refute() {   # refute <name> <line> <rule> <label>
     local hits rc=0
     case "$3" in
         A) hits="$(scan "$RULE_A" "$PTMP/$1.sh")" || rc=$? ;;
-        C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
         D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
     esac
     { [ "$rc" -eq 0 ] && [ -z "$hits" ]; } \
@@ -786,19 +709,15 @@ refute jqline  "gh api x --jq 'test(\"^\\\\s+\$\")'"          A "a \\s inside a 
 # portable to BSD and broken on GNU, where the detached empty argument becomes the
 # script. Recommending it would have shipped a command that fails on the platform
 # CI runs. It is planted as a rejection instead.
-plant sedempty "sed -i '' 's/a/b/' \"\$f\""         C "sed -i '' , which GNU reads as the script"
-refute sedE    "sed -E 's/a+/b/' \"\$f\""                     C "sed -E, the portable spelling"
 # `\b` IN AWK IS A BACKSPACE, not a word boundary — which is why gawk invented
 # `\y`. Rejecting it made the mandatory gate fail on portable code.
 refute awkbs   "awk 'BEGIN { printf \"\\b\" }'"               A "awk's portable backspace escape"
 refute grepF   "grep -F '\\s' \"\$f\""                        A "grep -F, where a backslash is a literal"
 refute fgrepc  "fgrep '\\s' \"\$f\""                          A "fgrep, which is the same thing"
-refute grepe   "grep -e -P \"\$f\""                          C "grep -e -P, a search for the literal -P"
 # A quoted separator must not cut a command away from its own pattern, and a real
 # operator must still be seen on a line that happens to contain quotes elsewhere.
 plant qsep     "grep 'x;\\s' \"\$f\""                  A "a GNU escape behind a quoted separator"
 plant qpipe2   "printf '%s' x |& cat"               D "a real |& on a line with unrelated quotes"
-refute sedibak "sed -ibak 's/a/b/' \"\$f\""             C "sed -ibak, an attached suffix both platforms take"
 # A DATA OCCURRENCE IS REPORTED, AND THAT IS THE DESIGN. `printf '%s' realpath`
 # runs nothing, and this rule says so anyway — it reads names, not grammar, because
 # reading grammar took four rounds and was still wrong. The escape hatch is the
@@ -813,9 +732,9 @@ plant dataarg "printf '%s' realpath"                B "a name used as data, whic
 # case passed while testing a single line that happened to contain no command.
 { printf '#!/usr/bin/env bash\n'
   printf "cat <<'EOF'\n"
-  printf 'grep -P is unsupported on BSD\n'
+  printf 'grep -P and \\s are unsupported on BSD\n'
   printf 'EOF\n'; } > "$PTMP/heredoc.sh"
-hd_hits="$(scan "$RULE_C" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
+hd_hits="$(scan "$RULE_A" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
 # …and a delimiter that is not a bare identifier still terminates. `END-MARK`
 # matched only as `END`, so the real terminator was never seen and everything to
 # EOF was skipped — one document excusing the rest of the file.
@@ -823,8 +742,8 @@ hd_hits="$(scan "$RULE_C" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
   printf "cat <<'END-MARK'\n"
   printf 'harmless\n'
   printf 'END-MARK\n'
-  printf 'grep -P x "$f"\n'; } > "$PTMP/dashdelim.sh"
-dd_hits="$(scan "$RULE_C" "$PTMP/dashdelim.sh")" || dd_hits=SCANFAIL
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/dashdelim.sh"
+dd_hits="$(scan "$RULE_A" "$PTMP/dashdelim.sh")" || dd_hits=SCANFAIL
 { [ "$dd_hits" != SCANFAIL ] && [ -n "$dd_hits" ]; } \
     && pass "…and a hyphenated here-document delimiter still terminates the skip" \
     || die "an END-MARK delimiter swallowed the rest of the file ('$dd_hits')"
@@ -837,8 +756,8 @@ dd_hits="$(scan "$RULE_C" "$PTMP/dashdelim.sh")" || dd_hits=SCANFAIL
   printf "cat <<'EOF'\n"
   printf 'harmless text\n'
   printf 'EOF\n'
-  printf 'grep -P x "$f"\n'; } > "$PTMP/afterheredoc.sh"
-ah_hits="$(scan "$RULE_C" "$PTMP/afterheredoc.sh")" || ah_hits=SCANFAIL
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/afterheredoc.sh"
+ah_hits="$(scan "$RULE_A" "$PTMP/afterheredoc.sh")" || ah_hits=SCANFAIL
 { [ "$ah_hits" != SCANFAIL ] && [ -n "$ah_hits" ]; } \
     && pass "…while code after the terminator is scanned again" \
     || die "the here-document skip swallowed the rest of the file ('$ah_hits')"
@@ -872,19 +791,14 @@ tg_hits="$(scan "$RULE_A" "$PTMP/twogrep.sh")" || tg_hits=SCANFAIL
 { [ "$tg_hits" != SCANFAIL ] && [ -n "$tg_hits" ]; } \
     && pass "a fixed-string command does not exempt the next command on the line" \
     || die "grep -F excused a later grep with a GNU escape ('$tg_hits')"
-printf '#!/usr/bin/env bash\ngrep -e -P "$f"; grep -P x "$f"\n' > "$PTMP/twogrepc.sh"
-tc_hits="$(scan "$RULE_C" "$PTMP/twogrepc.sh")" || tc_hits=SCANFAIL
-{ [ "$tc_hits" != SCANFAIL ] && [ -n "$tc_hits" ]; } \
-    && pass "…nor does a -e operand exempt a later -P" \
-    || die "grep -e -P excused a later grep -P ('$tc_hits')"
 
 # ── A HERE-STRING IS NOT A HERE-DOCUMENT ───────────────────────────────────
 # `<<<` has no terminator; treating it as a document skipped every following line
 # to EOF — one `cat <<<EOF` excusing the whole file.
 { printf '#!/usr/bin/env bash\n'
   printf 'cat <<<EOF\n'
-  printf 'grep -P x "$f"\n'; } > "$PTMP/herestring.sh"
-hs_hits="$(scan "$RULE_C" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/herestring.sh"
+hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
 { [ "$hs_hits" != SCANFAIL ] && [ -n "$hs_hits" ]; } \
     && pass "a here-string does not start a here-document skip" \
     || die "cat <<<EOF swallowed the rest of the file ('$hs_hits')"
@@ -903,11 +817,6 @@ cont_hits="$(scan "$RULE_A" "$PTMP/continued.sh")" || cont_hits=SCANFAIL
 grep -q ':2:' <<<"$cont_hits" \
     && pass "…and is reported at the line the command starts on" \
     || die "the continued hit is not reported at its first line ('$cont_hits')"
-printf '#!/usr/bin/env bash\ngrep -m 1 \\\n    -P %s \\\n    "$f"\n' "'x'" > "$PTMP/contc.sh"
-cc_hits="$(scan "$RULE_C" "$PTMP/contc.sh")" || cc_hits=SCANFAIL
-{ [ "$cc_hits" != SCANFAIL ] && [ -n "$cc_hits" ]; } \
-    && pass "…and rule C sees the joined line too" \
-    || die "a continued grep -P was missed ('$cc_hits')"
 printf '#!/usr/bin/env bash\ndeclare \\\n    -A M\n' > "$PTMP/contd.sh"
 cd_hits="$(scan "$RULE_D" "$PTMP/contd.sh")" || cd_hits=SCANFAIL
 { [ "$cd_hits" != SCANFAIL ] && [ -n "$cd_hits" ]; } \

@@ -16,24 +16,26 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   run, so the suite passes and the defect ships. The scan is the other way round.
   Both are kept because each catches what the other cannot.
 
+- **The text scan keeps only the rules with closed surfaces.** GNU regex escapes
+  (POSIX defines no backslash-class escapes, so the set cannot grow), Bash 4
+  constructs (a finite list), and GNU-only tool names (a name is a name). It does
+  *not* check GNU-only flags — `sed -i`, `readlink -f`, `grep -P`, `date -d` —
+  because reading an option from text means parsing one, and eight review rounds
+  produced clusters, long forms, equals forms, `-e` operands, fixed-string mode and
+  quoted option words, each fix revealing the next. That is the structural checker
+  this repository has already built and deleted six times. The flags are review's
+  job, and the trade is recorded where the rule used to be.
+
 - **Two checks, because one cannot cover both halves.** `test-portability.sh`
-  reads the text for what BSD rejects and GNU accepts — `\s` and friends in a
-  `grep`/`sed`/`awk` pattern, gawk's `\y`/`\<`/`\>`, `readlink -f`, `grep -P`,
-  `date -d`, `echo -e` — and for constructs newer than the Bash 3.2 macOS ships:
-  `mapfile`, associative arrays, `${x^^}`, `coproc`, `[[ -v ]]`. Nothing fails at runtime on Linux for these, so only text can find
+  reads the text for `\s` and its family in a `grep`/`sed`/`awk` pattern, gawk's
+  `\y`/`\<`/`\>`, the names of GNU-only tools, and constructs newer than the Bash
+  3.2 macOS ships: `mapfile`, associative arrays, `${x^^}`, `coproc`, `[[ -v ]]`,
+  `;&`, `&>>`, `globstar`, `{1..5..2}`. Nothing fails at runtime on Linux for these, so only text can find
   them. A **portability CI job** runs the entire suite with the GNU-only tools
   removed from `PATH`, which is the only thing that sees a command name assembled
   at runtime. A separate job, so it runs in parallel and CI grows by the
   difference rather than doubling — measured at 9m15s against the normal 6m35s,
   the gap being `run_limited` falling back to polling once `timeout` is gone.
-
-- **The DETACHED `sed -i` forms have no portable spelling.** BSD requires a suffix
-  argument, so `sed -i 's/a/b/' f` eats the script as the suffix; GNU documents
-  `-i[SUFFIX]` as *attached*, so `sed -i '' 's/a/b/' f` makes the empty string the
-  script. Neither works on both, and the first version of this check *recommended*
-  the BSD form. A nonempty suffix attached — `sed -ibak` — does work on both and is
-  accepted, which is why `-i` is matched only when it ends the option cluster:
-  `sed -ni` is `-n` and a bare `-i`, while `sed -ibak` is `-i` carrying its data.
 
 - **Here-document bodies are dropped before the rules see them.** `cat <<EOF`
   followed by prose is not shell, and passing it through made an ordinary mention
@@ -61,11 +63,6 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   scanner, so every rule inherits it, and a hit is reported at the line the command
   *starts* on.
 
-- **A forbidden flag need not come first, and a comment is not a guard.**
-  `grep -n -P` and `sed -n -r` passed a check that read only the first option word;
-  `# use command -v seq` satisfied the probe requirement for an unguarded `seq` two
-  lines down. Both halves of a rule now read the same text, with comments stripped.
-
 - **The command rule matches names that cannot occur in prose, and exempts by a
   LIST.** It began by matching command position and inferring a `command -v` guard,
   and four review rounds took that apart: the operators that begin a command, then
@@ -84,11 +81,12 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   the CI job's, behaviourally. The gap that leaves is a use of one of those three
   whose failure does not propagate, and it is the price of not being a parser.
 
-- **One rule terminates and the others do not, and which is which is written
-  down.** POSIX BRE and ERE define no backslash-class escapes at all, so
+- **Which rules terminate is written down, and the one that did not was
+  dropped.** POSIX BRE and ERE define no backslash-class escapes at all, so
   `\s \S \d \D \w \W \b \B` is the *complete* set of what GNU and PCRE add — a
-  ninth cannot appear. The command and flag lists are blacklists and are one name
-  behind; the CI job is what closes that class.
+  ninth cannot appear. gawk's own operators and the tool-name list are open, and
+  are blacklists that the CI job closes behaviourally. Option syntax is open with
+  nothing to close it, which is why that rule is gone.
 
 - **A whitelist was attempted and abandoned, and the reason is recorded** so it is
   not attempted again: extracting command position from shell needs a lexer, the
