@@ -50,10 +50,23 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   `# use command -v seq` satisfied the probe requirement for an unguarded `seq` two
   lines down. Both halves of a rule now read the same text, with comments stripped.
 
-- **The command rule requires a GUARD, not absence.** `testlib.sh` runs `timeout`
-  and `test-pr-round-count.sh` runs `sha1sum`, both correctly: each probes with
-  `command -v` and has a fallback. That is what a contributor reaching for any new
-  tool should be doing, so it is what passes.
+- **The command rule matches names that cannot occur in prose, and exempts by a
+  LIST.** It began by matching command position and inferring a `command -v` guard,
+  and four review rounds took that apart: the operators that begin a command, then
+  `then`/`else`/`do`, then `if`/`while`/`until`/`!`, then `)` for case arms, then
+  the `command` builtin, then assignment prefixes — and on the guard side,
+  comments, then quoted data, then probes controlling nothing, then a guarded use
+  exempting an unrelated one in the same file. That is a shell parser written a
+  case at a time, and CLAUDE.md records the last one: six versions, each reporting
+  PASS while its stated invariant was false.
+
+  So there is no position matching and no guard inference. A name with no English
+  meaning — `sha1sum`, `realpath`, `tac`, `gsed` — is an invocation wherever it
+  appears, and the two correct uses are named in an exemption list with their
+  reason. `timeout`, `seq` and `truncate` are ordinary English, appear all over
+  this tree as prose and protocol values, and are **not** in that list: they are
+  the CI job's, behaviourally. The gap that leaves is a use of one of those three
+  whose failure does not propagate, and it is the price of not being a parser.
 
 - **One rule terminates and the others do not, and which is which is written
   down.** POSIX BRE and ERE define no backslash-class escapes at all, so

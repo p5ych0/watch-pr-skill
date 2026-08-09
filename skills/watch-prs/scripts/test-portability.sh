@@ -72,6 +72,20 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 # glue two unrelated statements together.
 SCAN_PROLOGUE='
     function report(msg) { print FILENAME ":" start ": " msg }
+    # A RULE JUDGES A SIMPLE COMMAND, NOT A LOGICAL LINE. `grep -F x f; grep "\s" f`
+    # has one fixed-string command and one that is not, and an exemption taken for
+    # the whole line let the first excuse the second. The line is split on the
+    # operators that separate commands and each rule is applied per segment.
+    #
+    # Splitting on those operators inside QUOTES is wrong and is not handled — that
+    # is the lexer this file declines to write. The direction is loud: a quoted
+    # `;` splits one command into two halves, and a rule sees less context than it
+    # should, so it reports rather than excuses.
+    function segments(l, n, i, parts) {
+        n = split(l, parts, /(&&|\|\||[;|])/)
+        for (i = 1; i <= n; i++) SEG[i] = parts[i]
+        return n
+    }
     { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
       if (buf == "") start = FNR
       if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
@@ -90,7 +104,15 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     # otherwise never be examined at all.
     out="$(awk "$SCAN_PROLOGUE"'
         { RULES() }
-        function RULES() {'"$prog"'}
+        function RULES(  nseg, si) {
+            # `WHOLE` survives the split, for the constructs the split destroys:
+            # `;&` is a case terminator and splitting on `;` takes it apart.
+            WHOLE = line
+            nseg = segments(WHOLE)
+            for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; ONE() }
+            line = WHOLE
+        }
+        function ONE() {'"$prog"'}
     '"$SCAN_EPILOGUE" "$@" 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -151,7 +173,36 @@ RULE_A='
     if (line ~ /awk/ && line ~ /\\[sSdDwWBy<>]/) {
         report("gawk-only regex operator: " line); return }'
 
-# ── RULE B: GNU-only commands must be `command -v`-guarded ─────────────────
+# ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
+#
+# THIS RULE WAS REDESIGNED, and the reason is the point of the redesign.
+#
+# It used to match COMMAND POSITION and require a `command -v` guard. Across four
+# review rounds that cost: the operators that begin a command, then `then`/`else`/
+# `do`, then `if`/`while`/`until`/`!`, then `)` for case arms, then the `command`
+# builtin, then assignment prefixes like `LC_ALL=C seq` — and on the guard side,
+# excluding comments, then quoted data, then probes that control nothing, then
+# probes in the wrong branch. Every one of those was a real hole and every fix
+# revealed the next. That is a shell parser being written a case at a time, and
+# CLAUDE.md records the last one: six versions, each reporting PASS while its
+# stated invariant was false.
+#
+# So the position matching and the guard inference are gone. What is left needs no
+# grammar: a NAME THAT CANNOT APPEAR IN PROSE, anywhere in non-comment text. There
+# is no command position to get wrong, no guard to infer, and nothing for a future
+# `case` arm or assignment prefix to slip through.
+#
+# THE PRICE IS STATED. `timeout`, `seq` and `truncate` are ordinary English and
+# appear all over this tree as prose, protocol values and variable fragments —
+# `state=timeout`, `$TMP/seq`, a JSON error payload. They cannot be matched this
+# way and are NOT in the list below; they are covered by the portability CI job,
+# behaviourally, which needs no grammar either. A use of one whose failure does not
+# propagate is the gap, and it is the gap this design accepts in exchange for not
+# being a parser.
+#
+# The exemptions are a LIST, not an inference. Two files run a GNU-only tool
+# correctly — each probes with `command -v` and falls back — and rather than teach
+# a scanner to recognise that shape, they are named here with their reason.
 #
 # A blacklist, and one name behind by construction — the CI job is what covers the
 # class. What it buys is speed and precision in the pre-push gate for the names
@@ -170,28 +221,16 @@ RULE_A='
 # — puts the command straight after a brace, and that spelling walked past the
 # first version of this list. `${name}` is not a false positive: the name there is
 # followed by `}` or `_`, never by whitespace.
-GNU_ONLY_COMMANDS='timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                   stdbuf truncate dircolors gsed gawk gdate gcp gln gsort'
-#
-# A CONDITION IS A COMMAND POSITION. `if seq 1 5; then …; fi` runs `seq`, and with
-# it absent the condition is merely false — an `if` whose branches all fail still
-# returns 0, so the CI job stays green too and both checks miss it. `while`,
-# `until`, `elif` and a leading `!` are the same shape.
-# The keyword branch carries its OWN left boundary — `(^|[[:space:]])` — because a
-# keyword can begin the line. Written as ` if ` it required a space in front, so
-# `if seq 1 5; then …` at column one walked past while an indented one was caught:
-# a position list that depends on indentation.
-#
-# `)` IS A COMMAND POSITION TOO: it ends a `case` pattern, and
-# `case x in x) seq 1 5; : ;; esac` runs `seq` there. With the command gone the
-# failed lookup is followed by `:`, so the arm returns 0 and the portability job
-# passes as well — both checks missing it.
-#
-# `command` IS AN INVOCATION WRAPPER: `command seq 1 5` runs `seq`. `command -v seq`
-# is not caught, because the name must follow the wrapper immediately and `-v` is
-# in the way — which is exactly the distinction that matters, one runs the tool and
-# the other asks whether it exists.
-CMD_POS='(^|[|;&({!)]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|command|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
+# Names with no English meaning, so a bare word is an invocation and nothing else.
+# `cksum` is NOT here: POSIX specifies it and macOS ships it. A name that exists
+# on both platforms in this list would make the gate fail on portable code, which
+# is the one thing worse than missing a defect.
+GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
+                dircolors gsed gawk gdate gcp gln gsort gtimeout gnproc'
+# (file:command) pairs that run one correctly — each probes with `command -v` and
+# falls back. Named rather than inferred: recognising the shape took three rounds
+# and was still wrong.
+GNU_EXEMPT='test-pr-round-count.sh:sha1sum'
 
 # ── RULE C: GNU-only flags on commands that do exist ───────────────────────
 #
@@ -229,21 +268,21 @@ RULE_C='
     # `$0` again threw the join away, so `grep -m 1 \` + `-P …` and `declare \` +
     # `-A M` reported clean while Rule A, which never reassigned, caught its own
     # continued case. A shared prologue only helps the rules that let it.
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place|-[A-Za-z]*i)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z]*i)([[:space:]]|$)/) {
         report("sed -i has no portable spelling; write a temp file and mv: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)|-[A-Za-z]*r)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)(=[^[:space:]]*)?|-[A-Za-z]*r)([[:space:]]|$)/) {
         report("sed -r is the GNU spelling of -E: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)|-[A-Za-z]*f)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)(=[^[:space:]]*)?|-[A-Za-z]*f)([[:space:]]|$)/) {
         report("readlink -f is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)|-[A-Za-z]*P)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)(=[^[:space:]]*)?|-[A-Za-z]*P)([[:space:]]|$)/) {
         report("grep -P is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)|-[A-Za-z]*d)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)(=[^[:space:]]*)?|-[A-Za-z]*d)([[:space:]]|$)/) {
         report("date -d is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)|-[A-Za-z]*c)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)(=[^[:space:]]*)?|-[A-Za-z]*c)([[:space:]]|$)/) {
         report("stat -c is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)|-[A-Za-z]*r)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)(=[^[:space:]]*)?|-[A-Za-z]*r)([[:space:]]|$)/) {
         report("xargs -r is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)|-[A-Za-z]*h)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)(=[^[:space:]]*)?|-[A-Za-z]*h)([[:space:]]|$)/) {
         report("sort -h is GNU-only: " line); return }
     if (line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/) {
         report("echo -e is not portable; use printf: " line); return }'
@@ -271,8 +310,13 @@ RULE_D='
         report("case modification is Bash 4: " line); return }
     if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKaUuL]\}/) {
         report("parameter transformation is Bash 4.4: " line); return }
-    if (line ~ /;;?&([[:space:]]|$)/) {
-        report("the ;& and ;;& case terminators are Bash 4: " line); return }
+    # On WHOLE, and only in the first segment, because the operator is what the
+    # split removed and every segment would otherwise report the same line.
+    if (SEGI <= 1 && WHOLE ~ /;;?&([[:space:]]|$)/) {
+        report("the ;& and ;;& case terminators are Bash 4: " WHOLE); return }
+    # On WHOLE and once: the segment split removes `|`, taking `|&` apart.
+    if (SEGI <= 1 && WHOLE ~ /(&>>|\|&)/) {
+        report("&>> and |& are Bash 4 redirections: " WHOLE); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
@@ -342,41 +386,41 @@ $c_hits"
 # Rule B is per file, because the guard it requires is per file.
 unguarded=""
 for f in "${TARGETS[@]}"; do
-    for c in $GNU_ONLY_COMMANDS; do
+    b="$(basename "$f")"
+    for c in $GNU_ONLY_NAMES; do
+        # Whitespace is normalised before matching: the list wraps across lines,
+        # and a pattern requiring a space either side silently matched nothing for
+        # the entry that happened to sit at a line end.
+        case " $(printf '%s' "$GNU_EXEMPT" | tr -s '[:space:]' ' ') " in
+            *" $b:$c "*) continue ;;
+        esac
         b_rc=0
         b_hits="$(scan '
-            if (line ~ /'"$CMD_POS$c"'([[:space:]]|$)/) { report(line); return }' "$f")" || b_rc=$?
-        [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $(basename "$f") (rc=$b_rc)"; continue; }
-        [ -n "$b_hits" ] || continue
-        # The guard, in the same file — READ AS CODE, not as text. A raw `grep`
-        # accepted `# use command -v seq` as the probe for an unguarded `seq` two
-        # lines down, and in the portability job the absent command merely makes
-        # an `if` false, so both checks passed and the macOS-only failure shipped.
-        # A comment describing a guard is not a guard.
-        # …AND THE PROBE ITSELF MUST BE IN COMMAND POSITION. Stripping comments
-        # was not enough: `printf '%s' 'command -v seq'` is quoted DATA — a
-        # diagnostic string naming the probe — and it satisfied the guard while an
-        # unguarded `seq` two lines down went unreported. A probe that is not run
-        # guards nothing.
-        # …AND THE PROBE MUST CONTROL SOMETHING. Being executable was not enough
-        # either: `command -v seq >/dev/null; if seq 1 5; then …` runs the probe,
-        # ignores it, and selects no fallback — the invocation is exempted by a
-        # test whose answer nothing reads. A probe governs when it is a CONDITION:
-        # `if command -v X`, `command -v X &&`, `command -v X ||`. Both real uses
-        # in this tree are the first form.
-        guard="$(scan '
-            if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+'"$c"'/ ||
-                line ~ /command[[:space:]]+-v[[:space:]]+'"$c"'[^|&]*(&&|\|\|)/) {
-                report("guard"); return }' "$f")" || {
-                die "the guard scan failed on $(basename "$f")"; continue; }
-        [ -n "$guard" ] && continue
-        unguarded="$unguarded
+            if (line ~ /(^|[^A-Za-z0-9_.-])'"$c"'([^A-Za-z0-9_-]|$)/) { report(line); return }' "$f")" || b_rc=$?
+        [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $b (rc=$b_rc)"; continue; }
+        [ -n "$b_hits" ] && unguarded="$unguarded
 $b_hits"
     done
 done
 [ -z "$unguarded" ] \
-    && pass "every GNU-only command this tree runs is guarded by a command -v probe" \
-    || die "GNU-only command(s) invoked without a command -v guard:$unguarded"
+    && pass "no GNU-only command name appears outside its declared exemptions" \
+    || die "GNU-only command name(s), and not exempt:$unguarded"
+
+# THE EXEMPTIONS ARE CHECKED FOR ROT. An exemption for a file that no longer names
+# the command is a licence nobody needs, and the next reader takes it as evidence
+# that the use is still there.
+stale_exempt=""
+for e in $GNU_EXEMPT; do
+    ef="${e%%:*}"; ec="${e##*:}"
+    [ -f "$SELF_DIR/$ef" ] || { stale_exempt="$stale_exempt $e(no-such-file)"; continue; }
+    eh="$(scan '
+        if (line ~ /(^|[^A-Za-z0-9_.-])'"$ec"'([^A-Za-z0-9_-]|$)/) { report("x"); return }' \
+        "$SELF_DIR/$ef")" || { die "the exemption scan failed on $ef"; continue; }
+    [ -n "$eh" ] || stale_exempt="$stale_exempt $e(unused)"
+done
+[ -z "$stale_exempt" ] \
+    && pass "…and every exemption is still earning its place" \
+    || die "stale exemption(s):$stale_exempt"
 
 # ── EACH RULE CATCHES A PLANTED INSTANCE ───────────────────────────────────
 # A scan reporting a clean tree proves nothing on its own: an empty result is what
@@ -402,7 +446,7 @@ plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
         C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
         D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
         B) hits="$(scan '
-               if (line ~ /'"$CMD_POS$cmd"'([[:space:]]|$)/) { report("hit"); return }' "$PTMP/$1.sh")" || rc=$? ;;
+               if (line ~ /(^|[^A-Za-z0-9_.-])'"$cmd"'([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/$1.sh")" || rc=$? ;;
     esac
     { [ "$rc" -eq 0 ] && [ -n "$hits" ]; } \
         && pass "the scan catches $4" \
@@ -410,9 +454,16 @@ plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
 }
 plant escape  "grep -qE '^[a-z]+\\s+[0-9]' \"\$f\"" A "the \\s that reached this tree"
 plant worddig "sed -n 's/\\d//p' \"\$f\""           A "a \\d in a sed pattern"
-plant timeout "timeout 5 gh pr view 7"              B "an unguarded timeout"
-plant seq     "for i in \$(seq 1 5); do :; done"    B "an unguarded seq"
 plant sha1sum "printf x | sha1sum"                  B "an unguarded sha1sum"
+plant realpath "realpath ./x"                       B "realpath, which stock macOS lacks"
+plant tac     "tac < \"\$f\""                        B "tac"
+plant gsed    "gsed -E 's/a/b/' x"                  B "a g-prefixed GNU tool"
+# POSITION NO LONGER MATTERS, which is the point of the redesign — these all read
+# the same to this rule, and none of them needed a new case to be added.
+plant casearm2 "case x in x) tac f; : ;; esac"      B "…at the start of a case arm" tac
+plant ifcond2  "if tac f; then :; fi"               B "…as an if condition"        tac
+plant assignp  "if LC_ALL=C tac f; then :; fi"      B "…behind an assignment prefix" tac
+plant cmdwrap2 "if command tac f; then :; fi"       B "…through the command builtin" tac
 plant inplace "sed -i 's/a/b/' \"\$f\""             C "sed -i with no suffix"
 plant readl   "readlink -f \"\$f\""                 C "readlink -f"
 plant pcre    "grep -P '\\t' \"\$f\""               C "grep -P"
@@ -439,6 +490,11 @@ plant sedlong  "sed --regexp-extended 's/a+/b/' x"  C "sed --regexp-extended"
 plant sortlong "sort --human-numeric-sort x"        C "sort --human-numeric-sort"
 plant sedilong "sed --in-place 's/a/b/' x"          C "sed --in-place"
 plant fallthru "case \"\$x\" in a) f ;& b) g ;; esac" D "the Bash 4 ;& case terminator"
+plant appendboth "cmd &>> log"                      D "the Bash 4 &>> redirection"
+plant pipeboth "cmd |& other"                       D "the Bash 4 |& pipeline"
+plant sedieq   "sed --in-place=.bak 's/a/b/' x"     C "sed --in-place=SUFFIX"
+plant dateeq   "date --date=2026-01-01 +%s"         C "date --date=TIME"
+plant stateq   "stat --format=%s x"                 C "stat --format=FORMAT"
 plant cmdwrap  "if command seq 1 5; then :; fi"     B "a GNU command run through the command builtin" seq
 plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option operand"
 plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
@@ -487,19 +543,42 @@ refute indirect "printf '%s' \"\${!name}\""                    D "indirect expan
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
 # Rule B accepts a guarded use, which is the whole point of requiring a guard
 # rather than absence — both real uses in this tree take this form.
-printf '#!/usr/bin/env bash\nif command -v timeout >/dev/null 2>&1; then timeout 5 true; else :; fi\n' \
-    > "$PTMP/guarded.sh"
-g_hits="$(scan '
-    if (line ~ /'"$CMD_POS"'timeout([[:space:]]|$)/) { report("hit"); return }' "$PTMP/guarded.sh")" || g_hits="SCANFAIL"
-{ [ "$g_hits" != SCANFAIL ] && [ -n "$g_hits" ] && grep -q 'command -v timeout' "$PTMP/guarded.sh"; } \
-    && pass "…and a guarded timeout is found but not reported, because it has a probe" \
-    || die "the guarded form was not recognised as guarded ('$g_hits')"
+# ── WHAT THIS RULE NO LONGER TRIES TO DO ───────────────────────────────────
+# The guard fixtures are gone with the guard inference: recognising
+# `if command -v X … else fallback` took three rounds — excluding comments, then
+# quoted data, then probes that control nothing — and the fourth round found a
+# guarded use exempting an unrelated unguarded one in the same file. Deciding
+# which invocation a probe governs is control-flow analysis, and this file does
+# not do analysis. The exemption list does that job in one line per case, and
+# `…and every exemption is still earning its place` keeps it honest.
+#
+# What that gives up is stated: a NEW correct use of `sha1sum` must be added to
+# the list, which is a small deliberate act, rather than being recognised by a
+# scanner that was wrong about it three times.
+[ -n "$GNU_EXEMPT" ] \
+    && pass "correct uses are exempted by a list, not by inferring control flow" \
+    || die "the exemption list is empty; a correct use has nowhere to be recorded"
+
+# ── AN EXEMPTION BELONGS TO ITS OWN COMMAND ────────────────────────────────
+# `grep -F x f; grep '\s' f` has one fixed-string command and one that is not, and
+# an exemption taken for the whole logical line let the first excuse the second.
+# Rules are applied per simple command now.
+printf '#!/usr/bin/env bash\ngrep -F x "$f"; grep %s "$f"\n' "'\\s'" > "$PTMP/twogrep.sh"
+tg_hits="$(scan "$RULE_A" "$PTMP/twogrep.sh")" || tg_hits=SCANFAIL
+{ [ "$tg_hits" != SCANFAIL ] && [ -n "$tg_hits" ]; } \
+    && pass "a fixed-string command does not exempt the next command on the line" \
+    || die "grep -F excused a later grep with a GNU escape ('$tg_hits')"
+printf '#!/usr/bin/env bash\ngrep -e -P "$f"; grep -P x "$f"\n' > "$PTMP/twogrepc.sh"
+tc_hits="$(scan "$RULE_C" "$PTMP/twogrepc.sh")" || tc_hits=SCANFAIL
+{ [ "$tc_hits" != SCANFAIL ] && [ -n "$tc_hits" ]; } \
+    && pass "…nor does a -e operand exempt a later -P" \
+    || die "grep -e -P excused a later grep -P ('$tc_hits')"
 
 # ── A CONTINUED COMMAND IS ONE COMMAND ─────────────────────────────────────
 # `grep -qE \` on one line and its pattern on the next satisfied neither predicate
-# of any rule: the command was on one side of the backslash and the escape on the
-# other. The join happens once, in `scan`, so every rule inherits it — and the hit
-# is reported at the FIRST physical line, which is where a reader has to look.
+# of any rule. The join happens once, in `scan`, and the hit is reported at the
+# line the command STARTS on. Each rule is exercised, because rules C and D once
+# took `$0` again and threw the join away while rule A did not.
 printf '#!/usr/bin/env bash\ngrep -qE \\\n    %s \\\n    "$f"\n' "'^[a-z]+\\s+\$'" \
     > "$PTMP/continued.sh"
 cont_hits="$(scan "$RULE_A" "$PTMP/continued.sh")" || cont_hits=SCANFAIL
@@ -509,70 +588,16 @@ cont_hits="$(scan "$RULE_A" "$PTMP/continued.sh")" || cont_hits=SCANFAIL
 grep -q ':2:' <<<"$cont_hits" \
     && pass "…and is reported at the line the command starts on" \
     || die "the continued hit is not reported at its first line ('$cont_hits')"
-
-# …AND RULES C AND D SEE IT TOO. Rule A never reassigned `line`, so it caught its
-# continued case while C and D took `$0` again and threw the join away — a shared
-# prologue only helps the rules that let it, which is why each is exercised.
 printf '#!/usr/bin/env bash\ngrep -m 1 \\\n    -P %s \\\n    "$f"\n' "'x'" > "$PTMP/contc.sh"
 cc_hits="$(scan "$RULE_C" "$PTMP/contc.sh")" || cc_hits=SCANFAIL
 { [ "$cc_hits" != SCANFAIL ] && [ -n "$cc_hits" ]; } \
-    && pass "a continued GNU-only flag is caught by rule C" \
+    && pass "…and rule C sees the joined line too" \
     || die "a continued grep -P was missed ('$cc_hits')"
 printf '#!/usr/bin/env bash\ndeclare \\\n    -A M\n' > "$PTMP/contd.sh"
 cd_hits="$(scan "$RULE_D" "$PTMP/contd.sh")" || cd_hits=SCANFAIL
 { [ "$cd_hits" != SCANFAIL ] && [ -n "$cd_hits" ]; } \
-    && pass "…and a continued Bash 4 construct by rule D" \
+    && pass "…and so does rule D" \
     || die "a continued declare -A was missed ('$cd_hits')"
-
-# ── A PROBE THAT CONTROLS NOTHING IS NOT A GUARD ───────────────────────────
-# Executable and unquoted was still not enough: `command -v seq >/dev/null` runs
-# the probe, ignores its answer, and selects no fallback — the invocation exempted
-# by a test nobody reads. A probe governs when it is a CONDITION.
-printf '#!/usr/bin/env bash\ncommand -v seq >/dev/null 2>&1\nif seq 1 5; then :; fi\n' \
-    > "$PTMP/looseprobe.sh"
-lp_guard="$(scan '
-    if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+seq/ ||
-        line ~ /command[[:space:]]+-v[[:space:]]+seq[^|&]*(&&|\|\|)/) { report("guard"); return }' \
-    "$PTMP/looseprobe.sh")" || lp_guard=SCANFAIL
-{ [ "$lp_guard" != SCANFAIL ] && [ -z "$lp_guard" ]; } \
-    && pass "a probe whose answer nothing reads does not count as a guard" \
-    || die "a non-controlling probe satisfied the guard check ('$lp_guard')"
-# …while the form this tree actually uses does.
-printf '#!/usr/bin/env bash\nif command -v seq >/dev/null 2>&1; then seq 1 5; else :; fi\n' \
-    > "$PTMP/realprobe.sh"
-rp_guard="$(scan '
-    if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+seq/ ||
-        line ~ /command[[:space:]]+-v[[:space:]]+seq[^|&]*(&&|\|\|)/) { report("guard"); return }' \
-    "$PTMP/realprobe.sh")" || rp_guard=SCANFAIL
-{ [ "$rp_guard" != SCANFAIL ] && [ -n "$rp_guard" ]; } \
-    && pass "…and an if-command-v probe does, which is the form in this tree" \
-    || die "the real guard form was not recognised ('$rp_guard')"
-
-# ── A QUOTED PROBE IS NOT A PROBE ──────────────────────────────────────────
-# Stripping comments was not enough: a diagnostic string NAMING the probe —
-# `printf '%s' 'command -v seq'` — satisfied the guard while an unguarded `seq`
-# went unreported. A probe that is not run guards nothing.
-printf '#!/usr/bin/env bash\nprintf %%s %s\nif seq 1 5; then :; fi\n' "'command -v seq'" \
-    > "$PTMP/quotedguard.sh"
-qg_guard="$(scan '
-    if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+seq/) { report("guard"); return }' \
-    "$PTMP/quotedguard.sh")" || qg_guard=SCANFAIL
-{ [ "$qg_guard" != SCANFAIL ] && [ -z "$qg_guard" ]; } \
-    && pass "a quoted string naming the probe does not count as a guard" \
-    || die "a quoted probe satisfied the guard check ('$qg_guard')"
-
-# ── A COMMENT IS NOT A GUARD ───────────────────────────────────────────────
-# The invocation scan strips comments; the guard check did not, so prose about a
-# probe stood in for the probe. Both halves of a rule have to read the same text.
-printf '#!/usr/bin/env bash\n# use command -v seq before calling it\nif seq 1 5; then :; fi\n' \
-    > "$PTMP/commentguard.sh"
-cg_inv="$(scan '
-    if (line ~ /'"$CMD_POS"'seq([[:space:]]|$)/) { report("inv"); return }' "$PTMP/commentguard.sh")" || cg_inv=SCANFAIL
-cg_guard="$(scan '
-    if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+seq/) { report("guard"); return }' "$PTMP/commentguard.sh")" || cg_guard=SCANFAIL
-{ [ "$cg_inv" != SCANFAIL ] && [ -n "$cg_inv" ] && [ "$cg_guard" != SCANFAIL ] && [ -z "$cg_guard" ]; } \
-    && pass "a comment mentioning command -v does not count as a guard" \
-    || die "a commented probe satisfied the guard check (inv='$cg_inv' guard='$cg_guard')"
 
 # ── the scan fails closed on input it cannot read ──────────────────────────
 # An unreadable file yielding no hits is indistinguishable from a clean one, which
