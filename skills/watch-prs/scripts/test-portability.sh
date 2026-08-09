@@ -149,6 +149,35 @@ SCAN_PROLOGUE='
     # COMMAND — `(( mask = value << shift )) || :` — and stripping only the first
     # left the second queueing `shift` as a delimiter, which is the same
     # swallow-the-file failure with a different two characters in front of it.
+    # AN INLINE COMMENT OPENS NOTHING. `: # <<EOF` is a comment to bash and a
+    # here-document to a scanner that removed only FULL-LINE comments: `EOF` was
+    # queued, no terminator ever came, and every following line was skipped — the
+    # swallow-the-file shape again, from two characters of prose.
+    #
+    # Only the REDIRECTION scan is stripped this way, not the rules. A forbidden
+    # spelling written in an inline comment is still reported, which is the safe
+    # direction: a rule that excused everything after a `#` would be excused by any
+    # line that ended in one.
+    function strip_comment(l, i, ch, q, prev) {
+        q = ""
+        for (i = 1; i <= length(l); i++) {
+            ch = substr(l, i, 1)
+            if (q == "\042" && ch == "\134") { i++; continue }
+            if (q == "") {
+                if (ch == "\047" || ch == "\042") { q = ch; continue }
+                # A `#` STARTS A COMMENT ONLY AT THE START OF A WORD. `x=a#b` is a
+                # value and `${x#p}` is an expansion; both keep their `#`.
+                if (ch == "#") {
+                    prev = (i == 1) ? " " : substr(l, i - 1, 1)
+                    # The class is spelled with `&` before `;` deliberately: the
+                    # other order puts a literal `;&` in this file, and rule D
+                    # reads that as the Bash 4 case terminator it is elsewhere.
+                    if (prev ~ /[[:space:]&;|(]/) return substr(l, 1, i - 1)
+                }
+            } else if (ch == q) { q = "" }
+        }
+        return l
+    }
     function strip_arith(l, out, i, ch, d) {
         out = ""; i = 1
         while (i <= length(l)) {
@@ -205,20 +234,77 @@ SCAN_PROLOGUE='
     # means writing one into the replacement string, where `\` is itself the escape
     # character — the first version produced no backslash at all and reported a
     # literal one as a GNU escape. Walking the span has no replacement string.
-    function ansic_decode(seg, out, i, ch, nx) {
+    #
+    # DECODED AGAINST THE SPEC, WHICH WAS READ RATHER THAN GUESSED. The first
+    # version accepted `\0134` as octal, and `bash` reads that as `\013` followed by
+    # `4` — a vertical tab and a digit, no backslash at all. It also accepted only
+    # the fully padded `\`, while bash takes ONE to four hex digits after `\u`
+    # and one to eight after `\U`, so `\u5c` is the same backslash and was missed.
+    # Both were checked by running them.
+    function hexdigits(s, maxn, out, k, ch) {
+        out = ""
+        for (k = 1; k <= maxn; k++) {
+            ch = substr(s, k, 1)
+            if (ch == "" || index("0123456789abcdefABCDEF", ch) == 0) break
+            out = out ch
+        }
+        return out
+    }
+    function hexval(h, v, k, p) {
+        v = 0
+        for (k = 1; k <= length(h); k++) {
+            p = index("0123456789abcdef", tolower(substr(h, k, 1))) - 1
+            v = v * 16 + p
+        }
+        return v
+    }
+    function octdigits(s, maxn, out, k, ch) {
+        out = ""
+        for (k = 1; k <= maxn; k++) {
+            ch = substr(s, k, 1)
+            if (ch == "" || index("01234567", ch) == 0) break
+            out = out ch
+        }
+        return out
+    }
+    function octval(o, v, k) {
+        v = 0
+        for (k = 1; k <= length(o); k++) v = v * 8 + (index("01234567", substr(o, k, 1)) - 1)
+        return v
+    }
+    function ansic_decode(seg, out, i, ch, nx, h, o) {
         out = ""; i = 1
         while (i <= length(seg)) {
             ch = substr(seg, i, 1)
             if (ch != "\134") { out = out ch; i++; continue }
             nx = substr(seg, i + 1)
+            if (nx == "") { out = out ch; i++; continue }
             # `\\` FIRST, so `$'\\134'` is a literal backslash and then digits
             # rather than an octal escape — which is what bash does with it.
-            if (substr(nx, 1, 1) == "\134")   { out = out "\134"; i += 2; continue }
-            if (nx ~ /^0134/)                 { out = out "\134"; i += 5; continue }
-            if (nx ~ /^134/)                  { out = out "\134"; i += 4; continue }
-            if (nx ~ /^x5[cC]/)               { out = out "\134"; i += 4; continue }
-            if (nx ~ /^u005[cC]/)             { out = out "\134"; i += 6; continue }
-            if (nx ~ /^U0000005[cC]/)         { out = out "\134"; i += 10; continue }
+            if (substr(nx, 1, 1) == "\134") { out = out "\134"; i += 2; continue }
+            # The NUMERIC forms are decoded to their actual character rather than
+            # to a placeholder: `$'\x5c\x73'` is a backslash and then an `s`, and a
+            # placeholder for the second would hide the escape the first produces.
+            if (substr(nx, 1, 1) == "x") {
+                h = hexdigits(substr(nx, 2), 2)
+                if (h != "") { out = out sprintf("%c", hexval(h)); i += 2 + length(h); continue }
+            }
+            if (substr(nx, 1, 1) == "u") {
+                h = hexdigits(substr(nx, 2), 4)
+                if (h != "") { out = out sprintf("%c", hexval(h)); i += 2 + length(h); continue }
+            }
+            if (substr(nx, 1, 1) == "U") {
+                h = hexdigits(substr(nx, 2), 8)
+                if (h != "") { out = out sprintf("%c", hexval(h)); i += 2 + length(h); continue }
+            }
+            o = octdigits(nx, 3)
+            if (o != "") { out = out sprintf("%c", octval(o)); i += 1 + length(o); continue }
+            # The single-character escapes bash RECOGNISES. `\b` is a BACKSPACE
+            # here, not the word boundary it is in a `grep` pattern, and keeping it
+            # as backslash-plus-letter reported portable code. `\c` takes the
+            # character after it as well.
+            if (index("abeEfnrtv\047\042?", substr(nx, 1, 1)) > 0) { out = out "\002"; i += 2; continue }
+            if (substr(nx, 1, 1) == "c") { out = out "\002"; i += 3; continue }
             # An UNRECOGNISED escape is kept as backslash-plus-character, which is
             # what bash does — and is why `$'\s'` reaches the engine as `\s`.
             out = out ch substr(nx, 1, 1); i += 2
@@ -226,12 +312,25 @@ SCAN_PROLOGUE='
         return out
     }
     # True when a decoded `$'…'` span escapes a letter from `set`. The span ends at
-    # the first quote: an escaped one inside it — `$'\''` — closes it early here,
-    # which reads the tail as ordinary shell and makes a rule REPORT rather than
-    # excuse, the same direction the split takes.
-    function ansic_hit(l, set, seg, i, n, ch) {
-        while (match(l, /\$\047[^\047]*\047/)) {
-            seg = ansic_decode(substr(l, RSTART + 2, RLENGTH - 3))
+    # the first UNESCAPED quote: `$'x\'\134s'` carries one inside it, and a pattern
+    # that stopped at the first quote of any kind cut the span in half and left the
+    # `\134s` unexamined — the walker deliberately ignores ANSI-C text, so nothing
+    # judged it at all.
+    function ansic_span_end(l, from, i, ch) {
+        for (i = from; i <= length(l); i++) {
+            ch = substr(l, i, 1)
+            if (ch == "\134") { i++; continue }
+            if (ch == "\047") return i
+        }
+        return 0
+    }
+    function ansic_hit(l, set, seg, i, n, ch, st, en) {
+        st = 1
+        while (st <= length(l)) {
+            if (substr(l, st, 2) != "$\047") { st++; continue }
+            en = ansic_span_end(l, st + 2)
+            if (en == 0) return 0
+            seg = ansic_decode(substr(l, st + 2, en - st - 2))
             for (i = 1; i <= length(seg); i++) {
                 if (substr(seg, i, 1) != "\134") continue
                 n = 0
@@ -240,7 +339,7 @@ SCAN_PROLOGUE='
                 if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
                 i--
             }
-            l = substr(l, RSTART + RLENGTH)
+            st = en + 1
         }
         return 0
     }
@@ -325,7 +424,7 @@ SCAN_PROLOGUE='
       # state across the whole line, which is the same not-a-lexer trade the split
       # makes: a line whose quoting is unbalanced mid-way is read as more code than
       # it is, so a rule REPORTS rather than excuses.
-      hdrest = strip_arith(raw)
+      hdrest = strip_arith(strip_comment(raw))
       while ((hp = unquoted_pos(hdrest, "<<")) > 0) {
           hdtail = substr(hdrest, hp)
           # `<<<` is a here-STRING and has no terminator. The pattern could begin
@@ -1253,6 +1352,70 @@ ae_hits="$(scan "$RULE_A" "$PTMP/ansicesc.sh")" || ae_hits=SCANFAIL
 { [ "$ae_hits" != SCANFAIL ] && [ -z "$ae_hits" ]; } \
     && pass "…while an escaped backslash before the digits is not an octal escape" \
     || die "\$'\\\\134s' was read as an escape ('$ae_hits')"
+
+# ── THE UNICODE ESCAPES TAKE A VARIABLE NUMBER OF DIGITS ───────────────────
+# Bash accepts ONE to four hex digits after `\u` and one to eight after `\U`, so
+# `$'\u5c'` is the same backslash as `$'\'`. Recognising only the padded
+# spelling left the short one unread and the script called clean.
+for spec in 'u5c' 'u05c' 'U5c' 'U0000005c'; do
+    printf '#!/usr/bin/env bash\ngrep $%s\\%ss%s "$f"\n' "'" "$spec" "'" > "$PTMP/ansicw.sh"
+    uw_hits="$(scan "$RULE_A" "$PTMP/ansicw.sh")" || uw_hits=SCANFAIL
+    { [ "$uw_hits" != SCANFAIL ] && [ -n "$uw_hits" ]; } \
+        && pass "\$'\\$spec' is a backslash, whatever its width" \
+        || die "\$'\\${spec}s' was read as portable ('$uw_hits')"
+done
+# …and `\0134` is NOT one, which was this decoder's own false positive: bash reads
+# it as `\013` followed by `4` — a vertical tab and a digit. Checked by running it.
+printf '#!/usr/bin/env bash\ngrep $%s\\0134s%s "$f"\n' "'" "'" > "$PTMP/ansicvt.sh"
+vt_hits="$(scan "$RULE_A" "$PTMP/ansicvt.sh")" || vt_hits=SCANFAIL
+{ [ "$vt_hits" != SCANFAIL ] && [ -z "$vt_hits" ]; } \
+    && pass "…while \$'\\0134' is a vertical tab and a digit, not a backslash" \
+    || die "\$'\\0134s' was read as an escape ('$vt_hits')"
+# …and a decoded character that is not a backslash is still the character it is:
+# `$'\x5c\x73'` is a backslash and then an `s`, which is the GNU escape.
+printf '#!/usr/bin/env bash\ngrep $%s\\x5c\\x73%s "$f"\n' "'" "'" > "$PTMP/ansicpair.sh"
+ap_hits="$(scan "$RULE_A" "$PTMP/ansicpair.sh")" || ap_hits=SCANFAIL
+{ [ "$ap_hits" != SCANFAIL ] && [ -n "$ap_hits" ]; } \
+    && pass "…and a numerically spelled letter is still that letter" \
+    || die "\$'\\x5c\\x73' was read as portable ('$ap_hits')"
+# …and `\b` inside these quotes is a BACKSPACE, not the word boundary it is in a
+# grep pattern, so the portable spelling is accepted.
+printf '#!/usr/bin/env bash\ngrep $%s\\b%s "$f"\n' "'" "'" > "$PTMP/ansicbs.sh"
+ab_hits="$(scan "$RULE_A" "$PTMP/ansicbs.sh")" || ab_hits=SCANFAIL
+{ [ "$ab_hits" != SCANFAIL ] && [ -z "$ab_hits" ]; } \
+    && pass "…and \$'\\b' is a backspace, which is portable" \
+    || die "a backspace escape was reported ('$ab_hits')"
+
+# ── THE SPAN ENDS AT THE FIRST UNESCAPED QUOTE ─────────────────────────────
+# `$'x\'\134s'` carries an escaped quote. Stopping at the first quote of any kind
+# cut the span in half and left the `\134s` unexamined — and the walker
+# deliberately ignores ANSI-C text, so nothing judged it at all.
+printf '#!/usr/bin/env bash\ngrep $%sx\\%s\\134s%s "$f"\n' "'" "'" "'" > "$PTMP/ansicq.sh"
+aq_hits="$(scan "$RULE_A" "$PTMP/ansicq.sh")" || aq_hits=SCANFAIL
+{ [ "$aq_hits" != SCANFAIL ] && [ -n "$aq_hits" ]; } \
+    && pass "an escaped quote does not end the ANSI-C span" \
+    || die "the span stopped at an escaped quote ('$aq_hits')"
+
+# ── AN INLINE COMMENT OPENS NOTHING ────────────────────────────────────────
+# `: # <<EOF` is a comment to bash. Removing only FULL-LINE comments queued `EOF`,
+# no terminator ever came, and every following line was skipped.
+{ printf '#!/usr/bin/env bash\n'
+  printf ': # <<EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/inlinehd.sh"
+ih_hits="$(scan "$RULE_A" "$PTMP/inlinehd.sh")" || ih_hits=SCANFAIL
+{ [ "$ih_hits" != SCANFAIL ] && [ -n "$ih_hits" ]; } \
+    && pass "a here-document marker in an inline comment opens nothing" \
+    || die "an inline comment swallowed the rest of the file ('$ih_hits')"
+# …and a `#` that is NOT starting a word is data: `${v#pat}` and `a#b` keep theirs,
+# so a real redirection after one is still tracked.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'x=${v#pat}; cat <<EOF\n'
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/hashword.sh"
+hw_hits="$(scan "$RULE_A" "$PTMP/hashword.sh")" || hw_hits=SCANFAIL
+{ [ "$hw_hits" != SCANFAIL ] && [ -z "$hw_hits" ]; } \
+    && pass "…while a # inside a word is data, not a comment" \
+    || die "a # inside a word ended the line early ('$hw_hits')"
 
 # ── THE ARITHMETIC COMMAND IS ARITHMETIC TOO ───────────────────────────────
 # `(( mask = value << shift ))` is the command form of the same expression, and

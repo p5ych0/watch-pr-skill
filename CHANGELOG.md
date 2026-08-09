@@ -89,8 +89,19 @@ stays green: the failure is invisible on the machine that introduces it. Closes
 - **A backslash can be synthesised.** Inside `$'…'` the escapes are decoded, so
   `$'\134s'` contains no `\s` anywhere in its source — octal 134 *is* the
   backslash — and the engine receives the GNU `\s`. The producers are a closed
-  set: `\\`, `\134`, `\0134`, `\x5c`, `\u005c`, `\U0000005c`. Each becomes one
-  backslash and the run is counted as anywhere else.
+  set, and it was read from the manual and then RUN rather than guessed: `\\`,
+  `\134`, `\x5c`, and `\u`/`\U` at any width that evaluates to 0x5c — bash takes
+  one to four hex digits after `\u` and one to eight after `\U`, so `$'\u5c'` is
+  the same backslash. `\0134` is *not* one: bash reads it as `\013` and then `4`.
+  Numeric escapes decode to their actual character, so `$'\x5c\x73'` is a
+  backslash and then an `s`; `\b` there is a backspace rather than the word
+  boundary it is in a pattern. The span ends at the first *unescaped* quote.
+
+- **An inline comment opens nothing.** `: # <<EOF` is a comment to bash and was a
+  here-document to a scanner that removed only full-line ones: `EOF` was queued, no
+  terminator came, and the rest of the file was skipped. Only the redirection scan
+  strips them — a forbidden spelling written in an inline comment is still
+  reported, which is the safe direction.
 
 - **The diagnostics file is one the run owns.** It is opened with `2>`, which
   truncates, and removed afterwards. Asking `mktemp` for it meant accepting
