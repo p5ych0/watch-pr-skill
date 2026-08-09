@@ -85,9 +85,11 @@ SCAN_PROLOGUE='
     # THE SPLIT IS QUOTE-AWARE. `split()` on the operators is blind to them, and a
     # separator inside a pattern — `grep "x;\s" f` — cut the command away from its
     # own escape, so neither half satisfied a rule. This walks the line once,
-    # tracking single and double quotes, and breaks only at depth zero. It is not a
-    # lexer: it does not follow backslash escapes or here-documents, and it says so
-    # rather than pretending. What it does buy is that a quoted separator no longer
+    # tracking single and double quotes, and breaks only at depth zero. It follows
+    # backslash escapes inside double quotes, and here-document bodies are dropped
+    # before it ever sees them. It is still not a lexer — it does not know about
+    # `$(…)` nesting, `((…))`, or a quote spanning a continuation — and that list is
+    # kept accurate rather than left as the one written when it did less. What it does buy is that a quoted separator no longer
     # splits a command, and that an operator can be told from the same characters
     # inside a string.
     function segments(l, n, i, ch, q, cur, rest) {
@@ -123,7 +125,24 @@ SCAN_PROLOGUE='
         }
         return 0
     }
+    #
+    # A HERE-DOCUMENT BODY IS DATA. `cat <<EOF` followed by prose is not shell, and
+    # passing it to the rules made an ordinary mention of `grep -P` in a summary
+    # block a reason to fail the mandatory gate — `SKILL.md` writes user-facing
+    # text that way. The delimiter is taken from the redirection and the body is
+    # skipped until it reappears alone on a line. `<<-` strips leading tabs from the
+    # terminator, so that form is allowed for.
     { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
+      if (heredoc != "") {
+          t = raw; sub(/^[\t ]+/, "", t)
+          if (t == heredoc) heredoc = ""
+          next
+      }
+      if (match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*["'"'"']?/)) {
+          heredoc = substr(raw, RSTART, RLENGTH)
+          sub(/^<<-?[[:space:]]*/, "", heredoc)
+          gsub(/["'"'"']/, "", heredoc)
+      }
       if (buf == "") start = FNR
       if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
       line = buf raw; buf = "" }
@@ -364,9 +383,9 @@ RULE_D='
         report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
     if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*A[A-Za-z]*([[:space:]]|$)/) {
         report("associative arrays are Bash 4: " line); return }
-    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
+    if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
-    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKakUuL]\}/) {
+    if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) {
         report("parameter transformation is Bash 4.4: " line); return }
     # On WHOLE, and only in the first segment, because the operator is what the
     # split removed and every segment would otherwise report the same line.
@@ -385,6 +404,8 @@ RULE_D='
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
         report("|& is a Bash 4 pipeline: " WHOLE); return }
+    if (line ~ /(^|[[:space:]])(shopt[[:space:]]+(-[A-Za-z]+[[:space:]]+)*globstar|set[[:space:]]+-o[[:space:]]+globstar)/) {
+        report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
@@ -415,8 +436,12 @@ port_production() {   # the plumbing, as a temp file the scans can take
     awk -v m="$PORT_SPLIT" '
         index($0, m) == 1 { exit }
         index($0, "# portability-scan: rules-begin") == 1 { skip = 1; next }
-        index($0, "# portability-scan: rules-end") == 1 { skip = 0; next }
-        !skip { print }' "${BASH_SOURCE[0]}" > "$out" || arc=$?
+        index($0, "# portability-scan: rules-end") == 1 { skip = 0; seen = 1; next }
+        !skip { print }
+        END { if (!seen) exit 3 }' "${BASH_SOURCE[0]}" > "$out" || arc=$?
+    # THE END MARKER HAS TO BE OBSERVED. Without it `skip` never clears, everything
+    # after `rules-begin` is dropped, and the extract is a short prefix that scans
+    # clean — the self-scan silently covering almost nothing.
     [ "$arc" -eq 0 ] && [ -s "$out" ]
 }
 targets() {
@@ -439,7 +464,7 @@ targets() {
 # on the part it never read.
 PORT_SKILL_BLOCKS=""
 if [ -f "$SELF_DIR/../SKILL.md" ]; then
-    PORT_SKILL_BLOCKS="$(mktemp)" || { die "no scratch file for the skill blocks"; PORT_SKILL_BLOCKS=""; }
+    PORT_SKILL_BLOCKS="${PORT_TMPDIR:+$PORT_TMPDIR/SKILL.md(bash blocks)}"
     if [ -n "$PORT_SKILL_BLOCKS" ]; then
         if awk '/^```bash$/ {inb=1; next} /^```$/ {inb=0} inb' "$SELF_DIR/../SKILL.md" \
              > "$PORT_SKILL_BLOCKS" && [ -s "$PORT_SKILL_BLOCKS" ]; then
@@ -458,10 +483,21 @@ fi
 TARGETS=()
 while IFS= read -r _t; do TARGETS+=( "$_t" ); done < <(targets)
 # The checker's own implementation joins the list.
-PORT_SELF="$(mktemp)" || { die "no scratch file for the self-scan"; PORT_SELF=""; }
+# NAMED, not a bare `mktemp` path. A hit in an extracted target is reported as its
+# file, and `/tmp/tmp.AbCdEf:212:` tells a reader nothing about which file to open.
+PORT_TMPDIR="$(mktemp -d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
+[ -n "$PORT_TMPDIR" ] && trap 'rm -rf "$PORT_TMPDIR"' EXIT
+PORT_SELF="${PORT_TMPDIR:+$PORT_TMPDIR/test-portability.sh(implementation)}"
 if [ -n "$PORT_SELF" ] && port_production "$PORT_SELF"; then
     TARGETS+=( "$PORT_SELF" )
     pass "the checker's own implementation is in scope, above the fixture marker"
+    # AND IT REACHES PAST THE RULES REGION. If the end marker is never seen, `skip`
+    # stays set, everything after `rules-begin` is dropped, and the extract is a
+    # short prefix that scans clean — a self-scan covering almost nothing while
+    # reporting that it covered the implementation.
+    grep -qF 'count_hits() {' "$PORT_SELF" \
+        && pass "…and reaches the plumbing below the rules, not just the header" \
+        || die "the self-scan extract stops at the rules; the end marker was not seen"
 else
     die "the checker's implementation half could not be extracted"
 fi
@@ -510,7 +546,13 @@ for f in "${TARGETS[@]}"; do
     for c in $GNU_ONLY_NAMES; do
         b_rc=0
         b_hits="$(scan '
-            if (line ~ /(^|[^A-Za-z0-9_.-])'"$c"'([^A-Za-z0-9_-]|$)/) { report(line); return }' "$f")" || b_rc=$?
+            n = 0; rest = line
+            while (match(rest, /(^|[^A-Za-z0-9_.-])'"$c"'([^A-Za-z0-9_-]|$)/)) {
+                n++
+                rest = substr(rest, RSTART + RLENGTH - 1)
+            }
+            for (k = 0; k < n; k++) report(line)
+            return' "$f")" || b_rc=$?
         [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $b (rc=$b_rc)"; continue; }
         [ -n "$b_hits" ] || continue
         # Whitespace is normalised before matching: the list wraps across lines,
@@ -641,6 +683,10 @@ plant transk   "printf '%s' \"\${items[@]@k}\""      D "the lowercase @k transfo
 # The escape matters to the SPLIT as well as to the operator test: without it the
 # walker closes at the escaped quote, the `;` inside the string reads as a
 # separator, and the command is cut away from its own pattern.
+plant globst   "shopt -s globstar"                  D "globstar, a Bash 4 shell option"
+plant setglob  "set -o globstar"                    D "…and its set -o spelling"
+plant atq      "printf '%s' \"\${@@Q}\""              D "a transformation on the special parameter @"
+plant atup     "printf '%s' \"\${@^^}\""              D "…and case modification on it"
 plant qsep2    'grep "a\";\s" "$f"'                      A "a GNU escape behind an escaped quote"
 plant escq     "printf '%s' \"a\\\"b\" |& cat"          D "a real |& after an escaped quote"
 plant transU   "printf '%s' \"\${name@U}\""            D "the @U transformation"
@@ -694,6 +740,30 @@ refute sedibak "sed -ibak 's/a/b/' \"\$f\""             C "sed -ibak, an attache
 # by a contributor rather than an inference by a scanner that was mistaken about it
 # three times, and it is the trade this rule makes.
 plant dataarg "printf '%s' realpath"                B "a name used as data, which this rule reports by design" realpath
+# A here-document BODY is data. `SKILL.md` writes user-facing summaries that way,
+# and an ordinary mention of a forbidden spelling in one is not an invocation.
+# Written directly, with REAL newlines: the helpers write their body with `%s`, so
+# a `\n` in it stays two characters and the here-document never spans lines — the
+# case passed while testing a single line that happened to contain no command.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'EOF'\n"
+  printf 'grep -P is unsupported on BSD\n'
+  printf 'EOF\n'; } > "$PTMP/heredoc.sh"
+hd_hits="$(scan "$RULE_C" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
+{ [ "$hd_hits" != SCANFAIL ] && [ -z "$hd_hits" ]; } \
+    && pass "…and accepts a forbidden spelling inside a here-document body" \
+    || die "a here-document body was read as shell ('$hd_hits')"
+# …and the rule still applies AFTER the body ends, or the skip would swallow the
+# rest of the file.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'EOF'\n"
+  printf 'harmless text\n'
+  printf 'EOF\n'
+  printf 'grep -P x "$f"\n'; } > "$PTMP/afterheredoc.sh"
+ah_hits="$(scan "$RULE_C" "$PTMP/afterheredoc.sh")" || ah_hits=SCANFAIL
+{ [ "$ah_hits" != SCANFAIL ] && [ -n "$ah_hits" ]; } \
+    && pass "…while code after the terminator is scanned again" \
+    || die "the here-document skip swallowed the rest of the file ('$ah_hits')"
 refute qpipe   "printf %s 'producer |& consumer'"          D "a quoted |&, which is data rather than syntax"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"

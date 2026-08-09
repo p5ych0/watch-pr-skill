@@ -35,6 +35,11 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   accepted, which is why `-i` is matched only when it ends the option cluster:
   `sed -ni` is `-n` and a bare `-i`, while `sed -ibak` is `-i` carrying its data.
 
+- **Here-document bodies are dropped before the rules see them.** `cat <<EOF`
+  followed by prose is not shell, and passing it through made an ordinary mention
+  of `grep -P` in a user-facing summary a reason to fail the gate — `SKILL.md`
+  writes exactly that way.
+
 - **The split is quote-aware.** Breaking on the operators blindly cut a command
   away from its own pattern — `grep "x;\s" f` — so neither half satisfied a rule,
   and it suppressed a real `|&` on any line that quoted something else. It walks
