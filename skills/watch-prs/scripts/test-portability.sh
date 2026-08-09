@@ -135,23 +135,51 @@ SCAN_PROLOGUE='
     }
     # True when the operator appears outside quotes anywhere on the line.
     function unquoted(l, pat) { return unquoted_pos(l, pat) > 0 }
-    # True when a letter from `set` is escaped by a backslash that is ITSELF not
-    # escaped. `grep '\\s' f` passes TWO backslashes and an `s`, which both
-    # engines read as an escaped literal backslash followed by an ordinary `s` —
-    # portable, and a pattern starting at the second backslash reported it as a GNU
-    # class escape. Only an ODD run of backslashes leaves the last one escaping the
-    # letter, so the run is counted rather than the pair matched.
-    function esc_class(l, set, i, n, ch) {
+    # True when a letter from `set` reaches the regex engine ESCAPED — which is a
+    # question about what the shell hands over, not about what the source looks
+    # like. `grep "\\s" f` writes two backslashes and passes ONE, because double
+    # quotes halve the run; `grep '\\s' f` writes two and passes two, because
+    # single quotes do not. Counting the source run alone therefore read the first
+    # as portable and the second as a violation, and both were backwards.
+    #
+    # THREE CONTEXTS, ONE RULE EACH, and the surface is closed at three:
+    #   single-quoted — nothing is removed, so the run survives: odd escapes.
+    #   double-quoted — each pair becomes one, and a lone backslash before an
+    #                   ordinary letter is KEPT, so ceil(n/2) survive.
+    #   unquoted      — each pair becomes one and a lone backslash is REMOVED
+    #                   along with nothing else, so floor(n/2) survive.
+    # In each case the letter is escaped when an odd number of backslashes reaches
+    # the engine.
+    function esc_class(l, set, i, n, ch, q, kept) {
+        q = ""
         for (i = 1; i <= length(l); i++) {
-            if (substr(l, i, 1) != "\134") continue
-            n = 0
-            while (substr(l, i, 1) == "\134") { n++; i++ }
             ch = substr(l, i, 1)
-            if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
-            i--
+            if (ch == "\134") {
+                n = 0
+                while (substr(l, i, 1) == "\134") { n++; i++ }
+                ch = substr(l, i, 1)
+                if (ch == "") return 0
+                if (q == "\047")      kept = n
+                else if (q == "\042") kept = int((n + 1) / 2)
+                else                  kept = int(n / 2)
+                if (kept % 2 == 1 && index(set, ch) > 0) return 1
+                # The character that ENDED the run may be a quote, and whether it
+                # opens or closes one depends on whether the run escaped it — which
+                # single quotes never allow.
+                if (ch == "\047" || ch == "\042") {
+                    if (q == "\047" || n % 2 == 0) {
+                        if (q == "") q = ch
+                        else if (q == ch) q = ""
+                    }
+                }
+                continue
+            }
+            if (q == "") { if (ch == "\047" || ch == "\042") q = ch }
+            else if (ch == q) q = ""
         }
         return 0
     }
+
     #
     # A HERE-DOCUMENT BODY IS DATA. `cat <<EOF` followed by prose is not shell, and
     # passing it to the rules made an ordinary mention of `grep -P` in a summary
@@ -160,46 +188,59 @@ SCAN_PROLOGUE='
     # skipped until it reappears alone on a line. `<<-` strips leading tabs from the
     # terminator, so that form is allowed for.
     { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
-      if (heredoc != "") {
+      # A COMMAND CAN OPEN MORE THAN ONE DOCUMENT. `cat <<ONE <<TWO` is two, read
+      # in the order written, and recording only the first meant the SECOND body
+      # was scanned as shell once the first terminator arrived — example text in it
+      # then failed the gate. The delimiters are a queue, and the head is what the
+      # current body ends on.
+      if (hdn > 0) {
           t = raw
           # ONLY `<<-` STRIPS INDENTATION, and only TABS. Stripping whitespace from
           # every terminator meant an indented `  EOF` inside an ordinary `<<EOF`
           # body ended the skip early — the rest of the document then read as
           # shell, so a `grep -P` written as example text failed the gate.
-          if (hd_dash) sub(/^\t+/, "", t)
-          if (t == heredoc) { heredoc = ""; hd_dash = 0 }
+          if (HDD[hdi]) sub(/^\t+/, "", t)
+          if (t == HDQ[hdi]) { hdi++; if (hdi > hdn) { hdn = 0; hdi = 0 } }
           next
       }
       # The delimiter can be any word — `END-MARK`, `_EOF_`, `EOF.1` — and matching
       # only an identifier took `END` from `END-MARK`, so the real terminator was
       # never recognised and everything to EOF was skipped: one document silently
       # excusing the rest of the file.
+      #
       # A `<<` INSIDE QUOTES IS NOT A REDIRECTION. A quoted word carrying those
-      # characters — printf %s "<<EOF" — is a string, and matching the raw text
-      # took it as one: the skip began, no
-      # terminator ever arrived, and every following line to EOF was excused by a
-      # here-document that was never opened. The operator is located outside quotes
-      # first, and the delimiter is read from THERE rather than from anywhere on
-      # the line.
-      hp = unquoted_pos(raw, "<<")
-      # `<<<` is a here-STRING and has no terminator. The pattern could begin at
-      # the second `<` of one, take the word after it as a delimiter, and skip
-      # every following line to EOF — a single `cat <<<EOF` excusing the file.
-      if (hp > 0 && substr(raw, hp, 3) != "<<<") {
-          tail = substr(raw, hp)
-          if (match(tail, /^<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
-              heredoc = substr(tail, RSTART, RLENGTH)
-              hd_dash = (heredoc ~ /^<<-/)
-              sub(/^<<-?[[:space:]]*/, "", heredoc)
-              gsub(/["'"'"']/, "", heredoc)
+      # characters is a string, and matching the raw text took it as one: the skip
+      # began, no terminator ever arrived, and every following line to EOF was
+      # excused by a here-document that was never opened. The operator is located
+      # outside quotes first, and the delimiter is read from THERE.
+      #
+      # The scan restarts after each delimiter word rather than tracking quote
+      # state across the whole line, which is the same not-a-lexer trade the split
+      # makes: a line whose quoting is unbalanced mid-way is read as more code than
+      # it is, so a rule REPORTS rather than excuses.
+      hdrest = raw
+      while ((hp = unquoted_pos(hdrest, "<<")) > 0) {
+          hdtail = substr(hdrest, hp)
+          # `<<<` is a here-STRING and has no terminator. The pattern could begin
+          # at the second `<` of one, take the word after it as a delimiter, and
+          # skip every following line to EOF — a single `cat <<<EOF` excusing the
+          # file.
+          if (substr(hdtail, 1, 3) == "<<<") { hdrest = substr(hdtail, 4); continue }
+          if (match(hdtail, /^<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
+              hdw = substr(hdtail, RSTART, RLENGTH)
+              hdrest = substr(hdtail, RLENGTH + 1)
+              hddash = (hdw ~ /^<<-/)
+              sub(/^<<-?[[:space:]]*/, "", hdw)
+              gsub(/["'"'"']/, "", hdw)
               # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled
               # the same and its right operand is a number, so a numeric delimiter
               # is the shift rather than a document — and taking it started a skip
               # with no terminator, to EOF. A here-document delimiter that is only
               # digits is not a spelling anything here uses.
-              if (heredoc ~ /^[0-9]+$/) { heredoc = ""; hd_dash = 0 }
-          }
+              if (hdw !~ /^[0-9]+$/) { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
+          } else { hdrest = substr(hdtail, 3) }
       }
+      if (hdn > 0) hdi = 1
       if (buf == "") start = FNR
       if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
       line = buf raw; buf = "" }
@@ -413,6 +454,21 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # Absence cannot catch these either: the runner has Bash 5 and accepts them all.
 # Only text can, and like the flag list this one is open — a Bash 5 construct is
 # equally unusable there, and the list grows when one is found.
+#
+# SINGLE-QUOTED TEXT IS STILL SCANNED, AND THAT IS THE CHOICE RATHER THAN AN
+# OVERSIGHT. `printf '%s' '${name^^}'` is data, and this rule reports it. Skipping
+# single-quoted text would fix that — and would excuse `bash -c 'mapfile -t a < f'`,
+# which is not data but the ordinary way this tree runs code in a child shell:
+# `test-loadlib.sh` is built on exactly that spelling. Telling the two apart is
+# knowing whether the string is executed, which is the analysis this file does not
+# do; the version that guessed would report PASS while its invariant was false,
+# which CLAUDE.md records as worse than no check at all.
+#
+# So the trade is the same one `|&` already makes, and it is bounded on both
+# sides. The cost is a false positive on a Bash 4 spelling quoted as data, which a
+# contributor sees immediately and can spell around; nothing in this tree hits it,
+# and the one place such text belongs — the planted fixtures — is below
+# `PORT_SPLIT` and outside the self-scan by construction.
 #
 # `${!name}` is NOT here: indirect expansion is Bash 2, and only the Bash 4
 # `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
@@ -888,6 +944,7 @@ hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
 # TWO backslashes in the file, built with a counted variable rather than a
 # printf format, because the escaping of a backslash count is the thing under
 # test and a format string adds a second layer of it.
+one_bs='\'
 two_bs='\\'
 printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/evenesc.sh"
 ee_hits="$(scan "$RULE_A" "$PTMP/evenesc.sh")" || ee_hits=SCANFAIL
@@ -903,6 +960,32 @@ oe_hits="$(scan "$RULE_A" "$PTMP/oddesc.sh")" || oe_hits=SCANFAIL
     && pass "…while an odd run of backslashes still escapes the letter" \
     || die "three backslashes before s were read as portable ('$oe_hits')"
 
+# ── THE SHELL HALVES A RUN INSIDE DOUBLE QUOTES ────────────────────────────
+# `grep "\\s" f` writes two backslashes and passes ONE, so the engine sees the GNU
+# `\s` — the same command the single-quoted spelling of two backslashes does NOT
+# produce. Counting the source run alone read this as portable and let a real
+# incompatibility through: the gate reporting clean on a script BSD reads
+# differently, which is the failure mode this whole file exists to remove.
+printf '#!/usr/bin/env bash\ngrep "%ss" "$f"\n' "$two_bs" > "$PTMP/dqeven.sh"
+de_hits="$(scan "$RULE_A" "$PTMP/dqeven.sh")" || de_hits=SCANFAIL
+{ [ "$de_hits" != SCANFAIL ] && [ -n "$de_hits" ]; } \
+    && pass "two backslashes inside DOUBLE quotes still reach the engine as one" \
+    || die "a double-quoted \\\\s was read as portable ('$de_hits')"
+# …and three inside double quotes become two, which is a literal backslash and an
+# ordinary letter. Same arithmetic, opposite answer.
+printf '#!/usr/bin/env bash\ngrep "%ss" "$f"\n' "$three_bs" > "$PTMP/dqodd.sh"
+do_hits="$(scan "$RULE_A" "$PTMP/dqodd.sh")" || do_hits=SCANFAIL
+{ [ "$do_hits" != SCANFAIL ] && [ -z "$do_hits" ]; } \
+    && pass "…while three inside double quotes are a literal backslash" \
+    || die "a double-quoted literal backslash was reported ('$do_hits')"
+# UNQUOTED, a lone backslash is REMOVED rather than kept: `grep \\s f` searches for
+# a plain `s` and is portable, so the counts differ again by context.
+printf '#!/usr/bin/env bash\ngrep %ss "$f"\n' "$one_bs" > "$PTMP/bareone.sh"
+bo_hits="$(scan "$RULE_A" "$PTMP/bareone.sh")" || bo_hits=SCANFAIL
+{ [ "$bo_hits" != SCANFAIL ] && [ -z "$bo_hits" ]; } \
+    && pass "…and an unquoted lone backslash is removed, not passed" \
+    || die "an unquoted single backslash was reported ('$bo_hits')"
+
 # ── THE TWO REMOVAL LISTS ARE KEPT IN STEP BY A CHECK, NOT BY A COMMENT ────
 # The workflow said it was "KEPT IN STEP with GNU_ONLY_NAMES" and nothing verified
 # it. A name in the scan but not in the job is covered by text alone and misses the
@@ -914,27 +997,14 @@ if [ -f "$PORT_WF" ]; then
     if [ -z "$wf_tools" ]; then
         die "the portability job's tool list could not be read"
     else
-        # THE `g`-PREFIXED SPELLINGS ARE EXEMPT, and the reason was measured. They
-        # were added to the job's list on the theory that hiding a tool the runner
-        # does not have is a harmless no-op. Ubuntu's `awk` is a symlink chain
-        # ending at `/usr/bin/gawk`, so hiding `gawk` removed `awk` itself and
-        # every scan in the suite died with `command not found` — both portability
-        # jobs red, for the check rather than for the code. A Homebrew spelling is
-        # covered by the text scan; the job cannot cover it without removing the
-        # system tool it aliases.
-        PORT_WF_EXEMPT='gsed gawk gdate gcp gln gsort gtimeout gnproc'
-        # A stale exemption is loud: a name here that has left `GNU_ONLY_NAMES` is
-        # excusing something the scan no longer looks for.
-        stale_wf=""
-        for e in $PORT_WF_EXEMPT; do
-            printf '%s\n' $GNU_ONLY_NAMES | grep -qxF "$e" || stale_wf="$stale_wf $e"
-        done
-        [ -z "$stale_wf" ] \
-            && pass "…and every workflow exemption still names a scanned tool" \
-            || die "workflow exemption(s) no longer in the scan:$stale_wf"
+        # NO EXEMPTIONS. The `g`-prefixed spellings were exempt for one round,
+        # because hiding `gawk` on Ubuntu removed `awk` — the same file — and the
+        # suite, which is written in awk, could not run. The job preserves a real
+        # POSIX `awk` under its own name before hiding the GNU one now, so the
+        # containment holds for every name and there is no list of which entries
+        # it does not hold for.
         missing=""
         for n in $GNU_ONLY_NAMES; do
-            printf '%s\n' $PORT_WF_EXEMPT | grep -qxF "$n" && continue
             # The quotes go first: the last name is adjacent to the closing one,
             # so `gnproc"` was a token that matched nothing — the check reporting a
             # gap in the list rather than in the code.
@@ -1028,6 +1098,35 @@ dt_hits="$(scan "$RULE_A" "$PTMP/dashterm.sh")" || dt_hits=SCANFAIL
 { [ "$dt_hits" != SCANFAIL ] && [ -n "$dt_hits" ]; } \
     && pass "…while <<- ends on a tab-indented terminator, as bash does" \
     || die "a <<- here-document never ended ('$dt_hits')"
+
+# ── ONE COMMAND, TWO DOCUMENTS ─────────────────────────────────────────────
+# `cat <<ONE <<TWO` opens both, in the order written. Recording only the first
+# meant the SECOND body was read as shell as soon as the first terminator arrived,
+# so example text in it failed the gate — and the file resumed one document early,
+# which is the mirror of the skip that never ends.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<ONE <<TWO\n'
+  printf 'first body\n'
+  printf 'ONE\n'
+  printf 'grep -qE "\\s" is example text in the second body\n'
+  printf 'TWO\n'; } > "$PTMP/twodocs.sh"
+td_hits="$(scan "$RULE_A" "$PTMP/twodocs.sh")" || td_hits=SCANFAIL
+{ [ "$td_hits" != SCANFAIL ] && [ -z "$td_hits" ]; } \
+    && pass "a second here-document body on one command is data too" \
+    || die "the body of the second document was scanned as shell ('$td_hits')"
+# …and the queue drains: after BOTH terminators the file is code again, or a
+# two-document command would excuse everything after it.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<ONE <<TWO\n'
+  printf 'first\n'
+  printf 'ONE\n'
+  printf 'second\n'
+  printf 'TWO\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/twodocsend.sh"
+te2_hits="$(scan "$RULE_A" "$PTMP/twodocsend.sh")" || te2_hits=SCANFAIL
+{ [ "$te2_hits" != SCANFAIL ] && [ -n "$te2_hits" ]; } \
+    && pass "…and code after the second terminator is scanned again" \
+    || die "a two-document command swallowed the rest of the file ('$te2_hits')"
 
 # ── A << INSIDE QUOTES IS NOT A REDIRECTION ────────────────────────────────
 # A quoted word carrying the characters is a string. Matching the raw text took it

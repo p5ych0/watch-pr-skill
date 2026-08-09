@@ -93,6 +93,31 @@ jobs:
       # fails, which is wrong: the guard's whole point is that the fallback runs.
       # So the shims are NOT on PATH for `command -v` to find. They are absent,
       # and the loud part is the summary this step prints if the suite fails.
+      # `awk` IS NOT `gawk`, AND THE JOB HAS TO KEEP THAT DISTINCTION. POSIX
+      # specifies `awk` and macOS ships one; `gawk` is the GNU name and is what a
+      # portable script must not call. On Ubuntu they are the same file — `awk` is
+      # a symlink chain ending at `/usr/bin/gawk` — so hiding the GNU name removed
+      # the POSIX one with it and every scan in the suite, all of which are written
+      # in awk, died with `command not found`.
+      #
+      # A REAL COPY UNDER THE POSIX NAME breaks that chain: `/usr/local/bin/awk` is
+      # a file rather than a link, it precedes `/usr/bin` on PATH, and it survives
+      # `/usr/bin/gawk` being moved away. The job then covers what it is for — a
+      # `gawk` assembled at runtime, which no text scan can see — while the suite
+      # still runs.
+      - name: Preserve a POSIX awk before the GNU name goes
+        run: |
+          set -euo pipefail
+          real_awk="$(readlink -f "$(command -v awk)")"
+          sudo cp "$real_awk" /usr/local/bin/awk
+          hash -r 2>/dev/null || true
+          [ "$(command -v awk)" = /usr/local/bin/awk ] || {
+            echo "::error::/usr/local/bin/awk does not win on PATH: $(command -v awk)"
+            exit 1
+          }
+          awk 'BEGIN { exit 0 }' || { echo "::error::the preserved awk does not run"; exit 1; }
+          echo "preserved: $real_awk -> /usr/local/bin/awk"
+
       - name: Remove the GNU-only tools
         run: |
           set -euo pipefail
@@ -102,15 +127,11 @@ jobs:
           # `test-portability.sh` now CHECKS this containment rather than trusting
           # this comment: every scanned name must appear here.
           #
-          # THE `g`-PREFIXED SPELLINGS ARE NOT HERE, and the reason was measured
-          # rather than assumed. They were added on the theory that hiding a tool
-          # the runner does not have is a harmless no-op; Ubuntu's `awk` is a
-          # symlink chain ending at `/usr/bin/gawk`, so hiding `gawk` removed `awk`
-          # itself and every scan in the suite died with `command not found`.
-          # They are the Homebrew names a macOS contributor may reach for, and the
-          # text scan is what covers them.
+          # The `g`-prefixed spellings are the Homebrew names a macOS contributor
+          # may reach for. Hiding them is what the step above preserves `awk` for.
           tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors numfmt shred"
+                 stdbuf truncate dircolors numfmt shred
+                 gsed gawk gdate gcp gln gsort gtimeout gnproc"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool
@@ -134,7 +155,12 @@ jobs:
             echo "::error::still on PATH:$still — this job would prove nothing"
             exit 1
           fi
-          echo "all hidden, none resolves"
+          # …and the POSIX name still works, which is the whole point of the copy.
+          awk 'BEGIN { exit 0 }' || {
+            echo "::error::awk stopped working when the GNU names were hidden"
+            exit 1
+          }
+          echo "all hidden, none resolves; awk still runs"
 
       # …and the removal is proven to BITE, not merely to have happened. A step
       # that hid nothing and a step that hid everything both leave the suite
@@ -147,6 +173,15 @@ jobs:
             exit 1
           fi
           echo "confirmed: seq no longer runs"
+          # AND AN ASSEMBLED NAME, which is the case only this job can reach: a
+          # target spelling `_a=g; _b=awk; "$_a$_b" …` has no literal `gawk` for any
+          # text scan to find, so absence is the only thing that catches it.
+          _a=g; _b=awk
+          if "$_a$_b" 'BEGIN { exit 0 }' >/dev/null 2>&1; then
+            echo "::error::a gawk assembled at runtime still resolves"
+            exit 1
+          fi
+          echo "confirmed: an assembled gawk no longer runs"
 
       - name: Run test suite without the GNU-only tools
         working-directory: skills/watch-prs/scripts

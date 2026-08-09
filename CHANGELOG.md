@@ -62,12 +62,34 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   workflow said it was kept in step with `GNU_ONLY_NAMES` and nothing verified it.
   A name in the scan but not in the job is covered by text alone; a name in neither
   is covered by nothing, which is how `shred` — GNU coreutils, absent from stock
-  macOS — sat uncovered by both. It is in both lists now, and the containment is
-  asserted rather than asserted-about. The `g`-prefixed Homebrew spellings are
-  exempt, for a reason that was measured rather than assumed: they were added to
-  the job on the theory that hiding a tool the runner lacks is a harmless no-op,
-  and Ubuntu's `awk` is a symlink chain ending at `/usr/bin/gawk`, so hiding
-  `gawk` removed `awk` itself and every scan died with `command not found`.
+  macOS — sat uncovered by both. It is in both lists now, with no exemptions.
+
+- **`awk` is not `gawk`, and the job keeps that distinction.** POSIX specifies
+  `awk` and macOS ships one; `gawk` is the GNU name a portable script must not
+  call. On Ubuntu they are the same file — `awk` is a symlink chain ending at
+  `/usr/bin/gawk` — so hiding the GNU name removed the POSIX one and every scan in
+  the suite, all written in awk, died with `command not found`. The job copies a
+  real POSIX `awk` under its own name first, which breaks the chain; it then hides
+  `gawk` and proves that a name assembled at runtime — `_a=g; _b=awk; "$_a$_b"` —
+  no longer resolves, which is the case no text scan can reach.
+
+- **Backslash parity is judged after shell quote removal, not on the source.**
+  `grep "\\s" f` writes two backslashes and passes ONE, because double quotes
+  halve the run; `grep '\\s' f` writes two and passes two, because single quotes
+  do not. Counting the source alone read the first as portable — the gate
+  reporting clean on a script BSD reads differently — and the second as a
+  violation. Three contexts, one rule each: single-quoted keeps the run,
+  double-quoted keeps ceil(n/2), unquoted keeps floor(n/2).
+
+- **Every document a command opens is queued.** `cat <<ONE <<TWO` opens both, in
+  the order written; recording only the first meant the second body was read as
+  shell as soon as the first terminator arrived.
+
+- **Single-quoted text is still scanned, and that is a choice.** Skipping it would
+  stop `printf '%s' '${name^^}'` being reported as data — and would excuse
+  `bash -c 'mapfile -t a < f'`, which is not data but how this tree runs code in a
+  child shell. Telling those apart is knowing whether the string is executed. The
+  trade is the one `|&` already makes, and it is recorded where the rule lives.
 
 - **A `<<` is a redirection only where the shell sees one.** A quoted word
   carrying the characters is a string, and matching the raw text took it as an
