@@ -96,8 +96,12 @@ jobs:
       - name: Remove the GNU-only tools
         run: |
           set -euo pipefail
+          # KEPT IN STEP with `GNU_ONLY_NAMES` in test-portability.sh, plus the
+          # English-colliding names that only this job can cover — `timeout`,
+          # `seq`, `truncate`. A tool in neither list is covered by nothing.
           tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors"
+                 stdbuf truncate dircolors numfmt ptx csplit expand unexpand
+                 pathchk"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool

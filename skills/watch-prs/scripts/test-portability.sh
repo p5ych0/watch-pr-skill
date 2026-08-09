@@ -138,7 +138,11 @@ SCAN_PROLOGUE='
           if (t == heredoc) heredoc = ""
           next
       }
-      if (match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*["'"'"']?/)) {
+      # The delimiter can be any word — `END-MARK`, `_EOF_`, `EOF.1` — and matching
+      # only an identifier took `END` from `END-MARK`, so the real terminator was
+      # never recognised and everything to EOF was skipped: one document silently
+      # excusing the rest of the file.
+      if (match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
           heredoc = substr(raw, RSTART, RLENGTH)
           sub(/^<<-?[[:space:]]*/, "", heredoc)
           gsub(/["'"'"']/, "", heredoc)
@@ -288,7 +292,8 @@ RULE_A='
 # on both platforms in this list would make the gate fail on portable code, which
 # is the one thing worse than missing a defect.
 GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
-                dircolors gsed gawk gdate gcp gln gsort gtimeout gnproc'
+                dircolors numfmt ptx csplit expand unexpand pathchk
+                gsed gawk gdate gcp gln gsort gtimeout gnproc'
 # (file:command) pairs that run one correctly — each probes with `command -v` and
 # falls back. Named rather than inferred: recognising the shape took three rounds
 # and was still wrong.
@@ -404,6 +409,8 @@ RULE_D='
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
         report("|& is a Bash 4 pipeline: " WHOLE); return }
+    if (line ~ /\{[0-9]+\.\.[0-9]+\.\.[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.[0-9]+\}/) {
+        report("a stepped brace expansion is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])(shopt[[:space:]]+(-[A-Za-z]+[[:space:]]+)*globstar|set[[:space:]]+-o[[:space:]]+globstar)/) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
@@ -462,6 +469,14 @@ targets() {
 # Extracted before the list is built, and its status taken: an `awk` that wrote a
 # prefix and then failed would hand the scans a truncated driver and report clean
 # on the part it never read.
+# ALLOCATED BEFORE ANYTHING READS IT. This sat below both uses, so
+# `${PORT_TMPDIR:+…}` expanded to nothing, the extraction branch never ran, and
+# SKILL.md quietly left the target list — a GNU-only construct in the driver was
+# invisible to the gate. Nothing failed, because the only check on the list was a
+# count with no expected value.
+PORT_TMPDIR="$(mktemp -d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
+[ -n "$PORT_TMPDIR" ] && trap 'rm -rf "$PORT_TMPDIR"' EXIT
+
 PORT_SKILL_BLOCKS=""
 if [ -f "$SELF_DIR/../SKILL.md" ]; then
     PORT_SKILL_BLOCKS="${PORT_TMPDIR:+$PORT_TMPDIR/SKILL.md(bash blocks)}"
@@ -485,8 +500,6 @@ while IFS= read -r _t; do TARGETS+=( "$_t" ); done < <(targets)
 # The checker's own implementation joins the list.
 # NAMED, not a bare `mktemp` path. A hit in an extracted target is reported as its
 # file, and `/tmp/tmp.AbCdEf:212:` tells a reader nothing about which file to open.
-PORT_TMPDIR="$(mktemp -d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
-[ -n "$PORT_TMPDIR" ] && trap 'rm -rf "$PORT_TMPDIR"' EXIT
 PORT_SELF="${PORT_TMPDIR:+$PORT_TMPDIR/test-portability.sh(implementation)}"
 if [ -n "$PORT_SELF" ] && port_production "$PORT_SELF"; then
     TARGETS+=( "$PORT_SELF" )
@@ -501,9 +514,19 @@ if [ -n "$PORT_SELF" ] && port_production "$PORT_SELF"; then
 else
     die "the checker's implementation half could not be extracted"
 fi
+# BY NAME, not by count. `there are N files to scan` passed at 25 exactly as it
+# had at 26, so SKILL.md leaving the list was invisible. Every input this file
+# claims to cover is named.
+port_listed() { printf '%s\n' "${TARGETS[@]}" | grep -qF "$1"; }
 [ "${#TARGETS[@]}" -gt 0 ] \
     && pass "there are ${#TARGETS[@]} files to scan" \
     || { die "no files found to scan"; echo "RESULT: FAIL"; exit 1; }
+for want in pr-ci-state.sh testlib.sh identitylib.sh 'SKILL.md(bash blocks)' \
+            'test-portability.sh(implementation)'; do
+    port_listed "$want" \
+        && pass "…including $want" \
+        || die "$want is not among the scanned inputs"
+done
 
 # ── the tree is clean ──────────────────────────────────────────────────────
 a_rc=0; a_hits="$(scan "$RULE_A" "${TARGETS[@]}")" || a_rc=$?
@@ -622,8 +645,16 @@ plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
         A) hits="$(scan "$RULE_A" "$PTMP/$1.sh")" || rc=$? ;;
         C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
         D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
-        B) hits="$(scan '
-               if (line ~ /(^|[^A-Za-z0-9_.-])'"$cmd"'([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/$1.sh")" || rc=$? ;;
+        # THROUGH THE PRODUCTION LIST, not a regex built from the fixture's own
+        # name. Constructed fresh, a planted `realpath` reported a hit even if
+        # `realpath` had been dropped from `GNU_ONLY_NAMES` — the fixture proving
+        # the pattern works rather than that the rule covers the tool.
+        B) hits=""
+           for pc in $GNU_ONLY_NAMES; do
+               [ "$pc" = "$cmd" ] || continue
+               hits="$(scan '
+                   if (line ~ /(^|[^A-Za-z0-9_.-])'"$pc"'([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/$1.sh")" || rc=$?
+           done ;;
     esac
     { [ "$rc" -eq 0 ] && [ -n "$hits" ]; } \
         && pass "the scan catches $4" \
@@ -633,10 +664,17 @@ plant escape  "grep -qE '^[a-z]+\\s+[0-9]' \"\$f\"" A "the \\s that reached this
 plant worddig "sed -n 's/\\d//p' \"\$f\""           A "a \\d in a sed pattern"
 plant sha1sum "printf x | sha1sum"                  B "an unguarded sha1sum"
 plant realpath "realpath ./x"                       B "realpath, which stock macOS lacks"
+plant numfmt  "numfmt --from=iec 1K"                B "numfmt, a coreutils tool macOS does not ship"
 plant tac     "tac < \"\$f\""                        B "tac"
 plant gsed    "gsed -E 's/a/b/' x"                  B "a g-prefixed GNU tool"
 # POSITION NO LONGER MATTERS, which is the point of the redesign — these all read
 # the same to this rule, and none of them needed a new case to be added.
+#
+# They use `tac`, not `seq`. `seq` is deliberately outside this rule — it is
+# ordinary English — so a plant naming it asserted a coverage the rule does not
+# claim, and once the fixtures went through the production list those five cases
+# failed for the right reason. Removed rather than repaired: the position they
+# tested is covered here.
 plant casearm2 "case x in x) tac f; : ;; esac"      B "…at the start of a case arm" tac
 plant ifcond2  "if tac f; then :; fi"               B "…as an if condition"        tac
 plant assignp  "if LC_ALL=C tac f; then :; fi"      B "…behind an assignment prefix" tac
@@ -674,7 +712,6 @@ plant pipeboth "cmd |& other"                       D "the Bash 4 |& pipeline"
 plant sedieq   "sed --in-place=.bak 's/a/b/' x"     C "sed --in-place=SUFFIX"
 plant dateeq   "date --date=2026-01-01 +%s"         C "date --date=TIME"
 plant stateq   "stat --format=%s x"                 C "stat --format=FORMAT"
-plant cmdwrap  "if command seq 1 5; then :; fi"     B "a GNU command run through the command builtin" seq
 plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option operand"
 plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
 plant declra   "declare -r -A M"                    D "an associative array declared with a separated option"
@@ -683,6 +720,7 @@ plant transk   "printf '%s' \"\${items[@]@k}\""      D "the lowercase @k transfo
 # The escape matters to the SPLIT as well as to the operator test: without it the
 # walker closes at the escaped quote, the `;` inside the string reads as a
 # separator, and the command is cut away from its own pattern.
+plant bracestep "for i in {1..5..2}; do :; done"     D "a stepped brace expansion"
 plant globst   "shopt -s globstar"                  D "globstar, a Bash 4 shell option"
 plant setglob  "set -o globstar"                    D "…and its set -o spelling"
 plant atq      "printf '%s' \"\${@@Q}\""              D "a transformation on the special parameter @"
@@ -691,13 +729,9 @@ plant qsep2    'grep "a\";\s" "$f"'                      A "a GNU escape behind 
 plant escq     "printf '%s' \"a\\\"b\" |& cat"          D "a real |& after an escaped quote"
 plant transU   "printf '%s' \"\${name@U}\""            D "the @U transformation"
 plant transL   "printf '%s' \"\${name@L}\""            D "the @L transformation"
-plant casearm  "case x in x) seq 1 5; : ;; esac"    B "a GNU command at the start of a case arm" seq
 plant sednr    "sed -n -r 's/a+/b/p' \"\$f\""        C "sed -r after another option"
 plant statlc   "stat -L -c '%s' \"\$f\""             C "stat -c after another option"
 plant upperpat "printf '%s' \"\${name^^[a-z]}\""     D "case conversion with a pattern operand"
-plant ifseq    "if seq 1 5; then :; fi"             B "a GNU command as an if condition"     seq
-plant whileseq "while seq 1 2; do break; done"      B "…and as a while condition"            seq
-plant notseq   "! seq 1 2"                          B "…and after a leading !"                seq
 
 # ── …and does NOT fire on the correct forms ────────────────────────────────
 # A scan that rejects the portable spelling is worse than none: it teaches the
@@ -750,6 +784,18 @@ plant dataarg "printf '%s' realpath"                B "a name used as data, whic
   printf 'grep -P is unsupported on BSD\n'
   printf 'EOF\n'; } > "$PTMP/heredoc.sh"
 hd_hits="$(scan "$RULE_C" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
+# …and a delimiter that is not a bare identifier still terminates. `END-MARK`
+# matched only as `END`, so the real terminator was never seen and everything to
+# EOF was skipped — one document excusing the rest of the file.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'END-MARK'\n"
+  printf 'harmless\n'
+  printf 'END-MARK\n'
+  printf 'grep -P x "$f"\n'; } > "$PTMP/dashdelim.sh"
+dd_hits="$(scan "$RULE_C" "$PTMP/dashdelim.sh")" || dd_hits=SCANFAIL
+{ [ "$dd_hits" != SCANFAIL ] && [ -n "$dd_hits" ]; } \
+    && pass "…and a hyphenated here-document delimiter still terminates the skip" \
+    || die "an END-MARK delimiter swallowed the rest of the file ('$dd_hits')"
 { [ "$hd_hits" != SCANFAIL ] && [ -z "$hd_hits" ]; } \
     && pass "…and accepts a forbidden spelling inside a here-document body" \
     || die "a here-document body was read as shell ('$hd_hits')"
