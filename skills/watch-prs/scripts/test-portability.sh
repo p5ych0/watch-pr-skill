@@ -136,6 +136,16 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
 # `\b` only — gawk defines `\B` as a within-word operator, and exempting the pair
 # together let `awk '/foo\Bbar/'` through.
 RULE_A='
+    # `-e` AND `-f` TAKE AN OPERAND, and that operand is not a flag:
+    # `grep -e -P file` searches for the literal string `-P`. Checked before the
+    # flag rules, because the operand looks exactly like what they hunt for.
+    if (line ~ /(^|[^a-zA-Z_-])(grep|sed)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*[ef][[:space:]]+-/) return
+
+    # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so
+    # `grep -F '\s' f` behaves the same on both platforms, and rejecting it made
+    # the gate fail on portable code.
+    if (line ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
+
     if (line ~ /(grep|sed)/ && line ~ /\\[sSdDwWbBy<>]/) {
         report("GNU regex escape: " line); return }
     if (line ~ /awk/ && line ~ /\\[sSdDwWBy<>]/) {
@@ -176,7 +186,12 @@ GNU_ONLY_COMMANDS='timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
 # `case x in x) seq 1 5; : ;; esac` runs `seq` there. With the command gone the
 # failed lookup is followed by `:`, so the arm returns 0 and the portability job
 # passes as well — both checks missing it.
-CMD_POS='(^|[|;&({!)]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
+#
+# `command` IS AN INVOCATION WRAPPER: `command seq 1 5` runs `seq`. `command -v seq`
+# is not caught, because the name must follow the wrapper immediately and `-v` is
+# in the way — which is exactly the distinction that matters, one runs the tool and
+# the other asks whether it exists.
+CMD_POS='(^|[|;&({!)]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|command|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
 
 # ── RULE C: GNU-only flags on commands that do exist ───────────────────────
 #
@@ -206,22 +221,29 @@ CMD_POS='(^|[|;&({!)]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif
 # BSD rejects the flag.
 #   echo -e       Not portable in any shell; `printf` is.
 RULE_C='
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    if (line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/) {
+    # THE OPERAND OF `-e`/`-f` IS NOT A FLAG, here as in Rule A: `grep -e -P file`
+    # searches for the literal `-P`. First, because the operand looks exactly like
+    # what every clause below is hunting for.
+    if (line ~ /(^|[^a-zA-Z_-])(grep|sed)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*[ef][[:space:]]+-/) return
+    # NO `line = $0` HERE. The prologue hands these rules a LOGICAL line; taking
+    # `$0` again threw the join away, so `grep -m 1 \` + `-P …` and `declare \` +
+    # `-A M` reported clean while Rule A, which never reassigned, caught its own
+    # continued case. A shared prologue only helps the rules that let it.
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place|-[A-Za-z]*i)([[:space:]]|$)/) {
         report("sed -i has no portable spelling; write a temp file and mv: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)|-[A-Za-z]*r)([[:space:]]|$)/) {
         report("sed -r is the GNU spelling of -E: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*f([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)|-[A-Za-z]*f)([[:space:]]|$)/) {
         report("readlink -f is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*P([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)|-[A-Za-z]*P)([[:space:]]|$)/) {
         report("grep -P is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*d([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)|-[A-Za-z]*d)([[:space:]]|$)/) {
         report("date -d is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*c([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)|-[A-Za-z]*c)([[:space:]]|$)/) {
         report("stat -c is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)|-[A-Za-z]*r)([[:space:]]|$)/) {
         report("xargs -r is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*h([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)|-[A-Za-z]*h)([[:space:]]|$)/) {
         report("sort -h is GNU-only: " line); return }
     if (line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/) {
         report("echo -e is not portable; use printf: " line); return }'
@@ -241,7 +263,6 @@ RULE_C='
 # `${!name}` is NOT here: indirect expansion is Bash 2, and only the Bash 4
 # `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
 RULE_D='
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
     if (line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/) {
         report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
     if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*A[A-Za-z]*([[:space:]]|$)/) {
@@ -250,6 +271,8 @@ RULE_D='
         report("case modification is Bash 4: " line); return }
     if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKaUuL]\}/) {
         report("parameter transformation is Bash 4.4: " line); return }
+    if (line ~ /;;?&([[:space:]]|$)/) {
+        report("the ;& and ;;& case terminators are Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
@@ -335,8 +358,15 @@ for f in "${TARGETS[@]}"; do
         # diagnostic string naming the probe — and it satisfied the guard while an
         # unguarded `seq` two lines down went unreported. A probe that is not run
         # guards nothing.
+        # …AND THE PROBE MUST CONTROL SOMETHING. Being executable was not enough
+        # either: `command -v seq >/dev/null; if seq 1 5; then …` runs the probe,
+        # ignores it, and selects no fallback — the invocation is exempted by a
+        # test whose answer nothing reads. A probe governs when it is a CONDITION:
+        # `if command -v X`, `command -v X &&`, `command -v X ||`. Both real uses
+        # in this tree are the first form.
         guard="$(scan '
-            if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+'"$c"'/) {
+            if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+'"$c"'/ ||
+                line ~ /command[[:space:]]+-v[[:space:]]+'"$c"'[^|&]*(&&|\|\|)/) {
                 report("guard"); return }' "$f")" || {
                 die "the guard scan failed on $(basename "$f")"; continue; }
         [ -n "$guard" ] && continue
@@ -404,6 +434,12 @@ plant coprocp  "coproc CAT { cat; }"                D "coproc"
 plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
 plant grepnp   "grep -n -P '\\d' \"\$f\""             C "grep -P after another option"
 plant grepmp   "grep -m 1 -P '\\d' \"\$f\""           C "grep -P after an option that takes an operand"
+plant greplong "grep --perl-regexp 'x' \"\$f\""       C "grep --perl-regexp, the long form of -P"
+plant sedlong  "sed --regexp-extended 's/a+/b/' x"  C "sed --regexp-extended"
+plant sortlong "sort --human-numeric-sort x"        C "sort --human-numeric-sort"
+plant sedilong "sed --in-place 's/a/b/' x"          C "sed --in-place"
+plant fallthru "case \"\$x\" in a) f ;& b) g ;; esac" D "the Bash 4 ;& case terminator"
+plant cmdwrap  "if command seq 1 5; then :; fi"     B "a GNU command run through the command builtin" seq
 plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option operand"
 plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
 plant declra   "declare -r -A M"                    D "an associative array declared with a separated option"
@@ -444,6 +480,9 @@ refute sedE    "sed -E 's/a+/b/' \"\$f\""                     C "sed -E, the por
 # `\b` IN AWK IS A BACKSPACE, not a word boundary — which is why gawk invented
 # `\y`. Rejecting it made the mandatory gate fail on portable code.
 refute awkbs   "awk 'BEGIN { printf \"\\b\" }'"               A "awk's portable backspace escape"
+refute grepF   "grep -F '\\s' \"\$f\""                        A "grep -F, where a backslash is a literal"
+refute fgrepc  "fgrep '\\s' \"\$f\""                          A "fgrep, which is the same thing"
+refute grepe   "grep -e -P \"\$f\""                          C "grep -e -P, a search for the literal -P"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
 # Rule B accepts a guarded use, which is the whole point of requiring a guard
@@ -470,6 +509,44 @@ cont_hits="$(scan "$RULE_A" "$PTMP/continued.sh")" || cont_hits=SCANFAIL
 grep -q ':2:' <<<"$cont_hits" \
     && pass "…and is reported at the line the command starts on" \
     || die "the continued hit is not reported at its first line ('$cont_hits')"
+
+# …AND RULES C AND D SEE IT TOO. Rule A never reassigned `line`, so it caught its
+# continued case while C and D took `$0` again and threw the join away — a shared
+# prologue only helps the rules that let it, which is why each is exercised.
+printf '#!/usr/bin/env bash\ngrep -m 1 \\\n    -P %s \\\n    "$f"\n' "'x'" > "$PTMP/contc.sh"
+cc_hits="$(scan "$RULE_C" "$PTMP/contc.sh")" || cc_hits=SCANFAIL
+{ [ "$cc_hits" != SCANFAIL ] && [ -n "$cc_hits" ]; } \
+    && pass "a continued GNU-only flag is caught by rule C" \
+    || die "a continued grep -P was missed ('$cc_hits')"
+printf '#!/usr/bin/env bash\ndeclare \\\n    -A M\n' > "$PTMP/contd.sh"
+cd_hits="$(scan "$RULE_D" "$PTMP/contd.sh")" || cd_hits=SCANFAIL
+{ [ "$cd_hits" != SCANFAIL ] && [ -n "$cd_hits" ]; } \
+    && pass "…and a continued Bash 4 construct by rule D" \
+    || die "a continued declare -A was missed ('$cd_hits')"
+
+# ── A PROBE THAT CONTROLS NOTHING IS NOT A GUARD ───────────────────────────
+# Executable and unquoted was still not enough: `command -v seq >/dev/null` runs
+# the probe, ignores its answer, and selects no fallback — the invocation exempted
+# by a test nobody reads. A probe governs when it is a CONDITION.
+printf '#!/usr/bin/env bash\ncommand -v seq >/dev/null 2>&1\nif seq 1 5; then :; fi\n' \
+    > "$PTMP/looseprobe.sh"
+lp_guard="$(scan '
+    if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+seq/ ||
+        line ~ /command[[:space:]]+-v[[:space:]]+seq[^|&]*(&&|\|\|)/) { report("guard"); return }' \
+    "$PTMP/looseprobe.sh")" || lp_guard=SCANFAIL
+{ [ "$lp_guard" != SCANFAIL ] && [ -z "$lp_guard" ]; } \
+    && pass "a probe whose answer nothing reads does not count as a guard" \
+    || die "a non-controlling probe satisfied the guard check ('$lp_guard')"
+# …while the form this tree actually uses does.
+printf '#!/usr/bin/env bash\nif command -v seq >/dev/null 2>&1; then seq 1 5; else :; fi\n' \
+    > "$PTMP/realprobe.sh"
+rp_guard="$(scan '
+    if (line ~ /(^|[[:space:]])(if|elif|while|until)[[:space:]]+(![[:space:]]*)?command[[:space:]]+-v[[:space:]]+seq/ ||
+        line ~ /command[[:space:]]+-v[[:space:]]+seq[^|&]*(&&|\|\|)/) { report("guard"); return }' \
+    "$PTMP/realprobe.sh")" || rp_guard=SCANFAIL
+{ [ "$rp_guard" != SCANFAIL ] && [ -n "$rp_guard" ]; } \
+    && pass "…and an if-command-v probe does, which is the form in this tree" \
+    || die "the real guard form was not recognised ('$rp_guard')"
 
 # ── A QUOTED PROBE IS NOT A PROBE ──────────────────────────────────────────
 # Stripping comments was not enough: a diagnostic string NAMING the probe —
