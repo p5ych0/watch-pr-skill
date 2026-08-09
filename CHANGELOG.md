@@ -39,6 +39,12 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   first version rejected `awk 'BEGIN { printf "\b" }'` — portable code failing a
   mandatory gate, which is how a check gets switched off rather than obeyed.
 
+- **The rules read a LOGICAL line.** `grep -qE \` on one line with its pattern on
+  the next satisfied neither predicate of any rule — the command on one side of the
+  backslash, the escape on the other. Continuations are joined once, in the
+  scanner, so every rule inherits it, and a hit is reported at the line the command
+  *starts* on.
+
 - **A forbidden flag need not come first, and a comment is not a guard.**
   `grep -n -P` and `sed -n -r` passed a check that read only the first option word;
   `# use command -v seq` satisfied the probe requirement for an unguarded `seq` two

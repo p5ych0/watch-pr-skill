@@ -59,12 +59,39 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 # A SCAN THAT CANNOT READ ITS INPUT IS NOT A CLEAN SCAN. One `awk` pass, one
 # status: `awk` has no "no match" exit code, so any non-zero is a real failure and
 # anything on stderr is too.
-scan() {   # scan <awk-program> <file…> ; prints hits, 2 if the scan failed
+#
+# THE RULES SEE A LOGICAL LINE, NOT A PHYSICAL ONE. `grep -qE \` on one line and
+# its pattern on the next satisfied neither predicate of any rule — the command was
+# on one side of the backslash and the `\s` on the other, and the scan reported
+# clean. Continuations are joined here, once, so every rule inherits it; `start`
+# carries the FIRST physical line number, because that is where a reader has to
+# look.
+#
+# Full-line comments are dropped BEFORE joining. A comment cannot continue a
+# command, and stripping after the join would let a commented-out continuation
+# glue two unrelated statements together.
+SCAN_PROLOGUE='
+    function report(msg) { print FILENAME ":" start ": " msg }
+    { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
+      if (buf == "") start = FNR
+      if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
+      line = buf raw; buf = "" }
+'
+SCAN_EPILOGUE='
+    END { if (buf != "") { line = buf; RULES() } }
+'
+scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     local prog="$1"; shift
     local errf out rc msg mrc
     errf="$(mktemp)" || return 2
     rc=0
-    out="$(awk "$prog" "$@" 2>"$errf")" || rc=$?
+    # The body is wrapped in a function so the END block can run it on a trailing
+    # unterminated continuation — a file whose last line ends in a backslash would
+    # otherwise never be examined at all.
+    out="$(awk "$SCAN_PROLOGUE"'
+        { RULES() }
+        function RULES() {'"$prog"'}
+    '"$SCAN_EPILOGUE" "$@" 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
     [ "$mrc" -eq 0 ] || return 2
@@ -104,12 +131,15 @@ scan() {   # scan <awk-program> <file…> ; prints hits, 2 if the scan failed
 # rule rejected — a mandatory gate failing on something correct, which is how a
 # check gets switched off. A line naming grep or sed takes the stricter rule, so a
 # line naming both is judged by the boundary meaning.
+#
+# UPPERCASE `\B` STAYS IN THE awk SET. The backspace exemption is for lowercase
+# `\b` only — gawk defines `\B` as a within-word operator, and exempting the pair
+# together let `awk '/foo\Bbar/'` through.
 RULE_A='
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(grep|sed)/ && line ~ /\\[sSdDwWbBy<>]/ {
-        print FILENAME ":" FNR ": GNU regex escape: " $0; next }
-    line ~ /awk/ && line ~ /\\[sSdDwWy<>]/ {
-        print FILENAME ":" FNR ": gawk-only regex operator: " $0; next }'
+    if (line ~ /(grep|sed)/ && line ~ /\\[sSdDwWbBy<>]/) {
+        report("GNU regex escape: " line); return }
+    if (line ~ /awk/ && line ~ /\\[sSdDwWBy<>]/) {
+        report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only commands must be `command -v`-guarded ─────────────────
 #
@@ -141,7 +171,12 @@ GNU_ONLY_COMMANDS='timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
 # keyword can begin the line. Written as ` if ` it required a space in front, so
 # `if seq 1 5; then …` at column one walked past while an indented one was caught:
 # a position list that depends on indentation.
-CMD_POS='(^|[|;&({!]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
+#
+# `)` IS A COMMAND POSITION TOO: it ends a `case` pattern, and
+# `case x in x) seq 1 5; : ;; esac` runs `seq` there. With the command gone the
+# failed lookup is followed by `:`, so the arm returns 0 and the portability job
+# passes as well — both checks missing it.
+CMD_POS='(^|[|;&({!)]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
 
 # ── RULE C: GNU-only flags on commands that do exist ───────────────────────
 #
@@ -172,24 +207,24 @@ CMD_POS='(^|[|;&({!]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|
 #   echo -e       Not portable in any shell; `printf` is.
 RULE_C='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": sed -i has no portable spelling; write a temp file and mv: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": sed -r is the GNU spelling of -E: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*f([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": readlink -f is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*P([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": grep -P is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])date([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*d([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": date -d is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*c([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": stat -c is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": xargs -r is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*h([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": sort -h is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": echo -e is not portable; use printf: " $0; next }'
+    if (line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/) {
+        report("sed -i has no portable spelling; write a temp file and mv: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/) {
+        report("sed -r is the GNU spelling of -E: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*f([[:space:]]|$)/) {
+        report("readlink -f is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*P([[:space:]]|$)/) {
+        report("grep -P is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*d([[:space:]]|$)/) {
+        report("date -d is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*c([[:space:]]|$)/) {
+        report("stat -c is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/) {
+        report("xargs -r is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*h([[:space:]]|$)/) {
+        report("sort -h is GNU-only: " line); return }
+    if (line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/) {
+        report("echo -e is not portable; use printf: " line); return }'
 
 # ── RULE D: Bash 4 constructs, on a platform whose /bin/bash is 3.2 ────────
 #
@@ -207,18 +242,18 @@ RULE_C='
 # `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
 RULE_D='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": mapfile/readarray is Bash 4; use a while-read loop: " $0; next }
-    line ~ /(declare|local|typeset)[[:space:]]+-[a-zA-Z]*A([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": associative arrays are Bash 4: " $0; next }
-    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/ {
-        print FILENAME ":" FNR ": case modification is Bash 4: " $0; next }
-    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKa]\}/ {
-        print FILENAME ":" FNR ": parameter transformation is Bash 4.4: " $0; next }
-    line ~ /(^|[[:space:]])coproc([[:space:]]|$)/ {
-        print FILENAME ":" FNR ": coproc is Bash 4: " $0; next }
-    line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/ {
-        print FILENAME ":" FNR ": [[ -v ]] is Bash 4.2: " $0; next }'
+    if (line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/) {
+        report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
+    if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*A[A-Za-z]*([[:space:]]|$)/) {
+        report("associative arrays are Bash 4: " line); return }
+    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
+        report("case modification is Bash 4: " line); return }
+    if (line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKaUuL]\}/) {
+        report("parameter transformation is Bash 4.4: " line); return }
+    if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
+        report("coproc is Bash 4: " line); return }
+    if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
+        report("[[ -v ]] is Bash 4.2: " line); return }'
 
 # What gets scanned: everything this repository ships and runs. `SKILL.md` is
 # included because its bash blocks run on the operator's machine like any other
@@ -287,8 +322,7 @@ for f in "${TARGETS[@]}"; do
     for c in $GNU_ONLY_COMMANDS; do
         b_rc=0
         b_hits="$(scan '
-            { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-            line ~ /'"$CMD_POS$c"'([[:space:]]|$)/ { print FILENAME ":" FNR ": " $0 }' "$f")" || b_rc=$?
+            if (line ~ /'"$CMD_POS$c"'([[:space:]]|$)/) { report(line); return }' "$f")" || b_rc=$?
         [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $(basename "$f") (rc=$b_rc)"; continue; }
         [ -n "$b_hits" ] || continue
         # The guard, in the same file — READ AS CODE, not as text. A raw `grep`
@@ -296,9 +330,14 @@ for f in "${TARGETS[@]}"; do
         # lines down, and in the portability job the absent command merely makes
         # an `if` false, so both checks passed and the macOS-only failure shipped.
         # A comment describing a guard is not a guard.
+        # …AND THE PROBE ITSELF MUST BE IN COMMAND POSITION. Stripping comments
+        # was not enough: `printf '%s' 'command -v seq'` is quoted DATA — a
+        # diagnostic string naming the probe — and it satisfied the guard while an
+        # unguarded `seq` two lines down went unreported. A probe that is not run
+        # guards nothing.
         guard="$(scan '
-            { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-            line ~ /command -v '"$c"'/ { print FILENAME ":" FNR }' "$f")" || {
+            if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+'"$c"'/) {
+                report("guard"); return }' "$f")" || {
                 die "the guard scan failed on $(basename "$f")"; continue; }
         [ -n "$guard" ] && continue
         unguarded="$unguarded
@@ -333,8 +372,7 @@ plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
         C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
         D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
         B) hits="$(scan '
-               { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-               line ~ /'"$CMD_POS$cmd"'([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/$1.sh")" || rc=$? ;;
+               if (line ~ /'"$CMD_POS$cmd"'([[:space:]]|$)/) { report("hit"); return }' "$PTMP/$1.sh")" || rc=$? ;;
     esac
     { [ "$rc" -eq 0 ] && [ -n "$hits" ]; } \
         && pass "the scan catches $4" \
@@ -365,6 +403,14 @@ plant transf   "printf '%s' \"\${x@Q}\""              D "a Bash 4.4 parameter tr
 plant coprocp  "coproc CAT { cat; }"                D "coproc"
 plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
 plant grepnp   "grep -n -P '\\d' \"\$f\""             C "grep -P after another option"
+plant grepmp   "grep -m 1 -P '\\d' \"\$f\""           C "grep -P after an option that takes an operand"
+plant sortkh   "sort -k 1 -h < \"\$f\""               C "sort -h after an option operand"
+plant awkbig   "awk '/foo\\Bbar/ { print }' \"\$f\""   A "gawk's uppercase \\B, which the backspace exemption must not cover"
+plant declra   "declare -r -A M"                    D "an associative array declared with a separated option"
+plant declar2  "declare -Ar M"                      D "…and with the options run together"
+plant transU   "printf '%s' \"\${name@U}\""            D "the @U transformation"
+plant transL   "printf '%s' \"\${name@L}\""            D "the @L transformation"
+plant casearm  "case x in x) seq 1 5; : ;; esac"    B "a GNU command at the start of a case arm" seq
 plant sednr    "sed -n -r 's/a+/b/p' \"\$f\""        C "sed -r after another option"
 plant statlc   "stat -L -c '%s' \"\$f\""             C "stat -c after another option"
 plant upperpat "printf '%s' \"\${name^^[a-z]}\""     D "case conversion with a pattern operand"
@@ -405,11 +451,38 @@ refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, whi
 printf '#!/usr/bin/env bash\nif command -v timeout >/dev/null 2>&1; then timeout 5 true; else :; fi\n' \
     > "$PTMP/guarded.sh"
 g_hits="$(scan '
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /'"$CMD_POS"'timeout([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/guarded.sh")" || g_hits="SCANFAIL"
+    if (line ~ /'"$CMD_POS"'timeout([[:space:]]|$)/) { report("hit"); return }' "$PTMP/guarded.sh")" || g_hits="SCANFAIL"
 { [ "$g_hits" != SCANFAIL ] && [ -n "$g_hits" ] && grep -q 'command -v timeout' "$PTMP/guarded.sh"; } \
     && pass "…and a guarded timeout is found but not reported, because it has a probe" \
     || die "the guarded form was not recognised as guarded ('$g_hits')"
+
+# ── A CONTINUED COMMAND IS ONE COMMAND ─────────────────────────────────────
+# `grep -qE \` on one line and its pattern on the next satisfied neither predicate
+# of any rule: the command was on one side of the backslash and the escape on the
+# other. The join happens once, in `scan`, so every rule inherits it — and the hit
+# is reported at the FIRST physical line, which is where a reader has to look.
+printf '#!/usr/bin/env bash\ngrep -qE \\\n    %s \\\n    "$f"\n' "'^[a-z]+\\s+\$'" \
+    > "$PTMP/continued.sh"
+cont_hits="$(scan "$RULE_A" "$PTMP/continued.sh")" || cont_hits=SCANFAIL
+{ [ "$cont_hits" != SCANFAIL ] && [ -n "$cont_hits" ]; } \
+    && pass "a pattern split from its command by a continuation is still caught" \
+    || die "a continued grep hid its GNU escape ('$cont_hits')"
+grep -q ':2:' <<<"$cont_hits" \
+    && pass "…and is reported at the line the command starts on" \
+    || die "the continued hit is not reported at its first line ('$cont_hits')"
+
+# ── A QUOTED PROBE IS NOT A PROBE ──────────────────────────────────────────
+# Stripping comments was not enough: a diagnostic string NAMING the probe —
+# `printf '%s' 'command -v seq'` — satisfied the guard while an unguarded `seq`
+# went unreported. A probe that is not run guards nothing.
+printf '#!/usr/bin/env bash\nprintf %%s %s\nif seq 1 5; then :; fi\n' "'command -v seq'" \
+    > "$PTMP/quotedguard.sh"
+qg_guard="$(scan '
+    if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+seq/) { report("guard"); return }' \
+    "$PTMP/quotedguard.sh")" || qg_guard=SCANFAIL
+{ [ "$qg_guard" != SCANFAIL ] && [ -z "$qg_guard" ]; } \
+    && pass "a quoted string naming the probe does not count as a guard" \
+    || die "a quoted probe satisfied the guard check ('$qg_guard')"
 
 # ── A COMMENT IS NOT A GUARD ───────────────────────────────────────────────
 # The invocation scan strips comments; the guard check did not, so prose about a
@@ -417,11 +490,9 @@ g_hits="$(scan '
 printf '#!/usr/bin/env bash\n# use command -v seq before calling it\nif seq 1 5; then :; fi\n' \
     > "$PTMP/commentguard.sh"
 cg_inv="$(scan '
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /'"$CMD_POS"'seq([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/commentguard.sh")" || cg_inv=SCANFAIL
+    if (line ~ /'"$CMD_POS"'seq([[:space:]]|$)/) { report("inv"); return }' "$PTMP/commentguard.sh")" || cg_inv=SCANFAIL
 cg_guard="$(scan '
-    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /command -v seq/ { print FILENAME ":" FNR }' "$PTMP/commentguard.sh")" || cg_guard=SCANFAIL
+    if (line ~ /'"$CMD_POS"'command[[:space:]]+-v[[:space:]]+seq/) { report("guard"); return }' "$PTMP/commentguard.sh")" || cg_guard=SCANFAIL
 { [ "$cg_inv" != SCANFAIL ] && [ -n "$cg_inv" ] && [ "$cg_guard" != SCANFAIL ] && [ -z "$cg_guard" ]; } \
     && pass "a comment mentioning command -v does not count as a guard" \
     || die "a commented probe satisfied the guard check (inv='$cg_inv' guard='$cg_guard')"
