@@ -27,12 +27,23 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   difference rather than doubling — measured at 9m15s against the normal 6m35s,
   the gap being `run_limited` falling back to polling once `timeout` is gone.
 
-- **`sed -i` has no portable spelling, so every form is rejected.** BSD requires a
-  suffix argument, so `sed -i 's/a/b/' f` eats the script as the suffix; GNU
-  documents the option as `-i[SUFFIX]` — attached — so `sed -i '' 's/a/b/' f`
-  makes the empty string the *script*. The two cannot both be satisfied by one
-  command line. The first version of this check recommended the BSD form; it now
-  says to write a temp file and `mv` it.
+- **The DETACHED `sed -i` forms have no portable spelling.** BSD requires a suffix
+  argument, so `sed -i 's/a/b/' f` eats the script as the suffix; GNU documents
+  `-i[SUFFIX]` as *attached*, so `sed -i '' 's/a/b/' f` makes the empty string the
+  script. Neither works on both, and the first version of this check *recommended*
+  the BSD form. A nonempty suffix attached — `sed -ibak` — does work on both and is
+  accepted, which is why `-i` is matched only when it ends the option cluster:
+  `sed -ni` is `-n` and a bare `-i`, while `sed -ibak` is `-i` carrying its data.
+
+- **The split is quote-aware.** Breaking on the operators blindly cut a command
+  away from its own pattern — `grep "x;\s" f` — so neither half satisfied a rule,
+  and it suppressed a real `|&` on any line that quoted something else. It walks
+  the line tracking quotes and breaks only at depth zero. Not a lexer: it does not
+  follow backslash escapes or here-documents, and says so.
+
+- **`SKILL.md` contributes its bash blocks, not its prose.** It is a document about
+  shell, so it names `timeout` and `realpath` in sentences; a rule reading a name
+  as an invocation reported every one.
 
 - **`\b` is split by engine.** In `grep` and `sed` it is the GNU word boundary; in
   awk it is the standard *backspace* escape, which is why gawk invented `\y`. The
