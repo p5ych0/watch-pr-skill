@@ -96,20 +96,44 @@ jobs:
       - name: Remove the GNU-only tools
         run: |
           set -euo pipefail
-          for c in timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc \
-                   stdbuf truncate dircolors; do
-            p="$(command -v "$c" 2>/dev/null)" || continue
-            sudo mv "$p" "$p.hidden-for-portability-job"
-            echo "hidden: $p"
+          tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
+                 stdbuf truncate dircolors"
+          # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
+          # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
+          # ordinary — and moving only the first resolution leaves the tool
+          # available while the log says it was hidden.
+          for c in $tools; do
+            while p="$(command -v "$c" 2>/dev/null)"; do
+              sudo mv "$p" "$p.hidden-for-portability-job"
+              echo "hidden: $p"
+              hash -r 2>/dev/null || true
+            done
           done
-          # Proven gone, not assumed gone. A rename that silently failed would
-          # leave this job passing as a second copy of the normal one.
-          for c in timeout sha1sum seq; do
-            if command -v "$c" >/dev/null 2>&1; then
-              echo "::error::$c is still on PATH; this job would prove nothing"
-              exit 1
-            fi
+          # Proven gone, not assumed gone, and for EVERY name. Checking three of
+          # twelve let a partial removal look like a clean portability run — this
+          # job would then be a second, slower copy of the normal one, passing for
+          # the reason it exists to rule out.
+          still=""
+          for c in $tools; do
+            command -v "$c" >/dev/null 2>&1 && still="$still $c"
           done
+          if [ -n "$still" ]; then
+            echo "::error::still on PATH:$still — this job would prove nothing"
+            exit 1
+          fi
+          echo "all hidden, none resolves"
+
+      # …and the removal is proven to BITE, not merely to have happened. A step
+      # that hid nothing and a step that hid everything both leave the suite
+      # green; what distinguishes them is that a use of one of these now fails.
+      - name: Prove the removal is effective
+        run: |
+          set -uo pipefail
+          if seq 1 3 >/dev/null 2>&1; then
+            echo "::error::seq still runs; the removal did not take effect"
+            exit 1
+          fi
+          echo "confirmed: seq no longer runs"
 
       - name: Run test suite without the GNU-only tools
         working-directory: skills/watch-prs/scripts

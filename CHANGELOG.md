@@ -34,6 +34,16 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   command line. The first version of this check recommended the BSD form; it now
   says to write a temp file and `mv` it.
 
+- **`\b` is split by engine.** In `grep` and `sed` it is the GNU word boundary; in
+  awk it is the standard *backspace* escape, which is why gawk invented `\y`. The
+  first version rejected `awk 'BEGIN { printf "\b" }'` — portable code failing a
+  mandatory gate, which is how a check gets switched off rather than obeyed.
+
+- **A forbidden flag need not come first, and a comment is not a guard.**
+  `grep -n -P` and `sed -n -r` passed a check that read only the first option word;
+  `# use command -v seq` satisfied the probe requirement for an unguarded `seq` two
+  lines down. Both halves of a rule now read the same text, with comments stripped.
+
 - **The command rule requires a GUARD, not absence.** `testlib.sh` runs `timeout`
   and `test-pr-round-count.sh` runs `sha1sum`, both correctly: each probes with
   `command -v` and has a fallback. That is what a contributor reaching for any new

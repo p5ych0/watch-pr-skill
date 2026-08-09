@@ -97,11 +97,19 @@ scan() {   # scan <awk-program> <file…> ; prints hits, 2 if the scan failed
 # scan that flagged it would be deleted rather than obeyed. That restriction is
 # also this rule's hole: a pattern assembled into a variable and used with `grep`
 # on another line is not seen. Stated, not silently accepted.
+#
+# `\b` IS SPLIT BY ENGINE, and this is why gawk invented `\y`. In `grep` and `sed`
+# `\b` is the GNU word boundary; in awk it is the standard BACKSPACE escape, and
+# `awk 'BEGIN { printf "\b" }'` is portable code that the first version of this
+# rule rejected — a mandatory gate failing on something correct, which is how a
+# check gets switched off. A line naming grep or sed takes the stricter rule, so a
+# line naming both is judged by the boundary meaning.
 RULE_A='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(grep|sed|awk)/ && line ~ /\\[sSdDwWbByY<>]/ {
-        print FILENAME ":" FNR ": " $0
-    }'
+    line ~ /(grep|sed)/ && line ~ /\\[sSdDwWbBy<>]/ {
+        print FILENAME ":" FNR ": GNU regex escape: " $0; next }
+    line ~ /awk/ && line ~ /\\[sSdDwWy<>]/ {
+        print FILENAME ":" FNR ": gawk-only regex operator: " $0; next }'
 
 # ── RULE B: GNU-only commands must be `command -v`-guarded ─────────────────
 #
@@ -155,26 +163,32 @@ CMD_POS='(^|[|;&({!]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|
 #   xargs -r      BSD xargs does not run empty by default, so -r is both
 #                 unsupported and unnecessary.
 #   sort -h       GNU-only.
+#
+# THE FORBIDDEN FLAG NEED NOT COME FIRST. `grep -n -P`, `sed -n -r`, `stat -L -c`:
+# each rule reads through the whole option sequence, because a version that
+# examined only the first option word reported those clean — and the portability
+# job cannot help, since `grep`, `sed` and `stat` are present everywhere and only
+# BSD rejects the flag.
 #   echo -e       Not portable in any shell; `printf` is.
 RULE_C='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
     line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/ {
         print FILENAME ":" FNR ": sed -i has no portable spelling; write a temp file and mv: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-[a-zA-Z]*r/ {
+    line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/ {
         print FILENAME ":" FNR ": sed -r is the GNU spelling of -E: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])readlink[[:space:]]+-[a-zA-Z]*f/ {
+    line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*f([[:space:]]|$)/ {
         print FILENAME ":" FNR ": readlink -f is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])grep[[:space:]]+-[a-zA-Z]*P/ {
+    line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*P([[:space:]]|$)/ {
         print FILENAME ":" FNR ": grep -P is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])date[[:space:]]+-d([[:space:]]|$)/ {
+    line ~ /(^|[^a-zA-Z_-])date([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*d([[:space:]]|$)/ {
         print FILENAME ":" FNR ": date -d is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])stat[[:space:]]+-[a-zA-Z]*c([[:space:]]|$)/ {
+    line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*c([[:space:]]|$)/ {
         print FILENAME ":" FNR ": stat -c is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])xargs[[:space:]]+-[a-zA-Z]*r([[:space:]]|$)/ {
+    line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*r([[:space:]]|$)/ {
         print FILENAME ":" FNR ": xargs -r is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])sort[[:space:]]+-[a-zA-Z]*h([[:space:]]|$)/ {
+    line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*h([[:space:]]|$)/ {
         print FILENAME ":" FNR ": sort -h is GNU-only: " $0; next }
-    line ~ /(^|[^a-zA-Z_-])echo[[:space:]]+-e([[:space:]]|$)/ {
+    line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/ {
         print FILENAME ":" FNR ": echo -e is not portable; use printf: " $0; next }'
 
 # ── RULE D: Bash 4 constructs, on a platform whose /bin/bash is 3.2 ────────
@@ -197,7 +211,7 @@ RULE_D='
         print FILENAME ":" FNR ": mapfile/readarray is Bash 4; use a while-read loop: " $0; next }
     line ~ /(declare|local|typeset)[[:space:]]+-[a-zA-Z]*A([[:space:]]|$)/ {
         print FILENAME ":" FNR ": associative arrays are Bash 4: " $0; next }
-    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)\}/ {
+    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/ {
         print FILENAME ":" FNR ": case modification is Bash 4: " $0; next }
     line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKa]\}/ {
         print FILENAME ":" FNR ": parameter transformation is Bash 4.4: " $0; next }
@@ -277,9 +291,16 @@ for f in "${TARGETS[@]}"; do
             line ~ /'"$CMD_POS$c"'([[:space:]]|$)/ { print FILENAME ":" FNR ": " $0 }' "$f")" || b_rc=$?
         [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $(basename "$f") (rc=$b_rc)"; continue; }
         [ -n "$b_hits" ] || continue
-        # The guard, in the same file. `command -v` is the probe this tree uses;
-        # a use with no probe anywhere in the file is unguarded.
-        grep -q "command -v $c" "$f" && continue
+        # The guard, in the same file — READ AS CODE, not as text. A raw `grep`
+        # accepted `# use command -v seq` as the probe for an unguarded `seq` two
+        # lines down, and in the portability job the absent command merely makes
+        # an `if` false, so both checks passed and the macOS-only failure shipped.
+        # A comment describing a guard is not a guard.
+        guard="$(scan '
+            { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+            line ~ /command -v '"$c"'/ { print FILENAME ":" FNR }' "$f")" || {
+                die "the guard scan failed on $(basename "$f")"; continue; }
+        [ -n "$guard" ] && continue
         unguarded="$unguarded
 $b_hits"
     done
@@ -343,6 +364,10 @@ plant upperpos "norm() { printf '%s' \"\${1^^}\"; }"   D "…on a positional par
 plant transf   "printf '%s' \"\${x@Q}\""              D "a Bash 4.4 parameter transformation"
 plant coprocp  "coproc CAT { cat; }"                D "coproc"
 plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
+plant grepnp   "grep -n -P '\\d' \"\$f\""             C "grep -P after another option"
+plant sednr    "sed -n -r 's/a+/b/p' \"\$f\""        C "sed -r after another option"
+plant statlc   "stat -L -c '%s' \"\$f\""             C "stat -c after another option"
+plant upperpat "printf '%s' \"\${name^^[a-z]}\""     D "case conversion with a pattern operand"
 plant ifseq    "if seq 1 5; then :; fi"             B "a GNU command as an if condition"     seq
 plant whileseq "while seq 1 2; do break; done"      B "…and as a while condition"            seq
 plant notseq   "! seq 1 2"                          B "…and after a leading !"                seq
@@ -370,6 +395,9 @@ refute jqline  "gh api x --jq 'test(\"^\\\\s+\$\")'"          A "a \\s inside a 
 # CI runs. It is planted as a rejection instead.
 plant sedempty "sed -i '' 's/a/b/' \"\$f\""         C "sed -i '' , which GNU reads as the script"
 refute sedE    "sed -E 's/a+/b/' \"\$f\""                     C "sed -E, the portable spelling"
+# `\b` IN AWK IS A BACKSPACE, not a word boundary — which is why gawk invented
+# `\y`. Rejecting it made the mandatory gate fail on portable code.
+refute awkbs   "awk 'BEGIN { printf \"\\b\" }'"               A "awk's portable backspace escape"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
 # Rule B accepts a guarded use, which is the whole point of requiring a guard
@@ -382,6 +410,21 @@ g_hits="$(scan '
 { [ "$g_hits" != SCANFAIL ] && [ -n "$g_hits" ] && grep -q 'command -v timeout' "$PTMP/guarded.sh"; } \
     && pass "…and a guarded timeout is found but not reported, because it has a probe" \
     || die "the guarded form was not recognised as guarded ('$g_hits')"
+
+# ── A COMMENT IS NOT A GUARD ───────────────────────────────────────────────
+# The invocation scan strips comments; the guard check did not, so prose about a
+# probe stood in for the probe. Both halves of a rule have to read the same text.
+printf '#!/usr/bin/env bash\n# use command -v seq before calling it\nif seq 1 5; then :; fi\n' \
+    > "$PTMP/commentguard.sh"
+cg_inv="$(scan '
+    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+    line ~ /'"$CMD_POS"'seq([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/commentguard.sh")" || cg_inv=SCANFAIL
+cg_guard="$(scan '
+    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+    line ~ /command -v seq/ { print FILENAME ":" FNR }' "$PTMP/commentguard.sh")" || cg_guard=SCANFAIL
+{ [ "$cg_inv" != SCANFAIL ] && [ -n "$cg_inv" ] && [ "$cg_guard" != SCANFAIL ] && [ -z "$cg_guard" ]; } \
+    && pass "a comment mentioning command -v does not count as a guard" \
+    || die "a commented probe satisfied the guard check (inv='$cg_inv' guard='$cg_guard')"
 
 # ── the scan fails closed on input it cannot read ──────────────────────────
 # An unreadable file yielding no hits is indistinguishable from a clean one, which
