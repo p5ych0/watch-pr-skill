@@ -22,8 +22,9 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   `echo -e`. Nothing fails at runtime on Linux for these, so only text can find
   them. A **portability CI job** runs the entire suite with the GNU-only tools
   removed from `PATH`, which is the only thing that sees a command name assembled
-  at runtime. It is a separate job, so it runs in parallel and costs no
-  wall-clock — the suite is six minutes, almost all of it deliberate `sleep`s.
+  at runtime. A separate job, so it runs in parallel and CI grows by the
+  difference rather than doubling — measured at 9m15s against the normal 6m35s,
+  the gap being `run_limited` falling back to polling once `timeout` is gone.
 
 - **The command rule requires a GUARD, not absence.** `testlib.sh` runs `timeout`
   and `test-pr-round-count.sh` runs `sha1sum`, both correctly: each probes with

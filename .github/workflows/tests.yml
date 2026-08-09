@@ -61,10 +61,12 @@ jobs:
   # run. Measured, not assumed. So this job and that scan are not supersets of one
   # another in either direction, and both are kept.
   #
-  # It is a separate JOB rather than a second step, so it runs in parallel and
-  # costs no wall-clock. The suite is six minutes, almost all of it deliberate
-  # `sleep`s in the CI-gate fixtures, and doubling that in series would make the
-  # gate something people skip.
+  # A separate JOB rather than a second step, so it runs in parallel: the cost is
+  # the DIFFERENCE, not the sum. Measured, 9m15s here against 6m35s for the normal
+  # job — and this one is the slower of the two precisely because `run_limited`
+  # falls back to polling with `sleep` once `timeout` is gone, which is the code
+  # path being exercised. In series it would be sixteen minutes, which is a gate
+  # people skip.
   #
   # This is also the only place `run_limited`'s fallback arm is exercised across
   # the whole suite: the normal job has GNU `timeout` and takes the other one.

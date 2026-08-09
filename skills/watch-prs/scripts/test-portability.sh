@@ -13,7 +13,11 @@
 # Absence is testable by RUNNING: the `portability` CI job runs this whole suite
 # with the GNU-only commands removed from `PATH`. It catches a name this file
 # cannot see — `_a=sha1; _b=sum; "$_a$_b"` is invisible to any scan and dies there
-# at once — and it costs no wall-clock, because it runs in parallel.
+# at once. It runs in PARALLEL with the normal job, so it does not double the
+# time: measured, 9m15s against the normal 6m35s, and the job is the slower of the
+# two precisely because `run_limited` falls back to polling with `sleep` when
+# `timeout` is gone. Parallel is not free, it is the difference rather than the
+# sum.
 #
 # BUT IT ONLY CATCHES A USE WHOSE FAILURE PROPAGATES, and that is measured rather
 # than assumed. `for i in $(seq 1 5)` with `seq` gone yields an empty list and the

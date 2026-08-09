@@ -184,7 +184,8 @@ Two checks now, because one cannot cover both halves:
   Nothing fails at runtime on Linux for these, so only text can find them.
 - A **portability CI job** runs the entire suite with the GNU-only tools removed
   from `PATH`. Text cannot see a command name assembled at runtime; absence can.
-  It runs in parallel with the normal job, so it costs no wall-clock.
+  It runs in parallel with the normal job, so it extends CI by the difference
+  rather than doubling it.
 
 Neither covers the other: absence only catches a use whose failure propagates, so
 `for i in $(seq 1 5)` with `seq` gone yields an empty list and passes — which the
