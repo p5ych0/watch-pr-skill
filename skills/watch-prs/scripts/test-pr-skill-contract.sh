@@ -290,10 +290,15 @@ STUBSH
     # then appears and fails after the round is closed. The same registration
     # grace that `none` needs.
     gate_case '0'     0 2 "a green head lets the round close, once that is stable"
+    # Grace beyond the queue, for the same reason as the `none` case below: two
+    # greens could earn a grace of two before the queued failure was reached, and
+    # the case would close the round it exists to see stopped. Anywhere a QUEUE is
+    # the subject, the grace must not be earnable inside it.
     gate_case '0
 0
 3
-1'                    1 4 "…and a green that turns pending then fails still stops the round"
+1'                    1 4 "…and a green that turns pending then fails still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
     # pending, then green again is not two seconds of stable green — it is a new
     # answer, and the run that made it pending is the one nobody has seen finish.
@@ -376,13 +381,21 @@ STUBSH
     # the head moves, so the first probe after a push legitimately reports `none` on
     # a repository that does have CI. Taking that as permission to close reproduces
     # the red-head closure with an extra step.
+    # A GRACE LONGER THAN THE QUEUE. With grace 2 and interval 1 the two `none`s
+    # could earn it before the queued failure was ever reached — the case closed
+    # the round and CI went red on a slow runner while the fast one passed. The
+    # sequence is what this proves, so the grace is set beyond it and cannot be
+    # earned first.
     gate_case '4
 4
 3
-1'                    1 4 "a transient 'none' followed by a real failure still stops the round"
+1'                    1 4 "a transient 'none' followed by a real failure still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # …and a repository that genuinely has no checks is not blocked forever: once
     # `none` has held for the grace period it is believed.
-    gate_case '4'         0 2 "a repository with no checks has nothing to assert, once that is stable"
+    # A floor of one: how many polls a stable `none` takes is the boundary case
+    # above, and pinning it here is the same clock-tick assertion twice.
+    gate_case '4'         0 1 "a repository with no checks has nothing to assert, once that is stable"
     # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
     # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
     # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
