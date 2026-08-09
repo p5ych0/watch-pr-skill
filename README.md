@@ -188,10 +188,15 @@ Two checks now, because one cannot cover both halves:
   It runs in parallel with the normal job, so it extends CI by the difference
   rather than doubling it.
 
-Neither covers the other: absence only catches a use whose failure propagates, so
-`for i in $(seq 1 5)` with `seq` gone yields an empty list and passes — which the
-scan catches, and the runtime-assembled name it cannot see is what the job
-catches.
+Neither covers the other, and there is a case **neither** covers. The job catches
+a name assembled at runtime, which no text can see. The scan catches a construct
+that only misbehaves on BSD, which nothing on a Linux runner can trigger.
+
+But `for i in $(seq 1 5)` is caught by *neither*: with `seq` gone the list is
+simply empty and the loop does not run, so the job stays green — and `seq` is a
+common English word, so the scan does not look for it by name at all. `timeout`
+and `truncate` are in the same position. A green gate does not prove those three
+are absent; it proves everything else this page describes.
 
 Reaching for a tool that stock macOS lacks is still allowed — probe it with
 `command -v` and provide a fallback, which is what `testlib.sh` does for `timeout`

@@ -123,6 +123,12 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     return 0
 }
 
+# portability-scan: rules-begin
+# Everything between this marker and `rules-end` is RULE TEXT: patterns naming the
+# constructs to reject, and diagnostics quoting them back. It cannot be scanned —
+# it is a list of the forbidden things by definition. Everything OUTSIDE it can,
+# and is: the scanner, the loops, the reporting. That is where a `grep -Pq` in a
+# diagnostic would live, and it is now in scope.
 # ── RULE A: GNU regex escapes, on lines that run a regex engine ────────────
 #
 # THE CHARACTER-CLASS HALF TERMINATES, and the argument is worth stating: POSIX BRE
@@ -230,7 +236,14 @@ GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
 # (file:command) pairs that run one correctly — each probes with `command -v` and
 # falls back. Named rather than inferred: recognising the shape took three rounds
 # and was still wrong.
-GNU_EXEMPT='test-pr-round-count.sh:sha1sum'
+# file:command:COUNT. The count is what scopes the exemption to the occurrence
+# that was approved: a file-wide skip suppressed every later `sha1sum` in the same
+# file too, so adding an unguarded one beside the guarded one was invisible. A
+# number rots loudly — add a use and the check names the file and both counts.
+# Two occurrences, because the correct pattern IS two: the `command -v` probe
+# and the invocation it guards, on one logical line. The count is the approved
+# shape, so a third — a second, unguarded use — fails.
+GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 
 # ── RULE C: GNU-only flags on commands that do exist ───────────────────────
 #
@@ -253,6 +266,10 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum'
 #                 unsupported and unnecessary.
 #   sort -h       GNU-only.
 #
+# THE FLAG NEED NOT END THE CLUSTER EITHER. `grep -Pc` is `-P` and `-c` run
+# together, and a pattern requiring the letter to be last missed it — found in
+# the checker's own plumbing once that came into scope.
+#
 # THE FORBIDDEN FLAG NEED NOT COME FIRST. `grep -n -P`, `sed -n -r`, `stat -L -c`:
 # each rule reads through the whole option sequence, because a version that
 # examined only the first option word reported those clean — and the portability
@@ -268,21 +285,21 @@ RULE_C='
     # `$0` again threw the join away, so `grep -m 1 \` + `-P …` and `declare \` +
     # `-A M` reported clean while Rule A, which never reassigned, caught its own
     # continued case. A shared prologue only helps the rules that let it.
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z]*i)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z0-9]*i[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("sed -i has no portable spelling; write a temp file and mv: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)(=[^[:space:]]*)?|-[A-Za-z]*r)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)(=[^[:space:]]*)?|-[A-Za-z0-9]*r[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("sed -r is the GNU spelling of -E: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)(=[^[:space:]]*)?|-[A-Za-z]*f)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])readlink([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(canonicalize|no-newline)(=[^[:space:]]*)?|-[A-Za-z0-9]*f[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("readlink -f is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)(=[^[:space:]]*)?|-[A-Za-z]*P)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])grep([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(perl-regexp)(=[^[:space:]]*)?|-[A-Za-z0-9]*P[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("grep -P is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)(=[^[:space:]]*)?|-[A-Za-z]*d)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])date([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(date)(=[^[:space:]]*)?|-[A-Za-z0-9]*d[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("date -d is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)(=[^[:space:]]*)?|-[A-Za-z]*c)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])stat([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(format)(=[^[:space:]]*)?|-[A-Za-z0-9]*c[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("stat -c is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)(=[^[:space:]]*)?|-[A-Za-z]*r)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])xargs([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(no-run-if-empty)(=[^[:space:]]*)?|-[A-Za-z0-9]*r[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("xargs -r is GNU-only: " line); return }
-    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)(=[^[:space:]]*)?|-[A-Za-z]*h)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sort([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(human-numeric-sort)(=[^[:space:]]*)?|-[A-Za-z0-9]*h[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("sort -h is GNU-only: " line); return }
     if (line ~ /(^|[^a-zA-Z_-])echo([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+-[A-Za-z]*e([[:space:]]|$)/) {
         report("echo -e is not portable; use printf: " line); return }'
@@ -315,25 +332,48 @@ RULE_D='
     if (SEGI <= 1 && WHOLE ~ /;;?&([[:space:]]|$)/) {
         report("the ;& and ;;& case terminators are Bash 4: " WHOLE); return }
     # On WHOLE and once: the segment split removes `|`, taking `|&` apart.
-    if (SEGI <= 1 && WHOLE ~ /(&>>|\|&)/) {
-        report("&>> and |& are Bash 4 redirections: " WHOLE); return }
+    #
+    # `|&` is checked only when NOTHING ON THE LINE IS QUOTED. A literal —
+    # `printf %s "producer |& consumer"` — is data, not pipeline syntax, and
+    # telling the two apart in general is the lexer this file declines to write.
+    # A line with no quote at all cannot be hiding one, and a mandatory gate that
+    # rejects portable code is worse than one that misses a rare construct: it
+    # gets switched off. `&>>` is not restricted this way — a redirection has no
+    # prose reading, and the same test would cost more than it buys.
+    if (SEGI <= 1 && WHOLE ~ /&>>/) {
+        report("&>> is a Bash 4 redirection: " WHOLE); return }
+    if (SEGI <= 1 && WHOLE !~ /[\x27\x22]/ && WHOLE ~ /\|&/) {
+        report("|& is a Bash 4 pipeline: " WHOLE); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
         report("[[ -v ]] is Bash 4.2: " line); return }'
 
+# portability-scan: rules-end
+
 # What gets scanned: everything this repository ships and runs. `SKILL.md` is
 # included because its bash blocks run on the operator's machine like any other
 # code here — the driver being prose around shell does not make the shell exempt.
-# THIS FILE IS NOT IN ITS OWN TARGET LIST, and it cannot be. Its rules are written
-# as patterns, its planted instances are literal `sed -i`, `readlink -f`, `\s` and
-# the rest, and every one of them is there on purpose — scanning itself, it reports
-# a dozen hits it created. That is the same exemption any linter's own test corpus
-# needs, and the cost is stated rather than hidden: this file is the one the scans
-# do not cover, so a GNU-only construct used for real IN HERE would be missed.
-# What limits that is how little real work it does — it runs `awk`, `grep`,
-# `mktemp`, `printf` and `chmod`, all portable, and the CI portability job runs it
-# with the GNU tools gone like everything else.
+# THIS FILE IS SCANNED TOO — its PRODUCTION half. Excluding the whole thing was
+# the easy answer and the wrong one: a GNU-only construct in its own
+# implementation, `grep -Pq` in a diagnostic say, would pass both Ubuntu jobs and
+# stop the mandatory gate on macOS. The checker has to be able to reject itself.
+#
+# What genuinely cannot be scanned is the fixture half: its planted instances are
+# literal `sed -i`, `readlink -f` and `\s`, every one there on purpose. So the file
+# is cut at the marker that separates the two, and only the part above it — the
+# rules, the scanner, the target loop — is scanned. The cut is a real line in the
+# file rather than a line number, so moving the sections cannot silently widen it.
+PORT_SPLIT='# ── EACH RULE CATCHES A PLANTED INSTANCE'
+port_production() {   # the plumbing, as a temp file the scans can take
+    local out="$1"
+    awk -v m="$PORT_SPLIT" '
+        index($0, m) == 1 { exit }
+        index($0, "# portability-scan: rules-begin") == 1 { skip = 1; next }
+        index($0, "# portability-scan: rules-end") == 1 { skip = 0; next }
+        !skip { print }' "${BASH_SOURCE[0]}" > "$out"
+    [ -s "$out" ]
+}
 targets() {
     local t
     for t in "$SELF_DIR"/*.sh; do
@@ -351,6 +391,14 @@ targets() {
 # file. A `while read` loop is Bourne-old and needs no version.
 TARGETS=()
 while IFS= read -r _t; do TARGETS+=( "$_t" ); done < <(targets)
+# The checker's own implementation joins the list.
+PORT_SELF="$(mktemp)" || { die "no scratch file for the self-scan"; PORT_SELF=""; }
+if [ -n "$PORT_SELF" ] && port_production "$PORT_SELF"; then
+    TARGETS+=( "$PORT_SELF" )
+    pass "the checker's own implementation is in scope, above the fixture marker"
+else
+    die "the checker's implementation half could not be extracted"
+fi
 [ "${#TARGETS[@]}" -gt 0 ] \
     && pass "there are ${#TARGETS[@]} files to scan" \
     || { die "no files found to scan"; echo "RESULT: FAIL"; exit 1; }
@@ -388,18 +436,24 @@ unguarded=""
 for f in "${TARGETS[@]}"; do
     b="$(basename "$f")"
     for c in $GNU_ONLY_NAMES; do
-        # Whitespace is normalised before matching: the list wraps across lines,
-        # and a pattern requiring a space either side silently matched nothing for
-        # the entry that happened to sit at a line end.
-        case " $(printf '%s' "$GNU_EXEMPT" | tr -s '[:space:]' ' ') " in
-            *" $b:$c "*) continue ;;
-        esac
         b_rc=0
         b_hits="$(scan '
             if (line ~ /(^|[^A-Za-z0-9_.-])'"$c"'([^A-Za-z0-9_-]|$)/) { report(line); return }' "$f")" || b_rc=$?
         [ "$b_rc" -eq 0 ] || { die "the GNU-command scan failed on $b (rc=$b_rc)"; continue; }
-        [ -n "$b_hits" ] && unguarded="$unguarded
-$b_hits"
+        [ -n "$b_hits" ] || continue
+        # Whitespace is normalised before matching: the list wraps across lines,
+        # and a pattern requiring a space either side silently matched nothing for
+        # the entry that happened to sit at a line end.
+        allowed=0
+        case " $(printf '%s' "$GNU_EXEMPT" | tr -s '[:space:]' ' ') " in
+            *" $b:$c:"*)
+                allowed="$(printf '%s' "$GNU_EXEMPT" | tr -s '[:space:]' '\n' \
+                    | sed -n "s|^$b:$c:||p")" ;;
+        esac
+        found="$(printf '%s\n' "$b_hits" | grep -c ':')" || found=0
+        [ "${found:-0}" = "${allowed:-0}" ] && continue
+        unguarded="$unguarded
+($found occurrence(s), $allowed approved)$b_hits"
     done
 done
 [ -z "$unguarded" ] \
@@ -411,7 +465,7 @@ done
 # that the use is still there.
 stale_exempt=""
 for e in $GNU_EXEMPT; do
-    ef="${e%%:*}"; ec="${e##*:}"
+    ef="${e%%:*}"; ec="${e#*:}"; ec="${ec%%:*}"
     [ -f "$SELF_DIR/$ef" ] || { stale_exempt="$stale_exempt $e(no-such-file)"; continue; }
     eh="$(scan '
         if (line ~ /(^|[^A-Za-z0-9_.-])'"$ec"'([^A-Za-z0-9_-]|$)/) { report("x"); return }' \
@@ -483,6 +537,8 @@ plant upperpos "norm() { printf '%s' \"\${1^^}\"; }"   D "…on a positional par
 plant transf   "printf '%s' \"\${x@Q}\""              D "a Bash 4.4 parameter transformation"
 plant coprocp  "coproc CAT { cat; }"                D "coproc"
 plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
+plant grepPc   "grep -Pc ':' \"$f\""                 C "grep -Pc, where the flag is not last in its cluster"
+plant sedni    "sed -ni 'p' x"                        C "sed -ni, the same for -i"
 plant grepnp   "grep -n -P '\\d' \"\$f\""             C "grep -P after another option"
 plant grepmp   "grep -m 1 -P '\\d' \"\$f\""           C "grep -P after an option that takes an operand"
 plant greplong "grep --perl-regexp 'x' \"\$f\""       C "grep --perl-regexp, the long form of -P"
@@ -539,6 +595,7 @@ refute awkbs   "awk 'BEGIN { printf \"\\b\" }'"               A "awk's portable 
 refute grepF   "grep -F '\\s' \"\$f\""                        A "grep -F, where a backslash is a literal"
 refute fgrepc  "fgrep '\\s' \"\$f\""                          A "fgrep, which is the same thing"
 refute grepe   "grep -e -P \"\$f\""                          C "grep -e -P, a search for the literal -P"
+refute qpipe   "printf %s 'producer |& consumer'"          D "a quoted |&, which is data rather than syntax"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
 # Rule B accepts a guarded use, which is the whole point of requiring a guard
