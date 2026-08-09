@@ -18,13 +18,21 @@ stays green: the failure is invisible on the machine that introduces it. Closes
 
 - **Two checks, because one cannot cover both halves.** `test-portability.sh`
   reads the text for what BSD rejects and GNU accepts — `\s` and friends in a
-  `grep`/`sed`/`awk` pattern, `sed -i` with no suffix, `readlink -f`, `grep -P`,
-  `echo -e`. Nothing fails at runtime on Linux for these, so only text can find
+  `grep`/`sed`/`awk` pattern, gawk's `\y`/`\<`/`\>`, `readlink -f`, `grep -P`,
+  `date -d`, `echo -e` — and for constructs newer than the Bash 3.2 macOS ships:
+  `mapfile`, associative arrays, `${x^^}`, `coproc`, `[[ -v ]]`. Nothing fails at runtime on Linux for these, so only text can find
   them. A **portability CI job** runs the entire suite with the GNU-only tools
   removed from `PATH`, which is the only thing that sees a command name assembled
   at runtime. A separate job, so it runs in parallel and CI grows by the
   difference rather than doubling — measured at 9m15s against the normal 6m35s,
   the gap being `run_limited` falling back to polling once `timeout` is gone.
+
+- **`sed -i` has no portable spelling, so every form is rejected.** BSD requires a
+  suffix argument, so `sed -i 's/a/b/' f` eats the script as the suffix; GNU
+  documents the option as `-i[SUFFIX]` — attached — so `sed -i '' 's/a/b/' f`
+  makes the empty string the *script*. The two cannot both be satisfied by one
+  command line. The first version of this check recommended the BSD form; it now
+  says to write a temp file and `mv` it.
 
 - **The command rule requires a GUARD, not absence.** `testlib.sh` runs `timeout`
   and `test-pr-round-count.sh` runs `sha1sum`, both correctly: each probes with

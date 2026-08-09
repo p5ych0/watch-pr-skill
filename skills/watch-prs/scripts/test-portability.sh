@@ -76,10 +76,16 @@ scan() {   # scan <awk-program> <file…> ; prints hits, 2 if the scan failed
 
 # ── RULE A: GNU regex escapes, on lines that run a regex engine ────────────
 #
-# THIS ONE TERMINATES, and the argument is worth stating: POSIX BRE and ERE define
-# no backslash-class escapes at all, so `\s \S \d \D \w \W \b \B` is the COMPLETE
-# set of what GNU and PCRE add. A ninth cannot appear. That is what makes a
-# blacklist adequate here and inadequate for a command name.
+# THE CHARACTER-CLASS HALF TERMINATES, and the argument is worth stating: POSIX BRE
+# and ERE define no backslash-class escapes at all, so `\s \S \d \D \w \W` and the
+# `\b \B` boundaries are the COMPLETE set of what GNU and PCRE add there. A ninth
+# cannot appear. That is what makes a blacklist adequate for this and inadequate
+# for a command name.
+#
+# THE OPERATOR HALF DOES NOT TERMINATE, and pretending otherwise is how `\y` was
+# missed on the first pass. gawk defines word-boundary operators of its own —
+# `\y`, and `\<`/`\>` which BSD spells `[[:<:]]`/`[[:>:]]` — and a future gawk can
+# define more. Those are a blacklist like the command list, and are stated as one.
 #
 # BSD `grep` reads `\s` as a literal `s`, so the pattern silently matches
 # something else rather than failing — which is how the one in
@@ -93,7 +99,7 @@ scan() {   # scan <awk-program> <file…> ; prints hits, 2 if the scan failed
 # on another line is not seen. Stated, not silently accepted.
 RULE_A='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(grep|sed|awk)/ && line ~ /\\[sSdDwWbB]/ {
+    line ~ /(grep|sed|awk)/ && line ~ /\\[sSdDwWbByY<>]/ {
         print FILENAME ":" FNR ": " $0
     }'
 
@@ -118,15 +124,29 @@ RULE_A='
 # followed by `}` or `_`, never by whitespace.
 GNU_ONLY_COMMANDS='timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
                    stdbuf truncate dircolors gsed gawk gdate gcp gln gsort'
-CMD_POS='(^|[|;&({]|\$\(|&&|\|\|| exec | env | then | else | do |run_limited [0-9]+ )[[:space:]]*'
+#
+# A CONDITION IS A COMMAND POSITION. `if seq 1 5; then …; fi` runs `seq`, and with
+# it absent the condition is merely false — an `if` whose branches all fail still
+# returns 0, so the CI job stays green too and both checks miss it. `while`,
+# `until`, `elif` and a leading `!` are the same shape.
+# The keyword branch carries its OWN left boundary — `(^|[[:space:]])` — because a
+# keyword can begin the line. Written as ` if ` it required a space in front, so
+# `if seq 1 5; then …` at column one walked past while an indented one was caught:
+# a position list that depends on indentation.
+CMD_POS='(^|[|;&({!]|\$\(|&&|\|\||(^|[[:space:]])(exec|env|then|else|do|if|elif|while|until|run_limited [0-9]+)[[:space:]])[[:space:]]*'
 
 # ── RULE C: GNU-only flags on commands that do exist ───────────────────────
 #
 # Also a blacklist, and one flag behind. Absence cannot catch these at all: the
 # commands are present everywhere, and GNU accepts the flag — only BSD rejects it.
 #
-#   sed -i        BSD requires a suffix argument; `sed -i` alone eats the next
-#                 word as the suffix and silently edits nothing expected.
+#   sed -i        THERE IS NO PORTABLE SPELLING, which is why every form is
+#                 rejected rather than one being recommended. BSD requires a
+#                 suffix argument, so `sed -i 's/a/b/' f` eats the script as the
+#                 suffix. GNU documents the option as `-i[SUFFIX]` — attached — so
+#                 `sed -i '' 's/a/b/' f` makes the empty string the SCRIPT and the
+#                 substitution an input filename. The two requirements cannot both
+#                 be met by one command line. Write a temp file and `mv` it.
 #   sed -r        GNU spelling of `-E`, which is the portable one.
 #   readlink -f   BSD readlink has no -f.
 #   grep -P       PCRE, GNU-only.
@@ -138,9 +158,8 @@ CMD_POS='(^|[|;&({]|\$\(|&&|\|\|| exec | env | then | else | do |run_limited [0-
 #   echo -e       Not portable in any shell; `printf` is.
 RULE_C='
     { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-    line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/ &&
-        line !~ /sed[[:space:]]+-i[[:space:]]*(""|'"''"')/ {
-            print FILENAME ":" FNR ": sed -i without a suffix argument: " $0; next }
+    line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-i([[:space:]]|$)/ {
+        print FILENAME ":" FNR ": sed -i has no portable spelling; write a temp file and mv: " $0; next }
     line ~ /(^|[^a-zA-Z_-])sed[[:space:]]+-[a-zA-Z]*r/ {
         print FILENAME ":" FNR ": sed -r is the GNU spelling of -E: " $0; next }
     line ~ /(^|[^a-zA-Z_-])readlink[[:space:]]+-[a-zA-Z]*f/ {
@@ -157,6 +176,35 @@ RULE_C='
         print FILENAME ":" FNR ": sort -h is GNU-only: " $0; next }
     line ~ /(^|[^a-zA-Z_-])echo[[:space:]]+-e([[:space:]]|$)/ {
         print FILENAME ":" FNR ": echo -e is not portable; use printf: " $0; next }'
+
+# ── RULE D: Bash 4 constructs, on a platform whose /bin/bash is 3.2 ────────
+#
+# The same class as the rest and the one that was missed: this file used
+# `mapfile`, which arrived in Bash 4, so the check written to keep the suite
+# runnable on macOS would have been the thing that stopped it — failing before a
+# single scan ran, with both Ubuntu jobs green. Caught by a reviewer, which is
+# what this whole file exists to stop happening.
+#
+# Absence cannot catch these either: the runner has Bash 5 and accepts them all.
+# Only text can, and like the flag list this one is open — a Bash 5 construct is
+# equally unusable there, and the list grows when one is found.
+#
+# `${!name}` is NOT here: indirect expansion is Bash 2, and only the Bash 4
+# `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
+RULE_D='
+    { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
+    line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/ {
+        print FILENAME ":" FNR ": mapfile/readarray is Bash 4; use a while-read loop: " $0; next }
+    line ~ /(declare|local|typeset)[[:space:]]+-[a-zA-Z]*A([[:space:]]|$)/ {
+        print FILENAME ":" FNR ": associative arrays are Bash 4: " $0; next }
+    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?(\^\^?|,,?)\}/ {
+        print FILENAME ":" FNR ": case modification is Bash 4: " $0; next }
+    line ~ /\$\{[A-Za-z0-9_][A-Za-z0-9_]*(\[[^]]*\])?@[QEPAKa]\}/ {
+        print FILENAME ":" FNR ": parameter transformation is Bash 4.4: " $0; next }
+    line ~ /(^|[[:space:]])coproc([[:space:]]|$)/ {
+        print FILENAME ":" FNR ": coproc is Bash 4: " $0; next }
+    line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/ {
+        print FILENAME ":" FNR ": [[ -v ]] is Bash 4.2: " $0; next }'
 
 # What gets scanned: everything this repository ships and runs. `SKILL.md` is
 # included because its bash blocks run on the operator's machine like any other
@@ -180,7 +228,13 @@ targets() {
     [ -f "$SELF_DIR/../SKILL.md" ] && printf '%s\n' "$SELF_DIR/../SKILL.md"
     return 0
 }
-mapfile -t TARGETS < <(targets)
+# NOT `mapfile`: it arrived in Bash 4 and stock macOS ships 3.2, so the file
+# written to keep this suite runnable on macOS would have been the one that
+# stopped it — failing before a single scan ran, while both Ubuntu jobs stayed
+# green. That is the exact shape of the defect this file exists to catch, in this
+# file. A `while read` loop is Bourne-old and needs no version.
+TARGETS=()
+while IFS= read -r _t; do TARGETS+=( "$_t" ); done < <(targets)
 [ "${#TARGETS[@]}" -gt 0 ] \
     && pass "there are ${#TARGETS[@]} files to scan" \
     || { die "no files found to scan"; echo "RESULT: FAIL"; exit 1; }
@@ -194,6 +248,15 @@ a_rc=0; a_hits="$(scan "$RULE_A" "${TARGETS[@]}")" || a_rc=$?
     && pass "no grep/sed/awk pattern uses a GNU regex escape" \
     || die "GNU regex escape(s) in a grep/sed/awk pattern:
 $a_hits"
+
+d_rc=0; d_hits="$(scan "$RULE_D" "${TARGETS[@]}")" || d_rc=$?
+[ "$d_rc" -eq 0 ] \
+    && pass "the Bash-4-construct scan completed" \
+    || die "the Bash-4-construct scan could not be completed (rc=$d_rc)"
+[ -z "$d_hits" ] \
+    && pass "nothing uses a construct newer than the Bash 3.2 macOS ships" \
+    || die "Bash 4+ construct(s):
+$d_hits"
 
 c_rc=0; c_hits="$(scan "$RULE_C" "${TARGETS[@]}")" || c_rc=$?
 [ "$c_rc" -eq 0 ] \
@@ -235,15 +298,22 @@ done
 # defect rather than an invented one.
 PTMP="$(mktemp -d)" || { die "no scratch directory for the planted instances"; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$PTMP"' EXIT
-plant() {   # plant <name> <line> <rule> <label>
+plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
     printf '#!/usr/bin/env bash\n%s\n' "$2" > "$PTMP/$1.sh"
+    # The command defaults to the fixture's NAME, which is right for the cases
+    # named after the tool — and wrong for the ones that vary the POSITION rather
+    # than the tool. `if seq 1 5` planted as `ifseq` scanned for a command called
+    # `ifseq`, found nothing, and reported the scan had missed it: a fixture
+    # failing for its own reason rather than the code's.
+    local cmd="${5:-$1}"
     local hits rc=0
     case "$3" in
         A) hits="$(scan "$RULE_A" "$PTMP/$1.sh")" || rc=$? ;;
         C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
+        D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
         B) hits="$(scan '
                { line = $0; sub(/^[[:space:]]*#.*$/, "", line) }
-               line ~ /'"$CMD_POS$1"'([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/$1.sh")" || rc=$? ;;
+               line ~ /'"$CMD_POS$cmd"'([[:space:]]|$)/ { print FILENAME ":" FNR }' "$PTMP/$1.sh")" || rc=$? ;;
     esac
     { [ "$rc" -eq 0 ] && [ -n "$hits" ]; } \
         && pass "the scan catches $4" \
@@ -258,6 +328,24 @@ plant inplace "sed -i 's/a/b/' \"\$f\""             C "sed -i with no suffix"
 plant readl   "readlink -f \"\$f\""                 C "readlink -f"
 plant pcre    "grep -P '\\t' \"\$f\""               C "grep -P"
 plant echoe   "echo -e 'a\\tb'"                     C "echo -e"
+plant sedr    "sed -r 's/a+/b/' \"\$f\""              C "sed -r, the GNU spelling of -E"
+plant dated   "date -d '2026-01-01' +%s"            C "date -d"
+plant statc   "stat -c '%s' \"\$f\""                 C "stat -c"
+plant xargsr  "printf '' | xargs -r rm"             C "xargs -r"
+plant sorth   "sort -h < \"\$f\""                    C "sort -h"
+plant awky    "awk '/\\yfoo\\y/ { print }' \"\$f\""  A "gawk's \\y word boundary"
+plant awklt   "awk '/\\<foo\\>/ { print }' \"\$f\""  A "gawk's \\< and \\> boundaries"
+plant mapf     "mapfile -t X < <(printf 'a\\n')"     D "the mapfile that reached this very file"
+plant readarr  "readarray -t X < \"\$f\""             D "readarray, its other name"
+plant assoc    "declare -A M"                       D "an associative array"
+plant upper    "printf '%s' \"\${x^^}\""              D "Bash 4 case modification"
+plant upperpos "norm() { printf '%s' \"\${1^^}\"; }"   D "…on a positional parameter, the commonest spelling"
+plant transf   "printf '%s' \"\${x@Q}\""              D "a Bash 4.4 parameter transformation"
+plant coprocp  "coproc CAT { cat; }"                D "coproc"
+plant isvar    "if [[ -v x ]]; then :; fi"          D "[[ -v ]]"
+plant ifseq    "if seq 1 5; then :; fi"             B "a GNU command as an if condition"     seq
+plant whileseq "while seq 1 2; do break; done"      B "…and as a while condition"            seq
+plant notseq   "! seq 1 2"                          B "…and after a leading !"                seq
 
 # ── …and does NOT fire on the correct forms ────────────────────────────────
 # A scan that rejects the portable spelling is worse than none: it teaches the
@@ -268,6 +356,7 @@ refute() {   # refute <name> <line> <rule> <label>
     case "$3" in
         A) hits="$(scan "$RULE_A" "$PTMP/$1.sh")" || rc=$? ;;
         C) hits="$(scan "$RULE_C" "$PTMP/$1.sh")" || rc=$? ;;
+        D) hits="$(scan "$RULE_D" "$PTMP/$1.sh")" || rc=$? ;;
     esac
     { [ "$rc" -eq 0 ] && [ -z "$hits" ]; } \
         && pass "…and accepts $4" \
@@ -275,8 +364,14 @@ refute() {   # refute <name> <line> <rule> <label>
 }
 refute posix   "grep -qE '^[a-z]+[[:space:]]+[0-9]' \"\$f\"" A "a POSIX character class"
 refute jqline  "gh api x --jq 'test(\"^\\\\s+\$\")'"          A "a \\s inside a jq program"
-refute sedsuf  "sed -i '' 's/a/b/' \"\$f\""                   C "sed -i with an empty suffix"
+# `sed -i ''` is NOT among the accepted forms, and that is the correction: it is
+# portable to BSD and broken on GNU, where the detached empty argument becomes the
+# script. Recommending it would have shipped a command that fails on the platform
+# CI runs. It is planted as a rejection instead.
+plant sedempty "sed -i '' 's/a/b/' \"\$f\""         C "sed -i '' , which GNU reads as the script"
 refute sedE    "sed -E 's/a+/b/' \"\$f\""                     C "sed -E, the portable spelling"
+refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
+refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
 # Rule B accepts a guarded use, which is the whole point of requiring a guard
 # rather than absence — both real uses in this tree take this form.
 printf '#!/usr/bin/env bash\nif command -v timeout >/dev/null 2>&1; then timeout 5 true; else :; fi\n' \
