@@ -490,7 +490,12 @@ targets() {
 # invisible to the gate. Nothing failed, because the only check on the list was a
 # count with no expected value.
 PORT_TMPDIR="$(mktemp -d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
-[ -n "$PORT_TMPDIR" ] && trap 'rm -rf "$PORT_TMPDIR"' EXIT
+# ONE TRAP, BOTH DIRECTORIES. `trap … EXIT` REPLACES the previous handler rather
+# than adding to it, so the second one written silently dropped the first and that
+# directory leaked on every run of the suite. Both paths are cleaned from a single
+# handler, and an unset one expands to nothing rather than to `rm -rf ""`.
+PTMP=""
+trap 'rm -rf ${PORT_TMPDIR:+"$PORT_TMPDIR"} ${PTMP:+"$PTMP"}' EXIT
 
 PORT_SKILL_BLOCKS=""
 if [ -f "$SELF_DIR/../SKILL.md" ]; then
@@ -656,7 +661,8 @@ done
 # and was fixed in 96bfae4 — so the planted instance below is the real historical
 # defect rather than an invented one.
 PTMP="$(mktemp -d)" || { die "no scratch directory for the planted instances"; echo "RESULT: FAIL"; exit 1; }
-trap 'rm -rf "$PTMP"' EXIT
+# No second `trap` here: the handler above already names this path, and writing
+# another would drop the first — which is how the extraction directory came to leak.
 plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
     printf '#!/usr/bin/env bash\n%s\n' "$2" > "$PTMP/$1.sh"
     # The command defaults to the fixture's NAME, which is right for the cases
