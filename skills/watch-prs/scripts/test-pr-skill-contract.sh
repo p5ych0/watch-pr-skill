@@ -299,9 +299,15 @@ STUBSH
     # answer, and the run that made it pending is the one nobody has seen finish.
     # Without the reset the second green inherits the first one's age and closes
     # immediately, which is the incomplete-picture close this grace exists for.
+    # A GRACE OF THREE, not two, and a call floor with slack. `SECONDS` has
+    # one-second granularity, so with grace 2 and interval 1 the acceptance sat
+    # exactly on a tick: this closed in five polls on one runner and four on
+    # another, and CI failed on the count while the behaviour was identical. The
+    # assertion is that the interruption COST polls, not that it cost exactly five.
     gate_case '0
 3
-0'                    0 5 "a verdict interrupted by a change starts its grace again" PR_CI_TIMEOUT=10
+0'                    0 5 "a verdict interrupted by a change starts its grace again" \
+        PR_CI_TIMEOUT=15 PR_CI_GRACE=3
     # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
     # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
     # round past its own bound — and a bound that a verdict can step over is not a
@@ -336,8 +342,12 @@ STUBSH
     # minute before this loop could look at the clock. A bound the callee does not
     # know about is not a bound. The stub here reads what it was given and reports
     # it, so the assertion is on the value passed down rather than on a duration.
+    # A FLOOR OF ONE, because this case exists for the probe-budget assertion below
+    # it, and with grace 1 and interval 1 the acceptance sits on a `SECONDS` tick:
+    # two polls or one, depending on the machine. What it must show is that a green
+    # closes; how many polls that took is the other cases' business.
     gate_case '0
-0'                    0 2 "the gate still closes on a stable green" PR_CI_GRACE=1
+0'                    0 1 "the gate still closes on a stable green" PR_CI_GRACE=1
     first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
     { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
         && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
