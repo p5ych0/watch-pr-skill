@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.0.6] — 2026-08-09
+
+**GNU-only constructs are caught by a check rather than by review.** Four had
+reached the tree — `timeout`, `sha1sum`, `seq`, and `\s` in a `grep` pattern — and
+every one was found by a reviewer. The suite is a mandatory pre-push gate, so any
+of them stops a macOS contributor from closing a review round while Ubuntu CI
+stays green: the failure is invisible on the machine that introduces it. Closes
+#15.
+
+- **Neither check is a superset of the other, which is measured rather than
+  assumed.** The CI job catches a name no scan can see — `_a=sha1; _b=sum;
+  "$_a$_b"` — and misses a use whose failure does not propagate: `for i in
+  $(seq 1 5)` with `seq` gone yields an empty list and the loop simply does not
+  run, so the suite passes and the defect ships. The scan is the other way round.
+  Both are kept because each catches what the other cannot.
+
+- **Two checks, because one cannot cover both halves.** `test-portability.sh`
+  reads the text for what BSD rejects and GNU accepts — `\s` and friends in a
+  `grep`/`sed`/`awk` pattern, `sed -i` with no suffix, `readlink -f`, `grep -P`,
+  `echo -e`. Nothing fails at runtime on Linux for these, so only text can find
+  them. A **portability CI job** runs the entire suite with the GNU-only tools
+  removed from `PATH`, which is the only thing that sees a command name assembled
+  at runtime. It is a separate job, so it runs in parallel and costs no
+  wall-clock — the suite is six minutes, almost all of it deliberate `sleep`s.
+
+- **The command rule requires a GUARD, not absence.** `testlib.sh` runs `timeout`
+  and `test-pr-round-count.sh` runs `sha1sum`, both correctly: each probes with
+  `command -v` and has a fallback. That is what a contributor reaching for any new
+  tool should be doing, so it is what passes.
+
+- **One rule terminates and the others do not, and which is which is written
+  down.** POSIX BRE and ERE define no backslash-class escapes at all, so
+  `\s \S \d \D \w \W \b \B` is the *complete* set of what GNU and PCRE add — a
+  ninth cannot appear. The command and flag lists are blacklists and are one name
+  behind; the CI job is what closes that class.
+
+- **A whitelist was attempted and abandoned, and the reason is recorded** so it is
+  not attempted again: extracting command position from shell needs a lexer, the
+  measured vocabulary over this tree was about 40% English from strings and
+  embedded jq and awk programs, and filtering by "is this an executable here"
+  makes the answer differ per machine — the exact failure being guarded against.
+  CLAUDE.md records a structural checker built and deleted six times for this
+  reason; this is not the seventh.
+
 ## [2.0.5] — 2026-08-08
 
 **How a shared library is loaded lives in one place.** The clear-source-verify

@@ -170,6 +170,31 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
 caveat is gone with the daemons it was about.
 
+That is enforced rather than asserted, because it kept not being true. Four
+GNU-only constructs reached this repository — `timeout`, `sha1sum`, `seq`, and
+`\s` in a `grep` pattern — and every one was caught by review. The suite is a
+mandatory pre-push gate, so any of them stops a macOS contributor from closing a
+review round while Ubuntu CI stays green: the failure is invisible on the machine
+that introduces it.
+
+Two checks now, because one cannot cover both halves:
+
+- `test-portability.sh` reads the text for constructs BSD rejects but GNU
+  accepts — `\s` and friends in a `grep`, `sed -i` with no suffix, `readlink -f`.
+  Nothing fails at runtime on Linux for these, so only text can find them.
+- A **portability CI job** runs the entire suite with the GNU-only tools removed
+  from `PATH`. Text cannot see a command name assembled at runtime; absence can.
+  It runs in parallel with the normal job, so it costs no wall-clock.
+
+Neither covers the other: absence only catches a use whose failure propagates, so
+`for i in $(seq 1 5)` with `seq` gone yields an empty list and passes — which the
+scan catches, and the runtime-assembled name it cannot see is what the job
+catches.
+
+Reaching for a tool that stock macOS lacks is still allowed — probe it with
+`command -v` and provide a fallback, which is what `testlib.sh` does for `timeout`
+and `test-pr-round-count.sh` does for `sha1sum`.
+
 ## Install
 
 ```

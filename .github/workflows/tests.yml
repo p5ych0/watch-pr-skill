@@ -50,3 +50,84 @@ jobs:
             exit 1
           fi
           echo "all $total test files passed"
+
+  # The same suite, with the GNU-only tools GONE. `test-portability.sh` scans the
+  # text for constructs BSD rejects, and text cannot see a command name built at
+  # runtime — `_a=sha1; _b=sum; "$_a$_b"` is invisible to any scan and dies here at
+  # once. So this job removes them from `PATH` and runs everything.
+  #
+  # It catches a use whose failure PROPAGATES, which is not every use: `for i in
+  # $(seq 1 5)` with `seq` gone yields an empty list and the loop just does not
+  # run. Measured, not assumed. So this job and that scan are not supersets of one
+  # another in either direction, and both are kept.
+  #
+  # It is a separate JOB rather than a second step, so it runs in parallel and
+  # costs no wall-clock. The suite is six minutes, almost all of it deliberate
+  # `sleep`s in the CI-gate fixtures, and doubling that in series would make the
+  # gate something people skip.
+  #
+  # This is also the only place `run_limited`'s fallback arm is exercised across
+  # the whole suite: the normal job has GNU `timeout` and takes the other one.
+  # Stock macOS has neither this job's shims nor `timeout`, which is the
+  # configuration being stood in for.
+  portability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+
+      # Shims that FAIL LOUDLY rather than being absent. A missing command gives
+      # `command not found` on stderr and a 127 that a `|| true` somewhere might
+      # swallow; a shim that names itself puts the reason in the log next to the
+      # test that tripped it. `command -v` still finds them, so a correctly
+      # GUARDED use — `command -v timeout && timeout 5 …` — takes the shim and
+      # fails, which is wrong: the guard's whole point is that the fallback runs.
+      # So the shims are NOT on PATH for `command -v` to find. They are absent,
+      # and the loud part is the summary this step prints if the suite fails.
+      - name: Remove the GNU-only tools
+        run: |
+          set -euo pipefail
+          for c in timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc \
+                   stdbuf truncate dircolors; do
+            p="$(command -v "$c" 2>/dev/null)" || continue
+            sudo mv "$p" "$p.hidden-for-portability-job"
+            echo "hidden: $p"
+          done
+          # Proven gone, not assumed gone. A rename that silently failed would
+          # leave this job passing as a second copy of the normal one.
+          for c in timeout sha1sum seq; do
+            if command -v "$c" >/dev/null 2>&1; then
+              echo "::error::$c is still on PATH; this job would prove nothing"
+              exit 1
+            fi
+          done
+
+      - name: Run test suite without the GNU-only tools
+        working-directory: skills/watch-prs/scripts
+        run: |
+          set -uo pipefail
+          fail=0 total=0
+          for t in test-*.sh; do
+            total=$((total + 1))
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "PASS $t"
+            else
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed without the GNU-only tools"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          echo "----"
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more of $total test files needs a GNU-only tool"
+            exit 1
+          fi
+          echo "all $total test files passed without the GNU-only tools"
