@@ -81,10 +81,41 @@ SCAN_PROLOGUE='
     # is the lexer this file declines to write. The direction is loud: a quoted
     # `;` splits one command into two halves, and a rule sees less context than it
     # should, so it reports rather than excuses.
-    function segments(l, n, i, parts) {
-        n = split(l, parts, /(&&|\|\||[;|])/)
-        for (i = 1; i <= n; i++) SEG[i] = parts[i]
+    #
+    # THE SPLIT IS QUOTE-AWARE. `split()` on the operators is blind to them, and a
+    # separator inside a pattern — `grep "x;\s" f` — cut the command away from its
+    # own escape, so neither half satisfied a rule. This walks the line once,
+    # tracking single and double quotes, and breaks only at depth zero. It is not a
+    # lexer: it does not follow backslash escapes or here-documents, and it says so
+    # rather than pretending. What it does buy is that a quoted separator no longer
+    # splits a command, and that an operator can be told from the same characters
+    # inside a string.
+    function segments(l, n, i, ch, q, cur, rest) {
+        n = 1; SEG[1] = ""; q = ""
+        for (i = 1; i <= length(l); i++) {
+            ch = substr(l, i, 1)
+            if (q == "") {
+                if (ch == "\047" || ch == "\042") { q = ch; SEG[n] = SEG[n] ch; continue }
+                rest = substr(l, i, 2)
+                if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; i++; continue }
+                if (ch == ";" || ch == "|") { n++; SEG[n] = ""; continue }
+            } else if (ch == q) { q = "" }
+            SEG[n] = SEG[n] ch
+        }
         return n
+    }
+    # True when the operator appears outside quotes anywhere on the line.
+    function unquoted(l, pat, i, ch, q, rest) {
+        q = ""
+        for (i = 1; i <= length(l); i++) {
+            ch = substr(l, i, 1)
+            if (q == "") {
+                if (ch == "\047" || ch == "\042") { q = ch; continue }
+                rest = substr(l, i, length(pat))
+                if (rest == pat) return 1
+            } else if (ch == q) { q = "" }
+        }
+        return 0
     }
     { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
       if (buf == "") start = FNR
@@ -250,13 +281,17 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # Also a blacklist, and one flag behind. Absence cannot catch these at all: the
 # commands are present everywhere, and GNU accepts the flag — only BSD rejects it.
 #
-#   sed -i        THERE IS NO PORTABLE SPELLING, which is why every form is
-#                 rejected rather than one being recommended. BSD requires a
+#   sed -i        THE DETACHED FORMS have no portable spelling. BSD requires a
 #                 suffix argument, so `sed -i 's/a/b/' f` eats the script as the
-#                 suffix. GNU documents the option as `-i[SUFFIX]` — attached — so
-#                 `sed -i '' 's/a/b/' f` makes the empty string the SCRIPT and the
-#                 substitution an input filename. The two requirements cannot both
-#                 be met by one command line. Write a temp file and `mv` it.
+#                 suffix; GNU documents `-i[SUFFIX]` as ATTACHED, so
+#                 `sed -i '' 's/a/b/' f` makes the empty string the script. Neither
+#                 bare `-i` nor `-i ''` works on both. Write a temp file and `mv`.
+#
+#                 `-ibak` — a nonempty suffix ATTACHED — does work on both, and is
+#                 accepted. The flag is therefore matched only when `i` ENDS the
+#                 cluster: `sed -ni` is `-n` and a bare `-i`, while `sed -ibak` is
+#                 `-i` carrying its suffix. That is the one flag where "anywhere in
+#                 the cluster" is wrong, because what follows it is data.
 #   sed -r        GNU spelling of `-E`, which is the portable one.
 #   readlink -f   BSD readlink has no -f.
 #   grep -P       PCRE, GNU-only.
@@ -285,7 +320,7 @@ RULE_C='
     # `$0` again threw the join away, so `grep -m 1 \` + `-P …` and `declare \` +
     # `-A M` reported clean while Rule A, which never reassigned, caught its own
     # continued case. A shared prologue only helps the rules that let it.
-    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z0-9]*i[A-Za-z0-9]*)([[:space:]]|$)/) {
+    if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--in-place(=[^[:space:]]*)?|-[A-Za-z0-9]*i)([[:space:]]|$)/) {
         report("sed -i has no portable spelling; write a temp file and mv: " line); return }
     if (line ~ /(^|[^a-zA-Z_-])sed([[:space:]]+(-[A-Za-z-]+|[A-Za-z0-9_.,:\/=-]+))*[[:space:]]+(--(regexp-extended)(=[^[:space:]]*)?|-[A-Za-z0-9]*r[A-Za-z0-9]*)([[:space:]]|$)/) {
         report("sed -r is the GNU spelling of -E: " line); return }
@@ -329,7 +364,7 @@ RULE_D='
         report("parameter transformation is Bash 4.4: " line); return }
     # On WHOLE, and only in the first segment, because the operator is what the
     # split removed and every segment would otherwise report the same line.
-    if (SEGI <= 1 && WHOLE ~ /;;?&([[:space:]]|$)/) {
+    if (SEGI <= 1 && (unquoted(WHOLE, ";&") || unquoted(WHOLE, ";;&"))) {
         report("the ;& and ;;& case terminators are Bash 4: " WHOLE); return }
     # On WHOLE and once: the segment split removes `|`, taking `|&` apart.
     #
@@ -340,9 +375,9 @@ RULE_D='
     # rejects portable code is worse than one that misses a rare construct: it
     # gets switched off. `&>>` is not restricted this way — a redirection has no
     # prose reading, and the same test would cost more than it buys.
-    if (SEGI <= 1 && WHOLE ~ /&>>/) {
+    if (SEGI <= 1 && unquoted(WHOLE, "&>>")) {
         report("&>> is a Bash 4 redirection: " WHOLE); return }
-    if (SEGI <= 1 && WHOLE !~ /[\x27\x22]/ && WHOLE ~ /\|&/) {
+    if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
         report("|& is a Bash 4 pipeline: " WHOLE); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
@@ -366,13 +401,17 @@ RULE_D='
 # file rather than a line number, so moving the sections cannot silently widen it.
 PORT_SPLIT='# ── EACH RULE CATCHES A PLANTED INSTANCE'
 port_production() {   # the plumbing, as a temp file the scans can take
-    local out="$1"
+    local out="$1" arc=0
+    # THE STATUS IS TAKEN. `awk` can write a valid prefix and then fail on an I/O
+    # error, and `[ -s "$out" ]` alone turned that into success — the gate scanning
+    # a TRUNCATED copy of its own implementation and reporting clean on the part it
+    # never read. Non-empty is necessary and not sufficient.
     awk -v m="$PORT_SPLIT" '
         index($0, m) == 1 { exit }
         index($0, "# portability-scan: rules-begin") == 1 { skip = 1; next }
         index($0, "# portability-scan: rules-end") == 1 { skip = 0; next }
-        !skip { print }' "${BASH_SOURCE[0]}" > "$out"
-    [ -s "$out" ]
+        !skip { print }' "${BASH_SOURCE[0]}" > "$out" || arc=$?
+    [ "$arc" -eq 0 ] && [ -s "$out" ]
 }
 targets() {
     local t
@@ -381,9 +420,30 @@ targets() {
         case "$(basename "$t")" in test-portability.sh) continue ;; esac
         printf '%s\n' "$t"
     done
-    [ -f "$SELF_DIR/../SKILL.md" ] && printf '%s\n' "$SELF_DIR/../SKILL.md"
+    # `SKILL.md` contributes its BASH BLOCKS, not its prose. It is a document about
+    # shell, so it names `timeout` and `realpath` in sentences — and a rule that
+    # reads a name as an invocation would report every one of them. Extracting the
+    # fenced blocks is exactly what `pr-selfcheck.sh` already does to the same file,
+    # and it removes a whole class of false positive without any lexing.
+    [ -n "${PORT_SKILL_BLOCKS:-}" ] && printf '%s\n' "$PORT_SKILL_BLOCKS"
     return 0
 }
+# Extracted before the list is built, and its status taken: an `awk` that wrote a
+# prefix and then failed would hand the scans a truncated driver and report clean
+# on the part it never read.
+PORT_SKILL_BLOCKS=""
+if [ -f "$SELF_DIR/../SKILL.md" ]; then
+    PORT_SKILL_BLOCKS="$(mktemp)" || { die "no scratch file for the skill blocks"; PORT_SKILL_BLOCKS=""; }
+    if [ -n "$PORT_SKILL_BLOCKS" ]; then
+        if awk '/^```bash$/ {inb=1; next} /^```$/ {inb=0} inb' "$SELF_DIR/../SKILL.md" \
+             > "$PORT_SKILL_BLOCKS" && [ -s "$PORT_SKILL_BLOCKS" ]; then
+            pass "SKILL.md contributes its bash blocks, not its prose"
+        else
+            die "the SKILL.md bash blocks could not be extracted"
+            PORT_SKILL_BLOCKS=""
+        fi
+    fi
+fi
 # NOT `mapfile`: it arrived in Bash 4 and stock macOS ships 3.2, so the file
 # written to keep this suite runnable on macOS would have been the one that
 # stopped it — failing before a single scan ran, while both Ubuntu jobs stayed
@@ -595,6 +655,18 @@ refute awkbs   "awk 'BEGIN { printf \"\\b\" }'"               A "awk's portable 
 refute grepF   "grep -F '\\s' \"\$f\""                        A "grep -F, where a backslash is a literal"
 refute fgrepc  "fgrep '\\s' \"\$f\""                          A "fgrep, which is the same thing"
 refute grepe   "grep -e -P \"\$f\""                          C "grep -e -P, a search for the literal -P"
+# A quoted separator must not cut a command away from its own pattern, and a real
+# operator must still be seen on a line that happens to contain quotes elsewhere.
+plant qsep     "grep 'x;\\s' \"\$f\""                  A "a GNU escape behind a quoted separator"
+plant qpipe2   "printf '%s' x |& cat"               D "a real |& on a line with unrelated quotes"
+refute sedibak "sed -ibak 's/a/b/' \"\$f\""             C "sed -ibak, an attached suffix both platforms take"
+# A DATA OCCURRENCE IS REPORTED, AND THAT IS THE DESIGN. `printf '%s' realpath`
+# runs nothing, and this rule says so anyway — it reads names, not grammar, because
+# reading grammar took four rounds and was still wrong. The escape hatch is the
+# exemption list: one line, with the count and a reason. That is a deliberate act
+# by a contributor rather than an inference by a scanner that was mistaken about it
+# three times, and it is the trade this rule makes.
+plant dataarg "printf '%s' realpath"                B "a name used as data, which this rule reports by design" realpath
 refute qpipe   "printf %s 'producer |& consumer'"          D "a quoted |&, which is data rather than syntax"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
