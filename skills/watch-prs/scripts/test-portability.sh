@@ -142,7 +142,11 @@ SCAN_PROLOGUE='
       # only an identifier took `END` from `END-MARK`, so the real terminator was
       # never recognised and everything to EOF was skipped: one document silently
       # excusing the rest of the file.
-      if (match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
+      # `<<<` is a here-STRING and has no terminator. The pattern could begin at
+      # the second `<` of one, take the word after it as a delimiter, and skip
+      # every following line to EOF — a single `cat <<<EOF` excusing the file.
+      if (raw !~ /<<</ &&
+          match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
           heredoc = substr(raw, RSTART, RLENGTH)
           sub(/^<<-?[[:space:]]*/, "", heredoc)
           gsub(/["'"'"']/, "", heredoc)
@@ -288,11 +292,16 @@ RULE_A='
 # first version of this list. `${name}` is not a false positive: the name there is
 # followed by `}` or `_`, never by whitespace.
 # Names with no English meaning, so a bare word is an invocation and nothing else.
-# `cksum` is NOT here: POSIX specifies it and macOS ships it. A name that exists
+# `cksum`, `csplit`, `expand`, `unexpand`, `pathchk` and `ptx` are NOT here: POSIX
+# specifies them and macOS ships them. Four were added in one round on the strength
+# of being coreutils, which they are — and being in coreutils is not the test. The
+# test is whether stock macOS has them, and a name that exists on both platforms in
+# this list makes the gate fail on portable code, which is the one thing worse than
+# missing a defect. A name that exists
 # on both platforms in this list would make the gate fail on portable code, which
 # is the one thing worse than missing a defect.
 GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
-                dircolors numfmt ptx csplit expand unexpand pathchk
+                dircolors numfmt
                 gsed gawk gdate gcp gln gsort gtimeout gnproc'
 # (file:command) pairs that run one correctly — each probes with `command -v` and
 # falls back. Named rather than inferred: recognising the shape took three rounds
@@ -342,6 +351,12 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # BSD rejects the flag.
 #   echo -e       Not portable in any shell; `printf` is.
 RULE_C='
+    # QUOTES AROUND AN OPTION WORD ARE REMOVED BEFORE THE COMMAND SEES IT, so
+    # `grep '-P' x` is the same invocation as `grep -P x`. They are stripped for
+    # this rule only: it matches command names and option words, where a quote
+    # carries no meaning. Rule A must NOT do this — there the quotes are what
+    # separate a pattern from an option, and the escapes it hunts live inside them.
+    gsub(/["'"'"']/, "", line)
     # THE OPERAND OF `-e`/`-f` IS NOT A FLAG, here as in Rule A: `grep -e -P file`
     # searches for the literal `-P`. First, because the operand looks exactly like
     # what every clause below is hunting for.
@@ -517,10 +532,20 @@ fi
 # BY NAME, not by count. `there are N files to scan` passed at 25 exactly as it
 # had at 26, so SKILL.md leaving the list was invisible. Every input this file
 # claims to cover is named.
-port_listed() { printf '%s\n' "${TARGETS[@]}" | grep -qF "$1"; }
+# WHOLE ENTRY, not substring. `grep -qF testlib.sh` finds it inside
+# `test-testlib.sh`, so three of the five required names were satisfied by other
+# files and the check would have survived their removal.
+port_listed() { printf '%s\n' "${TARGETS[@]}" | sed 's|.*/||' | grep -qxF "$1"; }
 [ "${#TARGETS[@]}" -gt 0 ] \
     && pass "there are ${#TARGETS[@]} files to scan" \
     || { die "no files found to scan"; echo "RESULT: FAIL"; exit 1; }
+# The matcher is checked before it is trusted: as a substring test, `testlib.sh`
+# was satisfied by `test-testlib.sh` and three of the five required names could
+# have left the list unnoticed. A fragment that is a substring of several entries
+# and a whole entry of none must not count as listed.
+port_listed 'lib.sh' \
+    && die "the target check matches substrings; a missing input would go unnoticed" \
+    || pass "a required target is matched as a whole entry, not a substring"
 for want in pr-ci-state.sh testlib.sh identitylib.sh 'SKILL.md(bash blocks)' \
             'test-portability.sh(implementation)'; do
     port_listed "$want" \
@@ -664,6 +689,7 @@ plant escape  "grep -qE '^[a-z]+\\s+[0-9]' \"\$f\"" A "the \\s that reached this
 plant worddig "sed -n 's/\\d//p' \"\$f\""           A "a \\d in a sed pattern"
 plant sha1sum "printf x | sha1sum"                  B "an unguarded sha1sum"
 plant realpath "realpath ./x"                       B "realpath, which stock macOS lacks"
+plant quotedP  "grep '-P' x \"\$f\""                   C "a quoted -P, which the shell unquotes before grep sees it"
 plant numfmt  "numfmt --from=iec 1K"                B "numfmt, a coreutils tool macOS does not ship"
 plant tac     "tac < \"\$f\""                        B "tac"
 plant gsed    "gsed -E 's/a/b/' x"                  B "a g-prefixed GNU tool"
@@ -845,6 +871,17 @@ tc_hits="$(scan "$RULE_C" "$PTMP/twogrepc.sh")" || tc_hits=SCANFAIL
 { [ "$tc_hits" != SCANFAIL ] && [ -n "$tc_hits" ]; } \
     && pass "…nor does a -e operand exempt a later -P" \
     || die "grep -e -P excused a later grep -P ('$tc_hits')"
+
+# ── A HERE-STRING IS NOT A HERE-DOCUMENT ───────────────────────────────────
+# `<<<` has no terminator; treating it as a document skipped every following line
+# to EOF — one `cat <<<EOF` excusing the whole file.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<<EOF\n'
+  printf 'grep -P x "$f"\n'; } > "$PTMP/herestring.sh"
+hs_hits="$(scan "$RULE_C" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
+{ [ "$hs_hits" != SCANFAIL ] && [ -n "$hs_hits" ]; } \
+    && pass "a here-string does not start a here-document skip" \
+    || die "cat <<<EOF swallowed the rest of the file ('$hs_hits')"
 
 # ── A CONTINUED COMMAND IS ONE COMMAND ─────────────────────────────────────
 # `grep -qE \` on one line and its pattern on the next satisfied neither predicate

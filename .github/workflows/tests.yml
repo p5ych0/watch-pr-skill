@@ -100,8 +100,7 @@ jobs:
           # English-colliding names that only this job can cover — `timeout`,
           # `seq`, `truncate`. A tool in neither list is covered by nothing.
           tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors numfmt ptx csplit expand unexpand
-                 pathchk"
+                 stdbuf truncate dircolors numfmt"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool
