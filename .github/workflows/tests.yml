@@ -98,9 +98,17 @@ jobs:
           set -euo pipefail
           # KEPT IN STEP with `GNU_ONLY_NAMES` in test-portability.sh, plus the
           # English-colliding names that only this job can cover — `timeout`,
-          # `seq`, `truncate`. A tool in neither list is covered by nothing.
+          # `seq`, `truncate`. A tool in neither list is covered by nothing, and
+          # `test-portability.sh` now CHECKS this containment rather than trusting
+          # this comment: every scanned name must appear here.
+          #
+          # The `g`-prefixed spellings are the Homebrew names a macOS contributor
+          # may reach for. They are not installed on the runner, so hiding them is
+          # a no-op — and they are listed anyway, because a list that is equal to
+          # the other one needs no rule about which entries are exempt from it.
           tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors numfmt"
+                 stdbuf truncate dircolors numfmt shred
+                 gsed gawk gdate gcp gln gsort gtimeout gnproc"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool

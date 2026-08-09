@@ -135,6 +135,23 @@ SCAN_PROLOGUE='
     }
     # True when the operator appears outside quotes anywhere on the line.
     function unquoted(l, pat) { return unquoted_pos(l, pat) > 0 }
+    # True when a letter from `set` is escaped by a backslash that is ITSELF not
+    # escaped. `grep '\\s' f` passes TWO backslashes and an `s`, which both
+    # engines read as an escaped literal backslash followed by an ordinary `s` —
+    # portable, and a pattern starting at the second backslash reported it as a GNU
+    # class escape. Only an ODD run of backslashes leaves the last one escaping the
+    # letter, so the run is counted rather than the pair matched.
+    function esc_class(l, set, i, n, ch) {
+        for (i = 1; i <= length(l); i++) {
+            if (substr(l, i, 1) != "\134") continue
+            n = 0
+            while (substr(l, i, 1) == "\134") { n++; i++ }
+            ch = substr(l, i, 1)
+            if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
+            i--
+        }
+        return 0
+    }
     #
     # A HERE-DOCUMENT BODY IS DATA. `cat <<EOF` followed by prose is not shell, and
     # passing it to the rules made an ordinary mention of `grep -P` in a summary
@@ -281,9 +298,9 @@ RULE_A='
     # the gate fail on portable code.
     if (line ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
 
-    if (line ~ /(grep|sed)/ && line ~ /\\[sSdDwWbBy<>]/) {
+    if (line ~ /(grep|sed)/ && esc_class(line, "sSdDwWbBy<>")) {
         report("GNU regex escape: " line); return }
-    if (line ~ /awk/ && line ~ /\\[sSdDwWBy<>]/) {
+    if (line ~ /awk/ && esc_class(line, "sSdDwWBy<>")) {
         report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
@@ -344,7 +361,7 @@ RULE_A='
 # on both platforms in this list would make the gate fail on portable code, which
 # is the one thing worse than missing a defect.
 GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
-                dircolors numfmt
+                dircolors numfmt shred
                 gsed gawk gdate gcp gln gsort gtimeout gnproc'
 # (file:command) pairs that run one correctly — each probes with `command -v` and
 # falls back. Named rather than inferred: recognising the shape took three rounds
@@ -860,6 +877,57 @@ hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
 { [ "$hs_hits" != SCANFAIL ] && [ -n "$hs_hits" ]; } \
     && pass "a here-string does not start a here-document skip" \
     || die "cat <<<EOF swallowed the rest of the file ('$hs_hits')"
+
+# ── AN ESCAPED BACKSLASH IS NOT AN ESCAPE ──────────────────────────────────
+# `grep '\\s' "$f"` passes TWO backslashes and an `s`. Both engines read that as an
+# escaped literal backslash followed by an ordinary `s`, so it means the same thing
+# on either platform — and a pattern that started at the SECOND backslash reported
+# it as a GNU class escape, making a mandatory pre-push gate reject correct code.
+# That is the failure this file calls worse than missing a defect, because it is
+# how a check gets switched off rather than obeyed.
+# TWO backslashes in the file, built with a counted variable rather than a
+# printf format, because the escaping of a backslash count is the thing under
+# test and a format string adds a second layer of it.
+two_bs='\\'
+printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/evenesc.sh"
+ee_hits="$(scan "$RULE_A" "$PTMP/evenesc.sh")" || ee_hits=SCANFAIL
+{ [ "$ee_hits" != SCANFAIL ] && [ -z "$ee_hits" ]; } \
+    && pass "an escaped backslash before a class letter is accepted" \
+    || die "the scan rejected a portable escaped backslash ('$ee_hits')"
+# …and a THIRD backslash makes it an escape again: the literal backslash, then a
+# `\s` that really is the GNU class. Parity, not pairing.
+three_bs='\\\'
+printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$three_bs" "'" > "$PTMP/oddesc.sh"
+oe_hits="$(scan "$RULE_A" "$PTMP/oddesc.sh")" || oe_hits=SCANFAIL
+{ [ "$oe_hits" != SCANFAIL ] && [ -n "$oe_hits" ]; } \
+    && pass "…while an odd run of backslashes still escapes the letter" \
+    || die "three backslashes before s were read as portable ('$oe_hits')"
+
+# ── THE TWO REMOVAL LISTS ARE KEPT IN STEP BY A CHECK, NOT BY A COMMENT ────
+# The workflow said it was "KEPT IN STEP with GNU_ONLY_NAMES" and nothing verified
+# it. A name in the scan but not in the job is covered by text alone and misses the
+# runtime-assembled spelling; a name in neither is covered by nothing at all, which
+# is how `shred` sat uncovered. This is the check that comment was standing in for.
+PORT_WF="$SELF_DIR/../../../.github/workflows/tests.yml"
+if [ -f "$PORT_WF" ]; then
+    wf_tools="$(awk '/^ *tools="/{f=1} f{print} f && /"[[:space:]]*$/{exit}' "$PORT_WF")"
+    if [ -z "$wf_tools" ]; then
+        die "the portability job's tool list could not be read"
+    else
+        missing=""
+        for n in $GNU_ONLY_NAMES; do
+            # The quotes go first: the last name is adjacent to the closing one,
+            # so `gnproc"` was a token that matched nothing — the check reporting a
+            # gap in the list rather than in the code.
+            printf '%s' "$wf_tools" | tr -d '"' | tr -s ' \n' '\n\n' | grep -qxF "$n" || missing="$missing $n"
+        done
+        [ -z "$missing" ] \
+            && pass "every scanned GNU-only name is also removed by the CI job" \
+            || die "in the scan but not hidden by the portability job:$missing"
+    fi
+else
+    die "the portability workflow is not where this check expects it"
+fi
 
 # ── A TEMPORARY PATH IS VALIDATED BEFORE IT IS USED ────────────────────────
 # `mktemp` can print a path it did not create and still exit zero. For the scan's

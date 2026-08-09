@@ -50,6 +50,21 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   ever sees them. Not a lexer: it does not know about `$(…)` nesting, `((…))`, or
   a quote spanning a continuation, and says so.
 
+- **An escaped backslash is not an escape.** `grep '\\s' f` passes two
+  backslashes and an `s`, which both engines read as an escaped literal backslash
+  followed by an ordinary `s` — portable, and a pattern starting at the second
+  backslash reported it as a GNU class escape. The gate rejecting correct code is
+  the failure this check calls worse than missing a defect, because it is how a
+  check gets switched off rather than obeyed. The backslash run is counted now:
+  odd escapes the letter, even does not.
+
+- **The two removal lists are kept in step by a check, not by a comment.** The
+  workflow said it was kept in step with `GNU_ONLY_NAMES` and nothing verified it.
+  A name in the scan but not in the job is covered by text alone; a name in neither
+  is covered by nothing, which is how `shred` — GNU coreutils, absent from stock
+  macOS — sat uncovered by both. It is in both lists now, and the containment is
+  asserted rather than asserted-about.
+
 - **A `<<` is a redirection only where the shell sees one.** A quoted word
   carrying the characters is a string, and matching the raw text took it as an
   opening: the skip began, no terminator ever arrived, and every line to EOF was
