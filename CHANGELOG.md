@@ -95,13 +95,17 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   the same backslash. `\0134` is *not* one: bash reads it as `\013` and then `4`.
   Numeric escapes decode to their actual character, so `$'\x5c\x73'` is a
   backslash and then an `s`; `\b` there is a backspace rather than the word
-  boundary it is in a pattern. The span ends at the first *unescaped* quote.
+  boundary it is in a pattern. The span ends at the first *unescaped* quote, and
+  the opener is one only outside quotes — a command carrying those two characters
+  as data paired them with the opening quote of the real span, which was then
+  never decoded at all.
 
 - **An inline comment opens nothing.** `: # <<EOF` is a comment to bash and was a
   here-document to a scanner that removed only full-line ones: `EOF` was queued, no
   terminator came, and the rest of the file was skipped. Only the redirection scan
   strips them — a forbidden spelling written in an inline comment is still
-  reported, which is the safe direction.
+  reported, which is the safe direction. The boundary is the control operators
+  that *end* a word as well as the ones that begin one, so `(:)# <<EOF` counts.
 
 - **The diagnostics file is one the run owns.** It is opened with `2>`, which
   truncates, and removed afterwards. Asking `mktemp` for it meant accepting

@@ -169,10 +169,15 @@ SCAN_PROLOGUE='
                 # value and `${x#p}` is an expansion; both keep their `#`.
                 if (ch == "#") {
                     prev = (i == 1) ? " " : substr(l, i - 1, 1)
-                    # The class is spelled with `&` before `;` deliberately: the
-                    # other order puts a literal `;&` in this file, and rule D
-                    # reads that as the Bash 4 case terminator it is elsewhere.
-                    if (prev ~ /[[:space:]&;|(]/) return substr(l, 1, i - 1)
+                    # `)` IS A CONTROL OPERATOR TOO, and `(:)# <<EOF` is the
+                    # spelling that needs it — a subshell closed, then a comment
+                    # with no space in front of it. The class is the operators that
+                    # END a word as well as the ones that begin one.
+                    #
+                    # It is spelled with `&` before `;` deliberately: the other
+                    # order puts a literal `;&` in this file, and rule D reads that
+                    # as the Bash 4 case terminator it is elsewhere.
+                    if (prev ~ /[[:space:]&;|()]/) return substr(l, 1, i - 1)
                 }
             } else if (ch == q) { q = "" }
         }
@@ -324,25 +329,40 @@ SCAN_PROLOGUE='
         }
         return 0
     }
-    function ansic_hit(l, set, seg, i, n, ch, st, en) {
-        st = 1
+    # THE OPENER IS ONLY AN OPENER OUTSIDE QUOTES. A command can carry those two
+    # characters twice: once as data inside double quotes, once opening a real
+    # span. Taking the first as an opener paired it with the opening quote of the
+    # REAL span, which was then never decoded — and the walker deliberately
+    # ignores ANSI-C text, so nothing judged the GNU escape at all. Quote state
+    # is tracked here for the same reason it is tracked in the split.
+    function ansic_hit(l, set, seg, i, n, ch, st, en, q) {
+        q = ""; st = 1
         while (st <= length(l)) {
-            if (substr(l, st, 2) != "$\047") { st++; continue }
-            en = ansic_span_end(l, st + 2)
-            if (en == 0) return 0
-            seg = ansic_decode(substr(l, st + 2, en - st - 2))
-            for (i = 1; i <= length(seg); i++) {
-                if (substr(seg, i, 1) != "\134") continue
-                n = 0
-                while (substr(seg, i, 1) == "\134") { n++; i++ }
-                ch = substr(seg, i, 1)
-                if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
-                i--
-            }
-            st = en + 1
+            ch = substr(l, st, 1)
+            if (q == "\042" && ch == "\134") { st += 2; continue }
+            if (q == "") {
+                if (substr(l, st, 2) == "$\047") {
+                    en = ansic_span_end(l, st + 2)
+                    if (en == 0) return 0
+                    seg = ansic_decode(substr(l, st + 2, en - st - 2))
+                    for (i = 1; i <= length(seg); i++) {
+                        if (substr(seg, i, 1) != "\134") continue
+                        n = 0
+                        while (substr(seg, i, 1) == "\134") { n++; i++ }
+                        ch = substr(seg, i, 1)
+                        if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
+                        i--
+                    }
+                    st = en + 1
+                    continue
+                }
+                if (ch == "\047" || ch == "\042") { q = ch; st++; continue }
+            } else if (ch == q) { q = ""; st++; continue }
+            st++
         }
         return 0
     }
+
     function esc_class(l, set, i, n, ch, q, kept) {
         if (ansic_hit(l, set)) return 1
         q = ""
@@ -1396,6 +1416,17 @@ aq_hits="$(scan "$RULE_A" "$PTMP/ansicq.sh")" || aq_hits=SCANFAIL
     && pass "an escaped quote does not end the ANSI-C span" \
     || die "the span stopped at an escaped quote ('$aq_hits')"
 
+# ── AN ANSI-C OPENER IS ONE ONLY OUTSIDE QUOTES ────────────────────────────
+# A command can carry the two characters twice: once as data inside double quotes,
+# once opening a real span. Taking the first as an opener paired it with the
+# opening quote of the REAL span, which was then never decoded — and the walker
+# deliberately ignores ANSI-C text, so nothing judged the GNU escape at all.
+printf '#!/usr/bin/env bash\ngrep -e "$%s" -e $%s\\134s%s "$f"\n' "'" "'" "'" > "$PTMP/ansicdq.sh"
+ad_hits="$(scan "$RULE_A" "$PTMP/ansicdq.sh")" || ad_hits=SCANFAIL
+{ [ "$ad_hits" != SCANFAIL ] && [ -n "$ad_hits" ]; } \
+    && pass "a quoted \$' is data, and the real span is still decoded" \
+    || die "a quoted \$' consumed the real ANSI-C span ('$ad_hits')"
+
 # ── AN INLINE COMMENT OPENS NOTHING ────────────────────────────────────────
 # `: # <<EOF` is a comment to bash. Removing only FULL-LINE comments queued `EOF`,
 # no terminator ever came, and every following line was skipped.
@@ -1406,6 +1437,16 @@ ih_hits="$(scan "$RULE_A" "$PTMP/inlinehd.sh")" || ih_hits=SCANFAIL
 { [ "$ih_hits" != SCANFAIL ] && [ -n "$ih_hits" ]; } \
     && pass "a here-document marker in an inline comment opens nothing" \
     || die "an inline comment swallowed the rest of the file ('$ih_hits')"
+# …and `)` is a control operator, so `(:)# <<EOF` is a comment with no space in
+# front of it — the boundary class is the operators that END a word as well as the
+# ones that begin one.
+{ printf '#!/usr/bin/env bash\n'
+  printf '(:)# <<EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/parencomment.sh"
+pc_hits="$(scan "$RULE_A" "$PTMP/parencomment.sh")" || pc_hits=SCANFAIL
+{ [ "$pc_hits" != SCANFAIL ] && [ -n "$pc_hits" ]; } \
+    && pass "…and a comment right after a closing parenthesis opens nothing" \
+    || die "(:)# <<EOF swallowed the rest of the file ('$pc_hits')"
 # …and a `#` that is NOT starting a word is data: `${v#pat}` and `a#b` keep theirs,
 # so a real redirection after one is still tracked.
 { printf '#!/usr/bin/env bash\n'
