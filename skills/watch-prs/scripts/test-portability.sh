@@ -44,6 +44,12 @@
 # scans below cover what only text can — with each one's closure stated.
 set -Eeuo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# For `mktemp_d`, the VALIDATED scratch directory. This file allocated two of its
+# own with a bare `mktemp -d`, which exits zero on a path it did not create — and
+# every path built from one, including what the EXIT handler removes, is then
+# somewhere unintended. The helper this suite already ships is the definition;
+# a second, unvalidated allocation beside it is the copy that misses the rule.
+. "$SELF_DIR/testlib.sh"
 
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
@@ -111,20 +117,24 @@ SCAN_PROLOGUE='
         }
         return n
     }
-    # True when the operator appears outside quotes anywhere on the line.
-    function unquoted(l, pat, i, ch, q, rest) {
+    # WHERE the operator appears outside quotes, or 0. The here-document detector
+    # needs the position and not merely the fact: a `<<` is only a redirection if
+    # the shell sees it as one, and a quoted word carrying those characters is a
+    # string, not a redirection.
+    function unquoted_pos(l, pat, i, ch, q) {
         q = ""
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
             if (q == "\042" && ch == "\134") { i++; continue }
             if (q == "") {
                 if (ch == "\047" || ch == "\042") { q = ch; continue }
-                rest = substr(l, i, length(pat))
-                if (rest == pat) return 1
+                if (substr(l, i, length(pat)) == pat) return i
             } else if (ch == q) { q = "" }
         }
         return 0
     }
+    # True when the operator appears outside quotes anywhere on the line.
+    function unquoted(l, pat) { return unquoted_pos(l, pat) > 0 }
     #
     # A HERE-DOCUMENT BODY IS DATA. `cat <<EOF` followed by prose is not shell, and
     # passing it to the rules made an ordinary mention of `grep -P` in a summary
@@ -134,22 +144,44 @@ SCAN_PROLOGUE='
     # terminator, so that form is allowed for.
     { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
       if (heredoc != "") {
-          t = raw; sub(/^[\t ]+/, "", t)
-          if (t == heredoc) heredoc = ""
+          t = raw
+          # ONLY `<<-` STRIPS INDENTATION, and only TABS. Stripping whitespace from
+          # every terminator meant an indented `  EOF` inside an ordinary `<<EOF`
+          # body ended the skip early — the rest of the document then read as
+          # shell, so a `grep -P` written as example text failed the gate.
+          if (hd_dash) sub(/^\t+/, "", t)
+          if (t == heredoc) { heredoc = ""; hd_dash = 0 }
           next
       }
       # The delimiter can be any word — `END-MARK`, `_EOF_`, `EOF.1` — and matching
       # only an identifier took `END` from `END-MARK`, so the real terminator was
       # never recognised and everything to EOF was skipped: one document silently
       # excusing the rest of the file.
+      # A `<<` INSIDE QUOTES IS NOT A REDIRECTION. A quoted word carrying those
+      # characters — printf %s "<<EOF" — is a string, and matching the raw text
+      # took it as one: the skip began, no
+      # terminator ever arrived, and every following line to EOF was excused by a
+      # here-document that was never opened. The operator is located outside quotes
+      # first, and the delimiter is read from THERE rather than from anywhere on
+      # the line.
+      hp = unquoted_pos(raw, "<<")
       # `<<<` is a here-STRING and has no terminator. The pattern could begin at
       # the second `<` of one, take the word after it as a delimiter, and skip
       # every following line to EOF — a single `cat <<<EOF` excusing the file.
-      if (raw !~ /<<</ &&
-          match(raw, /<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
-          heredoc = substr(raw, RSTART, RLENGTH)
-          sub(/^<<-?[[:space:]]*/, "", heredoc)
-          gsub(/["'"'"']/, "", heredoc)
+      if (hp > 0 && substr(raw, hp, 3) != "<<<") {
+          tail = substr(raw, hp)
+          if (match(tail, /^<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
+              heredoc = substr(tail, RSTART, RLENGTH)
+              hd_dash = (heredoc ~ /^<<-/)
+              sub(/^<<-?[[:space:]]*/, "", heredoc)
+              gsub(/["'"'"']/, "", heredoc)
+              # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled
+              # the same and its right operand is a number, so a numeric delimiter
+              # is the shift rather than a document — and taking it started a skip
+              # with no terminator, to EOF. A here-document delimiter that is only
+              # digits is not a spelling anything here uses.
+              if (heredoc ~ /^[0-9]+$/) { heredoc = ""; hd_dash = 0 }
+          }
       }
       if (buf == "") start = FNR
       if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
@@ -161,7 +193,14 @@ SCAN_EPILOGUE='
 scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     local prog="$1"; shift
     local errf out rc msg mrc
-    errf="$(mktemp)" || return 2
+    # THE ERROR FILE IS VALIDATED TOO, and it is the one that matters most: this
+    # file is where a failed scan reports itself, and a path `mktemp` printed
+    # without creating makes the `2>` redirection fail — the diagnostic is lost and
+    # the scan reads as clean. `mktemp_d` covers directories; a file needs the same
+    # check, which is three lines rather than a helper for one caller.
+    errf="$(mktemp 2>/dev/null)" || return 2
+    case "$errf" in /*) ;; *) return 2 ;; esac
+    [ -f "$errf" ] && [ -w "$errf" ] || return 2
     rc=0
     # The body is wrapped in a function so the END block can run it on a trailing
     # unterminated continuation — a file whose last line ends in a backslash would
@@ -228,11 +267,15 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
 # `\b` only — gawk defines `\B` as a within-word operator, and exempting the pair
 # together let `awk '/foo\Bbar/'` through.
 RULE_A='
-    # `-e` AND `-f` TAKE AN OPERAND, and that operand is not a flag:
-    # `grep -e -P file` searches for the literal string `-P`. Checked before the
-    # flag rules, because the operand looks exactly like what they hunt for.
-    if (line ~ /(^|[^a-zA-Z_-])(grep|sed)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*[ef][[:space:]]+-/) return
-
+    # THE `-e`/`-f` OPERAND EXEMPTION IS GONE WITH RULE C. It existed so
+    # `grep -e -P file` — which searches for the literal string `-P` — was not read
+    # as the flag `-P`, and rule A does not look at `-P` or at any other flag. What
+    # it left behind was an over-exemption: `grep -e -x -e '\s' "$f"` matched it on
+    # the FIRST `-e`, whose operand really is `-x`, and the whole command was
+    # excused — including the `\s` introduced by the second. An exemption that
+    # cannot say where an operand ends is option parsing, which is the thing rule C
+    # was deleted for; the rule it was protecting no longer exists, so it goes too.
+    #
     # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so
     # `grep -F '\s' f` behaves the same on both platforms, and rejecting it made
     # the gate fail on portable code.
@@ -359,7 +402,14 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 RULE_D='
     if (line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/) {
         report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
-    if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*A[A-Za-z]*([[:space:]]|$)/) {
+    # THE OPTION WORD MAY BE QUOTED. Shell quote removal happens before `declare`
+    # sees its arguments, so a quoted option word — the dash and the letter
+    # wrapped in quotes — declares an associative array
+    # exactly as the bare form does — and the pattern, anchored on whitespace
+    # immediately before the dash, saw the quote and passed it. One optional quote
+    # character on each side, which is the whole of what quote removal does to an
+    # option word; this is a pattern for a construct, not an option parser.
+    if (line ~ /(declare|local|typeset)([[:space:]]+["'"'"']?-[A-Za-z-]+["'"'"']?)*[[:space:]]+["'"'"']?-[A-Za-z]*A[A-Za-z]*["'"'"']?([[:space:]]|$)/) {
         report("associative arrays are Bash 4: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
@@ -382,7 +432,10 @@ RULE_D='
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
         report("|& is a Bash 4 pipeline: " WHOLE); return }
-    if (line ~ /\{[0-9]+\.\.[0-9]+\.\.[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.[0-9]+\}/) {
+    # THE STEP MAY BE SIGNED. `{5..1..-1}` counts down and is the same Bash 4
+    # feature; an unsigned `[0-9]+` for the step read the `-` as not-a-step and let
+    # the descending form through — the spelling a descending loop actually uses.
+    if (line ~ /\{[0-9]+\.\.[0-9]+\.\.-?[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.-?[0-9]+\}/) {
         report("a stepped brace expansion is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])(shopt[[:space:]]+(-[A-Za-z]+[[:space:]]+)*globstar|set[[:space:]]+-o[[:space:]]+globstar)/) {
         report("globstar is Bash 4: " line); return }
@@ -447,7 +500,12 @@ targets() {
 # SKILL.md quietly left the target list — a GNU-only construct in the driver was
 # invisible to the gate. Nothing failed, because the only check on the list was a
 # count with no expected value.
-PORT_TMPDIR="$(mktemp -d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
+# THROUGH `mktemp_d`, NOT A BARE `mktemp -d`. `mktemp` can print a path it did not
+# create and still exit zero, and a relative or empty one then makes every path
+# built from it land somewhere unintended — and the EXIT handler `rm -rf` it.
+# `testlib.sh` already carries the validated helper; a second, unvalidated
+# allocation beside it is the copy that misses the rule.
+PORT_TMPDIR="$(mktemp_d)" || { die "no scratch directory for the extracts"; PORT_TMPDIR=""; }
 # ONE TRAP, BOTH DIRECTORIES. `trap … EXIT` REPLACES the previous handler rather
 # than adding to it, so the second one written silently dropped the first and that
 # directory leaked on every run of the suite. Both paths are cleaned from a single
@@ -609,7 +667,7 @@ done
 # `\s` is the one that actually reached this tree, in `test-pr-skill-contract.sh`,
 # and was fixed in 96bfae4 — so the planted instance below is the real historical
 # defect rather than an invented one.
-PTMP="$(mktemp -d)" || { die "no scratch directory for the planted instances"; echo "RESULT: FAIL"; exit 1; }
+PTMP="$(mktemp_d)" || { die "no scratch directory for the planted instances"; echo "RESULT: FAIL"; exit 1; }
 # No second `trap` here: the handler above already names this path, and writing
 # another would drop the first — which is how the extraction directory came to leak.
 plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
@@ -802,6 +860,108 @@ hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
 { [ "$hs_hits" != SCANFAIL ] && [ -n "$hs_hits" ]; } \
     && pass "a here-string does not start a here-document skip" \
     || die "cat <<<EOF swallowed the rest of the file ('$hs_hits')"
+
+# ── A TEMPORARY PATH IS VALIDATED BEFORE IT IS USED ────────────────────────
+# `mktemp` can print a path it did not create and still exit zero. For the scan's
+# stderr file that is not an abstract risk: a RELATIVE path is redirected into
+# whatever the current directory happens to be, so a mandatory pre-push gate writes
+# a file into the tree it is checking and then deletes it. The path is required to
+# be absolute and to exist before anything is redirected into it.
+mkdir -p "$PTMP/stub" "$PTMP/cwd"
+printf '#!/usr/bin/env bash\ngrep -qE "\\s" "$f"\n' > "$PTMP/needstmp.sh"
+# A RELATIVE path that EXISTS. Only the absolute-path test rejects this one: the
+# file is there and writable, so a check for those alone is satisfied — and the
+# gate then writes its diagnostics into whatever directory it was run from.
+printf '#!/usr/bin/env bash\n: > relative-errfile\nprintf %%s relative-errfile\n' > "$PTMP/stub/mktemp"
+chmod +x "$PTMP/stub/mktemp"
+mk_rc=0
+( cd "$PTMP/cwd" && PATH="$PTMP/stub:$PATH" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
+[ "$mk_rc" -eq 2 ] \
+    && pass "a relative path from mktemp is refused, even when it exists" \
+    || die "the scan redirected into a relative temporary path (rc=$mk_rc)"
+# An ABSOLUTE path that was NOT created — the failure shape `mktemp` actually has.
+# Only the existence test rejects this one, because `2>` would create the file and
+# the scan would run as if nothing were wrong.
+printf '#!/usr/bin/env bash\nprintf %%s "%s/uncreated-errfile"\n' "$PTMP" > "$PTMP/stub/mktemp"
+mk_rc=0
+( PATH="$PTMP/stub:$PATH" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
+[ "$mk_rc" -eq 2 ] \
+    && pass "…and so is an absolute path mktemp printed without creating" \
+    || die "the scan used a path mktemp never created (rc=$mk_rc)"
+
+# ── AN OPERAND EXEMPTION THAT CANNOT SAY WHERE THE OPERAND ENDS ────────────
+# `grep -e -x -e PATTERN f` passes TWO patterns. The exemption that used to cover
+# `-e`'s operand matched on the first one, whose operand really is `-x`, and
+# excused the whole command — including the GNU escape introduced by the second.
+# Rule C is what that exemption existed for, and rule C is gone, so an operand
+# beginning with a dash is now just another word to this rule.
+printf '#!/usr/bin/env bash\ngrep -e -x -e %s "$f"\n' "'\\s'" > "$PTMP/twoe.sh"
+te_hits="$(scan "$RULE_A" "$PTMP/twoe.sh")" || te_hits=SCANFAIL
+{ [ "$te_hits" != SCANFAIL ] && [ -n "$te_hits" ]; } \
+    && pass "a first -e operand no longer excuses a later GNU escape" \
+    || die "grep -e -x excused the escape after the second -e ('$te_hits')"
+# …and the portable spelling it used to protect is still accepted, because this
+# rule never looked at a flag: `-x` is not an escape and there is nothing to report.
+refute eoperand 'grep -e -x -- "$f"' A "a dash-prefixed -e operand, which carries no escape"
+
+# ── A QUOTED OPTION WORD IS STILL THE OPTION ───────────────────────────────
+# Quote removal happens before `declare` sees its arguments, so the quoted form
+# declares an associative array exactly as the bare one does — and the pattern,
+# anchored on the whitespace before the dash, stopped at the quote.
+plant quotedassoc "if declare '-A' M; then :; fi" D "an associative array whose option word is quoted"
+
+# ── A DESCENDING RANGE IS STILL A STEPPED RANGE ────────────────────────────
+# `{5..1..-1}` is the spelling a countdown uses, and an unsigned step operand read
+# the minus as not-a-step and let it through.
+plant signedstep "for i in {5..1..-1}; do :; done" D "a stepped brace expansion with a negative step"
+
+# ── ONLY <<- STRIPS THE TERMINATOR, AND ONLY TABS ──────────────────────────
+# An indented `  EOF` inside an ordinary `<<EOF` body is DATA: bash requires the
+# terminator at column one. Stripping indentation from every terminator ended the
+# skip there, and the rest of the document was read as shell — a forbidden
+# spelling written as example text then failed the mandatory gate.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'EOF'\n"
+  printf '  EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'
+  printf 'EOF\n'; } > "$PTMP/indentterm.sh"
+it_hits="$(scan "$RULE_A" "$PTMP/indentterm.sh")" || it_hits=SCANFAIL
+{ [ "$it_hits" != SCANFAIL ] && [ -z "$it_hits" ]; } \
+    && pass "an indented terminator does not end an ordinary here-document" \
+    || die "an indented EOF ended a <<EOF body early ('$it_hits')"
+# …and `<<-` DOES strip leading tabs, so a tab-indented terminator ends that form
+# and the code after it is scanned again. Refusing to strip for both forms would
+# swallow the file from a legitimate `<<-` onward.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<-'EOF'\n"
+  printf '\tharmless\n'
+  printf '\tEOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/dashterm.sh"
+dt_hits="$(scan "$RULE_A" "$PTMP/dashterm.sh")" || dt_hits=SCANFAIL
+{ [ "$dt_hits" != SCANFAIL ] && [ -n "$dt_hits" ]; } \
+    && pass "…while <<- ends on a tab-indented terminator, as bash does" \
+    || die "a <<- here-document never ended ('$dt_hits')"
+
+# ── A << INSIDE QUOTES IS NOT A REDIRECTION ────────────────────────────────
+# A quoted word carrying the characters is a string. Matching the raw text took it
+# as a redirection, the skip began, no terminator ever arrived, and every line to
+# EOF was excused by a document that was never opened.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'printf %s "<<EOF"\n' "'%s'"
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/quotedhd.sh"
+qh_hits="$(scan "$RULE_A" "$PTMP/quotedhd.sh")" || qh_hits=SCANFAIL
+{ [ "$qh_hits" != SCANFAIL ] && [ -n "$qh_hits" ]; } \
+    && pass "a quoted << marker does not start a here-document skip" \
+    || die "a quoted <<EOF swallowed the rest of the file ('$qh_hits')"
+# …and neither does the arithmetic left shift, whose operator is spelled the same
+# and whose right operand is a number.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'n=$(( 1 << 2 ))\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/shift.sh"
+sh_hits="$(scan "$RULE_A" "$PTMP/shift.sh")" || sh_hits=SCANFAIL
+{ [ "$sh_hits" != SCANFAIL ] && [ -n "$sh_hits" ]; } \
+    && pass "…and neither does an arithmetic left shift" \
+    || die "1 << 2 was read as a here-document ('$sh_hits')"
 
 # ── A CONTINUED COMMAND IS ONE COMMAND ─────────────────────────────────────
 # `grep -qE \` on one line and its pattern on the next satisfied neither predicate

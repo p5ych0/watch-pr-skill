@@ -45,8 +45,43 @@ stays green: the failure is invisible on the machine that introduces it. Closes
 - **The split is quote-aware.** Breaking on the operators blindly cut a command
   away from its own pattern — `grep "x;\s" f` — so neither half satisfied a rule,
   and it suppressed a real `|&` on any line that quoted something else. It walks
-  the line tracking quotes and breaks only at depth zero. Not a lexer: it does not
-  follow backslash escapes or here-documents, and says so.
+  the line tracking quotes and breaks only at depth zero. It follows backslash
+  escapes inside double quotes, and here-document bodies are dropped before it
+  ever sees them. Not a lexer: it does not know about `$(…)` nesting, `((…))`, or
+  a quote spanning a continuation, and says so.
+
+- **A `<<` is a redirection only where the shell sees one.** A quoted word
+  carrying the characters is a string, and matching the raw text took it as an
+  opening: the skip began, no terminator ever arrived, and every line to EOF was
+  excused by a document that was never opened. The operator is located outside
+  quotes now. The same shape rejects `$(( 1 << 2 ))`, whose left-shift is spelled
+  identically and whose right operand is a number.
+
+- **Only `<<-` strips the terminator, and only tabs.** Bash requires an ordinary
+  `<<EOF` terminator at column one, so an indented `  EOF` in the body is data —
+  and stripping indentation from every terminator ended the skip there, after
+  which the rest of the document was read as shell.
+
+- **Every temporary path is validated before it is used.** `mktemp` can print a
+  path it did not create and still exit zero. The scan's stderr file is where a
+  failed scan reports itself, so a relative path meant the mandatory pre-push gate
+  redirected diagnostics into whatever directory it was run from. The two scratch
+  directories go through `testlib.sh`'s validated helper rather than a second,
+  unchecked `mktemp -d` beside it.
+
+- **A quoted option word is still the option.** Quote removal happens before
+  `declare` sees its arguments, so `declare '-A' M` is an associative array exactly
+  as the bare form is, and the pattern anchored on the whitespace before the dash
+  stopped at the quote. `{5..1..-1}` is the same story for the descending brace
+  expansion: an unsigned step operand read the minus as not-a-step.
+
+- **The `-e` operand exemption went with rule C.** It existed so `grep -e -P f` —
+  which searches for the literal string `-P` — was not read as the flag, and no
+  remaining rule looks at a flag. What it left behind was an over-exemption:
+  `grep -e -x -e '\s' f` matched it on the first `-e`, whose operand really is
+  `-x`, and the whole command was excused including the escape the second one
+  introduced. An exemption that cannot say where an operand ends is option
+  parsing.
 
 - **`SKILL.md` contributes its bash blocks, not its prose.** It is a document about
   shell, so it names `timeout` and `realpath` in sentences; a rule reading a name
