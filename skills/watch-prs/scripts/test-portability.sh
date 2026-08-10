@@ -77,7 +77,11 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 # command, and stripping after the join would let a commented-out continuation
 # glue two unrelated statements together.
 SCAN_PROLOGUE='
-    function report(msg) { print FILENAME ":" start ": " msg }
+    # THE FILE THE LINE CAME FROM, which is not always the one awk is reading.
+    # A pending logical line is flushed at the NEXT file boundary, by which point
+    # `FILENAME` has already moved on — the hit was reported against the wrong
+    # target, with a line number belonging to the file before it.
+    function report(msg) { print (OWNER != "" ? OWNER : FILENAME) ":" start ": " msg }
     # ── ONE MODEL OF SHELL QUOTING, NOT SIX ────────────────────────────────
     #
     # This was written out separately in the splitter, the operator finder, the
@@ -151,6 +155,10 @@ SCAN_PROLOGUE='
                 # word called `out=$(grep` and no command at all. The delimiters are
                 # marked as operators, so the words inside are a simple command and
                 # the words outside are another.
+                # `$((` IS ARITHMETIC, NOT A COMMAND. It shares the first two
+                # characters, and treating it as a substitution made the operands of
+                # `value=$((a + b))` look like an invoked command with arguments.
+                if (substr(l, i, 3) == "$((") { SC_EFF = SC_EFF substr(l, i, 3); word = word substr(l, i, 3); saw = 1; i += 3; continue }
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
@@ -204,8 +212,15 @@ SCAN_PROLOGUE='
             # A SUBSTITUTION OPENS INSIDE DOUBLE QUOTES TOO — `"$(… "$x" …)"` is the
             # ordinary spelling, and handling it only in unquoted text left every
             # inner quote toggling the OUTER state.
+            if (substr(l, i, 3) == "$((") { SC_EFF = SC_EFF substr(l, i, 3); word = word substr(l, i, 3); i += 3; continue }
             if (substr(l, i, 2) == "$(") {
                 depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
+                # THE SAME FLUSH AS THE UNQUOTED BRANCH. `out="$(grep PATTERN f)"`
+                # is the ordinary spelling, and appending the words to the
+                # assignment left `out=grep` with no command in it.
+                if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
+                word = ""; saw = 0
+                SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1
                 SC_EFF = SC_EFF substr(l, i, 2)
                 i += 2; continue
             }
@@ -260,6 +275,10 @@ SCAN_PROLOGUE='
         CMDW = ""; CMDN = 0
         for (i = from; i <= SC_ARGC; i++) {
             w = SC_ARGV[i]
+            # THE REDIRECTION FORMS ARE CHECKED FIRST, because `&` is both a
+            # control operator and the first character of `&>`: deciding it ends the
+            # command before looking at what follows lost every operand after it.
+            if (SC_AOP[i] && w == "&" && i < SC_ARGC && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) { i += 2; continue }
             if (SC_AOP[i] && is_op(w)) return i + 1
             # AN IO NUMBER BELONGS TO THE REDIRECTION AFTER IT. `2>/dev/null shopt
             # -s globstar` invokes `shopt`; taking the `2` as the command word lost
@@ -285,7 +304,20 @@ SCAN_PROLOGUE='
                 # `if [ -v x ]` runs `[`, not `if`. The list is the shell grammar
                 # and is closed — a leading `!` is one of them, while an `!` after
                 # the command word is that command an operand.
-                if (index(" if then elif else fi while until do done for select case esac function time { } ! ", " " w " ") > 0) continue
+                # A COMPOUND-COMMAND HEADER IS GRAMMAR, NOT A COMMAND. `for x in …`
+                # names a loop VARIABLE, and skipping only the reserved word left
+                # that name looking like an invoked command with the list as its
+                # arguments — `for shopt in globstar` was reported as a Bash 4
+                # option. The header runs to its `do` or `in`, and there is nothing
+                # in it for these rules.
+                if (w == "for" || w == "select" || w == "case") {
+                    for (i = i + 1; i <= SC_ARGC; i++) {
+                        if (SC_AOP[i] && is_op(SC_ARGV[i])) return i + 1
+                        if (SC_ARGV[i] == "do" || SC_ARGV[i] == "in") break
+                    }
+                    continue
+                }
+                if (index(" if then elif else fi while until do done esac function time { } ! ", " " w " ") > 0) continue
                 CMDW = w
             } else { CMDN++; CMDA[CMDN] = w }
         }
@@ -308,6 +340,20 @@ SCAN_PROLOGUE='
             CMDN--
         }
         return 1
+    }
+    # True when `cmd` is invoked with an option word carrying `letter`. Options
+    # cluster, so `-Ag` counts for both — and quote removal has already happened, so
+    # a quoted option word is the option.
+    function cmd_opt(cmd, letter, i, j) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (!unwrap()) continue
+            if (CMDW != cmd) continue
+            for (j = 1; j <= CMDN; j++)
+                if (CMDA[j] ~ /^-[A-Za-z]*$/ && index(CMDA[j], letter) > 1) return 1
+        }
+        return 0
     }
     function cmd_has(cmd, name, i, j) {
         i = 1
@@ -379,7 +425,10 @@ SCAN_PROLOGUE='
                 # its command word. A guard for this was written once and removed
                 # for want of a fixture that could fail; the command-position
                 # matcher is what made it observable, so it is back with one.
-                if (ch == "&" && i > 1 && substr(l, i - 1, 1) ~ /[<>]/) { SEG[n] = SEG[n] ch; continue }
+                # …AND `&>` PUTS THE AMPERSAND FIRST. Bash 3.2 has that spelling
+                # too, so `shopt &>/dev/null -s globstar` is one command and
+                # splitting there left `shopt` without its operands.
+                if (ch == "&" && ((i > 1 && substr(l, i - 1, 1) ~ /[<>]/) || substr(l, i + 1, 1) ~ /[<>]/)) { SEG[n] = SEG[n] ch; continue }
                 if (ch == "&") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
             }
             SEG[n] = SEG[n] ch
@@ -586,6 +635,19 @@ SCAN_PROLOGUE='
     # one backslash each — two in total, which is a literal backslash and an
     # ordinary letter. Judging either part on its own got that backwards, and
     # judging them separately is what the old pair of functions did.
+    # The operands of a command are ALREADY quote-removed, so their parity is read
+    # directly rather than by scanning them as source a second time.
+    function esc_class_eff(eff, set, i, n, ch) {
+        for (i = 1; i <= length(eff); i++) {
+            if (substr(eff, i, 1) != "\134") continue
+            n = 0
+            while (substr(eff, i, 1) == "\134") { n++; i++ }
+            ch = substr(eff, i, 1)
+            if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
+            i--
+        }
+        return 0
+    }
     function esc_class(l, set, i, n, ch) {
         shell_scan(l, SC_Q0)
         for (i = 1; i <= length(SC_EFF); i++) {
@@ -626,7 +688,7 @@ SCAN_PROLOGUE='
         # that at the next file discarded it — the END hook only ever sees the last
         # file, and production hands many targets to one awk. The violation went
         # out with the buffer and the scan reported clean.
-        if (buf != "") { line = buf; RULES() }
+        if (buf != "") { OWNER = BUFFILE; line = buf; RULES(); OWNER = "" }
         hdn = 0; hdi = 0; buf = ""; CARRY = ""
     }
     { raw = $0
@@ -668,7 +730,7 @@ SCAN_PROLOGUE='
       # A continuation can split ANYTHING, including a delimiter word: `cat <<E\`
       # and `OF` opens a document terminated by `EOF`, and extracting before the
       # join recorded `E` and waited for a terminator that never comes.
-      if (buf == "") { start = FNR; SC_LINE_Q = CARRY }
+      if (buf == "") { start = FNR; SC_LINE_Q = CARRY; BUFFILE = FILENAME }
       # …AND ONLY WHEN THE TRAILING RUN IS ODD. Two backslashes at the end are a
       # literal backslash and the command ENDS there; joining anyway glued the next
       # line on, and an exemption taken by the first half then covered the second.
@@ -873,26 +935,31 @@ RULE_A='
     # THE ENGINE IS THE INVOKED COMMAND, not a word that appears. `printf %s grep`
     # runs `printf`, and reading its operand as an engine reported the unrelated
     # pattern beside it — the same command-position rule rule D already uses.
+    # EACH ENGINE IS JUDGED ON ITS OWN ARGUMENTS. A segment can hold more than one:
+    # `grep -F x $(grep PATTERN f)` has a fixed-string outer command and an inner one
+    # that is not, and accumulating the mode across both let the outer exempt the
+    # inner. The operands of the command are what its own pattern is made of.
     shell_scan(line, SC_Q0)
-    engine = 0; fixed = 0; grepsed = 0
     ai = 1
     while (ai <= SC_ARGC) {
         ai = simple_cmd(ai)
         if (!unwrap()) continue
-        if (CMDW == "fgrep") { engine = 1; fixed = 1; grepsed = 1 }
-        else if (CMDW ~ /^(grep|egrep|sed)$/) { engine = 1; grepsed = 1 }
-        else if (CMDW ~ /^(awk|gawk)$/) engine = 1
-        else continue
+        efixed = 0; egrepsed = 0
+        if (CMDW == "fgrep") { efixed = 1; egrepsed = 1 }
+        else if (CMDW ~ /^(grep|egrep|sed)$/) egrepsed = 1
+        else if (CMDW !~ /^(awk|gawk)$/) continue
         for (aj = 1; aj <= CMDN; aj++)
-            if (CMDA[aj] ~ /^-[A-Za-z]*F$/ || CMDA[aj] == "--fixed-strings") fixed = 1
+            if (CMDA[aj] ~ /^-[A-Za-z]*F$/ || CMDA[aj] == "--fixed-strings") efixed = 1
+        if (efixed) continue
+        eargs = ""
+        for (aj = 1; aj <= CMDN; aj++) eargs = eargs " " CMDA[aj]
+        if (egrepsed && esc_class_eff(eargs, "sSdDwWbBy<>")) {
+            report("GNU regex escape: " line); return }
+        if (!egrepsed && esc_class_eff(eargs, "sSdDwWBy<>")) {
+            report("gawk-only regex operator: " line); return }
     }
-    if (fixed) return
+    return'
 
-    if (!engine) return
-    if (grepsed && esc_class(line, "sSdDwWbBy<>")) {
-        report("GNU regex escape: " line); return }
-    if (!grepsed && esc_class(line, "sSdDwWBy<>")) {
-        report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
 #
@@ -1037,7 +1104,10 @@ RULE_D='
     # `-g` DECLARES A GLOBAL FROM INSIDE A FUNCTION — Bash 4.2. Bash 3.2 rejects the
     # option and the variable is simply never set, which is a behaviour difference
     # rather than a failure, so nothing else would show it.
-    if (line ~ /(declare|typeset)([[:space:]]+["'"'"']?-[A-Za-z-]+["'"'"']?)*[[:space:]]+["'"'"']?-[A-Za-z]*g[A-Za-z]*["'"'"']?([[:space:]]|$)/) {
+    #
+    # AS A COMMAND WORD, like every other builtin rule here: `printf %s declare -g`
+    # runs `printf`, and the raw pattern this arrived as reported it.
+    if (cmd_opt("declare", "g") || cmd_opt("typeset", "g")) {
         report("declare -g is Bash 4.2: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
@@ -1089,7 +1159,7 @@ RULE_D='
     # 3.2 simply rejects the option and carries on differently. A list because
     # `shopt` options are enumerated in the manual per release — not a pattern,
     # which would need to know what an option name looks like.
-    for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat31 compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
+    for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
         if (cmd_has("shopt", SHOPT4[si2])) {
             report("the " SHOPT4[si2] " shell option is newer than Bash 3.2: " line); return }
     if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
@@ -1885,6 +1955,15 @@ plant declareg   "f() { declare -g observed=yes; }; f || :"   D "declare -g, whi
 # is in the middle and the first word is an operand.
 refute vbinary   "if test -v = token; then :; fi"             D "a three-argument string comparison"
 refute vbinbrk   "if [ -v = token ]; then :; fi"              D "the same comparison in brackets"
+# …and `&>` puts the ampersand FIRST, a spelling Bash 3.2 also has.
+plant globstarampfirst "shopt &>/dev/null -s globstar || :"   D "globstar behind an ampersand-first redirection"
+# …while a compound-command HEADER is grammar: `for x in …` names a loop variable,
+# and the words after it are a list, not a command with arguments.
+refute forheader "for shopt in globstar; do :; done"          D "a loop variable that shares a builtin name"
+refute declaredata "printf %s declare -g"                     D "declare -g as data"
+# …and `compat31` is Bash 3.2 asking for 3.1 behaviour, so it is not newer than the
+# platform this gate supports. It was listed by mistake.
+refute compat31  "shopt -s compat31 || :"                     D "compat31, which Bash 3.2 provides"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -1991,6 +2070,29 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
 
+# ── A QUOTED SUBSTITUTION IS STILL A COMMAND ───────────────────────────────
+# `out="$(grep PATTERN f)"` is the ordinary spelling. The quoted branch appended the
+# words to the assignment instead of flushing it, so the command word was `out=grep`
+# and no engine was recognised.
+printf '#!/usr/bin/env bash\nout="$(grep %s "$f")" || :\n' "'\\s'" > "$PTMP/qsubcmd.sh"
+qs_hits="$(scan "$RULE_A" "$PTMP/qsubcmd.sh")" || qs_hits=SCANFAIL
+{ [ "$qs_hits" != SCANFAIL ] && [ -n "$qs_hits" ]; } \
+    && pass "a substitution inside double quotes is still a command" \
+    || die "out=\"\$(grep …)\" hid the engine ('$qs_hits')"
+# …while `$((` is ARITHMETIC and shares the first two characters. Reading it as a
+# substitution made the operands of an ordinary sum look like an invoked command.
+refute arithword 'value=$((shopt + globstar))'                D "arithmetic whose operands share builtin names"
+
+# ── FIXED-STRING MODE BELONGS TO ITS OWN COMMAND ───────────────────────────
+# A segment can hold more than one engine. `grep -F x $(grep PATTERN f)` has a
+# fixed-string outer command and an inner one that is not, and a mode accumulated
+# across both let the outer exempt the inner.
+printf '#!/usr/bin/env bash\ngrep -F x $(grep %s "$f")\n' "'\\s'" > "$PTMP/nestedF.sh"
+nf_hits="$(scan "$RULE_A" "$PTMP/nestedF.sh")" || nf_hits=SCANFAIL
+{ [ "$nf_hits" != SCANFAIL ] && [ -n "$nf_hits" ]; } \
+    && pass "an outer -F does not exempt an inner grep" \
+    || die "fixed-string mode leaked across commands ('$nf_hits')"
+
 # ── A SUBSTITUTION RUNS A COMMAND OF ITS OWN ───────────────────────────────
 # `out=$(grep PATTERN f)` invokes `grep`. Appending the text to the assignment word
 # left a word called `out=$(grep` and no command at all, so the engine was never
@@ -2022,6 +2124,13 @@ pf_hits="$(scan "$RULE_A" "$PTMP/pending.sh" "$PTMP/after.sh")" || pf_hits=SCANF
 { [ "$pf_hits" != SCANFAIL ] && [ -n "$pf_hits" ]; } \
     && pass "a continued last line is scanned before the next file starts" \
     || die "a pending logical line went out with the buffer ('$pf_hits')"
+# …and it is reported against the file it came FROM. The flush happens at the next
+# boundary, by which point awk has moved on, so the hit named the wrong target and
+# sent the contributor to a line number in a file that does not have it.
+case "$pf_hits" in
+    *pending.sh*) pass "…and is attributed to the file it came from" ;;
+    *)            die "the flushed line was blamed on the next file ('$pf_hits')" ;;
+esac
 
 # ── NOTHING CARRIES ACROSS A FILE BOUNDARY ─────────────────────────────────
 # A target that ends while a document is still open must not consume the next one

@@ -123,6 +123,21 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **`$((` is arithmetic, `for x in …` is a header, and `compat31` is Bash 3.2.**
+  Three false positives the previous round introduced: arithmetic shares its first
+  two characters with a substitution, so `value=$((a + b))` read as an invoked
+  command with operands; skipping only the reserved word left a loop *variable*
+  looking like a command; and `compat31` is Bash 3.2 asking for 3.1 behaviour, not
+  something newer than it.
+
+- **Fixed-string mode belongs to its own command.** A segment can hold more than
+  one engine — `grep -F x $(grep PATTERN f)` — and a mode accumulated across both
+  let the outer exempt the inner.
+
+- **A flushed continuation is attributed to the file it came from.** The flush
+  happens at the next file boundary, by which point awk has moved on, so the hit
+  named the wrong target and a line number belonging to the file before it.
+
 - **A substitution runs a command of its own.** `out=$(grep PATTERN f)` invokes
   `grep`; appending the text to the assignment word left a word called `out=$(grep`
   and no command at all. A `(` inside one is a subshell whose `)` does not end it —
