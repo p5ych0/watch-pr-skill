@@ -100,6 +100,13 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **Every `shopt` operand is examined, and `-v` has three spellings.**
+  `shopt -s nullglob globstar` enables both, and a pattern allowing only flag
+  words between the two missed it — with the status masked by a `|| :`, the CI job
+  passes as well and nothing sees it. `[ -v x ]` and `test -v x` are the same
+  Bash 4.2 conditional as `[[ -v x ]]`, and are the spellings a script written for
+  portability would reach for.
+
 - **A continuation needs an odd trailing run.** Two backslashes at the end of a
   line are a literal backslash and the command *ends* there; joining anyway glued
   the next line on, and a fixed-string exemption taken by the first half then
@@ -119,8 +126,10 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   backslashes that quote one are dropped and whatever they cover is kept — an
   *escaped* quote stays in the word, and `<<"E\"OF"` names `E"OF`. Any non-empty
   word is a delimiter, `'END MARK'` included: what it may contain is for bash to
-  say, and the one spelling that is not a document is a purely numeric operand,
-  which is the arithmetic left shift.
+  say. A numeric one is a delimiter too — the test that refused it was guarding
+  against the arithmetic left shift, which `strip_arith` removes before any of
+  this runs, so it covered a case that no longer arrives and rejected a real one
+  that does.
 
 - **A lone `&` ends a command.** `grep -F x f & grep '\s' f` is two commands, and
   the fixed-string exemption taken by the first was covering the second. The `&` of

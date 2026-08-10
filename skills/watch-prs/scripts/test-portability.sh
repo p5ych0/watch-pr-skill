@@ -466,7 +466,13 @@ SCAN_PROLOGUE='
           # body was read as shell. What the word may contain is for bash to say;
           # what is left here is the one spelling that is NOT a document: a purely
           # numeric operand, which is the arithmetic left shift.
-          if (hdw != "" && hdw !~ /^[0-9]+$/) {
+          # ANY NON-EMPTY WORD. A numeric one is a delimiter too — `cat <<'"'"'123'"'"'` is
+          # a document — and refusing it read the body as shell. The arithmetic
+          # left shift that the numeric test was guarding against is removed by
+          # `strip_arith` before this runs, in both of its spellings, so the test
+          # was covering a case that no longer reaches here and rejecting a real
+          # one that does.
+          if (hdw != "") {
               hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash
           }
 
@@ -758,12 +764,24 @@ RULE_D='
     # the descending form through — the spelling a descending loop actually uses.
     if (line ~ /\{[0-9]+\.\.[0-9]+\.\.-?[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.-?[0-9]+\}/) {
         report("a stepped brace expansion is Bash 4: " line); return }
-    if (line ~ /(^|[[:space:]])(shopt[[:space:]]+(-[A-Za-z]+[[:space:]]+)*globstar|set[[:space:]]+-o[[:space:]]+globstar)/) {
+    # EVERY OPERAND, not the first one after the flags. `shopt -s nullglob
+    # globstar` enables both, and a pattern allowing only flag words between the
+    # two missed it — with the status masked by a `|| :`, the CI job passes as
+    # well and nothing sees it.
+    if (line ~ /(^|[[:space:]])shopt([[:space:]]|$)/ && line ~ /(^|[[:space:]])globstar([[:space:]]|$)/) {
+        report("globstar is Bash 4: " line); return }
+    if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
+    # `[ -v x ]` AND `test -v x` ARE THE SAME OPERATOR. Bash 4.2 added it to all
+    # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
+    # let the other two through, and they are the ones a script written for
+    # portability would reach for.
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
-        report("[[ -v ]] is Bash 4.2: " line); return }'
+        report("[[ -v ]] is Bash 4.2: " line); return }
+    if (line ~ /(^|[[:space:]&;|(])(\[|test)[[:space:]]+-v[[:space:]]/) {
+        report("the -v conditional is Bash 4.2: " line); return }'
 
 # portability-scan: rules-end
 
@@ -1480,6 +1498,23 @@ cw_hits="$(scan "$RULE_A" "$PTMP/contword.sh")" || cw_hits=SCANFAIL
 { [ "$cw_hits" != SCANFAIL ] && [ -n "$cw_hits" ]; } \
     && pass "…while a continuation between words keeps them apart" \
     || die "a continued command lost its word boundary ('$cw_hits')"
+
+plant globstartwo "shopt -s nullglob globstar || :"          D "globstar as a second shopt operand"
+plant vtest      "if [ -v token ]; then observed=yes; fi"    D "the -v conditional in single brackets"
+plant vbuiltin   "if test -v token; then observed=yes; fi"   D "the -v conditional in the test builtin"
+
+# ── A NUMERIC DELIMITER IS STILL A DELIMITER ───────────────────────────────
+# `cat <<'123'` is a document. The numeric test was guarding against the arithmetic
+# left shift, which `strip_arith` removes before any of this runs — so it was
+# covering a case that no longer arrives and rejecting a real one that does.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'123'\n"
+  printf 'grep -qE "\\s" is example text\n'
+  printf '123\n'; } > "$PTMP/numdelim.sh"
+nd_hits="$(scan "$RULE_A" "$PTMP/numdelim.sh")" || nd_hits=SCANFAIL
+{ [ "$nd_hits" != SCANFAIL ] && [ -z "$nd_hits" ]; } \
+    && pass "a numeric here-document delimiter is accepted" \
+    || die "cat <<'123' was refused as a delimiter ('$nd_hits')"
 
 # ── A CONTINUATION NEEDS AN ODD TRAILING RUN ───────────────────────────────
 # Two backslashes at the end of a line are a literal backslash and the command ENDS
