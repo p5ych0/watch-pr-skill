@@ -168,6 +168,10 @@ SCAN_PROLOGUE='
                 }
                 # A quote CHARACTER contributes nothing itself, but it means a word
                 # is present — which is how `cat <<''` differs from `cat <<`.
+                # `$"…"` IS LOCALE TRANSLATION, and the dollar is not part of the
+                # word: `$"grep"` invokes `grep`, and keeping it produced a command
+                # named `$grep` that no rule recognises.
+                if (substr(l, i, 2) == "$\042") { q = "\042"; saw = 1; i += 2; continue }
                 if (ch == "\047" || ch == "\042") { q = ch; saw = 1; i++; continue }
                 # Unquoted whitespace ENDS a word; an unquoted control operator ends
                 # one and is a token of its own, so `(test -v x)` has `test` as a
@@ -537,7 +541,7 @@ SCAN_PROLOGUE='
     # True when `cmd` is invoked with an option word carrying `letter`. Options
     # cluster, so `-Ag` counts for both — and quote removal has already happened, so
     # a quoted option word is the option.
-    function cmd_opt(cmd, letter, i, j) {
+    function cmd_opt(cmd, letter, i, j, cl) {
         i = 1
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
@@ -549,10 +553,15 @@ SCAN_PROLOGUE='
             # source. The builtins with operand-taking options are few and named.
             for (j = 1; j <= CMDN; j++) {
                 if (CMDA[j] !~ /^-/) continue
-                if (CMDA[j] ~ /^-[A-Za-z]*$/ && index(CMDA[j], letter) > 1) return 1
-                # ONLY THE ONES THAT TAKE AN OPERAND. `-s` suppresses echo and
-                # takes nothing, and skipping the word after it stepped over a real
-                # `-N` — the option this rule exists to find.
+                # THE LETTERS AFTER AN OPERAND-TAKING ONE ARE ITS OPERAND, attached.
+                # `read -pN` gives `-p` the prompt `N`, so that is not the `-N`
+                # option — the cluster is read only up to the first such letter.
+                #
+                # ONLY THE ONES THAT TAKE AN OPERAND. `-s` suppresses echo and takes
+                # nothing, and skipping the word after it stepped over a real `-N`.
+                cl = CMDA[j]
+                if (cmd == "read" && match(cl, /[pntuda]/)) cl = substr(cl, 1, RSTART)
+                if (cl ~ /^-[A-Za-z]*$/ && index(cl, letter) > 1) return 1
                 if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pntuda]$/) j++
             }
         }
@@ -1161,7 +1170,20 @@ SCAN_PROLOGUE='
           # quote characters and nothing between them reads to a blank terminator
           # line. `hdsaw` is what tells that from a `<<` with no word at all,
           # which an emptiness test alone could not.
+          # A SUBSTITUTION-SHAPED DELIMITER IS TAKEN WHOLE. Bash does not expand the
+          # delimiter word, so `<<$(printf EOF)` names that text — parentheses,
+          # space and all — and stopping at the `(` recorded a prefix of it.
           hdw = ""; hdsaw = 0; hdquoted = 0
+          if (substr(hdsrc, hdk, 2) == "$(") {
+              hdp = 1; hdj = hdk + 2
+              while (hdj <= length(hdsrc) && hdp > 0) {
+                  if (substr(hdsrc, hdj, 1) == "(") hdp++
+                  else if (substr(hdsrc, hdj, 1) == ")") hdp--
+                  hdj++
+              }
+              hdw = substr(hdsrc, hdk, hdj - hdk); hdsaw = 1; hdquoted = 1
+              hdk = hdj
+          }
           while (hdk <= length(hdsrc)) {
               hdc = substr(hdsrc, hdk, 1)
               # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
@@ -1609,11 +1631,16 @@ RULE_D='
     # prose reading, and the same test would cost more than it buys.
     # `{fd}>file` ALLOCATES A DESCRIPTOR AND NAMES IT — Bash 4, and Bash 3.2 reads
     # the brace as an ordinary word. One more spelling in a finite list.
-    # OUTSIDE QUOTES, like every other construct here: a quoted `{fd}>file` is data,
-    # and a raw-line pattern rejected it.
-    if ((unquoted(line, "}<") || unquoted(line, "}>")) &&
-        line ~ /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
-        report("a {varname} descriptor is Bash 4: " line); return }
+    # OUTSIDE QUOTES, AT THE POSITION THAT MATCHES. A quoted `{fd}>file` is data,
+    # and testing "is there an unquoted `}>` somewhere" separately from "does the
+    # shape appear somewhere" let one supply the position and the other the shape.
+    shell_scan(line, SC_Q0)
+    for (fdi = 1; fdi <= length(line); fdi++) {
+        if (substr(line, fdi, 1) != "{") continue
+        if (SC_CTX[fdi] != "" || SC_ESC[fdi]) continue
+        if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
+            report("a {varname} descriptor is Bash 4: " line); return }
+    }
     if (SEGI <= 1 && unquoted(WHOLE, "&>>")) {
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
@@ -2528,6 +2555,13 @@ plant execengine "exec grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"             A "a
 plant execname   "exec -a alt grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"      A "an engine behind exec -a"
 # …while a quoted descriptor allocation is data.
 refute fdquoted  "printf %s ${sq}{fd}>file${sq}"               D "a quoted descriptor allocation"
+# …even when an unrelated `}>` appears unquoted elsewhere on the same line: the two
+# tests were independent, so one supplied the position and the other the shape.
+refute fdmixed   "printf %s ${sq}{fd}>file${sq} x}>out"        D "a quoted allocation beside an unquoted brace"
+# …and `read -pN` attaches the prompt to `-p`, so it is not the `-N` option.
+refute readattach "IFS= read -pN value < ${dq}\$f${dq}"            D "a prompt attached to its option"
+# …while `$"grep"` is locale translation and invokes `grep`.
+plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2658,6 +2692,20 @@ cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
 { [ "$cd3_hits" != SCANFAIL ] && [ -n "$cd3_hits" ]; } \
     && pass "…and a control escape names the character it stands for" \
     || die "a control-escape delimiter did not end at its character ('$cd3_hits')"
+
+# ── A SUBSTITUTION-SHAPED DELIMITER IS TAKEN WHOLE ─────────────────────────
+# Bash does not expand the delimiter word, so `<<$(printf EOF)` names that text —
+# parentheses, space and all. Stopping at the `(` recorded a prefix of it, and the
+# real terminator never drained the queue.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$(printf EOF)\n'
+  printf 'body text\n'
+  printf '$(printf EOF)\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substdelim.sh"
+sd3_hits="$(scan "$RULE_A" "$PTMP/substdelim.sh")" || sd3_hits=SCANFAIL
+{ [ "$sd3_hits" != SCANFAIL ] && [ -n "$sd3_hits" ]; } \
+    && pass "a substitution-shaped delimiter is taken whole" \
+    || die "the delimiter stopped at its parenthesis ('$sd3_hits')"
 
 # ── A QUOTED BRACE DOES NOT CLOSE AN EXPANSION ─────────────────────────────
 # `${unset:-"}"<<EOF}` closes at the LAST brace, and counting the quoted one closed

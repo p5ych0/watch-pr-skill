@@ -127,6 +127,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A substitution-shaped delimiter is taken whole, a locale-quoted word is the
+  word inside it, an attached operand is not an option, and a descriptor match has
+  to be at the position that is unquoted.** `<<$(printf EOF)` names that text —
+  parentheses, space and all — because the delimiter word is not expanded;
+  `$"grep"` invokes `grep`; `read -pN` gives `-p` the prompt `N`; and testing "is
+  there an unquoted `}>` somewhere" separately from "does the shape appear
+  somewhere" let one supply the position and the other the shape.
+
 - **`exec -a name` takes an operand, `\c[` is escape, a quoted brace does not close
   an expansion, and a quoted `{fd}>file` is data.** Four edges of the machinery the
   previous rounds added: skipping the option but not its name made the name the
