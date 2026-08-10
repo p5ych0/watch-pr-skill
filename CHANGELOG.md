@@ -123,6 +123,32 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A substitution runs a command of its own.** `out=$(grep PATTERN f)` invokes
+  `grep`; appending the text to the assignment word left a word called `out=$(grep`
+  and no command at all. A `(` inside one is a subshell whose `)` does not end it —
+  closing at the first restored the outer quoting early and every quote after that
+  read inverted.
+
+- **A descriptor duplication is one redirection.** `2>&1 shopt -s globstar` is a
+  single command; splitting at the `&` left neither half with `shopt` as its
+  command word. The guard for that was written once and removed for want of a
+  fixture that could fail — the command-position matcher is what made it
+  observable, so it is back with one.
+
+- **The three-argument test is a binary comparison.** `test -v = token` asks
+  whether the string `-v` equals `token`, on every bash: the operator is in the
+  middle and the first word is an operand.
+
+- **`declare -g` and the post-3.2 shell options.** Both change behaviour rather
+  than failing — Bash 3.2 rejects the option and carries on differently — so
+  nothing but text finds them. The `shopt` names are a list because the manual
+  enumerates them per release.
+
+- **A pending logical line survives the file boundary.** A target whose last line
+  ends in a continuation left its text in the buffer, and clearing that at the next
+  file discarded it: the `END` hook only ever sees the last file, and production
+  hands many targets to one awk.
+
 - **The grammar around a simple command, in the finite form it has.** An IO
   number belongs to the redirection after it (`2>/dev/null shopt -s globstar`
   invokes `shopt`); `command` and `builtin` invoke what follows them, while
