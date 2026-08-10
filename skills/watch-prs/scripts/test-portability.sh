@@ -139,8 +139,8 @@ SCAN_PROLOGUE='
         return i
     }
     function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth) {
-        delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete QSTK; delete PSTK
-        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; depth = 0
+        delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete SC_SUB; delete QSTK; delete PSTK
+        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; depth = 0; SC_BODIES = ""; delete SUBSTS
         q = q0; i = 1
         while (i <= length(l)) {
             ch = substr(l, i, 1)
@@ -199,17 +199,19 @@ SCAN_PROLOGUE='
                 # modelling them left the command inside as part of a word.
                 if ((ch == "<" || ch == ">") && substr(l, i + 1, 1) == "(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
+                    SUBSTS[depth] = i + 2
                     if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                     word = ""; saw = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
                     i += 2; continue
                 }
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
+                    SUBSTS[depth] = i + 2
                     if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                     word = ""; saw = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
                     i += 2; continue
                 }
@@ -231,6 +233,13 @@ SCAN_PROLOGUE='
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 if (ch == ")" && depth > 0) {
+                    # RECORDED AT EVERY DEPTH, not only the outermost: `$(cat
+                    # <(grep …))` has the engine two levels in, and one level of
+                    # extraction reached only the `cat`.
+                    if (SUBSTS[depth] > 0) {
+                        SC_BODIES = SC_BODIES (SC_BODIES == "" ? "" : "\n") substr(l, SUBSTS[depth], i - SUBSTS[depth])
+                        SUBSTS[depth] = 0
+                    }
                     q = QSTK[depth]; depth--
                     if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                     word = ""; saw = 0
@@ -265,12 +274,13 @@ SCAN_PROLOGUE='
             }
             if (substr(l, i, 2) == "$(") {
                 depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
+                SUBSTS[depth] = i + 2
                 # THE SAME FLUSH AS THE UNQUOTED BRANCH. `out="$(grep PATTERN f)"`
                 # is the ordinary spelling, and appending the words to the
                 # assignment left `out=grep` with no command in it.
                 if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                 word = ""; saw = 0
-                SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1
+                SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                 SC_EFF = SC_EFF substr(l, i, 2)
                 i += 2; continue
             }
@@ -358,6 +368,20 @@ SCAN_PROLOGUE='
             # control operator and the first character of `&>`: deciding it ends the
             # command before looking at what follows lost every operand after it.
             if (SC_AOP[i] && w == "&" && i < SC_ARGC && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) { i += 2; continue }
+            # A SUBSTITUTION DOES NOT END THE COMMAND IT SITS IN.
+            # `printf %s "$(printf x)" shopt globstar` runs two printfs, and ending
+            # the outer command at the `(` made the words after the `)` look like an
+            # invocation of their own. The group is stepped over here and its
+            # contents are scanned separately, the same way a shell body is.
+            if (SC_AOP[i] && w == "(" && SC_SUB[i]) {
+                pd = 1
+                while (++i <= SC_ARGC && pd > 0) {
+                    if (SC_AOP[i] && SC_ARGV[i] == "(") pd++
+                    else if (SC_AOP[i] && SC_ARGV[i] == ")") pd--
+                }
+                i--
+                continue
+            }
             if (SC_AOP[i] && is_op(w)) return i + 1
             # AN IO NUMBER BELONGS TO THE REDIRECTION AFTER IT. `2>/dev/null shopt
             # -s globstar` invokes `shopt`; taking the `2` as the command word lost
@@ -507,7 +531,10 @@ SCAN_PROLOGUE='
             for (j = 1; j <= CMDN; j++) {
                 if (CMDA[j] !~ /^-/) continue
                 if (CMDA[j] ~ /^-[A-Za-z]*$/ && index(CMDA[j], letter) > 1) return 1
-                if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pnstud]$/) j++
+                # ONLY THE ONES THAT TAKE AN OPERAND. `-s` suppresses echo and
+                # takes nothing, and skipping the word after it stepped over a real
+                # `-N` — the option this rule exists to find.
+                if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pntuda]$/) j++
             }
         }
         return 0
@@ -518,6 +545,17 @@ SCAN_PROLOGUE='
     # a logical line of its own when it is scanned. Returning at the first one left
     # a second `bash -c` on the same line unexamined — and the wrappers apply here
     # too, because `command bash -c …` and `env bash -c …` invoke the same shell.
+    # The text inside each top-level `$( … )` / `<( … )` group, joined by newlines.
+    # Stepping over a group keeps the command it sits in whole; scanning the text
+    # here is what keeps the command INSIDE it visible.
+    # The text inside each top-level `$( … )` / `<( … )` group, recorded while the
+    # line is scanned — including the ones inside double quotes, which is where they
+    # usually are. Stepping over a group keeps the command it sits in whole; this is
+    # what keeps the command INSIDE it visible.
+    function subst_bodies(l) {
+        shell_scan(l, SC_Q0)
+        return SC_BODIES
+    }
     function shell_c_body(l, i, j, base, out) {
         shell_scan(l, SC_Q0)
         out = ""
@@ -578,7 +616,17 @@ SCAN_PROLOGUE='
             # whether the string `-v` equals `token`, on every bash — the operator is
             # in the MIDDLE, and reading the first word as a unary primary rejected
             # portable code.
-            if (vn - vb + 1 == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
+            # `-a` AND `-o` JOIN TWO EXPRESSIONS, so the arity is per PART: in
+            # `test -v = token -a x = x` each side is a three-argument comparison,
+            # and measuring the whole thing found seven operands and no comparison.
+            vpart = 1; vok = 1; vs = vb
+            for (j = vb; j <= vn + 1; j++) {
+                if (j > vn || CMDA[j] == "-a" || CMDA[j] == "-o") {
+                    if (!(j - vs == 3 && CMDA[vs + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/)) vok = 0
+                    vs = j + 1
+                }
+            }
+            if (vok) continue
             for (j = 1; j <= CMDN; j++) {
                 if (CMDA[j] != "-v") continue
                 if (j < CMDN && CMDA[j + 1] != "]" && CMDA[j + 1] != ")") return 1
@@ -1068,6 +1116,15 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
             # itself spawns another shell is not followed, and saying so is cheaper
             # than a recursion this file would then have to bound.
             if (!NESTED) {
+                body = subst_bodies(WHOLE)
+                if (body != "") {
+                    saved = WHOLE
+                    NESTED = 1; SC_Q0 = ""
+                    nb = split(body, BODIES, "\n")
+                    for (si = 1; si <= nb; si++) { line = BODIES[si]; RULES() }
+                    NESTED = 0
+                    line = saved; WHOLE = saved; SC_Q0 = lq
+                }
                 body = shell_c_body(WHOLE)
                 if (body != "") {
                     saved = WHOLE
@@ -1375,6 +1432,11 @@ RULE_D='
     # `read -N` READS EXACTLY THAT MANY CHARACTERS and `-i` seeds the line editor —
     # both after 3.2, which rejects the option and leaves different state behind
     # rather than failing outright.
+    # `declare -n` MAKES A NAMEREF — Bash 4.3. Bash 3.2 rejects the option and the
+    # assignment through it goes somewhere else, which is a behaviour difference
+    # rather than a failure.
+    if (cmd_opt("declare", "n") || cmd_opt("typeset", "n")) {
+        report("declare -n is Bash 4.3: " line); return }
     if (cmd_opt("read", "N") || cmd_opt("read", "i")) {
         report("this read option is newer than Bash 3.2: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
@@ -2287,6 +2349,14 @@ refute vgroupbin "if test \( ! -v = token \); then :; fi"      D "a grouped nega
 # …and an option OPERAND is not an option: `read -p -N value` has `-N` as the
 # prompt that `-p` takes.
 refute readprompt "IFS= read -p -N value < ${dq}\$f${dq}"           D "a prompt that looks like a newer option"
+# …while `-s` takes NOTHING, so the option after it is still an option.
+plant readsn     "IFS= read -s -N 1 value < ${dq}\$f${dq} || :"      D "read -N behind a flag that takes no operand"
+# …and `-a`/`-o` join two expressions, so the arity is measured per PART.
+refute vcompound "if test -v = token -a x = x; then :; fi"     D "a compound of two comparisons"
+plant nameref    "target=value; declare -n ref=target || :"    D "declare -n, which is Bash 4.3"
+# …and a substitution does not end the command it sits in: the words after the `)`
+# belong to the command that opened it.
+refute outerdata "printf %s ${dq}\$(printf x)${dq} shopt globstar"  D "words after a substitution in the same command"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists

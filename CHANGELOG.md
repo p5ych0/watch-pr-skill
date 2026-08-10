@@ -125,6 +125,17 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A substitution does not end the command it sits in.** `printf %s "$(printf x)"
+  shopt globstar` runs two printfs, and ending the outer command at the `(` made
+  the words after the `)` an invocation of their own. The group is stepped over,
+  and its text is scanned separately — at every depth, because `$(cat <(grep …))`
+  has the engine two levels in.
+
+- **`-s` takes nothing, `-a`/`-o` join two expressions, and `declare -n` is a
+  nameref.** Skipping the word after a flag that takes no operand stepped over a
+  real `read -N`; measuring `test -v = token -a x = x` as one expression found
+  seven operands and no comparison, so the arity is per part.
+
 - **The command model has a stated edge rather than an open one.** The rules that
   ask *which command is this* need a notion of a simple command, and building one
   took nine review rounds and roughly seventy findings, nearly all of them another
