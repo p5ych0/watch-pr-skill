@@ -16,9 +16,12 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   run, so the suite passes and the defect ships. The scan is the other way round.
   Both are kept because each catches what the other cannot.
 
-- **The text scan keeps only the rules with closed surfaces.** GNU regex escapes
-  (POSIX defines no backslash-class escapes, so the set cannot grow), Bash 4
-  constructs (a finite list), and GNU-only tool names (a name is a name). It does
+- **The text scan keeps only the rules that terminate.** One of the three is
+  genuinely closed — GNU regex escapes, where POSIX defines no backslash-class
+  escapes, so the set cannot grow. The other two are blacklists that are one entry
+  behind, and are stated as such: GNU-only tool names (closed behaviourally by the
+  CI job) and constructs newer than Bash 3.2 (a list that grows when a newer one is
+  found). It does
   *not* check GNU-only flags — `sed -i`, `readlink -f`, `grep -P`, `date -d` —
   because reading an option from text means parsing one, and eight review rounds
   produced clusters, long forms, equals forms, `-e` operands, fixed-string mode and
@@ -124,6 +127,13 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   conditional masks it. The `shopt` rule reads what the command *receives* rather
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
+
+- **`local -n`, `name+=value`, grouping per part, and substitutions inside shell
+  bodies.** A nameref is usually written with `local`; an append assignment is
+  still an assignment prefix, and not recognising it made the prefix the command
+  word; each side of `test \( … \) -a \( … \)` carries its own parentheses, so
+  the arity is measured after they come off; and the guard that stops a shell body
+  spawning another shell was also stopping the substitution extraction inside one.
 
 - **A substitution does not end the command it sits in.** `printf %s "$(printf x)"
   shopt globstar` runs two printfs, and ending the outer command at the `(` made

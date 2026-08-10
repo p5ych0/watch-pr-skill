@@ -410,7 +410,10 @@ SCAN_PROLOGUE='
                 continue
             }
             if (CMDW == "") {
-                if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+                # `name+=value` IS AN ASSIGNMENT PREFIX TOO, and Bash 3.2 has it —
+                # not recognising it made the prefix the command word and the real
+                # command an operand.
+                if (w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=/) continue
                 # RESERVED WORDS INTRODUCE a command rather than being one:
                 # `if [ -v x ]` runs `[`, not `if`. The list is the shell grammar
                 # and is closed — a leading `!` is one of them, while an `!` after
@@ -620,9 +623,15 @@ SCAN_PROLOGUE='
             # `test -v = token -a x = x` each side is a three-argument comparison,
             # and measuring the whole thing found seven operands and no comparison.
             vpart = 1; vok = 1; vs = vb
+            # …AND EACH PART CARRIES ITS OWN GROUPING. `test \( -v = token \) -a
+            # \( x = x \)` leaves a parenthesis on either side of the join, and a
+            # part measured with them had four operands rather than three.
             for (j = vb; j <= vn + 1; j++) {
                 if (j > vn || CMDA[j] == "-a" || CMDA[j] == "-o") {
-                    if (!(j - vs == 3 && CMDA[vs + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/)) vok = 0
+                    ps = vs; pe = j - 1
+                    while (ps <= pe && (CMDA[ps] == "(" || CMDA[ps] == "!")) ps++
+                    while (pe >= ps && CMDA[pe] == ")") pe--
+                    if (!(pe - ps + 1 == 3 && CMDA[ps + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/)) vok = 0
                     vs = j + 1
                 }
             }
@@ -1101,7 +1110,10 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     # otherwise never be examined at all.
     out="$(awk "$SCAN_PROLOGUE"'
         { RULES() }
-        function RULES(  nseg, si, lq, body, saved, nb) {
+        # `BA` IS A LOCAL ARRAY, and that matters: this function calls itself for
+        # each substitution and each shell body, and a shared split target would be
+        # overwritten by the nested call while the outer loop was still walking it.
+        function RULES(  nseg, si, lq, body, saved, nb, BA) {
             # `WHOLE` survives the split, for the constructs the split destroys:
             # `;&` is a case terminator and splitting on `;` takes it apart.
             WHOLE = line
@@ -1115,22 +1127,25 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
             # inside it. The body is scanned as its own input, once: a body that
             # itself spawns another shell is not followed, and saying so is cheaper
             # than a recursion this file would then have to bound.
+            # SUBSTITUTIONS ARE EXTRACTED AT EVERY LEVEL, including inside a shell
+            # body: `bash -c '"'"'out=$(… | grep …)'"'"'` has the engine one level further in,
+            # and the guard that stops a shell body spawning another shell was
+            # stopping this too. Only the SHELL recursion is bounded.
+            body = subst_bodies(WHOLE)
+            if (body != "") {
+                saved = WHOLE
+                nb = split(body, BA, "\n")
+                SC_Q0 = ""
+                for (si = 1; si <= nb; si++) { line = BA[si]; RULES() }
+                line = saved; WHOLE = saved; SC_Q0 = lq
+            }
             if (!NESTED) {
-                body = subst_bodies(WHOLE)
-                if (body != "") {
-                    saved = WHOLE
-                    NESTED = 1; SC_Q0 = ""
-                    nb = split(body, BODIES, "\n")
-                    for (si = 1; si <= nb; si++) { line = BODIES[si]; RULES() }
-                    NESTED = 0
-                    line = saved; WHOLE = saved; SC_Q0 = lq
-                }
                 body = shell_c_body(WHOLE)
                 if (body != "") {
                     saved = WHOLE
                     NESTED = 1; SC_Q0 = ""
-                    nb = split(body, BODIES, "\n")
-                    for (si = 1; si <= nb; si++) { line = BODIES[si]; RULES() }
+                    nb = split(body, BA, "\n")
+                    for (si = 1; si <= nb; si++) { line = BA[si]; RULES() }
                     NESTED = 0
                     line = saved; WHOLE = saved; SC_Q0 = lq
                 }
@@ -1435,7 +1450,9 @@ RULE_D='
     # `declare -n` MAKES A NAMEREF — Bash 4.3. Bash 3.2 rejects the option and the
     # assignment through it goes somewhere else, which is a behaviour difference
     # rather than a failure.
-    if (cmd_opt("declare", "n") || cmd_opt("typeset", "n")) {
+    # `local -n` IS THE SAME OPTION on the function-scope builtin, and the spelling
+    # a nameref is usually written with.
+    if (cmd_opt("declare", "n") || cmd_opt("typeset", "n") || cmd_opt("local", "n")) {
         report("declare -n is Bash 4.3: " line); return }
     if (cmd_opt("read", "N") || cmd_opt("read", "i")) {
         report("this read option is newer than Bash 3.2: " line); return }
@@ -2357,6 +2374,12 @@ plant nameref    "target=value; declare -n ref=target || :"    D "declare -n, wh
 # …and a substitution does not end the command it sits in: the words after the `)`
 # belong to the command that opened it.
 refute outerdata "printf %s ${dq}\$(printf x)${dq} shopt globstar"  D "words after a substitution in the same command"
+# …and the remaining spellings of the same constructs.
+plant localn     "f() { local -n ref=\$1 || :; }; f target"     D "local -n, the usual nameref spelling"
+plant appendpfx  "prefix+=x shopt -s globstar || :"            D "globstar behind an append-assignment prefix"
+
+# …while each part of a compound comparison carries its own grouping.
+refute vgroupand "if test \( -v = token \) -a \( x = x \); then :; fi" D "two grouped comparisons joined by -a"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2462,6 +2485,21 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
 { [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── A SUBSTITUTION INSIDE A SHELL BODY IS STILL ONE ────────────────────────
+# The guard that stops a shell body from spawning another shell was stopping the
+# substitution extraction there too, so `bash -c 'out=$(… | grep …)'` had the engine
+# one level further in than anything looked.
+#
+# NO PIPE IN THE BODY, deliberately: the segment split would surface the engine on
+# its own, and the fixture would pass with the substitution machinery removed
+# entirely — which is what the first version of it did.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'bash -c %sout=$(grep -qE "%ss" f) || :%s\n' "$sq" "$bs" "$sq"; } > "$PTMP/bodysubst.sh"
+bs2_hits="$(scan "$RULE_A" "$PTMP/bodysubst.sh")" || bs2_hits=SCANFAIL
+{ [ "$bs2_hits" != SCANFAIL ] && [ -n "$bs2_hits" ]; } \
+    && pass "a substitution inside a shell body is scanned too" \
+    || die "the shell-body guard suppressed the substitution ('$bs2_hits')"
 
 # ── A QUOTED SUBSTITUTION IS STILL A COMMAND ───────────────────────────────
 # `out="$(grep PATTERN f)"` is the ordinary spelling. The quoted branch appended the
