@@ -127,6 +127,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **An escaped dollar is not an expansion, `$"…"` is a quoted delimiter, and
+  `$'\t'` names a tab.** The first is the same parity that decides an escape; the
+  second is locale translation, where the `$` is not part of the word and appending
+  it recorded a name no line will ever equal; the third came from the delimiter
+  path reusing the escape decoder, which represented every recognised escape with a
+  placeholder — enough while it only answered *is there a backslash before a class
+  letter*, and not enough once a delimiter was built from it.
+
 - **Every quoting form on the delimiter suppresses expansion, and an expansion in
   an unquoted body is performed.** `<<\EOF` and `<<$'EOF'` are quoted delimiters as
   much as `<<'EOF'` is, and the branches consuming those spellings were not saying

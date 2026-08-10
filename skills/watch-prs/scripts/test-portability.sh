@@ -557,9 +557,17 @@ SCAN_PROLOGUE='
     # what keeps the command INSIDE it visible.
     # The Bash 4 EXPANSIONS, which are the only rules that apply inside a
     # here-document body: everything else there is text bash never executes.
-    function expansion_hit(l) {
-        if (l ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) return 1
-        if (l ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) return 1
+    # AN ESCAPED DOLLAR IS NOT AN EXPANSION. In an unquoted body `\${name}` is the
+    # literal text, and the same parity that decides an escape decides this.
+    function expansion_hit(l, i, n) {
+        for (i = 1; i <= length(l); i++) {
+            if (substr(l, i, 1) != "$") continue
+            n = 0
+            while (i - n - 1 >= 1 && substr(l, i - n - 1, 1) == "\134") n++
+            if (n % 2 == 1) continue
+            if (substr(l, i) ~ /^\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) return 1
+            if (substr(l, i) ~ /^\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) return 1
+        }
         return 0
     }
     function subst_bodies(l) {
@@ -832,7 +840,11 @@ SCAN_PROLOGUE='
         for (k = 1; k <= length(o); k++) v = v * 8 + (index("01234567", substr(o, k, 1)) - 1)
         return v
     }
-    function ansic_decode(seg, out, i, ch, nx, h, o) {
+    function ansic_decode(seg, out, i, ch, nx, h, o, k) {
+        if (ESCCODE[1] == "") {
+            # `\a \b \e \E \f \n \r \t \v`, in that order — the codes bash gives them.
+            split("7 8 27 27 12 10 13 9 11", ESCCODE, " ")
+        }
         out = ""; i = 1
         while (i <= length(seg)) {
             ch = substr(seg, i, 1)
@@ -863,7 +875,15 @@ SCAN_PROLOGUE='
             # here, not the word boundary it is in a `grep` pattern, and keeping it
             # as backslash-plus-letter reported portable code. `\c` takes the
             # character after it as well.
-            if (index("abeEfnrtv\047\042?", substr(nx, 1, 1)) > 0) { out = out "\002"; i += 2; continue }
+            # THE RECOGNISED ESCAPES DECODE TO THEIR REAL CHARACTERS. A placeholder
+            # was enough while this only answered "is there a backslash before a
+            # class letter" — and then the here-document delimiter started using the
+            # same decoder, where `$'"'"'\t'"'"' names a TAB and a placeholder names nothing
+            # any line will ever equal.
+            if ((k = index("abeEfnrtv", substr(nx, 1, 1))) > 0) {
+                out = out sprintf("%c", ESCCODE[k]); i += 2; continue
+            }
+            if (index("\047\042?", substr(nx, 1, 1)) > 0) { out = out substr(nx, 1, 1); i += 2; continue }
             if (substr(nx, 1, 1) == "c") { out = out "\002"; i += 3; continue }
             # An UNRECOGNISED escape is kept as backslash-plus-character, which is
             # what bash does — and is why `$'\s'` reaches the engine as `\s`.
@@ -1092,6 +1112,10 @@ SCAN_PROLOGUE='
               # `<<'"'"'EOF'"'"'` is, and the branches that consumed them were not saying so —
               # so their bodies were treated as expanding and portable source was
               # rejected.
+              # `$"…"` IS LOCALE TRANSLATION, and a quoted delimiter like the rest:
+              # the `$` is not part of the word, and appending it recorded a name no
+              # line will ever equal.
+              if (substr(hdsrc, hdk, 2) == "$\042") { hdk++; hdsaw = 1; hdquoted = 1; continue }
               if (SC_CTX[hdk] == "$" && substr(hdsrc, hdk, 2) == "$\047") {
                   hdquoted = 1
                   hden = ansic_span_end(hdsrc, hdk + 2)
@@ -2533,6 +2557,43 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
 { [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── AN ESCAPED DOLLAR IS NOT AN EXPANSION ──────────────────────────────────
+# In an unquoted body `\${name^^}` is the literal text — bash quotes the dollar and
+# performs nothing. The same parity that decides an escape decides this.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<EOF || :\n'
+  printf 'value %s${name^^} more\n' "$bs"
+  printf 'EOF\n'; } > "$PTMP/hdescaped.sh"
+hx_hits="$(scan "$RULE_D" "$PTMP/hdescaped.sh")" || hx_hits=SCANFAIL
+{ [ "$hx_hits" != SCANFAIL ] && [ -z "$hx_hits" ]; } \
+    && pass "an escaped dollar in a body is not an expansion" \
+    || die "an escaped expansion was reported ('$hx_hits')"
+
+# ── `$"…"` IS A QUOTED DELIMITER, AND `$'…'` NAMES ITS DECODED WORD ────────
+# `cat <<$"EOF"` is locale translation: the `$` is not part of the word, and
+# appending it recorded a name no line will ever equal — so a later violation was
+# skipped to end of file.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$%sEOF%s\n' "$dq" "$dq"
+  printf 'body text\n'
+  printf 'EOF\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/localedelim.sh"
+ld_hits="$(scan "$RULE_A" "$PTMP/localedelim.sh")" || ld_hits=SCANFAIL
+{ [ "$ld_hits" != SCANFAIL ] && [ -n "$ld_hits" ]; } \
+    && pass "a locale-quoted delimiter names the word inside it" \
+    || die "cat <<\$\"EOF\" recorded the dollar ('$ld_hits')"
+# …and `$'\t'` names a TAB, which is what ends the document. The decoder used a
+# placeholder for the escapes it recognised, which named nothing.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$%s%st%s\n' "$sq" "$bs" "$sq"
+  printf 'body text\n'
+  printf '\t\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/tabdelim.sh"
+td2_hits="$(scan "$RULE_A" "$PTMP/tabdelim.sh")" || td2_hits=SCANFAIL
+{ [ "$td2_hits" != SCANFAIL ] && [ -n "$td2_hits" ]; } \
+    && pass "…and an ANSI-C delimiter decodes to the character it names" \
+    || die "cat <<\$'\\t' did not end at a tab ('$td2_hits')"
 
 # ── EVERY QUOTING FORM ON THE DELIMITER SUPPRESSES EXPANSION ───────────────
 # `cat <<\EOF` and `cat <<$'EOF'` are quoted delimiters as much as `<<'EOF'` is.
