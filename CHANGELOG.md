@@ -127,6 +127,19 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Every Bash 4 rule is now about the command word.** `mapfile`, `readarray`,
+  `coproc` and `set -o globstar` were still matched on the raw line, so
+  `printf '%s' mapfile coproc` was rejected as data. That was the last of the
+  accepted false positives from before the command model existed, and it comes off
+  the list — as does a pattern attached to its option, `grep -e'PATTERN'`, which is
+  one word after quote removal and whose suffix is the active regex.
+
+- **`<<x$(printf EOF)` names the whole word, and quotes nothing.** A
+  substitution-shaped part is taken whole wherever it sits, not only at the start —
+  and none of its characters are quoted, so a body under that delimiter still
+  expands. `${fd}>out` is an expansion followed by a redirection rather than an
+  allocation, and `read -N1` attaches its count.
+
 - **A substitution-shaped delimiter is taken whole, a locale-quoted word is the
   word inside it, an attached operand is not an option, and a descriptor match has
   to be at the position that is unquoted.** `<<$(printf EOF)` names that text —

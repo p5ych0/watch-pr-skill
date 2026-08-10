@@ -339,11 +339,9 @@ SCAN_PROLOGUE='
     # NOT FOLLOWED, as of this writing: a command substitution split across physical
     # lines inside a here-document BODY (the bodies are read a line at a time,
     # because that is how a terminator is recognised); a command name held in a
-    # VARIABLE
-    # (`tool=grep; "$tool" …`), a BACKQUOTE substitution, a pattern ATTACHED to its
-    # option (`grep -e PATTERN` written as one word), a substitution inside a
-    # compound-command HEADER, a word left open across physical lines, and a shell
-    # spawned from inside another shell body. Each was measured, not assumed: the
+    # VARIABLE (`tool=grep; "$tool" …`), a BACKQUOTE substitution, a substitution
+    # inside a compound-command HEADER, a word left open across physical lines, and
+    # a shell spawned from inside another shell body. Each was measured, not assumed: the
     # header case was implemented and reverted, because reaching the command inside
     # it lost the header and rejected the list data after it.
     #
@@ -561,6 +559,9 @@ SCAN_PROLOGUE='
                 # nothing, and skipping the word after it stepped over a real `-N`.
                 cl = CMDA[j]
                 if (cmd == "read" && match(cl, /[pntuda]/)) cl = substr(cl, 1, RSTART)
+                # AN ATTACHED COUNT IS STILL THE OPTION: `read -N1` is `-N` with its
+                # argument, and an alphabetic-only cluster test missed it.
+                sub(/[0-9]+$/, "", cl)
                 if (cl ~ /^-[A-Za-z]*$/ && index(cl, letter) > 1) return 1
                 if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pntuda]$/) j++
             }
@@ -615,6 +616,16 @@ SCAN_PROLOGUE='
                 if (CMDA[j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { out = out (out == "" ? "" : "\n") CMDA[j + 1]; break }
         }
         return out
+    }
+    # True when `cmd` is the command word of some simple command on this line.
+    function cmd_is(cmd, i) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (!unwrap()) continue
+            if (CMDW == cmd) return 1
+        }
+        return 0
     }
     function cmd_has(cmd, name, i, j) {
         i = 1
@@ -1174,16 +1185,6 @@ SCAN_PROLOGUE='
           # delimiter word, so `<<$(printf EOF)` names that text — parentheses,
           # space and all — and stopping at the `(` recorded a prefix of it.
           hdw = ""; hdsaw = 0; hdquoted = 0
-          if (substr(hdsrc, hdk, 2) == "$(") {
-              hdp = 1; hdj = hdk + 2
-              while (hdj <= length(hdsrc) && hdp > 0) {
-                  if (substr(hdsrc, hdj, 1) == "(") hdp++
-                  else if (substr(hdsrc, hdj, 1) == ")") hdp--
-                  hdj++
-              }
-              hdw = substr(hdsrc, hdk, hdj - hdk); hdsaw = 1; hdquoted = 1
-              hdk = hdj
-          }
           while (hdk <= length(hdsrc)) {
               hdc = substr(hdsrc, hdk, 1)
               # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
@@ -1211,6 +1212,24 @@ SCAN_PROLOGUE='
                       hdw = hdw ansic_decode(substr(hdsrc, hdk + 2, hden - hdk - 2))
                       hdsaw = 1; hdk = hden + 1; continue
                   }
+              }
+              # A SUBSTITUTION-SHAPED PART IS TAKEN WHOLE, WHEREVER IT SITS. The
+              # delimiter word is not expanded, so `<<x$(printf EOF)` names that
+              # text — parentheses and the space inside them included — and the
+              # ordinary word loop would have stopped at the `(`.
+              #
+              # IT QUOTES NOTHING, THOUGH: none of its characters are quoted, so a
+              # body under this delimiter still expands. Marking it quoted, which is
+              # what the first version of this did, suppressed that.
+              if (substr(hdsrc, hdk, 2) == "$(") {
+                  hdp = 1; hdj = hdk + 2
+                  while (hdj <= length(hdsrc) && hdp > 0) {
+                      if (substr(hdsrc, hdj, 1) == "(") hdp++
+                      else if (substr(hdsrc, hdj, 1) == ")") hdp--
+                      hdj++
+                  }
+                  hdw = hdw substr(hdsrc, hdk, hdj - hdk); hdsaw = 1
+                  hdk = hdj; continue
               }
               if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; hdquoted = 1; continue }
               if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
@@ -1425,6 +1444,12 @@ RULE_A='
             if (egrepsed && CMDA[aj] ~ /^-[mABCd]$/ && aj < CMDN) { aj++; continue }
             if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
             if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
+            # …AND THE VALUE MAY BE ATTACHED. `grep -e'"'"'PATTERN'"'"'` is one word after
+            # quote removal, and its suffix is the active pattern — this was on the
+            # list of forms the model did not follow, and it comes off that list.
+            if (CMDA[aj] ~ /^-[A-Za-z]*e.+$/ && CMDA[aj] !~ /^--/) {
+                eargs = eargs " " substr(CMDA[aj], index(CMDA[aj], "e") + 1); epat = 1; continue
+            }
             if (CMDA[aj] ~ /^-[A-Za-z]*e$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
             if (CMDA[aj] ~ /^-/) continue
             if (!epat) { eargs = eargs " " CMDA[aj]; epat = 1 }
@@ -1566,7 +1591,10 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # `${!name}` is NOT here: indirect expansion is Bash 2, and only the Bash 4
 # `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
 RULE_D='
-    if (line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/) {
+    # AS COMMAND WORDS, like every other builtin rule here. `printf '"'"'%s'"'"' mapfile`
+    # runs `printf`, and a raw word pattern rejected it — the last of the Bash 4
+    # rules that was still reading the line rather than the command.
+    if (cmd_is("mapfile") || cmd_is("readarray")) {
         report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
     # THE OPTION WORD MAY BE QUOTED. Shell quote removal happens before `declare`
     # sees its arguments, so a quoted option word — the dash and the letter
@@ -1638,6 +1666,10 @@ RULE_D='
     for (fdi = 1; fdi <= length(line); fdi++) {
         if (substr(line, fdi, 1) != "{") continue
         if (SC_CTX[fdi] != "" || SC_ESC[fdi]) continue
+        # `${fd}>out` IS AN EXPANSION AND THEN A REDIRECTION, which Bash 3.2 has.
+        # The brace of an allocation stands alone; a `$` in front makes it something
+        # else entirely.
+        if (fdi > 1 && substr(line, fdi - 1, 1) == "$") continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -1675,9 +1707,9 @@ RULE_D='
     for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
         if (cmd_has("shopt", SHOPT4[si2])) {
             report("the " SHOPT4[si2] " shell option is newer than Bash 3.2: " line); return }
-    if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
+    if (cmd_has("set", "globstar")) {
         report("globstar is Bash 4: " line); return }
-    if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
+    if (cmd_is("coproc")) {
         report("coproc is Bash 4: " line); return }
     # `[ -v x ]` AND `test -v x` ARE THE SAME OPERATOR. Bash 4.2 added it to all
     # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
@@ -2560,6 +2592,13 @@ refute fdquoted  "printf %s ${sq}{fd}>file${sq}"               D "a quoted descr
 refute fdmixed   "printf %s ${sq}{fd}>file${sq} x}>out"        D "a quoted allocation beside an unquoted brace"
 # …and `read -pN` attaches the prompt to `-p`, so it is not the `-N` option.
 refute readattach "IFS= read -pN value < ${dq}\$f${dq}"            D "a prompt attached to its option"
+# …while `-N1` attaches the COUNT to the option, which is still the option.
+plant readcount  "IFS= read -N1 value < ${dq}\$f${dq} || :"          D "read -N with an attached count"
+# …and `-e` may carry its pattern attached, which is the active regex.
+plant grepattach "grep -e${sq}${bs}s${sq} ${dq}\$f${dq} || :"              A "a pattern attached to its option"
+# …while a Bash 4 builtin NAME is a command word like any other.
+refute mapdata   "printf %s mapfile coproc"                    D "Bash 4 builtin names used as data"
+refute fdexpand  "fd=value; printf %s \${fd}>out"              D "an expansion followed by a redirection"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2698,14 +2737,25 @@ cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
 # parentheses, space and all. Stopping at the `(` recorded a prefix of it, and the
 # real terminator never drained the queue.
 { printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$(printf EOF)\n'
+  printf 'cat <<x$(printf EOF)\n'
   printf 'body text\n'
-  printf '$(printf EOF)\n'
+  printf 'x$(printf EOF)\n'
   printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substdelim.sh"
 sd3_hits="$(scan "$RULE_A" "$PTMP/substdelim.sh")" || sd3_hits=SCANFAIL
 { [ "$sd3_hits" != SCANFAIL ] && [ -n "$sd3_hits" ]; } \
     && pass "a substitution-shaped delimiter is taken whole" \
     || die "the delimiter stopped at its parenthesis ('$sd3_hits')"
+
+# …and it QUOTES NOTHING: none of the delimiter word's characters are quoted, so a
+# body under it still expands, and a substitution there really invokes its command.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<x$(printf EOF)\n'
+  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
+  printf 'x$(printf EOF)\n'; } > "$PTMP/substdelimx.sh"
+sx_hits="$(scan "$RULE_A" "$PTMP/substdelimx.sh")" || sx_hits=SCANFAIL
+{ [ "$sx_hits" != SCANFAIL ] && [ -n "$sx_hits" ]; } \
+    && pass "…and a body under it still expands" \
+    || die "a substitution-shaped delimiter suppressed expansion ('$sx_hits')"
 
 # ── A QUOTED BRACE DOES NOT CLOSE AN EXPANSION ─────────────────────────────
 # `${unset:-"}"<<EOF}` closes at the LAST brace, and counting the quoted one closed
