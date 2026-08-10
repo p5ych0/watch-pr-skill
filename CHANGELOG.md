@@ -100,6 +100,25 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **One model of shell quoting, not six.** It had been written out separately in
+  the splitter, the operator finder, the comment stripper, the arithmetic
+  stripper, the ANSI-C decoder and the escape counter, and every copy was missing
+  a different rule — four review rounds in a row landed on exactly that: an
+  escaped quote, an escaped dollar, an escaped parenthesis, a quoted arithmetic
+  opener. It is one walker now, which records for every source position which
+  quoting context it is in and whether a backslash made it literal, and builds
+  what the command would actually *receive*. That last part is what an escape
+  parity question is really about: `grep \\$'\s' f` is an unquoted escape and an
+  ANSI-C span written next to each other, one backslash each, and judging either
+  part alone got it backwards. A word separator was written into that string to
+  stop a run joining across two arguments, and then removed: no case could tell it
+  from the space it replaced, and a branch no fixture can fail is worse than none.
+
+- **A quoted arithmetic opener is data**, `\EOF` is a here-document delimiter
+  (bash quote-removes the delimiter word, and a backslash is one of the quotings),
+  and an apostrophe escaped inside an ANSI-C word does not close it — all three
+  fall out of the shared model rather than being three more special cases.
+
 - **A backslash escapes outside quotes too.** Two walkers read the previous
   *source* character rather than the previous word. In `\)#` the parenthesis is an
   escaped literal, so the `#` continues the word instead of starting a comment —

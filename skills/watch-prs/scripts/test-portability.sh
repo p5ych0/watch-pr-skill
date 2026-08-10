@@ -78,62 +78,99 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 # glue two unrelated statements together.
 SCAN_PROLOGUE='
     function report(msg) { print FILENAME ":" start ": " msg }
+    # ── ONE MODEL OF SHELL QUOTING, NOT SIX ────────────────────────────────
+    #
+    # This was written out separately in the splitter, the operator finder, the
+    # comment stripper, the arithmetic stripper, the ANSI-C decoder and the escape
+    # counter — and every copy was missing a different rule. Four review rounds in
+    # a row landed on that: an escaped quote, an escaped dollar, an escaped
+    # parenthesis, a quoted arithmetic opener. Each was a hole in one copy that the
+    # others did not have, which is the shape CLAUDE.md records for `recordlib.sh`
+    # and `identitylib.sh`: a rule that applies to more than one helper belongs in
+    # one place.
+    #
+    # `shell_scan` walks a line ONCE and records, for every source position, which
+    # quoting context it is in and whether it is a character a backslash made
+    # literal. It also builds SC_EFF: what the command would actually RECEIVE,
+    # which is what an escape-parity question is really about.
+    #
+    # It is still not a lexer. `$( … )` nesting, `${ … }` and a quote spanning a
+    # continuation are not modelled, and the direction of that is unchanged: a rule
+    # sees less context than it should and therefore REPORTS rather than excuses.
+    function shell_scan(l, i, k, ch, q, nxt, en) {
+        delete SC_CTX; delete SC_ESC
+        SC_EFF = ""; q = ""; i = 1
+        while (i <= length(l)) {
+            ch = substr(l, i, 1)
+            SC_CTX[i] = q; SC_ESC[i] = 0
+            if (q == "") {
+                # An unquoted backslash makes the NEXT character literal, which is
+                # what `\)#` and `\$'…'` turn on: the escaped character is not the
+                # operator or opener it looks like.
+                if (ch == "\134" && i < length(l)) {
+                    SC_CTX[i + 1] = q; SC_ESC[i + 1] = 1
+                    SC_EFF = SC_EFF substr(l, i + 1, 1)
+                    i += 2; continue
+                }
+                # `$'…'` is ANSI-C quoting: the escapes inside are DECODED, and
+                # what it contributes to the word is the decoded text.
+                if (substr(l, i, 2) == "$\047") {
+                    en = ansic_span_end(l, i + 2)
+                    if (en > 0) {
+                        for (k = i; k <= en; k++) { SC_CTX[k] = "$"; SC_ESC[k] = 0 }
+                        SC_EFF = SC_EFF ansic_decode(substr(l, i + 2, en - i - 2))
+                        i = en + 1; continue
+                    }
+                }
+                if (ch == "\047" || ch == "\042") { q = ch; i++; continue }
+                SC_EFF = SC_EFF ch; i++; continue
+            }
+            if (q == "\047") {
+                if (ch == "\047") { q = ""; i++; continue }
+                SC_EFF = SC_EFF ch; i++; continue
+            }
+            # Inside double quotes a backslash is literal EXCEPT before one of the
+            # four characters it can escape there.
+            if (ch == "\134" && i < length(l)) {
+                nxt = substr(l, i + 1, 1)
+                if (index("$\140\042\134", nxt) > 0) {
+                    SC_CTX[i + 1] = q; SC_ESC[i + 1] = 1
+                    SC_EFF = SC_EFF nxt; i += 2; continue
+                }
+                SC_EFF = SC_EFF ch; i++; continue
+            }
+            if (ch == q) { q = ""; i++; continue }
+            SC_EFF = SC_EFF ch; i++; continue
+        }
+    }
     # A RULE JUDGES A SIMPLE COMMAND, NOT A LOGICAL LINE. `grep -F x f; grep "\s" f`
     # has one fixed-string command and one that is not, and an exemption taken for
     # the whole line let the first excuse the second. The line is split on the
     # operators that separate commands and each rule is applied per segment.
     #
-    # Splitting on those operators inside QUOTES is wrong and is not handled — that
-    # is the lexer this file declines to write. The direction is loud: a quoted
-    # `;` splits one command into two halves, and a rule sees less context than it
-    # should, so it reports rather than excuses.
-    #
-    # THE SPLIT IS QUOTE-AWARE. `split()` on the operators is blind to them, and a
-    # separator inside a pattern — `grep "x;\s" f` — cut the command away from its
-    # own escape, so neither half satisfied a rule. This walks the line once,
-    # tracking single and double quotes, and breaks only at depth zero. It follows
-    # backslash escapes inside double quotes, and here-document bodies are dropped
-    # before it ever sees them. It is still not a lexer — it does not know about
-    # `$(…)` nesting, `((…))`, or a quote spanning a continuation — and that list is
-    # kept accurate rather than left as the one written when it did less. What it does buy is that a quoted separator no longer
-    # splits a command, and that an operator can be told from the same characters
-    # inside a string.
-    function segments(l, n, i, ch, q, cur, rest) {
-        n = 1; SEG[1] = ""; q = ""
+    # The split reads the shared model, so a separator inside quotes — or one made
+    # literal by a backslash — no longer cuts a command away from its own pattern.
+    function segments(l, n, i, ch, rest) {
+        shell_scan(l)
+        n = 1; SEG[1] = ""
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
-            # Inside DOUBLE quotes a backslash escapes the next character, so
-            # `"a\"b"` closed at the escaped quote and reopened at the real one —
-            # every operator after it read as quoted. Single quotes have no escape,
-            # which is why this only applies to the double-quoted state.
-            if (q == "\042" && ch == "\134") { SEG[n] = SEG[n] ch substr(l, i+1, 1); i++; continue }
-            if (q == "") {
-                if (ch == "\047" || ch == "\042") { q = ch; SEG[n] = SEG[n] ch; continue }
+            if (SC_CTX[i] == "" && !SC_ESC[i]) {
                 rest = substr(l, i, 2)
                 if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; i++; continue }
                 if (ch == ";" || ch == "|") { n++; SEG[n] = ""; continue }
-            } else if (ch == q) { q = "" }
+            }
             SEG[n] = SEG[n] ch
         }
         return n
     }
-    # WHERE the operator appears outside quotes, or 0. The here-document detector
-    # needs the position and not merely the fact: a `<<` is only a redirection if
-    # the shell sees it as one, and a quoted word carrying those characters is a
-    # string, not a redirection.
-    function unquoted_pos(l, pat, i, ch, q) {
-        q = ""
-        for (i = 1; i <= length(l); i++) {
-            ch = substr(l, i, 1)
-            if (q == "\042" && ch == "\134") { i++; continue }
-            if (q == "") {
-                if (ch == "\047" || ch == "\042") { q = ch; continue }
-                if (substr(l, i, length(pat)) == pat) return i
-            } else if (ch == q) { q = "" }
-        }
+    # WHERE the operator appears outside quotes, or 0.
+    function unquoted_pos(l, pat, i) {
+        shell_scan(l)
+        for (i = 1; i <= length(l); i++)
+            if (SC_CTX[i] == "" && !SC_ESC[i] && substr(l, i, length(pat)) == pat) return i
         return 0
     }
-    # True when the operator appears outside quotes anywhere on the line.
     function unquoted(l, pat) { return unquoted_pos(l, pat) > 0 }
     # `$(( … ))` REMOVED, because its left-shift is spelled `<<` and its right
     # operand is a WORD. `mask=$((value << shift))` queued `shift` as a delimiter,
@@ -163,96 +200,56 @@ SCAN_PROLOGUE='
     # parenthesis is an escaped literal, so the `#` continues the word instead of
     # starting a comment — and treating it as one stripped a real `<<EOF` and read
     # the document body as shell.
-    function strip_comment(l, i, ch, q, prev, esc) {
-        q = ""; esc = 0
+    function strip_comment(l, i, ch, prev) {
+        shell_scan(l)
         for (i = 1; i <= length(l); i++) {
-            ch = substr(l, i, 1)
-            if ((q == "\042" || q == "") && ch == "\134") { i++; esc = 1; continue }
-            if (q == "") {
-                # A `#` STARTS A COMMENT ONLY AT THE START OF A WORD. `x=a#b` is a
-                # value and `${x#p}` is an expansion; both keep their `#`.
-                if (ch == "#") {
-                    prev = (i == 1) ? " " : substr(l, i - 1, 1)
-                    if (esc) prev = "x"
-                    # `)` IS A CONTROL OPERATOR TOO, and `(:)# <<EOF` is the
-                    # spelling that needs it — a subshell closed, then a comment
-                    # with no space in front of it. The class is the operators that
-                    # END a word as well as the ones that begin one.
-                    #
-                    # It is spelled with `&` before `;` deliberately: the other
-                    # order puts a literal `;&` in this file, and rule D reads that
-                    # as the Bash 4 case terminator it is elsewhere.
-                    if (prev ~ /[[:space:]&;|()]/) return substr(l, 1, i - 1)
-                }
-                if (ch == "\047" || ch == "\042") { q = ch; esc = 0; continue }
-            } else if (ch == q) { q = "" }
-            esc = 0
+            if (SC_CTX[i] != "" || SC_ESC[i]) continue
+            if (substr(l, i, 1) != "#") continue
+            # A `#` STARTS A COMMENT ONLY AT THE START OF A WORD. `x=a#b` is a
+            # value and `${x#p}` is an expansion; both keep their `#`. The
+            # character before it must be a boundary AND must not have been made
+            # literal by a backslash — `\)#` is one word.
+            #
+            # The class is spelled with `&` before `;` deliberately: the other
+            # order puts a literal `;&` in this file, and rule D reads that as the
+            # Bash 4 case terminator it is elsewhere.
+            if (i == 1) return ""
+            prev = substr(l, i - 1, 1)
+            if (SC_ESC[i - 1] || SC_CTX[i - 1] != "") continue
+            if (prev ~ /[[:space:]&;|()]/) return substr(l, 1, i - 1)
         }
         return l
     }
-    function strip_arith(l, out, i, ch, d) {
+    function strip_arith(l, out, i, ch, d, opener) {
+        shell_scan(l)
         out = ""; i = 1
         while (i <= length(l)) {
-            if (substr(l, i, 3) == "$((" || substr(l, i, 2) == "((") {
-                d = 2
-                i += (substr(l, i, 3) == "$((") ? 3 : 2
-                while (i <= length(l) && d > 0) {
-                    ch = substr(l, i, 1)
-                    if (ch == "(") d++
-                    else if (ch == ")") d--
-                    i++
+            # QUOTED, IT IS DATA. `printf '%s' "(("` has no arithmetic in it, and
+            # taking the quoted characters as an opener consumed the rest of the
+            # logical line looking for a `))` that never came — including a real
+            # here-document redirection after it.
+            if (SC_CTX[i] == "" && !SC_ESC[i]) {
+                opener = 0
+                if (substr(l, i, 3) == "$((") opener = 3
+                else if (substr(l, i, 2) == "((") opener = 2
+                if (opener > 0) {
+                    d = 2; i += opener
+                    while (i <= length(l) && d > 0) {
+                        ch = substr(l, i, 1)
+                        if (SC_CTX[i] == "" && !SC_ESC[i]) {
+                            if (ch == "(") d++
+                            else if (ch == ")") d--
+                        }
+                        i++
+                    }
+                    out = out " "
+                    continue
                 }
-                out = out " "
-                continue
             }
             out = out substr(l, i, 1); i++
         }
         return out
     }
-    # True when a letter from `set` reaches the regex engine ESCAPED — which is a
-    # question about what the shell hands over, not about what the source looks
-    # like. `grep "\\s" f` writes two backslashes and passes ONE, because double
-    # quotes halve the run; `grep '\\s' f` writes two and passes two, because
-    # single quotes do not. Counting the source run alone therefore read the first
-    # as portable and the second as a violation, and both were backwards.
-    #
-    # THREE CONTEXTS, ONE RULE EACH, and the surface is closed at three:
-    #   single-quoted — nothing is removed, so the run survives: odd escapes.
-    #   $'…'          — ANSI-C quoting, which LOOKS single-quoted and behaves like
-    #                   the double-quoted case: `$'\\s'` collapses the pair and
-    #                   hands the engine `\s`. Reading it as ordinary single
-    #                   quoting preserved both backslashes and called the script
-    #                   clean.
-    #   double-quoted — each pair becomes one, and a lone backslash before an
-    #                   ordinary letter is KEPT, so ceil(n/2) survive.
-    #   unquoted      — each pair becomes one and a lone backslash is REMOVED
-    #                   along with nothing else, so floor(n/2) survive.
-    # In each case the letter is escaped when an odd number of backslashes reaches
-    # the engine.
-    # A BACKSLASH CAN BE SYNTHESISED. Inside `$'…'` the escapes are DECODED, so
-    # `$'\134s'` is octal 134 — a backslash — followed by `s`, and the engine
-    # receives the GNU `\s` while the source contains no `\s` at all. Counting
-    # literal backslashes saw `\1` and called it clean.
-    #
-    # The producers are a CLOSED SET, which is what makes this a rule rather than
-    # another parser: the ANSI-C escapes that yield a backslash are `\\`, octal
-    # `\134` and `\0134`, hex `\x5c`, and the unicode `\`/`\U0000005c`. Each
-    # becomes one backslash; then the run is counted as anywhere else, because an
-    # unrecognised escape such as `\s` is kept by bash as backslash-plus-letter.
-    #
-    # `\\` IS REPLACED FIRST, so `$'\\134'` is a literal backslash followed by the
-    # digits rather than an octal escape — which is what bash does with it.
-    # WALKED, NOT `gsub`-ED. Reconstructing a backslash through a gsub REPLACEMENT
-    # means writing one into the replacement string, where `\` is itself the escape
-    # character — the first version produced no backslash at all and reported a
-    # literal one as a GNU escape. Walking the span has no replacement string.
-    #
-    # DECODED AGAINST THE SPEC, WHICH WAS READ RATHER THAN GUESSED. The first
-    # version accepted `\0134` as octal, and `bash` reads that as `\013` followed by
-    # `4` — a vertical tab and a digit, no backslash at all. It also accepted only
-    # the fully padded `\`, while bash takes ONE to four hex digits after `\u`
-    # and one to eight after `\U`, so `\u5c` is the same backslash and was missed.
-    # Both were checked by running them.
     function hexdigits(s, maxn, out, k, ch) {
         out = ""
         for (k = 1; k <= maxn; k++) {
@@ -342,77 +339,27 @@ SCAN_PROLOGUE='
     # REAL span, which was then never decoded — and the walker deliberately
     # ignores ANSI-C text, so nothing judged the GNU escape at all. Quote state
     # is tracked here for the same reason it is tracked in the split.
-    function ansic_hit(l, set, seg, i, n, ch, st, en, q) {
-        q = ""; st = 1
-        while (st <= length(l)) {
-            ch = substr(l, st, 1)
-            # An UNQUOTED backslash escapes too: `\$` is a literal dollar, and the
-            # quote after it opens an ORDINARY single-quoted span rather than an
-            # ANSI-C one. Reading the pair as an opener decoded `\\s` to one
-            # backslash and rejected a portable command.
-            if ((q == "\042" || q == "") && ch == "\134") { st += 2; continue }
-            if (q == "") {
-                if (substr(l, st, 2) == "$\047") {
-                    en = ansic_span_end(l, st + 2)
-                    if (en == 0) return 0
-                    seg = ansic_decode(substr(l, st + 2, en - st - 2))
-                    for (i = 1; i <= length(seg); i++) {
-                        if (substr(seg, i, 1) != "\134") continue
-                        n = 0
-                        while (substr(seg, i, 1) == "\134") { n++; i++ }
-                        ch = substr(seg, i, 1)
-                        if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
-                        i--
-                    }
-                    st = en + 1
-                    continue
-                }
-                if (ch == "\047" || ch == "\042") { q = ch; st++; continue }
-            } else if (ch == q) { q = ""; st++; continue }
-            st++
-        }
-        return 0
-    }
-
-    function esc_class(l, set, i, n, ch, q, kept) {
-        if (ansic_hit(l, set)) return 1
-        q = ""
-        for (i = 1; i <= length(l); i++) {
-            ch = substr(l, i, 1)
-            if (ch == "\134") {
-                n = 0
-                while (substr(l, i, 1) == "\134") { n++; i++ }
-                ch = substr(l, i, 1)
-                if (ch == "") return 0
-                if (q == "\047")                    kept = n
-                else if (q == "\042")               kept = int((n + 1) / 2)
-                # `$'…'` IS DECODED ELSEWHERE, by `ansic_hit`, because a backslash
-                # there can be SYNTHESISED from `\134` or `\x5c` and no count of
-                # the source characters can see one. Judging it twice, by two
-                # different rules, is how the two answers come to disagree.
-                else if (q == "$")                  kept = 0
-                else                              kept = int(n / 2)
-                if (kept % 2 == 1 && index(set, ch) > 0) return 1
-                # The character that ENDED the run may be a quote, and whether it
-                # opens or closes one depends on whether the run escaped it — which
-                # single quotes never allow.
-                if (ch == "\047" || ch == "\042") {
-                    if (q == "\047" || n % 2 == 0) {
-                        if (q == "") q = ch
-                        else if (q == "$" && ch == "\047") q = ""
-                        else if (q == ch) q = ""
-                    }
-                }
-                continue
-            }
-            if (q == "") {
-                # `$'…'` FIRST, because it looks like a `$` followed by an ordinary
-                # single quote and is neither: the escapes inside are processed.
-                if (ch == "$" && substr(l, i + 1, 1) == "\047") { q = "$"; i++ }
-                else if (ch == "\047" || ch == "\042") q = ch
-            }
-            else if (q == "$") { if (ch == "\047") q = "" }
-            else if (ch == q) q = ""
+    # WHAT THE ENGINE RECEIVES, not what the source looks like. The shared model
+    # already built it: quote removal, ANSI-C decoding and backslash escapes are
+    # all applied. Whitespace between two arguments survives into it as itself,
+    # which is all that is needed to stop a run joining across them — a separator
+    # was written for that and then had no case that could tell it from the space
+    # it replaced, so it went.
+    #
+    # A WORD CAN BE ASSEMBLED FROM SEVERAL KINDS OF QUOTING. `grep \\$'\s' f` is an
+    # unquoted escape and an ANSI-C span written next to each other, contributing
+    # one backslash each — two in total, which is a literal backslash and an
+    # ordinary letter. Judging either part on its own got that backwards, and
+    # judging them separately is what the old pair of functions did.
+    function esc_class(l, set, i, n, ch) {
+        shell_scan(l)
+        for (i = 1; i <= length(SC_EFF); i++) {
+            if (substr(SC_EFF, i, 1) != "\134") continue
+            n = 0
+            while (substr(SC_EFF, i, 1) == "\134") { n++; i++ }
+            ch = substr(SC_EFF, i, 1)
+            if (n % 2 == 1 && ch != "" && index(set, ch) > 0) return 1
+            i--
         }
         return 0
     }
@@ -463,12 +410,16 @@ SCAN_PROLOGUE='
           # skip every following line to EOF — a single `cat <<<EOF` excusing the
           # file.
           if (substr(hdtail, 1, 3) == "<<<") { hdrest = substr(hdtail, 4); continue }
-          if (match(hdtail, /^<<-?[[:space:]]*["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
+          # THE DELIMITER WORD IS QUOTE-REMOVED, and a BACKSLASH is one of the
+          # quotings bash accepts there: `cat <<\EOF` is a document ending at
+          # `EOF`, and a pattern taking only a single or double quote recorded no
+          # document at all — so the body was read as shell.
+          if (match(hdtail, /^<<-?[[:space:]]*\\?["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
               hdw = substr(hdtail, RSTART, RLENGTH)
               hdrest = substr(hdtail, RLENGTH + 1)
               hddash = (hdw ~ /^<<-/)
               sub(/^<<-?[[:space:]]*/, "", hdw)
-              gsub(/["'"'"']/, "", hdw)
+              gsub(/["'"'"']/, "", hdw); gsub(/\\/, "", hdw)
               # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled
               # the same and its right operand is a number, so a numeric delimiter
               # is the shift rather than a document — and taking it started a skip
@@ -1451,6 +1402,75 @@ ad_hits="$(scan "$RULE_A" "$PTMP/ansicdq.sh")" || ad_hits=SCANFAIL
 { [ "$ad_hits" != SCANFAIL ] && [ -n "$ad_hits" ]; } \
     && pass "a quoted \$' is data, and the real span is still decoded" \
     || die "a quoted \$' consumed the real ANSI-C span ('$ad_hits')"
+
+# ── A WORD CAN BE ASSEMBLED FROM SEVERAL QUOTINGS ──────────────────────────
+# `grep \\$'\s' f` is an unquoted escape and an ANSI-C span written next to each
+# other: one backslash each, two in total, which is a literal backslash and an
+# ordinary letter. Judging the span alone saw its single backslash and rejected a
+# portable command — the parity question is about the assembled word.
+printf '#!/usr/bin/env bash\ngrep %s$%s\\134s%s "$f"\n' "$two_bs" "'" "'" > "$PTMP/mixedword.sh"
+mw_hits="$(scan "$RULE_A" "$PTMP/mixedword.sh")" || mw_hits=SCANFAIL
+{ [ "$mw_hits" != SCANFAIL ] && [ -z "$mw_hits" ]; } \
+    && pass "parity is judged across the whole assembled word" \
+    || die "an adjacent unquoted escape was ignored ('$mw_hits')"
+# …and the same escape beside a span carrying TWO leaves three, which is odd, so
+# it still reports. One unquoted backslash instead would escape the dollar and
+# leave no ANSI-C span at all, which is a different case and already covered.
+printf '#!/usr/bin/env bash\ngrep %s$%s\\134\\134s%s "$f"\n' "$two_bs" "'" "'" > "$PTMP/mixedodd.sh"
+mo_hits="$(scan "$RULE_A" "$PTMP/mixedodd.sh")" || mo_hits=SCANFAIL
+{ [ "$mo_hits" != SCANFAIL ] && [ -n "$mo_hits" ]; } \
+    && pass "…and an odd assembled count still escapes the letter" \
+    || die "an odd assembled count was read as portable ('$mo_hits')"
+
+# …and a run does not join across two ARGUMENTS. `grep -e '\' 'sub' f` searches for
+# a lone backslash and then for `sub`; run them together and the text reads as the
+# GNU `\s`, a rejection of portable code invented by the concatenation. The space
+# between them is what prevents it, and it prevents it by being a character that
+# is not a backslash.
+printf '#!/usr/bin/env bash\ngrep -e %s%s%s %ssub%s "$f"\n' "'" "$one_bs" "'" "'" "'" > "$PTMP/wordsplit.sh"
+ws_hits="$(scan "$RULE_A" "$PTMP/wordsplit.sh")" || ws_hits=SCANFAIL
+{ [ "$ws_hits" != SCANFAIL ] && [ -z "$ws_hits" ]; } \
+    && pass "…and a backslash run does not join across two arguments" \
+    || die "two arguments were read as one word ('$ws_hits')"
+
+# ── A QUOTED ARITHMETIC OPENER IS DATA ─────────────────────────────────────
+# `printf '%s' "(("` has no arithmetic in it. Taking the quoted characters as an
+# opener consumed the rest of the logical line looking for a `))` that never came,
+# and a real here-document redirection after it went with it.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'printf %s "(("; cat <<EOF\n' "'%s\\n'"
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/quotedarith.sh"
+qa_hits="$(scan "$RULE_A" "$PTMP/quotedarith.sh")" || qa_hits=SCANFAIL
+{ [ "$qa_hits" != SCANFAIL ] && [ -z "$qa_hits" ]; } \
+    && pass "a quoted arithmetic opener does not consume the line" \
+    || die "a quoted (( ate a real redirection ('$qa_hits')"
+
+# ── THE DELIMITER WORD IS QUOTE-REMOVED, BACKSLASH INCLUDED ────────────────
+# `cat <<\EOF` is a document ending at `EOF`. A pattern taking only a single or
+# double quote recorded no document at all, so the body was read as shell.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<\\EOF\n'
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/bsdelim.sh"
+bd_hits="$(scan "$RULE_A" "$PTMP/bsdelim.sh")" || bd_hits=SCANFAIL
+{ [ "$bd_hits" != SCANFAIL ] && [ -z "$bd_hits" ]; } \
+    && pass "a backslash-quoted here-document delimiter is recognised" \
+    || die "cat <<\\EOF recorded no document ('$bd_hits')"
+
+# ── AN ESCAPED QUOTE INSIDE AN ANSI-C WORD IS DATA ─────────────────────────
+# The apostrophe escaped inside the word does not close it; the one after it does,
+# so the redirection that follows is real. Modelling the span as ordinary single
+# quoting closed it early, reopened it at the real closer, and read the redirection
+# as quoted — the body then went through the rules as shell.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'printf %s $%sx\\%s%s; cat <<EOF\n' "'%s\\n'" "'" "'" "'"
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'EOF\n'; } > "$PTMP/ansicheredoc.sh"
+ah2_hits="$(scan "$RULE_A" "$PTMP/ansicheredoc.sh")" || ah2_hits=SCANFAIL
+{ [ "$ah2_hits" != SCANFAIL ] && [ -z "$ah2_hits" ]; } \
+    && pass "an escaped quote in an ANSI-C word does not hide the redirection" \
+    || die "an ANSI-C word swallowed a real here-document ('$ah2_hits')"
 
 # ── AN ESCAPED DOLLAR IS NOT AN OPENER ─────────────────────────────────────
 # In `grep \$'\\s' f` the dollar is an escaped literal, so the quote after it opens
