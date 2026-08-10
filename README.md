@@ -179,14 +179,15 @@ that introduces it.
 
 Two checks now, because one cannot cover both halves:
 
-- `test-portability.sh` reads the text for three things, and only one of the three
-  has a surface that is **closed**: GNU regex escapes in a `grep`/`sed`/`awk`
-  pattern, where POSIX defines no backslash-class escapes at all, so the set cannot
-  grow. The other two are **blacklists that are one entry behind**: the names of
-  GNU-only tools that cannot occur in prose, and the constructs newer than the Bash
-  3.2 macOS ships — a list that grows whenever a newer one is found. Nothing fails
-  at runtime on Linux for any of them, so only text can find them, and the CI job
-  below is what closes the command-name half behaviourally.
+- `test-portability.sh` reads the text for three things, and **one half of one of
+  them** is closed: the backslash-class escapes `\s \S \d \D \w \W \b \B` in a
+  `grep`/`sed`/`awk` pattern, where POSIX defines none at all, so the set cannot
+  grow. Everything else is a **blacklist that is one entry behind** and says so —
+  gawk's own operators (`\y`, `\<`, `\>`, and whatever a future gawk adds), the
+  names of GNU-only tools that cannot occur in prose, and the constructs newer than
+  the Bash 3.2 macOS ships. Nothing fails at runtime on Linux for any of them, so
+  only text can find them, and the CI job below is what closes the command-name
+  half behaviourally.
 
   It does **not** check GNU-only *flags* — `sed -i`, `readlink -f`, `grep -P`,
   `date -d`. Those need an option parser, which does not terminate: eight review

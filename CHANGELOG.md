@@ -16,12 +16,11 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   run, so the suite passes and the defect ships. The scan is the other way round.
   Both are kept because each catches what the other cannot.
 
-- **The text scan keeps only the rules that terminate.** One of the three is
-  genuinely closed — GNU regex escapes, where POSIX defines no backslash-class
-  escapes, so the set cannot grow. The other two are blacklists that are one entry
-  behind, and are stated as such: GNU-only tool names (closed behaviourally by the
-  CI job) and constructs newer than Bash 3.2 (a list that grows when a newer one is
-  found). It does
+- **The text scan keeps only the rules that terminate.** One HALF of one rule is
+  genuinely closed — the backslash-class escapes, where POSIX defines none, so the
+  set cannot grow. Everything else is a blacklist one entry behind and is stated as
+  such: gawk's own operators, GNU-only tool names (closed behaviourally by the CI
+  job) and constructs newer than Bash 3.2. It does
   *not* check GNU-only flags — `sed -i`, `readlink -f`, `grep -P`, `date -d` —
   because reading an option from text means parsing one, and eight review rounds
   produced clusters, long forms, equals forms, `-e` operands, fixed-string mode and
@@ -127,6 +126,18 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   conditional masks it. The `shopt` rule reads what the command *receives* rather
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
+
+- **An unquoted here-document delimiter means the body expands.** The body is data
+  for the rules, but bash still performs substitution in it, so a `$( … )` there
+  really invokes its command — and with the CI job removing that command, the
+  substitution fails silently while the surrounding `cat` succeeds. A quoted
+  delimiter suppresses expansion, and the two are no longer treated alike.
+
+- **A three-argument comparison is one whatever its operands are called.**
+  `test -v = -a` compares two strings and the second happens to be an operator
+  name; splitting on it first left a two-word part and no comparison. And
+  `declare -u`/`-l` convert case on assignment — Bash 3.2 rejects the attribute and
+  stores what it was given, which is a different value rather than a failure.
 
 - **`local -n`, `name+=value`, grouping per part, and substitutions inside shell
   bodies.** A nameref is usually written with `local`; an append assignment is

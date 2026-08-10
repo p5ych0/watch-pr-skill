@@ -622,6 +622,10 @@ SCAN_PROLOGUE='
             # `-a` AND `-o` JOIN TWO EXPRESSIONS, so the arity is per PART: in
             # `test -v = token -a x = x` each side is a three-argument comparison,
             # and measuring the whole thing found seven operands and no comparison.
+            # A THREE-ARGUMENT COMPARISON IS ONE, WHATEVER ITS OPERANDS ARE CALLED.
+            # `test -v = -a` compares two strings and the second happens to be `-a`;
+            # splitting on it first left a two-word part and no comparison at all.
+            if (vn - vb + 1 == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
             vpart = 1; vok = 1; vs = vb
             # …AND EACH PART CARRIES ITS OWN GROUPING. `test \( -v = token \) -a
             # \( x = x \)` leaves a parenthesis on either side of the join, and a
@@ -961,6 +965,17 @@ SCAN_PROLOGUE='
       # A BODY LINE IS NEVER JOINED. It is data, so a trailing backslash in it
       # continues nothing.
       if (hdn > 0) {
+          # AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS, so a substitution in it
+          # runs its command — the body is data for the RULES, but not for that.
+          if (HDX[hdi]) {
+              hdbody = subst_bodies($0)
+              if (hdbody != "") {
+                  hdn2 = split(hdbody, HDB, "\n")
+                  hdsave = line
+                  for (hdi2 = 1; hdi2 <= hdn2; hdi2++) { line = HDB[hdi2]; RULES() }
+                  line = hdsave
+              }
+          }
           t = $0
           # ONLY `<<-` STRIPS INDENTATION, and only TABS.
           if (HDD[hdi]) sub(/^\t+/, "", t)
@@ -1052,7 +1067,7 @@ SCAN_PROLOGUE='
           # quote characters and nothing between them reads to a blank terminator
           # line. `hdsaw` is what tells that from a `<<` with no word at all,
           # which an emptiness test alone could not.
-          hdw = ""; hdsaw = 0
+          hdw = ""; hdsaw = 0; hdquoted = 0
           while (hdk <= length(hdsrc)) {
               hdc = substr(hdsrc, hdk, 1)
               # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
@@ -1072,14 +1087,18 @@ SCAN_PROLOGUE='
                   # `&` before `;` again: the other order writes a literal `;&`
                   # into this file, which rule D reads as a case terminator.
                   if (hdc ~ /[[:space:]&;|<>()]/) break
-                  if (hdc == "\047" || hdc == "\042") { hdk++; hdsaw = 1; continue }
-                  if (hdc == "\134") { hdk++; hdsaw = 1; continue }
+                  if (hdc == "\047" || hdc == "\042") { hdk++; hdsaw = 1; hdquoted = 1; continue }
+                  if (hdc == "\134") { hdk++; hdsaw = 1; hdquoted = 1; continue }
               # An ESCAPED quote inside a quoted delimiter is part of the word.
               } else if (SC_CTX[hdk] != "" && !SC_ESC[hdk] && hdc == SC_CTX[hdk]) { hdk++; hdsaw = 1; continue }
               hdw = hdw hdc; hdsaw = 1
               hdk++
           }
-          if (hdsaw) { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
+          # WHETHER THE DELIMITER WAS QUOTED DECIDES WHETHER THE BODY EXPANDS.
+          # With an unquoted one bash performs substitution inside the body, so a
+          # `$( … )` there really invokes its command — and the body was being
+          # skipped whole.
+          if (hdsaw) { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash; HDX[hdn] = !hdquoted }
           hp = (hdk > hp) ? hdk : hp + 2
       }
       if (hdn > 0) hdi = 1 }
@@ -1454,6 +1473,13 @@ RULE_D='
     # a nameref is usually written with.
     if (cmd_opt("declare", "n") || cmd_opt("typeset", "n") || cmd_opt("local", "n")) {
         report("declare -n is Bash 4.3: " line); return }
+    # `declare -u` AND `-l` CONVERT CASE ON ASSIGNMENT — Bash 4. Bash 3.2 rejects
+    # the attribute and stores what it was given, which is a different value rather
+    # than a failure.
+    if (cmd_opt("declare", "u") || cmd_opt("declare", "l") ||
+        cmd_opt("typeset", "u") || cmd_opt("typeset", "l") ||
+        cmd_opt("local", "u")   || cmd_opt("local", "l")) {
+        report("declare -u and -l are Bash 4: " line); return }
     if (cmd_opt("read", "N") || cmd_opt("read", "i")) {
         report("this read option is newer than Bash 3.2: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
@@ -2380,6 +2406,10 @@ plant appendpfx  "prefix+=x shopt -s globstar || :"            D "globstar behin
 
 # …while each part of a compound comparison carries its own grouping.
 refute vgroupand "if test \( -v = token \) -a \( x = x \); then :; fi" D "two grouped comparisons joined by -a"
+# …and a three-argument comparison is one whatever its operands are CALLED:
+# `test -v = -a` compares two strings and the second happens to be an operator name.
+refute vopname   "if test -v = -a; then :; fi"                 D "a comparison whose operand is named -a"
+plant declareu   "value=abc; declare -u value || :"            D "declare -u, which converts case on assignment"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2485,6 +2515,28 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
 { [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS ───────────────────────────
+# The body is data for the rules, but bash still performs substitution in it, so a
+# `$( … )` there really invokes its command. A quoted delimiter suppresses that, and
+# the two must not be treated alike.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<EOF\n'
+  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
+  printf 'EOF\n'; } > "$PTMP/hdexpand.sh"
+he_hits="$(scan "$RULE_A" "$PTMP/hdexpand.sh")" || he_hits=SCANFAIL
+{ [ "$he_hits" != SCANFAIL ] && [ -n "$he_hits" ]; } \
+    && pass "a substitution in an expanded here-document body is scanned" \
+    || die "an unquoted delimiter hid a command in its body ('$he_hits')"
+# …while a QUOTED delimiter suppresses expansion, so the same text is data.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'EOF'\n"
+  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
+  printf 'EOF\n'; } > "$PTMP/hdquoted.sh"
+hq_hits="$(scan "$RULE_A" "$PTMP/hdquoted.sh")" || hq_hits=SCANFAIL
+{ [ "$hq_hits" != SCANFAIL ] && [ -z "$hq_hits" ]; } \
+    && pass "…while a quoted delimiter keeps it data" \
+    || die "a quoted here-document body was scanned ('$hq_hits')"
 
 # ── A SUBSTITUTION INSIDE A SHELL BODY IS STILL ONE ────────────────────────
 # The guard that stops a shell body from spawning another shell was stopping the
