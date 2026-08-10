@@ -123,6 +123,30 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **The grammar around a simple command, in the finite form it has.** An IO
+  number belongs to the redirection after it (`2>/dev/null shopt -s globstar`
+  invokes `shopt`); `command` and `builtin` invoke what follows them, while
+  `command -v X` describes X and runs nothing; a grouped test expression still has
+  primaries inside it; and an operator is only an operator when it was written as
+  one — a quoted or escaped `(` is an argument. `{fd}>file` joins the Bash 4 list.
+
+- **`$( … )` starts a fresh quoting context.** Not modelling it was the stated
+  limitation, and it stopped being acceptable: a substitution containing quotes
+  flipped the *outer* state at every one of them, so a `<<` written inside such a
+  string was read as a redirection and swallowed the rest of a real target — about
+  900 lines of one test file were never scanned. An unclosed substitution now
+  carries nothing to the next line, because a state derived from text this model
+  did not follow is a guess, and carrying a guess made every such spot contagious.
+
+- **Nothing carries across a file boundary.** A target that ends while a document
+  is open would otherwise consume the next target as its body, and the multi-file
+  scan would report clean because one file was truncated.
+
+- **The engine and the mode come from the words.** `gr"ep"` is `grep` and a quoted
+  `'-F'` is fixed-string mode; quote removal happens before the command sees
+  either, and a raw-text test saw neither — so one skipped the check entirely and
+  the other rejected portable code.
+
 - **A builtin rule is a rule about the command word.** `printf '%s' shopt -s
   globstar` runs `printf`, and rejecting it rejects portable code; so does
   treating a redirection as a boundary, because `shopt >/dev/null -s globstar`

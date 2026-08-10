@@ -97,9 +97,19 @@ SCAN_PROLOGUE='
     # It is still not a lexer. `$( … )` nesting, `${ … }` and a quote spanning a
     # continuation are not modelled, and the direction of that is unchanged: a rule
     # sees less context than it should and therefore REPORTS rather than excuses.
-    function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw) {
-        delete SC_CTX; delete SC_ESC; delete SC_ARGV
-        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0
+    # `$( … )` STARTS A FRESH QUOTING CONTEXT, and not knowing that was the
+    # limitation this file used to state and accept. It stopped being acceptable:
+    # a command substitution containing quotes flips the OUTER state at every one
+    # of them, so `"$(… "$x" … )"` left the scan unquoted where it is quoted — and
+    # a `<<` written inside such a string was then read as a redirection, queued a
+    # delimiter no line matches, and swallowed the rest of the file. That is the
+    # swallow-the-file shape, this time in a real target rather than a fixture.
+    #
+    # The nesting is a STACK: the state at the `$(` is pushed and restored at the
+    # matching `)`. Backticks are still not modelled, and that stays stated.
+    function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth) {
+        delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete QSTK
+        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; depth = 0
         q = q0; i = 1
         while (i <= length(l)) {
             ch = substr(l, i, 1)
@@ -132,14 +142,29 @@ SCAN_PROLOGUE='
                 # one and is a token of its own, so `(test -v x)` has `test` as a
                 # command word rather than as part of `(test`.
                 if (ch == " " || ch == "\t") {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                     word = ""; saw = 0
                     SC_EFF = SC_EFF ch; i++; continue
                 }
+                if (substr(l, i, 2) == "$(") {
+                    depth++; QSTK[depth] = q; q = ""
+                    SC_EFF = SC_EFF substr(l, i, 2); word = word substr(l, i, 2); saw = 1
+                    i += 2; continue
+                }
+                if (ch == ")" && depth > 0) {
+                    q = QSTK[depth]; depth--
+                    SC_EFF = SC_EFF ch; word = word ch; saw = 1
+                    i++; continue
+                }
+                # AN OPERATOR IS MARKED AS ONE. A quoted or escaped `(` is an
+                # ordinary word — `test \( -v x \)` groups an expression and the
+                # parenthesis is an ARGUMENT of `test` — and a list that recorded
+                # only the character could not tell the two apart, so the simple
+                # command ended at the group and never reached the operator.
                 if (index("();&|<>", ch) > 0) {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
                     word = ""; saw = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 SC_EFF = SC_EFF ch; word = word ch; saw = 1; i++; continue
@@ -147,6 +172,14 @@ SCAN_PROLOGUE='
             if (q == "\047") {
                 if (ch == "\047") { q = ""; i++; continue }
                 SC_EFF = SC_EFF ch; word = word ch; i++; continue
+            }
+            # A SUBSTITUTION OPENS INSIDE DOUBLE QUOTES TOO — `"$(… "$x" …)"` is the
+            # ordinary spelling, and handling it only in unquoted text left every
+            # inner quote toggling the OUTER state.
+            if (substr(l, i, 2) == "$(") {
+                depth++; QSTK[depth] = q; q = ""
+                SC_EFF = SC_EFF substr(l, i, 2); word = word substr(l, i, 2)
+                i += 2; continue
             }
             # Inside double quotes a backslash is literal EXCEPT before one of the
             # four characters it can escape there.
@@ -166,7 +199,14 @@ SCAN_PROLOGUE='
         # from it: a word opened on one physical line and closed on the next is
         # ONE word, and a scan that restarted at every line read that closing
         # quote as an opener — the whole rest of the line then became data.
-        SC_QEND = q
+        # AN UNCLOSED SUBSTITUTION CARRIES NOTHING. If the line ends with a `$(`
+        # still open, this model did not follow it — the text is as likely to be an
+        # awk or jq program quoted inside the shell as it is to be shell. Carrying a
+        # state derived from that made every such spot CONTAGIOUS: the next line was
+        # read as quoted, its comment stopped being a comment, and two real targets
+        # failed the gate for constructs they do not contain. Being unsure is a
+        # reason to carry nothing, not a reason to carry a guess.
+        SC_QEND = (depth > 0) ? "" : q
     }
     # ── WHAT A SIMPLE COMMAND IS ───────────────────────────────────────────
     #
@@ -192,8 +232,13 @@ SCAN_PROLOGUE='
         CMDW = ""; CMDN = 0
         for (i = from; i <= SC_ARGC; i++) {
             w = SC_ARGV[i]
-            if (is_op(w)) return i + 1
-            if (is_redir(w)) { i++; continue }
+            if (SC_AOP[i] && is_op(w)) return i + 1
+            # AN IO NUMBER BELONGS TO THE REDIRECTION AFTER IT. `2>/dev/null shopt
+            # -s globstar` invokes `shopt`; taking the `2` as the command word lost
+            # the whole simple command, and with the output redirected nothing else
+            # would have shown it.
+            if (w ~ /^[0-9]+$/ && (i < SC_ARGC) && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) { i += 2; continue }
+            if (SC_AOP[i] && is_redir(w)) { i++; continue }
             if (CMDW == "") {
                 if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
                 # RESERVED WORDS INTRODUCE a command rather than being one:
@@ -206,10 +251,29 @@ SCAN_PROLOGUE='
         }
         return SC_ARGC + 1
     }
+    # `command X` AND `builtin X` INVOKE X. `command shopt -s globstar` enables the
+    # option exactly as the bare spelling does, so the wrapper is unwrapped — but
+    # `command -v X` and `-V` DESCRIBE X rather than running it, which is the guard
+    # pattern this tree uses everywhere, so those are left alone.
+    function unwrap(i) {
+        while (CMDW == "command" || CMDW == "builtin") {
+            i = 1
+            while (i <= CMDN && CMDA[i] ~ /^-/) {
+                if (CMDA[i] == "-v" || CMDA[i] == "-V") return 0
+                i++
+            }
+            if (i > CMDN) return 0
+            CMDW = CMDA[i]
+            for (i = i + 1; i <= CMDN; i++) CMDA[i - 1] = CMDA[i]
+            CMDN--
+        }
+        return 1
+    }
     function cmd_has(cmd, name, i, j) {
         i = 1
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
+            if (!unwrap()) continue
             if (CMDW != cmd) continue
             for (j = 1; j <= CMDN; j++) if (CMDA[j] == name) return 1
         }
@@ -222,12 +286,17 @@ SCAN_PROLOGUE='
         i = 1
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
+            if (!unwrap()) continue
             if (CMDW != "[" && CMDW != "test") continue
+            # EVERY PRIMARY, not the first one. `test \( -v token \)` groups the
+            # expression, and stopping at the leading `(` never reached the operator
+            # — with the `if` around it masking the old shell, nothing saw it.
+            # The operand is still required: `test -v` alone is the one-argument
+            # string test, and `]` or `)` after it is the end of the expression
+            # rather than an operand.
             for (j = 1; j <= CMDN; j++) {
-                if (CMDA[j] == "!") continue
-                if (CMDA[j] != "-v") break
-                if (j < CMDN && CMDA[j + 1] != "]") return 1
-                break
+                if (CMDA[j] != "-v") continue
+                if (j < CMDN && CMDA[j + 1] != "]" && CMDA[j + 1] != ")") return 1
             }
         }
         return 0
@@ -245,9 +314,9 @@ SCAN_PROLOGUE='
                 rest = substr(l, i, 2)
                 if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; SEGQ[n] = ""; i++; continue }
                 if (ch == ";" || ch == "|") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
-                # A LONE `&` BACKGROUNDS AND ENDS A COMMAND, so `grep -F x f &
-                # grep "\s" f` is two commands, and the fixed-string exemption
-                # taken by the first was covering the second.
+                # A LONE `&` BACKGROUNDS AND ENDS A COMMAND, so a fixed-string
+                # grep followed by an ampersand and a second grep is two commands,
+                # and the exemption taken by the first was covering the second.
                 #
                 # The `&` OF A REDIRECTION — `2>&1`, `&>f` — splits here too, and
                 # is left to: a redirection carries no pattern of its own, so the
@@ -482,6 +551,21 @@ SCAN_PROLOGUE='
     # text that way. The delimiter is taken from the redirection and the body is
     # skipped until it reappears alone on a line. `<<-` strips leading tabs from the
     # terminator, so that form is allowed for.
+    # NOTHING CARRIES ACROSS A FILE BOUNDARY. A target that ends while a document
+    # is still open would otherwise consume the NEXT target as its body, and a real
+    # violation in that file would be skipped — a multi-file scan reporting clean
+    # because one file was truncated. The leftover state is a failure, not a
+    # nuisance: it goes to stderr, which `scan` treats as a failed scan.
+    # NOTHING CARRIES ACROSS A FILE BOUNDARY. A target that ends while a document
+    # is still open would otherwise consume the NEXT target as its body, and a real
+    # violation there would be skipped — a multi-file scan reporting clean because
+    # one file was truncated.
+    #
+    # CONFINED RATHER THAN FATAL. An unterminated document is usually this model
+    # reading a construct differently from bash rather than a broken target, and
+    # failing the whole scan on that would take the gate down for something that is
+    # not a portability defect. What matters is that it cannot reach the next file.
+    FNR == 1 { hdn = 0; hdi = 0; buf = ""; CARRY = "" }
     { raw = $0
       # A COMMAND CAN OPEN MORE THAN ONE DOCUMENT. `cat <<ONE <<TWO` is two, read
       # in the order written, and recording only the first meant the SECOND body
@@ -511,6 +595,11 @@ SCAN_PROLOGUE='
       # the same line — and deleting from that `#` deleted the closer and the
       # command with it. Mid-continuation the same applies: the `#` is inside a
       # line that is being assembled, not at the start of one.
+      # …AND ONLY WHERE THE LINE STARTS UNQUOTED. A word opened on an earlier line
+      # can carry a `#` as data — the quote then closes and a command follows on the
+      # same line — and deleting from that `#` deleted the closer and the command
+      # with it. Mid-continuation the same applies: the `#` is inside a line being
+      # assembled, not at the start of one.
       if (buf == "" && CARRY == "") sub(/^[[:space:]]*#.*$/, "", raw)
       # THE LOGICAL LINE IS ASSEMBLED FIRST, and only then read for redirections.
       # A continuation can split ANYTHING, including a delimiter word: `cat <<E\`
@@ -534,6 +623,23 @@ SCAN_PROLOGUE='
       if (nbs % 2 == 1 && SC_CTX[length(raw)] != "\047") {
           sub(/\\$/, "", raw); buf = buf raw; CARRY = SC_QEND; next }
       CARRY = SC_QEND
+      # A WORD LEFT OPEN IS NOT JOINED TO THE NEXT LINE, AND THAT IS A CHOICE.
+      # Bash would: a quote spanning physical lines is one command, so
+      # `printf %s data` opened on one line and closed on the next takes the words
+      # after the closing quote as ITS operands, not as a command of their own.
+      #
+      # Joining them was implemented and reverted. It requires quote fidelity this
+      # model does not have — a jq or awk program embedded in a string is full of
+      # quoting this scan reads differently from bash, and every such spot became
+      # contagious, gluing unrelated lines together. Two real targets started
+      # failing the gate for constructs they do not contain. A rule that rejects
+      # portable code is worse than one that misses a rare construct, so the lines
+      # stay separate and the carried quote state is all that crosses.
+      #
+      # What that costs: on the line after an unclosed quote, a command word cannot
+      # be told from an operand of the command that opened it. The two spellings
+      # are indistinguishable without the join, and this takes the reading that
+      # reports a construct rather than the one that excuses it.
       line = buf raw; buf = ""
 
       # AN INLINE COMMENT OPENS NOTHING, and a `<<` inside an arithmetic expression
@@ -697,11 +803,26 @@ RULE_A='
     # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so
     # `grep -F '\s' f` behaves the same on both platforms, and rejecting it made
     # the gate fail on portable code.
-    if (line ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
+    # FIXED-STRING MODE AND THE ENGINE COME FROM THE WORDS. Quote removal happens
+    # before the command sees either: `grep '-F' pat f` passes the ordinary option,
+    # and `gr"ep"` IS `grep`. A raw-text test saw neither, so the first rejected
+    # portable code and the second skipped the check entirely.
+    shell_scan(line, SC_Q0)
+    engine = 0; fixed = 0
+    for (ai = 1; ai <= SC_ARGC; ai++) {
+        if (SC_ARGV[ai] == "fgrep") { engine = 1; fixed = 1 }
+        else if (SC_ARGV[ai] ~ /^(grep|egrep|sed|awk|gawk)$/) engine = 1
+        else if (SC_ARGV[ai] ~ /^-[A-Za-z]*F$/ || SC_ARGV[ai] == "--fixed-strings") fixed = 1
+    }
+    if (fixed) return
 
-    if (line ~ /(grep|sed)/ && esc_class(line, "sSdDwWbBy<>")) {
+    if (!engine) return
+    grepsed = 0
+    for (ai = 1; ai <= SC_ARGC; ai++)
+        if (SC_ARGV[ai] ~ /^(grep|egrep|sed)$/) grepsed = 1
+    if (grepsed && esc_class(line, "sSdDwWbBy<>")) {
         report("GNU regex escape: " line); return }
-    if (line ~ /awk/ && esc_class(line, "sSdDwWBy<>")) {
+    if (!grepsed && esc_class(line, "sSdDwWBy<>")) {
         report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
@@ -861,6 +982,10 @@ RULE_D='
     # rejects portable code is worse than one that misses a rare construct: it
     # gets switched off. `&>>` is not restricted this way — a redirection has no
     # prose reading, and the same test would cost more than it buys.
+    # `{fd}>file` ALLOCATES A DESCRIPTOR AND NAMES IT — Bash 4, and Bash 3.2 reads
+    # the brace as an ordinary word. One more spelling in a finite list.
+    if (line ~ /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
+        report("a {varname} descriptor is Bash 4: " line); return }
     if (SEGI <= 1 && unquoted(WHOLE, "&>>")) {
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
@@ -1659,6 +1784,16 @@ refute vdata        "printf %s test -v token"                 D "the conditional
 # bash has.
 refute vbare     "if test -v; then :; fi"                     D "a bare -v, which is a string test"
 refute vbarebrk  "if [ -v ]; then :; fi"                      D "a bare -v in brackets"
+# …and the grammar around a simple command: an IO number belongs to the redirection
+# after it, `command` and `builtin` invoke what follows them, and a grouped test
+# expression still has primaries inside it.
+plant globstario  "2>/dev/null shopt -s globstar || :"        D "globstar behind an IO number"
+plant globstarcmd "command shopt -s globstar || :"            D "globstar through the command builtin"
+plant vgroup     "if test \( -v token \); then :; fi"            D "a -v primary inside a grouped expression"
+plant fdvar      'exec {logfd}>/dev/null || :'                 D "a {varname} descriptor allocation"
+# …while `command -v X` DESCRIBES X rather than running it, which is the guard
+# pattern this tree uses everywhere.
+refute vprobe    "command -v test -v token >/dev/null && :"   D "a command -v probe, which runs nothing"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -1739,6 +1874,36 @@ bc_hits="$(scan "$RULE_A" "$PTMP/bodycont.sh")" || bc_hits=SCANFAIL
 { [ "$bc_hits" != SCANFAIL ] && [ -n "$bc_hits" ]; } \
     && pass "…while a trailing backslash in a body line joins nothing" \
     || die "a body line was joined to its terminator ('$bc_hits')"
+
+# ── THE ENGINE AND THE MODE COME FROM THE WORDS ────────────────────────────
+# Quote removal happens before the command sees either. `gr"ep" -qE PATTERN f` IS
+# `grep`, and a raw-text test never saw the name — so the escape check was skipped
+# on a command that runs GNU grep.
+printf '#!/usr/bin/env bash\ngr"ep" -qE %s "$f" || :\n' "'\\s'" > "$PTMP/asmengine.sh"
+ae2_hits="$(scan "$RULE_A" "$PTMP/asmengine.sh")" || ae2_hits=SCANFAIL
+{ [ "$ae2_hits" != SCANFAIL ] && [ -n "$ae2_hits" ]; } \
+    && pass "an assembled engine name is still the engine" \
+    || die "gr\"ep\" was not recognised as grep ('$ae2_hits')"
+# …and a QUOTED `-F` is the ordinary fixed-string option, where a backslash is a
+# literal and the pattern means the same thing on both platforms.
+printf '#!/usr/bin/env bash\ngrep %s-F%s %s "$f"\n' "'" "'" "'\\s'" > "$PTMP/quotedF.sh"
+qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
+{ [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
+    && pass "…and a quoted -F is still fixed-string mode" \
+    || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── NOTHING CARRIES ACROSS A FILE BOUNDARY ─────────────────────────────────
+# A target that ends while a document is still open must not consume the next one
+# as its body: a real violation there would be skipped, and the multi-file scan
+# would report clean because one file was truncated.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<UNTERMINATED\n'
+  printf 'body text with no terminator\n'; } > "$PTMP/openfile.sh"
+printf '#!/usr/bin/env bash\ngrep -qE "\\s" "$f"\n' > "$PTMP/nextfile.sh"
+fb_hits="$(scan "$RULE_A" "$PTMP/openfile.sh" "$PTMP/nextfile.sh")" || fb_hits=SCANFAIL
+{ [ "$fb_hits" != SCANFAIL ] && [ -n "$fb_hits" ]; } \
+    && pass "an unterminated document does not consume the next target" \
+    || die "a truncated file hid the one after it ('$fb_hits')"
 
 # ── AN ANSI-C DELIMITER NAMES ITS DECODED WORD ─────────────────────────────
 # `cat <<$'EOF'` names `EOF`. Appending the characters as written recorded the
