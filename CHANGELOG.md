@@ -125,6 +125,23 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **The command model has a stated edge rather than an open one.** The rules that
+  ask *which command is this* need a notion of a simple command, and building one
+  took nine review rounds and roughly seventy findings, nearly all of them another
+  production of the shell grammar — the surface `RULE_C` was deleted for. So the
+  criterion is asymmetric now, and written where the model is: a **false positive
+  is a defect**, because a mandatory gate that rejects portable code gets switched
+  off; a **miss in a form the model does not follow is a limitation**, recorded
+  rather than chased, with the CI job and review as the other two layers. Not
+  followed: a command name held in a variable, a backquote substitution, a pattern
+  attached to its option, a substitution inside a compound-command header, a word
+  left open across physical lines, and a shell spawned from inside a shell body.
+
+  The header case is the one that was *measured*: reaching the command inside a
+  `for` list lost the header, so `for x in $(printf x) shopt globstar` was rejected
+  as an invocation. One direction misses a command, the other rejects portable
+  code, and the whole file has been consistent about which of those is worse.
+
 - **The wrappers compose, and consuming one removes everything it consumed.**
   `command env grep …` is both; running each unwrapping once in a fixed order
   stopped at the first. And `env LC_ALL=C grep …` left the assignment as the first

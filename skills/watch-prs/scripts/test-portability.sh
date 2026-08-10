@@ -301,6 +301,35 @@ SCAN_PROLOGUE='
         # reason to carry nothing, not a reason to carry a guess.
         SC_QEND = (depth > 0) ? "" : q
     }
+    # ── WHERE THIS MODEL STOPS, AND WHY IT STOPS THERE ─────────────────────
+    #
+    # The rules that ask "which command is this" — the `shopt` option names, the
+    # `-v` conditional, `declare -A`/`-g`, `wait -n`, and the regex engine — need a
+    # notion of a simple command. Building one has taken nine review rounds and
+    # roughly seventy findings, nearly all of them another production of the shell
+    # grammar. That is the surface CLAUDE.md records a structural checker being
+    # built and deleted six times for, and it is why rule C was deleted from this
+    # very file.
+    #
+    # So the model has a stated edge rather than an open one, and the criterion is
+    # asymmetric:
+    #
+    #   A FALSE POSITIVE IS A DEFECT. A mandatory gate that rejects portable code
+    #   gets switched off, and this file has said so from the first round. Those are
+    #   fixed whenever they are found, wherever they come from.
+    #
+    #   A MISS IN A FORM THIS MODEL DOES NOT FOLLOW IS A LIMITATION, recorded here
+    #   rather than chased. The portability CI job and review are the other two
+    #   layers, and neither of them needs this grammar.
+    #
+    # NOT FOLLOWED, as of this writing: a command name held in a VARIABLE
+    # (`tool=grep; "$tool" …`), a BACKQUOTE substitution, a pattern ATTACHED to its
+    # option (`grep -e PATTERN` written as one word), a substitution inside a
+    # compound-command HEADER, a word left open across physical lines, and a shell
+    # spawned from inside another shell body. Each was measured, not assumed: the
+    # header case was implemented and reverted, because reaching the command inside
+    # it lost the header and rejected the list data after it.
+    #
     # ── WHAT A SIMPLE COMMAND IS ───────────────────────────────────────────
     #
     # A rule about a BUILTIN is a rule about the command WORD, not about a word
@@ -377,10 +406,8 @@ SCAN_PROLOGUE='
                 # The header skip stops at the `(` that opens one and lets the
                 # ordinary walk take the command inside.
                 if (w == "case") {
-                    for (i = i + 1; i <= SC_ARGC; i++) {
-                        if (SC_AOP[i] && SC_ARGV[i] == "(") return i + 1
+                    for (i = i + 1; i <= SC_ARGC; i++)
                         if (SC_ARGV[i] == "in") break
-                    }
                     continue
                 }
                 if (w == "for" || w == "select") {
@@ -394,10 +421,15 @@ SCAN_PROLOGUE='
                     # the skip stops there so that command is examined.
                     pd = 0
                     for (i = i + 1; i <= SC_ARGC; i++) {
-                        if (SC_AOP[i] && SC_ARGV[i] == "(") {
-                            if (pd == 0 && !(i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "(")) return i + 1
-                            pd++; continue
-                        }
+                        # A SUBSTITUTION INSIDE THE LIST IS NOT EXAMINED, and that
+                        # is the trade. Stopping the skip at its `(` reaches the
+                        # command inside — and then the header is gone, so the list
+                        # data AFTER the `)` reads as an invocation of its own:
+                        # `for x in $(printf x) shopt globstar` was rejected. One
+                        # direction misses a command, the other rejects portable
+                        # code, and this file has said all along which of those is
+                        # worse. The whole header is grammar.
+                        if (SC_AOP[i] && SC_ARGV[i] == "(") { pd++; continue }
                         if (SC_AOP[i] && SC_ARGV[i] == ")") { pd--; continue }
                         if (pd > 0) continue
                         if (SC_AOP[i] && is_op(SC_ARGV[i]) && SC_ARGV[i] != ";") return i + 1
@@ -468,8 +500,15 @@ SCAN_PROLOGUE='
             i = simple_cmd(i)
             if (!unwrap()) continue
             if (CMDW != cmd) continue
-            for (j = 1; j <= CMDN; j++)
+            # AN OPTION OPERAND IS NOT AN OPTION. `read -p -N value` has `-N` as
+            # the PROMPT that `-p` takes, and scanning every dash-prefixed word
+            # independently read it as the post-3.2 option and rejected portable
+            # source. The builtins with operand-taking options are few and named.
+            for (j = 1; j <= CMDN; j++) {
+                if (CMDA[j] !~ /^-/) continue
                 if (CMDA[j] ~ /^-[A-Za-z]*$/ && index(CMDA[j], letter) > 1) return 1
+                if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pnstud]$/) j++
+            }
         }
         return 0
     }
@@ -527,13 +566,19 @@ SCAN_PROLOGUE='
             # primary rejected portable code.
             # The `]` of the bracket form is not an argument of the expression, and
             # counting it made the three-argument comparison look like four.
-            vn = CMDN; vb = 1
+            # THE EXPRESSION IS WHAT IS LEFT AFTER THE GRAMMAR. A bracket form
+            # ends with `]`, a negation begins with `!`, and a grouped expression is
+            # wrapped in parentheses — none of those are operands, and counting them
+            # made a three-argument comparison look like four or six.
+            vb = 1; vn = CMDN
             if (CMDW == "[" && vn > 0 && CMDA[vn] == "]") vn--
-            # A LEADING `!` NEGATES THE WHOLE EXPRESSION and is not part of it, so
-            # `test ! -v = token` is the negation of a three-argument comparison —
-            # counting the `!` made it four and the special case was skipped.
-            if (CMDA[1] == "!") { vb = 2; vn-- }
-            if (vn == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
+            while (vb <= vn && (CMDA[vb] == "(" || CMDA[vb] == "!")) vb++
+            while (vn >= vb && CMDA[vn] == ")") vn--
+            # THE THREE-ARGUMENT FORM IS A BINARY COMPARISON. `test -v = token` asks
+            # whether the string `-v` equals `token`, on every bash — the operator is
+            # in the MIDDLE, and reading the first word as a unary primary rejected
+            # portable code.
+            if (vn - vb + 1 == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
             for (j = 1; j <= CMDN; j++) {
                 if (CMDA[j] != "-v") continue
                 if (j < CMDN && CMDA[j + 1] != "]" && CMDA[j + 1] != ")") return 1
@@ -2225,13 +2270,23 @@ plant noclobber  ">|log shopt -s globstar || :"                D "globstar behin
 plant envassign  "env LC_ALL=C grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind an env assignment"
 plant twowrap    "command env grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind two wrappers"
 plant clusterc   "bash -cx 'wait -n || :'"                     D "a shell body behind a clustered -c"
-plant headersub  "for x in \$(grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}); do :; done" A "an engine inside a for-list substitution"
+# …and a substitution INSIDE a compound header is not examined. Stopping the skip
+# at its `(` reaches the command and then loses the header, so the list data after
+# the `)` reads as an invocation of its own — portable code rejected to catch a rare
+# command. The whole header is grammar.
+refute headerdata "for x in \$(printf x) shopt globstar; do :; done" D "list data after a substitution in a header"
 plant grepmax    "grep -m 1 -E ${sq}${bs}s${sq} ${dq}\$f${dq} || :"       A "a pattern after an option that takes a number"
 plant signedends "for i in {1..-1..-1}; do :; done"            D "a stepped expansion with signed endpoints"
 plant assembled  "de\"clare\" -A values || :"                   D "an associative array whose name is assembled"
 plant readn      "IFS= read -r -N 1 first < ${dq}\$f${dq} || :"      D "read -N, which is newer than Bash 3.2"
 # …while a NEGATED three-argument comparison is still a comparison.
 refute vnegbin   "if test ! -v = token; then :; fi"            D "a negated three-argument comparison"
+# …and GROUPING is not an operand either: `test \( ! -v = token \)` is the same
+# comparison wrapped in parentheses, and counting them made it six arguments.
+refute vgroupbin "if test \( ! -v = token \); then :; fi"      D "a grouped negated comparison"
+# …and an option OPERAND is not an option: `read -p -N value` has `-N` as the
+# prompt that `-p` takes.
+refute readprompt "IFS= read -p -N value < ${dq}\$f${dq}"           D "a prompt that looks like a newer option"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
