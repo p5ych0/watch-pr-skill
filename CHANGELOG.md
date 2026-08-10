@@ -127,6 +127,15 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **`exec -a name` takes an operand, `\c[` is escape, a quoted brace does not close
+  an expansion, and a quoted `{fd}>file` is data.** Four edges of the machinery the
+  previous rounds added: skipping the option but not its name made the name the
+  command; every `\cX` was decoding to one character because only letters were
+  answerable; `${unset:-"}"<<EOF}` closes at the *last* brace; and a descriptor
+  allocation has to be shell rather than text. The here-document terminator is
+  compared, not expanded — bash quote-removes the delimiter word and matches the
+  line literally, so the terminator is not a body line at all.
+
 - **A locale prefix counts only where the quoting is active, `\cA` names control-A,
   `exec` invokes what follows it, and `${ … }` is not a redirection.** Inside single
   quotes `$"` is literal text; every `\cX` was decoding to one fixed placeholder;

@@ -332,7 +332,10 @@ SCAN_PROLOGUE='
     #   rather than chased. The portability CI job and review are the other two
     #   layers, and neither of them needs this grammar.
     #
-    # NOT FOLLOWED, as of this writing: a command name held in a VARIABLE
+    # NOT FOLLOWED, as of this writing: a command substitution split across physical
+    # lines inside a here-document BODY (the bodies are read a line at a time,
+    # because that is how a terminator is recognised); a command name held in a
+    # VARIABLE
     # (`tool=grep; "$tool" …`), a BACKQUOTE substitution, a pattern ATTACHED to its
     # option (`grep -e PATTERN` written as one word), a substitution inside a
     # compound-command HEADER, a word left open across physical lines, and a shell
@@ -510,7 +513,12 @@ SCAN_PROLOGUE='
             # the command still runs, which is all these rules care about.
             if (CMDW == "exec") {
                 i = 1
-                while (i <= CMDN && CMDA[i] ~ /^-/) i++
+                # `-a name` REPLACES argv[0] and takes the word after it; skipping
+                # only the option made that name the command.
+                while (i <= CMDN && CMDA[i] ~ /^-/) {
+                    if (CMDA[i] ~ /^-[cl]*a$/ && i < CMDN) i++
+                    i++
+                }
                 if (i > CMDN) return 0
                 take_after(i); moved = 1; continue
             }
@@ -860,17 +868,30 @@ SCAN_PROLOGUE='
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
             if (SC_ESC[i]) continue
-            if (substr(l, i, 2) == "${") { d++; SC_ARI[i] = 1; SC_ARI[i + 1] = 1; i++; continue }
+            if (SC_CTX[i] == "" && substr(l, i, 2) == "${") { d++; SC_ARI[i] = 1; SC_ARI[i + 1] = 1; i++; continue }
             if (d > 0) {
-                if (ch == "{") d++
-                else if (ch == "}") d--
+                # A QUOTED BRACE IS DATA. `${unset:-"}"<<EOF}` closes at the LAST
+                # brace, and counting the quoted one closed it early — after which
+                # the `<<EOF` was outside the expansion and queued a document.
+                if (SC_CTX[i] == "") {
+                    if (ch == "{") d++
+                    else if (ch == "}") d--
+                }
                 SC_ARI[i] = 1
             }
         }
     }
-    function ctrl_code(c, u) {
-        u = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", toupper(c))
-        return u > 0 ? u : 0
+    # The character `\cX` names: X uppercased, with bit 64 toggled. `\c[` is escape
+    # and `\c?` is delete, so the letters are not the whole of it — a table built
+    # once is what makes any printable operand answerable.
+    function ord(c, i) {
+        if (ORD["A"] == "") for (i = 32; i < 127; i++) ORD[sprintf("%c", i)] = i
+        return ORD[c]
+    }
+    function ctrl_code(c, v) {
+        v = ord(toupper(c))
+        if (v == "") return 0
+        return v >= 64 ? v - 64 : v + 64
     }
     function ansic_decode(seg, out, i, ch, nx, h, o, k) {
         if (ESCCODE[1] == "") {
@@ -1030,7 +1051,14 @@ SCAN_PROLOGUE='
       if (hdn > 0) {
           # AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS, so a substitution in it
           # runs its command — the body is data for the RULES, but not for that.
-          if (HDX[hdi]) {
+          # THE TERMINATOR IS NOT EXPANDED. Bash performs quote removal on the
+          # delimiter word and compares the line literally, so a body line that IS
+          # the terminator is not a body line at all — running the expansion check
+          # over it rejected a document whose delimiter is written as an
+          # expansion, against its own terminator line.
+          t = $0
+          if (HDD[hdi]) sub(/^\t+/, "", t)
+          if (HDX[hdi] && t != HDQ[hdi]) {
               # A PARAMETER EXPANSION IS ACTIVE THERE TOO. A case-modifying one in
               # an unquoted body is performed by bash, so the Bash 4 rules for it
               # apply — while the ordinary TEXT of the body is still
@@ -1044,9 +1072,7 @@ SCAN_PROLOGUE='
                   line = hdsave
               }
           }
-          t = $0
           # ONLY `<<-` STRIPS INDENTATION, and only TABS.
-          if (HDD[hdi]) sub(/^\t+/, "", t)
           if (t == HDQ[hdi]) { hdi++; if (hdi > hdn) { hdn = 0; hdi = 0 } }
           next
       }
@@ -1583,7 +1609,10 @@ RULE_D='
     # prose reading, and the same test would cost more than it buys.
     # `{fd}>file` ALLOCATES A DESCRIPTOR AND NAMES IT — Bash 4, and Bash 3.2 reads
     # the brace as an ordinary word. One more spelling in a finite list.
-    if (line ~ /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
+    # OUTSIDE QUOTES, like every other construct here: a quoted `{fd}>file` is data,
+    # and a raw-line pattern rejected it.
+    if ((unquoted(line, "}<") || unquoted(line, "}>")) &&
+        line ~ /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
         report("a {varname} descriptor is Bash 4: " line); return }
     if (SEGI <= 1 && unquoted(WHOLE, "&>>")) {
         report("&>> is a Bash 4 redirection: " WHOLE); return }
@@ -2495,6 +2524,10 @@ plant declareu   "value=abc; declare -u value || :"            D "declare -u, wh
 # …and `exec` replaces the shell with the command after its own options, which
 # still runs it.
 plant execengine "exec grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"             A "an engine invoked through exec"
+# …and `exec -a name` replaces argv[0], so the name is not the command.
+plant execname   "exec -a alt grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"      A "an engine behind exec -a"
+# …while a quoted descriptor allocation is data.
+refute fdquoted  "printf %s ${sq}{fd}>file${sq}"               D "a quoted descriptor allocation"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2613,16 +2646,47 @@ ql_hits="$(scan "$RULE_A" "$PTMP/quotedlocale.sh")" || ql_hits=SCANFAIL
 { [ "$ql_hits" != SCANFAIL ] && [ -n "$ql_hits" ]; } \
     && pass "a quoted locale prefix is part of the delimiter word" \
     || die "the dollar was discarded inside single quotes ('$ql_hits')"
-# …and `\cA` names control-A, not one placeholder for every control escape.
+# …and `\c[` names ESCAPE, which is where a table beats a letter list: every
+# control escape decoded to the same character while only the letters were
+# answerable, so a delimiter built from one matched nothing.
 { printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$%s%scA%s\n' "$sq" "$bs" "$sq"
+  printf 'cat <<$%s%sc[%s\n' "$sq" "$bs" "$sq"
   printf 'body text\n'
-  printf '\001\n'
+  printf '\033\n'
   printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/ctrldelim.sh"
 cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
 { [ "$cd3_hits" != SCANFAIL ] && [ -n "$cd3_hits" ]; } \
     && pass "…and a control escape names the character it stands for" \
-    || die "cat <<\$'\\cA' did not end at control-A ('$cd3_hits')"
+    || die "a control-escape delimiter did not end at its character ('$cd3_hits')"
+
+# ── A QUOTED BRACE DOES NOT CLOSE AN EXPANSION ─────────────────────────────
+# `${unset:-"}"<<EOF}` closes at the LAST brace, and counting the quoted one closed
+# it early — after which the `<<EOF` was outside the expansion and queued a
+# document whose terminator never comes.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'value=${unset:-%s}%s<<EOF}\n' "$dq" "$dq"
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/pexbrace.sh"
+pb_hits="$(scan "$RULE_A" "$PTMP/pexbrace.sh")" || pb_hits=SCANFAIL
+{ [ "$pb_hits" != SCANFAIL ] && [ -n "$pb_hits" ]; } \
+    && pass "a quoted brace does not close a parameter expansion" \
+    || die "an expansion closed at a quoted brace ('$pb_hits')"
+
+# ── THE TERMINATOR IS COMPARED, NOT EXPANDED ───────────────────────────────
+# Bash performs quote removal on the delimiter word and compares the line
+# literally, so a body line that IS the terminator is not a body line at all.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<${name^^} || :\n'
+  printf 'body text\n'
+  printf '${name^^}\n'; } > "$PTMP/hdterm.sh"
+ht_hits="$(scan "$RULE_D" "$PTMP/hdterm.sh")" || ht_hits=SCANFAIL
+# ONE hit, not two. The OPENING line carries the expansion text and is reported —
+# that is a separate question, and not the one this fixture is about. What the fix
+# changes is whether the TERMINATOR line is reported as well, so the count is what
+# distinguishes them.
+ht_n="$(printf '%s' "$ht_hits" | grep -c 'case modification' || true)"
+{ [ "$ht_hits" != SCANFAIL ] && [ "$ht_n" = 1 ]; } \
+    && pass "a terminator is compared rather than expanded" \
+    || die "the terminator line was scanned as a body ($ht_n hits)"
 
 # ── `${ … }` IS AN EXPANSION, NOT A REDIRECTION ────────────────────────────
 # `trimmed=${value#<<EOF}` is a removal pattern, and the two characters in it were
