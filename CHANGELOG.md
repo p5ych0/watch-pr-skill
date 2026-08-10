@@ -46,9 +46,11 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   away from its own pattern — `grep "x;\s" f` — so neither half satisfied a rule,
   and it suppressed a real `|&` on any line that quoted something else. It walks
   the line tracking quotes and breaks only at depth zero. It follows backslash
-  escapes inside double quotes, and here-document bodies are dropped before it
-  ever sees them. Not a lexer: it does not know about `$(…)` nesting, `((…))`, or
-  a quote spanning a continuation, and says so.
+  escapes inside double quotes, here-document bodies are dropped before it ever
+  sees them, and `$( … )`, `<( … )` and `(( … ))` are modelled — see the entries
+  below for what each of those turned out to require. What it still does not follow:
+  a word left open across physical lines, backtick substitutions, and the body of a
+  shell spawned from inside another shell body.
 
 - **An escaped backslash is not an escape.** `grep '\\s' f` passes two
   backslashes and an `s`, which both engines read as an escaped literal backslash
@@ -122,6 +124,20 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   conditional masks it. The `shopt` rule reads what the command *receives* rather
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
+
+- **The wrappers a command arrives through, and the shapes it sits behind.** `env`
+  runs the command after its options and assignments, as `command` and `builtin`
+  do. `>>`, `<<` and `<>` are single operators — tokenised a character at a time,
+  the second `>` of `>>log` was consumed as the preceding operator's target and
+  `log` became the command word. `<( … )` runs a command like `$( … )` does. A
+  `case` header ends at `in`, not at a `do` that never comes. And every literal
+  `bash -c` body on a line is scanned, not just the first.
+
+- **`-F` is an option only in its own position, and only for the grep family.**
+  `awk -F ,` sets a field separator; `grep -e PATTERN -e -F` makes the second `-F` a
+  pattern, because `-e` takes the next word whatever it looks like. `-f` names a
+  *file* of patterns, so its operand is not pattern text — and that holds for
+  `sed -f script` and `awk -f prog` too.
 
 - **Only the operands that carry a pattern are examined.** `grep x 'file\s'`
   searches for `x` in a file whose *name* contains a backslash — the same search on

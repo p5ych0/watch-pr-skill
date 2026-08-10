@@ -127,6 +127,12 @@ SCAN_PROLOGUE='
                 if (ch == "\047" || ch == "\042") { q = ch; i++; continue }
                 if (ch == "(") d++
                 else if (ch == ")") d--
+            } else if (q == "\042" && ch == "\134") {
+                # INSIDE DOUBLE QUOTES A BACKSLASH ESCAPES the next character, so an
+                # escaped quote does not close the string. Treating it as the closer
+                # counted the following `)` as nesting and read the real closer as an
+                # opener — after which the span ran to the end of the line.
+                i += 2; continue
             } else if (ch == q) q = ""
             i++
         }
@@ -187,6 +193,17 @@ SCAN_PROLOGUE='
                     k = arith_end(l, i + 3)
                     SC_EFF = SC_EFF substr(l, i, k - i); word = word substr(l, i, k - i); saw = 1
                     i = k; continue
+                }
+                # `<( … )` AND `>( … )` RUN A COMMAND TOO. They are the same shape
+                # as a substitution with a redirection character in front, and not
+                # modelling them left the command inside as part of a word.
+                if ((ch == "<" || ch == ">") && substr(l, i + 1, 1) == "(") {
+                    depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
+                    word = ""; saw = 0
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1
+                    SC_EFF = SC_EFF substr(l, i, 2)
+                    i += 2; continue
                 }
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
@@ -327,6 +344,11 @@ SCAN_PROLOGUE='
                 continue
             }
             if (SC_AOP[i] && is_redir(w)) {
+                # `>>`, `<<` AND `<>` ARE ONE OPERATOR. Tokenised a character at a
+                # time, the second `>` of `>>log` was consumed as the preceding
+                # operator TARGET, and `log` then became the command word — the real
+                # command after it was only an argument.
+                while (i < SC_ARGC && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) i++
                 if (i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "&") i++
                 i++
                 continue
@@ -343,7 +365,15 @@ SCAN_PROLOGUE='
                 # arguments — `for shopt in globstar` was reported as a Bash 4
                 # option. The header runs to its `do` or `in`, and there is nothing
                 # in it for these rules.
-                if (w == "for" || w == "select" || w == "case") {
+                # `case x in` ENDS AT `in`, and what follows is a pattern list and
+                # then commands. Grouping it with `for` made the header search for a
+                # `do` that never comes, so an entire arm was consumed as grammar.
+                if (w == "case") {
+                    for (i = i + 1; i <= SC_ARGC; i++)
+                        if (SC_ARGV[i] == "in") break
+                    continue
+                }
+                if (w == "for" || w == "select") {
                     # THE LIST IS PART OF THE HEADER. `for x in a b c; do` names a
                     # variable and then a WORD LIST, and stopping at `in` handed that
                     # list to the next iteration as a command with arguments.
@@ -376,6 +406,20 @@ SCAN_PROLOGUE='
     # `command -v X` and `-V` DESCRIBE X rather than running it, which is the guard
     # pattern this tree uses everywhere, so those are left alone.
     function unwrap(i) {
+        # `env` RUNS THE COMMAND AFTER ITS OPTIONS AND ASSIGNMENTS, which is the
+        # third spelling of the same wrapper — and the one a script reaches for when
+        # it wants a clean environment.
+        while (CMDW == "env") {
+            i = 1
+            while (i <= CMDN && (CMDA[i] ~ /^-/ || CMDA[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
+                if (CMDA[i] == "-u" || CMDA[i] == "--unset") i++
+                i++
+            }
+            if (i > CMDN) return 0
+            CMDW = CMDA[i]
+            for (i = i + 1; i <= CMDN; i++) CMDA[i - 1] = CMDA[i]
+            CMDN--
+        }
         while (CMDW == "command" || CMDW == "builtin") {
             i = 1
             while (i <= CMDN && CMDA[i] ~ /^-/) {
@@ -405,17 +449,23 @@ SCAN_PROLOGUE='
     }
     # The body of an invoked `bash -c` / `sh -c`, or "" when there is none. The
     # operand is already quote-removed, which is what makes it scannable as shell.
-    function shell_c_body(l, i, j, base) {
+    # EVERY literal shell body on the line, in order, joined by newlines so each is
+    # a logical line of its own when it is scanned. Returning at the first one left
+    # a second `bash -c` on the same line unexamined — and the wrappers apply here
+    # too, because `command bash -c …` and `env bash -c …` invoke the same shell.
+    function shell_c_body(l, i, j, base, out) {
         shell_scan(l, SC_Q0)
+        out = ""
         i = 1
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
+            if (!unwrap()) continue
             base = CMDW; sub(/^.*\//, "", base)
             if (base != "bash" && base != "sh") continue
             for (j = 1; j < CMDN; j++)
-                if (CMDA[j] ~ /^-[A-Za-z]*c$/) return CMDA[j + 1]
+                if (CMDA[j] ~ /^-[A-Za-z]*c$/) { out = out (out == "" ? "" : "\n") CMDA[j + 1]; break }
         }
-        return ""
+        return out
     }
     function cmd_has(cmd, name, i, j) {
         i = 1
@@ -921,7 +971,7 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     # otherwise never be examined at all.
     out="$(awk "$SCAN_PROLOGUE"'
         { RULES() }
-        function RULES(  nseg, si, lq, body, saved) {
+        function RULES(  nseg, si, lq, body, saved, nb) {
             # `WHOLE` survives the split, for the constructs the split destroys:
             # `;&` is a case terminator and splitting on `;` takes it apart.
             WHOLE = line
@@ -940,7 +990,8 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
                 if (body != "") {
                     saved = WHOLE
                     NESTED = 1; SC_Q0 = ""
-                    line = body; RULES()
+                    nb = split(body, BODIES, "\n")
+                    for (si = 1; si <= nb; si++) { line = BODIES[si]; RULES() }
                     NESTED = 0
                     line = saved; WHOLE = saved; SC_Q0 = lq
                 }
@@ -1034,12 +1085,15 @@ RULE_A='
         if (ebase == "fgrep") { efixed = 1; egrepsed = 1 }
         else if (ebase ~ /^(grep|egrep|sed)$/) egrepsed = 1
         else if (ebase !~ /^(awk|gawk)$/) continue
-        # `--` ENDS THE OPTIONS. After it a word beginning with a dash is a
-        # filename, so `grep -e PATTERN -- -F` searches a file called `-F` with the
-        # pattern still active — reading that as fixed-string mode exempted a
-        # command whose pattern is not.
+        # `-F` IS AN OPTION IN ITS OWN POSITION, and only for the grep family.
+        # `awk -F ,` sets the field separator; `grep -e PATTERN -e -F` makes the
+        # second `-F` a PATTERN, because `-e` takes the next word whatever it looks
+        # like; and after `--` a leading dash is a filename. Each of those read as
+        # fixed-string mode and exempted a command whose pattern is not.
         for (aj = 1; aj <= CMDN; aj++) {
             if (CMDA[aj] == "--") break
+            if (CMDA[aj] ~ /^-[A-Za-z]*[ef]$/) { aj++; continue }
+            if (!egrepsed) continue
             # `F` ANYWHERE IN THE CLUSTER. `grep -Fq PATTERN` has both options
             # active, and requiring `F` last read it as an ordinary option word.
             if (CMDA[aj] ~ /^-[A-Za-z]*F[A-Za-z]*$/ || CMDA[aj] == "--fixed-strings") efixed = 1
@@ -1056,7 +1110,16 @@ RULE_A='
         eargs = ""; epat = 0
         for (aj = 1; aj <= CMDN; aj++) {
             if (CMDA[aj] == "--") { aj++; if (!epat && aj <= CMDN) { eargs = eargs " " CMDA[aj]; epat = 1 } break }
-            if (CMDA[aj] ~ /^-[A-Za-z]*[ef]$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
+            # `-e` CARRIES A PATTERN; `-f` NAMES A FILE OF THEM. Appending the
+            # filename read its name as a pattern — and `sed -f script` and
+            # `awk -f prog` are files for the same reason.
+            # AN OPTION THAT TAKES AN ARGUMENT CONSUMES IT, or the argument is
+            # read as the pattern: `awk -F , PROGRAM` would otherwise make the comma
+            # the program. The list is per engine and short — awk takes `-F` and
+            # `-v`, and `-f` names a file for all three.
+            if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
+            if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
+            if (CMDA[aj] ~ /^-[A-Za-z]*e$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
             if (CMDA[aj] ~ /^-/) continue
             if (!epat) { eargs = eargs " " CMDA[aj]; epat = 1 }
         }
@@ -1722,6 +1785,7 @@ hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
 # printf format, because the escaping of a backslash count is the thing under
 # test and a format string adds a second layer of it.
 one_bs='\'
+bs="\\"; dq='"'; sq="'"
 two_bs='\\'
 printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/evenesc.sh"
 ee_hits="$(scan "$RULE_A" "$PTMP/evenesc.sh")" || ee_hits=SCANFAIL
@@ -2089,6 +2153,23 @@ plant nestedopt  "bash -c 'shopt -s globstar' || :"           D "globstar inside
 # …and the arithmetic FOR header is a header: the expression inside it is not a
 # command, whatever its words are called.
 refute arithfor  "for (( i=0; shopt + globstar; i++ )); do :; done" D "an arithmetic for header"
+# …and the wrappers a command can arrive through, and the redirections it can sit
+# behind, and the arms of a `case`.
+plant envengine  "env grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :"        A "an engine invoked through env"
+plant envshell   "env bash -c 'wait -n || :'"                 D "a shell body behind env"
+plant cmdshell   "command bash -c 'wait -n || :'"             D "a shell body behind the command builtin"
+plant twobodies  "bash -c ':'; bash -c 'wait -n || :'"        D "a second shell body on the same line"
+plant appendred  ">>log shopt -s globstar || :"               D "globstar behind an appending redirection"
+plant casearm    "case x in x) shopt -s globstar || : ;; esac" D "globstar inside a case arm"
+plant procsub    "out=\$(cat <(grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq})) || :" A "an engine inside a process substitution"
+# …while `-F` is an option only in its own position and only for the grep family,
+# and `-f` names a FILE of patterns rather than carrying one.
+refute awkfs     "awk -F , '\''/x/'\'' \"$f\""                       A "awk -F, which sets a field separator"
+# …and the same command WITH an escape must still report: if `-F` were read as
+# fixed-string mode the whole command would be skipped, which is what the refute
+# above cannot show on its own.
+plant awkfspat   "awk -F , ${sq}/${bs}s/${sq} ${dq}\$f${dq}"                A "a gawk operator behind a field separator"
+refute grepfile  "grep -f 'patterns\\s' \"$f\""                   A "a -f operand, which names a file"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2236,6 +2317,20 @@ pe_hits="$(scan "$RULE_A" "$PTMP/pathengine.sh")" || pe_hits=SCANFAIL
 # swallowed the rest of the logical line — taking a real command with it.
 { printf '#!/usr/bin/env bash\n'
   printf 'value=$(( ${x:-%s(%s} + 1 )); shopt -s globstar || :\n' "'" "'"; } > "$PTMP/arithquote.sh"
+# …and an ESCAPED quote inside the span does not close the string it is in: taking
+# it as the closer counted the `)` after it as nesting and read the real closer as
+# an opener, after which the span ran to the end of the line.
+#
+# The command shares the SEGMENT with the expansion deliberately. With an operator
+# between them the splitter would find the command whatever the span did, and the
+# fixture would pass for a reason that is not the one it names.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'value=$(( ${x:-%s%s%s)%s} + 1 )) shopt -s globstar\n' \
+      "$dq" "$bs" "$dq" "$dq"; } > "$PTMP/aritharith.sh"
+ae3_hits="$(scan "$RULE_D" "$PTMP/aritharith.sh")" || ae3_hits=SCANFAIL
+{ [ "$ae3_hits" != SCANFAIL ] && [ -n "$ae3_hits" ]; } \
+    && pass "…and an escaped quote inside a span does not end its string" \
+    || die "an escaped quote ended the arithmetic span early ('$ae3_hits')"
 aq2_hits="$(scan "$RULE_D" "$PTMP/arithquote.sh")" || aq2_hits=SCANFAIL
 { [ "$aq2_hits" != SCANFAIL ] && [ -n "$aq2_hits" ]; } \
     && pass "a command after an arithmetic span is still visible" \
