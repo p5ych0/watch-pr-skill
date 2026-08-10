@@ -123,6 +123,24 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A builtin rule is a rule about the command word.** `printf '%s' shopt -s
+  globstar` runs `printf`, and rejecting it rejects portable code; so does
+  treating a redirection as a boundary, because `shopt >/dev/null -s globstar`
+  still passes both operands. The word list makes this small: skip assignments,
+  skip reserved words, skip redirections and their targets, take the first word
+  that is left. `-v` needs an operand too — `test -v` alone is the one-argument
+  string test every bash has.
+
+- **A backslash-newline inside single quotes is data, and so is a `#`.** Bash keeps
+  both characters of the first, so a single-quoted value split across two lines is
+  not a continuation — joining it ran the halves together into a GNU-only name the
+  source never contained. And a word opened on an earlier line can carry a `#`,
+  with the quote closing and a command following on the same line; deleting from
+  that `#` deleted the command with it.
+
+- **An ANSI-C delimiter names its decoded word.** `cat <<$'EOF'` names `EOF`, and
+  appending the characters as written recorded the dollar and the quotes too.
+
 - **The logical line is assembled before it is read for redirections.** A
   continuation can split anything, including a delimiter word: `cat <<E\` then
   `OF` opens a document terminated by `EOF`, and extracting first recorded `E` and

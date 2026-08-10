@@ -168,26 +168,70 @@ SCAN_PROLOGUE='
         # quote as an opener — the whole rest of the line then became data.
         SC_QEND = q
     }
-    # True when `cmd` and `name` are words of the SAME simple command — no control
-    # operator between them. `shopt -s nullglob globstar` qualifies; `shopt -s x;
-    # echo globstar` does not.
-    function argv_pair(cmd, name, i, j) {
-        for (i = 1; i <= SC_ARGC; i++) {
-            if (SC_ARGV[i] != cmd) continue
-            for (j = i + 1; j <= SC_ARGC; j++) {
-                if (index("();&|<>", SC_ARGV[j]) > 0 && length(SC_ARGV[j]) == 1) break
-                if (SC_ARGV[j] == name) return 1
+    # ── WHAT A SIMPLE COMMAND IS ───────────────────────────────────────────
+    #
+    # A rule about a BUILTIN is a rule about the command WORD, not about a word
+    # appearing somewhere on the line: `printf %s shopt -s globstar` runs `printf`,
+    # and rejecting it is rejecting portable code. CLAUDE.md records
+    # command-position matching being built and deleted for rule B, four rounds
+    # running — but that was a regex over raw text guessing where a command began.
+    # This reads the WORD LIST the shared model already produces, where the
+    # operators are tokens rather than characters to be spotted, and the whole rule
+    # is: skip assignments, skip redirections and their targets, take the first
+    # word that is left.
+    function is_op(w)    { return length(w) == 1 && index("();&|", w) > 0 }
+    function is_redir(w) { return w == "<" || w == ">" }
+    # Fills CMDW (the command word) and CMDA[1..CMDN] (its remaining words) for the
+    # simple command starting at `from`, and returns where the next one starts.
+    #
+    # A REDIRECTION DOES NOT END A COMMAND. `shopt >/dev/null -s globstar` still
+    # passes `-s globstar` to `shopt`; treating `>` as a boundary lost the operands
+    # and the construct reported clean — and with the output redirected, nothing
+    # else would have shown it either.
+    function simple_cmd(from, i, w) {
+        CMDW = ""; CMDN = 0
+        for (i = from; i <= SC_ARGC; i++) {
+            w = SC_ARGV[i]
+            if (is_op(w)) return i + 1
+            if (is_redir(w)) { i++; continue }
+            if (CMDW == "") {
+                if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/) continue
+                # RESERVED WORDS INTRODUCE a command rather than being one:
+                # `if [ -v x ]` runs `[`, not `if`. The list is the shell grammar
+                # and is closed — a leading `!` is one of them, while an `!` after
+                # the command word is that command an operand.
+                if (index(" if then elif else fi while until do done for select case esac function time { } ! ", " " w " ") > 0) continue
+                CMDW = w
+            } else { CMDN++; CMDA[CMDN] = w }
+        }
+        return SC_ARGC + 1
+    }
+    function cmd_has(cmd, name, i, j) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (CMDW != cmd) continue
+            for (j = 1; j <= CMDN; j++) if (CMDA[j] == name) return 1
+        }
+        return 0
+    }
+    # `[ -v x ]` and `test -v x` evaluate the Bash 4.2 operator; `test -v` alone is
+    # the ordinary one-argument string test that every bash has, so an operand is
+    # required. A leading `!` negates and changes neither answer.
+    function cond_v(i, j) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (CMDW != "[" && CMDW != "test") continue
+            for (j = 1; j <= CMDN; j++) {
+                if (CMDA[j] == "!") continue
+                if (CMDA[j] != "-v") break
+                if (j < CMDN && CMDA[j + 1] != "]") return 1
+                break
             }
         }
         return 0
     }
-    # A RULE JUDGES A SIMPLE COMMAND, NOT A LOGICAL LINE. `grep -F x f; grep "\s" f`
-    # has one fixed-string command and one that is not, and an exemption taken for
-    # the whole line let the first excuse the second. The line is split on the
-    # operators that separate commands and each rule is applied per segment.
-    #
-    # The split reads the shared model, so a separator inside quotes — or one made
-    # literal by a backslash — no longer cuts a command away from its own pattern.
     function segments(l, n, i, ch, rest) {
         shell_scan(l, SC_Q0)
         # EACH SEGMENT KEEPS ITS OWN STARTING STATE. The first inherits whatever
@@ -461,7 +505,13 @@ SCAN_PROLOGUE='
       # FULL-LINE COMMENTS GO BEFORE ANYTHING IS INFERRED FROM THE TEXT — but
       # AFTER the terminator check above, which compares against the untouched
       # line, because a quoted delimiter may begin with a comment character.
-      sub(/^[[:space:]]*#.*$/, "", raw)
+      #
+      # AND ONLY WHERE THE LINE STARTS UNQUOTED. A word opened on an earlier line
+      # can carry a `#` as data — the quote then closes and a command follows on
+      # the same line — and deleting from that `#` deleted the closer and the
+      # command with it. Mid-continuation the same applies: the `#` is inside a
+      # line that is being assembled, not at the start of one.
+      if (buf == "" && CARRY == "") sub(/^[[:space:]]*#.*$/, "", raw)
       # THE LOGICAL LINE IS ASSEMBLED FIRST, and only then read for redirections.
       # A continuation can split ANYTHING, including a delimiter word: `cat <<E\`
       # and `OF` opens a document terminated by `EOF`, and extracting before the
@@ -471,9 +521,19 @@ SCAN_PROLOGUE='
       # literal backslash and the command ENDS there; joining anyway glued the next
       # line on, and an exemption taken by the first half then covered the second.
       # The same parity that decides an escape decides a continuation.
+      #
+      # A BACKSLASH-NEWLINE INSIDE SINGLE QUOTES IS DATA. Bash keeps both, so a
+      # single-quoted value split across two lines keeps the backslash and the
+      # newline as characters — and joining them ran the halves together into a
+      # GNU-only tool name this scan then invented out of portable code. The
+      # quoting at the END of the physical line decides, which is why the line is
+      # scanned before the join rather than after it.
+      shell_scan(raw, CARRY)
       nbs = 0
       while (nbs < length(raw) && substr(raw, length(raw) - nbs, 1) == "\134") nbs++
-      if (nbs % 2 == 1) { sub(/\\$/, "", raw); buf = buf raw; next }
+      if (nbs % 2 == 1 && SC_CTX[length(raw)] != "\047") {
+          sub(/\\$/, "", raw); buf = buf raw; CARRY = SC_QEND; next }
+      CARRY = SC_QEND
       line = buf raw; buf = ""
 
       # AN INLINE COMMENT OPENS NOTHING, and a `<<` inside an arithmetic expression
@@ -510,6 +570,16 @@ SCAN_PROLOGUE='
               hdc = substr(hdsrc, hdk, 1)
               # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
               # sits: keeping it recorded a delimiter no line will ever equal.
+              # AN ANSI-C SPAN CONTRIBUTES ITS DECODED TEXT. `cat <<$'"'"'EOF'"'"'` names
+              # `EOF`; appending the characters as written recorded the dollar and
+              # the quotes, and no line ever equals that.
+              if (SC_CTX[hdk] == "$" && substr(hdsrc, hdk, 2) == "$\047") {
+                  hden = ansic_span_end(hdsrc, hdk + 2)
+                  if (hden > 0) {
+                      hdw = hdw ansic_decode(substr(hdsrc, hdk + 2, hden - hdk - 2))
+                      hdsaw = 1; hdk = hden + 1; continue
+                  }
+              }
               if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; continue }
               if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
                   # `&` before `;` again: the other order writes a literal `;&`
@@ -814,7 +884,7 @@ RULE_D='
     # are structural instead. `shopt -s '"'"'globstar'"'"'` still counts, because quote
     # removal happens before the words are built.
     shell_scan(line, SC_Q0)
-    if (argv_pair("shopt", "globstar")) {
+    if (cmd_has("shopt", "globstar")) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
@@ -833,13 +903,8 @@ RULE_D='
     # …and the same for `-v`, which also needs `(` and `)` to be tokens of their
     # own: `(test -v token)` is a subshell running `test`, and a flattened string
     # left the parenthesis stuck to the command name.
-    for (vi = 1; vi < SC_ARGC; vi++) {
-        if (SC_ARGV[vi] != "[" && SC_ARGV[vi] != "test") continue
-        vj = vi + 1
-        if (SC_ARGV[vj] == "!") vj++
-        if (SC_ARGV[vj] == "-v") {
-            report("the -v conditional is Bash 4.2: " line); return }
-    }'
+    if (cond_v()) {
+        report("the -v conditional is Bash 4.2: " line); return }'
 
 # portability-scan: rules-end
 
@@ -1581,6 +1646,19 @@ refute globstarbyte "shopt -s \$'"'"'nullglob\\002globstar'"'"' || :"       D "a
 # still the command word.
 plant vparen     "token=1; if (test -v token); then observed=yes; fi" D "a -v conditional inside a subshell"
 plant globstarparen "(shopt -s globstar) || :"                D "globstar inside a subshell"
+# …and a REDIRECTION does not end the command: `shopt >/dev/null -s globstar`
+# still passes both operands, and with the output redirected nothing else would
+# have shown it either.
+plant globstarredir "shopt >/dev/null -s globstar || :"       D "globstar after a redirection"
+plant vredir     "if test >/dev/null -v token; then :; fi"    D "a -v conditional after a redirection"
+# …while the builtin has to be the COMMAND WORD. `printf %s shopt -s globstar`
+# runs `printf`, and rejecting it is rejecting portable code.
+refute globstardata "printf %s shopt -s globstar"             D "the name as an operand of another command"
+refute vdata        "printf %s test -v token"                 D "the conditional as data"
+# …and `-v` needs an OPERAND: alone it is the one-argument string test that every
+# bash has.
+refute vbare     "if test -v; then :; fi"                     D "a bare -v, which is a string test"
+refute vbarebrk  "if [ -v ]; then :; fi"                      D "a bare -v in brackets"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -1661,6 +1739,45 @@ bc_hits="$(scan "$RULE_A" "$PTMP/bodycont.sh")" || bc_hits=SCANFAIL
 { [ "$bc_hits" != SCANFAIL ] && [ -n "$bc_hits" ]; } \
     && pass "…while a trailing backslash in a body line joins nothing" \
     || die "a body line was joined to its terminator ('$bc_hits')"
+
+# ── AN ANSI-C DELIMITER NAMES ITS DECODED WORD ─────────────────────────────
+# `cat <<$'EOF'` names `EOF`. Appending the characters as written recorded the
+# dollar and the quotes with them, and no line ever equals that — so a violation
+# after the document was skipped to end of file.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$%sEOF%s\n' "'" "'"
+  printf 'body text\n'
+  printf 'EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/ansicdelim.sh"
+an_hits="$(scan "$RULE_A" "$PTMP/ansicdelim.sh")" || an_hits=SCANFAIL
+{ [ "$an_hits" != SCANFAIL ] && [ -n "$an_hits" ]; } \
+    && pass "an ANSI-C delimiter names its decoded word" \
+    || die "cat <<\$'EOF' recorded the undecoded word ('$an_hits')"
+
+# ── A BACKSLASH-NEWLINE INSIDE SINGLE QUOTES IS DATA ───────────────────────
+# Bash keeps both characters, so a single-quoted value split across two lines is
+# not a continuation. Joining them ran the halves together into a GNU-only name
+# that the source never contained.
+{ printf '#!/usr/bin/env bash\n'
+  printf "value='gaw%s\n" "$one_bs"
+  printf "k'\n"; } > "$PTMP/quotedcont.sh"
+qc_hits="$(scan '
+    if (line ~ /(^|[^A-Za-z0-9_.-])gawk([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/quotedcont.sh")" || qc_hits=SCANFAIL
+{ [ "$qc_hits" != SCANFAIL ] && [ -z "$qc_hits" ]; } \
+    && pass "a quoted trailing backslash joins nothing" \
+    || die "a single-quoted split invented a GNU-only name ('$qc_hits')"
+
+# ── A QUOTED # IS NOT A COMMENT, EVEN AT THE START OF A LINE ───────────────
+# A word opened on an earlier line can carry a `#` as data; the quote then closes
+# and a command follows on the same line. Deleting from that `#` deleted the closer
+# and the command with it.
+{ printf '#!/usr/bin/env bash\n'
+  printf "x='data\n"
+  printf "#'; shopt -s globstar || :\n"; } > "$PTMP/quotedhash.sh"
+qh2_hits="$(scan "$RULE_D" "$PTMP/quotedhash.sh")" || qh2_hits=SCANFAIL
+{ [ "$qh2_hits" != SCANFAIL ] && [ -n "$qh2_hits" ]; } \
+    && pass "a # carried as data does not comment out the command after it" \
+    || die "a quoted # deleted a real command ('$qh2_hits')"
 
 # ── A PRESENT BUT EMPTY DELIMITER IS A DELIMITER ───────────────────────────
 # `cat <<''` reads to a blank terminator line. Treating the empty value as though
