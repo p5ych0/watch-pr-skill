@@ -111,6 +111,17 @@ SCAN_PROLOGUE='
     #
     # The nesting is a STACK: the state at the `$(` is pushed and restored at the
     # matching `)`. Backticks are still not modelled, and that stays stated.
+    # Where the `$(( … ))` beginning at `from` ends: one past its final `)`.
+    function arith_end(l, from, d, i, ch) {
+        d = 2; i = from
+        while (i <= length(l) && d > 0) {
+            ch = substr(l, i, 1)
+            if (ch == "(") d++
+            else if (ch == ")") d--
+            i++
+        }
+        return i
+    }
     function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth) {
         delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete QSTK; delete PSTK
         SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; depth = 0
@@ -158,7 +169,15 @@ SCAN_PROLOGUE='
                 # `$((` IS ARITHMETIC, NOT A COMMAND. It shares the first two
                 # characters, and treating it as a substitution made the operands of
                 # `value=$((a + b))` look like an invoked command with arguments.
-                if (substr(l, i, 3) == "$((") { SC_EFF = SC_EFF substr(l, i, 3); word = word substr(l, i, 3); saw = 1; i += 3; continue }
+                # …AND THE WHOLE SPAN, not just the opener. Consuming three
+                # characters left the expression to the ordinary word rules, so the
+                # whitespace inside `$(( a + b ))` flushed the assignment and the
+                # operands became words of their own — an invoked command again.
+                if (substr(l, i, 3) == "$((") {
+                    k = arith_end(l, i + 3)
+                    SC_EFF = SC_EFF substr(l, i, k - i); word = word substr(l, i, k - i); saw = 1
+                    i = k; continue
+                }
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
@@ -212,7 +231,11 @@ SCAN_PROLOGUE='
             # A SUBSTITUTION OPENS INSIDE DOUBLE QUOTES TOO — `"$(… "$x" …)"` is the
             # ordinary spelling, and handling it only in unquoted text left every
             # inner quote toggling the OUTER state.
-            if (substr(l, i, 3) == "$((") { SC_EFF = SC_EFF substr(l, i, 3); word = word substr(l, i, 3); i += 3; continue }
+            if (substr(l, i, 3) == "$((") {
+                k = arith_end(l, i + 3)
+                SC_EFF = SC_EFF substr(l, i, k - i); word = word substr(l, i, k - i)
+                i = k; continue
+            }
             if (substr(l, i, 2) == "$(") {
                 depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                 # THE SAME FLUSH AS THE UNQUOTED BRANCH. `out="$(grep PATTERN f)"`
@@ -311,13 +334,22 @@ SCAN_PROLOGUE='
                 # option. The header runs to its `do` or `in`, and there is nothing
                 # in it for these rules.
                 if (w == "for" || w == "select" || w == "case") {
+                    # THE LIST IS PART OF THE HEADER. `for x in a b c; do` names a
+                    # variable and then a WORD LIST, and stopping at `in` handed that
+                    # list to the next iteration as a command with arguments.
                     for (i = i + 1; i <= SC_ARGC; i++) {
                         if (SC_AOP[i] && is_op(SC_ARGV[i])) return i + 1
-                        if (SC_ARGV[i] == "do" || SC_ARGV[i] == "in") break
+                        if (SC_ARGV[i] == "do") break
                     }
                     continue
                 }
-                if (index(" if then elif else fi while until do done esac function time { } ! ", " " w " ") > 0) continue
+                # `time` TAKES OPTIONS OF ITS OWN, and they are not the command:
+                # `time -p shopt -s globstar` runs `shopt`.
+                if (w == "time") {
+                    while (i < SC_ARGC && SC_ARGV[i + 1] ~ /^-[A-Za-z]+$/) i++
+                    continue
+                }
+                if (index(" if then elif else fi while until do done esac function { } ! ", " " w " ") > 0) continue
                 CMDW = w
             } else { CMDN++; CMDA[CMDN] = w }
         }
@@ -948,8 +980,14 @@ RULE_A='
         if (CMDW == "fgrep") { efixed = 1; egrepsed = 1 }
         else if (CMDW ~ /^(grep|egrep|sed)$/) egrepsed = 1
         else if (CMDW !~ /^(awk|gawk)$/) continue
-        for (aj = 1; aj <= CMDN; aj++)
+        # `--` ENDS THE OPTIONS. After it a word beginning with a dash is a
+        # filename, so `grep -e PATTERN -- -F` searches a file called `-F` with the
+        # pattern still active — reading that as fixed-string mode exempted a
+        # command whose pattern is not.
+        for (aj = 1; aj <= CMDN; aj++) {
+            if (CMDA[aj] == "--") break
             if (CMDA[aj] ~ /^-[A-Za-z]*F$/ || CMDA[aj] == "--fixed-strings") efixed = 1
+        }
         if (efixed) continue
         eargs = ""
         for (aj = 1; aj <= CMDN; aj++) eargs = eargs " " CMDA[aj]
@@ -1109,6 +1147,11 @@ RULE_D='
     # runs `printf`, and the raw pattern this arrived as reported it.
     if (cmd_opt("declare", "g") || cmd_opt("typeset", "g")) {
         report("declare -g is Bash 4.2: " line); return }
+    # `wait -n` RETURNS WHEN THE FIRST JOB FINISHES — Bash 4.3. Bash 3.2 rejects the
+    # option and returns at once, so what follows races rather than failing, which
+    # is the shape nothing but text finds.
+    if (cmd_opt("wait", "n")) {
+        report("wait -n is Bash 4.3: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) {
@@ -1964,6 +2007,12 @@ refute declaredata "printf %s declare -g"                     D "declare -g as d
 # …and `compat31` is Bash 3.2 asking for 3.1 behaviour, so it is not newer than the
 # platform this gate supports. It was listed by mistake.
 refute compat31  "shopt -s compat31 || :"                     D "compat31, which Bash 3.2 provides"
+# …and the rest of the header: the LIST after `in` belongs to it, and `time` takes
+# options of its own before the command it measures.
+refute forlist   "for x in shopt globstar; do :; done"        D "a for-list whose words share builtin names"
+refute forlistA  "for x in grep '\\s'; do :; done"             A "a for-list carrying a pattern"
+plant timeopt    "time -p shopt -s globstar || :"             D "globstar behind a timed prefix"
+plant waitn      "sleep 0 & wait -n || :"                     D "wait -n, which is Bash 4.3"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2082,6 +2131,22 @@ qs_hits="$(scan "$RULE_A" "$PTMP/qsubcmd.sh")" || qs_hits=SCANFAIL
 # …while `$((` is ARITHMETIC and shares the first two characters. Reading it as a
 # substitution made the operands of an ordinary sum look like an invoked command.
 refute arithword 'value=$((shopt + globstar))'                D "arithmetic whose operands share builtin names"
+
+# ── `--` ENDS THE OPTIONS ──────────────────────────────────────────────────
+# After it a word beginning with a dash is a filename: `grep -e PATTERN -- -F`
+# searches a file called `-F` with the pattern still active. Reading that operand as
+# fixed-string mode exempted a command whose pattern is not.
+printf '#!/usr/bin/env bash\ngrep -e %s -- -F || :\n' "'\\s'" > "$PTMP/optterm.sh"
+ot_hits="$(scan "$RULE_A" "$PTMP/optterm.sh")" || ot_hits=SCANFAIL
+{ [ "$ot_hits" != SCANFAIL ] && [ -n "$ot_hits" ]; } \
+    && pass "a -F after -- is a filename, not fixed-string mode" \
+    || die "an operand after -- was read as an option ('$ot_hits')"
+
+# ── AN ARITHMETIC SPAN IS DATA THROUGHOUT ──────────────────────────────────
+# Consuming only the opener left the expression to the ordinary word rules, so the
+# whitespace inside `$(( a + b ))` flushed the assignment and the operands became
+# words of their own — an invoked command again.
+refute arithspace 'value=$(( shopt + globstar ))'             D "arithmetic with spaces around its operands"
 
 # ── FIXED-STRING MODE BELONGS TO ITS OWN COMMAND ───────────────────────────
 # A segment can hold more than one engine. `grep -F x $(grep PATTERN f)` has a

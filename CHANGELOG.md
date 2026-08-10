@@ -123,6 +123,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A span is data throughout, and a header runs to its `do`.** Consuming only the
+  arithmetic opener left the expression to the ordinary word rules, so the
+  whitespace inside `$(( a + b ))` flushed the assignment and the operands became
+  words of their own; stopping the header at `in` handed the word list to the next
+  iteration as a command with arguments. `time` takes options of its own before the
+  command it measures, and `--` ends option parsing — after it a `-F` is a
+  filename, not fixed-string mode.
+
 - **`$((` is arithmetic, `for x in …` is a header, and `compat31` is Bash 3.2.**
   Three false positives the previous round introduced: arithmetic shares its first
   two characters with a substitution, so `value=$((a + b))` read as an invoked
@@ -154,7 +162,7 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   whether the string `-v` equals `token`, on every bash: the operator is in the
   middle and the first word is an operand.
 
-- **`declare -g` and the post-3.2 shell options.** Both change behaviour rather
+- **`declare -g`, `wait -n`, and the post-3.2 shell options.** Both change behaviour rather
   than failing — Bash 3.2 rejects the option and carries on differently — so
   nothing but text finds them. The `shopt` names are a list because the manual
   enumerates them per release.
