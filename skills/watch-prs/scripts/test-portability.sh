@@ -123,6 +123,18 @@ SCAN_PROLOGUE='
                     }
                 }
                 if (ch == "\047" || ch == "\042") { q = ch; i++; continue }
+                # UNQUOTED WHITESPACE SEPARATES ARGUMENTS; quoted whitespace is
+                # inside one. `shopt -s "nullglob globstar"` passes ONE operand,
+                # which is not a valid option name and enables nothing — flattening
+                # both to spaces read it as two and rejected portable code.
+                #
+                # It was first written for the parity question — whether a
+                # backslash run joins across two arguments — and removed again,
+                # because an ordinary space answers that one just as well. This is
+                # the question it is actually needed for: whether two words are one
+                # argument, which a space cannot answer because a quoted one looks
+                # the same.
+                if (ch == " " || ch == "\t") { SC_EFF = SC_EFF "\002"; i++; continue }
                 SC_EFF = SC_EFF ch; i++; continue
             }
             if (q == "\047") {
@@ -232,22 +244,25 @@ SCAN_PROLOGUE='
         }
         return l
     }
-    function strip_arith(l, out, i, ch, d, opener) {
-        shell_scan(l)
-        out = ""; i = 1
+    # MARKED, NOT REMOVED. The point is only that a `<<` INSIDE an arithmetic
+    # expression is not a redirection — and deleting the text to achieve that also
+    # deleted `cat <<$[EOF]`, whose delimiter word is quote-removed but NOT
+    # arithmetically expanded, so its terminator really is the literal `$[EOF]`.
+    # Marking the span leaves every other character where it was.
+    #
+    # THREE SPELLINGS: `$(( … ))` is the expansion, `(( … ))` the arithmetic
+    # COMMAND, and `$[ … ]` the legacy expansion Bash 3.2 still accepts — which is
+    # the one this tree must keep working on.
+    #
+    # Quoted, it is data: `printf '%s' "(("` has no arithmetic in it, and taking
+    # the quoted characters as an opener consumed the rest of the line looking for
+    # a close that never came.
+    function arith_mark(l, i, ch, d, opener, opens, closes, k) {
+        delete SC_ARI
+        i = 1
         while (i <= length(l)) {
-            # QUOTED, IT IS DATA. `printf '%s' "(("` has no arithmetic in it, and
-            # taking the quoted characters as an opener consumed the rest of the
-            # logical line looking for a `))` that never came — including a real
-            # here-document redirection after it.
             if (SC_CTX[i] == "" && !SC_ESC[i]) {
-                # THREE SPELLINGS. `$(( … ))` is the expansion, `(( … ))` the
-                # arithmetic COMMAND, and `$[ … ]` the legacy expansion Bash 3.2
-                # still accepts — which is the one this tree must keep working on.
-                # Its left shift is spelled `<<` like the others, so leaving it out
-                # queued the right operand as a here-document delimiter and skipped
-                # to end of file waiting for a terminator that never comes.
-                opener = 0; opens = ""; closes = ""
+                opener = 0
                 if (substr(l, i, 3) == "$((")     { opener = 3; opens = "("; closes = ")" }
                 else if (substr(l, i, 2) == "((") { opener = 2; opens = "("; closes = ")" }
                 else if (substr(l, i, 2) == "$[") { opener = 2; opens = "["; closes = "]" }
@@ -255,6 +270,7 @@ SCAN_PROLOGUE='
                     # Two parens to close for either paren form, one bracket for
                     # the legacy one.
                     d = (opens == "(") ? 2 : 1
+                    for (k = i; k < i + opener; k++) SC_ARI[k] = 1
                     i += opener
                     while (i <= length(l) && d > 0) {
                         ch = substr(l, i, 1)
@@ -262,15 +278,14 @@ SCAN_PROLOGUE='
                             if (ch == opens) d++
                             else if (ch == closes) d--
                         }
+                        SC_ARI[i] = 1
                         i++
                     }
-                    out = out " "
                     continue
                 }
             }
-            out = out substr(l, i, 1); i++
+            i++
         }
-        return out
     }
     function hexdigits(s, maxn, out, k, ch) {
         out = ""
@@ -393,99 +408,68 @@ SCAN_PROLOGUE='
     # text that way. The delimiter is taken from the redirection and the body is
     # skipped until it reappears alone on a line. `<<-` strips leading tabs from the
     # terminator, so that form is allowed for.
-    { raw = $0; sub(/^[[:space:]]*#.*$/, "", raw)
+    { raw = $0
       # A COMMAND CAN OPEN MORE THAN ONE DOCUMENT. `cat <<ONE <<TWO` is two, read
       # in the order written, and recording only the first meant the SECOND body
-      # was scanned as shell once the first terminator arrived — example text in it
-      # then failed the gate. The delimiters are a queue, and the head is what the
-      # current body ends on.
+      # was scanned as shell once the first terminator arrived. The delimiters are
+      # a queue, and the head is what the current body ends on.
+      #
+      # THE TERMINATOR IS COMPARED AGAINST THE UNTOUCHED LINE. `cat <<'#EOF'` names
+      # a delimiter beginning with a `#`, and stripping full-line comments before
+      # this check turned that terminator into an empty line: the document never
+      # drained and everything after it was skipped to end of file.
       if (hdn > 0) {
-          t = raw
+          t = $0
           # ONLY `<<-` STRIPS INDENTATION, and only TABS. Stripping whitespace from
           # every terminator meant an indented `  EOF` inside an ordinary `<<EOF`
           # body ended the skip early — the rest of the document then read as
-          # shell, so a `grep -P` written as example text failed the gate.
+          # shell, so a forbidden spelling written as example text failed the gate.
           if (HDD[hdi]) sub(/^\t+/, "", t)
           if (t == HDQ[hdi]) { hdi++; if (hdi > hdn) { hdn = 0; hdi = 0 } }
           next
       }
-      # The delimiter can be any word — `END-MARK`, `_EOF_`, `EOF.1` — and matching
-      # only an identifier took `END` from `END-MARK`, so the real terminator was
-      # never recognised and everything to EOF was skipped: one document silently
-      # excusing the rest of the file.
-      #
-      # A `<<` INSIDE QUOTES IS NOT A REDIRECTION. A quoted word carrying those
-      # characters is a string, and matching the raw text took it as one: the skip
-      # began, no terminator ever arrived, and every following line to EOF was
-      # excused by a here-document that was never opened. The operator is located
-      # outside quotes first, and the delimiter is read from THERE.
-      #
-      # The scan restarts after each delimiter word rather than tracking quote
-      # state across the whole line, which is the same not-a-lexer trade the split
-      # makes: a line whose quoting is unbalanced mid-way is read as more code than
-      # it is, so a rule REPORTS rather than excuses.
-      hdrest = strip_arith(strip_comment(raw))
-      while ((hp = unquoted_pos(hdrest, "<<")) > 0) {
-          hdtail = substr(hdrest, hp)
+      sub(/^[[:space:]]*#.*$/, "", raw)
+      # AN INLINE COMMENT OPENS NOTHING, and a `<<` inside an arithmetic expression
+      # is not a redirection. Both are decided on the same string, through the
+      # shared model, so the positions stay absolute and the delimiter word is read
+      # from the line as written.
+      hdsrc = strip_comment(raw)
+      shell_scan(hdsrc); arith_mark(hdsrc)
+      hp = 1
+      while (hp < length(hdsrc)) {
+          if (SC_CTX[hp] != "" || SC_ESC[hp] || SC_ARI[hp] || substr(hdsrc, hp, 2) != "<<") { hp++; continue }
           # `<<<` is a here-STRING and has no terminator. The pattern could begin
           # at the second `<` of one, take the word after it as a delimiter, and
           # skip every following line to EOF — a single `cat <<<EOF` excusing the
           # file.
-          if (substr(hdtail, 1, 3) == "<<<") { hdrest = substr(hdtail, 4); continue }
-          # THE DELIMITER IS A WHOLE WORD, and bash quote-removes it. `<<E"OF"` is
-          # a document ending at `EOF`, and `<<\EOF` is one ending at `EOF` too —
-          # a pattern taking one optional quote consumed `<<E"`, recorded `E`, and
-          # waited for a terminator that never came, so everything after the real
-          # one was skipped.
-          #
-          # The word is read through the shared model: quote characters and the
-          # backslashes that quote one are dropped, whatever they cover is kept,
-          # and the word ends at the first unquoted character that ends a word.
-          shell_scan(hdtail)
-          hdk = 3
-          if (substr(hdtail, hdk, 1) == "-") hdk++
-          while (substr(hdtail, hdk, 1) == " " || substr(hdtail, hdk, 1) == "\t") hdk++
-          hddash = (substr(hdtail, 3, 1) == "-")
+          if (substr(hdsrc, hp, 3) == "<<<") { hp += 3; continue }
+          hdk = hp + 2
+          hddash = (substr(hdsrc, hdk, 1) == "-")
+          if (hddash) hdk++
+          while (substr(hdsrc, hdk, 1) == " " || substr(hdsrc, hdk, 1) == "\t") hdk++
+          # THE DELIMITER IS A WHOLE WORD, and bash quote-removes it — `<<E"OF"`
+          # names `EOF`, `<<\EOF` names `EOF`, `<<"E\"OF"` names `E"OF`, and
+          # `<<'"'"'END MARK'"'"'` names one with a space in it. What the word may contain
+          # is for bash to say; the word simply ends where an unquoted character
+          # ends one.
           hdw = ""
-          while (hdk <= length(hdtail)) {
-              hdc = substr(hdtail, hdk, 1)
+          while (hdk <= length(hdsrc)) {
+              hdc = substr(hdsrc, hdk, 1)
               # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
-              # sits: `<<"E\"OF"` names `E"OF`, and keeping the backslash recorded
-              # a delimiter no line will ever equal.
+              # sits: keeping it recorded a delimiter no line will ever equal.
               if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; continue }
               if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
                   # `&` before `;` again: the other order writes a literal `;&`
                   # into this file, which rule D reads as a case terminator.
                   if (hdc ~ /[[:space:]&;|<>()]/) break
                   if (hdc == "\047" || hdc == "\042" || hdc == "\134") { hdk++; continue }
-              # An ESCAPED quote inside a quoted delimiter is part of the word:
-              # `<<"E\"OF"` names `E"OF`. Dropping it because it matches its own
-              # context recorded `EOF`, and the real terminator never arrived.
+              # An ESCAPED quote inside a quoted delimiter is part of the word.
               } else if (SC_CTX[hdk] != "" && !SC_ESC[hdk] && hdc == SC_CTX[hdk]) { hdk++; continue }
               hdw = hdw hdc
               hdk++
           }
-          hdrest = substr(hdtail, hdk)
-          # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled the
-          # same and its right operand is a number, so a numeric delimiter is the
-          # shift rather than a document — and taking it started a skip with no
-          # terminator, to EOF. A delimiter that is only digits is not a spelling
-          # anything here uses, and one that is not a word at all is not one either.
-          # ANY QUOTED WORD IS A DELIMITER. `cat <<'"'"'END MARK'"'"'` names one with a space in
-          # it, and an identifier-shaped whitelist refused to queue it — so the
-          # body was read as shell. What the word may contain is for bash to say;
-          # what is left here is the one spelling that is NOT a document: a purely
-          # numeric operand, which is the arithmetic left shift.
-          # ANY NON-EMPTY WORD. A numeric one is a delimiter too — `cat <<'"'"'123'"'"'` is
-          # a document — and refusing it read the body as shell. The arithmetic
-          # left shift that the numeric test was guarding against is removed by
-          # `strip_arith` before this runs, in both of its spellings, so the test
-          # was covering a case that no longer reaches here and rejecting a real
-          # one that does.
-          if (hdw != "") {
-              hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash
-          }
-
+          if (hdw != "") { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
+          hp = (hdk > hp) ? hdk : hp + 2
       }
       if (hdn > 0) hdi = 1
       if (buf == "") start = FNR
@@ -783,7 +767,7 @@ RULE_D='
     # already builds that string, and using it here is the same move as judging
     # escape parity on it.
     shell_scan(line); eff = SC_EFF
-    if (eff ~ /(^|[[:space:]])shopt([[:space:]]|$)/ && eff ~ /(^|[[:space:]])globstar([[:space:]]|$)/) {
+    if (eff ~ /(^|\002)shopt(\002|$)/ && eff ~ /(^|\002)globstar(\002|$)/) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
@@ -799,7 +783,7 @@ RULE_D='
     # Bash 4.2 operator, and a pattern requiring it immediately after the command
     # missed both — while the `if` around them masks the failure, so nothing else
     # sees it either.
-    if (eff ~ /(^|[[:space:]&;|(])(\[|test)[[:space:]]+(![[:space:]]+)?-v[[:space:]]/) {
+    if (eff ~ /(^|\002)(\[|test)\002(!\002)?-v\002/) {
         report("the -v conditional is Bash 4.2: " line); return }'
 
 # portability-scan: rules-end
@@ -1528,6 +1512,12 @@ plant globstarq  "shopt -s 'globstar' || :"                    D "a quoted globs
 # masks the failure, so nothing else sees these two either.
 plant vneg       "if [ ! -v token ]; then observed=yes; fi"  D "a negated -v in single brackets"
 plant vnegtest   "if test ! -v token; then observed=yes; fi" D "a negated -v in the test builtin"
+# …and a QUOTED argument is one argument, whatever whitespace is inside it.
+# `shopt -s "nullglob globstar"` passes a single invalid option name and enables
+# nothing; `test "! -v token"` is a one-argument string test. Flattening quoted
+# whitespace to ordinary whitespace read both as several words and rejected them.
+refute globstarone "shopt -s \"nullglob globstar\" || :"       D "a quoted pair that is one invalid operand"
+refute vstring     "if test \"! -v token\"; then :; fi"        D "a one-argument string test"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -1542,9 +1532,37 @@ la_hits="$(scan "$RULE_A" "$PTMP/legacyarith.sh")" || la_hits=SCANFAIL
     && pass "the legacy \$[ ] arithmetic opens no here-document" \
     || die "\$[1 << 2 ] swallowed the rest of the file ('$la_hits')"
 
+# ── AN ARITHMETIC-LOOKING DELIMITER IS A DELIMITER ─────────────────────────
+# `cat <<$[EOF]` names the literal `$[EOF]`: a delimiter word is quote-removed but
+# NOT arithmetically expanded. Deleting arithmetic spans before looking for
+# redirections took the word with them, so no document was queued and the body was
+# read as shell. The spans are marked now, and everything else stays where it is.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$[EOF]\n'
+  printf 'grep -qE "\\s" is example text\n'
+  printf '$[EOF]\n'; } > "$PTMP/arithdelim.sh"
+ad2_hits="$(scan "$RULE_A" "$PTMP/arithdelim.sh")" || ad2_hits=SCANFAIL
+{ [ "$ad2_hits" != SCANFAIL ] && [ -z "$ad2_hits" ]; } \
+    && pass "an arithmetic-looking delimiter word survives the arithmetic mark" \
+    || die "cat <<\$[EOF] queued no document ('$ad2_hits')"
+
+# ── A TERMINATOR MAY BEGIN WITH A COMMENT CHARACTER ────────────────────────
+# `cat <<'#EOF'` names `#EOF`. Stripping full-line comments before checking the
+# terminator turned it into an empty line: the document never drained and a real
+# violation after it was skipped to end of file.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'#EOF'\n"
+  printf 'body text\n'
+  printf '#EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/hashdelim.sh"
+hd2_hits="$(scan "$RULE_A" "$PTMP/hashdelim.sh")" || hd2_hits=SCANFAIL
+{ [ "$hd2_hits" != SCANFAIL ] && [ -n "$hd2_hits" ]; } \
+    && pass "a terminator beginning with # still ends the document" \
+    || die "a #EOF terminator was stripped to an empty line ('$hd2_hits')"
+
 # ── A NUMERIC DELIMITER IS STILL A DELIMITER ───────────────────────────────
 # `cat <<'123'` is a document. The numeric test was guarding against the arithmetic
-# left shift, which `strip_arith` removes before any of this runs — so it was
+# left shift, whose `<<` is marked as arithmetic before any of this runs — so it was
 # covering a case that no longer arrives and rejecting a real one that does.
 { printf '#!/usr/bin/env bash\n'
   printf "cat <<'123'\n"

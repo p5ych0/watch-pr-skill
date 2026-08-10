@@ -100,6 +100,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **Arithmetic is marked, not removed, and a terminator is compared against the
+  untouched line.** The point of the arithmetic pass is only that a `<<` inside an
+  expression is not a redirection; deleting the span to achieve that also deleted
+  `cat <<$[EOF]`, whose delimiter word is quote-removed but *not* arithmetically
+  expanded. And `cat <<'#EOF'` names a delimiter beginning with `#`, which the
+  full-line comment substitution turned into an empty line — so the document never
+  drained and everything after it was skipped.
+
 - **The legacy `$[ … ]` arithmetic is arithmetic too.** Bash 3.2 — the platform
   this whole check exists for — still accepts it, and its left shift is spelled
   `<<` like the others, so leaving it out of the stripper queued the right operand
@@ -135,16 +143,16 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   *escaped* quote stays in the word, and `<<"E\"OF"` names `E"OF`. Any non-empty
   word is a delimiter, `'END MARK'` included: what it may contain is for bash to
   say. A numeric one is a delimiter too — the test that refused it was guarding
-  against the arithmetic left shift, which `strip_arith` removes before any of
-  this runs, so it covered a case that no longer arrives and rejected a real one
+  against the arithmetic left shift, whose `<<` is marked as arithmetic before any
+  of this runs, so it covered a case that no longer arrives and rejected a real one
   that does.
 
 - **A lone `&` ends a command.** `grep -F x f & grep '\s' f` is two commands, and
   the fixed-string exemption taken by the first was covering the second. The `&` of
-  a redirection splits too: a guard was written to exclude `2>&1` and `&>f`, then
-  removed when nothing could make it matter — a redirection carries no pattern of
-  its own, so the extra segment is `1` or `>f` and no rule has anything to say
-  about it. Second branch this round to go for want of a fixture that could fail.
+  a redirection splits too, deliberately: a redirection carries no pattern of its
+  own, so the extra segment is `1` or `>f` and no rule has anything to say about
+  it — a guard excluding `2>&1` and `&>f` would be a branch no fixture could
+  fail.
 
 - **One model of shell quoting, not six.** It had been written out separately in
   the splitter, the operator finder, the comment stripper, the arithmetic
@@ -156,9 +164,11 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   what the command would actually *receive*. That last part is what an escape
   parity question is really about: `grep \\$'\s' f` is an unquoted escape and an
   ANSI-C span written next to each other, one backslash each, and judging either
-  part alone got it backwards. A word separator was written into that string to
-  stop a run joining across two arguments, and then removed: no case could tell it
-  from the space it replaced, and a branch no fixture can fail is worse than none.
+  part alone got it backwards. Unquoted whitespace becomes an argument separator
+  in that string and quoted whitespace stays a space, because the difference is
+  what tells one argument from two: `shopt -s "nullglob globstar"` passes ONE
+  invalid option name and enables nothing, and `test "! -v token"` is a
+  one-argument string test.
 
 - **A quoted arithmetic opener is data**, `\EOF` is a here-document delimiter
   (bash quote-removes the delimiter word, and a backslash is one of the quotings),
