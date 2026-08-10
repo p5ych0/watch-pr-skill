@@ -127,6 +127,12 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A locale prefix counts only where the quoting is active, `\cA` names control-A,
+  `exec` invokes what follows it, and `${ … }` is not a redirection.** Inside single
+  quotes `$"` is literal text; every `\cX` was decoding to one fixed placeholder;
+  `exec grep …` still runs grep; and `${value#<<EOF}` is a removal pattern whose two
+  characters were queueing a document that never terminates.
+
 - **An escaped dollar is not an expansion, `$"…"` is a quoted delimiter, and
   `$'\t'` names a tab.** The first is the same parity that decides an escape; the
   second is locale translation, where the `$` is not part of the word and appending

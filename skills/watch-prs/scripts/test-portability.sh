@@ -506,6 +506,14 @@ SCAN_PROLOGUE='
                 if (i > CMDN) return 0
                 take_after(i); moved = 1; continue
             }
+            # `exec` REPLACES THE SHELL WITH THE COMMAND after its own options —
+            # the command still runs, which is all these rules care about.
+            if (CMDW == "exec") {
+                i = 1
+                while (i <= CMDN && CMDA[i] ~ /^-/) i++
+                if (i > CMDN) return 0
+                take_after(i); moved = 1; continue
+            }
             if (CMDW == "command" || CMDW == "builtin") {
                 i = 1
                 while (i <= CMDN && CMDA[i] ~ /^-/) {
@@ -779,8 +787,13 @@ SCAN_PROLOGUE='
     # Quoted, it is data: `printf '%s' "(("` has no arithmetic in it, and taking
     # the quoted characters as an opener consumed the rest of the line looking for
     # a close that never came.
+    # …AND `${ … }` IS AN EXPANSION, NOT A REDIRECTION EITHER. `${value#<<EOF}` is
+    # a removal pattern, and the two characters in it were queueing a document whose
+    # terminator never comes. The span is marked with the arithmetic ones because
+    # the redirection walk asks the same question of both: is this position code.
     function arith_mark(l, i, ch, d, opener, opens, closes, k) {
         delete SC_ARI
+        pex_mark(l)
         i = 1
         while (i <= length(l)) {
             if (SC_CTX[i] == "" && !SC_ESC[i]) {
@@ -840,6 +853,25 @@ SCAN_PROLOGUE='
         for (k = 1; k <= length(o); k++) v = v * 8 + (index("01234567", substr(o, k, 1)) - 1)
         return v
     }
+    # The character `\cX` names: the letter uppercased, with bit 64 cleared.
+    # Mark every position inside a `${ … }` expansion.
+    function pex_mark(l, i, d, ch) {
+        d = 0
+        for (i = 1; i <= length(l); i++) {
+            ch = substr(l, i, 1)
+            if (SC_ESC[i]) continue
+            if (substr(l, i, 2) == "${") { d++; SC_ARI[i] = 1; SC_ARI[i + 1] = 1; i++; continue }
+            if (d > 0) {
+                if (ch == "{") d++
+                else if (ch == "}") d--
+                SC_ARI[i] = 1
+            }
+        }
+    }
+    function ctrl_code(c, u) {
+        u = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", toupper(c))
+        return u > 0 ? u : 0
+    }
     function ansic_decode(seg, out, i, ch, nx, h, o, k) {
         if (ESCCODE[1] == "") {
             # `\a \b \e \E \f \n \r \t \v`, in that order — the codes bash gives them.
@@ -884,7 +916,11 @@ SCAN_PROLOGUE='
                 out = out sprintf("%c", ESCCODE[k]); i += 2; continue
             }
             if (index("\047\042?", substr(nx, 1, 1)) > 0) { out = out substr(nx, 1, 1); i += 2; continue }
-            if (substr(nx, 1, 1) == "c") { out = out "\002"; i += 3; continue }
+            # `\cX` IS CONTROL-X — `$'"'"'\cA'"'"' is control-A, and a fixed placeholder named
+            # the same character for every one of them.
+            if (substr(nx, 1, 1) == "c" && length(nx) >= 2) {
+                out = out sprintf("%c", ctrl_code(substr(nx, 2, 1))); i += 3; continue
+            }
             # An UNRECOGNISED escape is kept as backslash-plus-character, which is
             # what bash does — and is why `$'\s'` reaches the engine as `\s`.
             out = out ch substr(nx, 1, 1); i += 2
@@ -1115,7 +1151,11 @@ SCAN_PROLOGUE='
               # `$"…"` IS LOCALE TRANSLATION, and a quoted delimiter like the rest:
               # the `$` is not part of the word, and appending it recorded a name no
               # line will ever equal.
-              if (substr(hdsrc, hdk, 2) == "$\042") { hdk++; hdsaw = 1; hdquoted = 1; continue }
+              # …AND ONLY WHERE THE QUOTING IS ACTIVE. Inside single quotes the two
+              # characters are literal text, so `<<'"'"'$"EOF"'"'"'` names `$"EOF"` — discarding
+              # the dollar there recorded a word no line will ever equal.
+              if (SC_CTX[hdk] == "" && !SC_ESC[hdk] && substr(hdsrc, hdk, 2) == "$\042") {
+                  hdk++; hdsaw = 1; hdquoted = 1; continue }
               if (SC_CTX[hdk] == "$" && substr(hdsrc, hdk, 2) == "$\047") {
                   hdquoted = 1
                   hden = ansic_span_end(hdsrc, hdk + 2)
@@ -2452,6 +2492,9 @@ refute vgroupand "if test \( -v = token \) -a \( x = x \); then :; fi" D "two gr
 # `test -v = -a` compares two strings and the second happens to be an operator name.
 refute vopname   "if test -v = -a; then :; fi"                 D "a comparison whose operand is named -a"
 plant declareu   "value=abc; declare -u value || :"            D "declare -u, which converts case on assignment"
+# …and `exec` replaces the shell with the command after its own options, which
+# still runs it.
+plant execengine "exec grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"             A "an engine invoked through exec"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2557,6 +2600,40 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
 { [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── A LOCALE PREFIX ONLY COUNTS WHERE THE QUOTING IS ACTIVE ────────────────
+# Inside single quotes the two characters are literal text, so `<<'$"EOF"'` names
+# `$"EOF"` — discarding the dollar there recorded a word no line will ever equal.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<%s$%sEOF%s%s\n' "$sq" "$dq" "$dq" "$sq"
+  printf 'body text\n'
+  printf '$%sEOF%s\n' "$dq" "$dq"
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/quotedlocale.sh"
+ql_hits="$(scan "$RULE_A" "$PTMP/quotedlocale.sh")" || ql_hits=SCANFAIL
+{ [ "$ql_hits" != SCANFAIL ] && [ -n "$ql_hits" ]; } \
+    && pass "a quoted locale prefix is part of the delimiter word" \
+    || die "the dollar was discarded inside single quotes ('$ql_hits')"
+# …and `\cA` names control-A, not one placeholder for every control escape.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<$%s%scA%s\n' "$sq" "$bs" "$sq"
+  printf 'body text\n'
+  printf '\001\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/ctrldelim.sh"
+cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
+{ [ "$cd3_hits" != SCANFAIL ] && [ -n "$cd3_hits" ]; } \
+    && pass "…and a control escape names the character it stands for" \
+    || die "cat <<\$'\\cA' did not end at control-A ('$cd3_hits')"
+
+# ── `${ … }` IS AN EXPANSION, NOT A REDIRECTION ────────────────────────────
+# `trimmed=${value#<<EOF}` is a removal pattern, and the two characters in it were
+# queueing a document whose terminator never comes.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'trimmed=${value#<<EOF}\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/pexheredoc.sh"
+px_hits="$(scan "$RULE_A" "$PTMP/pexheredoc.sh")" || px_hits=SCANFAIL
+{ [ "$px_hits" != SCANFAIL ] && [ -n "$px_hits" ]; } \
+    && pass "a << inside a parameter expansion opens no document" \
+    || die "a removal pattern swallowed the rest of the file ('$px_hits')"
 
 # ── AN ESCAPED DOLLAR IS NOT AN EXPANSION ──────────────────────────────────
 # In an unquoted body `\${name^^}` is the literal text — bash quotes the dollar and
