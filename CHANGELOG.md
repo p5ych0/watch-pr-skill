@@ -100,6 +100,25 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **A continuation is removed, not replaced.** Bash deletes the backslash-newline
+  and joins the halves directly, so a command split inside its own name is still
+  that command. Joining with a space made `gaw\` and `k …` two words that are not
+  the name — and in the portability job the missing tool was masked by a `|| :`,
+  so both jobs read clean for code that fails on stock macOS. The space that
+  belongs between two words is the one already in the source, before the backslash.
+
+- **The delimiter is a whole word.** `cat <<E"OF"` is a document ending at `EOF`;
+  consuming only `<<E"` recorded `E` and waited for a terminator that never came.
+  The word is read through the shared model, so quote characters and the
+  backslashes that quote one are dropped and whatever they cover is kept.
+
+- **A lone `&` ends a command.** `grep -F x f & grep '\s' f` is two commands, and
+  the fixed-string exemption taken by the first was covering the second. The `&` of
+  a redirection splits too: a guard was written to exclude `2>&1` and `&>f`, then
+  removed when nothing could make it matter — a redirection carries no pattern of
+  its own, so the extra segment is `1` or `>f` and no rule has anything to say
+  about it. Second branch this round to go for want of a fixture that could fail.
+
 - **One model of shell quoting, not six.** It had been written out separately in
   the splitter, the operator finder, the comment stripper, the arithmetic
   stripper, the ANSI-C decoder and the escape counter, and every copy was missing

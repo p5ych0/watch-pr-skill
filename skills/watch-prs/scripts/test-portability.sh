@@ -159,6 +159,18 @@ SCAN_PROLOGUE='
                 rest = substr(l, i, 2)
                 if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; i++; continue }
                 if (ch == ";" || ch == "|") { n++; SEG[n] = ""; continue }
+                # A LONE `&` BACKGROUNDS AND ENDS A COMMAND, so `grep -F x f &
+                # grep "\s" f` is two commands, and the fixed-string exemption
+                # taken by the first was covering the second.
+                #
+                # The `&` OF A REDIRECTION — `2>&1`, `&>f` — splits here too, and
+                # is left to: a redirection carries no pattern of its own, so the
+                # extra segment is `1` or `>f` and no rule has anything to say
+                # about it. A guard was written for that case and removed when no
+                # fixture could make it matter, which is the same reason the word
+                # separator went: a branch whose invariant cannot fail reads as
+                # covered when it is not.
+                if (ch == "&") { n++; SEG[n] = ""; continue }
             }
             SEG[n] = SEG[n] ch
         }
@@ -410,27 +422,51 @@ SCAN_PROLOGUE='
           # skip every following line to EOF — a single `cat <<<EOF` excusing the
           # file.
           if (substr(hdtail, 1, 3) == "<<<") { hdrest = substr(hdtail, 4); continue }
-          # THE DELIMITER WORD IS QUOTE-REMOVED, and a BACKSLASH is one of the
-          # quotings bash accepts there: `cat <<\EOF` is a document ending at
-          # `EOF`, and a pattern taking only a single or double quote recorded no
-          # document at all — so the body was read as shell.
-          if (match(hdtail, /^<<-?[[:space:]]*\\?["'"'"']?[A-Za-z0-9_][A-Za-z0-9_.-]*["'"'"']?/)) {
-              hdw = substr(hdtail, RSTART, RLENGTH)
-              hdrest = substr(hdtail, RLENGTH + 1)
-              hddash = (hdw ~ /^<<-/)
-              sub(/^<<-?[[:space:]]*/, "", hdw)
-              gsub(/["'"'"']/, "", hdw); gsub(/\\/, "", hdw)
-              # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled
-              # the same and its right operand is a number, so a numeric delimiter
-              # is the shift rather than a document — and taking it started a skip
-              # with no terminator, to EOF. A here-document delimiter that is only
-              # digits is not a spelling anything here uses.
-              if (hdw !~ /^[0-9]+$/) { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
-          } else { hdrest = substr(hdtail, 3) }
+          # THE DELIMITER IS A WHOLE WORD, and bash quote-removes it. `<<E"OF"` is
+          # a document ending at `EOF`, and `<<\EOF` is one ending at `EOF` too —
+          # a pattern taking one optional quote consumed `<<E"`, recorded `E`, and
+          # waited for a terminator that never came, so everything after the real
+          # one was skipped.
+          #
+          # The word is read through the shared model: quote characters and the
+          # backslashes that quote one are dropped, whatever they cover is kept,
+          # and the word ends at the first unquoted character that ends a word.
+          shell_scan(hdtail)
+          hdk = 3
+          if (substr(hdtail, hdk, 1) == "-") hdk++
+          while (substr(hdtail, hdk, 1) == " " || substr(hdtail, hdk, 1) == "\t") hdk++
+          hddash = (substr(hdtail, 3, 1) == "-")
+          hdw = ""
+          while (hdk <= length(hdtail)) {
+              hdc = substr(hdtail, hdk, 1)
+              if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
+                  # `&` before `;` again: the other order writes a literal `;&`
+                  # into this file, which rule D reads as a case terminator.
+                  if (hdc ~ /[[:space:]&;|<>()]/) break
+                  if (hdc == "\047" || hdc == "\042" || hdc == "\134") { hdk++; continue }
+              } else if (SC_CTX[hdk] != "" && hdc == SC_CTX[hdk]) { hdk++; continue }
+              hdw = hdw hdc
+              hdk++
+          }
+          hdrest = substr(hdtail, hdk)
+          # `$(( 1 << 2 ))` IS ARITHMETIC. The left-shift operator is spelled the
+          # same and its right operand is a number, so a numeric delimiter is the
+          # shift rather than a document — and taking it started a skip with no
+          # terminator, to EOF. A delimiter that is only digits is not a spelling
+          # anything here uses, and one that is not a word at all is not one either.
+          if (hdw ~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/ && hdw !~ /^[0-9]+$/) {
+              hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash
+          }
+
       }
       if (hdn > 0) hdi = 1
       if (buf == "") start = FNR
-      if (raw ~ /\\$/) { sub(/\\$/, " ", raw); buf = buf raw; next }
+      # REMOVED, not replaced by a space. Bash deletes the backslash-newline and
+      # joins the halves directly, so `gaw\` and `k …` is the command `gawk` — and
+      # a space put between them left rule B looking at two words that are not the
+      # name. The space that belongs there is already in the source, before the
+      # backslash.
+      if (raw ~ /\\$/) { sub(/\\$/, "", raw); buf = buf raw; next }
       line = buf raw; buf = "" }
 '
 SCAN_EPILOGUE='
@@ -1402,6 +1438,60 @@ ad_hits="$(scan "$RULE_A" "$PTMP/ansicdq.sh")" || ad_hits=SCANFAIL
 { [ "$ad_hits" != SCANFAIL ] && [ -n "$ad_hits" ]; } \
     && pass "a quoted \$' is data, and the real span is still decoded" \
     || die "a quoted \$' consumed the real ANSI-C span ('$ad_hits')"
+
+# ── A CONTINUATION IS REMOVED, NOT REPLACED ────────────────────────────────
+# Bash deletes the backslash-newline and joins the halves directly, so a command
+# split inside its own NAME is still that command. Joining with a space made
+# `gaw\` and `k …` two words that are not the name — and in the portability job the
+# missing tool was masked by a `|| :`, so both jobs read clean for code that fails
+# on stock macOS.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'gaw\\\n'
+  printf "k 'BEGIN { exit 0 }' || :\n"; } > "$PTMP/splitname.sh"
+sn_hits="$(scan '
+    if (line ~ /(^|[^A-Za-z0-9_.-])gawk([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/splitname.sh")" || sn_hits=SCANFAIL
+{ [ "$sn_hits" != SCANFAIL ] && [ -n "$sn_hits" ]; } \
+    && pass "a name split across a continuation is still that name" \
+    || die "gaw\\ + k was not read as gawk ('$sn_hits')"
+# …and the space that belongs between two words is the one already in the source,
+# before the backslash, so a continued command does not run together either.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'grep -qE \\\n'
+  printf '"\\s" "$f"\n'; } > "$PTMP/contword.sh"
+cw_hits="$(scan "$RULE_A" "$PTMP/contword.sh")" || cw_hits=SCANFAIL
+{ [ "$cw_hits" != SCANFAIL ] && [ -n "$cw_hits" ]; } \
+    && pass "…while a continuation between words keeps them apart" \
+    || die "a continued command lost its word boundary ('$cw_hits')"
+
+# ── THE DELIMITER IS A WHOLE WORD ──────────────────────────────────────────
+# `cat <<E"OF"` is a document ending at `EOF`. Consuming only `<<E"` recorded `E`,
+# and the terminator never came — so a real violation after the document was
+# skipped to end of file.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<E"OF"\n'
+  printf 'body text\n'
+  printf 'EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/splitdelim.sh"
+sd2_hits="$(scan "$RULE_A" "$PTMP/splitdelim.sh")" || sd2_hits=SCANFAIL
+{ [ "$sd2_hits" != SCANFAIL ] && [ -n "$sd2_hits" ]; } \
+    && pass "a concatenated delimiter word is quote-removed whole" \
+    || die "cat <<E\"OF\" swallowed the rest of the file ('$sd2_hits')"
+
+# ── A LONE & ENDS A COMMAND ────────────────────────────────────────────────
+# `grep -F x f & grep '\s' f` is two commands: the first is backgrounded, and its
+# fixed-string exemption was covering the second.
+printf '#!/usr/bin/env bash\ngrep -F x "$f" & grep %s "$f"\n' "'\\s'" > "$PTMP/ampsplit.sh"
+as_hits="$(scan "$RULE_A" "$PTMP/ampsplit.sh")" || as_hits=SCANFAIL
+{ [ "$as_hits" != SCANFAIL ] && [ -n "$as_hits" ]; } \
+    && pass "a backgrounded command does not exempt the next one" \
+    || die "grep -F excused a later grep across an & ('$as_hits')"
+# …and `&` in a REDIRECTION is not a separator: `2>&1` and `&>f` join a command to
+# its own output, and splitting there would cut a command from its own pattern.
+printf '#!/usr/bin/env bash\ngrep -F x "$f" 2>&1 | grep %s "$f"\n' "'\\s'" > "$PTMP/ampredir.sh"
+ar_hits="$(scan "$RULE_A" "$PTMP/ampredir.sh")" || ar_hits=SCANFAIL
+{ [ "$ar_hits" != SCANFAIL ] && [ -n "$ar_hits" ]; } \
+    && pass "…while an & inside a redirection is not a separator" \
+    || die "a redirection was split as a background operator ('$ar_hits')"
 
 # ── A WORD CAN BE ASSEMBLED FROM SEVERAL QUOTINGS ──────────────────────────
 # `grep \\$'\s' f` is an unquoted escape and an ANSI-C span written next to each
