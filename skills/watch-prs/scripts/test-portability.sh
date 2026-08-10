@@ -555,6 +555,13 @@ SCAN_PROLOGUE='
     # line is scanned — including the ones inside double quotes, which is where they
     # usually are. Stepping over a group keeps the command it sits in whole; this is
     # what keeps the command INSIDE it visible.
+    # The Bash 4 EXPANSIONS, which are the only rules that apply inside a
+    # here-document body: everything else there is text bash never executes.
+    function expansion_hit(l) {
+        if (l ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) return 1
+        if (l ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) return 1
+        return 0
+    }
     function subst_bodies(l) {
         shell_scan(l, SC_Q0)
         return SC_BODIES
@@ -968,6 +975,11 @@ SCAN_PROLOGUE='
           # AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS, so a substitution in it
           # runs its command — the body is data for the RULES, but not for that.
           if (HDX[hdi]) {
+              # A PARAMETER EXPANSION IS ACTIVE THERE TOO. A case-modifying one in
+              # an unquoted body is performed by bash, so the Bash 4 rules for it
+              # apply — while the ordinary TEXT of the body is still
+              # data, which is why the whole line is not handed to the rules.
+              if (expansion_hit($0)) report("case modification is Bash 4: " $0)
               hdbody = subst_bodies($0)
               if (hdbody != "") {
                   hdn2 = split(hdbody, HDB, "\n")
@@ -1075,14 +1087,20 @@ SCAN_PROLOGUE='
               # AN ANSI-C SPAN CONTRIBUTES ITS DECODED TEXT. `cat <<$'"'"'EOF'"'"'` names
               # `EOF`; appending the characters as written recorded the dollar and
               # the quotes, and no line ever equals that.
+              # EVERY QUOTING FORM SUPPRESSES EXPANSION, not only the two quote
+              # characters: `<<\EOF` and `<<$'"'"'EOF'"'"'` are quoted delimiters as much as
+              # `<<'"'"'EOF'"'"'` is, and the branches that consumed them were not saying so —
+              # so their bodies were treated as expanding and portable source was
+              # rejected.
               if (SC_CTX[hdk] == "$" && substr(hdsrc, hdk, 2) == "$\047") {
+                  hdquoted = 1
                   hden = ansic_span_end(hdsrc, hdk + 2)
                   if (hden > 0) {
                       hdw = hdw ansic_decode(substr(hdsrc, hdk + 2, hden - hdk - 2))
                       hdsaw = 1; hdk = hden + 1; continue
                   }
               }
-              if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; continue }
+              if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; hdquoted = 1; continue }
               if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
                   # `&` before `;` again: the other order writes a literal `;&`
                   # into this file, which rule D reads as a case terminator.
@@ -2515,6 +2533,46 @@ qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
 { [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
     && pass "…and a quoted -F is still fixed-string mode" \
     || die "a quoted -F was not recognised ('$qf_hits')"
+
+# ── EVERY QUOTING FORM ON THE DELIMITER SUPPRESSES EXPANSION ───────────────
+# `cat <<\EOF` and `cat <<$'EOF'` are quoted delimiters as much as `<<'EOF'` is.
+# The branches that consumed those spellings were not saying so, and their bodies
+# were treated as expanding — portable source rejected.
+for spec in 'bsdelim' 'ansicdelim'; do
+    { printf '#!/usr/bin/env bash\n'
+      case "$spec" in
+          bsdelim)   printf 'cat <<%sEOF\n' "$bs" ;;
+          ansicdelim) printf 'cat <<$%sEOF%s\n' "$sq" "$sq" ;;
+      esac
+      printf 'text $(grep -qE "%ss" f) more\n' "$bs"
+      printf 'EOF\n'; } > "$PTMP/$spec-quoted.sh"
+    dq2_hits="$(scan "$RULE_A" "$PTMP/$spec-quoted.sh")" || dq2_hits=SCANFAIL
+    { [ "$dq2_hits" != SCANFAIL ] && [ -z "$dq2_hits" ]; } \
+        && pass "a $spec delimiter suppresses expansion in its body" \
+        || die "a $spec delimiter was read as expanding ('$dq2_hits')"
+done
+
+# ── AN EXPANSION IN AN UNQUOTED BODY IS PERFORMED ──────────────────────────
+# The TEXT of a here-document body is data, which is why the rules do not see it —
+# but bash performs the expansions in an unquoted one, so a case-modifying
+# parameter expansion there is a Bash 4 construct that really runs.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<EOF || :\n'
+  printf 'value ${name^^} more\n'
+  printf 'EOF\n'; } > "$PTMP/hdparam.sh"
+hp2_hits="$(scan "$RULE_D" "$PTMP/hdparam.sh")" || hp2_hits=SCANFAIL
+{ [ "$hp2_hits" != SCANFAIL ] && [ -n "$hp2_hits" ]; } \
+    && pass "a case-modifying expansion in an expanded body is reported" \
+    || die "an active expansion in a here-document body was missed ('$hp2_hits')"
+# …and a QUOTED delimiter suppresses it, so the same text is data again.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'EOF' || :\n"
+  printf 'value ${name^^} more\n'
+  printf 'EOF\n'; } > "$PTMP/hdparamq.sh"
+hpq_hits="$(scan "$RULE_D" "$PTMP/hdparamq.sh")" || hpq_hits=SCANFAIL
+{ [ "$hpq_hits" != SCANFAIL ] && [ -z "$hpq_hits" ]; } \
+    && pass "…while a quoted delimiter keeps that expansion data" \
+    || die "an expansion in a quoted body was reported ('$hpq_hits')"
 
 # ── AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS ───────────────────────────
 # The body is data for the rules, but bash still performs substitution in it, so a

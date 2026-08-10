@@ -127,6 +127,13 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Every quoting form on the delimiter suppresses expansion, and an expansion in
+  an unquoted body is performed.** `<<\EOF` and `<<$'EOF'` are quoted delimiters as
+  much as `<<'EOF'` is, and the branches consuming those spellings were not saying
+  so. The other way round, a case-modifying parameter expansion in an *unquoted*
+  body really runs — the body's text is data, which is why the rules do not see it,
+  but the expansions in it are not.
+
 - **An unquoted here-document delimiter means the body expands.** The body is data
   for the rules, but bash still performs substitution in it, so a `$( … )` there
   really invokes its command — and with the CI job removing that command, the
