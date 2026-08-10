@@ -125,6 +125,22 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **The wrappers compose, and consuming one removes everything it consumed.**
+  `command env grep …` is both; running each unwrapping once in a fixed order
+  stopped at the first. And `env LC_ALL=C grep …` left the assignment as the first
+  operand, which the rule that reads the first operand as a pattern then read.
+
+- **`>|` is one redirection, `-c` counts anywhere in a cluster, and a `((` header
+  is an expression.** A lone `(` in a `for` list opens a substitution whose command
+  the list iterates over, so the header skip stops there; two in a row are the
+  arithmetic form and everything between them is grammar.
+
+- **The remaining option and endpoint spellings.** `grep -m NUM` and friends take
+  their argument, or it is read as the pattern; `{1..-1..-1}` signs its endpoints
+  as well as its step; `declare -A` is matched by command word like `-g`, so an
+  assembled name still counts; `read -N`/`-i` are post-3.2; and a leading `!`
+  negates a three-argument comparison rather than being part of it.
+
 - **The wrappers a command arrives through, and the shapes it sits behind.** `env`
   runs the command after its options and assignments, as `command` and `builtin`
   do. `>>`, `<<` and `<>` are single operators — tokenised a character at a time,

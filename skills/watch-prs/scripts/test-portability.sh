@@ -321,7 +321,7 @@ SCAN_PROLOGUE='
     # passes `-s globstar` to `shopt`; treating `>` as a boundary lost the operands
     # and the construct reported clean — and with the output redirected, nothing
     # else would have shown it either.
-    function simple_cmd(from, i, w) {
+    function simple_cmd(from, i, w, pd) {
         CMDW = ""; CMDN = 0
         for (i = from; i <= SC_ARGC; i++) {
             w = SC_ARGV[i]
@@ -348,7 +348,10 @@ SCAN_PROLOGUE='
                 # time, the second `>` of `>>log` was consumed as the preceding
                 # operator TARGET, and `log` then became the command word — the real
                 # command after it was only an argument.
-                while (i < SC_ARGC && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) i++
+                # `>|` OVERRIDES NOCLOBBER and is part of the operator, not a pipe
+                # after it — a bar in that position belongs to the redirection.
+                while (i < SC_ARGC && SC_AOP[i + 1] &&
+                       (is_redir(SC_ARGV[i + 1]) || SC_ARGV[i + 1] == "|")) i++
                 if (i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "&") i++
                 i++
                 continue
@@ -368,23 +371,36 @@ SCAN_PROLOGUE='
                 # `case x in` ENDS AT `in`, and what follows is a pattern list and
                 # then commands. Grouping it with `for` made the header search for a
                 # `do` that never comes, so an entire arm was consumed as grammar.
+                # A HEADER IS GRAMMAR, BUT A SUBSTITUTION INSIDE ONE STILL RUNS ITS
+                # COMMAND. `for x in $(grep PATTERN f)` iterates over the OUTPUT of a
+                # real `grep`, and consuming every token through `do` swallowed it.
+                # The header skip stops at the `(` that opens one and lets the
+                # ordinary walk take the command inside.
                 if (w == "case") {
-                    for (i = i + 1; i <= SC_ARGC; i++)
+                    for (i = i + 1; i <= SC_ARGC; i++) {
+                        if (SC_AOP[i] && SC_ARGV[i] == "(") return i + 1
                         if (SC_ARGV[i] == "in") break
+                    }
                     continue
                 }
                 if (w == "for" || w == "select") {
                     # THE LIST IS PART OF THE HEADER. `for x in a b c; do` names a
                     # variable and then a WORD LIST, and stopping at `in` handed that
                     # list to the next iteration as a command with arguments.
-                    # A PARENTHESIS IN A HEADER IS PART OF IT. `for (( i=0; c; i++ ))`
-                    # is the arithmetic form, and treating its `(` as a control
-                    # operator abandoned the header — the expression inside was then
-                    # read as an invoked command. The header ends at `do`, or at a
-                    # separator that is not a parenthesis.
+                    #
+                    # `((` IS THE ARITHMETIC FORM, and everything between the two
+                    # parentheses is an expression rather than a command. A LONE `(`
+                    # opens a substitution whose command the list iterates over, and
+                    # the skip stops there so that command is examined.
+                    pd = 0
                     for (i = i + 1; i <= SC_ARGC; i++) {
-                        if (SC_AOP[i] && is_op(SC_ARGV[i]) &&
-                            SC_ARGV[i] != "(" && SC_ARGV[i] != ")" && SC_ARGV[i] != ";") return i + 1
+                        if (SC_AOP[i] && SC_ARGV[i] == "(") {
+                            if (pd == 0 && !(i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "(")) return i + 1
+                            pd++; continue
+                        }
+                        if (SC_AOP[i] && SC_ARGV[i] == ")") { pd--; continue }
+                        if (pd > 0) continue
+                        if (SC_AOP[i] && is_op(SC_ARGV[i]) && SC_ARGV[i] != ";") return i + 1
                         if (SC_ARGV[i] == "do") break
                     }
                     continue
@@ -405,31 +421,41 @@ SCAN_PROLOGUE='
     # option exactly as the bare spelling does, so the wrapper is unwrapped — but
     # `command -v X` and `-V` DESCRIBE X rather than running it, which is the guard
     # pattern this tree uses everywhere, so those are left alone.
-    function unwrap(i) {
-        # `env` RUNS THE COMMAND AFTER ITS OPTIONS AND ASSIGNMENTS, which is the
-        # third spelling of the same wrapper — and the one a script reaches for when
-        # it wants a clean environment.
-        while (CMDW == "env") {
-            i = 1
-            while (i <= CMDN && (CMDA[i] ~ /^-/ || CMDA[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
-                if (CMDA[i] == "-u" || CMDA[i] == "--unset") i++
-                i++
+    # Drop CMDA[1..upto] and make CMDA[upto+1] the new command word. Shifting by one
+    # while consuming several left the earlier ones in place: `env LC_ALL=C grep …`
+    # kept the ASSIGNMENT as the first operand, and the rule that reads the first
+    # operand as a pattern read that.
+    function take_after(upto, i) {
+        CMDW = CMDA[upto]
+        for (i = upto + 1; i <= CMDN; i++) CMDA[i - upto] = CMDA[i]
+        CMDN -= upto
+    }
+    # THE WRAPPERS COMPOSE. `command env grep …` is both of them, and running each
+    # loop once in a fixed order unwrapped `command` to `env` and then stopped.
+    function unwrap(i, moved) {
+        moved = 1
+        while (moved) {
+            moved = 0
+            # `env` RUNS THE COMMAND AFTER ITS OPTIONS AND ASSIGNMENTS — the spelling
+            # a script reaches for when it wants a clean environment.
+            if (CMDW == "env") {
+                i = 1
+                while (i <= CMDN && (CMDA[i] ~ /^-/ || CMDA[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
+                    if (CMDA[i] == "-u" || CMDA[i] == "--unset") i++
+                    i++
+                }
+                if (i > CMDN) return 0
+                take_after(i); moved = 1; continue
             }
-            if (i > CMDN) return 0
-            CMDW = CMDA[i]
-            for (i = i + 1; i <= CMDN; i++) CMDA[i - 1] = CMDA[i]
-            CMDN--
-        }
-        while (CMDW == "command" || CMDW == "builtin") {
-            i = 1
-            while (i <= CMDN && CMDA[i] ~ /^-/) {
-                if (CMDA[i] == "-v" || CMDA[i] == "-V") return 0
-                i++
+            if (CMDW == "command" || CMDW == "builtin") {
+                i = 1
+                while (i <= CMDN && CMDA[i] ~ /^-/) {
+                    if (CMDA[i] == "-v" || CMDA[i] == "-V") return 0
+                    i++
+                }
+                if (i > CMDN) return 0
+                take_after(i); moved = 1; continue
             }
-            if (i > CMDN) return 0
-            CMDW = CMDA[i]
-            for (i = i + 1; i <= CMDN; i++) CMDA[i - 1] = CMDA[i]
-            CMDN--
         }
         return 1
     }
@@ -463,7 +489,10 @@ SCAN_PROLOGUE='
             base = CMDW; sub(/^.*\//, "", base)
             if (base != "bash" && base != "sh") continue
             for (j = 1; j < CMDN; j++)
-                if (CMDA[j] ~ /^-[A-Za-z]*c$/) { out = out (out == "" ? "" : "\n") CMDA[j + 1]; break }
+                # `-c` ANYWHERE IN THE CLUSTER. `bash -cx BODY` is the documented
+                # spelling with a trace flag after it, and requiring `c` last read
+                # the body as an ordinary operand.
+                if (CMDA[j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { out = out (out == "" ? "" : "\n") CMDA[j + 1]; break }
         }
         return out
     }
@@ -498,9 +527,13 @@ SCAN_PROLOGUE='
             # primary rejected portable code.
             # The `]` of the bracket form is not an argument of the expression, and
             # counting it made the three-argument comparison look like four.
-            vn = CMDN
+            vn = CMDN; vb = 1
             if (CMDW == "[" && vn > 0 && CMDA[vn] == "]") vn--
-            if (vn == 3 && CMDA[2] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
+            # A LEADING `!` NEGATES THE WHOLE EXPRESSION and is not part of it, so
+            # `test ! -v = token` is the negation of a three-argument comparison —
+            # counting the `!` made it four and the special case was skipped.
+            if (CMDA[1] == "!") { vb = 2; vn-- }
+            if (vn == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
             for (j = 1; j <= CMDN; j++) {
                 if (CMDA[j] != "-v") continue
                 if (j < CMDN && CMDA[j + 1] != "]" && CMDA[j + 1] != ")") return 1
@@ -525,6 +558,10 @@ SCAN_PROLOGUE='
             if (SC_CTX[i] == "" && !SC_ESC[i] && !SC_ARI[i]) {
                 rest = substr(l, i, 2)
                 if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; SEGQ[n] = ""; i++; continue }
+                # `>|` IS ONE REDIRECTION — the noclobber override — so the bar
+                # there is not a pipe and splitting on it left the target looking
+                # like the command.
+                if (ch == "|" && i > 1 && substr(l, i - 1, 1) == ">") { SEG[n] = SEG[n] ch; continue }
                 if (ch == ";" || ch == "|") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
                 # A LONE `&` BACKGROUNDS AND ENDS A COMMAND, so a fixed-string
                 # grep followed by an ampersand and a second grep is two commands,
@@ -1117,6 +1154,9 @@ RULE_A='
             # read as the pattern: `awk -F , PROGRAM` would otherwise make the comma
             # the program. The list is per engine and short — awk takes `-F` and
             # `-v`, and `-f` names a file for all three.
+            # …and grep has its own: `-m NUM`, `-A`/`-B`/`-C` and `-d ACTION` all
+            # take the next word, which was otherwise read as the pattern.
+            if (egrepsed && CMDA[aj] ~ /^-[mABCd]$/ && aj < CMDN) { aj++; continue }
             if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
             if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
             if (CMDA[aj] ~ /^-[A-Za-z]*e$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
@@ -1269,7 +1309,10 @@ RULE_D='
     # immediately before the dash, saw the quote and passed it. One optional quote
     # character on each side, which is the whole of what quote removal does to an
     # option word; this is a pattern for a construct, not an option parser.
-    if (line ~ /(declare|local|typeset)([[:space:]]+["'"'"']?-[A-Za-z-]+["'"'"']?)*[[:space:]]+["'"'"']?-[A-Za-z]*A[A-Za-z]*["'"'"']?([[:space:]]|$)/) {
+    # AS A COMMAND WORD, for the same reason `-g` is: quote removal happens first,
+    # so `de"clare" -A` invokes the ordinary builtin and a raw pattern could not see
+    # it. `local` is a function-scope builtin and gets the same treatment.
+    if (cmd_opt("declare", "A") || cmd_opt("typeset", "A") || cmd_opt("local", "A")) {
         report("associative arrays are Bash 4: " line); return }
     # `-g` DECLARES A GLOBAL FROM INSIDE A FUNCTION — Bash 4.2. Bash 3.2 rejects the
     # option and the variable is simply never set, which is a behaviour difference
@@ -1284,6 +1327,11 @@ RULE_D='
     # is the shape nothing but text finds.
     if (cmd_opt("wait", "n")) {
         report("wait -n is Bash 4.3: " line); return }
+    # `read -N` READS EXACTLY THAT MANY CHARACTERS and `-i` seeds the line editor —
+    # both after 3.2, which rejects the option and leaves different state behind
+    # rather than failing outright.
+    if (cmd_opt("read", "N") || cmd_opt("read", "i")) {
+        report("this read option is newer than Bash 3.2: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) {
@@ -1312,7 +1360,9 @@ RULE_D='
     # THE STEP MAY BE SIGNED. `{5..1..-1}` counts down and is the same Bash 4
     # feature; an unsigned `[0-9]+` for the step read the `-` as not-a-step and let
     # the descending form through — the spelling a descending loop actually uses.
-    if (line ~ /\{[0-9]+\.\.[0-9]+\.\.-?[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.-?[0-9]+\}/) {
+    # THE ENDPOINTS TAKE A SIGN TOO, not only the step: `{1..-1..-1}` counts down
+    # through zero, and requiring unsigned endpoints let that spelling through.
+    if (line ~ /\{-?[0-9]+\.\.-?[0-9]+\.\.-?[0-9]+\}/ || line ~ /\{[A-Za-z]\.\.[A-Za-z]\.\.-?[0-9]+\}/) {
         report("a stepped brace expansion is Bash 4: " line); return }
     # EVERY OPERAND, not the first one after the flags. `shopt -s nullglob
     # globstar` enables both, and a pattern allowing only flag words between the
@@ -2170,6 +2220,18 @@ refute awkfs     "awk -F , '\''/x/'\'' \"$f\""                       A "awk -F, 
 # above cannot show on its own.
 plant awkfspat   "awk -F , ${sq}/${bs}s/${sq} ${dq}\$f${dq}"                A "a gawk operator behind a field separator"
 refute grepfile  "grep -f 'patterns\\s' \"$f\""                   A "a -f operand, which names a file"
+# …and the rest of what a command can be written behind or through.
+plant noclobber  ">|log shopt -s globstar || :"                D "globstar behind a noclobber redirection"
+plant envassign  "env LC_ALL=C grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind an env assignment"
+plant twowrap    "command env grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind two wrappers"
+plant clusterc   "bash -cx 'wait -n || :'"                     D "a shell body behind a clustered -c"
+plant headersub  "for x in \$(grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}); do :; done" A "an engine inside a for-list substitution"
+plant grepmax    "grep -m 1 -E ${sq}${bs}s${sq} ${dq}\$f${dq} || :"       A "a pattern after an option that takes a number"
+plant signedends "for i in {1..-1..-1}; do :; done"            D "a stepped expansion with signed endpoints"
+plant assembled  "de\"clare\" -A values || :"                   D "an associative array whose name is assembled"
+plant readn      "IFS= read -r -N 1 first < ${dq}\$f${dq} || :"      D "read -N, which is newer than Bash 3.2"
+# …while a NEGATED three-argument comparison is still a comparison.
+refute vnegbin   "if test ! -v = token; then :; fi"            D "a negated three-argument comparison"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
