@@ -97,9 +97,10 @@ SCAN_PROLOGUE='
     # It is still not a lexer. `$( … )` nesting, `${ … }` and a quote spanning a
     # continuation are not modelled, and the direction of that is unchanged: a rule
     # sees less context than it should and therefore REPORTS rather than excuses.
-    function shell_scan(l, i, k, ch, q, nxt, en) {
-        delete SC_CTX; delete SC_ESC
-        SC_EFF = ""; q = ""; i = 1
+    function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw) {
+        delete SC_CTX; delete SC_ESC; delete SC_ARGV
+        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0
+        q = q0; i = 1
         while (i <= length(l)) {
             ch = substr(l, i, 1)
             SC_CTX[i] = q; SC_ESC[i] = 0
@@ -110,6 +111,7 @@ SCAN_PROLOGUE='
                 if (ch == "\134" && i < length(l)) {
                     SC_CTX[i + 1] = q; SC_ESC[i + 1] = 1
                     SC_EFF = SC_EFF substr(l, i + 1, 1)
+                    word = word substr(l, i + 1, 1); saw = 1
                     i += 2; continue
                 }
                 # `$'…'` is ANSI-C quoting: the escapes inside are DECODED, and
@@ -119,27 +121,32 @@ SCAN_PROLOGUE='
                     if (en > 0) {
                         for (k = i; k <= en; k++) { SC_CTX[k] = "$"; SC_ESC[k] = 0 }
                         SC_EFF = SC_EFF ansic_decode(substr(l, i + 2, en - i - 2))
+                        word = word ansic_decode(substr(l, i + 2, en - i - 2)); saw = 1
                         i = en + 1; continue
                     }
                 }
-                if (ch == "\047" || ch == "\042") { q = ch; i++; continue }
-                # UNQUOTED WHITESPACE SEPARATES ARGUMENTS; quoted whitespace is
-                # inside one. `shopt -s "nullglob globstar"` passes ONE operand,
-                # which is not a valid option name and enables nothing — flattening
-                # both to spaces read it as two and rejected portable code.
-                #
-                # It was first written for the parity question — whether a
-                # backslash run joins across two arguments — and removed again,
-                # because an ordinary space answers that one just as well. This is
-                # the question it is actually needed for: whether two words are one
-                # argument, which a space cannot answer because a quoted one looks
-                # the same.
-                if (ch == " " || ch == "\t") { SC_EFF = SC_EFF "\002"; i++; continue }
-                SC_EFF = SC_EFF ch; i++; continue
+                # A quote CHARACTER contributes nothing itself, but it means a word
+                # is present — which is how `cat <<''` differs from `cat <<`.
+                if (ch == "\047" || ch == "\042") { q = ch; saw = 1; i++; continue }
+                # Unquoted whitespace ENDS a word; an unquoted control operator ends
+                # one and is a token of its own, so `(test -v x)` has `test` as a
+                # command word rather than as part of `(test`.
+                if (ch == " " || ch == "\t") {
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+                    word = ""; saw = 0
+                    SC_EFF = SC_EFF ch; i++; continue
+                }
+                if (index("();&|<>", ch) > 0) {
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+                    word = ""; saw = 0
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch
+                    SC_EFF = SC_EFF ch; i++; continue
+                }
+                SC_EFF = SC_EFF ch; word = word ch; saw = 1; i++; continue
             }
             if (q == "\047") {
                 if (ch == "\047") { q = ""; i++; continue }
-                SC_EFF = SC_EFF ch; i++; continue
+                SC_EFF = SC_EFF ch; word = word ch; i++; continue
             }
             # Inside double quotes a backslash is literal EXCEPT before one of the
             # four characters it can escape there.
@@ -147,13 +154,32 @@ SCAN_PROLOGUE='
                 nxt = substr(l, i + 1, 1)
                 if (index("$\140\042\134", nxt) > 0) {
                     SC_CTX[i + 1] = q; SC_ESC[i + 1] = 1
-                    SC_EFF = SC_EFF nxt; i += 2; continue
+                    SC_EFF = SC_EFF nxt; word = word nxt; i += 2; continue
                 }
-                SC_EFF = SC_EFF ch; i++; continue
+                SC_EFF = SC_EFF ch; word = word ch; i++; continue
             }
             if (ch == q) { q = ""; i++; continue }
-            SC_EFF = SC_EFF ch; i++; continue
+            SC_EFF = SC_EFF ch; word = word ch; i++; continue
         }
+        if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+        # WHERE THE QUOTING STOOD AT THE END, so the next physical line can start
+        # from it: a word opened on one physical line and closed on the next is
+        # ONE word, and a scan that restarted at every line read that closing
+        # quote as an opener — the whole rest of the line then became data.
+        SC_QEND = q
+    }
+    # True when `cmd` and `name` are words of the SAME simple command — no control
+    # operator between them. `shopt -s nullglob globstar` qualifies; `shopt -s x;
+    # echo globstar` does not.
+    function argv_pair(cmd, name, i, j) {
+        for (i = 1; i <= SC_ARGC; i++) {
+            if (SC_ARGV[i] != cmd) continue
+            for (j = i + 1; j <= SC_ARGC; j++) {
+                if (index("();&|<>", SC_ARGV[j]) > 0 && length(SC_ARGV[j]) == 1) break
+                if (SC_ARGV[j] == name) return 1
+            }
+        }
+        return 0
     }
     # A RULE JUDGES A SIMPLE COMMAND, NOT A LOGICAL LINE. `grep -F x f; grep "\s" f`
     # has one fixed-string command and one that is not, and an exemption taken for
@@ -163,14 +189,18 @@ SCAN_PROLOGUE='
     # The split reads the shared model, so a separator inside quotes — or one made
     # literal by a backslash — no longer cuts a command away from its own pattern.
     function segments(l, n, i, ch, rest) {
-        shell_scan(l)
-        n = 1; SEG[1] = ""
+        shell_scan(l, SC_Q0)
+        # EACH SEGMENT KEEPS ITS OWN STARTING STATE. The first inherits whatever
+        # quoting the logical line began inside — a word opened on an earlier
+        # physical line — and every later one starts unquoted, because the operator
+        # that ended the previous segment was itself unquoted.
+        n = 1; SEG[1] = ""; SEGQ[1] = SC_Q0
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
             if (SC_CTX[i] == "" && !SC_ESC[i]) {
                 rest = substr(l, i, 2)
-                if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; i++; continue }
-                if (ch == ";" || ch == "|") { n++; SEG[n] = ""; continue }
+                if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; SEGQ[n] = ""; i++; continue }
+                if (ch == ";" || ch == "|") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
                 # A LONE `&` BACKGROUNDS AND ENDS A COMMAND, so `grep -F x f &
                 # grep "\s" f` is two commands, and the fixed-string exemption
                 # taken by the first was covering the second.
@@ -182,7 +212,7 @@ SCAN_PROLOGUE='
                 # fixture could make it matter, which is the same reason the word
                 # separator went: a branch whose invariant cannot fail reads as
                 # covered when it is not.
-                if (ch == "&") { n++; SEG[n] = ""; continue }
+                if (ch == "&") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
             }
             SEG[n] = SEG[n] ch
         }
@@ -190,7 +220,7 @@ SCAN_PROLOGUE='
     }
     # WHERE the operator appears outside quotes, or 0.
     function unquoted_pos(l, pat, i) {
-        shell_scan(l)
+        shell_scan(l, SC_Q0)
         for (i = 1; i <= length(l); i++)
             if (SC_CTX[i] == "" && !SC_ESC[i] && substr(l, i, length(pat)) == pat) return i
         return 0
@@ -225,7 +255,7 @@ SCAN_PROLOGUE='
     # starting a comment — and treating it as one stripped a real `<<EOF` and read
     # the document body as shell.
     function strip_comment(l, i, ch, prev) {
-        shell_scan(l)
+        shell_scan(l, SC_Q0)
         for (i = 1; i <= length(l); i++) {
             if (SC_CTX[i] != "" || SC_ESC[i]) continue
             if (substr(l, i, 1) != "#") continue
@@ -358,10 +388,10 @@ SCAN_PROLOGUE='
         return out
     }
     # True when a decoded `$'…'` span escapes a letter from `set`. The span ends at
-    # the first UNESCAPED quote: `$'x\'\134s'` carries one inside it, and a pattern
-    # that stopped at the first quote of any kind cut the span in half and left the
-    # `\134s` unexamined — the walker deliberately ignores ANSI-C text, so nothing
-    # judged it at all.
+    # the first UNESCAPED quote: a span can carry an escaped one inside it, and a
+    # pattern that stopped at the first quote of any kind cut the span in half and
+    # left the tail unexamined — the walker deliberately ignores ANSI-C text, so
+    # nothing judged it at all.
     function ansic_span_end(l, from, i, ch) {
         for (i = from; i <= length(l); i++) {
             ch = substr(l, i, 1)
@@ -389,7 +419,7 @@ SCAN_PROLOGUE='
     # ordinary letter. Judging either part on its own got that backwards, and
     # judging them separately is what the old pair of functions did.
     function esc_class(l, set, i, n, ch) {
-        shell_scan(l)
+        shell_scan(l, SC_Q0)
         for (i = 1; i <= length(SC_EFF); i++) {
             if (substr(SC_EFF, i, 1) != "\134") continue
             n = 0
@@ -414,70 +444,29 @@ SCAN_PROLOGUE='
       # was scanned as shell once the first terminator arrived. The delimiters are
       # a queue, and the head is what the current body ends on.
       #
-      # THE TERMINATOR IS COMPARED AGAINST THE UNTOUCHED LINE. `cat <<'#EOF'` names
-      # a delimiter beginning with a `#`, and stripping full-line comments before
+      # THE TERMINATOR IS COMPARED AGAINST THE UNTOUCHED LINE. A quoted delimiter
+      # may begin with a comment character, and stripping full-line comments before
       # this check turned that terminator into an empty line: the document never
       # drained and everything after it was skipped to end of file.
+      #
+      # A BODY LINE IS NEVER JOINED. It is data, so a trailing backslash in it
+      # continues nothing.
       if (hdn > 0) {
           t = $0
-          # ONLY `<<-` STRIPS INDENTATION, and only TABS. Stripping whitespace from
-          # every terminator meant an indented `  EOF` inside an ordinary `<<EOF`
-          # body ended the skip early — the rest of the document then read as
-          # shell, so a forbidden spelling written as example text failed the gate.
+          # ONLY `<<-` STRIPS INDENTATION, and only TABS.
           if (HDD[hdi]) sub(/^\t+/, "", t)
           if (t == HDQ[hdi]) { hdi++; if (hdi > hdn) { hdn = 0; hdi = 0 } }
           next
       }
+      # FULL-LINE COMMENTS GO BEFORE ANYTHING IS INFERRED FROM THE TEXT — but
+      # AFTER the terminator check above, which compares against the untouched
+      # line, because a quoted delimiter may begin with a comment character.
       sub(/^[[:space:]]*#.*$/, "", raw)
-      # AN INLINE COMMENT OPENS NOTHING, and a `<<` inside an arithmetic expression
-      # is not a redirection. Both are decided on the same string, through the
-      # shared model, so the positions stay absolute and the delimiter word is read
-      # from the line as written.
-      hdsrc = strip_comment(raw)
-      shell_scan(hdsrc); arith_mark(hdsrc)
-      hp = 1
-      while (hp < length(hdsrc)) {
-          if (SC_CTX[hp] != "" || SC_ESC[hp] || SC_ARI[hp] || substr(hdsrc, hp, 2) != "<<") { hp++; continue }
-          # `<<<` is a here-STRING and has no terminator. The pattern could begin
-          # at the second `<` of one, take the word after it as a delimiter, and
-          # skip every following line to EOF — a single `cat <<<EOF` excusing the
-          # file.
-          if (substr(hdsrc, hp, 3) == "<<<") { hp += 3; continue }
-          hdk = hp + 2
-          hddash = (substr(hdsrc, hdk, 1) == "-")
-          if (hddash) hdk++
-          while (substr(hdsrc, hdk, 1) == " " || substr(hdsrc, hdk, 1) == "\t") hdk++
-          # THE DELIMITER IS A WHOLE WORD, and bash quote-removes it — `<<E"OF"`
-          # names `EOF`, `<<\EOF` names `EOF`, `<<"E\"OF"` names `E"OF`, and
-          # `<<'"'"'END MARK'"'"'` names one with a space in it. What the word may contain
-          # is for bash to say; the word simply ends where an unquoted character
-          # ends one.
-          hdw = ""
-          while (hdk <= length(hdsrc)) {
-              hdc = substr(hdsrc, hdk, 1)
-              # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
-              # sits: keeping it recorded a delimiter no line will ever equal.
-              if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; continue }
-              if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
-                  # `&` before `;` again: the other order writes a literal `;&`
-                  # into this file, which rule D reads as a case terminator.
-                  if (hdc ~ /[[:space:]&;|<>()]/) break
-                  if (hdc == "\047" || hdc == "\042" || hdc == "\134") { hdk++; continue }
-              # An ESCAPED quote inside a quoted delimiter is part of the word.
-              } else if (SC_CTX[hdk] != "" && !SC_ESC[hdk] && hdc == SC_CTX[hdk]) { hdk++; continue }
-              hdw = hdw hdc
-              hdk++
-          }
-          if (hdw != "") { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
-          hp = (hdk > hp) ? hdk : hp + 2
-      }
-      if (hdn > 0) hdi = 1
-      if (buf == "") start = FNR
-      # REMOVED, not replaced by a space. Bash deletes the backslash-newline and
-      # joins the halves directly, so `gaw\` and `k …` is the command `gawk` — and
-      # a space put between them left rule B looking at two words that are not the
-      # name. The space that belongs there is already in the source, before the
-      # backslash.
+      # THE LOGICAL LINE IS ASSEMBLED FIRST, and only then read for redirections.
+      # A continuation can split ANYTHING, including a delimiter word: `cat <<E\`
+      # and `OF` opens a document terminated by `EOF`, and extracting before the
+      # join recorded `E` and waited for a terminator that never comes.
+      if (buf == "") { start = FNR; SC_LINE_Q = CARRY }
       # …AND ONLY WHEN THE TRAILING RUN IS ODD. Two backslashes at the end are a
       # literal backslash and the command ENDS there; joining anyway glued the next
       # line on, and an exemption taken by the first half then covered the second.
@@ -485,7 +474,58 @@ SCAN_PROLOGUE='
       nbs = 0
       while (nbs < length(raw) && substr(raw, length(raw) - nbs, 1) == "\134") nbs++
       if (nbs % 2 == 1) { sub(/\\$/, "", raw); buf = buf raw; next }
-      line = buf raw; buf = "" }
+      line = buf raw; buf = ""
+
+      # AN INLINE COMMENT OPENS NOTHING, and a `<<` inside an arithmetic expression
+      # is not a redirection. Both are decided on the same string, through the
+      # shared model, so the positions stay absolute and the delimiter word is read
+      # from the line as written.
+      SC_Q0 = SC_LINE_Q
+      hdsrc = strip_comment(line)
+      shell_scan(hdsrc, SC_Q0); arith_mark(hdsrc)
+      # QUOTE STATE CARRIES TO THE NEXT LINE. `x='"'"'data` and then `'"'"'; shopt …` is one
+      # word split across two physical lines, and a scan restarting at every line
+      # read the closing quote as an opener — everything after it became data and
+      # the rule saw nothing.
+      CARRY = SC_QEND
+      hp = 1
+      while (hp < length(hdsrc)) {
+          if (SC_CTX[hp] != "" || SC_ESC[hp] || SC_ARI[hp] || substr(hdsrc, hp, 2) != "<<") { hp++; continue }
+          # `<<<` is a here-STRING and has no terminator.
+          if (substr(hdsrc, hp, 3) == "<<<") { hp += 3; continue }
+          hdk = hp + 2
+          hddash = (substr(hdsrc, hdk, 1) == "-")
+          if (hddash) hdk++
+          while (substr(hdsrc, hdk, 1) == " " || substr(hdsrc, hdk, 1) == "\t") hdk++
+          # THE DELIMITER IS A WHOLE WORD, and bash quote-removes it. What the word
+          # may contain is for bash to say; it ends where an unquoted character
+          # ends a word.
+          #
+          # A WORD THAT IS PRESENT BUT EMPTY IS STILL A WORD: a delimiter of two
+          # quote characters and nothing between them reads to a blank terminator
+          # line. `hdsaw` is what tells that from a `<<` with no word at all,
+          # which an emptiness test alone could not.
+          hdw = ""; hdsaw = 0
+          while (hdk <= length(hdsrc)) {
+              hdc = substr(hdsrc, hdk, 1)
+              # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
+              # sits: keeping it recorded a delimiter no line will ever equal.
+              if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; continue }
+              if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
+                  # `&` before `;` again: the other order writes a literal `;&`
+                  # into this file, which rule D reads as a case terminator.
+                  if (hdc ~ /[[:space:]&;|<>()]/) break
+                  if (hdc == "\047" || hdc == "\042") { hdk++; hdsaw = 1; continue }
+                  if (hdc == "\134") { hdk++; hdsaw = 1; continue }
+              # An ESCAPED quote inside a quoted delimiter is part of the word.
+              } else if (SC_CTX[hdk] != "" && !SC_ESC[hdk] && hdc == SC_CTX[hdk]) { hdk++; hdsaw = 1; continue }
+              hdw = hdw hdc; hdsaw = 1
+              hdk++
+          }
+          if (hdsaw) { hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash }
+          hp = (hdk > hp) ? hdk : hp + 2
+      }
+      if (hdn > 0) hdi = 1 }
 '
 SCAN_EPILOGUE='
     END { if (buf != "") { line = buf; RULES() } }
@@ -513,12 +553,14 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     # otherwise never be examined at all.
     out="$(awk "$SCAN_PROLOGUE"'
         { RULES() }
-        function RULES(  nseg, si) {
+        function RULES(  nseg, si, lq) {
             # `WHOLE` survives the split, for the constructs the split destroys:
             # `;&` is a case terminator and splitting on `;` takes it apart.
             WHOLE = line
+            lq = SC_Q0
             nseg = segments(WHOLE)
-            for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; ONE() }
+            for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; SC_Q0 = SEGQ[si]; ONE() }
+            SC_Q0 = lq
             line = WHOLE
         }
         function ONE() {'"$prog"'}
@@ -766,8 +808,13 @@ RULE_D='
     # passes the same operand and the quotes are gone by then. The shared model
     # already builds that string, and using it here is the same move as judging
     # escape parity on it.
-    shell_scan(line); eff = SC_EFF
-    if (eff ~ /(^|\002)shopt(\002|$)/ && eff ~ /(^|\002)globstar(\002|$)/) {
+    # JUDGED ON THE ARGUMENT LIST, not on a flattened string. A separator byte
+    # written into one collides with the same byte produced by an ANSI-C escape —
+    # `shopt -s $'"'"'nullglob\002globstar'"'"'` is ONE invalid operand — so the boundaries
+    # are structural instead. `shopt -s '"'"'globstar'"'"'` still counts, because quote
+    # removal happens before the words are built.
+    shell_scan(line, SC_Q0)
+    if (argv_pair("shopt", "globstar")) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
@@ -783,8 +830,16 @@ RULE_D='
     # Bash 4.2 operator, and a pattern requiring it immediately after the command
     # missed both — while the `if` around them masks the failure, so nothing else
     # sees it either.
-    if (eff ~ /(^|\002)(\[|test)\002(!\002)?-v\002/) {
-        report("the -v conditional is Bash 4.2: " line); return }'
+    # …and the same for `-v`, which also needs `(` and `)` to be tokens of their
+    # own: `(test -v token)` is a subshell running `test`, and a flattened string
+    # left the parenthesis stuck to the command name.
+    for (vi = 1; vi < SC_ARGC; vi++) {
+        if (SC_ARGV[vi] != "[" && SC_ARGV[vi] != "test") continue
+        vj = vi + 1
+        if (SC_ARGV[vj] == "!") vj++
+        if (SC_ARGV[vj] == "-v") {
+            report("the -v conditional is Bash 4.2: " line); return }
+    }'
 
 # portability-scan: rules-end
 
@@ -1518,6 +1573,14 @@ plant vnegtest   "if test ! -v token; then observed=yes; fi" D "a negated -v in 
 # whitespace to ordinary whitespace read both as several words and rejected them.
 refute globstarone "shopt -s \"nullglob globstar\" || :"       D "a quoted pair that is one invalid operand"
 refute vstring     "if test \"! -v token\"; then :; fi"        D "a one-argument string test"
+# …and the boundary is STRUCTURAL, so a decoded byte cannot be mistaken for one:
+# `shopt -s $'"'"'nullglob\002globstar'"'"'` is a single invalid operand whichever byte a
+# flattened representation happened to pick.
+refute globstarbyte "shopt -s \$'"'"'nullglob\\002globstar'"'"' || :"       D "an operand carrying the separator byte"
+# …and a control operator is a token of its own, so the command word beside it is
+# still the command word.
+plant vparen     "token=1; if (test -v token); then observed=yes; fi" D "a -v conditional inside a subshell"
+plant globstarparen "(shopt -s globstar) || :"                D "globstar inside a subshell"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -1572,6 +1635,56 @@ nd_hits="$(scan "$RULE_A" "$PTMP/numdelim.sh")" || nd_hits=SCANFAIL
 { [ "$nd_hits" != SCANFAIL ] && [ -z "$nd_hits" ]; } \
     && pass "a numeric here-document delimiter is accepted" \
     || die "cat <<'123' was refused as a delimiter ('$nd_hits')"
+
+# ── THE DELIMITER IS READ FROM THE JOINED LINE ─────────────────────────────
+# A continuation can split ANYTHING, including the delimiter word. Extracting
+# before the join recorded `E` from `cat <<E\` and waited for a terminator that
+# never comes, so a later violation was skipped to end of file.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<E%s\n' "$one_bs"
+  printf 'OF\n'
+  printf 'body text\n'
+  printf 'EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/contdelim.sh"
+cd2_hits="$(scan "$RULE_A" "$PTMP/contdelim.sh")" || cd2_hits=SCANFAIL
+{ [ "$cd2_hits" != SCANFAIL ] && [ -n "$cd2_hits" ]; } \
+    && pass "a delimiter split across a continuation is read whole" \
+    || die "cat <<E\\ + OF recorded the wrong delimiter ('$cd2_hits')"
+# …and a BODY line is never joined: it is data, so a trailing backslash in it
+# continues nothing and the terminator after it still arrives.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<EOF\n'
+  printf 'body ending in a backslash %s\n' "$one_bs"
+  printf 'EOF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/bodycont.sh"
+bc_hits="$(scan "$RULE_A" "$PTMP/bodycont.sh")" || bc_hits=SCANFAIL
+{ [ "$bc_hits" != SCANFAIL ] && [ -n "$bc_hits" ]; } \
+    && pass "…while a trailing backslash in a body line joins nothing" \
+    || die "a body line was joined to its terminator ('$bc_hits')"
+
+# ── A PRESENT BUT EMPTY DELIMITER IS A DELIMITER ───────────────────────────
+# `cat <<''` reads to a blank terminator line. Treating the empty value as though
+# no word had been written queued nothing and the body was read as shell.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<''\n"
+  printf 'grep -qE "\\s" is example text\n'
+  printf '\n'; } > "$PTMP/emptydelim.sh"
+ed2_hits="$(scan "$RULE_A" "$PTMP/emptydelim.sh")" || ed2_hits=SCANFAIL
+{ [ "$ed2_hits" != SCANFAIL ] && [ -z "$ed2_hits" ]; } \
+    && pass "a present but empty delimiter opens a document" \
+    || die "cat <<'' queued nothing ('$ed2_hits')"
+
+# ── QUOTE STATE CARRIES ACROSS PHYSICAL LINES ──────────────────────────────
+# A word opened on one line and closed on the next is one word. A scan that
+# restarted at every line read that closing quote as an OPENER, so the rest of the
+# line became data and the rule saw nothing in it.
+{ printf '#!/usr/bin/env bash\n'
+  printf "x='data\n"
+  printf "'; shopt -s globstar || :\n"; } > "$PTMP/multiline.sh"
+ml_hits="$(scan "$RULE_D" "$PTMP/multiline.sh")" || ml_hits=SCANFAIL
+{ [ "$ml_hits" != SCANFAIL ] && [ -n "$ml_hits" ]; } \
+    && pass "a word closed on the next physical line does not quote the rest" \
+    || die "a multiline word hid a Bash 4 option ('$ml_hits')"
 
 # ── A CONTINUATION NEEDS AN ODD TRAILING RUN ───────────────────────────────
 # Two backslashes at the end of a line are a literal backslash and the command ENDS
@@ -1630,13 +1743,12 @@ as_hits="$(scan "$RULE_A" "$PTMP/ampsplit.sh")" || as_hits=SCANFAIL
 { [ "$as_hits" != SCANFAIL ] && [ -n "$as_hits" ]; } \
     && pass "a backgrounded command does not exempt the next one" \
     || die "grep -F excused a later grep across an & ('$as_hits')"
-# …and `&` in a REDIRECTION is not a separator: `2>&1` and `&>f` join a command to
-# its own output, and splitting there would cut a command from its own pattern.
-printf '#!/usr/bin/env bash\ngrep -F x "$f" 2>&1 | grep %s "$f"\n' "'\\s'" > "$PTMP/ampredir.sh"
-ar_hits="$(scan "$RULE_A" "$PTMP/ampredir.sh")" || ar_hits=SCANFAIL
-{ [ "$ar_hits" != SCANFAIL ] && [ -n "$ar_hits" ]; } \
-    && pass "…while an & inside a redirection is not a separator" \
-    || die "a redirection was split as a background operator ('$ar_hits')"
+# The `&` of a REDIRECTION splits too, deliberately: a redirection carries no
+# pattern of its own, so the extra segment is `1` or `>f` and no rule has anything
+# to say about it. There is no fixture for that, because there is nothing an
+# implementation could do differently that any assertion would see — the fixture
+# that used to sit here asserted the opposite of the production behaviour and
+# passed anyway, on a `|` that separated the commands regardless.
 
 # ── A WORD CAN BE ASSEMBLED FROM SEVERAL QUOTINGS ──────────────────────────
 # `grep \\$'\s' f` is an unquoted escape and an ANSI-C span written next to each

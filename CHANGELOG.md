@@ -123,6 +123,21 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **The logical line is assembled before it is read for redirections.** A
+  continuation can split anything, including a delimiter word: `cat <<E\` then
+  `OF` opens a document terminated by `EOF`, and extracting first recorded `E` and
+  waited for a terminator that never comes. Body lines are still never joined —
+  they are data, so a trailing backslash in one continues nothing.
+
+- **Quote state carries across physical lines.** A word opened on one line and
+  closed on the next is one word; a scan restarting at every line read that
+  closing quote as an opener, so the rest of the line became data and the rules
+  saw nothing in it. Each segment of a split line keeps its own starting state.
+
+- **A present but empty delimiter is a delimiter.** `cat <<''` reads to a blank
+  terminator line, and treating the empty value as though no word had been written
+  queued nothing at all.
+
 - **A continuation needs an odd trailing run.** Two backslashes at the end of a
   line are a literal backslash and the command *ends* there; joining anyway glued
   the next line on, and a fixed-string exemption taken by the first half then
@@ -165,10 +180,13 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   parity question is really about: `grep \\$'\s' f` is an unquoted escape and an
   ANSI-C span written next to each other, one backslash each, and judging either
   part alone got it backwards. Unquoted whitespace becomes an argument separator
-  in that string and quoted whitespace stays a space, because the difference is
-  what tells one argument from two: `shopt -s "nullglob globstar"` passes ONE
-  invalid option name and enables nothing, and `test "! -v token"` is a
-  one-argument string test.
+  in that string, and the words themselves are built as a LIST rather than marked
+  inside it. A separator byte written into a flattened string collides with the
+  same byte an ANSI-C escape can produce, so the boundaries are structural: an
+  unquoted control operator is a token of its own, which is also what makes
+  `(test -v token)` a `test` command rather than a word called `(test`. What this
+  buys is that `shopt -s "nullglob globstar"` is ONE invalid option name that
+  enables nothing, and `test "! -v token"` is a one-argument string test.
 
 - **A quoted arithmetic opener is data**, `\EOF` is a here-document delimiter
   (bash quote-removes the delimiter word, and a backslash is one of the quotings),
