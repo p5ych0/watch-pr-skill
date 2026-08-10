@@ -439,12 +439,19 @@ SCAN_PROLOGUE='
           hdw = ""
           while (hdk <= length(hdtail)) {
               hdc = substr(hdtail, hdk, 1)
+              # A BACKSLASH THAT QUOTES SOMETHING IS NOT IN THE WORD, wherever it
+              # sits: `<<"E\"OF"` names `E"OF`, and keeping the backslash recorded
+              # a delimiter no line will ever equal.
+              if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; continue }
               if (SC_CTX[hdk] == "" && !SC_ESC[hdk]) {
                   # `&` before `;` again: the other order writes a literal `;&`
                   # into this file, which rule D reads as a case terminator.
                   if (hdc ~ /[[:space:]&;|<>()]/) break
                   if (hdc == "\047" || hdc == "\042" || hdc == "\134") { hdk++; continue }
-              } else if (SC_CTX[hdk] != "" && hdc == SC_CTX[hdk]) { hdk++; continue }
+              # An ESCAPED quote inside a quoted delimiter is part of the word:
+              # `<<"E\"OF"` names `E"OF`. Dropping it because it matches its own
+              # context recorded `EOF`, and the real terminator never arrived.
+              } else if (SC_CTX[hdk] != "" && !SC_ESC[hdk] && hdc == SC_CTX[hdk]) { hdk++; continue }
               hdw = hdw hdc
               hdk++
           }
@@ -454,7 +461,12 @@ SCAN_PROLOGUE='
           # shift rather than a document — and taking it started a skip with no
           # terminator, to EOF. A delimiter that is only digits is not a spelling
           # anything here uses, and one that is not a word at all is not one either.
-          if (hdw ~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/ && hdw !~ /^[0-9]+$/) {
+          # ANY QUOTED WORD IS A DELIMITER. `cat <<'"'"'END MARK'"'"'` names one with a space in
+          # it, and an identifier-shaped whitelist refused to queue it — so the
+          # body was read as shell. What the word may contain is for bash to say;
+          # what is left here is the one spelling that is NOT a document: a purely
+          # numeric operand, which is the arithmetic left shift.
+          if (hdw != "" && hdw !~ /^[0-9]+$/) {
               hdn++; HDQ[hdn] = hdw; HDD[hdn] = hddash
           }
 
@@ -466,7 +478,13 @@ SCAN_PROLOGUE='
       # a space put between them left rule B looking at two words that are not the
       # name. The space that belongs there is already in the source, before the
       # backslash.
-      if (raw ~ /\\$/) { sub(/\\$/, "", raw); buf = buf raw; next }
+      # …AND ONLY WHEN THE TRAILING RUN IS ODD. Two backslashes at the end are a
+      # literal backslash and the command ENDS there; joining anyway glued the next
+      # line on, and an exemption taken by the first half then covered the second.
+      # The same parity that decides an escape decides a continuation.
+      nbs = 0
+      while (nbs < length(raw) && substr(raw, length(raw) - nbs, 1) == "\134") nbs++
+      if (nbs % 2 == 1) { sub(/\\$/, "", raw); buf = buf raw; next }
       line = buf raw; buf = "" }
 '
 SCAN_EPILOGUE='
@@ -1463,6 +1481,18 @@ cw_hits="$(scan "$RULE_A" "$PTMP/contword.sh")" || cw_hits=SCANFAIL
     && pass "…while a continuation between words keeps them apart" \
     || die "a continued command lost its word boundary ('$cw_hits')"
 
+# ── A CONTINUATION NEEDS AN ODD TRAILING RUN ───────────────────────────────
+# Two backslashes at the end of a line are a literal backslash and the command ENDS
+# there. Joining anyway glued the next line on, and the fixed-string exemption
+# taken by the first half then covered a real GNU escape in the second.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'grep -F x "$f" %s\n' "$two_bs"
+  printf 'if grep %s /dev/null; then :; fi\n' "'\\s'"; } > "$PTMP/doublecont.sh"
+dc_hits="$(scan "$RULE_A" "$PTMP/doublecont.sh")" || dc_hits=SCANFAIL
+{ [ "$dc_hits" != SCANFAIL ] && [ -n "$dc_hits" ]; } \
+    && pass "two trailing backslashes end the command rather than continue it" \
+    || die "a doubled trailing backslash joined the next line ('$dc_hits')"
+
 # ── THE DELIMITER IS A WHOLE WORD ──────────────────────────────────────────
 # `cat <<E"OF"` is a document ending at `EOF`. Consuming only `<<E"` recorded `E`,
 # and the terminator never came — so a real violation after the document was
@@ -1476,6 +1506,29 @@ sd2_hits="$(scan "$RULE_A" "$PTMP/splitdelim.sh")" || sd2_hits=SCANFAIL
 { [ "$sd2_hits" != SCANFAIL ] && [ -n "$sd2_hits" ]; } \
     && pass "a concatenated delimiter word is quote-removed whole" \
     || die "cat <<E\"OF\" swallowed the rest of the file ('$sd2_hits')"
+
+# …and an ESCAPED quote inside a quoted delimiter is part of the word: `<<"E\"OF"`
+# names `E"OF`. Dropping it because it matches its own context recorded `EOF`, and
+# the real terminator never arrived.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<"E\\"OF"\n'
+  printf 'body text\n'
+  printf 'E"OF\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/escqdelim.sh"
+eq_hits="$(scan "$RULE_A" "$PTMP/escqdelim.sh")" || eq_hits=SCANFAIL
+{ [ "$eq_hits" != SCANFAIL ] && [ -n "$eq_hits" ]; } \
+    && pass "…and an escaped quote inside a delimiter stays in the word" \
+    || die "an escaped quote was dropped from the delimiter ('$eq_hits')"
+# …and any quoted word is a delimiter, space included. An identifier-shaped
+# whitelist refused `END MARK` and the body was read as shell.
+{ printf '#!/usr/bin/env bash\n'
+  printf "cat <<'END MARK'\n"
+  printf 'grep -qE "\\s" is example text\n'
+  printf 'END MARK\n'; } > "$PTMP/spacedelim.sh"
+sp_hits="$(scan "$RULE_A" "$PTMP/spacedelim.sh")" || sp_hits=SCANFAIL
+{ [ "$sp_hits" != SCANFAIL ] && [ -z "$sp_hits" ]; } \
+    && pass "…and a delimiter containing a space is still a delimiter" \
+    || die "a quoted delimiter with a space was refused ('$sp_hits')"
 
 # ── A LONE & ENDS A COMMAND ────────────────────────────────────────────────
 # `grep -F x f & grep '\s' f` is two commands: the first is backgrounded, and its
