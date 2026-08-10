@@ -112,12 +112,22 @@ SCAN_PROLOGUE='
     # The nesting is a STACK: the state at the `$(` is pushed and restored at the
     # matching `)`. Backticks are still not modelled, and that stays stated.
     # Where the `$(( … ))` beginning at `from` ends: one past its final `)`.
-    function arith_end(l, from, d, i, ch) {
-        d = 2; i = from
+    #
+    # QUOTED PARENTHESES ARE DATA. Counting them never reached depth zero and the
+    # span swallowed the rest of the logical line, taking a real command with it.
+    # Quoting is tracked here rather than assumed away, and a span that does not
+    # close by the end of the line ends THERE — an indeterminate span consuming
+    # everything after it is the swallow-the-file shape one more time.
+    function arith_end(l, from, d, i, ch, q) {
+        d = 2; i = from; q = ""
         while (i <= length(l) && d > 0) {
             ch = substr(l, i, 1)
-            if (ch == "(") d++
-            else if (ch == ")") d--
+            if (q == "") {
+                if (ch == "\134") { i += 2; continue }
+                if (ch == "\047" || ch == "\042") { q = ch; i++; continue }
+                if (ch == "(") d++
+                else if (ch == ")") d--
+            } else if (ch == q) q = ""
             i++
         }
         return i
@@ -337,8 +347,14 @@ SCAN_PROLOGUE='
                     # THE LIST IS PART OF THE HEADER. `for x in a b c; do` names a
                     # variable and then a WORD LIST, and stopping at `in` handed that
                     # list to the next iteration as a command with arguments.
+                    # A PARENTHESIS IN A HEADER IS PART OF IT. `for (( i=0; c; i++ ))`
+                    # is the arithmetic form, and treating its `(` as a control
+                    # operator abandoned the header — the expression inside was then
+                    # read as an invoked command. The header ends at `do`, or at a
+                    # separator that is not a parenthesis.
                     for (i = i + 1; i <= SC_ARGC; i++) {
-                        if (SC_AOP[i] && is_op(SC_ARGV[i])) return i + 1
+                        if (SC_AOP[i] && is_op(SC_ARGV[i]) &&
+                            SC_ARGV[i] != "(" && SC_ARGV[i] != ")" && SC_ARGV[i] != ";") return i + 1
                         if (SC_ARGV[i] == "do") break
                     }
                     continue
@@ -387,6 +403,20 @@ SCAN_PROLOGUE='
         }
         return 0
     }
+    # The body of an invoked `bash -c` / `sh -c`, or "" when there is none. The
+    # operand is already quote-removed, which is what makes it scannable as shell.
+    function shell_c_body(l, i, j, base) {
+        shell_scan(l, SC_Q0)
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            base = CMDW; sub(/^.*\//, "", base)
+            if (base != "bash" && base != "sh") continue
+            for (j = 1; j < CMDN; j++)
+                if (CMDA[j] ~ /^-[A-Za-z]*c$/) return CMDA[j + 1]
+        }
+        return ""
+    }
     function cmd_has(cmd, name, i, j) {
         i = 1
         while (i <= SC_ARGC) {
@@ -430,6 +460,11 @@ SCAN_PROLOGUE='
     }
     function segments(l, n, i, ch, rest) {
         shell_scan(l, SC_Q0)
+        # AN ARITHMETIC EXPRESSION IS NOT A LIST OF COMMANDS. `for (( i=0; c; i++ ))`
+        # separates its three parts with `;`, and splitting there handed the middle
+        # one to the rules as a command of its own. The same mask the redirection
+        # scan uses says which positions are inside one.
+        arith_mark(l)
         # EACH SEGMENT KEEPS ITS OWN STARTING STATE. The first inherits whatever
         # quoting the logical line began inside — a word opened on an earlier
         # physical line — and every later one starts unquoted, because the operator
@@ -437,7 +472,7 @@ SCAN_PROLOGUE='
         n = 1; SEG[1] = ""; SEGQ[1] = SC_Q0
         for (i = 1; i <= length(l); i++) {
             ch = substr(l, i, 1)
-            if (SC_CTX[i] == "" && !SC_ESC[i]) {
+            if (SC_CTX[i] == "" && !SC_ESC[i] && !SC_ARI[i]) {
                 rest = substr(l, i, 2)
                 if (rest == "&&" || rest == "||") { n++; SEG[n] = ""; SEGQ[n] = ""; i++; continue }
                 if (ch == ";" || ch == "|") { n++; SEG[n] = ""; SEGQ[n] = ""; continue }
@@ -886,7 +921,7 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
     # otherwise never be examined at all.
     out="$(awk "$SCAN_PROLOGUE"'
         { RULES() }
-        function RULES(  nseg, si, lq) {
+        function RULES(  nseg, si, lq, body, saved) {
             # `WHOLE` survives the split, for the constructs the split destroys:
             # `;&` is a case terminator and splitting on `;` takes it apart.
             WHOLE = line
@@ -895,6 +930,21 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
             for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; SC_Q0 = SEGQ[si]; ONE() }
             SC_Q0 = lq
             line = WHOLE
+            # A LITERAL `bash -c` BODY IS SHELL. It arrives as ONE operand of
+            # `bash`, so a rule about an invoked command never sees the command
+            # inside it. The body is scanned as its own input, once: a body that
+            # itself spawns another shell is not followed, and saying so is cheaper
+            # than a recursion this file would then have to bound.
+            if (!NESTED) {
+                body = shell_c_body(WHOLE)
+                if (body != "") {
+                    saved = WHOLE
+                    NESTED = 1; SC_Q0 = ""
+                    line = body; RULES()
+                    NESTED = 0
+                    line = saved; WHOLE = saved; SC_Q0 = lq
+                }
+            }
         }
         function ONE() {'"$prog"'}
     '"$SCAN_EPILOGUE" "$@" 2>"$errf")" || rc=$?
@@ -977,20 +1027,39 @@ RULE_A='
         ai = simple_cmd(ai)
         if (!unwrap()) continue
         efixed = 0; egrepsed = 0
-        if (CMDW == "fgrep") { efixed = 1; egrepsed = 1 }
-        else if (CMDW ~ /^(grep|egrep|sed)$/) egrepsed = 1
-        else if (CMDW !~ /^(awk|gawk)$/) continue
+        # A PATH-QUALIFIED ENGINE IS THE SAME ENGINE. `/usr/bin/grep` is GNU grep on
+        # one platform and BSD grep on the other, which is exactly the difference
+        # this rule exists for, and the leading path hid it.
+        ebase = CMDW; sub(/^.*\//, "", ebase)
+        if (ebase == "fgrep") { efixed = 1; egrepsed = 1 }
+        else if (ebase ~ /^(grep|egrep|sed)$/) egrepsed = 1
+        else if (ebase !~ /^(awk|gawk)$/) continue
         # `--` ENDS THE OPTIONS. After it a word beginning with a dash is a
         # filename, so `grep -e PATTERN -- -F` searches a file called `-F` with the
         # pattern still active — reading that as fixed-string mode exempted a
         # command whose pattern is not.
         for (aj = 1; aj <= CMDN; aj++) {
             if (CMDA[aj] == "--") break
-            if (CMDA[aj] ~ /^-[A-Za-z]*F$/ || CMDA[aj] == "--fixed-strings") efixed = 1
+            # `F` ANYWHERE IN THE CLUSTER. `grep -Fq PATTERN` has both options
+            # active, and requiring `F` last read it as an ordinary option word.
+            if (CMDA[aj] ~ /^-[A-Za-z]*F[A-Za-z]*$/ || CMDA[aj] == "--fixed-strings") efixed = 1
         }
         if (efixed) continue
-        eargs = ""
-        for (aj = 1; aj <= CMDN; aj++) eargs = eargs " " CMDA[aj]
+        # ONLY THE OPERANDS THAT CARRY A PATTERN. `grep x '"'"'file\s'"'"'` searches for
+        # `x` in a file whose NAME contains a backslash, which is the same search on
+        # both platforms — concatenating every argument reported the filename.
+        #
+        # Which operand is the pattern is a small rule per engine and not an option
+        # parser: for `grep` it is the operand of each `-e`, or else the first
+        # non-option word; `sed` and `awk` take their script the same way. Anything
+        # after `--` or after that first word is a FILE.
+        eargs = ""; epat = 0
+        for (aj = 1; aj <= CMDN; aj++) {
+            if (CMDA[aj] == "--") { aj++; if (!epat && aj <= CMDN) { eargs = eargs " " CMDA[aj]; epat = 1 } break }
+            if (CMDA[aj] ~ /^-[A-Za-z]*[ef]$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
+            if (CMDA[aj] ~ /^-/) continue
+            if (!epat) { eargs = eargs " " CMDA[aj]; epat = 1 }
+        }
         if (egrepsed && esc_class_eff(eargs, "sSdDwWbBy<>")) {
             report("GNU regex escape: " line); return }
         if (!egrepsed && esc_class_eff(eargs, "sSdDwWBy<>")) {
@@ -2013,6 +2082,13 @@ refute forlist   "for x in shopt globstar; do :; done"        D "a for-list whos
 refute forlistA  "for x in grep '\\s'; do :; done"             A "a for-list carrying a pattern"
 plant timeopt    "time -p shopt -s globstar || :"             D "globstar behind a timed prefix"
 plant waitn      "sleep 0 & wait -n || :"                     D "wait -n, which is Bash 4.3"
+# …and a literal `bash -c` body is shell: the command inside it is invoked, and a
+# rule about an invoked command never saw it while it was one operand of `bash`.
+plant nestedwait "bash -c 'wait -n || :'"                     D "wait -n inside a bash -c body"
+plant nestedopt  "bash -c 'shopt -s globstar' || :"           D "globstar inside a bash -c body"
+# …and the arithmetic FOR header is a header: the expression inside it is not a
+# command, whatever its words are called.
+refute arithfor  "for (( i=0; shopt + globstar; i++ )); do :; done" D "an arithmetic for header"
 
 # ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
 # `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
@@ -2131,6 +2207,39 @@ qs_hits="$(scan "$RULE_A" "$PTMP/qsubcmd.sh")" || qs_hits=SCANFAIL
 # …while `$((` is ARITHMETIC and shares the first two characters. Reading it as a
 # substitution made the operands of an ordinary sum look like an invoked command.
 refute arithword 'value=$((shopt + globstar))'                D "arithmetic whose operands share builtin names"
+
+# ── ONLY THE OPERANDS THAT CARRY A PATTERN ─────────────────────────────────
+# `grep x 'file\s'` searches for `x` in a file whose NAME contains a backslash —
+# the same search on both platforms. Concatenating every argument reported the
+# filename as a GNU escape.
+printf '#!/usr/bin/env bash\ngrep x %sfile%ss%s\n' "'" "$one_bs" "'" > "$PTMP/patfile.sh"
+pt_hits="$(scan "$RULE_A" "$PTMP/patfile.sh")" || pt_hits=SCANFAIL
+{ [ "$pt_hits" != SCANFAIL ] && [ -z "$pt_hits" ]; } \
+    && pass "an escape in a FILENAME is not an escape in the pattern" \
+    || die "a filename operand was read as a pattern ('$pt_hits')"
+# …and `-Fq` has both options active, so the fixed-string exemption applies.
+printf '#!/usr/bin/env bash\ngrep -Fq %s "$f"\n' "'\\s'" > "$PTMP/fcluster.sh"
+fc_hits="$(scan "$RULE_A" "$PTMP/fcluster.sh")" || fc_hits=SCANFAIL
+{ [ "$fc_hits" != SCANFAIL ] && [ -z "$fc_hits" ]; } \
+    && pass "…and -F anywhere in a cluster is still fixed-string mode" \
+    || die "a clustered -F was not recognised ('$fc_hits')"
+# …while a PATH-QUALIFIED engine is the same engine: `/usr/bin/grep` is GNU on one
+# platform and BSD on the other, which is the difference this rule exists for.
+printf '#!/usr/bin/env bash\n/usr/bin/grep -E %s "$f" || :\n' "'\\s'" > "$PTMP/pathengine.sh"
+pe_hits="$(scan "$RULE_A" "$PTMP/pathengine.sh")" || pe_hits=SCANFAIL
+{ [ "$pe_hits" != SCANFAIL ] && [ -n "$pe_hits" ]; } \
+    && pass "…and a path-qualified engine is still the engine" \
+    || die "/usr/bin/grep was not recognised ('$pe_hits')"
+
+# ── AN ARITHMETIC SPAN ENDS WHERE ITS QUOTING SAYS ─────────────────────────
+# Quoted parentheses are data. Counting them never reached depth zero, and the span
+# swallowed the rest of the logical line — taking a real command with it.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'value=$(( ${x:-%s(%s} + 1 )); shopt -s globstar || :\n' "'" "'"; } > "$PTMP/arithquote.sh"
+aq2_hits="$(scan "$RULE_D" "$PTMP/arithquote.sh")" || aq2_hits=SCANFAIL
+{ [ "$aq2_hits" != SCANFAIL ] && [ -n "$aq2_hits" ]; } \
+    && pass "a command after an arithmetic span is still visible" \
+    || die "the arithmetic span swallowed the command after it ('$aq2_hits')"
 
 # ── `--` ENDS THE OPTIONS ──────────────────────────────────────────────────
 # After it a word beginning with a dash is a filename: `grep -e PATTERN -- -F`

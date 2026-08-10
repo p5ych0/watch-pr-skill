@@ -123,6 +123,23 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Only the operands that carry a pattern are examined.** `grep x 'file\s'`
+  searches for `x` in a file whose *name* contains a backslash — the same search on
+  both platforms — and concatenating every argument reported the filename. Which
+  operand is the pattern is a small rule per engine: the operand of each `-e`, or
+  else the first non-option word. A path-qualified `/usr/bin/grep` is still the
+  engine, and `-F` counts anywhere in a cluster.
+
+- **A literal `bash -c` body is shell.** It arrives as one operand, so a rule about
+  an invoked command never saw the command inside it. The body is scanned as its
+  own input, once — a body that itself spawns another shell is not followed, and
+  saying so is cheaper than a recursion this file would have to bound.
+
+- **An arithmetic expression is not a list of commands.** `for (( i=0; c; i++ ))`
+  separates its three parts with `;`, and splitting there handed the middle one to
+  the rules as a command; quoted parentheses inside a span are data, and counting
+  them never reached depth zero, so the span swallowed the rest of the line.
+
 - **A span is data throughout, and a header runs to its `do`.** Consuming only the
   arithmetic opener left the expression to the ordinary word rules, so the
   whitespace inside `$(( a + b ))` flushed the assignment and the operands became
