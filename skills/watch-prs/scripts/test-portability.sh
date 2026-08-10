@@ -241,16 +241,26 @@ SCAN_PROLOGUE='
             # logical line looking for a `))` that never came — including a real
             # here-document redirection after it.
             if (SC_CTX[i] == "" && !SC_ESC[i]) {
-                opener = 0
-                if (substr(l, i, 3) == "$((") opener = 3
-                else if (substr(l, i, 2) == "((") opener = 2
+                # THREE SPELLINGS. `$(( … ))` is the expansion, `(( … ))` the
+                # arithmetic COMMAND, and `$[ … ]` the legacy expansion Bash 3.2
+                # still accepts — which is the one this tree must keep working on.
+                # Its left shift is spelled `<<` like the others, so leaving it out
+                # queued the right operand as a here-document delimiter and skipped
+                # to end of file waiting for a terminator that never comes.
+                opener = 0; opens = ""; closes = ""
+                if (substr(l, i, 3) == "$((")     { opener = 3; opens = "("; closes = ")" }
+                else if (substr(l, i, 2) == "((") { opener = 2; opens = "("; closes = ")" }
+                else if (substr(l, i, 2) == "$[") { opener = 2; opens = "["; closes = "]" }
                 if (opener > 0) {
-                    d = 2; i += opener
+                    # Two parens to close for either paren form, one bracket for
+                    # the legacy one.
+                    d = (opens == "(") ? 2 : 1
+                    i += opener
                     while (i <= length(l) && d > 0) {
                         ch = substr(l, i, 1)
                         if (SC_CTX[i] == "" && !SC_ESC[i]) {
-                            if (ch == "(") d++
-                            else if (ch == ")") d--
+                            if (ch == opens) d++
+                            else if (ch == closes) d--
                         }
                         i++
                     }
@@ -768,7 +778,12 @@ RULE_D='
     # globstar` enables both, and a pattern allowing only flag words between the
     # two missed it — with the status masked by a `|| :`, the CI job passes as
     # well and nothing sees it.
-    if (line ~ /(^|[[:space:]])shopt([[:space:]]|$)/ && line ~ /(^|[[:space:]])globstar([[:space:]]|$)/) {
+    # JUDGED ON WHAT `shopt` RECEIVES, not on the source text: `shopt -s '"'"'globstar'"'"'`
+    # passes the same operand and the quotes are gone by then. The shared model
+    # already builds that string, and using it here is the same move as judging
+    # escape parity on it.
+    shell_scan(line); eff = SC_EFF
+    if (eff ~ /(^|[[:space:]])shopt([[:space:]]|$)/ && eff ~ /(^|[[:space:]])globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
     if (line ~ /(^|[[:space:]])set[[:space:]]+-o[[:space:]]+globstar([[:space:]]|$)/) {
         report("globstar is Bash 4: " line); return }
@@ -780,7 +795,11 @@ RULE_D='
     # portability would reach for.
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
         report("[[ -v ]] is Bash 4.2: " line); return }
-    if (line ~ /(^|[[:space:]&;|(])(\[|test)[[:space:]]+-v[[:space:]]/) {
+    # NEGATED COUNTS. `[ ! -v token ]` and `test ! -v token` evaluate the same
+    # Bash 4.2 operator, and a pattern requiring it immediately after the command
+    # missed both — while the `if` around them masks the failure, so nothing else
+    # sees it either.
+    if (eff ~ /(^|[[:space:]&;|(])(\[|test)[[:space:]]+(![[:space:]]+)?-v[[:space:]]/) {
         report("the -v conditional is Bash 4.2: " line); return }'
 
 # portability-scan: rules-end
@@ -1502,6 +1521,26 @@ cw_hits="$(scan "$RULE_A" "$PTMP/contword.sh")" || cw_hits=SCANFAIL
 plant globstartwo "shopt -s nullglob globstar || :"          D "globstar as a second shopt operand"
 plant vtest      "if [ -v token ]; then observed=yes; fi"    D "the -v conditional in single brackets"
 plant vbuiltin   "if test -v token; then observed=yes; fi"   D "the -v conditional in the test builtin"
+# …and the operand may be QUOTED, which `shopt` never sees: quote removal happens
+# first, so the rule is applied to what the command receives.
+plant globstarq  "shopt -s 'globstar' || :"                    D "a quoted globstar operand"
+# …and the conditional may be NEGATED, in either command form. The `if` around it
+# masks the failure, so nothing else sees these two either.
+plant vneg       "if [ ! -v token ]; then observed=yes; fi"  D "a negated -v in single brackets"
+plant vnegtest   "if test ! -v token; then observed=yes; fi" D "a negated -v in the test builtin"
+
+# ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
+# `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
+# for — still accepts it. Its left shift is spelled `<<` like the others, so
+# leaving it out queued the right operand as a delimiter and skipped to end of file
+# waiting for a terminator that never comes.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'n=$[1 << 2 ]\n'
+  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/legacyarith.sh"
+la_hits="$(scan "$RULE_A" "$PTMP/legacyarith.sh")" || la_hits=SCANFAIL
+{ [ "$la_hits" != SCANFAIL ] && [ -n "$la_hits" ]; } \
+    && pass "the legacy \$[ ] arithmetic opens no here-document" \
+    || die "\$[1 << 2 ] swallowed the rest of the file ('$la_hits')"
 
 # ── A NUMERIC DELIMITER IS STILL A DELIMITER ───────────────────────────────
 # `cat <<'123'` is a document. The numeric test was guarding against the arithmetic

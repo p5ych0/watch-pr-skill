@@ -100,12 +100,20 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   as data paired them with the opening quote of the real span, which was then
   never decoded at all.
 
+- **The legacy `$[ … ]` arithmetic is arithmetic too.** Bash 3.2 — the platform
+  this whole check exists for — still accepts it, and its left shift is spelled
+  `<<` like the others, so leaving it out of the stripper queued the right operand
+  as a here-document delimiter and skipped to end of file.
+
 - **Every `shopt` operand is examined, and `-v` has three spellings.**
   `shopt -s nullglob globstar` enables both, and a pattern allowing only flag
   words between the two missed it — with the status masked by a `|| :`, the CI job
   passes as well and nothing sees it. `[ -v x ]` and `test -v x` are the same
   Bash 4.2 conditional as `[[ -v x ]]`, and are the spellings a script written for
-  portability would reach for.
+  portability would reach for — negated included, since the `if` around a failed
+  conditional masks it. The `shopt` rule reads what the command *receives* rather
+  than the source text, so a quoted `'globstar'` operand counts: the same move as
+  judging escape parity on it.
 
 - **A continuation needs an odd trailing run.** Two backslashes at the end of a
   line are a literal backslash and the command *ends* there; joining anyway glued
