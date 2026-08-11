@@ -234,92 +234,92 @@ jobs:
             exit 1
           fi
           echo "confirmed: declare -A is rejected"
-
-      # `awk` IS NOT `gawk`, AND THIS JOB HAS TO KEEP THAT DISTINCTION. POSIX
-      # specifies `awk` and macOS ships one; `gawk` is the GNU name and is what a
-      # portable script must not call. On Ubuntu they are the same file — `awk` is
-      # a symlink chain ending at `/usr/bin/gawk` — so hiding the GNU name removed
-      # the POSIX one with it and every scan in the suite, all of which are written
-      # in awk, died with `command not found`. A real copy under the POSIX name
-      # breaks that chain and survives `/usr/bin/gawk` being moved away.
-      - name: Preserve a POSIX awk before the GNU name goes
+      # ── A PATH WITH ONLY WHAT A MAC HAS ───────────────────────────────────
+      #
+      # This step used to HIDE a list of Linux-only names, and that list was wrong
+      # in the way every denylist is wrong: `flock`, `setsid` and `taskset` were
+      # missing from it, then `getent`, `ip`, `ss`, `lsns`, `findmnt` and
+      # `mountpoint` were missing from the version that added those. Each round
+      # answered one finding and produced the next — the exact shape that got a
+      # 2,200-line text scanner deleted from this repository, reappearing in a
+      # different file.
+      #
+      # SO THE DEFAULT IS ABSENCE. `PATH` is REPLACED with a directory holding
+      # links to an explicit list of commands stock macOS has, plus the three a
+      # macOS contributor installs to work here at all (`git`, `gh`, `jq`). A
+      # command outside that list does not resolve, whether or not anyone thought
+      # of it — so the surface is closed rather than one name behind.
+      #
+      # The earlier objection to this — "the complement cannot be hidden, the suite
+      # needs coreutils" — was answering the wrong question. Nothing is hidden:
+      # `PATH` is rebuilt, and the tools the suite legitimately needs are on the
+      # list because macOS has them too.
+      #
+      # WHEN THIS JOB FAILS WITH `command not found` FOR SOMETHING PORTABLE, the
+      # list is short by a name: add it, with the check below that it exists on
+      # macOS. That failure is a false alarm — loud, safe, and converging — where
+      # the denylist's failure was a false green.
+      - name: Replace PATH with the commands stock macOS has
         run: |
           set -euo pipefail
-          real_awk="$(readlink -f "$(command -v awk)")"
-          sudo cp "$real_awk" /usr/local/bin/awk
-          hash -r 2>/dev/null || true
-          [ "$(command -v awk)" = /usr/local/bin/awk ] || {
-            echo "::error::/usr/local/bin/awk does not win on PATH: $(command -v awk)"
-            exit 1
-          }
-          awk 'BEGIN { exit 0 }' || { echo "::error::the preserved awk does not run"; exit 1; }
-          echo "preserved: $real_awk -> /usr/local/bin/awk"
+          ALLOW="$HOME/macos-path"; mkdir -p "$ALLOW"
+          # Stock macOS ships every one of these. `git`, `gh` and `jq` are the
+          # three a contributor installs; the suite cannot run without them and
+          # neither can a Mac checkout of this repository.
+          # `awk` is the POSIX name and is what a portable script calls. On this
+          # runner it resolves to gawk, which is why GAWK-ONLY REGEX OPERATORS are
+          # in the reviewers' table rather than here: the name is portable and the
+          # dialect is not, and no PATH can tell those apart.
+          cmds="bash sh env git gh jq awk sed grep
+                cat cut head tail sort uniq wc tr od tee
+                ls mkdir rmdir rm cp mv ln find xargs chmod touch
+                mktemp dirname basename readlink stat
+                date sleep ps kill id whoami uname hostname
+                diff patch tar gzip gunzip curl openssl shasum
+                printf echo test expr sudo make cc python3 perl"
+          missing=""
+          for c in $cmds; do
+            cp_="$(command -v "$c" 2>/dev/null)" || { missing="$missing $c"; continue; }
+            case "$cp_" in
+              /*) ln -sf "$cp_" "$ALLOW/$c" ;;
+              *)  : ;;   # a shell builtin needs no link
+            esac
+          done
+          [ -z "$missing" ] || { echo "::error::not on this runner:$missing"; exit 1; }
+          # REPLACED, not prepended. `GITHUB_PATH` only prepends, which would leave
+          # every Linux-only name still reachable further along and make this step
+          # decorative.
+          echo "PATH=$HOME/bash32/shim:$ALLOW" >> "$GITHUB_ENV"
+          echo "PATH is now $HOME/bash32/shim:$ALLOW"
 
-      - name: Remove the GNU-only tools
+      - name: Prove the PATH is the one that was built
         run: |
           set -euo pipefail
-          # ABSENT, NOT SHIMMED. A shim that names itself reads better in a log, but
-          # `command -v` still finds it — so a correctly GUARDED use
-          # (`command -v timeout && timeout 5 …`) takes the shim and fails, which is
-          # exactly backwards: the guard's whole point is that the fallback runs.
-          # `testlib.sh` has one, and this job is where it is exercised.
-          #
-          # The `g`-prefixed spellings are the Homebrew names a macOS contributor
-          # may reach for. Hiding them is what the step above preserves `awk` for.
-          # NOT ONLY THE *GNU* NAMES. What matters is what stock macOS LACKS, and
-          # that set is wider than coreutils: `flock`, `setsid`, `taskset` and the
-          # Linux namespace tools are all on this runner and on none of them. A
-          # list of GNU names alone let `flock` through, which would pass in the
-          # purported Mac-shaped job and fail on a Mac — the exact false green this
-          # job exists to prevent.
-          #
-          # IT IS STILL A DENYLIST, and that is a limit rather than a preference.
-          # The complement cannot be hidden: the suite legitimately needs `git`,
-          # `gh`, `jq`, `awk`, `sed`, `grep` and most of coreutils, and removing
-          # everything not on an allowlist removes those too. So this list grows
-          # when a name is met, and the reviewer instructions carry the classes no
-          # list can cover at all.
-          tools="timeout sha1sum sha256sum md5sum sha512sum b2sum seq realpath
-                 tac shuf nproc stdbuf truncate dircolors numfmt shred
-                 flock setsid taskset ionice unshare nsenter pidof free
-                 lsblk lscpu getopt watch faketime
-                 gsed gawk gdate gcp gln gsort gtimeout gnproc gxargs gfind gstat"
-          # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
-          # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
-          # ordinary — and moving only the first resolution leaves the tool
-          # available while the log says it was hidden.
-          for c in $tools; do
-            while p="$(command -v "$c" 2>/dev/null)"; do
-              sudo mv "$p" "$p.hidden-for-portability-job"
-              echo "hidden: $p"
-              hash -r 2>/dev/null || true
-            done
+          # PROVEN BOTH WAYS. That the allowed commands resolve, so a green run
+          # means the suite ran rather than that everything vanished; and that
+          # names macOS lacks do NOT, so this job is not a second copy of the
+          # normal one. `flock` is the name that was missing from the denylist for
+          # two rounds, and `getent` from the round after.
+          for c in bash git gh jq awk sed grep; do
+            command -v "$c" >/dev/null 2>&1 \
+              || { echo "::error::$c is not reachable; the suite cannot run"; exit 1; }
           done
-          # Proven gone, not assumed gone, and for EVERY name. Checking three of
-          # twenty let a partial removal look like a clean run — this job would then
-          # be a second, slower copy of the normal one, passing for the reason it
-          # exists to rule out.
-          still=""
-          for c in $tools; do
-            command -v "$c" >/dev/null 2>&1 && still="$still $c"
+          absent=""
+          for c in flock setsid taskset ionice unshare nsenter getent ip ss \
+                   lsns findmnt mountpoint sha1sum sha256sum md5sum seq realpath \
+                   tac shuf nproc stdbuf truncate gawk gsed gdate gtimeout timeout; do
+            ! command -v "$c" >/dev/null 2>&1 || absent="$absent $c"
           done
-          if [ -n "$still" ]; then
-            echo "::error::still on PATH:$still — this job would prove nothing"
-            exit 1
-          fi
-          # …and the POSIX name still works, which is the whole point of the copy.
-          awk 'BEGIN { exit 0 }' || {
-            echo "::error::awk stopped working when the GNU names were hidden"
-            exit 1
-          }
-          echo "all GNU-only names hidden; POSIX awk intact"
+          [ -z "$absent" ] || { echo "::error::still reachable:$absent"; exit 1; }
+          echo "confirmed: the allowed commands resolve and the Linux-only ones do not"
+
 
       - name: Configure git identity
         run: |
           git config --global user.email ci@example.com
           git config --global user.name ci
 
-      - name: Run test suite on bash 3.2, without the GNU tools
+      - name: Run test suite on bash 3.2.57, on a mac-shaped PATH
         working-directory: skills/watch-prs/scripts
         run: |
           set -uo pipefail
@@ -330,13 +330,13 @@ jobs:
             if bash "$t"; then
               echo "PASS $t"
             else
-              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2 without the GNU tools"
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH"
               fail=1
             fi
             echo "::endgroup::"
           done
           if [ "$fail" -ne 0 ]; then
-            echo "::error::one or more of $total test files needs a GNU tool or a bash newer than 3.2"
+            echo "::error::one or more of $total test files needs a command macOS lacks, or a bash newer than 3.2"
             exit 1
           fi
-          echo "all $total test files pass on bash 3.2 without the GNU tools"
+          echo "all $total test files pass on bash 3.2.57 with a mac-shaped PATH"

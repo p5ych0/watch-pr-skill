@@ -1435,10 +1435,20 @@ grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
 # report a clean parse of zero blocks — the failure mode this repository calls
 # worse than no check at all.
 skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse check"; skb_dir=""; }
+# INDENTED FENCES COUNT. Markdown allows up to three spaces before a fence, and
+# `SKILL.md` has two such blocks — inside a list item, where the shell in them is
+# no less real. A column-zero pattern skipped both while the count check still
+# passed on the eleven that were left, which is the shape of a check that reports
+# a clean parse of most of the file.
+#
+# The CLOSING fence is matched at its own indentation for the same reason, and the
+# body is dedented by the opener's indent so a here-document terminator inside an
+# indented block still starts at column zero where the parser expects it.
 [ -n "$skb_dir" ] && awk -v out="$skb_dir" '
-    /^```bash$/ { inb = 1; n++; next }
-    /^```$/     { inb = 0; next }
-    inb         { print > (out "/block-" n ".sh") }
+    !inb && /^[ ]{0,3}```bash$/ { inb = 1; n++
+                                  match($0, /^[ ]*/); ind = RLENGTH; next }
+    inb && /^[ ]{0,3}```$/      { inb = 0; next }
+    inb                         { print substr($0, ind + 1) > (out "/block-" n ".sh") }
 ' "$SKILL" || die "the SKILL.md bash blocks could not be extracted"
 # A PLACEHOLDER IS PROSE, NOT A REDIRECTION. The driver is told to substitute
 # `CODEX_SHA=<full 40-hex sha …>` before running the block, and to a parser that
@@ -1456,9 +1466,17 @@ for skb in "$skb_dir"/block-*.sh; do
     die "a SKILL.md bash block does not parse under this bash ($(basename "$skb"): $skb_err)"
     skb_bad=1
 done
-{ [ "$skb_bad" -eq 0 ] && [ "$skb_n" -ge 10 ]; } \
+# THE COUNT IS EXACT, and it is counted from the file rather than written here.
+# A floor passed while two indented blocks were being skipped; a hard-coded number
+# would go stale the first time a block is added. Counting the openers the same way
+# the extractor finds them, and requiring the two to agree, is what makes a block
+# that was silently dropped a failure.
+skb_want="$(grep -cE '^[ ]{0,3}```bash$' "$SKILL")"; skb_wrc=$?
+{ [ "$skb_wrc" -eq 0 ] && [ "$skb_want" -gt 0 ]; } \
+    || die "the bash fences in SKILL.md could not be counted (rc=$skb_wrc)"
+{ [ "$skb_bad" -eq 0 ] && [ "$skb_n" -eq "$skb_want" ]; } \
     && pass "all $skb_n bash blocks in SKILL.md parse under this bash ($BASH_VERSION)" \
-    || die "$skb_n bash blocks extracted, $skb_bad unparseable; this check must cover the file or say so"
+    || die "$skb_want bash fences in SKILL.md, $skb_n extracted, $skb_bad unparseable"
 # Its own scratch tree goes with it: the leak check below is over the whole run,
 # and a probe that leaves one behind fails the case it is not about.
 [ -n "$skb_dir" ] && rm -rf "$skb_dir"
@@ -1576,6 +1594,34 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
     grep -qi 'run the test suite' "$doc" \
         && pass "$name: running the suite is ruled out explicitly" \
         || die "$name: does not rule out running the tests"
+    # ── THE PORTABILITY CLASSES CI CANNOT SEE ──────────────────────────────
+    #
+    # The `macos-shell` job covers absent commands and post-3.2 constructs by
+    # running the suite; three classes stay invisible to it, and the ONLY thing
+    # assigning them to a reviewer is this table. Copilot reads its own copy and
+    # follows no pointers, so an edit that weakens either file silently restores
+    # the gap — and every check above would stay green, because none of them looks
+    # at this.
+    #
+    # THE EXCEPTIONS ARE ASSERTED TOO, and that is not symmetry for its own sake:
+    # a table that says "report `\b`" without saying "except in awk, where it is
+    # backspace" produces BLOCKING FALSE FINDINGS, which cost the author a round
+    # each and teach the reviewer to distrust the rule.
+    while IFS='|' read -r pat what; do
+        [ -n "$pat" ] || continue
+        grep -qi "$pat" "$doc" \
+            && pass "$name: $what" \
+            || die "$name: $what — no line matching '$pat'"
+    done <<'PORTCLASSES'
+sed -i|GNU-only flags are the reviewer's, not CI's
+readlink -f|…and the flag list names the ones that have reached this tree
+matches a literal|the silent half of the escape rule is stated: BSD grep does not fail on it
+oniguruma|jq's engine is exempt, so a jq program is not a false finding
+backspace|awk's backslash-b is backspace, not a word boundary
+builtin|echo -e is the Bash builtin here, not the external command
+guarded|a command-v-guarded use with a fallback is correct
+branch the suite never executes|the unexecuted-branch gap is stated as a gap
+PORTCLASSES
 done
 
 # ── the phase summary is written by a QUOTED heredoc ───────────────────────

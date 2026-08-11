@@ -39,11 +39,17 @@
   own file and follows no pointers, so an acknowledged CI gap recorded in
   `CLAUDE.md` alone was missing from one required reviewer's contract.
 
-  The removal list is also about **what stock macOS lacks**, not only about GNU
-  names: `flock`, `setsid`, `taskset` and the Linux namespace tools are on the
-  runner and on no Mac, and a GNU-only list let them through. It remains a
-  denylist because the complement cannot be hidden — the suite needs `git`, `gh`,
-  `jq` and most of coreutils to run at all.
+  **The job builds its own `PATH` rather than hiding names from the runner's.**
+  The first version hid a denylist of GNU tools; `flock`, `setsid` and `taskset`
+  were missing from it, and `getent`, `ip`, `ss`, `lsns`, `findmnt` and
+  `mountpoint` were missing from the version that added those. Each round answered
+  one finding and produced the next — the shape that got the text scanner deleted,
+  reappearing in a different file. So `PATH` is now *replaced* with links to an
+  explicit list of commands stock macOS has, plus the three a contributor installs
+  (`git`, `gh`, `jq`). A command nobody thought of does not resolve, which closes
+  the surface instead of tracking it. When the list is short by a portable name
+  the job fails loudly with `command not found` — a false alarm rather than a
+  false green.
 
   The one item from that issue it does **not** close is `\s` in a `grep` pattern:
   BSD `grep` does not fail on it, it matches a literal `s`, so the suite passes

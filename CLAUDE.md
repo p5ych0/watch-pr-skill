@@ -150,6 +150,13 @@ category; do not "fix" a script into a stricter mode.
   suite was unexecuted branches; what it cost was the review budget of an entire
   release.
 
+  **The job builds its own `PATH`; it does not hide names from the runner's.** A
+  denylist of Linux-only commands was tried and was one name behind on every
+  round — the same shape as the scanner. `PATH` is replaced with links to the
+  commands stock macOS has, so anything nobody listed simply does not resolve. If
+  the job fails with `command not found` for something portable, add it to that
+  list; that direction of failure is the safe one.
+
   **The classes it cannot see belong to the reviewers, so they live in the
   reviewer files.** `AGENTS.md` and `.github/copilot-instructions.md` carry the
   GNU-only flags, the regex escapes and the unexecuted-branch gap as a table —
