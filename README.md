@@ -177,26 +177,27 @@ mandatory pre-push gate, so any of them stops a macOS contributor from closing a
 review round while Ubuntu CI stays green: the failure is invisible on the machine
 that introduces it.
 
-Two checks now, because one cannot cover both halves:
+Three checks, because none of them covers what the others do:
 
-- `test-portability.sh` reads the text for three things, and **one half of one of
-  them** is closed: the backslash-class escapes `\s \S \d \D \w \W \b \B` in a
-  `grep`/`sed`/`awk` pattern, where POSIX defines none at all, so the set cannot
-  grow. Everything else is a **blacklist that is one entry behind** and says so —
-  gawk's own operators (`\y`, `\<`, `\>`, and whatever a future gawk adds), the
-  names of GNU-only tools that cannot occur in prose, and the constructs newer than
-  the Bash 3.2 macOS ships. Nothing fails at runtime on Linux for any of them, so
-  only text can find them, and the CI job below is what closes the command-name
-  half behaviourally.
-
-  It does **not** check GNU-only *flags* — `sed -i`, `readlink -f`, `grep -P`,
-  `date -d`. Those need an option parser, which does not terminate: eight review
-  rounds produced clusters, long forms, equals forms, operands and quoted option
-  words, each fix revealing the next. They are review's job.
+- `test-portability.sh` reads the **text**, in the pre-push suite — fast, blunt and
+  deliberately lexical. It keeps the backslash-class escapes `\s \S \d \D \w \W \b
+  \B` in a `grep`/`sed`/`awk` pattern (POSIX defines none, so that set cannot grow),
+  gawk's own operators, the names of GNU-only tools that cannot occur in prose, and
+  the constructs newer than the Bash 3.2 macOS ships. It reports a forbidden
+  spelling written as *data* — `printf '%s' mapfile` counts — which is the price of
+  a check that needs no shell parser.
+- A **bash 3.2 CI job** runs the whole suite under a 3.2 built from source. Every
+  post-3.2 construct fails there outright, with no grammar to get right; it covers
+  the paths the suite executes, which is why the text scan keeps its list too.
 - A **portability CI job** runs the entire suite with the GNU-only tools removed
   from `PATH`. Text cannot see a command name assembled at runtime; absence can.
   It runs in parallel with the normal job, so it extends CI by the difference
   rather than doubling it.
+
+None of the three looks at GNU-only *flags* — `sed -i`, `readlink -f`, `grep -P`,
+`date -d`. Those need an option parser, which does not terminate: eight review
+rounds produced clusters, long forms, equals forms, operands and quoted option
+words, each fix revealing the next. They are review's job.
 
 Neither covers the other, and there is a case **neither** covers. The job catches
 a name assembled at runtime, which no text can see. The scan catches a construct

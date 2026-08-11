@@ -27,7 +27,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
 | `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
-| `skills/watch-prs/scripts/test-portability.sh` | The three portability rules: the backslash-class escapes (the one closed set — POSIX defines none), and gawk's own operators, GNU-only tool names and post-3.2 Bash constructs (blacklists, one entry behind, and stated as such). Flags are review's job — see the note in the file. |
+| `skills/watch-prs/scripts/test-portability.sh` | The fast, blunt half of the portability gate: a text scan for GNU regex escapes, GNU-only tool names and post-3.2 Bash constructs. Lexical by design — there is no command model, and the file records why. Flags are review's job. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
 
@@ -140,14 +140,23 @@ category; do not "fix" a script into a stricter mode.
   suite is a mandatory pre-push gate, so a GNU-only construct blocks a macOS
   contributor while Ubuntu CI stays green — invisible on the machine that
   introduced it, which is why review kept being what caught it.
-  `test-portability.sh` reads the text for the backslash-class escapes, whose set
-  POSIX closes; and for gawk's own operators, GNU-only tool names and post-3.2 Bash
-  constructs, which are blacklists one entry behind and say so — and deliberately
-  not for GNU-only flags, which need an option parser and do not terminate; the **portability CI job** runs the whole suite with the GNU-only
-  tools removed from `PATH`, which is the only thing that sees a command name
-  built at runtime. A tool stock macOS
-  lacks is still usable — probe it with `command -v` and provide a fallback, as
-  `testlib.sh` does for `timeout`.
+  There are THREE checks, and each answers what the others cannot:
+
+  1. `test-portability.sh` reads the TEXT, in the pre-push suite. Fast and blunt,
+     and deliberately lexical: a command model was built here across twenty review
+     rounds and deleted again, because every round it answered one finding and
+     produced the next while several of its own defects rejected portable code. It
+     keeps the escape rule, the tool-name list and the post-3.2 construct list, and
+     reports a forbidden spelling written as DATA — a stated cost, not a bug.
+  2. The **bash 3.2 CI job** runs the whole suite under a 3.2 built from source.
+     Every post-3.2 construct simply fails there, with no grammar to get right. It
+     covers executed paths only, which is why the text scan keeps its list.
+  3. The **portability CI job** runs the suite with the GNU-only tools removed from
+     `PATH` — the only thing that sees a command name built at runtime.
+
+  GNU-only FLAGS are review's job: they need an option parser, which does not
+  terminate. A tool stock macOS lacks is still usable — probe it with `command -v`
+  and provide a fallback, as `testlib.sh` does for `timeout`.
 
   The command list in the scan is a blacklist and is one name behind; the CI job
   is what terminates that class. Do not try to make it a whitelist: extracting

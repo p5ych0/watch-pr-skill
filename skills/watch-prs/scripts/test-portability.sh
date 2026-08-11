@@ -139,7 +139,7 @@ SCAN_PROLOGUE='
         return i
     }
     function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth, wq) {
-        delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete SC_SUB; delete QSTK; delete PSTK
+        delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete SC_SUB; delete SC_AEND; delete SC_ABEG; delete QSTK; delete PSTK
         SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; wq = 0; depth = 0; SC_BODIES = ""; delete SUBSTS; delete SC_WQ
         q = q0; i = 1
         while (i <= length(l)) {
@@ -178,11 +178,8 @@ SCAN_PROLOGUE='
                 # named `$grep` that no rule recognises.
                 if (substr(l, i, 2) == "$\042") { q = "\042"; saw = 1; wq = 1; i += 2; continue }
                 if (ch == "\047" || ch == "\042") { q = ch; saw = 1; wq = 1; i++; continue }
-                # Unquoted whitespace ENDS a word; an unquoted control operator ends
-                # one and is a token of its own, so `(test -v x)` has `test` as a
-                # command word rather than as part of `(test`.
                 if (ch == " " || ch == "\t") {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
                     SC_EFF = SC_EFF ch; i++; continue
                 }
@@ -209,7 +206,7 @@ SCAN_PROLOGUE='
                 if ((ch == "<" || ch == ">") && substr(l, i + 1, 1) == "(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     SUBSTS[depth] = i + 2
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
@@ -218,7 +215,7 @@ SCAN_PROLOGUE='
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     SUBSTS[depth] = i + 2
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
@@ -229,16 +226,16 @@ SCAN_PROLOGUE='
                 # early, and every quote after that read inverted.
                 if (ch == "(" && depth > 0) {
                     PSTK[depth]++
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1; SC_ABEG[SC_ARGC] = i
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 if (ch == ")" && depth > 0 && PSTK[depth] > 0) {
                     PSTK[depth]--
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1; SC_ABEG[SC_ARGC] = i
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 if (ch == ")" && depth > 0) {
@@ -250,7 +247,7 @@ SCAN_PROLOGUE='
                         SUBSTS[depth] = 0
                     }
                     q = QSTK[depth]; depth--
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = ")"; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch
@@ -262,9 +259,9 @@ SCAN_PROLOGUE='
                 # only the character could not tell the two apart, so the simple
                 # command ended at the group and never reached the operator.
                 if (index("();&|<>", ch) > 0) {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                     word = ""; saw = 0; wq = 0
-                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
+                    SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1; SC_ABEG[SC_ARGC] = i
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 SC_EFF = SC_EFF ch; word = word ch; saw = 1; i++; continue
@@ -287,7 +284,7 @@ SCAN_PROLOGUE='
                 # THE SAME FLUSH AS THE UNQUOTED BRANCH. `out="$(grep PATTERN f)"`
                 # is the ordinary spelling, and appending the words to the
                 # assignment left `out=grep` with no command in it.
-                if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
                 word = ""; saw = 0
                 SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                 SC_EFF = SC_EFF substr(l, i, 2)
@@ -306,7 +303,7 @@ SCAN_PROLOGUE='
             if (ch == q) { q = ""; i++; continue }
             SC_EFF = SC_EFF ch; word = word ch; i++; continue
         }
-        if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+        if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq; SC_AEND[SC_ARGC] = i }
         # WHERE THE QUOTING STOOD AT THE END, so the next physical line can start
         # from it: a word opened on one physical line and closed on the next is
         # ONE word, and a scan that restarted at every line read that closing
@@ -319,433 +316,6 @@ SCAN_PROLOGUE='
         # failed the gate for constructs they do not contain. Being unsure is a
         # reason to carry nothing, not a reason to carry a guess.
         SC_QEND = (depth > 0) ? "" : q
-    }
-    # ── WHERE THIS MODEL STOPS, AND WHY IT STOPS THERE ─────────────────────
-    #
-    # The rules that ask "which command is this" — the `shopt` option names, the
-    # `-v` conditional, `declare -A`/`-g`, `wait -n`, and the regex engine — need a
-    # notion of a simple command. Building one has taken nine review rounds and
-    # roughly seventy findings, nearly all of them another production of the shell
-    # grammar. That is the surface CLAUDE.md records a structural checker being
-    # built and deleted six times for, and it is why rule C was deleted from this
-    # very file.
-    #
-    # So the model has a stated edge rather than an open one, and the criterion is
-    # asymmetric:
-    #
-    #   A FALSE POSITIVE IS A DEFECT. A mandatory gate that rejects portable code
-    #   gets switched off, and this file has said so from the first round. Those are
-    #   fixed whenever they are found, wherever they come from.
-    #
-    #   A MISS IN A FORM THIS MODEL DOES NOT FOLLOW IS A LIMITATION, recorded here
-    #   rather than chased. The portability CI job and review are the other two
-    #   layers, and neither of them needs this grammar.
-    #
-    # NOT FOLLOWED, as of this writing: a command substitution split across physical
-    # lines inside a here-document BODY (the bodies are read a line at a time,
-    # because that is how a terminator is recognised); a command name held in a
-    # VARIABLE (`tool=grep; "$tool" …`), a BACKQUOTE substitution, a substitution
-    # inside a compound-command HEADER, a word left open across physical lines, and
-    # a shell spawned from inside another shell body. Each was measured, not assumed: the
-    # header case was implemented and reverted, because reaching the command inside
-    # it lost the header and rejected the list data after it.
-    #
-    # ── WHAT A SIMPLE COMMAND IS ───────────────────────────────────────────
-    #
-    # A rule about a BUILTIN is a rule about the command WORD, not about a word
-    # appearing somewhere on the line: `printf %s shopt -s globstar` runs `printf`,
-    # and rejecting it is rejecting portable code. CLAUDE.md records
-    # command-position matching being built and deleted for rule B, four rounds
-    # running — but that was a regex over raw text guessing where a command began.
-    # This reads the WORD LIST the shared model already produces, where the
-    # operators are tokens rather than characters to be spotted, and the whole rule
-    # is: skip assignments, skip redirections and their targets, take the first
-    # word that is left.
-    function is_op(w)    { return length(w) == 1 && index("();&|", w) > 0 }
-    function is_redir(w) { return w == "<" || w == ">" }
-    # Fills CMDW (the command word) and CMDA[1..CMDN] (its remaining words) for the
-    # simple command starting at `from`, and returns where the next one starts.
-    #
-    # A REDIRECTION DOES NOT END A COMMAND. `shopt >/dev/null -s globstar` still
-    # passes `-s globstar` to `shopt`; treating `>` as a boundary lost the operands
-    # and the construct reported clean — and with the output redirected, nothing
-    # else would have shown it either.
-    function simple_cmd(from, i, w, pd) {
-        # CMDFNNEXT IS CONFINED TO ONE SIMPLE COMMAND. It is set by the reserved
-        # word and consumed by the name after it; carrying it further declared a
-        # command in the NEXT segment to be a function.
-        CMDW = ""; CMDN = 0; CMDFN = 0; CMDFNNEXT = 0
-        for (i = from; i <= SC_ARGC; i++) {
-            w = SC_ARGV[i]
-            # THE REDIRECTION FORMS ARE CHECKED FIRST, because `&` is both a
-            # control operator and the first character of `&>`: deciding it ends the
-            # command before looking at what follows lost every operand after it.
-            if (SC_AOP[i] && w == "&" && i < SC_ARGC && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) { i += 2; continue }
-            # A SUBSTITUTION DOES NOT END THE COMMAND IT SITS IN.
-            # `printf %s "$(printf x)" shopt globstar` runs two printfs, and ending
-            # the outer command at the `(` made the words after the `)` look like an
-            # invocation of their own. The group is stepped over here and its
-            # contents are scanned separately, the same way a shell body is.
-            if (SC_AOP[i] && w == "(" && SC_SUB[i]) {
-                pd = 1
-                while (++i <= SC_ARGC && pd > 0) {
-                    if (SC_AOP[i] && SC_ARGV[i] == "(") pd++
-                    else if (SC_AOP[i] && SC_ARGV[i] == ")") pd--
-                }
-                i--
-                continue
-            }
-            if (SC_AOP[i] && is_op(w)) return i + 1
-            # AN IO NUMBER BELONGS TO THE REDIRECTION AFTER IT. `2>/dev/null shopt
-            # -s globstar` invokes `shopt`; taking the `2` as the command word lost
-            # the whole simple command, and with the output redirected nothing else
-            # would have shown it.
-            # A DESCRIPTOR DUPLICATION IS ONE REDIRECTION: `2>&1` is the IO number,
-            # the operator, the `&` and the target, and consuming only the first two
-            # left the `&` to end the command.
-            if (w ~ /^[0-9]+$/ && (i < SC_ARGC) && SC_AOP[i + 1] && is_redir(SC_ARGV[i + 1])) {
-                i++
-                if (i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "&") i++
-                i++
-                continue
-            }
-            if (SC_AOP[i] && is_redir(w)) {
-                # `>>`, `<<` AND `<>` ARE ONE OPERATOR. Tokenised a character at a
-                # time, the second `>` of `>>log` was consumed as the preceding
-                # operator TARGET, and `log` then became the command word — the real
-                # command after it was only an argument.
-                # `>|` OVERRIDES NOCLOBBER and is part of the operator, not a pipe
-                # after it — a bar in that position belongs to the redirection.
-                while (i < SC_ARGC && SC_AOP[i + 1] &&
-                       (is_redir(SC_ARGV[i + 1]) || SC_ARGV[i + 1] == "|")) i++
-                if (i < SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "&") i++
-                i++
-                continue
-            }
-            if (CMDW == "") {
-                # `name+=value` IS AN ASSIGNMENT PREFIX TOO, and Bash 3.2 has it —
-                # not recognising it made the prefix the command word and the real
-                # command an operand.
-                if (w ~ /^[A-Za-z_][A-Za-z0-9_]*\+?=/) continue
-                # RESERVED WORDS INTRODUCE a command rather than being one:
-                # `if [ -v x ]` runs `[`, not `if`. The list is the shell grammar
-                # and is closed — a leading `!` is one of them, while an `!` after
-                # the command word is that command an operand.
-                # A COMPOUND-COMMAND HEADER IS GRAMMAR, NOT A COMMAND. `for x in …`
-                # names a loop VARIABLE, and skipping only the reserved word left
-                # that name looking like an invoked command with the list as its
-                # arguments — `for shopt in globstar` was reported as a Bash 4
-                # option. The header runs to its `do` or `in`, and there is nothing
-                # in it for these rules.
-                # `case x in` ENDS AT `in`, and what follows is a pattern list and
-                # then commands. Grouping it with `for` made the header search for a
-                # `do` that never comes, so an entire arm was consumed as grammar.
-                # A HEADER IS GRAMMAR, BUT A SUBSTITUTION INSIDE ONE STILL RUNS ITS
-                # COMMAND. `for x in $(grep PATTERN f)` iterates over the OUTPUT of a
-                # real `grep`, and consuming every token through `do` swallowed it.
-                # The header skip stops at the `(` that opens one and lets the
-                # ordinary walk take the command inside.
-                if (w == "case") {
-                    for (i = i + 1; i <= SC_ARGC; i++)
-                        if (SC_ARGV[i] == "in") break
-                    continue
-                }
-                if (w == "for" || w == "select") {
-                    # THE LIST IS PART OF THE HEADER. `for x in a b c; do` names a
-                    # variable and then a WORD LIST, and stopping at `in` handed that
-                    # list to the next iteration as a command with arguments.
-                    #
-                    # `((` IS THE ARITHMETIC FORM, and everything between the two
-                    # parentheses is an expression rather than a command. A LONE `(`
-                    # opens a substitution whose command the list iterates over, and
-                    # the skip stops there so that command is examined.
-                    pd = 0
-                    for (i = i + 1; i <= SC_ARGC; i++) {
-                        # A SUBSTITUTION INSIDE THE LIST IS NOT EXAMINED, and that
-                        # is the trade. Stopping the skip at its `(` reaches the
-                        # command inside — and then the header is gone, so the list
-                        # data AFTER the `)` reads as an invocation of its own:
-                        # `for x in $(printf x) shopt globstar` was rejected. One
-                        # direction misses a command, the other rejects portable
-                        # code, and this file has said all along which of those is
-                        # worse. The whole header is grammar.
-                        if (SC_AOP[i] && SC_ARGV[i] == "(") { pd++; continue }
-                        if (SC_AOP[i] && SC_ARGV[i] == ")") { pd--; continue }
-                        if (pd > 0) continue
-                        if (SC_AOP[i] && is_op(SC_ARGV[i]) && SC_ARGV[i] != ";") return i + 1
-                        if (SC_ARGV[i] == "do") break
-                    }
-                    continue
-                }
-                # `time` TAKES OPTIONS OF ITS OWN, and they are not the command:
-                # `time -p shopt -s globstar` runs `shopt`.
-                if (w == "time") {
-                    while (i < SC_ARGC && SC_ARGV[i + 1] ~ /^-[A-Za-z]+$/) i++
-                    continue
-                }
-                # `function name { … }` DECLARES ONE TOO, and the reserved word is
-                # skipped as grammar — so the name after it would have looked like a
-                # command. The declaration is recorded here as well.
-                # …AND ONLY WHEN IT IS THE RESERVED WORD. `'"'"'function'"'"'; mapfile …` has
-                # a quoted first word, which is an ordinary command, and a flag that
-                # outlived its simple command declared the NEXT one a function.
-                if (w == "function" && !SC_WQ[i]) { CMDFNNEXT = 1; continue }
-                if (index(" if then elif else fi while until do done esac { } ! ", " " w " ") > 0) continue
-                CMDW = w
-                CMDQ = SC_WQ[i]
-                # A FUNCTION DECLARATION IS NOT AN INVOCATION. `mapfile() { … }`
-                # names a function and runs nothing; the `()` after the name is what
-                # tells them apart, and it is recorded here because the walk ends at
-                # that parenthesis rather than carrying it as an operand.
-                CMDFN = (i + 2 <= SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "(" &&
-                         SC_AOP[i + 2] && SC_ARGV[i + 2] == ")")
-                if (CMDFNNEXT) { CMDFN = 1; CMDFNNEXT = 0 }
-            } else { CMDN++; CMDA[CMDN] = w }
-        }
-        return SC_ARGC + 1
-    }
-    # `command X` AND `builtin X` INVOKE X. `command shopt -s globstar` enables the
-    # option exactly as the bare spelling does, so the wrapper is unwrapped — but
-    # `command -v X` and `-V` DESCRIBE X rather than running it, which is the guard
-    # pattern this tree uses everywhere, so those are left alone.
-    # Drop CMDA[1..upto] and make CMDA[upto+1] the new command word. Shifting by one
-    # while consuming several left the earlier ones in place: `env LC_ALL=C grep …`
-    # kept the ASSIGNMENT as the first operand, and the rule that reads the first
-    # operand as a pattern read that.
-    function take_after(upto, i) {
-        CMDW = CMDA[upto]
-        for (i = upto + 1; i <= CMDN; i++) CMDA[i - upto] = CMDA[i]
-        CMDN -= upto
-    }
-    # THE WRAPPERS COMPOSE. `command env grep …` is both of them, and running each
-    # loop once in a fixed order unwrapped `command` to `env` and then stopped.
-    function unwrap(i, moved) {
-        moved = 1
-        while (moved) {
-            moved = 0
-            # `env` RUNS THE COMMAND AFTER ITS OPTIONS AND ASSIGNMENTS — the spelling
-            # a script reaches for when it wants a clean environment.
-            if (CMDW == "env") {
-                i = 1
-                while (i <= CMDN && (CMDA[i] ~ /^-/ || CMDA[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/)) {
-                    if (CMDA[i] == "-u" || CMDA[i] == "--unset") i++
-                    i++
-                }
-                if (i > CMDN) return 0
-                take_after(i); moved = 1; continue
-            }
-            # `exec` REPLACES THE SHELL WITH THE COMMAND after its own options —
-            # the command still runs, which is all these rules care about.
-            if (CMDW == "exec") {
-                i = 1
-                # `-a name` REPLACES argv[0] and takes the word after it; skipping
-                # only the option made that name the command.
-                while (i <= CMDN && CMDA[i] ~ /^-/) {
-                    if (CMDA[i] ~ /^-[cl]*a$/ && i < CMDN) i++
-                    i++
-                }
-                if (i > CMDN) return 0
-                take_after(i); moved = 1; continue
-            }
-            if (CMDW == "command" || CMDW == "builtin") {
-                i = 1
-                while (i <= CMDN && CMDA[i] ~ /^-/) {
-                    if (CMDA[i] == "-v" || CMDA[i] == "-V") return 0
-                    i++
-                }
-                if (i > CMDN) return 0
-                take_after(i); moved = 1; continue
-            }
-        }
-        return 1
-    }
-    # True when `cmd` is invoked with an option word carrying `letter`. Options
-    # cluster, so `-Ag` counts for both — and quote removal has already happened, so
-    # a quoted option word is the option.
-    function cmd_opt(cmd, letter, i, j, cl) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            if (CMDW != cmd) continue
-            # AN OPTION OPERAND IS NOT AN OPTION. `read -p -N value` has `-N` as
-            # the PROMPT that `-p` takes, and scanning every dash-prefixed word
-            # independently read it as the post-3.2 option and rejected portable
-            # source. The builtins with operand-taking options are few and named.
-            for (j = 1; j <= CMDN; j++) {
-                if (CMDA[j] !~ /^-/) continue
-                # THE LETTERS AFTER AN OPERAND-TAKING ONE ARE ITS OPERAND, attached.
-                # `read -pN` gives `-p` the prompt `N`, so that is not the `-N`
-                # option — the cluster is read only up to the first such letter.
-                #
-                # ONLY THE ONES THAT TAKE AN OPERAND. `-s` suppresses echo and takes
-                # nothing, and skipping the word after it stepped over a real `-N`.
-                cl = CMDA[j]
-                if (cmd == "read" && match(cl, /[pntuda]/)) cl = substr(cl, 1, RSTART)
-                # AN ATTACHED COUNT IS STILL THE OPTION: `read -N1` is `-N` with its
-                # argument, and an alphabetic-only cluster test missed it.
-                sub(/[0-9]+$/, "", cl)
-                if (cl ~ /^-[A-Za-z]*$/ && index(cl, letter) > 1) return 1
-                if (cmd == "read" && CMDA[j] ~ /^-[A-Za-z]*[pntuda]$/) j++
-            }
-        }
-        return 0
-    }
-    # The body of an invoked `bash -c` / `sh -c`, or "" when there is none. The
-    # operand is already quote-removed, which is what makes it scannable as shell.
-    # EVERY literal shell body on the line, in order, joined by newlines so each is
-    # a logical line of its own when it is scanned. Returning at the first one left
-    # a second `bash -c` on the same line unexamined — and the wrappers apply here
-    # too, because `command bash -c …` and `env bash -c …` invoke the same shell.
-    # The text inside each top-level `$( … )` / `<( … )` group, joined by newlines.
-    # Stepping over a group keeps the command it sits in whole; scanning the text
-    # here is what keeps the command INSIDE it visible.
-    # The text inside each top-level `$( … )` / `<( … )` group, recorded while the
-    # line is scanned — including the ones inside double quotes, which is where they
-    # usually are. Stepping over a group keeps the command it sits in whole; this is
-    # what keeps the command INSIDE it visible.
-    # The Bash 4 EXPANSIONS, which are the only rules that apply inside a
-    # here-document body: everything else there is text bash never executes.
-    # AN ESCAPED DOLLAR IS NOT AN EXPANSION. In an unquoted body `\${name}` is the
-    # literal text, and the same parity that decides an escape decides this.
-    function expansion_hit(l, i, n) {
-        for (i = 1; i <= length(l); i++) {
-            if (substr(l, i, 1) != "$") continue
-            n = 0
-            while (i - n - 1 >= 1 && substr(l, i - n - 1, 1) == "\134") n++
-            if (n % 2 == 1) continue
-            if (substr(l, i) ~ /^\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) return 1
-            if (substr(l, i) ~ /^\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?@[QEPAKakUuL]\}/) return 1
-        }
-        return 0
-    }
-    function subst_bodies(l) {
-        shell_scan(l, SC_Q0)
-        return SC_BODIES
-    }
-    function shell_c_body(l, i, j, base, out) {
-        shell_scan(l, SC_Q0)
-        out = ""
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            base = CMDW; sub(/^.*\//, "", base)
-            if (base != "bash" && base != "sh") continue
-            for (j = 1; j < CMDN; j++)
-                # `-c` ANYWHERE IN THE CLUSTER. `bash -cx BODY` is the documented
-                # spelling with a trace flag after it, and requiring `c` last read
-                # the body as an ordinary operand.
-                if (CMDA[j] ~ /^-[A-Za-z]*c[A-Za-z]*$/) { out = out (out == "" ? "" : "\n") CMDA[j + 1]; break }
-        }
-        return out
-    }
-    # True when `cmd` is the command word of some simple command on this line.
-    # WITHOUT UNWRAPPING. A reserved word is recognised at the FIRST command word or
-    # not at all: `command coproc` makes it an operand of the builtin, and every bash
-    # does an ordinary command lookup — unwrapping the wrapper first turned that into
-    # the Bash 4 construct.
-    function cmd_is_unquoted(cmd, i) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (CMDFN) continue
-            if (CMDW == cmd && !CMDQ) return 1
-        }
-        return 0
-    }
-    function cmd_is(cmd, i) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            if (CMDFN) continue
-            if (CMDW == cmd) return 1
-        }
-        return 0
-    }
-    # True when `cmd` is invoked with `opt` immediately followed by `val`.
-    function cmd_optval(cmd, opt, val, i, j) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            if (CMDW != cmd) continue
-            for (j = 1; j < CMDN; j++)
-                if (CMDA[j] == opt && CMDA[j + 1] == val) return 1
-        }
-        return 0
-    }
-    function cmd_has(cmd, name, i, j) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            if (CMDW != cmd) continue
-            for (j = 1; j <= CMDN; j++) if (CMDA[j] == name) return 1
-        }
-        return 0
-    }
-    # `[ -v x ]` and `test -v x` evaluate the Bash 4.2 operator; `test -v` alone is
-    # the ordinary one-argument string test that every bash has, so an operand is
-    # required. A leading `!` negates and changes neither answer.
-    function cond_v(i, j) {
-        i = 1
-        while (i <= SC_ARGC) {
-            i = simple_cmd(i)
-            if (!unwrap()) continue
-            if (CMDW != "[" && CMDW != "test") continue
-            # EVERY PRIMARY, not the first one. `test \( -v token \)` groups the
-            # expression, and stopping at the leading `(` never reached the operator
-            # — with the `if` around it masking the old shell, nothing saw it.
-            # The operand is still required: `test -v` alone is the one-argument
-            # string test, and `]` or `)` after it is the end of the expression
-            # rather than an operand.
-            # THE THREE-ARGUMENT FORM IS A BINARY COMPARISON. `test -v = token`
-            # asks whether the string `-v` equals `token`, on every bash — the
-            # operator is in the MIDDLE, and reading the first word as a unary
-            # primary rejected portable code.
-            # The `]` of the bracket form is not an argument of the expression, and
-            # counting it made the three-argument comparison look like four.
-            # THE EXPRESSION IS WHAT IS LEFT AFTER THE GRAMMAR. A bracket form
-            # ends with `]`, a negation begins with `!`, and a grouped expression is
-            # wrapped in parentheses — none of those are operands, and counting them
-            # made a three-argument comparison look like four or six.
-            vb = 1; vn = CMDN
-            if (CMDW == "[" && vn > 0 && CMDA[vn] == "]") vn--
-            while (vb <= vn && (CMDA[vb] == "(" || CMDA[vb] == "!")) vb++
-            while (vn >= vb && CMDA[vn] == ")") vn--
-            # THE THREE-ARGUMENT FORM IS A BINARY COMPARISON. `test -v = token` asks
-            # whether the string `-v` equals `token`, on every bash — the operator is
-            # in the MIDDLE, and reading the first word as a unary primary rejected
-            # portable code.
-            # `-a` AND `-o` JOIN TWO EXPRESSIONS, so the arity is per PART: in
-            # `test -v = token -a x = x` each side is a three-argument comparison,
-            # and measuring the whole thing found seven operands and no comparison.
-            # A THREE-ARGUMENT COMPARISON IS ONE, WHATEVER ITS OPERANDS ARE CALLED.
-            # `test -v = -a` compares two strings and the second happens to be `-a`;
-            # splitting on it first left a two-word part and no comparison at all.
-            if (vn - vb + 1 == 3 && CMDA[vb + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/) continue
-            vpart = 1; vok = 1; vs = vb
-            # …AND EACH PART CARRIES ITS OWN GROUPING. `test \( -v = token \) -a
-            # \( x = x \)` leaves a parenthesis on either side of the join, and a
-            # part measured with them had four operands rather than three.
-            for (j = vb; j <= vn + 1; j++) {
-                if (j > vn || CMDA[j] == "-a" || CMDA[j] == "-o") {
-                    ps = vs; pe = j - 1
-                    while (ps <= pe && (CMDA[ps] == "(" || CMDA[ps] == "!")) ps++
-                    while (pe >= ps && CMDA[pe] == ")") pe--
-                    if (!(pe - ps + 1 == 3 && CMDA[ps + 1] ~ /^(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge|<|>)$/)) vok = 0
-                    vs = j + 1
-                }
-            }
-            if (vok) continue
-            for (j = 1; j <= CMDN; j++) {
-                if (CMDA[j] != "-v") continue
-                if (j < CMDN && CMDA[j + 1] != "]" && CMDA[j + 1] != ")") return 1
-            }
-        }
-        return 0
     }
     function segments(l, n, i, ch, rest) {
         shell_scan(l, SC_Q0)
@@ -795,6 +365,7 @@ SCAN_PROLOGUE='
         }
         return n
     }
+
     # WHERE the operator appears outside quotes, or 0.
     function unquoted_pos(l, pat, i) {
         shell_scan(l, SC_Q0)
@@ -1127,20 +698,6 @@ SCAN_PROLOGUE='
           # expansion, against its own terminator line.
           t = $0
           if (HDD[hdi]) sub(/^\t+/, "", t)
-          if (HDX[hdi] && t != HDQ[hdi]) {
-              # A PARAMETER EXPANSION IS ACTIVE THERE TOO. A case-modifying one in
-              # an unquoted body is performed by bash, so the Bash 4 rules for it
-              # apply — while the ordinary TEXT of the body is still
-              # data, which is why the whole line is not handed to the rules.
-              if (expansion_hit($0)) report("case modification is Bash 4: " $0)
-              hdbody = subst_bodies($0)
-              if (hdbody != "") {
-                  hdn2 = split(hdbody, HDB, "\n")
-                  hdsave = line
-                  for (hdi2 = 1; hdi2 <= hdn2; hdi2++) { line = HDB[hdi2]; RULES() }
-                  line = hdsave
-              }
-          }
           # ONLY `<<-` STRIPS INDENTATION, and only TABS.
           if (t == HDQ[hdi]) { hdi++; if (hdi > hdn) { hdn = 0; hdi = 0 } }
           next
@@ -1305,8 +862,11 @@ SCAN_PROLOGUE='
                               hdq = hden2; continue
                           }
                       }
+                      # A QUOTE CHARACTER ANYWHERE IN THE FRAGMENT QUOTES PART OF
+                      # THE DELIMITER, which suppresses expansion in the body — the
+                      # ANSI-C form is not the only one that does.
                       if (SC_CTX[hdq] == "" && (substr(hdsrc, hdq, 1) == "\047" ||
-                                                substr(hdsrc, hdq, 1) == "\042")) continue
+                                                substr(hdsrc, hdq, 1) == "\042")) { hdquoted = 1; continue }
                       if (SC_CTX[hdq] != "" && !SC_ESC[hdq] && substr(hdsrc, hdq, 1) == SC_CTX[hdq]) continue
                       if (substr(hdsrc, hdq, 1) == "\134" && SC_ESC[hdq + 1]) continue
                       hdw = hdw substr(hdsrc, hdq, 1)
@@ -1376,34 +936,11 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
             for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; SC_Q0 = SEGQ[si]; ONE() }
             SC_Q0 = lq
             line = WHOLE
-            # A LITERAL `bash -c` BODY IS SHELL. It arrives as ONE operand of
-            # `bash`, so a rule about an invoked command never sees the command
-            # inside it. The body is scanned as its own input, once: a body that
-            # itself spawns another shell is not followed, and saying so is cheaper
-            # than a recursion this file would then have to bound.
-            # SUBSTITUTIONS ARE EXTRACTED AT EVERY LEVEL, including inside a shell
-            # body: `bash -c '"'"'out=$(… | grep …)'"'"'` has the engine one level further in,
-            # and the guard that stops a shell body spawning another shell was
-            # stopping this too. Only the SHELL recursion is bounded.
-            body = subst_bodies(WHOLE)
-            if (body != "") {
-                saved = WHOLE
-                nb = split(body, BA, "\n")
-                SC_Q0 = ""
-                for (si = 1; si <= nb; si++) { line = BA[si]; RULES() }
-                line = saved; WHOLE = saved; SC_Q0 = lq
-            }
-            if (!NESTED) {
-                body = shell_c_body(WHOLE)
-                if (body != "") {
-                    saved = WHOLE
-                    NESTED = 1; SC_Q0 = ""
-                    nb = split(body, BA, "\n")
-                    for (si = 1; si <= nb; si++) { line = BA[si]; RULES() }
-                    NESTED = 0
-                    line = saved; WHOLE = saved; SC_Q0 = lq
-                }
-            }
+            # A COMMAND INSIDE A SUBSTITUTION OR A SHELL BODY NEEDS NO EXTRACTION
+            # NOW. Those passes existed so the command MODEL could see a command it
+            # would otherwise have read as one operand of `bash` or as part of an
+            # assignment word. The rules are lexical again, and text inside `$( … )`
+            # or inside a quoted body is text on this line like any other.
         }
         function ONE() {'"$prog"'}
     '"$SCAN_EPILOGUE" "$@" 2>"$errf")" || rc=$?
@@ -1422,6 +959,34 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
 # it is a list of the forbidden things by definition. Everything OUTSIDE it can,
 # and is: the scanner, the loops, the reporting. That is where a `grep -Pq` in a
 # diagnostic would live, and it is now in scope.
+# ── WHY THERE IS NO COMMAND MODEL HERE ─────────────────────────────────────
+#
+# There was one. Over about twenty review rounds these rules grew a notion of a
+# simple command — command words, wrappers (`command`, `env`, `exec`), redirection
+# spellings, compound-command headers, per-engine option tables, substitutions,
+# process substitutions and nested shell bodies. Every round it answered one finding
+# and produced the next, and several of its own defects REJECTED portable code,
+# which is the failure this file calls worse than a miss. It is the same shape
+# CLAUDE.md records a structural checker being built and deleted six times for, and
+# the same one rule C was deleted from this file for.
+#
+# WHAT REPLACED IT IS A CI JOB. The suite runs under a bash 3.2 built from source,
+# and every construct those rules were reaching for — `mapfile`, `declare -A`,
+# `${x^^}`, `coproc`, `wait -n`, `shopt -s lastpipe` — simply fails there, with no
+# grammar to get right. Absence answers the tool names the same way, in the job
+# beside it. Neither job needs to know what a command is.
+#
+# SO THESE RULES ARE LEXICAL, and the cost is a false positive on a forbidden
+# spelling written as DATA: `printf %s mapfile` is reported. That was always rule
+# B's stated behaviour and has a fixture saying so; it is the price of a check that
+# needs no parser. The pre-push gate is fast and blunt, the 3.2 job is slow and
+# exact, and review is neither.
+#
+# WHAT THE QUOTING WALKER IS STILL FOR: escape PARITY. `grep "\\s" f` passes ONE
+# backslash and `grep '"'"'\\s'"'"' f` passes two, and no lexical test can tell those apart —
+# which is also why rule A cannot be replaced by the 3.2 job. BSD grep does not FAIL
+# on `\s`; it matches a literal `s`, so the suite passes and the behaviour is wrong.
+
 # ── RULE A: GNU regex escapes, on lines that run a regex engine ────────────
 #
 # THE CHARACTER-CLASS HALF TERMINATES, and the argument is worth stating: POSIX BRE
@@ -1457,120 +1022,34 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
 # `\b` only — gawk defines `\B` as a within-word operator, and exempting the pair
 # together let `awk '/foo\Bbar/'` through.
 RULE_A='
-    # THE `-e`/`-f` OPERAND EXEMPTION IS GONE WITH RULE C. It existed so
-    # `grep -e -P file` — which searches for the literal string `-P` — was not read
-    # as the flag `-P`, and rule A does not look at `-P` or at any other flag. What
-    # it left behind was an over-exemption: `grep -e -x -e '\s' "$f"` matched it on
-    # the FIRST `-e`, whose operand really is `-x`, and the whole command was
-    # excused — including the `\s` introduced by the second. An exemption that
-    # cannot say where an operand ends is option parsing, which is the thing rule C
-    # was deleted for; the rule it was protecting no longer exists, so it goes too.
+    # FIXED-STRING MODE AND THE ENGINE, LEXICALLY. A command model that could say
+    # WHICH command a word belongs to was built here and then removed; the reasons
+    # are recorded where the model used to be. What is left asks two questions of
+    # the text: does this line run a regex engine, and is it in fixed-string mode.
     #
-    # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so
-    # `grep -F '\s' f` behaves the same on both platforms, and rejecting it made
-    # the gate fail on portable code.
-    # FIXED-STRING MODE AND THE ENGINE COME FROM THE WORDS. Quote removal happens
-    # before the command sees either: `grep '-F' pat f` passes the ordinary option,
-    # and `gr"ep"` IS `grep`. A raw-text test saw neither, so the first rejected
-    # portable code and the second skipped the check entirely.
-    # THE ENGINE IS THE INVOKED COMMAND, not a word that appears. `printf %s grep`
-    # runs `printf`, and reading its operand as an engine reported the unrelated
-    # pattern beside it — the same command-position rule rule D already uses.
-    # EACH ENGINE IS JUDGED ON ITS OWN ARGUMENTS. A segment can hold more than one:
-    # `grep -F x $(grep PATTERN f)` has a fixed-string outer command and an inner one
-    # that is not, and accumulating the mode across both let the outer exempt the
-    # inner. The operands of the command are what its own pattern is made of.
-    shell_scan(line, SC_Q0)
-    ai = 1
-    while (ai <= SC_ARGC) {
-        ai = simple_cmd(ai)
-        if (!unwrap()) continue
-        efixed = 0; egrepsed = 0
-        # A PATH-QUALIFIED ENGINE IS THE SAME ENGINE. `/usr/bin/grep` is GNU grep on
-        # one platform and BSD grep on the other, which is exactly the difference
-        # this rule exists for, and the leading path hid it.
-        ebase = CMDW; sub(/^.*\//, "", ebase)
-        if (ebase == "fgrep") { efixed = 1; egrepsed = 1 }
-        else if (ebase ~ /^(grep|egrep|sed)$/) egrepsed = 1
-        else if (ebase !~ /^(awk|gawk)$/) continue
-        # `-F` IS AN OPTION IN ITS OWN POSITION, and only for the grep family.
-        # `awk -F ,` sets the field separator; `grep -e PATTERN -e -F` makes the
-        # second `-F` a PATTERN, because `-e` takes the next word whatever it looks
-        # like; and after `--` a leading dash is a filename. Each of those read as
-        # fixed-string mode and exempted a command whose pattern is not.
-        for (aj = 1; aj <= CMDN; aj++) {
-            if (CMDA[aj] == "--") break
-            if (CMDA[aj] ~ /^-[A-Za-z]*[ef]$/) { aj++; continue }
-            if (!egrepsed) continue
-            # `F` ANYWHERE IN THE CLUSTER. `grep -Fq PATTERN` has both options
-            # active, and requiring `F` last read it as an ordinary option word.
-            if (CMDA[aj] ~ /^-[A-Za-z]*F[A-Za-z]*$/ || CMDA[aj] == "--fixed-strings") efixed = 1
-        }
-        if (efixed) continue
-        # ONLY THE OPERANDS THAT CARRY A PATTERN. `grep x '"'"'file\s'"'"'` searches for
-        # `x` in a file whose NAME contains a backslash, which is the same search on
-        # both platforms — concatenating every argument reported the filename.
-        #
-        # Which operand is the pattern is a small rule per engine and not an option
-        # parser: for `grep` it is the operand of each `-e`, or else the first
-        # non-option word; `sed` and `awk` take their script the same way. Anything
-        # after `--` or after that first word is a FILE.
-        eargs = ""; epat = 0
-        for (aj = 1; aj <= CMDN; aj++) {
-            if (CMDA[aj] == "--") { aj++; if (!epat && aj <= CMDN) { eargs = eargs " " CMDA[aj]; epat = 1 } break }
-            # `-e` CARRIES A PATTERN; `-f` NAMES A FILE OF THEM. Appending the
-            # filename read its name as a pattern — and `sed -f script` and
-            # `awk -f prog` are files for the same reason.
-            # AN OPTION THAT TAKES AN ARGUMENT CONSUMES IT, or the argument is
-            # read as the pattern: `awk -F , PROGRAM` would otherwise make the comma
-            # the program. The list is per engine and short — awk takes `-F` and
-            # `-v`, and `-f` names a file for all three.
-            # …and grep has its own: `-m NUM`, `-A`/`-B`/`-C` and `-d ACTION` all
-            # take the next word, which was otherwise read as the pattern.
-            if (egrepsed && CMDA[aj] ~ /^-[mABCd]$/ && aj < CMDN) { aj++; continue }
-            # `awk -F PATTERN` IS A REGULAR EXPRESSION. gawk reads `\s` there as a
-            # whitespace class and the awk macOS ships does not, so the field split
-            # differs — discarding the operand hid that.
-            # …ATTACHED OR SEPARATED. `awk -F'"'"'PATTERN'"'"'` is one word after quote
-            # removal, and an exact-equality test saw only the separated spelling.
-            if (!egrepsed && CMDA[aj] ~ /^-F.+$/) { eargs = eargs " " substr(CMDA[aj], 3); continue }
-            if (!egrepsed && CMDA[aj] == "-F" && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; continue }
-            if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
-            if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; epat = 1; continue }
-            # …AND THE VALUE MAY BE ATTACHED. `grep -e'"'"'PATTERN'"'"'` is one word after
-            # quote removal, and its suffix is the active pattern — this was on the
-            # list of forms the model did not follow, and it comes off that list.
-            # AN ATTACHED `-f` OPERAND IS A FILENAME, and it may contain an `e`:
-            # `sed -f'engine\s'` names a file, and finding the later letter in the
-            # same word read the filename as a pattern.
-            # THE FIRST OPERAND-TAKING LETTER IN THE CLUSTER OWNS THE REST OF THE
-            # WORD. `-efoo\s` is `-e` with the pattern `foo\s` — and it contains an
-            # `f` further along, which a test looking anywhere in the word read as
-            # `-f` and discarded. `-f` names a file and `-e` carries a pattern, so
-            # which letter comes first decides.
-            if (CMDA[aj] ~ /^-[A-Za-z]*[ef].+$/ && CMDA[aj] !~ /^--/) {
-                if (match(CMDA[aj], /[ef]/)) {
-                    if (substr(CMDA[aj], RSTART, 1) == "e") {
-                        eargs = eargs " " substr(CMDA[aj], RSTART + 1)
-                    }
-                    # EITHER WAY THE PROGRAM IS SUPPLIED. `awk -f prog.awk file` takes
-                    # its program from the FILE, so every later word is an input file
-                    # and none of them is a pattern.
-                    epat = 1
-                    continue
-                }
-            }
-            if (CMDA[aj] ~ /^-[A-Za-z]*e$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
-            if (CMDA[aj] ~ /^-/) continue
-            if (!epat) { eargs = eargs " " CMDA[aj]; epat = 1 }
-        }
-        if (egrepsed && esc_class_eff(eargs, "sSdDwWbBy<>")) {
-            report("GNU regex escape: " line); return }
-        if (!egrepsed && esc_class_eff(eargs, "sSdDwWBy<>")) {
-            report("gawk-only regex operator: " line); return }
-    }
-    return'
+    # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so a
+    # fixed-string pattern means the same thing on both platforms, and rejecting it
+    # made the gate fail on portable code.
+    if (line ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
 
+    # Restricted to lines that mention `grep`, `sed` or `awk`, because jq is
+    # Oniguruma and DOES support these — a jq program using one is correct, and a
+    # scan that flagged it would be deleted rather than obeyed. That restriction is
+    # also the hole in this rule: a pattern assembled into a variable and used
+    # with grep on another line is not seen. Stated, not silently accepted.
+    #
+    # PARITY IS JUDGED ON WHAT THE ENGINE RECEIVES, which is the one thing here that
+    # still needs the quoting walker: two backslashes inside double quotes reach it
+    # as one, and inside single quotes as two.
+    #
+    # `\b` IS SPLIT BY ENGINE. In `grep` and `sed` it is the GNU word boundary; in
+    # awk it is the standard BACKSPACE escape, and printing one is portable code the
+    # first version of this rule rejected. A line naming grep or sed takes the
+    # stricter rule, so a line naming both is judged by the boundary meaning.
+    if (line ~ /(grep|sed)/ && esc_class(line, "sSdDwWbBy<>")) {
+        report("GNU regex escape: " line); return }
+    if (line ~ /awk/ && esc_class(line, "sSdDwWBy<>")) {
+        report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
 #
@@ -1709,7 +1188,7 @@ RULE_D='
     # AS COMMAND WORDS, like every other builtin rule here. `printf '"'"'%s'"'"' mapfile`
     # runs `printf`, and a raw word pattern rejected it — the last of the Bash 4
     # rules that was still reading the line rather than the command.
-    if (cmd_is("mapfile") || cmd_is("readarray")) {
+    if (line ~ /(^|[^a-zA-Z_-])(mapfile|readarray)([[:space:]]|$)/) {
         report("mapfile/readarray is Bash 4; use a while-read loop: " line); return }
     # THE OPTION WORD MAY BE QUOTED. Shell quote removal happens before `declare`
     # sees its arguments, so a quoted option word — the dash and the letter
@@ -1721,7 +1200,7 @@ RULE_D='
     # AS A COMMAND WORD, for the same reason `-g` is: quote removal happens first,
     # so `de"clare" -A` invokes the ordinary builtin and a raw pattern could not see
     # it. `local` is a function-scope builtin and gets the same treatment.
-    if (cmd_opt("declare", "A") || cmd_opt("typeset", "A") || cmd_opt("local", "A")) {
+    if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*A[A-Za-z]*([[:space:]]|$)/) {
         report("associative arrays are Bash 4: " line); return }
     # `-g` DECLARES A GLOBAL FROM INSIDE A FUNCTION — Bash 4.2. Bash 3.2 rejects the
     # option and the variable is simply never set, which is a behaviour difference
@@ -1729,12 +1208,12 @@ RULE_D='
     #
     # AS A COMMAND WORD, like every other builtin rule here: `printf %s declare -g`
     # runs `printf`, and the raw pattern this arrived as reported it.
-    if (cmd_opt("declare", "g") || cmd_opt("typeset", "g")) {
+    if (line ~ /(declare|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*g[A-Za-z]*([[:space:]]|$)/) {
         report("declare -g is Bash 4.2: " line); return }
     # `wait -n` RETURNS WHEN THE FIRST JOB FINISHES — Bash 4.3. Bash 3.2 rejects the
     # option and returns at once, so what follows races rather than failing, which
     # is the shape nothing but text finds.
-    if (cmd_opt("wait", "n")) {
+    if (line ~ /(^|[[:space:]])wait[[:space:]]+-[A-Za-z]*n([[:space:]]|$)/) {
         report("wait -n is Bash 4.3: " line); return }
     # `read -N` READS EXACTLY THAT MANY CHARACTERS and `-i` seeds the line editor —
     # both after 3.2, which rejects the option and leaves different state behind
@@ -1744,16 +1223,14 @@ RULE_D='
     # rather than a failure.
     # `local -n` IS THE SAME OPTION on the function-scope builtin, and the spelling
     # a nameref is usually written with.
-    if (cmd_opt("declare", "n") || cmd_opt("typeset", "n") || cmd_opt("local", "n")) {
+    if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*n[A-Za-z]*([[:space:]]|$)/) {
         report("declare -n is Bash 4.3: " line); return }
     # `declare -u` AND `-l` CONVERT CASE ON ASSIGNMENT — Bash 4. Bash 3.2 rejects
     # the attribute and stores what it was given, which is a different value rather
     # than a failure.
-    if (cmd_opt("declare", "u") || cmd_opt("declare", "l") ||
-        cmd_opt("typeset", "u") || cmd_opt("typeset", "l") ||
-        cmd_opt("local", "u")   || cmd_opt("local", "l")) {
+    if (line ~ /(declare|local|typeset)([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*[ul][A-Za-z]*([[:space:]]|$)/) {
         report("declare -u and -l are Bash 4: " line); return }
-    if (cmd_opt("read", "N") || cmd_opt("read", "i")) {
+    if (line ~ /(^|[[:space:]])read[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*[Ni][A-Za-z0-9]*([[:space:]]|$)/) {
         report("this read option is newer than Bash 3.2: " line); return }
     if (line ~ /\$\{([A-Za-z0-9_][A-Za-z0-9_]*|[@*#?$!-])(\[[^]]*\])?(\^\^?|,,?)[^}]*\}/) {
         report("case modification is Bash 4: " line); return }
@@ -1774,34 +1251,8 @@ RULE_D='
     # prose reading, and the same test would cost more than it buys.
     # `{fd}>file` ALLOCATES A DESCRIPTOR AND NAMES IT — Bash 4, and Bash 3.2 reads
     # the brace as an ordinary word. One more spelling in a finite list.
-    # OUTSIDE QUOTES, AT THE POSITION THAT MATCHES. A quoted `{fd}>file` is data,
-    # and testing "is there an unquoted `}>` somewhere" separately from "does the
-    # shape appear somewhere" let one supply the position and the other the shape.
-    shell_scan(line, SC_Q0)
-    for (fdi = 1; fdi <= length(line); fdi++) {
-        if (substr(line, fdi, 1) != "{") continue
-        if (SC_CTX[fdi] != "" || SC_ESC[fdi]) continue
-        # `${fd}>out` IS AN EXPANSION AND THEN A REDIRECTION, which Bash 3.2 has.
-        # The brace of an allocation stands alone; a `$` in front makes it something
-        # else entirely.
-        # AT A WORD BOUNDARY. `x{fd}>out` is an ordinary argument and then a
-        # redirection, and a `$` in front makes `${fd}>out` an expansion — an
-        # allocation begins its word.
-        # AT A LEXICAL WORD START. `x{fd}>out` and `$(printf x){fd}>out` are both
-        # ordinary words followed by a redirection — a `)` ends a substitution and
-        # the word CONTINUES through it, so it is not a boundary.
-        # `(` OPENS A COMMAND, so `({fd}>file printf x)` really allocates — while
-        # `)` ENDS a substitution and the word continues through it, which is why
-        # the two brackets are not the same answer.
-        # …AND THE BOUNDARY ITSELF MUST BE ONE. `\({fd}>out` has an ESCAPED
-        # parenthesis, which is an ordinary character in the middle of a word.
-        # …AND A REDIRECTION OPERATOR IS NOT A BOUNDARY EITHER. `printf x <{fd}>out`
-        # has an ordinary filename `{fd}` as the target of the first redirection; an
-        # allocation begins a word, and a word does not begin after `<`.
-        if (fdi > 1 && (SC_ESC[fdi - 1] || substr(line, fdi - 1, 1) !~ /[[:space:];&|(]/)) continue
-        if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
-            report("a {varname} descriptor is Bash 4: " line); return }
-    }
+    if (line ~ /(^|[[:space:]])\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
+        report("a {varname} descriptor is Bash 4: " line); return }
     if (SEGI <= 1 && unquoted(WHOLE, "&>>")) {
         report("&>> is a Bash 4 redirection: " WHOLE); return }
     if (SEGI <= 1 && unquoted(WHOLE, "|&")) {
@@ -1834,7 +1285,7 @@ RULE_D='
     # `shopt` options are enumerated in the manual per release — not a pattern,
     # which would need to know what an option name looks like.
     for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
-        if (cmd_has("shopt", SHOPT4[si2])) {
+        if (line ~ /(^|[[:space:]])shopt([[:space:]]|$)/ && line ~ ("(^|[[:space:]])" SHOPT4[si2] "([[:space:]]|$)")) {
             report("the " SHOPT4[si2] " shell option is newer than Bash 3.2: " line); return }
     # THERE IS NO `set -o globstar` RULE, and there was one until this round.
     # `globstar` is a SHOPT option; `set -o` has its own list and does not include
@@ -1846,7 +1297,7 @@ RULE_D='
     # THE COMMAND WORD\'"'"'S OWN QUOTING DECIDES IT. `'"'"'coproc'"'"' coproc` has a quoted
     # first word — an ordinary command — and an unquoted one as its operand, and
     # asking whether the line contains an unquoted `coproc` anywhere conflated them.
-    if (cmd_is_unquoted("coproc")) {
+    if (line ~ /(^|[[:space:]])coproc([[:space:]]|$)/) {
         report("coproc is Bash 4: " line); return }
     # `[ -v x ]` AND `test -v x` ARE THE SAME OPERATOR. Bash 4.2 added it to all
     # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
@@ -1861,7 +1312,7 @@ RULE_D='
     # …and the same for `-v`, which also needs `(` and `)` to be tokens of their
     # own: `(test -v token)` is a subshell running `test`, and a flattened string
     # left the parenthesis stuck to the command name.
-    if (cond_v()) {
+    if (line ~ /(^|[[:space:]&;|(])(\[|test)[[:space:]]+(![[:space:]]+)?-v[[:space:]]/) {
         report("the -v conditional is Bash 4.2: " line); return }'
 
 # portability-scan: rules-end
@@ -2088,6 +1539,14 @@ done
 # and was fixed in 96bfae4 — so the planted instance below is the real historical
 # defect rather than an invented one.
 PTMP="$(mktemp_d)" || { die "no scratch directory for the planted instances"; echo "RESULT: FAIL"; exit 1; }
+
+# The characters these fixtures are built from, by COUNT rather than by writing
+# them out: the escaping of a backslash count is the thing under test, and a
+# literal in a printf format adds a second layer of it.
+one_bs='\'
+two_bs='\\'
+three_bs='\\\'
+bs="\\"; dq='"'; sq="'"
 # No second `trap` here: the handler above already names this path, and writing
 # another would drop the first — which is how the extraction directory came to leak.
 plant() {   # plant <name> <line> <rule> <label> [command, for rule B]
@@ -2207,982 +1666,21 @@ plant dataarg "printf '%s' realpath"                B "a name used as data, whic
 # Written directly, with REAL newlines: the helpers write their body with `%s`, so
 # a `\n` in it stays two characters and the here-document never spans lines — the
 # case passed while testing a single line that happened to contain no command.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'EOF'\n"
-  printf 'grep -P and \\s are unsupported on BSD\n'
-  printf 'EOF\n'; } > "$PTMP/heredoc.sh"
-hd_hits="$(scan "$RULE_A" "$PTMP/heredoc.sh")" || hd_hits=SCANFAIL
-# …and a delimiter that is not a bare identifier still terminates. `END-MARK`
-# matched only as `END`, so the real terminator was never seen and everything to
-# EOF was skipped — one document excusing the rest of the file.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'END-MARK'\n"
-  printf 'harmless\n'
-  printf 'END-MARK\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/dashdelim.sh"
-dd_hits="$(scan "$RULE_A" "$PTMP/dashdelim.sh")" || dd_hits=SCANFAIL
-{ [ "$dd_hits" != SCANFAIL ] && [ -n "$dd_hits" ]; } \
-    && pass "…and a hyphenated here-document delimiter still terminates the skip" \
-    || die "an END-MARK delimiter swallowed the rest of the file ('$dd_hits')"
-{ [ "$hd_hits" != SCANFAIL ] && [ -z "$hd_hits" ]; } \
-    && pass "…and accepts a forbidden spelling inside a here-document body" \
-    || die "a here-document body was read as shell ('$hd_hits')"
-# …and the rule still applies AFTER the body ends, or the skip would swallow the
-# rest of the file.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'EOF'\n"
-  printf 'harmless text\n'
-  printf 'EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/afterheredoc.sh"
-ah_hits="$(scan "$RULE_A" "$PTMP/afterheredoc.sh")" || ah_hits=SCANFAIL
-{ [ "$ah_hits" != SCANFAIL ] && [ -n "$ah_hits" ]; } \
-    && pass "…while code after the terminator is scanned again" \
-    || die "the here-document skip swallowed the rest of the file ('$ah_hits')"
-# `set -o globstar` IS NOT A SPELLING OF IT. `globstar` is a shopt option; `set -o`
-# has its own list and does not include it, so that command fails on every bash —
-# the rule that reported it could only ever have fired on source that is broken
-# everywhere, which is not a portability defect.
-refute setglob "set -o globstar 2>/dev/null || :"   D "a set -o option that does not exist"
-refute qpipe   "printf %s 'producer |& consumer'"          D "a quoted |&, which is data rather than syntax"
-refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
-refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
-# Rule B accepts a guarded use, which is the whole point of requiring a guard
-# rather than absence — both real uses in this tree take this form.
-# ── WHAT THIS RULE NO LONGER TRIES TO DO ───────────────────────────────────
-# The guard fixtures are gone with the guard inference: recognising
-# `if command -v X … else fallback` took three rounds — excluding comments, then
-# quoted data, then probes that control nothing — and the fourth round found a
-# guarded use exempting an unrelated unguarded one in the same file. Deciding
-# which invocation a probe governs is control-flow analysis, and this file does
-# not do analysis. The exemption list does that job in one line per case, and
-# `…and every exemption is still earning its place` keeps it honest.
-#
-# What that gives up is stated: a NEW correct use of `sha1sum` must be added to
-# the list, which is a small deliberate act, rather than being recognised by a
-# scanner that was wrong about it three times.
-[ -n "$GNU_EXEMPT" ] \
-    && pass "correct uses are exempted by a list, not by inferring control flow" \
-    || die "the exemption list is empty; a correct use has nowhere to be recorded"
-
-# ── AN EXEMPTION BELONGS TO ITS OWN COMMAND ────────────────────────────────
-# `grep -F x f; grep '\s' f` has one fixed-string command and one that is not, and
-# an exemption taken for the whole logical line let the first excuse the second.
-# Rules are applied per simple command now.
-printf '#!/usr/bin/env bash\ngrep -F x "$f"; grep %s "$f"\n' "'\\s'" > "$PTMP/twogrep.sh"
-tg_hits="$(scan "$RULE_A" "$PTMP/twogrep.sh")" || tg_hits=SCANFAIL
-{ [ "$tg_hits" != SCANFAIL ] && [ -n "$tg_hits" ]; } \
-    && pass "a fixed-string command does not exempt the next command on the line" \
-    || die "grep -F excused a later grep with a GNU escape ('$tg_hits')"
-
-# ── A HERE-STRING IS NOT A HERE-DOCUMENT ───────────────────────────────────
-# `<<<` has no terminator; treating it as a document skipped every following line
-# to EOF — one `cat <<<EOF` excusing the whole file.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<<EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/herestring.sh"
-hs_hits="$(scan "$RULE_A" "$PTMP/herestring.sh")" || hs_hits=SCANFAIL
-{ [ "$hs_hits" != SCANFAIL ] && [ -n "$hs_hits" ]; } \
-    && pass "a here-string does not start a here-document skip" \
-    || die "cat <<<EOF swallowed the rest of the file ('$hs_hits')"
-
-# ── AN ESCAPED BACKSLASH IS NOT AN ESCAPE ──────────────────────────────────
-# `grep '\\s' "$f"` passes TWO backslashes and an `s`. Both engines read that as an
-# escaped literal backslash followed by an ordinary `s`, so it means the same thing
-# on either platform — and a pattern that started at the SECOND backslash reported
-# it as a GNU class escape, making a mandatory pre-push gate reject correct code.
-# That is the failure this file calls worse than missing a defect, because it is
-# how a check gets switched off rather than obeyed.
-# TWO backslashes in the file, built with a counted variable rather than a
-# printf format, because the escaping of a backslash count is the thing under
-# test and a format string adds a second layer of it.
-one_bs='\'
-bs="\\"; dq='"'; sq="'"
-two_bs='\\'
-printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/evenesc.sh"
-ee_hits="$(scan "$RULE_A" "$PTMP/evenesc.sh")" || ee_hits=SCANFAIL
-{ [ "$ee_hits" != SCANFAIL ] && [ -z "$ee_hits" ]; } \
-    && pass "an escaped backslash before a class letter is accepted" \
-    || die "the scan rejected a portable escaped backslash ('$ee_hits')"
-# …and a THIRD backslash makes it an escape again: the literal backslash, then a
-# `\s` that really is the GNU class. Parity, not pairing.
-three_bs='\\\'
-printf '#!/usr/bin/env bash\ngrep %s%ss%s "$f"\n' "'" "$three_bs" "'" > "$PTMP/oddesc.sh"
-oe_hits="$(scan "$RULE_A" "$PTMP/oddesc.sh")" || oe_hits=SCANFAIL
-{ [ "$oe_hits" != SCANFAIL ] && [ -n "$oe_hits" ]; } \
-    && pass "…while an odd run of backslashes still escapes the letter" \
-    || die "three backslashes before s were read as portable ('$oe_hits')"
-
-# ── THE SHELL HALVES A RUN INSIDE DOUBLE QUOTES ────────────────────────────
-# `grep "\\s" f` writes two backslashes and passes ONE, so the engine sees the GNU
-# `\s` — the same command the single-quoted spelling of two backslashes does NOT
-# produce. Counting the source run alone read this as portable and let a real
-# incompatibility through: the gate reporting clean on a script BSD reads
-# differently, which is the failure mode this whole file exists to remove.
-printf '#!/usr/bin/env bash\ngrep "%ss" "$f"\n' "$two_bs" > "$PTMP/dqeven.sh"
-de_hits="$(scan "$RULE_A" "$PTMP/dqeven.sh")" || de_hits=SCANFAIL
-{ [ "$de_hits" != SCANFAIL ] && [ -n "$de_hits" ]; } \
-    && pass "two backslashes inside DOUBLE quotes still reach the engine as one" \
-    || die "a double-quoted \\\\s was read as portable ('$de_hits')"
-# …and three inside double quotes become two, which is a literal backslash and an
-# ordinary letter. Same arithmetic, opposite answer.
-printf '#!/usr/bin/env bash\ngrep "%ss" "$f"\n' "$three_bs" > "$PTMP/dqodd.sh"
-do_hits="$(scan "$RULE_A" "$PTMP/dqodd.sh")" || do_hits=SCANFAIL
-{ [ "$do_hits" != SCANFAIL ] && [ -z "$do_hits" ]; } \
-    && pass "…while three inside double quotes are a literal backslash" \
-    || die "a double-quoted literal backslash was reported ('$do_hits')"
-# UNQUOTED, a lone backslash is REMOVED rather than kept: `grep \\s f` searches for
-# a plain `s` and is portable, so the counts differ again by context.
-printf '#!/usr/bin/env bash\ngrep %ss "$f"\n' "$one_bs" > "$PTMP/bareone.sh"
-bo_hits="$(scan "$RULE_A" "$PTMP/bareone.sh")" || bo_hits=SCANFAIL
-{ [ "$bo_hits" != SCANFAIL ] && [ -z "$bo_hits" ]; } \
-    && pass "…and an unquoted lone backslash is removed, not passed" \
-    || die "an unquoted single backslash was reported ('$bo_hits')"
-
-# ── THE TWO REMOVAL LISTS ARE KEPT IN STEP BY A CHECK, NOT BY A COMMENT ────
-# The workflow said it was "KEPT IN STEP with GNU_ONLY_NAMES" and nothing verified
-# it. A name in the scan but not in the job is covered by text alone and misses the
-# runtime-assembled spelling; a name in neither is covered by nothing at all, which
-# is how `shred` sat uncovered. This is the check that comment was standing in for.
-PORT_WF="$SELF_DIR/../../../.github/workflows/tests.yml"
-if [ -f "$PORT_WF" ]; then
-    wf_tools="$(awk '/^ *tools="/{f=1} f{print} f && /"[[:space:]]*$/{exit}' "$PORT_WF")"
-    if [ -z "$wf_tools" ]; then
-        die "the portability job's tool list could not be read"
-    else
-        # NO EXEMPTIONS. The `g`-prefixed spellings were exempt for one round,
-        # because hiding `gawk` on Ubuntu removed `awk` — the same file — and the
-        # suite, which is written in awk, could not run. The job preserves a real
-        # POSIX `awk` under its own name before hiding the GNU one now, so the
-        # containment holds for every name and there is no list of which entries
-        # it does not hold for.
-        missing=""
-        for n in $GNU_ONLY_NAMES; do
-            # The quotes go first: the last name is adjacent to the closing one,
-            # so `gnproc"` was a token that matched nothing — the check reporting a
-            # gap in the list rather than in the code.
-            printf '%s' "$wf_tools" | tr -d '"' | tr -s ' \n' '\n\n' | grep -qxF "$n" || missing="$missing $n"
-        done
-        [ -z "$missing" ] \
-            && pass "every scanned GNU-only name is also removed by the CI job" \
-            || die "in the scan but not hidden by the portability job:$missing"
-    fi
-else
-    die "the portability workflow is not where this check expects it"
-fi
-
-# ── THE DIAGNOSTICS FILE IS ONE THIS RUN OWNS ──────────────────────────────
-# The scan's stderr file is where a failed scan reports itself, and it is opened
-# with `2>`, which TRUNCATES, and removed afterwards. Asking `mktemp` for it meant
-# taking whatever it returned: an earlier repair required the path to be absolute
-# and to exist, and neither establishes ownership — a stub, a hostile `TMPDIR` or
-# a collision hands back a real file, and under root that is somebody else's.
-#
-# So the path is a name inside the scratch directory this run allocated. What is
-# left to prove is that a scan with nowhere of its own to write FAILS rather than
-# writing somewhere else: no diagnostics file means a failure indistinguishable
-# from a clean result.
-printf '#!/usr/bin/env bash\ngrep -qE "\\s" "$f"\n' > "$PTMP/needstmp.sh"
-mk_rc=0
-( PORT_TMPDIR="$PTMP/no-such-directory" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
-[ "$mk_rc" -eq 2 ] \
-    && pass "a scan with no scratch directory of its own fails closed" \
-    || die "the scan ran without owned scratch space (rc=$mk_rc)"
-mk_rc=0
-( PORT_TMPDIR="" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || mk_rc=$?
-[ "$mk_rc" -eq 2 ] \
-    && pass "…and an unset one is refused rather than defaulted" \
-    || die "an empty PORT_TMPDIR was accepted (rc=$mk_rc)"
-# …and nothing is written into the working directory in either case, which is what
-# a relative path from an unvalidated `mktemp` used to do.
-mkdir -p "$PTMP/cwd"
-( cd "$PTMP/cwd" && PORT_TMPDIR="" scan "$RULE_A" "$PTMP/needstmp.sh" >/dev/null 2>&1 ) || true
-[ -z "$(ls -A "$PTMP/cwd" 2>/dev/null)" ] \
-    && pass "…and nothing is written into the working directory" \
-    || die "a refused scan left files in the current directory"
-
-# ── AN OPERAND EXEMPTION THAT CANNOT SAY WHERE THE OPERAND ENDS ────────────
-# `grep -e -x -e PATTERN f` passes TWO patterns. The exemption that used to cover
-# `-e`'s operand matched on the first one, whose operand really is `-x`, and
-# excused the whole command — including the GNU escape introduced by the second.
-# Rule C is what that exemption existed for, and rule C is gone, so an operand
-# beginning with a dash is now just another word to this rule.
-printf '#!/usr/bin/env bash\ngrep -e -x -e %s "$f"\n' "'\\s'" > "$PTMP/twoe.sh"
-te_hits="$(scan "$RULE_A" "$PTMP/twoe.sh")" || te_hits=SCANFAIL
-{ [ "$te_hits" != SCANFAIL ] && [ -n "$te_hits" ]; } \
-    && pass "a first -e operand no longer excuses a later GNU escape" \
-    || die "grep -e -x excused the escape after the second -e ('$te_hits')"
-# …and the portable spelling it used to protect is still accepted, because this
-# rule never looked at a flag: `-x` is not an escape and there is nothing to report.
-refute eoperand 'grep -e -x -- "$f"' A "a dash-prefixed -e operand, which carries no escape"
-
-# ── A QUOTED OPTION WORD IS STILL THE OPTION ───────────────────────────────
-# Quote removal happens before `declare` sees its arguments, so the quoted form
-# declares an associative array exactly as the bare one does — and the pattern,
-# anchored on the whitespace before the dash, stopped at the quote.
-plant quotedassoc "if declare '-A' M; then :; fi" D "an associative array whose option word is quoted"
-
-# ── A DESCENDING RANGE IS STILL A STEPPED RANGE ────────────────────────────
-# `{5..1..-1}` is the spelling a countdown uses, and an unsigned step operand read
-# the minus as not-a-step and let it through.
-plant signedstep "for i in {5..1..-1}; do :; done" D "a stepped brace expansion with a negative step"
-
-# ── ONLY <<- STRIPS THE TERMINATOR, AND ONLY TABS ──────────────────────────
-# An indented `  EOF` inside an ordinary `<<EOF` body is DATA: bash requires the
-# terminator at column one. Stripping indentation from every terminator ended the
-# skip there, and the rest of the document was read as shell — a forbidden
-# spelling written as example text then failed the mandatory gate.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'EOF'\n"
-  printf '  EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'
-  printf 'EOF\n'; } > "$PTMP/indentterm.sh"
-it_hits="$(scan "$RULE_A" "$PTMP/indentterm.sh")" || it_hits=SCANFAIL
-{ [ "$it_hits" != SCANFAIL ] && [ -z "$it_hits" ]; } \
-    && pass "an indented terminator does not end an ordinary here-document" \
-    || die "an indented EOF ended a <<EOF body early ('$it_hits')"
-# …and `<<-` DOES strip leading tabs, so a tab-indented terminator ends that form
-# and the code after it is scanned again. Refusing to strip for both forms would
-# swallow the file from a legitimate `<<-` onward.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<-'EOF'\n"
-  printf '\tharmless\n'
-  printf '\tEOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/dashterm.sh"
-dt_hits="$(scan "$RULE_A" "$PTMP/dashterm.sh")" || dt_hits=SCANFAIL
-{ [ "$dt_hits" != SCANFAIL ] && [ -n "$dt_hits" ]; } \
-    && pass "…while <<- ends on a tab-indented terminator, as bash does" \
-    || die "a <<- here-document never ended ('$dt_hits')"
-
-# ── ANSI-C QUOTING LOOKS SINGLE-QUOTED AND IS NOT ──────────────────────────
-# `grep $'\\s' f` collapses the pair the way double quotes do and hands the engine
-# the GNU `\s`. Read as ordinary single quoting, both backslashes survived the
-# count and the gate called an incompatible script clean.
-printf '#!/usr/bin/env bash\ngrep $%s%ss%s "$f"\n' "'" "$two_bs" "'" > "$PTMP/ansic.sh"
-ac_hits="$(scan "$RULE_A" "$PTMP/ansic.sh")" || ac_hits=SCANFAIL
-{ [ "$ac_hits" != SCANFAIL ] && [ -n "$ac_hits" ]; } \
-    && pass "ANSI-C quoting collapses the pair, like double quotes" \
-    || die "a \$'..' escape was read as portable ('$ac_hits')"
-# …and three backslashes inside it are a literal backslash again, so it is the
-# arithmetic that differs from single quoting rather than the direction.
-printf '#!/usr/bin/env bash\ngrep $%s%ss%s "$f"\n' "'" "$three_bs" "'" > "$PTMP/ansicodd.sh"
-ao_hits="$(scan "$RULE_A" "$PTMP/ansicodd.sh")" || ao_hits=SCANFAIL
-{ [ "$ao_hits" != SCANFAIL ] && [ -z "$ao_hits" ]; } \
-    && pass "…while three inside it are a literal backslash" \
-    || die "a literal backslash in \$'..' was reported ('$ao_hits')"
-
-# ── A BACKSLASH CAN BE SYNTHESISED ─────────────────────────────────────────
-# `grep $'\134s' f` contains no `\s` anywhere in its source: octal 134 IS the
-# backslash, and ANSI-C quoting decodes it before grep sees the GNU `\s`. Counting
-# literal backslashes saw `\1` and called the script clean.
-printf '#!/usr/bin/env bash\ngrep $%s\\134s%s "$f"\n' "'" "'" > "$PTMP/ansicoct.sh"
-oc_hits="$(scan "$RULE_A" "$PTMP/ansicoct.sh")" || oc_hits=SCANFAIL
-{ [ "$oc_hits" != SCANFAIL ] && [ -n "$oc_hits" ]; } \
-    && pass "an octal backslash inside \$'..' still escapes the letter" \
-    || die "\$'\\134s' was read as portable ('$oc_hits')"
-# …and the hex spelling of the same character.
-printf '#!/usr/bin/env bash\ngrep $%s\\x5cs%s "$f"\n' "'" "'" > "$PTMP/ansichex.sh"
-hx_hits="$(scan "$RULE_A" "$PTMP/ansichex.sh")" || hx_hits=SCANFAIL
-{ [ "$hx_hits" != SCANFAIL ] && [ -n "$hx_hits" ]; } \
-    && pass "…and the hex spelling of it" \
-    || die "\$'\\x5cs' was read as portable ('$hx_hits')"
-# …while `\\134` is a literal backslash followed by DIGITS, because the pair is
-# consumed first — which is what bash does, and the reason the order matters.
-printf '#!/usr/bin/env bash\ngrep $%s\\\\134s%s "$f"\n' "'" "'" > "$PTMP/ansicesc.sh"
-ae_hits="$(scan "$RULE_A" "$PTMP/ansicesc.sh")" || ae_hits=SCANFAIL
-{ [ "$ae_hits" != SCANFAIL ] && [ -z "$ae_hits" ]; } \
-    && pass "…while an escaped backslash before the digits is not an octal escape" \
-    || die "\$'\\\\134s' was read as an escape ('$ae_hits')"
-
-# ── THE UNICODE ESCAPES TAKE A VARIABLE NUMBER OF DIGITS ───────────────────
-# Bash accepts ONE to four hex digits after `\u` and one to eight after `\U`, so
-# `$'\u5c'` is the same backslash as `$'\'`. Recognising only the padded
-# spelling left the short one unread and the script called clean.
-for spec in 'u5c' 'u05c' 'U5c' 'U0000005c'; do
-    printf '#!/usr/bin/env bash\ngrep $%s\\%ss%s "$f"\n' "'" "$spec" "'" > "$PTMP/ansicw.sh"
-    uw_hits="$(scan "$RULE_A" "$PTMP/ansicw.sh")" || uw_hits=SCANFAIL
-    { [ "$uw_hits" != SCANFAIL ] && [ -n "$uw_hits" ]; } \
-        && pass "\$'\\$spec' is a backslash, whatever its width" \
-        || die "\$'\\${spec}s' was read as portable ('$uw_hits')"
-done
-# …and `\0134` is NOT one, which was this decoder's own false positive: bash reads
-# it as `\013` followed by `4` — a vertical tab and a digit. Checked by running it.
-printf '#!/usr/bin/env bash\ngrep $%s\\0134s%s "$f"\n' "'" "'" > "$PTMP/ansicvt.sh"
-vt_hits="$(scan "$RULE_A" "$PTMP/ansicvt.sh")" || vt_hits=SCANFAIL
-{ [ "$vt_hits" != SCANFAIL ] && [ -z "$vt_hits" ]; } \
-    && pass "…while \$'\\0134' is a vertical tab and a digit, not a backslash" \
-    || die "\$'\\0134s' was read as an escape ('$vt_hits')"
-# …and a decoded character that is not a backslash is still the character it is:
-# `$'\x5c\x73'` is a backslash and then an `s`, which is the GNU escape.
-printf '#!/usr/bin/env bash\ngrep $%s\\x5c\\x73%s "$f"\n' "'" "'" > "$PTMP/ansicpair.sh"
-ap_hits="$(scan "$RULE_A" "$PTMP/ansicpair.sh")" || ap_hits=SCANFAIL
-{ [ "$ap_hits" != SCANFAIL ] && [ -n "$ap_hits" ]; } \
-    && pass "…and a numerically spelled letter is still that letter" \
-    || die "\$'\\x5c\\x73' was read as portable ('$ap_hits')"
-# …and `\b` inside these quotes is a BACKSPACE, not the word boundary it is in a
-# grep pattern, so the portable spelling is accepted.
-printf '#!/usr/bin/env bash\ngrep $%s\\b%s "$f"\n' "'" "'" > "$PTMP/ansicbs.sh"
-ab_hits="$(scan "$RULE_A" "$PTMP/ansicbs.sh")" || ab_hits=SCANFAIL
-{ [ "$ab_hits" != SCANFAIL ] && [ -z "$ab_hits" ]; } \
-    && pass "…and \$'\\b' is a backspace, which is portable" \
-    || die "a backspace escape was reported ('$ab_hits')"
-
-# ── THE SPAN ENDS AT THE FIRST UNESCAPED QUOTE ─────────────────────────────
-# `$'x\'\134s'` carries an escaped quote. Stopping at the first quote of any kind
-# cut the span in half and left the `\134s` unexamined — and the walker
-# deliberately ignores ANSI-C text, so nothing judged it at all.
-printf '#!/usr/bin/env bash\ngrep $%sx\\%s\\134s%s "$f"\n' "'" "'" "'" > "$PTMP/ansicq.sh"
-aq_hits="$(scan "$RULE_A" "$PTMP/ansicq.sh")" || aq_hits=SCANFAIL
-{ [ "$aq_hits" != SCANFAIL ] && [ -n "$aq_hits" ]; } \
-    && pass "an escaped quote does not end the ANSI-C span" \
-    || die "the span stopped at an escaped quote ('$aq_hits')"
-
-# ── AN ESCAPED BOUNDARY CHARACTER IS PART OF THE WORD ──────────────────────
-# In `printf … \)# <<EOF` the parenthesis is an escaped literal, so the `#`
-# continues the word rather than starting a comment — and the redirection after it
-# is REAL. Reading the previous source character alone stripped it, and the
-# document body was then scanned as shell.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'printf %s \\)# <<EOF\n' "'%s\\n'"
-  printf 'grep -qE "\\s" is example text\n'
-  printf 'EOF\n'; } > "$PTMP/escparen.sh"
-ep_hits="$(scan "$RULE_A" "$PTMP/escparen.sh")" || ep_hits=SCANFAIL
-{ [ "$ep_hits" != SCANFAIL ] && [ -z "$ep_hits" ]; } \
-    && pass "an escaped boundary character does not start a comment" \
-    || die "an escaped ) let the # strip a real redirection ('$ep_hits')"
-
-# ── AN ANSI-C OPENER IS ONE ONLY OUTSIDE QUOTES ────────────────────────────
-# A command can carry the two characters twice: once as data inside double quotes,
-# once opening a real span. Taking the first as an opener paired it with the
-# opening quote of the REAL span, which was then never decoded — and the walker
-# deliberately ignores ANSI-C text, so nothing judged the GNU escape at all.
-printf '#!/usr/bin/env bash\ngrep -e "$%s" -e $%s\\134s%s "$f"\n' "'" "'" "'" > "$PTMP/ansicdq.sh"
-ad_hits="$(scan "$RULE_A" "$PTMP/ansicdq.sh")" || ad_hits=SCANFAIL
-{ [ "$ad_hits" != SCANFAIL ] && [ -n "$ad_hits" ]; } \
-    && pass "a quoted \$' is data, and the real span is still decoded" \
-    || die "a quoted \$' consumed the real ANSI-C span ('$ad_hits')"
-
-# ── A CONTINUATION IS REMOVED, NOT REPLACED ────────────────────────────────
-# Bash deletes the backslash-newline and joins the halves directly, so a command
-# split inside its own NAME is still that command. Joining with a space made
-# `gaw\` and `k …` two words that are not the name — and in the portability job the
-# missing tool was masked by a `|| :`, so both jobs read clean for code that fails
-# on stock macOS.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'gaw\\\n'
-  printf "k 'BEGIN { exit 0 }' || :\n"; } > "$PTMP/splitname.sh"
-sn_hits="$(scan '
-    if (line ~ /(^|[^A-Za-z0-9_.-])gawk([^A-Za-z0-9_-]|$)/) { report("hit"); return }' "$PTMP/splitname.sh")" || sn_hits=SCANFAIL
-{ [ "$sn_hits" != SCANFAIL ] && [ -n "$sn_hits" ]; } \
-    && pass "a name split across a continuation is still that name" \
-    || die "gaw\\ + k was not read as gawk ('$sn_hits')"
-# …and the space that belongs between two words is the one already in the source,
-# before the backslash, so a continued command does not run together either.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'grep -qE \\\n'
-  printf '"\\s" "$f"\n'; } > "$PTMP/contword.sh"
-cw_hits="$(scan "$RULE_A" "$PTMP/contword.sh")" || cw_hits=SCANFAIL
-{ [ "$cw_hits" != SCANFAIL ] && [ -n "$cw_hits" ]; } \
-    && pass "…while a continuation between words keeps them apart" \
-    || die "a continued command lost its word boundary ('$cw_hits')"
-
-plant globstartwo "shopt -s nullglob globstar || :"          D "globstar as a second shopt operand"
-plant vtest      "if [ -v token ]; then observed=yes; fi"    D "the -v conditional in single brackets"
-plant vbuiltin   "if test -v token; then observed=yes; fi"   D "the -v conditional in the test builtin"
-# …and the operand may be QUOTED, which `shopt` never sees: quote removal happens
-# first, so the rule is applied to what the command receives.
-plant globstarq  "shopt -s 'globstar' || :"                    D "a quoted globstar operand"
-# …and the conditional may be NEGATED, in either command form. The `if` around it
-# masks the failure, so nothing else sees these two either.
-plant vneg       "if [ ! -v token ]; then observed=yes; fi"  D "a negated -v in single brackets"
-plant vnegtest   "if test ! -v token; then observed=yes; fi" D "a negated -v in the test builtin"
-# …and a QUOTED argument is one argument, whatever whitespace is inside it.
-# `shopt -s "nullglob globstar"` passes a single invalid option name and enables
-# nothing; `test "! -v token"` is a one-argument string test. Flattening quoted
-# whitespace to ordinary whitespace read both as several words and rejected them.
-refute globstarone "shopt -s \"nullglob globstar\" || :"       D "a quoted pair that is one invalid operand"
-refute vstring     "if test \"! -v token\"; then :; fi"        D "a one-argument string test"
-# …and the boundary is STRUCTURAL, so a decoded byte cannot be mistaken for one:
-# `shopt -s $'"'"'nullglob\002globstar'"'"'` is a single invalid operand whichever byte a
-# flattened representation happened to pick.
-refute globstarbyte "shopt -s \$'"'"'nullglob\\002globstar'"'"' || :"       D "an operand carrying the separator byte"
-# …and a control operator is a token of its own, so the command word beside it is
-# still the command word.
-plant vparen     "token=1; if (test -v token); then observed=yes; fi" D "a -v conditional inside a subshell"
-plant globstarparen "(shopt -s globstar) || :"                D "globstar inside a subshell"
-# …and a REDIRECTION does not end the command: `shopt >/dev/null -s globstar`
-# still passes both operands, and with the output redirected nothing else would
-# have shown it either.
-plant globstarredir "shopt >/dev/null -s globstar || :"       D "globstar after a redirection"
-plant vredir     "if test >/dev/null -v token; then :; fi"    D "a -v conditional after a redirection"
-# …while the builtin has to be the COMMAND WORD. `printf %s shopt -s globstar`
-# runs `printf`, and rejecting it is rejecting portable code.
-refute globstardata "printf %s shopt -s globstar"             D "the name as an operand of another command"
-refute vdata        "printf %s test -v token"                 D "the conditional as data"
-# …and `-v` needs an OPERAND: alone it is the one-argument string test that every
-# bash has.
-refute vbare     "if test -v; then :; fi"                     D "a bare -v, which is a string test"
-refute vbarebrk  "if [ -v ]; then :; fi"                      D "a bare -v in brackets"
-# …and the grammar around a simple command: an IO number belongs to the redirection
-# after it, `command` and `builtin` invoke what follows them, and a grouped test
-# expression still has primaries inside it.
-plant globstario  "2>/dev/null shopt -s globstar || :"        D "globstar behind an IO number"
-plant globstarcmd "command shopt -s globstar || :"            D "globstar through the command builtin"
-plant vgroup     "if test \( -v token \); then :; fi"            D "a -v primary inside a grouped expression"
-plant fdvar      'exec {logfd}>/dev/null || :'                 D "a {varname} descriptor allocation"
-# …while `command -v X` DESCRIBES X rather than running it, which is the guard
-# pattern this tree uses everywhere.
-refute vprobe    "command -v test -v token >/dev/null && :"   D "a command -v probe, which runs nothing"
-# …and a descriptor duplication is one redirection, not a background operator:
-# `2>&1 shopt -s globstar` is a single command with its stderr joined to stdout.
-plant globstardup "2>&1 shopt -s globstar || :"               D "globstar behind a descriptor duplication"
-# …and the shell options that arrived after 3.2 are a list, not one name.
-plant lastpipe   "shopt -s lastpipe || :"                     D "lastpipe, a post-3.2 shell option"
-plant declareg   "f() { declare -g observed=yes; }; f || :"   D "declare -g, which is Bash 4.2"
-# …while the THREE-argument test is a binary comparison on every bash: the operator
-# is in the middle and the first word is an operand.
-refute vbinary   "if test -v = token; then :; fi"             D "a three-argument string comparison"
-refute vbinbrk   "if [ -v = token ]; then :; fi"              D "the same comparison in brackets"
-# …and `&>` puts the ampersand FIRST, a spelling Bash 3.2 also has.
-plant globstarampfirst "shopt &>/dev/null -s globstar || :"   D "globstar behind an ampersand-first redirection"
-# …while a compound-command HEADER is grammar: `for x in …` names a loop variable,
-# and the words after it are a list, not a command with arguments.
-refute forheader "for shopt in globstar; do :; done"          D "a loop variable that shares a builtin name"
-refute declaredata "printf %s declare -g"                     D "declare -g as data"
-# …and `compat31` is Bash 3.2 asking for 3.1 behaviour, so it is not newer than the
-# platform this gate supports. It was listed by mistake.
-refute compat31  "shopt -s compat31 || :"                     D "compat31, which Bash 3.2 provides"
-# …and the rest of the header: the LIST after `in` belongs to it, and `time` takes
-# options of its own before the command it measures.
-refute forlist   "for x in shopt globstar; do :; done"        D "a for-list whose words share builtin names"
-refute forlistA  "for x in grep '\\s'; do :; done"             A "a for-list carrying a pattern"
-plant timeopt    "time -p shopt -s globstar || :"             D "globstar behind a timed prefix"
-plant waitn      "sleep 0 & wait -n || :"                     D "wait -n, which is Bash 4.3"
-# …and a literal `bash -c` body is shell: the command inside it is invoked, and a
-# rule about an invoked command never saw it while it was one operand of `bash`.
-plant nestedwait "bash -c 'wait -n || :'"                     D "wait -n inside a bash -c body"
-plant nestedopt  "bash -c 'shopt -s globstar' || :"           D "globstar inside a bash -c body"
-# …and the arithmetic FOR header is a header: the expression inside it is not a
-# command, whatever its words are called.
-refute arithfor  "for (( i=0; shopt + globstar; i++ )); do :; done" D "an arithmetic for header"
-# …and the wrappers a command can arrive through, and the redirections it can sit
-# behind, and the arms of a `case`.
-plant envengine  "env grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :"        A "an engine invoked through env"
-plant envshell   "env bash -c 'wait -n || :'"                 D "a shell body behind env"
-plant cmdshell   "command bash -c 'wait -n || :'"             D "a shell body behind the command builtin"
-plant twobodies  "bash -c ':'; bash -c 'wait -n || :'"        D "a second shell body on the same line"
-plant appendred  ">>log shopt -s globstar || :"               D "globstar behind an appending redirection"
-plant casearm    "case x in x) shopt -s globstar || : ;; esac" D "globstar inside a case arm"
-plant procsub    "out=\$(cat <(grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq})) || :" A "an engine inside a process substitution"
-# …while `-F` is an option only in its own position and only for the grep family,
-# and `-f` names a FILE of patterns rather than carrying one.
-refute awkfs     "awk -F , '\''/x/'\'' \"$f\""                       A "awk -F, which sets a field separator"
-# …and the same command WITH an escape must still report: if `-F` were read as
-# fixed-string mode the whole command would be skipped, which is what the refute
-# above cannot show on its own.
-plant awkfspat   "awk -F , ${sq}/${bs}s/${sq} ${dq}\$f${dq}"                A "a gawk operator behind a field separator"
-refute grepfile  "grep -f 'patterns\\s' \"$f\""                   A "a -f operand, which names a file"
-# …and the rest of what a command can be written behind or through.
-plant noclobber  ">|log shopt -s globstar || :"                D "globstar behind a noclobber redirection"
-plant envassign  "env LC_ALL=C grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind an env assignment"
-plant twowrap    "command env grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq} || :" A "an engine behind two wrappers"
-plant clusterc   "bash -cx 'wait -n || :'"                     D "a shell body behind a clustered -c"
-# …and a substitution INSIDE a compound header is not examined. Stopping the skip
-# at its `(` reaches the command and then loses the header, so the list data after
-# the `)` reads as an invocation of its own — portable code rejected to catch a rare
-# command. The whole header is grammar.
-refute headerdata "for x in \$(printf x) shopt globstar; do :; done" D "list data after a substitution in a header"
-plant grepmax    "grep -m 1 -E ${sq}${bs}s${sq} ${dq}\$f${dq} || :"       A "a pattern after an option that takes a number"
-plant signedends "for i in {1..-1..-1}; do :; done"            D "a stepped expansion with signed endpoints"
-plant assembled  "de\"clare\" -A values || :"                   D "an associative array whose name is assembled"
-plant readn      "IFS= read -r -N 1 first < ${dq}\$f${dq} || :"      D "read -N, which is newer than Bash 3.2"
-# …while a NEGATED three-argument comparison is still a comparison.
-refute vnegbin   "if test ! -v = token; then :; fi"            D "a negated three-argument comparison"
-# …and GROUPING is not an operand either: `test \( ! -v = token \)` is the same
-# comparison wrapped in parentheses, and counting them made it six arguments.
-refute vgroupbin "if test \( ! -v = token \); then :; fi"      D "a grouped negated comparison"
-# …and an option OPERAND is not an option: `read -p -N value` has `-N` as the
-# prompt that `-p` takes.
-refute readprompt "IFS= read -p -N value < ${dq}\$f${dq}"           D "a prompt that looks like a newer option"
-# …while `-s` takes NOTHING, so the option after it is still an option.
-plant readsn     "IFS= read -s -N 1 value < ${dq}\$f${dq} || :"      D "read -N behind a flag that takes no operand"
-# …and `-a`/`-o` join two expressions, so the arity is measured per PART.
-refute vcompound "if test -v = token -a x = x; then :; fi"     D "a compound of two comparisons"
-plant nameref    "target=value; declare -n ref=target || :"    D "declare -n, which is Bash 4.3"
-# …and a substitution does not end the command it sits in: the words after the `)`
-# belong to the command that opened it.
-refute outerdata "printf %s ${dq}\$(printf x)${dq} shopt globstar"  D "words after a substitution in the same command"
-# …and the remaining spellings of the same constructs.
-plant localn     "f() { local -n ref=\$1 || :; }; f target"     D "local -n, the usual nameref spelling"
-plant appendpfx  "prefix+=x shopt -s globstar || :"            D "globstar behind an append-assignment prefix"
-
-# …while each part of a compound comparison carries its own grouping.
-refute vgroupand "if test \( -v = token \) -a \( x = x \); then :; fi" D "two grouped comparisons joined by -a"
-# …and a three-argument comparison is one whatever its operands are CALLED:
-# `test -v = -a` compares two strings and the second happens to be an operator name.
-refute vopname   "if test -v = -a; then :; fi"                 D "a comparison whose operand is named -a"
-plant declareu   "value=abc; declare -u value || :"            D "declare -u, which converts case on assignment"
-# …and `exec` replaces the shell with the command after its own options, which
-# still runs it.
-plant execengine "exec grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"             A "an engine invoked through exec"
-# …and `exec -a name` replaces argv[0], so the name is not the command.
-plant execname   "exec -a alt grep -qE ${sq}${bs}s${sq} ${dq}\$f${dq}"      A "an engine behind exec -a"
-# …while a quoted descriptor allocation is data.
-refute fdquoted  "printf %s ${sq}{fd}>file${sq}"               D "a quoted descriptor allocation"
-# …even when an unrelated `}>` appears unquoted elsewhere on the same line: the two
-# tests were independent, so one supplied the position and the other the shape.
-refute fdmixed   "printf %s ${sq}{fd}>file${sq} x}>out"        D "a quoted allocation beside an unquoted brace"
-# …and `read -pN` attaches the prompt to `-p`, so it is not the `-N` option.
-refute readattach "IFS= read -pN value < ${dq}\$f${dq}"            D "a prompt attached to its option"
-# …while `-N1` attaches the COUNT to the option, which is still the option.
-plant readcount  "IFS= read -N1 value < ${dq}\$f${dq} || :"          D "read -N with an attached count"
-# …and `-e` may carry its pattern attached, which is the active regex.
-plant grepattach "grep -e${sq}${bs}s${sq} ${dq}\$f${dq} || :"              A "a pattern attached to its option"
-# …while a Bash 4 builtin NAME is a command word like any other.
-refute mapdata   "printf %s mapfile coproc"                    D "Bash 4 builtin names used as data"
-refute fdexpand  "fd=value; printf %s \${fd}>out"              D "an expansion followed by a redirection"
-# …and an allocation begins its WORD: `x{fd}>out` is an argument and a redirection.
-refute fdword    "printf %s x{fd}>out"                         D "a brace inside an ordinary word"
-# …and `set -- globstar` sets a positional parameter rather than the option.
-refute setdashdash "set -- globstar"                           D "globstar as a positional parameter"
-# …and a quoted `coproc` is an ordinary command name on every bash.
-refute coprocq   "${sq}coproc${sq} true || :"                  D "a quoted coproc, which is not the reserved word"
-# …and a function DECLARATION is not an invocation.
-refute mapfunc   "mapfile() { printf %s \"\$1\"; }"              D "a function that shares a builtin name"
-# …while `awk -F PATTERN` is a regular expression, so an escape in it counts.
-plant awkfsesc   "awk -F ${sq}${bs}s${sq} ${sq}{ print \$1 }${sq} ${dq}\$f${dq}" A "a gawk operator in a field separator"
-# …while an attached `-f` operand is a FILENAME, whose backslash is not regex.
-refute sedfile   "sed -f${sq}engine${bs}s${sq} input"          A "a filename attached to -f"
-# …while `-e` attached carries the PATTERN, and the letter that comes first in the
-# cluster owns the rest of the word — `-efoo\s` is `-e`, not `-f`.
-plant grepefirst "grep -e${sq}foo${bs}s${sq} ${dq}\$f${dq} || :"           A "a pattern attached to -e that contains an f"
-# …and an attached field separator is a pattern too.
-plant awkfattach "awk -F${sq}${bs}s${sq} ${sq}{ print \$1 }${sq} ${dq}\$f${dq}" A "an attached gawk field separator"
-# …and `function name { }` declares one as much as `name()` does.
-refute funckw    "function mapfile { printf %s \"\$1\"; }"       D "a function declared with the reserved word"
-# …and an allocation begins a WORD, which a substitution before it does not end.
-refute fdafter   "printf %s \$(printf x){fd}>out"             D "a brace after a substitution in one word"
-# …while a quoted command word is not the reserved word, whatever follows it.
-refute coprocop  "${sq}coproc${sq} coproc || :"                D "a quoted coproc with an unquoted operand"
-# …and an inline comment is not code: the splitter has no comment state of its own.
-refute inlinecmd ": # note; mapfile"                           D "a builtin name inside an inline comment"
-# …and an ESCAPED character is quoted for the same reason a quoted one is.
-refute coprocesc "${bs}coproc true || :"                       D "an escaped coproc, which is not the reserved word"
-# …and the declaration flag belongs to ONE simple command.
-plant funcleak   "${sq}function${sq}; mapfile -t values < f || :" D "a builtin after a quoted function word"
-# …and `(` opens a command, so a brace after it really allocates.
-plant fdsubshell "({fd}>file printf x) || :"                   D "a descriptor allocation inside a subshell"
-# …while `awk -f prog` takes its program from a FILE, so later words are inputs.
-refute awkprog   "awk -f program.awk ${sq}file${bs}s${sq}"     A "an input file after a program file"
-# …and the ANSI-C and locale forms are quoting too, on a command word.
-refute coprocansi "LC_ALL=C \$${sq}coproc${sq} true || :"        D "an ANSI-C quoted coproc"
-refute coproclocale "LC_ALL=C \$${dq}coproc${dq} true || :"      D "a locale-quoted coproc"
-# …and an ESCAPED parenthesis is an ordinary character, not a command boundary.
-refute fdescparen "printf %s ${bs}({fd}>out"                   D "a brace after an escaped parenthesis"
-# …and a redirection TARGET is not an allocation: a word does not begin after `<`.
-refute fdtarget  "printf x <{fd}>out"                          D "a filename that looks like an allocation"
-# …and a reserved word is recognised at the FIRST command word or not at all.
-refute coproccmd "command coproc || :"                         D "coproc as an operand of the command builtin"
-# …and the LAST word on a line carries its quoting like any other.
-refute coproclast "LC_ALL=C \$${sq}coproc${sq}"                  D "a quoted coproc as the final word"
-# …while `$"grep"` is locale translation and invokes `grep`.
-plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
-
-# ── THE LEGACY ARITHMETIC EXPANSION IS ARITHMETIC TOO ──────────────────────
-# `$[ … ]` is the old spelling, and Bash 3.2 — the platform this whole file exists
-# for — still accepts it. Its left shift is spelled `<<` like the others, so
-# leaving it out queued the right operand as a delimiter and skipped to end of file
-# waiting for a terminator that never comes.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'n=$[1 << 2 ]\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/legacyarith.sh"
-la_hits="$(scan "$RULE_A" "$PTMP/legacyarith.sh")" || la_hits=SCANFAIL
-{ [ "$la_hits" != SCANFAIL ] && [ -n "$la_hits" ]; } \
-    && pass "the legacy \$[ ] arithmetic opens no here-document" \
-    || die "\$[1 << 2 ] swallowed the rest of the file ('$la_hits')"
-
-# ── AN ARITHMETIC-LOOKING DELIMITER IS A DELIMITER ─────────────────────────
-# `cat <<$[EOF]` names the literal `$[EOF]`: a delimiter word is quote-removed but
-# NOT arithmetically expanded. Deleting arithmetic spans before looking for
-# redirections took the word with them, so no document was queued and the body was
-# read as shell. The spans are marked now, and everything else stays where it is.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$[EOF]\n'
-  printf 'grep -qE "\\s" is example text\n'
-  printf '$[EOF]\n'; } > "$PTMP/arithdelim.sh"
-ad2_hits="$(scan "$RULE_A" "$PTMP/arithdelim.sh")" || ad2_hits=SCANFAIL
-{ [ "$ad2_hits" != SCANFAIL ] && [ -z "$ad2_hits" ]; } \
-    && pass "an arithmetic-looking delimiter word survives the arithmetic mark" \
-    || die "cat <<\$[EOF] queued no document ('$ad2_hits')"
-
-# ── A TERMINATOR MAY BEGIN WITH A COMMENT CHARACTER ────────────────────────
-# `cat <<'#EOF'` names `#EOF`. Stripping full-line comments before checking the
-# terminator turned it into an empty line: the document never drained and a real
-# violation after it was skipped to end of file.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'#EOF'\n"
-  printf 'body text\n'
-  printf '#EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/hashdelim.sh"
-hd2_hits="$(scan "$RULE_A" "$PTMP/hashdelim.sh")" || hd2_hits=SCANFAIL
-{ [ "$hd2_hits" != SCANFAIL ] && [ -n "$hd2_hits" ]; } \
-    && pass "a terminator beginning with # still ends the document" \
-    || die "a #EOF terminator was stripped to an empty line ('$hd2_hits')"
-
-# ── A NUMERIC DELIMITER IS STILL A DELIMITER ───────────────────────────────
-# `cat <<'123'` is a document. The numeric test was guarding against the arithmetic
-# left shift, whose `<<` is marked as arithmetic before any of this runs — so it was
-# covering a case that no longer arrives and rejecting a real one that does.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'123'\n"
-  printf 'grep -qE "\\s" is example text\n'
-  printf '123\n'; } > "$PTMP/numdelim.sh"
-nd_hits="$(scan "$RULE_A" "$PTMP/numdelim.sh")" || nd_hits=SCANFAIL
-{ [ "$nd_hits" != SCANFAIL ] && [ -z "$nd_hits" ]; } \
-    && pass "a numeric here-document delimiter is accepted" \
-    || die "cat <<'123' was refused as a delimiter ('$nd_hits')"
-
-# ── THE DELIMITER IS READ FROM THE JOINED LINE ─────────────────────────────
-# A continuation can split ANYTHING, including the delimiter word. Extracting
-# before the join recorded `E` from `cat <<E\` and waited for a terminator that
-# never comes, so a later violation was skipped to end of file.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<E%s\n' "$one_bs"
-  printf 'OF\n'
-  printf 'body text\n'
-  printf 'EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/contdelim.sh"
-cd2_hits="$(scan "$RULE_A" "$PTMP/contdelim.sh")" || cd2_hits=SCANFAIL
-{ [ "$cd2_hits" != SCANFAIL ] && [ -n "$cd2_hits" ]; } \
-    && pass "a delimiter split across a continuation is read whole" \
-    || die "cat <<E\\ + OF recorded the wrong delimiter ('$cd2_hits')"
-# …and a BODY line is never joined: it is data, so a trailing backslash in it
-# continues nothing and the terminator after it still arrives.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<EOF\n'
-  printf 'body ending in a backslash %s\n' "$one_bs"
-  printf 'EOF\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/bodycont.sh"
-bc_hits="$(scan "$RULE_A" "$PTMP/bodycont.sh")" || bc_hits=SCANFAIL
-{ [ "$bc_hits" != SCANFAIL ] && [ -n "$bc_hits" ]; } \
-    && pass "…while a trailing backslash in a body line joins nothing" \
-    || die "a body line was joined to its terminator ('$bc_hits')"
-
-# …and the engine has to be the INVOKED command: `printf %s grep PATTERN` runs
-# `printf`, and reading its operand as an engine reported the pattern beside it.
-printf '#!/usr/bin/env bash\nprintf %%s grep %s\n' "'\\s'" > "$PTMP/engdata.sh"
-ed3_hits="$(scan "$RULE_A" "$PTMP/engdata.sh")" || ed3_hits=SCANFAIL
-{ [ "$ed3_hits" != SCANFAIL ] && [ -z "$ed3_hits" ]; } \
-    && pass "an engine name as an operand is not an engine" \
-    || die "printf with a grep operand was reported ('$ed3_hits')"
-
-# ── THE ENGINE AND THE MODE COME FROM THE WORDS ────────────────────────────
-# Quote removal happens before the command sees either. `gr"ep" -qE PATTERN f` IS
-# `grep`, and a raw-text test never saw the name — so the escape check was skipped
-# on a command that runs GNU grep.
-printf '#!/usr/bin/env bash\ngr"ep" -qE %s "$f" || :\n' "'\\s'" > "$PTMP/asmengine.sh"
-ae2_hits="$(scan "$RULE_A" "$PTMP/asmengine.sh")" || ae2_hits=SCANFAIL
-{ [ "$ae2_hits" != SCANFAIL ] && [ -n "$ae2_hits" ]; } \
-    && pass "an assembled engine name is still the engine" \
-    || die "gr\"ep\" was not recognised as grep ('$ae2_hits')"
-# …and a QUOTED `-F` is the ordinary fixed-string option, where a backslash is a
-# literal and the pattern means the same thing on both platforms.
-printf '#!/usr/bin/env bash\ngrep %s-F%s %s "$f"\n' "'" "'" "'\\s'" > "$PTMP/quotedF.sh"
-qf_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf_hits=SCANFAIL
-{ [ "$qf_hits" != SCANFAIL ] && [ -z "$qf_hits" ]; } \
-    && pass "…and a quoted -F is still fixed-string mode" \
-    || die "a quoted -F was not recognised ('$qf_hits')"
-
-# ── A LOCALE PREFIX ONLY COUNTS WHERE THE QUOTING IS ACTIVE ────────────────
-# Inside single quotes the two characters are literal text, so `<<'$"EOF"'` names
-# `$"EOF"` — discarding the dollar there recorded a word no line will ever equal.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<%s$%sEOF%s%s\n' "$sq" "$dq" "$dq" "$sq"
-  printf 'body text\n'
-  printf '$%sEOF%s\n' "$dq" "$dq"
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/quotedlocale.sh"
-ql_hits="$(scan "$RULE_A" "$PTMP/quotedlocale.sh")" || ql_hits=SCANFAIL
-{ [ "$ql_hits" != SCANFAIL ] && [ -n "$ql_hits" ]; } \
-    && pass "a quoted locale prefix is part of the delimiter word" \
-    || die "the dollar was discarded inside single quotes ('$ql_hits')"
-# …and `\c[` names ESCAPE, which is where a table beats a letter list: every
-# control escape decoded to the same character while only the letters were
-# answerable, so a delimiter built from one matched nothing.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$%s%sc[%s\n' "$sq" "$bs" "$sq"
-  printf 'body text\n'
-  printf '\033\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/ctrldelim.sh"
-cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
-{ [ "$cd3_hits" != SCANFAIL ] && [ -n "$cd3_hits" ]; } \
-    && pass "…and a control escape names the character it stands for" \
-    || die "a control-escape delimiter did not end at its character ('$cd3_hits')"
-
-# …and the parentheses inside it are balanced with the QUOTING in mind: a quoted
-# one closes nothing, and decrementing at every parenthesis recorded a prefix of the
-# delimiter word — after which the real terminator never arrived.
-#
-# The terminator here is the QUOTE-REMOVED form, because that is what bash compares
-# against: the delimiter word loses its quote characters like any other word, so a
-# line carrying them would not be the terminator at all.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf %s)%s EOF)\n' "$sq" "$sq"
-  printf 'body text\n'
-  printf 'x$(printf ) EOF)\n'
-
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substquote.sh"
-sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
-{ [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \
-    && pass "a quoted parenthesis does not close a delimiter substitution" \
-    || die "the delimiter stopped at a quoted parenthesis ('$sq2_hits')"
-
-# …and that fragment QUOTES, so a body under such a delimiter does not expand.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf $%sEOF%s)\n' "$sq" "$sq"
-  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
-  printf 'x$(printf EOF)\n'; } > "$PTMP/substansicq.sh"
-saq_hits="$(scan "$RULE_A" "$PTMP/substansicq.sh")" || saq_hits=SCANFAIL
-{ [ "$saq_hits" != SCANFAIL ] && [ -z "$saq_hits" ]; } \
-    && pass "an ANSI-C fragment in a delimiter suppresses expansion" \
-    || die "a quoted fragment left the body expanding ('$saq_hits')"
 
 # …and an ANSI-C fragment inside it is DECODED, not copied: bash forms the delimiter
 # from the decoded text, so `x$(printf $'E\x4fF')` names `x$(printf EOF)`.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf $%sE%sx4fF%s)\n' "$sq" "$bs" "$sq"
-  printf 'body text\n'
-  printf 'x$(printf EOF)\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substansic.sh"
-sa_hits="$(scan "$RULE_A" "$PTMP/substansic.sh")" || sa_hits=SCANFAIL
-{ [ "$sa_hits" != SCANFAIL ] && [ -n "$sa_hits" ]; } \
-    && pass "an ANSI-C fragment in a delimiter is decoded" \
-    || die "the delimiter kept its ANSI-C text ('$sa_hits')"
 
-# …and the quote removal is FULL: a backslash that quotes something is gone from the
-# delimiter too, so `x$(printf E\OF)` names `x$(printf EOF)`.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf E%sOF)\n' "$bs"
-  printf 'body text\n'
-  printf 'x$(printf EOF)\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substesc.sh"
-se_hits="$(scan "$RULE_A" "$PTMP/substesc.sh")" || se_hits=SCANFAIL
-{ [ "$se_hits" != SCANFAIL ] && [ -n "$se_hits" ]; } \
-    && pass "a quoting backslash is removed from the delimiter too" \
-    || die "the delimiter kept its backslash ('$se_hits')"
 
-# ── A SUBSTITUTION-SHAPED DELIMITER IS TAKEN WHOLE ─────────────────────────
-# Bash does not expand the delimiter word, so `<<$(printf EOF)` names that text —
-# parentheses, space and all. Stopping at the `(` recorded a prefix of it, and the
-# real terminator never drained the queue.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf EOF)\n'
-  printf 'body text\n'
-  printf 'x$(printf EOF)\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substdelim.sh"
-sd3_hits="$(scan "$RULE_A" "$PTMP/substdelim.sh")" || sd3_hits=SCANFAIL
-{ [ "$sd3_hits" != SCANFAIL ] && [ -n "$sd3_hits" ]; } \
-    && pass "a substitution-shaped delimiter is taken whole" \
-    || die "the delimiter stopped at its parenthesis ('$sd3_hits')"
-
-# …and it QUOTES NOTHING: none of the delimiter word's characters are quoted, so a
-# body under it still expands, and a substitution there really invokes its command.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<x$(printf EOF)\n'
-  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
-  printf 'x$(printf EOF)\n'; } > "$PTMP/substdelimx.sh"
-sx_hits="$(scan "$RULE_A" "$PTMP/substdelimx.sh")" || sx_hits=SCANFAIL
-{ [ "$sx_hits" != SCANFAIL ] && [ -n "$sx_hits" ]; } \
-    && pass "…and a body under it still expands" \
-    || die "a substitution-shaped delimiter suppressed expansion ('$sx_hits')"
-
-# ── A QUOTED BRACE DOES NOT CLOSE AN EXPANSION ─────────────────────────────
-# `${unset:-"}"<<EOF}` closes at the LAST brace, and counting the quoted one closed
-# it early — after which the `<<EOF` was outside the expansion and queued a
-# document whose terminator never comes.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'value=${unset:-%s}%s<<EOF}\n' "$dq" "$dq"
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/pexbrace.sh"
-pb_hits="$(scan "$RULE_A" "$PTMP/pexbrace.sh")" || pb_hits=SCANFAIL
-{ [ "$pb_hits" != SCANFAIL ] && [ -n "$pb_hits" ]; } \
-    && pass "a quoted brace does not close a parameter expansion" \
-    || die "an expansion closed at a quoted brace ('$pb_hits')"
-
-# ── THE TERMINATOR IS COMPARED, NOT EXPANDED ───────────────────────────────
-# Bash performs quote removal on the delimiter word and compares the line
-# literally, so a body line that IS the terminator is not a body line at all.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<${name^^} || :\n'
-  printf 'body text\n'
-  printf '${name^^}\n'; } > "$PTMP/hdterm.sh"
-ht_hits="$(scan "$RULE_D" "$PTMP/hdterm.sh")" || ht_hits=SCANFAIL
-# ONE hit, not two. The OPENING line carries the expansion text and is reported —
-# that is a separate question, and not the one this fixture is about. What the fix
-# changes is whether the TERMINATOR line is reported as well, so the count is what
-# distinguishes them.
-ht_n="$(printf '%s' "$ht_hits" | grep -c 'case modification' || true)"
-{ [ "$ht_hits" != SCANFAIL ] && [ "$ht_n" = 1 ]; } \
-    && pass "a terminator is compared rather than expanded" \
-    || die "the terminator line was scanned as a body ($ht_n hits)"
-
-# ── `${ … }` IS AN EXPANSION, NOT A REDIRECTION ────────────────────────────
-# `trimmed=${value#<<EOF}` is a removal pattern, and the two characters in it were
-# queueing a document whose terminator never comes.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'trimmed=${value#<<EOF}\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/pexheredoc.sh"
-px_hits="$(scan "$RULE_A" "$PTMP/pexheredoc.sh")" || px_hits=SCANFAIL
-{ [ "$px_hits" != SCANFAIL ] && [ -n "$px_hits" ]; } \
-    && pass "a << inside a parameter expansion opens no document" \
-    || die "a removal pattern swallowed the rest of the file ('$px_hits')"
-
-# ── AN ESCAPED DOLLAR IS NOT AN EXPANSION ──────────────────────────────────
-# In an unquoted body `\${name^^}` is the literal text — bash quotes the dollar and
-# performs nothing. The same parity that decides an escape decides this.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<EOF || :\n'
-  printf 'value %s${name^^} more\n' "$bs"
-  printf 'EOF\n'; } > "$PTMP/hdescaped.sh"
-hx_hits="$(scan "$RULE_D" "$PTMP/hdescaped.sh")" || hx_hits=SCANFAIL
-{ [ "$hx_hits" != SCANFAIL ] && [ -z "$hx_hits" ]; } \
-    && pass "an escaped dollar in a body is not an expansion" \
-    || die "an escaped expansion was reported ('$hx_hits')"
-
-# ── `$"…"` IS A QUOTED DELIMITER, AND `$'…'` NAMES ITS DECODED WORD ────────
-# `cat <<$"EOF"` is locale translation: the `$` is not part of the word, and
-# appending it recorded a name no line will ever equal — so a later violation was
-# skipped to end of file.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$%sEOF%s\n' "$dq" "$dq"
-  printf 'body text\n'
-  printf 'EOF\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/localedelim.sh"
-ld_hits="$(scan "$RULE_A" "$PTMP/localedelim.sh")" || ld_hits=SCANFAIL
-{ [ "$ld_hits" != SCANFAIL ] && [ -n "$ld_hits" ]; } \
-    && pass "a locale-quoted delimiter names the word inside it" \
-    || die "cat <<\$\"EOF\" recorded the dollar ('$ld_hits')"
-# …and `$'\t'` names a TAB, which is what ends the document. The decoder used a
-# placeholder for the escapes it recognised, which named nothing.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<$%s%st%s\n' "$sq" "$bs" "$sq"
-  printf 'body text\n'
-  printf '\t\n'
-  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/tabdelim.sh"
-td2_hits="$(scan "$RULE_A" "$PTMP/tabdelim.sh")" || td2_hits=SCANFAIL
-{ [ "$td2_hits" != SCANFAIL ] && [ -n "$td2_hits" ]; } \
-    && pass "…and an ANSI-C delimiter decodes to the character it names" \
-    || die "cat <<\$'\\t' did not end at a tab ('$td2_hits')"
-
-# ── EVERY QUOTING FORM ON THE DELIMITER SUPPRESSES EXPANSION ───────────────
-# `cat <<\EOF` and `cat <<$'EOF'` are quoted delimiters as much as `<<'EOF'` is.
-# The branches that consumed those spellings were not saying so, and their bodies
-# were treated as expanding — portable source rejected.
-for spec in 'bsdelim' 'ansicdelim'; do
-    { printf '#!/usr/bin/env bash\n'
-      case "$spec" in
-          bsdelim)   printf 'cat <<%sEOF\n' "$bs" ;;
-          ansicdelim) printf 'cat <<$%sEOF%s\n' "$sq" "$sq" ;;
-      esac
-      printf 'text $(grep -qE "%ss" f) more\n' "$bs"
-      printf 'EOF\n'; } > "$PTMP/$spec-quoted.sh"
-    dq2_hits="$(scan "$RULE_A" "$PTMP/$spec-quoted.sh")" || dq2_hits=SCANFAIL
-    { [ "$dq2_hits" != SCANFAIL ] && [ -z "$dq2_hits" ]; } \
-        && pass "a $spec delimiter suppresses expansion in its body" \
-        || die "a $spec delimiter was read as expanding ('$dq2_hits')"
-done
-
-# ── AN EXPANSION IN AN UNQUOTED BODY IS PERFORMED ──────────────────────────
-# The TEXT of a here-document body is data, which is why the rules do not see it —
-# but bash performs the expansions in an unquoted one, so a case-modifying
-# parameter expansion there is a Bash 4 construct that really runs.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<EOF || :\n'
-  printf 'value ${name^^} more\n'
-  printf 'EOF\n'; } > "$PTMP/hdparam.sh"
-hp2_hits="$(scan "$RULE_D" "$PTMP/hdparam.sh")" || hp2_hits=SCANFAIL
-{ [ "$hp2_hits" != SCANFAIL ] && [ -n "$hp2_hits" ]; } \
-    && pass "a case-modifying expansion in an expanded body is reported" \
-    || die "an active expansion in a here-document body was missed ('$hp2_hits')"
-# …and a QUOTED delimiter suppresses it, so the same text is data again.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'EOF' || :\n"
-  printf 'value ${name^^} more\n'
-  printf 'EOF\n'; } > "$PTMP/hdparamq.sh"
-hpq_hits="$(scan "$RULE_D" "$PTMP/hdparamq.sh")" || hpq_hits=SCANFAIL
-{ [ "$hpq_hits" != SCANFAIL ] && [ -z "$hpq_hits" ]; } \
-    && pass "…while a quoted delimiter keeps that expansion data" \
-    || die "an expansion in a quoted body was reported ('$hpq_hits')"
-
-# ── AN UNQUOTED DELIMITER MEANS THE BODY EXPANDS ───────────────────────────
-# The body is data for the rules, but bash still performs substitution in it, so a
-# `$( … )` there really invokes its command. A quoted delimiter suppresses that, and
-# the two must not be treated alike.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'cat <<EOF\n'
-  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
-  printf 'EOF\n'; } > "$PTMP/hdexpand.sh"
-he_hits="$(scan "$RULE_A" "$PTMP/hdexpand.sh")" || he_hits=SCANFAIL
-{ [ "$he_hits" != SCANFAIL ] && [ -n "$he_hits" ]; } \
-    && pass "a substitution in an expanded here-document body is scanned" \
-    || die "an unquoted delimiter hid a command in its body ('$he_hits')"
-# …while a QUOTED delimiter suppresses expansion, so the same text is data.
-{ printf '#!/usr/bin/env bash\n'
-  printf "cat <<'EOF'\n"
-  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
-  printf 'EOF\n'; } > "$PTMP/hdquoted.sh"
-hq_hits="$(scan "$RULE_A" "$PTMP/hdquoted.sh")" || hq_hits=SCANFAIL
-{ [ "$hq_hits" != SCANFAIL ] && [ -z "$hq_hits" ]; } \
-    && pass "…while a quoted delimiter keeps it data" \
-    || die "a quoted here-document body was scanned ('$hq_hits')"
-
-# ── A SUBSTITUTION INSIDE A SHELL BODY IS STILL ONE ────────────────────────
-# The guard that stops a shell body from spawning another shell was stopping the
-# substitution extraction there too, so `bash -c 'out=$(… | grep …)'` had the engine
-# one level further in than anything looked.
-#
-# NO PIPE IN THE BODY, deliberately: the segment split would surface the engine on
-# its own, and the fixture would pass with the substitution machinery removed
-# entirely — which is what the first version of it did.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'bash -c %sout=$(grep -qE "%ss" f) || :%s\n' "$sq" "$bs" "$sq"; } > "$PTMP/bodysubst.sh"
-bs2_hits="$(scan "$RULE_A" "$PTMP/bodysubst.sh")" || bs2_hits=SCANFAIL
-{ [ "$bs2_hits" != SCANFAIL ] && [ -n "$bs2_hits" ]; } \
-    && pass "a substitution inside a shell body is scanned too" \
-    || die "the shell-body guard suppressed the substitution ('$bs2_hits')"
 
 # ── A QUOTED SUBSTITUTION IS STILL A COMMAND ───────────────────────────────
 # `out="$(grep PATTERN f)"` is the ordinary spelling. The quoted branch appended the
 # words to the assignment instead of flushing it, so the command word was `out=grep`
 # and no engine was recognised.
-printf '#!/usr/bin/env bash\nout="$(grep %s "$f")" || :\n' "'\\s'" > "$PTMP/qsubcmd.sh"
-qs_hits="$(scan "$RULE_A" "$PTMP/qsubcmd.sh")" || qs_hits=SCANFAIL
-{ [ "$qs_hits" != SCANFAIL ] && [ -n "$qs_hits" ]; } \
-    && pass "a substitution inside double quotes is still a command" \
-    || die "out=\"\$(grep …)\" hid the engine ('$qs_hits')"
-# …while `$((` is ARITHMETIC and shares the first two characters. Reading it as a
-# substitution made the operands of an ordinary sum look like an invoked command.
-refute arithword 'value=$((shopt + globstar))'                D "arithmetic whose operands share builtin names"
 
 # ── ONLY THE OPERANDS THAT CARRY A PATTERN ─────────────────────────────────
 # `grep x 'file\s'` searches for `x` in a file whose NAME contains a backslash —
 # the same search on both platforms. Concatenating every argument reported the
 # filename as a GNU escape.
-printf '#!/usr/bin/env bash\ngrep x %sfile%ss%s\n' "'" "$one_bs" "'" > "$PTMP/patfile.sh"
-pt_hits="$(scan "$RULE_A" "$PTMP/patfile.sh")" || pt_hits=SCANFAIL
-{ [ "$pt_hits" != SCANFAIL ] && [ -z "$pt_hits" ]; } \
-    && pass "an escape in a FILENAME is not an escape in the pattern" \
-    || die "a filename operand was read as a pattern ('$pt_hits')"
-# …and `-Fq` has both options active, so the fixed-string exemption applies.
-printf '#!/usr/bin/env bash\ngrep -Fq %s "$f"\n' "'\\s'" > "$PTMP/fcluster.sh"
-fc_hits="$(scan "$RULE_A" "$PTMP/fcluster.sh")" || fc_hits=SCANFAIL
-{ [ "$fc_hits" != SCANFAIL ] && [ -z "$fc_hits" ]; } \
-    && pass "…and -F anywhere in a cluster is still fixed-string mode" \
-    || die "a clustered -F was not recognised ('$fc_hits')"
-# …while a PATH-QUALIFIED engine is the same engine: `/usr/bin/grep` is GNU on one
-# platform and BSD on the other, which is the difference this rule exists for.
-printf '#!/usr/bin/env bash\n/usr/bin/grep -E %s "$f" || :\n' "'\\s'" > "$PTMP/pathengine.sh"
-pe_hits="$(scan "$RULE_A" "$PTMP/pathengine.sh")" || pe_hits=SCANFAIL
-{ [ "$pe_hits" != SCANFAIL ] && [ -n "$pe_hits" ]; } \
-    && pass "…and a path-qualified engine is still the engine" \
-    || die "/usr/bin/grep was not recognised ('$pe_hits')"
 
 # ── AN ARITHMETIC SPAN ENDS WHERE ITS QUOTING SAYS ─────────────────────────
 # Quoted parentheses are data. Counting them never reached depth zero, and the span
@@ -3222,37 +1720,16 @@ ot_hits="$(scan "$RULE_A" "$PTMP/optterm.sh")" || ot_hits=SCANFAIL
 # Consuming only the opener left the expression to the ordinary word rules, so the
 # whitespace inside `$(( a + b ))` flushed the assignment and the operands became
 # words of their own — an invoked command again.
-refute arithspace 'value=$(( shopt + globstar ))'             D "arithmetic with spaces around its operands"
 
 # ── FIXED-STRING MODE BELONGS TO ITS OWN COMMAND ───────────────────────────
 # A segment can hold more than one engine. `grep -F x $(grep PATTERN f)` has a
 # fixed-string outer command and an inner one that is not, and a mode accumulated
 # across both let the outer exempt the inner.
-printf '#!/usr/bin/env bash\ngrep -F x $(grep %s "$f")\n' "'\\s'" > "$PTMP/nestedF.sh"
-nf_hits="$(scan "$RULE_A" "$PTMP/nestedF.sh")" || nf_hits=SCANFAIL
-{ [ "$nf_hits" != SCANFAIL ] && [ -n "$nf_hits" ]; } \
-    && pass "an outer -F does not exempt an inner grep" \
-    || die "fixed-string mode leaked across commands ('$nf_hits')"
 
 # ── A SUBSTITUTION RUNS A COMMAND OF ITS OWN ───────────────────────────────
 # `out=$(grep PATTERN f)` invokes `grep`. Appending the text to the assignment word
 # left a word called `out=$(grep` and no command at all, so the engine was never
 # recognised and the escape went unreported.
-printf '#!/usr/bin/env bash\nout=$(grep %s "$f") || :\n' "'\\s'" > "$PTMP/subcmd.sh"
-sc_hits="$(scan "$RULE_A" "$PTMP/subcmd.sh")" || sc_hits=SCANFAIL
-{ [ "$sc_hits" != SCANFAIL ] && [ -n "$sc_hits" ]; } \
-    && pass "a command inside a substitution is a command" \
-    || die "out=\$(grep …) hid the engine ('$sc_hits')"
-# …and a `(` inside a substitution is a SUBSHELL, whose `)` does not end it.
-# Closing at the first one restored the outer quoting early, and every quote after
-# that read inverted — which exposed the text of a later string as a redirection.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'x="$( (:) ; printf "%%s" "<<MISSING" )"\n'
-  printf 'grep -qE "\\s" "$f"\n'; } > "$PTMP/subshell.sh"
-ss_hits="$(scan "$RULE_A" "$PTMP/subshell.sh")" || ss_hits=SCANFAIL
-{ [ "$ss_hits" != SCANFAIL ] && [ -n "$ss_hits" ]; } \
-    && pass "…and a subshell inside one does not close it early" \
-    || die "an inner ) ended the substitution and swallowed the file ('$ss_hits')"
 
 # ── A PENDING LOGICAL LINE SURVIVES THE FILE BOUNDARY ──────────────────────
 # A target whose last line ends in a continuation leaves its text unscanned unless

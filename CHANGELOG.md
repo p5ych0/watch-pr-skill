@@ -2,6 +2,32 @@
 
 ## [2.0.6] — 2026-08-09
 
+- **THE COMMAND MODEL IS GONE, AND A BASH 3.2 JOB REPLACES IT.** Over about twenty
+  review rounds the Bash-construct rules grew a notion of a simple command — command
+  words, wrappers (`command`, `env`, `exec`), redirection spellings, compound-command
+  headers, per-engine option tables, substitutions, process substitutions, nested
+  shell bodies. Every round it answered one finding and produced the next, and
+  several of its own defects *rejected portable code*, which this file calls worse
+  than a miss. It is the shape `CLAUDE.md` records a structural checker being built
+  and deleted six times for, and the one `RULE_C` was deleted for earlier in this
+  same release.
+
+  What replaced it needs no grammar at all: **the suite runs under a bash 3.2 built
+  from source**, where `mapfile`, `declare -A`, `${x^^}`, `coproc`, `wait -n` and
+  `shopt -s lastpipe` simply fail. The job proves it is 3.2 and proves 3.2 rejects
+  `declare -A`, so a build that quietly produced a newer bash cannot pass silently.
+  It covers the paths the suite executes — high here, not total — which is why the
+  text scan keeps its lists.
+
+  The scan is lexical again and 1,600 lines lighter. Its cost is stated rather than
+  chased: a forbidden spelling written as DATA is reported, which was always rule
+  B's behaviour and has a fixture saying so.
+
+- **CI ran everything twice.** `push` on every branch plus `pull_request` fired both
+  workflows for every push to a PR branch — the same commit, the same answer, twice.
+  Pushes to the default branch are covered directly; everything else as a pull
+  request.
+
 **GNU-only constructs are caught by a check rather than by review.** Four had
 reached the tree — `timeout`, `sha1sum`, `seq`, and `\s` in a `grep` pattern — and
 every one was found by a reviewer. The suite is a mandatory pre-push gate, so any
@@ -126,6 +152,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   conditional masks it. The `shopt` rule reads what the command *receives* rather
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
+
+- **Quoting suppresses assignment and reserved-word recognition too, and an IO
+  number has to be adjacent.** `'x=y' coproc` looks like an assignment only after
+  quote removal — bash never treats it as one, so `x=y` is the command; `'time'
+  coproc` looks up a command called `time`; and `2 >file` is the command `2` with
+  its output redirected, where only `2>file` written together is an IO number. Any
+  quote character in a delimiter fragment suppresses expansion in the body, not
+  just the ANSI-C form.
 
 - **A reserved word is recognised at the first command word or not at all.**
   `command coproc` makes it an operand of the builtin, and every bash does an

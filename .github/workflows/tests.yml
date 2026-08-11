@@ -1,8 +1,12 @@
 name: tests
 
+# ONE RUN PER PUSH. `push` on every branch plus `pull_request` fired BOTH for every
+# push to a PR branch — the whole workflow twice, for the same commit, telling us the
+# same thing. Pushes to the default branch are covered directly; everything else is
+# covered as a pull request.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -72,6 +76,93 @@ jobs:
   # the whole suite: the normal job has GNU `timeout` and takes the other one.
   # Stock macOS has neither this job's shims nor `timeout`, which is the
   # configuration being stood in for.
+  # ── THE CONSTRUCTS, BEHAVIOURALLY ──────────────────────────────────────────
+  #
+  # A text scan can only ever ask whether a construct LOOKS present. Running the
+  # suite under the bash macOS actually ships answers whether it IS: `mapfile`,
+  # `declare -A`, `${x^^}`, `coproc`, `wait -n`, `shopt -s lastpipe` and every other
+  # post-3.2 spelling simply fail there. No grammar, no parser, no list to keep one
+  # entry behind.
+  #
+  # WHAT IT DOES NOT COVER, stated rather than assumed: a construct on a branch the
+  # suite never takes. Coverage here is high — the suite is the pre-push gate and
+  # every helper has one — but it is not total, which is why the text scan keeps the
+  # rules whose surfaces are small enough to be worth it.
+  #
+  # BUILT FROM SOURCE, because no runner image ships a 3.2 and a container would pin
+  # us to someone else's libc. It is 3.2.57, the version macOS ships, and the build
+  # is cached on the tarball hash.
+  bash32:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
+
+      - name: Cache bash 3.2
+        id: cache-bash32
+        uses: actions/cache@v4
+        with:
+          path: ~/bash32
+          key: bash-3.2.57-${{ runner.os }}
+
+      - name: Build bash 3.2
+        if: steps.cache-bash32.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bash32src && cd /tmp/bash32src
+          curl -fsSLO https://ftp.gnu.org/gnu/bash/bash-3.2.tar.gz
+          tar xzf bash-3.2.tar.gz && cd bash-3.2
+          # 3.2 predates the compilers on this runner; these two keep it building
+          # without changing what the shell accepts.
+          ./configure --prefix="$HOME/bash32" --without-bash-malloc \
+            CFLAGS="-O2 -std=gnu89 -Wno-implicit-function-declaration"
+          make -j"$(nproc)" && make install
+
+      - name: Prove it is 3.2
+        run: |
+          set -euo pipefail
+          "$HOME/bash32/bin/bash" --version | head -1
+          case "$("$HOME/bash32/bin/bash" -c 'echo "$BASH_VERSION"')" in
+            3.2*) echo "confirmed 3.2" ;;
+            *) echo "::error::not bash 3.2"; exit 1 ;;
+          esac
+          # …and that it REJECTS what it should, so a build that quietly produced a
+          # newer bash cannot pass this job silently.
+          if "$HOME/bash32/bin/bash" -c 'declare -A m' 2>/dev/null; then
+            echo "::error::this bash accepts declare -A; it is not 3.2"
+            exit 1
+          fi
+          echo "confirmed: declare -A is rejected"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+
+      - name: Run test suite under bash 3.2
+        working-directory: skills/watch-prs/scripts
+        run: |
+          set -uo pipefail
+          fail=0 total=0
+          for t in test-*.sh; do
+            total=$((total + 1))
+            echo "::group::$t"
+            if "$HOME/bash32/bin/bash" "$t"; then
+              echo "PASS $t"
+            else
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed under bash 3.2"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more of $total test files needs a bash newer than 3.2"
+            exit 1
+          fi
+          echo "all $total test files pass under bash 3.2"
+
   portability:
     runs-on: ubuntu-latest
     steps:
