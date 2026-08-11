@@ -722,6 +722,55 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     chmod +x "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
     ( cd "$SETUPTMP/repo" && git init -q && git remote add origin git@github.com:acme/widget.git ) \
         >/dev/null 2>&1 || die "the setup probe's checkout could not be created"
+    # ── THE CI BOUNDS SURVIVE THE PROCESS BOUNDARY ─────────────────────────
+    #
+    # The gate is a child process now, and that is exactly where a documented knob
+    # can be lost in silence. `PR_CI_TIMEOUT=3600` ASSIGNED in the operator's shell
+    # was read by the function it replaced; a child sees nothing unless the value
+    # is exported, so the gate would have used its 1800-second default while the
+    # terminal showed the value that was set. `README.md` tells people to set these.
+    #
+    # ASSIGNED, NOT EXPORTED, and the probe is a CHILD — passing it through `env`
+    # would test the harness rather than the setup block, which is how the
+    # behaviour reached review uncovered in the first place.
+    #
+    # `TMPDIR` points into the probe's own tree: the setup block allocates the
+    # round's summary file with `mktemp -t`, and two more runs of it would leave
+    # two more files wherever that points — which the leak check at the end of this
+    # file would report, correctly, against a probe that is not about that.
+    cat "$SCRIPT_DIR/identitylib.sh" \
+        > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+    knob_out="$(cd "$SETUPTMP/repo" && run_limited 60 env -u PR_CI_TIMEOUT \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'PR_CI_TIMEOUT=3600
+                 eval "$1" >/dev/null
+                 bash -c '"'"'printf "child=%s" "${PR_CI_TIMEOUT-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+        || knob_out="FAILED:$knob_out"
+    case "$knob_out" in
+        *child=3600*) pass "a CI bound set without export still reaches the gate's process" ;;
+        *) die "the setup block does not export the CI bounds (got '$knob_out')" ;;
+    esac
+    # …AND THE LOOP VARIABLE DOES NOT LEAK INTO THE OPERATOR'S SHELL. This block
+    # runs in the driving session, so a name it forgets to clean up is written into
+    # that session and stays there — the same class the CI gate's `local`
+    # declarations used to guard, which is now the process boundary's job
+    # everywhere EXCEPT here, because this block genuinely does run in your shell.
+    #
+    # Two things are deliberately NOT asserted, because neither can fail:
+    # `export FOO` on an unset name puts nothing in the environment, so a child
+    # cannot tell that spelling from the guarded one; and the loop cannot abort a
+    # `set -e` session, because bash exempts a `&&` list whose left side fails.
+    # A fixture for either would be a green tick over an unverifiable claim.
+    knob_leak="$(cd "$SETUPTMP/repo" && run_limited 60 env \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'eval "$1" >/dev/null
+                 printf "leak=%s" "${_rb_knob-clean}"' _ "$setup_block" 2>&1)" \
+        || knob_leak="FAILED:$knob_leak"
+    case "$knob_leak" in
+        *leak=clean*) pass "…and the export loop leaves no name behind in that shell" ;;
+        *) die "the setup block leaks its loop variable into the session (got '$knob_leak')" ;;
+    esac
+
     # A readonly definition, in the SAME shell the block runs in — which is the
     # driver's situation, and the only place the case is reachable. `readonly -f`
     # does not survive a process boundary.

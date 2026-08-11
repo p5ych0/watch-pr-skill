@@ -234,6 +234,17 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 #
 # `pr-ci-gate.sh <pr> <head-oid>` — 0 carry on, 1 stop. Same bounds, same
 # `PR_CI_*` knobs, same diagnostics.
+#
+# THE KNOBS ARE EXPORTED, because a child process is what reads them now. A
+# function saw `PR_CI_TIMEOUT=3600` assigned in your shell whether or not it was
+# exported; a script does not, and would have gone on using the 1800-second
+# default while the terminal showed the value you set. That is the one behaviour
+# the move could have changed silently, so it is handled here rather than at each
+# of the four call sites.
+for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT; do
+    [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
+done
+unset _rb_knob
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
 # inline mangles it. Freshly created per PR and per session, because a reused

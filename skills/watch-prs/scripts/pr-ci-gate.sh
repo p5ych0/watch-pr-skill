@@ -30,7 +30,11 @@
 #     the process boundary does that job.
 #
 # WHAT DID NOT CHANGE is the contract: same two arguments, same environment
-# knobs, same diagnostics on stdout, and 0/1 with the same meanings. The four
+# knobs, same diagnostics on stdout, and 0/1 with the same meanings. EVERY
+# diagnostic goes to stdout, including the ones about loading a library — the
+# function printed on stdout and the four call sites were written against that, so
+# a startup failure routed to stderr would be the one message a caller capturing
+# the gate's output could not see. The four
 # call sites in `SKILL.md` invoke this instead of calling a function, and read the
 # status exactly as before.
 #
@@ -40,18 +44,18 @@
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
-    echo "ABORT: the CI gate could not resolve its own directory" >&2; exit 1; }
+    echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
 # The library loader, loaded the one way it cannot load itself: clear, source,
 # verify. An exported `rb_load` survives into this shell and an empty `loadlib.sh`
 # still sources successfully, so without the clear the type check accepts the
 # inherited function — and a stale loader is what makes every other load look
 # clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
-    echo "ABORT: a pre-existing rb_load could not be cleared" >&2; exit 1; }
+    echo "ABORT: a pre-existing rb_load could not be cleared"; exit 1; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
-    echo "ABORT: the library loader is unreadable" >&2; exit 1; }
+    echo "ABORT: the library loader is unreadable"; exit 1; }
 [ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "ABORT: the library loader defined nothing" >&2; exit 1; }
+    echo "ABORT: the library loader defined nothing"; exit 1; }
 # `sha_reason` — ONE definition of "a full commit SHA" across the plugin. The
 # first version of this script wrote the shape out as a `case` of its own, and
 # `test-recordlib.sh`'s drift guard rejected it: a rule that applies to more than
