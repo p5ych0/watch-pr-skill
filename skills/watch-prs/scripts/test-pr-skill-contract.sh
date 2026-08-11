@@ -1419,6 +1419,98 @@ grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
     && pass "…and validated against the known states" \
     || die "the parsed head-state is not checked against the known states"
 
+# ── EVERY BASH BLOCK IN SKILL.md PARSES UNDER THE BASH RUNNING THIS TEST ───
+#
+# `SKILL.md` is prose to the suite: nothing else executes it, so nothing else can
+# tell whether the shell can READ it. That is not a hypothetical gap — the
+# merge-gate block carried an inline `=~` pattern containing a parenthesis, which
+# Bash 3.2 rejects with a syntax error before the first statement runs, and every
+# check in this file grepped past it because a grep cannot parse.
+#
+# `bash -n` parses without executing, so a block referring to variables this
+# fixture never sets is fine. Under the `macos-shell` job the parser doing the
+# reading IS 3.2, which is what turns this from a spelling check into the check.
+#
+# THE COUNT IS ASSERTED, because an extractor that silently found nothing would
+# report a clean parse of zero blocks — the failure mode this repository calls
+# worse than no check at all.
+skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse check"; skb_dir=""; }
+[ -n "$skb_dir" ] && awk -v out="$skb_dir" '
+    /^```bash$/ { inb = 1; n++; next }
+    /^```$/     { inb = 0; next }
+    inb         { print > (out "/block-" n ".sh") }
+' "$SKILL" || die "the SKILL.md bash blocks could not be extracted"
+# A PLACEHOLDER IS PROSE, NOT A REDIRECTION. The driver is told to substitute
+# `CODEX_SHA=<full 40-hex sha …>` before running the block, and to a parser that
+# reads as a redirection with no target. Only a bracketed run containing a SPACE
+# and no shell metacharacter is rewritten, which is what every placeholder here
+# looks like and what no real redirection can be: `cmd <in >out` carries a `>`
+# inside the run and is left alone.
+skb_n=0 skb_bad=0
+for skb in "$skb_dir"/block-*.sh; do
+    [ -f "$skb" ] || continue
+    skb_n=$((skb_n + 1))
+    sed "s/<[a-zA-Z0-9][a-zA-Z0-9 ,.:'-]* [a-zA-Z0-9 ,.:'-]*>/PLACEHOLDER/g" "$skb" > "$skb.parse" \
+        || { die "a SKILL.md block could not be prepared for parsing ($(basename "$skb"))"; skb_bad=1; continue; }
+    skb_err="$(bash -n "$skb.parse" 2>&1)" && continue
+    die "a SKILL.md bash block does not parse under this bash ($(basename "$skb"): $skb_err)"
+    skb_bad=1
+done
+{ [ "$skb_bad" -eq 0 ] && [ "$skb_n" -ge 10 ]; } \
+    && pass "all $skb_n bash blocks in SKILL.md parse under this bash ($BASH_VERSION)" \
+    || die "$skb_n bash blocks extracted, $skb_bad unparseable; this check must cover the file or say so"
+# Its own scratch tree goes with it: the leak check below is over the whole run,
+# and a probe that leaves one behind fails the case it is not about.
+[ -n "$skb_dir" ] && rm -rf "$skb_dir"
+
+# ── …AND THE FRAGMENT IS RUN, NOT ONLY SPELLED ─────────────────────────────
+#
+# Everything above greps. A grep cannot tell whether the interpreter can PARSE
+# what it matched, and that is the whole subject here: Bash 3.2 rejects an inline
+# `=~` pattern containing a parenthesis with a syntax error, and this block runs in
+# the operator's own shell — which on macOS is that bash. `SKILL.md` is prose to
+# the suite, so nothing else executes it: the `macos-shell` job could stay green
+# with the merge gate unparseable, which is exactly the failure this PR exists to
+# have caught.
+#
+# So the two lines are lifted VERBATIM and executed under whichever bash is running
+# this test — 3.2 in that job. A second inline pattern introduced into the same
+# block fails here rather than on a contributor's Mac.
+rx_assign="$(grep -m1 "^RX_STATE='" "$SKILL")"; rxa_rc=$?
+rx_match="$(grep -m1 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL")"; rxm_rc=$?
+{ [ "$rxa_rc" -eq 0 ] && [ -n "$rx_assign" ] && [ "$rxm_rc" -eq 0 ] && [ -n "$rx_match" ]; } \
+    || die "the head-state match could not be lifted from SKILL.md (rc=$rxa_rc/$rxm_rc)"
+# The `if` is closed here rather than lifted: the block's own body reads variables
+# this fixture has no business setting, and what is under test is the CONDITION.
+rx_prog="$rx_assign
+CODEX_HEAD_STATE=\"\$1\"
+$rx_match
+    printf 'MATCH %s' \"\${BASH_REMATCH[4]}\"
+else
+    printf 'NOMATCH'
+fi"
+rx_case() {   # rx_case <record> <want> <label>
+    local got rc=0
+    got="$(bash -c "$rx_prog" _ "$1" 2>&1)" || rc=$?
+    { [ "$rc" -eq 0 ] && [ "$got" = "$2" ]; } \
+        && pass "$3" \
+        || die "$3 — got rc=$rc '$got' (wanted '$2')"
+}
+# It PARSES and it MATCHES: a syntax error fails every case below, which is the
+# point, but a fixture that only proved parsing would pass against a pattern that
+# matches nothing at all.
+rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none' \
+    'MATCH none' "the lifted head-state match parses and runs under this bash"
+# TRAILING TEXT IS REJECTED, executed rather than inferred from the spelling. This
+# is the case the terminal anchor exists for: without it the merge block takes the
+# old-signoff fallback on a record that was never about this head.
+rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none trailing' \
+    'NOMATCH' "…and a record with trailing text does not match"
+# …and rc-0 NOISE around a well-formed-looking tail. `warning: cached state=none`
+# is what a wrapper prints before its answer.
+rx_case 'warning: cached state=none' \
+    'NOMATCH' "…nor does a line that merely ends in a state token"
+
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.
