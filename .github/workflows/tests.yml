@@ -66,8 +66,14 @@ jobs:
   # THIS JOB RUNS THE SUITE RATHER THAN READING IT. Both halves of the difference
   # are set up and the existing tests are the check:
   #
-  #   - Bash is 3.2, the version macOS ships. `mapfile`, `declare -A`, `${x^^}`,
-  #     `coproc`, `wait -n`, `shopt -s lastpipe` and every other post-3.2 spelling
+  #   - Bash is 3.2, the version macOS ships — the base release, where macOS is at
+  #     the 3.2.57 patch level. The 57 patches are bug fixes, so this parser is at
+  #     worst STRICTER than a Mac's: the direction of any difference is a false
+  #     alarm here rather than a miss there, which is the safe one to have. It is
+  #     also the tarball with a detached GNU signature to verify against.
+  #
+  #     `mapfile`, `declare -A`, `${x^^}`, `coproc`, `wait -n`,
+  #     `shopt -s lastpipe` and every other post-3.2 spelling
   #     simply fail. So do the PARSING differences, which no list of features would
   #     ever have contained: an inline `[[ … =~ … ]]` pattern with a parenthesis is
   #     a syntax error there, and `pr-watch.sh` carried one from the day it was
