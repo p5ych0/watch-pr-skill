@@ -62,7 +62,12 @@ unset -f rb_load 2>/dev/null || {
 # one helper lives in the library, because every field check here was originally
 # written out two or three times and every one of them was then found missing from
 # a copy. See CLAUDE.md § Tests.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" || exit 1
+# `2>&1` BECAUSE `rb_load` REPORTS ON STDERR, and the promise above is that every
+# diagnostic reaches stdout. Moving this script's own echoes was not enough: a
+# missing, unreadable or empty `recordlib.sh` produces its only explanation inside
+# the loader, so a caller capturing stdout got an empty result and an exit status
+# for the one failure that happens before anything else can.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || exit 1
 
 pr="${1:-}"; oid="${2:-}"
 # BOTH ARGUMENTS, VALIDATED. The function took them positionally from a call site

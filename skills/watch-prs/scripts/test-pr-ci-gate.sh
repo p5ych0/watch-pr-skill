@@ -37,6 +37,32 @@ arg_case() {   # arg_case <label> [args…]
         && pass "$label" \
         || die "$label — rc=$rc out='$out'"
 }
+# ── A BROKEN LIBRARY EXPLAINS ITSELF ON STDOUT ─────────────────────────────
+# The gate's diagnostics are documented as stdout, and the four call sites read
+# them from there. `rb_load` reports on stderr, so a `recordlib.sh` that is empty —
+# or missing, or unreadable — used to exit non-zero with NOTHING on stdout: the one
+# failure that happens before the gate can say anything else was the one a caller
+# capturing its output could not see. STDOUT IS CAPTURED ALONE here, with stderr
+# discarded, because merging the two is exactly the mistake that would make this
+# pass while the defect stood.
+lib_case() {   # lib_case <what to do to recordlib.sh> <label>
+    local dir out rc=0
+    dir="$(mktemp_d)" || { die "no scratch directory for the library probe"; return 0; }
+    cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$dir/" || { die "the library probe could not be set up"; return 0; }
+    case "$1" in
+        empty)   : > "$dir/recordlib.sh" ;;
+        missing) : ;;
+    esac
+    out="$(cd "$dir" && run_limited 10 ./pr-ci-gate.sh 7 \
+        0123456789abcdef0123456789abcdef01234567 2>/dev/null)" || rc=$?
+    { [ "$rc" -ne 0 ] && [ -n "$out" ]; } \
+        && pass "$2" \
+        || die "$2 — rc=$rc stdout='$out'"
+    rm -rf "$dir"
+}
+lib_case empty   "an empty recordlib.sh is explained on stdout, not only on stderr"
+lib_case missing "…and so is a missing one"
+
 arg_case "no arguments at all are refused, by name"
 arg_case "a missing head oid is refused, by name" 7
 arg_case "a non-numeric PR is refused, by name" seven 0123456789abcdef0123456789abcdef01234567
