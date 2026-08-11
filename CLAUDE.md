@@ -143,6 +143,14 @@ category; do not "fix" a script into a stricter mode.
   one from the day it was written. Absence covers the other half: a command name
   assembled at runtime is invisible to text and dies at once here.
 
+  **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
+  than an oversight: ~950 lines of executable shell live in a Markdown file, and
+  reaching it means parsing Markdown. That was tried and removed — four rounds of
+  fence spellings, two of which rejected valid source. The fix is to move the code
+  into `.sh` files, where every existing check covers it for free. Until then one
+  narrow lift, by anchored `grep` and with no grammar, covers the merge-gate
+  condition that made the gap visible.
+
   **Do not build a text scanner for this.** One was, and it is why this bullet is
   short: 2,200 lines and fifty-two review rounds, every round answering one finding
   and producing the next, with several of its own defects rejecting portable code.

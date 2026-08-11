@@ -1419,93 +1419,27 @@ grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
     && pass "…and validated against the known states" \
     || die "the parsed head-state is not checked against the known states"
 
-# ── EVERY BASH BLOCK IN SKILL.md PARSES UNDER THE BASH RUNNING THIS TEST ───
+# ── WHY THERE IS NO MARKDOWN PARSER HERE ───────────────────────────────────
 #
-# `SKILL.md` is prose to the suite: nothing else executes it, so nothing else can
-# tell whether the shell can READ it. That is not a hypothetical gap — the
-# merge-gate block carried an inline `=~` pattern containing a parenthesis, which
-# Bash 3.2 rejects with a syntax error before the first statement runs, and every
-# check in this file grepped past it because a grep cannot parse.
+# There was one, for four rounds. `SKILL.md` holds ~950 lines of bash that the
+# driver executes VERBATIM in the operator's shell — on macOS, bash 3.2 — and the
+# merge gate could not be parsed there at all, which nothing caught. So a sweep was
+# added: extract every fenced bash block, `bash -n` each one.
 #
-# `bash -n` parses without executing, so a block referring to variables this
-# fixture never sets is fine. Under the `macos-shell` job the parser doing the
-# reading IS 3.2, which is what turns this from a spelling check into the check.
+# Extracting them means parsing Markdown, and that is an unbounded surface in
+# exactly the way this repository has now recorded three times. Each round answered
+# one spelling and produced the next: indented fences, four-backtick fences, tilde
+# fences, trailing whitespace after the info string, metadata after the language,
+# a dedent that ate characters that were not there — and then backticks inside a
+# backtick fence's info string, which CommonMark says is not a fence at all. Two of
+# those defects made the check REJECT VALID SOURCE, which is worse than missing.
 #
-# THE COUNT IS ASSERTED, because an extractor that silently found nothing would
-# report a clean parse of zero blocks — the failure mode this repository calls
-# worse than no check at all.
-skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse check"; skb_dir=""; }
-# INDENTED FENCES COUNT. Markdown allows up to three spaces before a fence, and
-# `SKILL.md` has two such blocks — inside a list item, where the shell in them is
-# no less real. A column-zero pattern skipped both while the count check still
-# passed on the eleven that were left, which is the shape of a check that reports
-# a clean parse of most of the file.
-#
-# The CLOSING fence is matched at its own indentation for the same reason, and the
-# body is dedented by the opener's indent so a here-document terminator inside an
-# indented block still starts at column zero where the parser expects it.
-# EVERY FENCE SPELLING MARKDOWN ALLOWS, because the ones it does not recognise are
-# exactly the ones that go unparsed: three backticks or more, tildes as well as
-# backticks, trailing whitespace after the info string, and METADATA AFTER THE
-# LANGUAGE — Markdown takes the language from the first word of the info string,
-# so ```` ```bash title="merge gate" ```` is a bash block and a pattern demanding
-# nothing but whitespace after `bash` skipped it. The closing fence must be the
-# same character and at least as long, which is the rule that lets a longer fence
-# carry a shorter one inside it as literal text.
-#
-# THE DEDENT REMOVES ONLY WHAT IS THERE. Markdown strips up to the opener's
-# indentation from each body line — up to, not exactly — so a line less indented
-# than its own fence keeps its text. Cutting `ind` characters unconditionally ate
-# the first three characters of a column-zero line inside an indented block and
-# handed `true; then` to the parser, which fails a VALID `SKILL.md` and blocks the
-# update. A false alarm is the wrong direction to be wrong in here.
-[ -n "$skb_dir" ] && awk -v out="$skb_dir" '
-    !inb && /^[ ]{0,3}(```+|~~~+)[ \t]*bash([ \t]|$)/ {
-        inb = 1; n++
-        match($0, /^[ ]*/); ind = RLENGTH
-        match($0, /(`+|~+)/); fence = substr($0, RSTART, RLENGTH)
-        next }
-    inb && index($0, fence) && $0 ~ /^[ ]{0,3}(`+|~+)[ \t]*$/ {
-        match($0, /(`+|~+)/)
-        if (RLENGTH >= length(fence) && substr($0, RSTART, 1) == substr(fence, 1, 1)) {
-            inb = 0; next } }
-    inb { match($0, /^[ ]*/)
-           cut = (RLENGTH < ind) ? RLENGTH : ind
-           print substr($0, cut + 1) > (out "/block-" n ".sh") }
-' "$SKILL" || die "the SKILL.md bash blocks could not be extracted"
-# A PLACEHOLDER IS PROSE, NOT A REDIRECTION. The driver is told to substitute
-# `CODEX_SHA=<full 40-hex sha …>` before running the block, and to a parser that
-# reads as a redirection with no target. Only a bracketed run containing a SPACE
-# and no shell metacharacter is rewritten, which is what every placeholder here
-# looks like and what no real redirection can be: `cmd <in >out` carries a `>`
-# inside the run and is left alone.
-skb_n=0 skb_bad=0
-for skb in "$skb_dir"/block-*.sh; do
-    [ -f "$skb" ] || continue
-    skb_n=$((skb_n + 1))
-    sed "s/<[a-zA-Z0-9][a-zA-Z0-9 ,.:'-]* [a-zA-Z0-9 ,.:'-]*>/PLACEHOLDER/g" "$skb" > "$skb.parse" \
-        || { die "a SKILL.md block could not be prepared for parsing ($(basename "$skb"))"; skb_bad=1; continue; }
-    skb_err="$(bash -n "$skb.parse" 2>&1)" && continue
-    die "a SKILL.md bash block does not parse under this bash ($(basename "$skb"): $skb_err)"
-    skb_bad=1
-done
-# THE COUNT IS EXACT, counted from the file, and DELIBERATELY BROADER THAN THE
-# EXTRACTOR. A floor passed while two indented blocks were being skipped; the fix
-# for that counted openers with the extractor's own predicate, which agrees with
-# itself by construction — a spelling neither one recognises is missing from both,
-# the totals match, and the test reports that every block parses. So this pattern
-# admits every fence Markdown allows and the extractor must reach the same number:
-# a block the extractor cannot see is then a failure rather than an omission from
-# both sides of an equation.
-skb_want="$(grep -cE '^[ ]{0,3}(`{3,}|~{3,})[[:space:]]*bash([[:space:]]|$)' "$SKILL")"; skb_wrc=$?
-{ [ "$skb_wrc" -eq 0 ] && [ "$skb_want" -gt 0 ]; } \
-    || die "the bash fences in SKILL.md could not be counted (rc=$skb_wrc)"
-{ [ "$skb_bad" -eq 0 ] && [ "$skb_n" -eq "$skb_want" ]; } \
-    && pass "all $skb_n bash blocks in SKILL.md parse under this bash ($BASH_VERSION)" \
-    || die "$skb_want bash fences in SKILL.md, $skb_n extracted, $skb_bad unparseable"
-# Its own scratch tree goes with it: the leak check below is over the whole run,
-# and a probe that leaves one behind fails the case it is not about.
-[ -n "$skb_dir" ] && rm -rf "$skb_dir"
+# WHAT REPLACES IT IS THE NARROW LIFT BELOW. It takes two anchored lines by name,
+# needs no grammar, and covers the defect that prompted the sweep. The rest of the
+# gap is real and is not papered over: it is issue #26, whose fix is to stop
+# keeping executable shell in a Markdown file. Bash in a `.sh` file is checked by
+# the whole suite, the 3.2 job and `pr-selfcheck.sh` for free, and no extractor
+# has to exist.
 
 # ── …AND THE FRAGMENT IS RUN, NOT ONLY SPELLED ─────────────────────────────
 #

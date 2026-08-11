@@ -56,6 +56,21 @@
   and the behaviour is silently wrong. That is recorded on the issue and left to
   review.
 
+- **`SKILL.md`'s merge gate is executed by the contract test, not just grepped.**
+  The head-state condition is lifted by two anchored `grep`s and run against a
+  valid record, one with trailing text, and the rc-0 noise a wrapper prints — under
+  whichever bash runs the suite, so 3.2 in the `macos-shell` job. A grep cannot
+  tell whether the interpreter can *read* what it matched, which is the whole
+  subject here.
+
+  A sweep that extracted and parsed *every* fenced block was built for this and
+  removed. Reaching the code means parsing Markdown, and four rounds went to fence
+  spellings — indented, four-backtick, tilde, trailing whitespace, info-string
+  metadata, a dedent that removed characters that were not there — two of which
+  rejected valid source. The remaining ~950 lines of shell in that file are
+  unchecked, on the record, as #26: the fix is to move them into `.sh` files, where
+  the suite and the 3.2 job already cover everything for free.
+
 - **CI ran everything twice.** `push` on every branch plus `pull_request` fired
   both workflows for every push to a PR branch — the same commit, the same answer,
   twice. Pushes to the default branch are covered directly; everything else as a
