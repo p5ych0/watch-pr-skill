@@ -152,7 +152,10 @@ SCAN_PROLOGUE='
                 if (ch == "\134" && i < length(l)) {
                     SC_CTX[i + 1] = q; SC_ESC[i + 1] = 1
                     SC_EFF = SC_EFF substr(l, i + 1, 1)
-                    word = word substr(l, i + 1, 1); saw = 1
+                    # AN ESCAPED CHARACTER IS QUOTED. `\coproc` is not the reserved
+                    # word for the same reason `'"'"'coproc'"'"'` is not: the quoting, of
+                    # whatever form, prevents the reading.
+                    word = word substr(l, i + 1, 1); saw = 1; wq = 1
                     i += 2; continue
                 }
                 # `$'…'` is ANSI-C quoting: the escapes inside are DECODED, and
@@ -366,7 +369,10 @@ SCAN_PROLOGUE='
     # and the construct reported clean — and with the output redirected, nothing
     # else would have shown it either.
     function simple_cmd(from, i, w, pd) {
-        CMDW = ""; CMDN = 0; CMDFN = 0
+        # CMDFNNEXT IS CONFINED TO ONE SIMPLE COMMAND. It is set by the reserved
+        # word and consumed by the name after it; carrying it further declared a
+        # command in the NEXT segment to be a function.
+        CMDW = ""; CMDN = 0; CMDFN = 0; CMDFNNEXT = 0
         for (i = from; i <= SC_ARGC; i++) {
             w = SC_ARGV[i]
             # THE REDIRECTION FORMS ARE CHECKED FIRST, because `&` is both a
@@ -478,7 +484,10 @@ SCAN_PROLOGUE='
                 # `function name { … }` DECLARES ONE TOO, and the reserved word is
                 # skipped as grammar — so the name after it would have looked like a
                 # command. The declaration is recorded here as well.
-                if (w == "function") { CMDFNNEXT = 1; continue }
+                # …AND ONLY WHEN IT IS THE RESERVED WORD. `'"'"'function'"'"'; mapfile …` has
+                # a quoted first word, which is an ordinary command, and a flag that
+                # outlived its simple command declared the NEXT one a function.
+                if (w == "function" && !SC_WQ[i]) { CMDFNNEXT = 1; continue }
                 if (index(" if then elif else fi while until do done esac { } ! ", " " w " ") > 0) continue
                 CMDW = w
                 CMDQ = SC_WQ[i]
@@ -1272,10 +1281,14 @@ SCAN_PROLOGUE='
                   # removal to the whole delimiter, substitution-shaped part and
                   # all, so the terminator carries no quote characters — keeping
                   # them named a word no line will equal.
+                  # FULL QUOTE REMOVAL, not only the quote characters: a
+                  # BACKSLASH that quotes something is gone too, so `x$(printf E\OF)`
+                  # names `x$(printf EOF)`.
                   for (hdq = hdk; hdq < hdj; hdq++) {
                       if (SC_CTX[hdq] == "" && (substr(hdsrc, hdq, 1) == "\047" ||
                                                 substr(hdsrc, hdq, 1) == "\042")) continue
-                      if (SC_CTX[hdq] != "" && substr(hdsrc, hdq, 1) == SC_CTX[hdq]) continue
+                      if (SC_CTX[hdq] != "" && !SC_ESC[hdq] && substr(hdsrc, hdq, 1) == SC_CTX[hdq]) continue
+                      if (substr(hdsrc, hdq, 1) == "\134" && SC_ESC[hdq + 1]) continue
                       hdw = hdw substr(hdsrc, hdq, 1)
                   }
                   hdsaw = 1
@@ -1503,7 +1516,7 @@ RULE_A='
             if (!egrepsed && CMDA[aj] ~ /^-F.+$/) { eargs = eargs " " substr(CMDA[aj], 3); continue }
             if (!egrepsed && CMDA[aj] == "-F" && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; continue }
             if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
-            if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
+            if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; epat = 1; continue }
             # …AND THE VALUE MAY BE ATTACHED. `grep -e'"'"'PATTERN'"'"'` is one word after
             # quote removal, and its suffix is the active pattern — this was on the
             # list of forms the model did not follow, and it comes off that list.
@@ -1518,8 +1531,12 @@ RULE_A='
             if (CMDA[aj] ~ /^-[A-Za-z]*[ef].+$/ && CMDA[aj] !~ /^--/) {
                 if (match(CMDA[aj], /[ef]/)) {
                     if (substr(CMDA[aj], RSTART, 1) == "e") {
-                        eargs = eargs " " substr(CMDA[aj], RSTART + 1); epat = 1
+                        eargs = eargs " " substr(CMDA[aj], RSTART + 1)
                     }
+                    # EITHER WAY THE PROGRAM IS SUPPLIED. `awk -f prog.awk file` takes
+                    # its program from the FILE, so every later word is an input file
+                    # and none of them is a pattern.
+                    epat = 1
                     continue
                 }
             }
@@ -1664,6 +1681,11 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # `${!name}` is NOT here: indirect expansion is Bash 2, and only the Bash 4
 # `${!prefix@}`/`${!array[@]}` name-listing forms would be — neither is used.
 RULE_D='
+    # THE WORD LIST IS BUILT FOR THIS SEGMENT FIRST. Every rule below asks about
+    # the invoked command, and the list is a global — so a rule reading it before
+    # anything had scanned THIS segment was answering about the previous one. It
+    # showed up as a `mapfile` reported against a line containing only `:`.
+    shell_scan(line, SC_Q0)
     # AS COMMAND WORDS, like every other builtin rule here. `printf '"'"'%s'"'"' mapfile`
     # runs `printf`, and a raw word pattern rejected it — the last of the Bash 4
     # rules that was still reading the line rather than the command.
@@ -1748,7 +1770,10 @@ RULE_D='
         # AT A LEXICAL WORD START. `x{fd}>out` and `$(printf x){fd}>out` are both
         # ordinary words followed by a redirection — a `)` ends a substitution and
         # the word CONTINUES through it, so it is not a boundary.
-        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|<]/) continue
+        # `(` OPENS A COMMAND, so `({fd}>file printf x)` really allocates — while
+        # `)` ENDS a substitution and the word continues through it, which is why
+        # the two brackets are not the same answer.
+        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|<(]/) continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -2715,6 +2740,14 @@ refute fdafter   "printf %s \$(printf x){fd}>out"             D "a brace after a
 refute coprocop  "${sq}coproc${sq} coproc || :"                D "a quoted coproc with an unquoted operand"
 # …and an inline comment is not code: the splitter has no comment state of its own.
 refute inlinecmd ": # note; mapfile"                           D "a builtin name inside an inline comment"
+# …and an ESCAPED character is quoted for the same reason a quoted one is.
+refute coprocesc "${bs}coproc true || :"                       D "an escaped coproc, which is not the reserved word"
+# …and the declaration flag belongs to ONE simple command.
+plant funcleak   "${sq}function${sq}; mapfile -t values < f || :" D "a builtin after a quoted function word"
+# …and `(` opens a command, so a brace after it really allocates.
+plant fdsubshell "({fd}>file printf x) || :"                   D "a descriptor allocation inside a subshell"
+# …while `awk -f prog` takes its program from a FILE, so later words are inputs.
+refute awkprog   "awk -f program.awk ${sq}file${bs}s${sq}"     A "an input file after a program file"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2859,11 +2892,24 @@ cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
   printf 'cat <<x$(printf %s)%s EOF)\n' "$sq" "$sq"
   printf 'body text\n'
   printf 'x$(printf ) EOF)\n'
+
   printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substquote.sh"
 sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
 { [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \
     && pass "a quoted parenthesis does not close a delimiter substitution" \
     || die "the delimiter stopped at a quoted parenthesis ('$sq2_hits')"
+
+# …and the quote removal is FULL: a backslash that quotes something is gone from the
+# delimiter too, so `x$(printf E\OF)` names `x$(printf EOF)`.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<x$(printf E%sOF)\n' "$bs"
+  printf 'body text\n'
+  printf 'x$(printf EOF)\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substesc.sh"
+se_hits="$(scan "$RULE_A" "$PTMP/substesc.sh")" || se_hits=SCANFAIL
+{ [ "$se_hits" != SCANFAIL ] && [ -n "$se_hits" ]; } \
+    && pass "a quoting backslash is removed from the delimiter too" \
+    || die "the delimiter kept its backslash ('$se_hits')"
 
 # ── A SUBSTITUTION-SHAPED DELIMITER IS TAKEN WHOLE ─────────────────────────
 # Bash does not expand the delimiter word, so `<<$(printf EOF)` names that text —

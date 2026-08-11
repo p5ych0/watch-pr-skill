@@ -127,6 +127,20 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Quoting has more than two forms, and declaration state belongs to one command.**
+  `\coproc` is not the reserved word for the same reason `'coproc'` is not — the
+  quoting, of whatever form, prevents the reading. `'function'; mapfile …` has a
+  quoted first word, and a flag that outlived its simple command declared the
+  *next* one a function. A delimiter word gets full quote removal, backslashes
+  included. `(` opens a command so a brace after it really allocates, while `)`
+  ends a substitution and the word continues through it. And `awk -f prog file`
+  takes its program from the file, so every later word is an input.
+
+  A mutant for the declaration state turned up something else: the rules that ask
+  about the invoked command were reading a word list built for the *previous*
+  segment, because the list is a global and nothing had scanned the current one
+  yet. It surfaced as a `mapfile` reported against a line containing only `:`.
+
 - **There is no `set -o globstar` rule any more, and there was one.** `globstar` is
   a `shopt` option; `set -o` has its own list and does not include it, so that
   command fails on every bash — the rule could only ever have fired on source that
