@@ -150,6 +150,13 @@ category; do not "fix" a script into a stricter mode.
   suite was unexecuted branches; what it cost was the review budget of an entire
   release.
 
+  **The classes it cannot see belong to the reviewers, so they live in the
+  reviewer files.** `AGENTS.md` and `.github/copilot-instructions.md` carry the
+  GNU-only flags, the regex escapes and the unexecuted-branch gap as a table —
+  Copilot reads only its own file and follows no pointers, so an acknowledged CI
+  gap recorded here alone is a gap in one required reviewer's contract. That is
+  the doc-sync rule applied to this file's own limits.
+
   Pin the inner interpreters, not only the outer one — the suite runs `bash -c` and
   `#!/usr/bin/env bash` helpers throughout, and pinning only the outer shell proves
   almost nothing. A tool stock macOS lacks is still usable: probe it with

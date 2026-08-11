@@ -11,6 +11,31 @@ invariant, the repo-agnostic invariant, test discipline, doc-sync duty, and the
 release process. Read it rather than assuming — it is not restated here, so that
 there is one place to change it.
 
+## Portability: what CI cannot see, and you can
+
+CI runs the whole suite twice — once normally, once in a `macos-shell` job on a
+**bash 3.2.57 built from source and first on `PATH`**, with the GNU-only tools
+removed from `PATH`. Post-3.2 constructs and absent commands therefore fail there
+on their own, and you do not need to check for them.
+
+**Three classes stay invisible to that job, and they are yours.** The runner is
+Ubuntu with GNU userland, so in each case CI goes green and a macOS contributor
+is the one who finds it:
+
+| Class | Why CI cannot see it | Examples |
+| --- | --- | --- |
+| GNU-only **flags** on commands that exist on both platforms | The command is present, so absence proves nothing | `sed -i` with no argument, `readlink -f`, `grep -P`, `date -d`, `stat -c`, `xargs -r`, `sort -h`, `echo -e` |
+| GNU regex escapes in a `grep`/`sed`/`awk` pattern | BSD `grep` does not *fail* on `\s` — it matches a literal `s`, so the suite passes and the behaviour is silently wrong | `\s`, `\S`, `\d`, `\D`, `\w`, `\W`, `\b`, `\B` |
+| A construct on a branch the suite never executes | The job runs the suite; coverage is high but not total | a post-3.2 spelling inside an `if false` arm or an untaken error path |
+
+jq's regex engine is Oniguruma and **does** support those escapes, so a `\s`
+inside a jq program is correct — do not report it. The same goes for `\b` in an
+`awk` string, where it is the standard backspace escape.
+
+A tool stock macOS lacks is still usable when it is guarded: `command -v timeout
+&& timeout 5 …` with a working fallback is correct, and `testlib.sh` does exactly
+that. Report the unguarded use, not the guarded one.
+
 ## Reviewing a pull request
 
 ### You review. You do not implement.

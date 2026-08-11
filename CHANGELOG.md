@@ -33,6 +33,18 @@
   the tree and each was caught by review — without asking anything about what the
   text of a script looks like.
 
+  **The classes it cannot see are now in the reviewers' own instructions.**
+  `AGENTS.md` and `.github/copilot-instructions.md` carry a table of the GNU-only
+  flags, the regex escapes and the unexecuted-branch gap. Copilot reads only its
+  own file and follows no pointers, so an acknowledged CI gap recorded in
+  `CLAUDE.md` alone was missing from one required reviewer's contract.
+
+  The removal list is also about **what stock macOS lacks**, not only about GNU
+  names: `flock`, `setsid`, `taskset` and the Linux namespace tools are on the
+  runner and on no Mac, and a GNU-only list let them through. It remains a
+  denylist because the complement cannot be hidden — the suite needs `git`, `gh`,
+  `jq` and most of coreutils to run at all.
+
   The one item from that issue it does **not** close is `\s` in a `grep` pattern:
   BSD `grep` does not fail on it, it matches a literal `s`, so the suite passes
   and the behaviour is silently wrong. That is recorded on the issue and left to

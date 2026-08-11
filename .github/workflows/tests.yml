@@ -266,9 +266,24 @@ jobs:
           #
           # The `g`-prefixed spellings are the Homebrew names a macOS contributor
           # may reach for. Hiding them is what the step above preserves `awk` for.
-          tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
-                 stdbuf truncate dircolors numfmt shred
-                 gsed gawk gdate gcp gln gsort gtimeout gnproc"
+          # NOT ONLY THE *GNU* NAMES. What matters is what stock macOS LACKS, and
+          # that set is wider than coreutils: `flock`, `setsid`, `taskset` and the
+          # Linux namespace tools are all on this runner and on none of them. A
+          # list of GNU names alone let `flock` through, which would pass in the
+          # purported Mac-shaped job and fail on a Mac — the exact false green this
+          # job exists to prevent.
+          #
+          # IT IS STILL A DENYLIST, and that is a limit rather than a preference.
+          # The complement cannot be hidden: the suite legitimately needs `git`,
+          # `gh`, `jq`, `awk`, `sed`, `grep` and most of coreutils, and removing
+          # everything not on an allowlist removes those too. So this list grows
+          # when a name is met, and the reviewer instructions carry the classes no
+          # list can cover at all.
+          tools="timeout sha1sum sha256sum md5sum sha512sum b2sum seq realpath
+                 tac shuf nproc stdbuf truncate dircolors numfmt shred
+                 flock setsid taskset ionice unshare nsenter pidof free
+                 lsblk lscpu getopt watch faketime
+                 gsed gawk gdate gcp gln gsort gtimeout gnproc gxargs gfind gstat"
           # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
           # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
           # ordinary — and moving only the first resolution leaves the tool
