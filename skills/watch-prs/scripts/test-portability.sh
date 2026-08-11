@@ -138,9 +138,9 @@ SCAN_PROLOGUE='
         }
         return i
     }
-    function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth) {
+    function shell_scan(l, q0, i, k, ch, q, nxt, en, word, saw, depth, wq) {
         delete SC_CTX; delete SC_ESC; delete SC_ARGV; delete SC_AOP; delete SC_SUB; delete QSTK; delete PSTK
-        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; depth = 0; SC_BODIES = ""; delete SUBSTS
+        SC_EFF = ""; SC_ARGC = 0; word = ""; saw = 0; wq = 0; depth = 0; SC_BODIES = ""; delete SUBSTS; delete SC_WQ
         q = q0; i = 1
         while (i <= length(l)) {
             ch = substr(l, i, 1)
@@ -172,13 +172,13 @@ SCAN_PROLOGUE='
                 # word: `$"grep"` invokes `grep`, and keeping it produced a command
                 # named `$grep` that no rule recognises.
                 if (substr(l, i, 2) == "$\042") { q = "\042"; saw = 1; i += 2; continue }
-                if (ch == "\047" || ch == "\042") { q = ch; saw = 1; i++; continue }
+                if (ch == "\047" || ch == "\042") { q = ch; saw = 1; wq = 1; i++; continue }
                 # Unquoted whitespace ENDS a word; an unquoted control operator ends
                 # one and is a token of its own, so `(test -v x)` has `test` as a
                 # command word rather than as part of `(test`.
                 if (ch == " " || ch == "\t") {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 # A SUBSTITUTION RUNS A COMMAND OF ITS OWN. `out=$(grep PATTERN f)`
@@ -204,8 +204,8 @@ SCAN_PROLOGUE='
                 if ((ch == "<" || ch == ">") && substr(l, i + 1, 1) == "(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     SUBSTS[depth] = i + 2
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
                     i += 2; continue
@@ -213,8 +213,8 @@ SCAN_PROLOGUE='
                 if (substr(l, i, 2) == "$(") {
                     depth++; QSTK[depth] = q; PSTK[depth] = 0; q = ""
                     SUBSTS[depth] = i + 2
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                     SC_EFF = SC_EFF substr(l, i, 2)
                     i += 2; continue
@@ -224,15 +224,15 @@ SCAN_PROLOGUE='
                 # early, and every quote after that read inverted.
                 if (ch == "(" && depth > 0) {
                     PSTK[depth]++
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch; i++; continue
                 }
                 if (ch == ")" && depth > 0 && PSTK[depth] > 0) {
                     PSTK[depth]--
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch; i++; continue
                 }
@@ -245,8 +245,8 @@ SCAN_PROLOGUE='
                         SUBSTS[depth] = 0
                     }
                     q = QSTK[depth]; depth--
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = ")"; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch
                     i++; continue
@@ -257,8 +257,8 @@ SCAN_PROLOGUE='
                 # only the character could not tell the two apart, so the simple
                 # command ended at the group and never reached the operator.
                 if (index("();&|<>", ch) > 0) {
-                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
-                    word = ""; saw = 0
+                    if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
+                    word = ""; saw = 0; wq = 0
                     SC_ARGC++; SC_ARGV[SC_ARGC] = ch; SC_AOP[SC_ARGC] = 1
                     SC_EFF = SC_EFF ch; i++; continue
                 }
@@ -475,14 +475,20 @@ SCAN_PROLOGUE='
                     while (i < SC_ARGC && SC_ARGV[i + 1] ~ /^-[A-Za-z]+$/) i++
                     continue
                 }
-                if (index(" if then elif else fi while until do done esac function { } ! ", " " w " ") > 0) continue
+                # `function name { … }` DECLARES ONE TOO, and the reserved word is
+                # skipped as grammar — so the name after it would have looked like a
+                # command. The declaration is recorded here as well.
+                if (w == "function") { CMDFNNEXT = 1; continue }
+                if (index(" if then elif else fi while until do done esac { } ! ", " " w " ") > 0) continue
                 CMDW = w
+                CMDQ = SC_WQ[i]
                 # A FUNCTION DECLARATION IS NOT AN INVOCATION. `mapfile() { … }`
                 # names a function and runs nothing; the `()` after the name is what
                 # tells them apart, and it is recorded here because the walk ends at
                 # that parenthesis rather than carrying it as an operand.
                 CMDFN = (i + 2 <= SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "(" &&
                          SC_AOP[i + 2] && SC_ARGV[i + 2] == ")")
+                if (CMDFNNEXT) { CMDFN = 1; CMDFNNEXT = 0 }
             } else { CMDN++; CMDA[CMDN] = w }
         }
         return SC_ARGC + 1
@@ -624,6 +630,16 @@ SCAN_PROLOGUE='
         return out
     }
     # True when `cmd` is the command word of some simple command on this line.
+    function cmd_is_unquoted(cmd, i) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (!unwrap()) continue
+            if (CMDFN) continue
+            if (CMDW == cmd && !CMDQ) return 1
+        }
+        return 0
+    }
     function cmd_is(cmd, i) {
         i = 1
         while (i <= SC_ARGC) {
@@ -1252,7 +1268,17 @@ SCAN_PROLOGUE='
                       }
                       hdj++
                   }
-                  hdw = hdw substr(hdsrc, hdk, hdj - hdk); hdsaw = 1
+                  # QUOTE-REMOVED LIKE THE REST OF THE WORD. Bash applies quote
+                  # removal to the whole delimiter, substitution-shaped part and
+                  # all, so the terminator carries no quote characters — keeping
+                  # them named a word no line will equal.
+                  for (hdq = hdk; hdq < hdj; hdq++) {
+                      if (SC_CTX[hdq] == "" && (substr(hdsrc, hdq, 1) == "\047" ||
+                                                substr(hdsrc, hdq, 1) == "\042")) continue
+                      if (SC_CTX[hdq] != "" && substr(hdsrc, hdq, 1) == SC_CTX[hdq]) continue
+                      hdw = hdw substr(hdsrc, hdq, 1)
+                  }
+                  hdsaw = 1
                   hdk = hdj; continue
               }
               if (hdc == "\134" && SC_ESC[hdk + 1]) { hdk++; hdsaw = 1; hdquoted = 1; continue }
@@ -1308,7 +1334,10 @@ scan() {   # scan <awk-rule-body> <file…> ; prints hits, 2 if the scan failed
         function RULES(  nseg, si, lq, body, saved, nb, BA) {
             # `WHOLE` survives the split, for the constructs the split destroys:
             # `;&` is a case terminator and splitting on `;` takes it apart.
-            WHOLE = line
+            # AN INLINE COMMENT IS NOT CODE HERE EITHER. `: # note; mapfile` invokes
+            # nothing after the `#`, and the splitter has no comment state — so the
+            # `;` in the comment separated a command that does not exist.
+            WHOLE = strip_comment(line)
             lq = SC_Q0
             nseg = segments(WHOLE)
             for (si = 1; si <= nseg; si++) { line = SEG[si]; SEGI = si; SC_Q0 = SEGQ[si]; ONE() }
@@ -1469,6 +1498,9 @@ RULE_A='
             # `awk -F PATTERN` IS A REGULAR EXPRESSION. gawk reads `\s` there as a
             # whitespace class and the awk macOS ships does not, so the field split
             # differs — discarding the operand hid that.
+            # …ATTACHED OR SEPARATED. `awk -F'"'"'PATTERN'"'"'` is one word after quote
+            # removal, and an exact-equality test saw only the separated spelling.
+            if (!egrepsed && CMDA[aj] ~ /^-F.+$/) { eargs = eargs " " substr(CMDA[aj], 3); continue }
             if (!egrepsed && CMDA[aj] == "-F" && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; continue }
             if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
             if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
@@ -1478,9 +1510,18 @@ RULE_A='
             # AN ATTACHED `-f` OPERAND IS A FILENAME, and it may contain an `e`:
             # `sed -f'engine\s'` names a file, and finding the later letter in the
             # same word read the filename as a pattern.
-            if (CMDA[aj] ~ /^-[A-Za-z]*f.+$/ && CMDA[aj] !~ /^--/) continue
-            if (CMDA[aj] ~ /^-[A-Za-z]*e.+$/ && CMDA[aj] !~ /^--/) {
-                eargs = eargs " " substr(CMDA[aj], index(CMDA[aj], "e") + 1); epat = 1; continue
+            # THE FIRST OPERAND-TAKING LETTER IN THE CLUSTER OWNS THE REST OF THE
+            # WORD. `-efoo\s` is `-e` with the pattern `foo\s` — and it contains an
+            # `f` further along, which a test looking anywhere in the word read as
+            # `-f` and discarded. `-f` names a file and `-e` carries a pattern, so
+            # which letter comes first decides.
+            if (CMDA[aj] ~ /^-[A-Za-z]*[ef].+$/ && CMDA[aj] !~ /^--/) {
+                if (match(CMDA[aj], /[ef]/)) {
+                    if (substr(CMDA[aj], RSTART, 1) == "e") {
+                        eargs = eargs " " substr(CMDA[aj], RSTART + 1); epat = 1
+                    }
+                    continue
+                }
             }
             if (CMDA[aj] ~ /^-[A-Za-z]*e$/ && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; epat = 1; continue }
             if (CMDA[aj] ~ /^-/) continue
@@ -1704,7 +1745,10 @@ RULE_D='
         # AT A WORD BOUNDARY. `x{fd}>out` is an ordinary argument and then a
         # redirection, and a `$` in front makes `${fd}>out` an expansion — an
         # allocation begins its word.
-        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|()<>]/) continue
+        # AT A LEXICAL WORD START. `x{fd}>out` and `$(printf x){fd}>out` are both
+        # ordinary words followed by a redirection — a `)` ends a substitution and
+        # the word CONTINUES through it, so it is not a boundary.
+        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|<]/) continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -1742,15 +1786,17 @@ RULE_D='
     for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
         if (cmd_has("shopt", SHOPT4[si2])) {
             report("the " SHOPT4[si2] " shell option is newer than Bash 3.2: " line); return }
-    # `set -o globstar` ENABLES IT; `set -- globstar` SETS A POSITIONAL PARAMETER.
-    # The option word is what distinguishes them, and asking only whether both names
-    # appear in the same command rejected portable source.
-    if (cmd_optval("set", "-o", "globstar")) {
-        report("globstar is Bash 4: " line); return }
+    # THERE IS NO `set -o globstar` RULE, and there was one until this round.
+    # `globstar` is a SHOPT option; `set -o` has its own list and does not include
+    # it, so every bash rejects that command — the rule could only ever have fired
+    # on source that fails everywhere. It is gone rather than narrowed.
     # AS AN UNQUOTED RESERVED WORD. `'coproc' true` is an ordinary command name on
     # every bash, because quoting prevents the reserved-word reading — and the word
     # list has already had the quotes removed by the time a rule sees it.
-    if (cmd_is("coproc") && unquoted(line, "coproc")) {
+    # THE COMMAND WORD\'"'"'S OWN QUOTING DECIDES IT. `'"'"'coproc'"'"' coproc` has a quoted
+    # first word — an ordinary command — and an unquoted one as its operand, and
+    # asking whether the line contains an unquoted `coproc` anywhere conflated them.
+    if (cmd_is_unquoted("coproc")) {
         report("coproc is Bash 4: " line); return }
     # `[ -v x ]` AND `test -v x` ARE THE SAME OPERATOR. Bash 4.2 added it to all
     # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
@@ -2062,7 +2108,6 @@ plant transk   "printf '%s' \"\${items[@]@k}\""      D "the lowercase @k transfo
 # separator, and the command is cut away from its own pattern.
 plant bracestep "for i in {1..5..2}; do :; done"     D "a stepped brace expansion"
 plant globst   "shopt -s globstar"                  D "globstar, a Bash 4 shell option"
-plant setglob  "set -o globstar"                    D "…and its set -o spelling"
 plant atq      "printf '%s' \"\${@@Q}\""              D "a transformation on the special parameter @"
 plant atup     "printf '%s' \"\${@^^}\""              D "…and case modification on it"
 plant qsep2    'grep "a\";\s" "$f"'                      A "a GNU escape behind an escaped quote"
@@ -2143,6 +2188,11 @@ ah_hits="$(scan "$RULE_A" "$PTMP/afterheredoc.sh")" || ah_hits=SCANFAIL
 { [ "$ah_hits" != SCANFAIL ] && [ -n "$ah_hits" ]; } \
     && pass "…while code after the terminator is scanned again" \
     || die "the here-document skip swallowed the rest of the file ('$ah_hits')"
+# `set -o globstar` IS NOT A SPELLING OF IT. `globstar` is a shopt option; `set -o`
+# has its own list and does not include it, so that command fails on every bash —
+# the rule that reported it could only ever have fired on source that is broken
+# everywhere, which is not a portability defect.
+refute setglob "set -o globstar 2>/dev/null || :"   D "a set -o option that does not exist"
 refute qpipe   "printf %s 'producer |& consumer'"          D "a quoted |&, which is data rather than syntax"
 refute indirect "printf '%s' \"\${!name}\""                    D "indirect expansion, which is Bash 2"
 refute defaulted "printf '%s' \"\${name:-fallback}\""          D "a default, which every Bash has"
@@ -2652,6 +2702,19 @@ refute mapfunc   "mapfile() { printf %s \"\$1\"; }"              D "a function t
 plant awkfsesc   "awk -F ${sq}${bs}s${sq} ${sq}{ print \$1 }${sq} ${dq}\$f${dq}" A "a gawk operator in a field separator"
 # …while an attached `-f` operand is a FILENAME, whose backslash is not regex.
 refute sedfile   "sed -f${sq}engine${bs}s${sq} input"          A "a filename attached to -f"
+# …while `-e` attached carries the PATTERN, and the letter that comes first in the
+# cluster owns the rest of the word — `-efoo\s` is `-e`, not `-f`.
+plant grepefirst "grep -e${sq}foo${bs}s${sq} ${dq}\$f${dq} || :"           A "a pattern attached to -e that contains an f"
+# …and an attached field separator is a pattern too.
+plant awkfattach "awk -F${sq}${bs}s${sq} ${sq}{ print \$1 }${sq} ${dq}\$f${dq}" A "an attached gawk field separator"
+# …and `function name { }` declares one as much as `name()` does.
+refute funckw    "function mapfile { printf %s \"\$1\"; }"       D "a function declared with the reserved word"
+# …and an allocation begins a WORD, which a substitution before it does not end.
+refute fdafter   "printf %s \$(printf x){fd}>out"             D "a brace after a substitution in one word"
+# …while a quoted command word is not the reserved word, whatever follows it.
+refute coprocop  "${sq}coproc${sq} coproc || :"                D "a quoted coproc with an unquoted operand"
+# …and an inline comment is not code: the splitter has no comment state of its own.
+refute inlinecmd ": # note; mapfile"                           D "a builtin name inside an inline comment"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2788,10 +2851,14 @@ cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
 # …and the parentheses inside it are balanced with the QUOTING in mind: a quoted
 # one closes nothing, and decrementing at every parenthesis recorded a prefix of the
 # delimiter word — after which the real terminator never arrived.
+#
+# The terminator here is the QUOTE-REMOVED form, because that is what bash compares
+# against: the delimiter word loses its quote characters like any other word, so a
+# line carrying them would not be the terminator at all.
 { printf '#!/usr/bin/env bash\n'
   printf 'cat <<x$(printf %s)%s EOF)\n' "$sq" "$sq"
   printf 'body text\n'
-  printf 'x$(printf %s)%s EOF)\n' "$sq" "$sq"
+  printf 'x$(printf ) EOF)\n'
   printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substquote.sh"
 sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
 { [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \

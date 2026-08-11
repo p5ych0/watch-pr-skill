@@ -127,6 +127,20 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **There is no `set -o globstar` rule any more, and there was one.** `globstar` is
+  a `shopt` option; `set -o` has its own list and does not include it, so that
+  command fails on every bash — the rule could only ever have fired on source that
+  is broken everywhere, which is not a portability defect. Removed rather than
+  narrowed.
+
+- **`function name { … }` declares one too, the first operand-taking letter in a
+  cluster owns the rest of the word, and the command word's own quoting decides
+  `coproc`.** `-efoo\s` is `-e` with a pattern that happens to contain an `f`;
+  `'coproc' coproc` has a quoted first word and an unquoted operand; a delimiter
+  word is quote-removed even where it looks like a substitution; an allocation
+  begins a *word*, which a substitution before it does not end; and an inline
+  comment is not code to the splitter either.
+
 - **Moving those rules to the command model needed the grammar around them.**
   `set -- globstar` sets a positional parameter rather than the option, so the `-o`
   is what distinguishes them; `mapfile() { … }` declares a function and invokes
