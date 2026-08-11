@@ -127,6 +127,15 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Moving those rules to the command model needed the grammar around them.**
+  `set -- globstar` sets a positional parameter rather than the option, so the `-o`
+  is what distinguishes them; `mapfile() { … }` declares a function and invokes
+  nothing; `'coproc' true` is an ordinary command name, because quoting prevents
+  the reserved-word reading and the word list has already had the quotes removed;
+  and an allocation begins its word, so `x{fd}>out` is an argument and a
+  redirection. `awk -F PATTERN` is a regular expression and its escapes count;
+  `sed -f'name'` is a filename and its do not.
+
 - **Every Bash 4 rule is now about the command word.** `mapfile`, `readarray`,
   `coproc` and `set -o globstar` were still matched on the raw line, so
   `printf '%s' mapfile coproc` was rejected as data. That was the last of the

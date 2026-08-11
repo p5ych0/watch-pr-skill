@@ -366,7 +366,7 @@ SCAN_PROLOGUE='
     # and the construct reported clean — and with the output redirected, nothing
     # else would have shown it either.
     function simple_cmd(from, i, w, pd) {
-        CMDW = ""; CMDN = 0
+        CMDW = ""; CMDN = 0; CMDFN = 0
         for (i = from; i <= SC_ARGC; i++) {
             w = SC_ARGV[i]
             # THE REDIRECTION FORMS ARE CHECKED FIRST, because `&` is both a
@@ -477,6 +477,12 @@ SCAN_PROLOGUE='
                 }
                 if (index(" if then elif else fi while until do done esac function { } ! ", " " w " ") > 0) continue
                 CMDW = w
+                # A FUNCTION DECLARATION IS NOT AN INVOCATION. `mapfile() { … }`
+                # names a function and runs nothing; the `()` after the name is what
+                # tells them apart, and it is recorded here because the walk ends at
+                # that parenthesis rather than carrying it as an operand.
+                CMDFN = (i + 2 <= SC_ARGC && SC_AOP[i + 1] && SC_ARGV[i + 1] == "(" &&
+                         SC_AOP[i + 2] && SC_ARGV[i + 2] == ")")
             } else { CMDN++; CMDA[CMDN] = w }
         }
         return SC_ARGC + 1
@@ -623,7 +629,20 @@ SCAN_PROLOGUE='
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
             if (!unwrap()) continue
+            if (CMDFN) continue
             if (CMDW == cmd) return 1
+        }
+        return 0
+    }
+    # True when `cmd` is invoked with `opt` immediately followed by `val`.
+    function cmd_optval(cmd, opt, val, i, j) {
+        i = 1
+        while (i <= SC_ARGC) {
+            i = simple_cmd(i)
+            if (!unwrap()) continue
+            if (CMDW != cmd) continue
+            for (j = 1; j < CMDN; j++)
+                if (CMDA[j] == opt && CMDA[j + 1] == val) return 1
         }
         return 0
     }
@@ -1222,10 +1241,15 @@ SCAN_PROLOGUE='
               # body under this delimiter still expands. Marking it quoted, which is
               # what the first version of this did, suppressed that.
               if (substr(hdsrc, hdk, 2) == "$(") {
+                  # QUOTING COUNTS INSIDE IT TOO: a quoted parenthesis in the
+                  # substitution closes nothing, and decrementing at every one
+                  # recorded a prefix of the word.
                   hdp = 1; hdj = hdk + 2
                   while (hdj <= length(hdsrc) && hdp > 0) {
-                      if (substr(hdsrc, hdj, 1) == "(") hdp++
-                      else if (substr(hdsrc, hdj, 1) == ")") hdp--
+                      if (SC_CTX[hdj] == "" && !SC_ESC[hdj]) {
+                          if (substr(hdsrc, hdj, 1) == "(") hdp++
+                          else if (substr(hdsrc, hdj, 1) == ")") hdp--
+                      }
                       hdj++
                   }
                   hdw = hdw substr(hdsrc, hdk, hdj - hdk); hdsaw = 1
@@ -1442,11 +1466,19 @@ RULE_A='
             # …and grep has its own: `-m NUM`, `-A`/`-B`/`-C` and `-d ACTION` all
             # take the next word, which was otherwise read as the pattern.
             if (egrepsed && CMDA[aj] ~ /^-[mABCd]$/ && aj < CMDN) { aj++; continue }
+            # `awk -F PATTERN` IS A REGULAR EXPRESSION. gawk reads `\s` there as a
+            # whitespace class and the awk macOS ships does not, so the field split
+            # differs — discarding the operand hid that.
+            if (!egrepsed && CMDA[aj] == "-F" && aj < CMDN) { aj++; eargs = eargs " " CMDA[aj]; continue }
             if (!egrepsed && CMDA[aj] ~ /^-[Fv]$/ && aj < CMDN) { aj++; continue }
             if (CMDA[aj] ~ /^-[A-Za-z]*f$/ && aj < CMDN) { aj++; continue }
             # …AND THE VALUE MAY BE ATTACHED. `grep -e'"'"'PATTERN'"'"'` is one word after
             # quote removal, and its suffix is the active pattern — this was on the
             # list of forms the model did not follow, and it comes off that list.
+            # AN ATTACHED `-f` OPERAND IS A FILENAME, and it may contain an `e`:
+            # `sed -f'engine\s'` names a file, and finding the later letter in the
+            # same word read the filename as a pattern.
+            if (CMDA[aj] ~ /^-[A-Za-z]*f.+$/ && CMDA[aj] !~ /^--/) continue
             if (CMDA[aj] ~ /^-[A-Za-z]*e.+$/ && CMDA[aj] !~ /^--/) {
                 eargs = eargs " " substr(CMDA[aj], index(CMDA[aj], "e") + 1); epat = 1; continue
             }
@@ -1669,7 +1701,10 @@ RULE_D='
         # `${fd}>out` IS AN EXPANSION AND THEN A REDIRECTION, which Bash 3.2 has.
         # The brace of an allocation stands alone; a `$` in front makes it something
         # else entirely.
-        if (fdi > 1 && substr(line, fdi - 1, 1) == "$") continue
+        # AT A WORD BOUNDARY. `x{fd}>out` is an ordinary argument and then a
+        # redirection, and a `$` in front makes `${fd}>out` an expansion — an
+        # allocation begins its word.
+        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|()<>]/) continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -1707,9 +1742,15 @@ RULE_D='
     for (si2 = 1; si2 <= split("globstar lastpipe autocd checkjobs dirspell direxpand globasciiranges inherit_errexit localvar_inherit compat32 compat40 compat41 compat42 compat43 compat44", SHOPT4, " "); si2++)
         if (cmd_has("shopt", SHOPT4[si2])) {
             report("the " SHOPT4[si2] " shell option is newer than Bash 3.2: " line); return }
-    if (cmd_has("set", "globstar")) {
+    # `set -o globstar` ENABLES IT; `set -- globstar` SETS A POSITIONAL PARAMETER.
+    # The option word is what distinguishes them, and asking only whether both names
+    # appear in the same command rejected portable source.
+    if (cmd_optval("set", "-o", "globstar")) {
         report("globstar is Bash 4: " line); return }
-    if (cmd_is("coproc")) {
+    # AS AN UNQUOTED RESERVED WORD. `'coproc' true` is an ordinary command name on
+    # every bash, because quoting prevents the reserved-word reading — and the word
+    # list has already had the quotes removed by the time a rule sees it.
+    if (cmd_is("coproc") && unquoted(line, "coproc")) {
         report("coproc is Bash 4: " line); return }
     # `[ -v x ]` AND `test -v x` ARE THE SAME OPERATOR. Bash 4.2 added it to all
     # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
@@ -2599,6 +2640,18 @@ plant grepattach "grep -e${sq}${bs}s${sq} ${dq}\$f${dq} || :"              A "a 
 # …while a Bash 4 builtin NAME is a command word like any other.
 refute mapdata   "printf %s mapfile coproc"                    D "Bash 4 builtin names used as data"
 refute fdexpand  "fd=value; printf %s \${fd}>out"              D "an expansion followed by a redirection"
+# …and an allocation begins its WORD: `x{fd}>out` is an argument and a redirection.
+refute fdword    "printf %s x{fd}>out"                         D "a brace inside an ordinary word"
+# …and `set -- globstar` sets a positional parameter rather than the option.
+refute setdashdash "set -- globstar"                           D "globstar as a positional parameter"
+# …and a quoted `coproc` is an ordinary command name on every bash.
+refute coprocq   "${sq}coproc${sq} true || :"                  D "a quoted coproc, which is not the reserved word"
+# …and a function DECLARATION is not an invocation.
+refute mapfunc   "mapfile() { printf %s \"\$1\"; }"              D "a function that shares a builtin name"
+# …while `awk -F PATTERN` is a regular expression, so an escape in it counts.
+plant awkfsesc   "awk -F ${sq}${bs}s${sq} ${sq}{ print \$1 }${sq} ${dq}\$f${dq}" A "a gawk operator in a field separator"
+# …while an attached `-f` operand is a FILENAME, whose backslash is not regex.
+refute sedfile   "sed -f${sq}engine${bs}s${sq} input"          A "a filename attached to -f"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2731,6 +2784,19 @@ cd3_hits="$(scan "$RULE_A" "$PTMP/ctrldelim.sh")" || cd3_hits=SCANFAIL
 { [ "$cd3_hits" != SCANFAIL ] && [ -n "$cd3_hits" ]; } \
     && pass "…and a control escape names the character it stands for" \
     || die "a control-escape delimiter did not end at its character ('$cd3_hits')"
+
+# …and the parentheses inside it are balanced with the QUOTING in mind: a quoted
+# one closes nothing, and decrementing at every parenthesis recorded a prefix of the
+# delimiter word — after which the real terminator never arrived.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<x$(printf %s)%s EOF)\n' "$sq" "$sq"
+  printf 'body text\n'
+  printf 'x$(printf %s)%s EOF)\n' "$sq" "$sq"
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substquote.sh"
+sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
+{ [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \
+    && pass "a quoted parenthesis does not close a delimiter substitution" \
+    || die "the delimiter stopped at a quoted parenthesis ('$sq2_hits')"
 
 # ── A SUBSTITUTION-SHAPED DELIMITER IS TAKEN WHOLE ─────────────────────────
 # Bash does not expand the delimiter word, so `<<$(printf EOF)` names that text —
