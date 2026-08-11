@@ -339,7 +339,18 @@ while :; do
     # `warning: cached state=reviewed`, which then drove the watch into the
     # terminal path — or, as `state=none`, polled quietly to a timeout that the
     # contract reads as "re-request or ask whether to keep waiting".
-    if [[ "$line" =~ ^PR_REVIEW_STATE\ pr=([0-9]+)\ sha=([0-9a-f]{7,40})\ reviewer=([^[:space:]]+)\ state=([a-z]+)$ ]]; then
+    # THE PATTERN LIVES IN A VARIABLE, and that is a portability requirement rather
+    # than a style. Bash 3.2 — the bash macOS ships — cannot PARSE a `[[ =~ ]]` whose
+    # pattern contains a parenthesis written inline: it fails with "syntax error in
+    # conditional expression", and the whole script dies before it runs a line. In a
+    # variable the pattern is a string to the parser and a regex to the match, which
+    # is what both 3.2 and every later bash do.
+    #
+    # It is not a Bash 4 construct by name — it is a PARSING difference, which no
+    # list of constructs would contain. The `macos-shell` CI job is what found it,
+    # by running the suite rather than by reading it.
+    rx_state='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)$'
+    if [[ "$line" =~ $rx_state ]]; then
         r_pr="${BASH_REMATCH[1]}"; r_sha="${BASH_REMATCH[2]}"
         r_who="${BASH_REMATCH[3]}"; state="${BASH_REMATCH[4]}"
     else
@@ -449,7 +460,8 @@ while :; do
             # An exact field, not a glob: `*verdict=clean*` also matched
             # `verdict=cleaned` and any line merely quoting the word, and
             # PR_REVIEW_READY is the actionable signal under Monitor.
-            if [[ "$verdict" =~ ^PR_REVIEW_STATE\ pr=([0-9]+)\ sha=([0-9a-f]{7,40})\ reviewer=([^[:space:]]+)\ verdict=([a-z]+)(.*)$ ]]; then
+            rx_verdict='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) verdict=([a-z]+)(.*)$'
+            if [[ "$verdict" =~ $rx_verdict ]]; then
                 v_pr="${BASH_REMATCH[1]}"; v_sha="${BASH_REMATCH[2]}"
                 v_who="${BASH_REMATCH[3]}"; v_field="${BASH_REMATCH[4]}"; v_tail="${BASH_REMATCH[5]}"
             else

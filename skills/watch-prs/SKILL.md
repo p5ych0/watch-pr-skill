@@ -1289,7 +1289,11 @@ fi
 # gate to catch, so the merge would pass on a state that was never read.
 # The WHOLE record, not the last `state=` token: rc-0 noise such as
 # `warning: cached state=none` would otherwise pass and take the fallback path.
-if [[ "$CODEX_HEAD_STATE" =~ ^PR_REVIEW_STATE\ pr=([0-9]+)\ sha=([0-9a-f]{7,40})\ reviewer=([^[:space:]]+)\ state=([a-z]+)$ ]]; then
+# THE PATTERN LIVES IN A VARIABLE: Bash 3.2 cannot parse a `[[ =~ ]]` whose pattern
+# contains a parenthesis written inline, and this block runs in the operator's own
+# shell — which on macOS is that bash.
+RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)$'
+if [[ "$CODEX_HEAD_STATE" =~ $RX_STATE ]]; then
     S_PR="${BASH_REMATCH[1]}"; S_SHA="${BASH_REMATCH[2]}"
     S_WHO="${BASH_REMATCH[3]}"; CODEX_STATE="${BASH_REMATCH[4]}"
 else

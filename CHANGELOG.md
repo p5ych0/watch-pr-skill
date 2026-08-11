@@ -1,5 +1,90 @@
 # Changelog
 
+## [2.0.6] — 2026-08-11
+
+- **`pr-watch.sh` never ran on macOS, and neither did the merge gate in
+  `SKILL.md`.** Bash 3.2 — the bash macOS ships — cannot *parse* a
+  `[[ … =~ … ]]` whose pattern is written inline and contains a parenthesis. It
+  is not a feature that degrades: the shell rejects the whole file with
+  `syntax error in conditional expression`, before the first statement runs.
+  Three sites carried one, from the day each was written. The portable spelling
+  holds the pattern in a variable, where it is a string to the parser and a regex
+  to the match.
+
+- **A comment was being executed at here-document time.** `test-pr-ci-state.sh`
+  writes its `gh` stub through an unquoted delimiter — it has to, the stub needs
+  `$TMP` expanded — and a comment inside the body named two mutants in backticks.
+  Those ran as commands every time the fixture built a stub.
+
+- **CI runs the suite a second time on a machine shaped like a Mac.** A new
+  `macos-shell` job builds **bash 3.2.57** from source — the base release with the
+  official patch series 001–057 applied, which is the patch level macOS ships —
+  puts it *first on `PATH`* so the suite's `bash -c` calls and
+  `#!/usr/bin/env bash` helpers reach it too, and removes the GNU-only tools.
+
+  The patches are not cosmetic. Building 3.2.0 and calling it "3.2" would have
+  been *more permissive* than a Mac, not less: the environment-function hardening
+  in the 052+ range rejects input the base release accepts, and this suite exports
+  functions. The job now asserts the exact patch level rather than a `3.2` prefix,
+  and both the tarball and the patch series are pinned by digest — the series as
+  one digest over all fifty-seven files concatenated, so any of them changing fails
+  closed. Both defects above were found by it. It closes the
+  case for which #15 was filed — `timeout`, `sha1sum` and `seq` had each reached
+  the tree and each was caught by review — without asking anything about what the
+  text of a script looks like.
+
+  **The classes it cannot see are now in the reviewers' own instructions.**
+  `AGENTS.md` and `.github/copilot-instructions.md` carry a table of the GNU-only
+  flags, the regex escapes and the unexecuted-branch gap. Copilot reads only its
+  own file and follows no pointers, so an acknowledged CI gap recorded in
+  `CLAUDE.md` alone was missing from one required reviewer's contract.
+
+  **The job builds its own `PATH` rather than hiding names from the runner's.**
+  The first version hid a denylist of GNU tools; `flock`, `setsid` and `taskset`
+  were missing from it, and `getent`, `ip`, `ss`, `lsns`, `findmnt` and
+  `mountpoint` were missing from the version that added those. Each round answered
+  one finding and produced the next — the shape that got the text scanner deleted,
+  reappearing in a different file. So `PATH` is now *replaced* with links to an
+  explicit list of commands stock macOS has, plus the three a contributor installs
+  (`git`, `gh`, `jq`). A command nobody thought of does not resolve, which closes
+  the surface instead of tracking it. When the list is short by a portable name
+  the job fails loudly with `command not found` — a false alarm rather than a
+  false green.
+
+  The one item from that issue it does **not** close is `\s` in a `grep` pattern:
+  BSD `grep` does not fail on it, it matches a literal `s`, so the suite passes
+  and the behaviour is silently wrong. That is recorded on the issue and left to
+  review.
+
+- **`SKILL.md`'s merge gate is executed by the contract test, not just grepped.**
+  The head-state condition is lifted by two anchored `grep`s and run against a
+  valid record, one with trailing text, and the rc-0 noise a wrapper prints — under
+  whichever bash runs the suite, so 3.2 in the `macos-shell` job. A grep cannot
+  tell whether the interpreter can *read* what it matched, which is the whole
+  subject here.
+
+  A sweep that extracted and parsed *every* fenced block was built for this and
+  removed. Reaching the code means parsing Markdown, and four rounds went to fence
+  spellings — indented, four-backtick, tilde, trailing whitespace, info-string
+  metadata, a dedent that removed characters that were not there — two of which
+  rejected valid source. The remaining ~950 lines of shell in that file are
+  unchecked, on the record, as #26: the fix is to move them into `.sh` files, where
+  the suite and the 3.2 job already cover everything for free.
+
+- **CI ran everything twice.** `push` on every branch plus `pull_request` fired
+  both workflows for every push to a PR branch — the same commit, the same answer,
+  twice. Pushes to the default branch are covered directly; everything else as a
+  pull request.
+
+- **A text scanner for this was built and deleted.** It reached 2,200 lines and
+  fifty-two review rounds. Every round it answered one finding and produced the
+  next, and several of its own defects *rejected portable code*, which is worse
+  than a miss: it converts an unverified assumption into a green tick. What it
+  bought over running the suite was coverage of unexecuted branches; what it cost
+  was the review budget of an entire release. `CLAUDE.md` records the same shape
+  being built and deleted twice before, and now says plainly not to build it a
+  fourth time.
+
 ## [2.0.5] — 2026-08-08
 
 **How a shared library is loaded lives in one place.** The clear-source-verify

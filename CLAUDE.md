@@ -135,6 +135,52 @@ category; do not "fix" a script into a stricter mode.
   call.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
+- **Portable, and proven by running rather than by reading.** The `macos-shell` CI
+  job runs the whole suite on a bash 3.2.57 built from source and first on `PATH`,
+  with the GNU-only tools removed. Post-3.2 constructs fail there, and so do the
+  differences in PARSING that no feature list contains — an inline `[[ … =~ … ]]`
+  pattern with a parenthesis is a syntax error on 3.2, and `pr-watch.sh` carried
+  one from the day it was written. Absence covers the other half: a command name
+  assembled at runtime is invisible to text and dies at once here.
+
+  **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
+  than an oversight: ~950 lines of executable shell live in a Markdown file, and
+  reaching it means parsing Markdown. That was tried and removed — four rounds of
+  fence spellings, two of which rejected valid source. The fix is to move the code
+  into `.sh` files, where every existing check covers it for free. Until then one
+  narrow lift, by anchored `grep` and with no grammar, covers the merge-gate
+  condition that made the gap visible.
+
+  **Do not build a text scanner for this.** One was, and it is why this bullet is
+  short: 2,200 lines and fifty-two review rounds, every round answering one finding
+  and producing the next, with several of its own defects rejecting portable code.
+  It is the shape this file records twice more. What it bought over running the
+  suite was unexecuted branches; what it cost was the review budget of an entire
+  release.
+
+  **The job builds its own `PATH`; it does not hide names from the runner's.** A
+  denylist of Linux-only commands was tried and was one name behind on every
+  round — the same shape as the scanner. `PATH` is replaced with links to the
+  commands stock macOS has, so anything nobody listed simply does not resolve. What
+  goes on that list is what a MAC has, not what a developer machine has: `make`,
+  `cc` and `python3` arrive with the Xcode Command Line Tools, which `README.md`
+  does not ask a contributor for, so their absence is asserted too. If
+  the job fails with `command not found` for something portable, add it to that
+  list; that direction of failure is the safe one.
+
+  **The classes it cannot see belong to the reviewers, so they live in the
+  reviewer files.** `AGENTS.md` and `.github/copilot-instructions.md` carry the
+  GNU-only flags, the regex escapes and the unexecuted-branch gap as a table —
+  Copilot reads only its own file and follows no pointers, so an acknowledged CI
+  gap recorded here alone is a gap in one required reviewer's contract. That is
+  the doc-sync rule applied to this file's own limits.
+
+  Pin the inner interpreters, not only the outer one — the suite runs `bash -c` and
+  `#!/usr/bin/env bash` helpers throughout, and pinning only the outer shell proves
+  almost nothing. A tool stock macOS lacks is still usable: probe it with
+  `command -v` and provide a fallback, as `testlib.sh` does for `timeout`. GNU-only
+  FLAGS and `\s` in a `grep` pattern are review's job — the command exists on both
+  platforms, and BSD `grep` does not fail on `\s`, it matches a literal `s`.
 - Every behaviour change ships its test in the same PR.
 - Prove a new test can fail: revert the fix and confirm the test fails for the
   reason it names. A fixture that passes against the unfixed code is worse than

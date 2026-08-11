@@ -290,18 +290,29 @@ STUBSH
     # then appears and fails after the round is closed. The same registration
     # grace that `none` needs.
     gate_case '0'     0 2 "a green head lets the round close, once that is stable"
+    # Grace beyond the queue, for the same reason as the `none` case below: two
+    # greens could earn a grace of two before the queued failure was reached, and
+    # the case would close the round it exists to see stopped. Anywhere a QUEUE is
+    # the subject, the grace must not be earnable inside it.
     gate_case '0
 0
 3
-1'                    1 4 "…and a green that turns pending then fails still stops the round"
+1'                    1 4 "…and a green that turns pending then fails still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
     # pending, then green again is not two seconds of stable green — it is a new
     # answer, and the run that made it pending is the one nobody has seen finish.
     # Without the reset the second green inherits the first one's age and closes
     # immediately, which is the incomplete-picture close this grace exists for.
+    # A GRACE OF THREE, not two, and a call floor with slack. `SECONDS` has
+    # one-second granularity, so with grace 2 and interval 1 the acceptance sat
+    # exactly on a tick: this closed in five polls on one runner and four on
+    # another, and CI failed on the count while the behaviour was identical. The
+    # assertion is that the interruption COST polls, not that it cost exactly five.
     gate_case '0
 3
-0'                    0 5 "a verdict interrupted by a change starts its grace again" PR_CI_TIMEOUT=10
+0'                    0 5 "a verdict interrupted by a change starts its grace again" \
+        PR_CI_TIMEOUT=15 PR_CI_GRACE=3
     # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
     # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
     # round past its own bound — and a bound that a verdict can step over is not a
@@ -336,8 +347,12 @@ STUBSH
     # minute before this loop could look at the clock. A bound the callee does not
     # know about is not a bound. The stub here reads what it was given and reports
     # it, so the assertion is on the value passed down rather than on a duration.
+    # A FLOOR OF ONE, because this case exists for the probe-budget assertion below
+    # it, and with grace 1 and interval 1 the acceptance sits on a `SECONDS` tick:
+    # two polls or one, depending on the machine. What it must show is that a green
+    # closes; how many polls that took is the other cases' business.
     gate_case '0
-0'                    0 2 "the gate still closes on a stable green" PR_CI_GRACE=1
+0'                    0 1 "the gate still closes on a stable green" PR_CI_GRACE=1
     first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
     { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
         && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
@@ -366,13 +381,21 @@ STUBSH
     # the head moves, so the first probe after a push legitimately reports `none` on
     # a repository that does have CI. Taking that as permission to close reproduces
     # the red-head closure with an extra step.
+    # A GRACE LONGER THAN THE QUEUE. With grace 2 and interval 1 the two `none`s
+    # could earn it before the queued failure was ever reached — the case closed
+    # the round and CI went red on a slow runner while the fast one passed. The
+    # sequence is what this proves, so the grace is set beyond it and cannot be
+    # earned first.
     gate_case '4
 4
 3
-1'                    1 4 "a transient 'none' followed by a real failure still stops the round"
+1'                    1 4 "a transient 'none' followed by a real failure still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # …and a repository that genuinely has no checks is not blocked forever: once
     # `none` has held for the grace period it is believed.
-    gate_case '4'         0 2 "a repository with no checks has nothing to assert, once that is stable"
+    # A floor of one: how many polls a stable `none` takes is the boundary case
+    # above, and pinning it here is the same clock-tick assertion twice.
+    gate_case '4'         0 1 "a repository with no checks has nothing to assert, once that is stable"
     # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
     # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
     # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
@@ -1374,8 +1397,16 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README does not state that Copilot is required"
 fi
 
-# The head-state line is parsed, not substring-matched.
-grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
+# The head-state line is parsed, not substring-matched. The pattern is held in a
+# variable because Bash 3.2 cannot PARSE an inline `=~` pattern containing a
+# parenthesis at all — the macOS shell rejects the whole block with a syntax error.
+#
+# THE WHOLE ASSIGNMENT IS ASSERTED, both anchors included. Checking the prefix and
+# checking that the variable is used leaves the terminal `$` unguarded: without it
+# the pattern accepts `PR_REVIEW_STATE … state=none trailing`, the merge block takes
+# the old-signoff fallback, and both halves of a split assertion still pass.
+grep -qF "RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'" "$SKILL" \
+    && grep -q 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL" \
     && pass "the Codex head-state line is matched as a whole record" \
     || die "the head-state decision is made on a substring or trailing token"
 # …and the record must be ABOUT the PR, reviewer and head that were asked for.
@@ -1387,6 +1418,76 @@ grep -q '"\$S_PR" != "N" \] || \[ "\$S_WHO" != "\$CODEX_BOT" \] || \[ "\$S_SHA" 
 grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
     && pass "…and validated against the known states" \
     || die "the parsed head-state is not checked against the known states"
+
+# ── WHY THERE IS NO MARKDOWN PARSER HERE ───────────────────────────────────
+#
+# There was one, for four rounds. `SKILL.md` holds ~950 lines of bash that the
+# driver executes VERBATIM in the operator's shell — on macOS, bash 3.2 — and the
+# merge gate could not be parsed there at all, which nothing caught. So a sweep was
+# added: extract every fenced bash block, `bash -n` each one.
+#
+# Extracting them means parsing Markdown, and that is an unbounded surface in
+# exactly the way this repository has now recorded three times. Each round answered
+# one spelling and produced the next: indented fences, four-backtick fences, tilde
+# fences, trailing whitespace after the info string, metadata after the language,
+# a dedent that ate characters that were not there — and then backticks inside a
+# backtick fence's info string, which CommonMark says is not a fence at all. Two of
+# those defects made the check REJECT VALID SOURCE, which is worse than missing.
+#
+# WHAT REPLACES IT IS THE NARROW LIFT BELOW. It takes two anchored lines by name,
+# needs no grammar, and covers the defect that prompted the sweep. The rest of the
+# gap is real and is not papered over: it is issue #26, whose fix is to stop
+# keeping executable shell in a Markdown file. Bash in a `.sh` file is checked by
+# the whole suite, the 3.2 job and `pr-selfcheck.sh` for free, and no extractor
+# has to exist.
+
+# ── …AND THE FRAGMENT IS RUN, NOT ONLY SPELLED ─────────────────────────────
+#
+# Everything above greps. A grep cannot tell whether the interpreter can PARSE
+# what it matched, and that is the whole subject here: Bash 3.2 rejects an inline
+# `=~` pattern containing a parenthesis with a syntax error, and this block runs in
+# the operator's own shell — which on macOS is that bash. `SKILL.md` is prose to
+# the suite, so nothing else executes it: the `macos-shell` job could stay green
+# with the merge gate unparseable, which is exactly the failure this PR exists to
+# have caught.
+#
+# So the two lines are lifted VERBATIM and executed under whichever bash is running
+# this test — 3.2 in that job. A second inline pattern introduced into the same
+# block fails here rather than on a contributor's Mac.
+rx_assign="$(grep -m1 "^RX_STATE='" "$SKILL")"; rxa_rc=$?
+rx_match="$(grep -m1 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL")"; rxm_rc=$?
+{ [ "$rxa_rc" -eq 0 ] && [ -n "$rx_assign" ] && [ "$rxm_rc" -eq 0 ] && [ -n "$rx_match" ]; } \
+    || die "the head-state match could not be lifted from SKILL.md (rc=$rxa_rc/$rxm_rc)"
+# The `if` is closed here rather than lifted: the block's own body reads variables
+# this fixture has no business setting, and what is under test is the CONDITION.
+rx_prog="$rx_assign
+CODEX_HEAD_STATE=\"\$1\"
+$rx_match
+    printf 'MATCH %s' \"\${BASH_REMATCH[4]}\"
+else
+    printf 'NOMATCH'
+fi"
+rx_case() {   # rx_case <record> <want> <label>
+    local got rc=0
+    got="$(bash -c "$rx_prog" _ "$1" 2>&1)" || rc=$?
+    { [ "$rc" -eq 0 ] && [ "$got" = "$2" ]; } \
+        && pass "$3" \
+        || die "$3 — got rc=$rc '$got' (wanted '$2')"
+}
+# It PARSES and it MATCHES: a syntax error fails every case below, which is the
+# point, but a fixture that only proved parsing would pass against a pattern that
+# matches nothing at all.
+rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none' \
+    'MATCH none' "the lifted head-state match parses and runs under this bash"
+# TRAILING TEXT IS REJECTED, executed rather than inferred from the spelling. This
+# is the case the terminal anchor exists for: without it the merge block takes the
+# old-signoff fallback on a record that was never about this head.
+rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none trailing' \
+    'NOMATCH' "…and a record with trailing text does not match"
+# …and rc-0 NOISE around a well-formed-looking tail. `warning: cached state=none`
+# is what a wrapper prints before its answer.
+rx_case 'warning: cached state=none' \
+    'NOMATCH' "…nor does a line that merely ends in a state token"
 
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
@@ -1453,6 +1554,34 @@ for doc in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
     grep -qi 'run the test suite' "$doc" \
         && pass "$name: running the suite is ruled out explicitly" \
         || die "$name: does not rule out running the tests"
+    # ── THE PORTABILITY CLASSES CI CANNOT SEE ──────────────────────────────
+    #
+    # The `macos-shell` job covers absent commands and post-3.2 constructs by
+    # running the suite; three classes stay invisible to it, and the ONLY thing
+    # assigning them to a reviewer is this table. Copilot reads its own copy and
+    # follows no pointers, so an edit that weakens either file silently restores
+    # the gap — and every check above would stay green, because none of them looks
+    # at this.
+    #
+    # THE EXCEPTIONS ARE ASSERTED TOO, and that is not symmetry for its own sake:
+    # a table that says "report `\b`" without saying "except in awk, where it is
+    # backspace" produces BLOCKING FALSE FINDINGS, which cost the author a round
+    # each and teach the reviewer to distrust the rule.
+    while IFS='|' read -r pat what; do
+        [ -n "$pat" ] || continue
+        grep -qi "$pat" "$doc" \
+            && pass "$name: $what" \
+            || die "$name: $what — no line matching '$pat'"
+    done <<'PORTCLASSES'
+sed -i|GNU-only flags are the reviewer's, not CI's
+readlink -f|…and the flag list names the ones that have reached this tree
+matches a literal|the silent half of the escape rule is stated: BSD grep does not fail on it
+oniguruma|jq's engine is exempt, so a jq program is not a false finding
+backspace|awk's backslash-b is backspace, not a word boundary
+builtin|echo -e is the Bash builtin here, not the external command
+guarded|a command-v-guarded use with a fallback is correct
+branch the suite never executes|the unexecuted-branch gap is stated as a gap
+PORTCLASSES
 done
 
 # ── the phase summary is written by a QUOTED heredoc ───────────────────────
