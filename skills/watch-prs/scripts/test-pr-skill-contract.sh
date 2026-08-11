@@ -134,7 +134,11 @@ grep -q 'CHECKS_RC' "$SKILL" \
 # closed on a local suite run, and `pr-selfcheck.sh` runs BEFORE the push, so it
 # cannot see a failure that only happens on the runner. "The suite passes here"
 # and "the checks pass there" are different claims. Issue #16.
-grep -q '^ci_gate() {' "$SKILL" \
+# THE GATE IS A SCRIPT, so what is asserted here is that the driver calls it.
+# It was a function defined in this document; `test-pr-ci-gate.sh` now runs the
+# script itself, which is why the behavioural cases moved out of this file.
+[ -x "$SCRIPT_DIR/pr-ci-gate.sh" ] \
+    && grep -q 'pr-ci-gate.sh N ' "$SKILL" \
     && pass "the driver has a CI gate for the head it pushed" \
     || die "nothing checks whether the pushed head is green"
 # EVERY push site calls it. One that does not is a round closed on an unknown
@@ -148,23 +152,23 @@ grep -q '^ci_gate() {' "$SKILL" \
 # left it never checked at all — through both phases and into a merge gate that
 # looks at REQUIRED checks only, which a failing optional one is not.
 pushes="$(grep -c '^git push ||' "$SKILL")" || pushes=0
-gates="$(grep -cE '^(if ! )?ci_gate N ' "$SKILL")" || gates=0
+gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gates=0
 [ "${pushes:-0}" -gt 0 ] && [ "$gates" -ge "$pushes" ] \
     && pass "…and every push site passes through it ($gates gates, $pushes pushes)" \
     || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
 # The two paths that accept a verdict WITHOUT a push: the Codex→Copilot phase
 # transition, and the merge gate. Named individually, because a count alone is
 # satisfied by two gates on the same site.
-grep -q '^ci_gate N "\$CODEX_SHA"' "$SKILL" \
+grep -q '^"\$RB_SCRIPTS"/pr-ci-gate.sh N "\$CODEX_SHA"' "$SKILL" \
     && pass "…and a clean verdict does not open the Copilot phase unchecked" \
     || die "a PR that never pushed can enter the Copilot phase with a red head"
-grep -q '^ci_gate N "\$HEAD_OID"' "$SKILL" \
+grep -q '^"\$RB_SCRIPTS"/pr-ci-gate.sh N "\$HEAD_OID"' "$SKILL" \
     && pass "…nor reach the merge with only its required checks read" \
     || die "the merge gate reads only required checks; a failing optional one passes"
 # …AND EVERY ONE IS ASKED ABOUT A COMMIT. `gh pr checks` is addressed by PR number
 # and the API can still be serving the previous head for a moment after a push, so
 # an unpinned call can return the previous round's green as this round's answer.
-oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
+oid_gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
 [ "$oid_gates" = "$gates" ] \
     && pass "…naming an OID, not just the PR ($oid_gates/$gates)" \
     || die "$((gates - oid_gates)) CI gate call(s) do not pin the head they ask about"
@@ -172,7 +176,7 @@ oid_gates="$(grep -cE '^(if ! )?ci_gate N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
 # the previous head's result, which is the last round's answer to this round's
 # question; asking after the request means the pass is already running.
 awk '/^git push \|\|/ {p=NR}
-     /^(if ! )?ci_gate N "\$HEAD_/ {if (p && p < NR) g=NR}
+     /^(if ! )?"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_/ {if (p && p < NR) g=NR}
      /gh pr comment N/ {if (g && g < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "…between the push and the request, so it answers about this head" \
     || die "the CI gate does not sit between the push and the review request"
@@ -180,7 +184,7 @@ awk '/^git push \|\|/ {p=NR}
 # trigger, nothing has been resolved or posted when the gate runs, so a red head
 # leaves the round genuinely open — that ordering is the whole value and it is the
 # one a later edit would most easily invert.
-awk '/^ci_gate N "\$HEAD_PUSHED"/ {g=NR}
+awk '/^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_PUSHED"/ {g=NR}
      g && /^SUMMARY="\$\(cat "\$SUMMARY_FILE"\)"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
     && pass "…and in the manual path it precedes the summary, so a red round stays open" \
     || die "the manual path posts its summary before knowing whether the head is green"
@@ -192,253 +196,16 @@ awk '/^ci_gate N "\$HEAD_PUSHED"/ {g=NR}
 # ahead of the closure; what that costs is a pass reading open threads, and that is
 # recoverable in a way a closed round is not.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /^ci_gate N "\$HEAD_BEFORE"/ {g=NR}
+     inb && /^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_BEFORE"/ {g=NR}
      inb && g && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
     | grep -q ok \
     && pass "…and in the automatic path the gate precedes the summary too" \
     || die "the automatic path posts its summary before knowing whether the head is green"
-# PENDING IS NOT GREEN — AND THE GATE IS RUN TO PROVE IT. The checks start when
-# the push lands, so an immediate ask always finds them running; treating that as a
-# pass closes every round before its own CI has said anything, which is the
-# original defect with an extra step.
-#
-# A grep for `PR_CI_TIMEOUT` passed while the pending arm returned 0 — the presence
-# of a timeout says nothing about what is done with a pending verdict. So the
-# function is extracted and executed against a stubbed `pr-ci-state.sh` that
-# answers on a script, the same reason the parser-clear branch is executed rather
-# than matched.
-gate_fn="$(sed -n '/^ci_gate() {/,/^}/p' "$SKILL")"; gate_rc=$?
-[ "$gate_rc" -eq 0 ] && [ -n "$gate_fn" ] \
-    || die "the ci_gate function could not be extracted from SKILL.md (rc=$gate_rc)"
-# EVERYTHING IT ASSIGNS IS ITS OWN. `SKILL.md`'s blocks run in the driving
-# session's shell, so a name this function forgets to declare `local` is written
-# into that session — clobbering whatever was there and being clobbered in turn,
-# which for a loop counter or a sleep interval is a bug nobody would look for
-# here. `nap` was such a name.
-#
-# `PR_CI_*` is excluded: those are documented inputs, and the one that appears at
-# the start of a line is a command PREFIX — `PR_CI_PROBE_TIMEOUT="$b" cmd …` — not
-# an assignment to a variable of this function's.
-gate_assigned="$(printf '%s\n' "$gate_fn" \
-    | grep -oE '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' | tr -d ' =' | sort -u)" || gate_assigned=""
-gate_local="$(printf '%s\n' "$gate_fn" | grep -E '^[[:space:]]*local ' \
-    | sed -E 's/^[[:space:]]*local //; s/=[^ ]*//g' | tr ' ' '\n' | sort -u)" || gate_local=""
-gate_leaks=""
-for v in $gate_assigned; do
-    case "$v" in PR_CI_*) continue ;; esac
-    printf '%s\n' "$gate_local" | grep -qx "$v" || gate_leaks="$gate_leaks $v"
-done
-[ -z "$gate_leaks" ] \
-    && pass "every name the CI gate assigns is declared local to it" \
-    || die "the CI gate writes into the driving session:$gate_leaks"
-# THE CHILD SKIPS THESE. The cleanup probe further down re-runs this whole file to
-# watch it remove its scratch tree, and these cases are the slow part — every one
-# of them waits on real `sleep`s. Re-running them inside that child doubled the
-# file's cost for nothing and, run after the other ten suites, pushed the child
-# past its own watchdog: the leak check then reported that its run had failed,
-# which is true and useless. The child needs the file to COMPLETE, not to re-prove
-# the gate.
-GATETMP=""
-if [ -z "${CONTRACT_SCRATCH_PROBE-}" ]; then
-    GATETMP="$(mktemp_d)" || { die "no scratch directory for the CI gate probe"; GATETMP=""; }
-fi
-if [ -n "$GATETMP" ] && [ -n "$gate_fn" ]; then
-    mkdir -p "$GATETMP/s"
-    # Answers come from a queue, one per call, so a gate that polls is
-    # distinguishable from one that decides on the first answer.
-    cat > "$GATETMP/s/pr-ci-state.sh" <<'STUBSH'
-#!/usr/bin/env bash
-# `tail -n +2`, not `sed -i` — in-place editing without a suffix argument is
-# GNU-only, and stock macOS runs this suite as a mandatory pre-push gate.
-# The bound it was handed, recorded — the gate is supposed to pass its REMAINING
-# time, not let the helper use its own sixty-second default.
-printf '%s\n' "${PR_CI_PROBE_TIMEOUT:-unset}" >> "$GATE_PROBE"
-rc="$(head -1 "$GATE_Q")"
-tail -n +2 "$GATE_Q" > "$GATE_Q.next" && mv "$GATE_Q.next" "$GATE_Q"
-# A SLOW PROBE, when asked for. The timeout has to be a real duration bound, and
-# counting only the sleeps excluded however long each probe took.
-[ -n "${GATE_DELAY:-}" ] && sleep "$GATE_DELAY"
-echo "call" >> "$GATE_CALLS"
-# An EXHAUSTED queue REPEATS ITS LAST ANSWER, which is what a real check state
-# does — it does not change into something else because the fixture ran out of
-# script. A fixed default of "pending" made the `none` grace case unreachable: the
-# single `4` was followed by `3`s, the grace counter reset every poll, and a
-# repository that genuinely has no checks could never close a round.
-if [ -n "$rc" ]; then printf '%s\n' "$rc" > "$GATE_LAST"; else rc="$(cat "$GATE_LAST" 2>/dev/null)"; fi
-exit "${rc:-3}"
-STUBSH
-    chmod +x "$GATETMP/s/pr-ci-state.sh"
-    gate_case() {   # gate_case <queue> <want rc> <want calls> <label> [env…]
-        local out rc=0 calls q="$1" want="$2" mincalls="$3" label="$4"
-        shift 4
-        printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
-        : > "$GATETMP/last"
-        : > "$GATETMP/probe"
-        out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
-            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" \
-            RB_SCRIPTS="$GATETMP/s" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
-            bash -c "$gate_fn"'
-                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
-        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
-        { [ "$rc" = "$want" ] && [ "${calls:-0}" -ge "$mincalls" ]; } \
-            && pass "$label" \
-            || die "$label — rc=$rc calls=$calls out='$out' (wanted $want / >=$mincalls calls)"
-    }
-    # GREEN MUST HOLD, TOO. A push that triggers two workflows can have the fast
-    # one registered and passing before the second is registered at all, so the
-    # first probe is green about an incomplete picture — and the later workflow
-    # then appears and fails after the round is closed. The same registration
-    # grace that `none` needs.
-    gate_case '0'     0 2 "a green head lets the round close, once that is stable"
-    # Grace beyond the queue, for the same reason as the `none` case below: two
-    # greens could earn a grace of two before the queued failure was reached, and
-    # the case would close the round it exists to see stopped. Anywhere a QUEUE is
-    # the subject, the grace must not be earnable inside it.
-    gate_case '0
-0
-3
-1'                    1 4 "…and a green that turns pending then fails still stops the round" \
-        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
-    # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
-    # pending, then green again is not two seconds of stable green — it is a new
-    # answer, and the run that made it pending is the one nobody has seen finish.
-    # Without the reset the second green inherits the first one's age and closes
-    # immediately, which is the incomplete-picture close this grace exists for.
-    # A GRACE OF THREE, not two, and a call floor with slack. `SECONDS` has
-    # one-second granularity, so with grace 2 and interval 1 the acceptance sat
-    # exactly on a tick: this closed in five polls on one runner and four on
-    # another, and CI failed on the count while the behaviour was identical. The
-    # assertion is that the interruption COST polls, not that it cost exactly five.
-    gate_case '0
-3
-0'                    0 5 "a verdict interrupted by a change starts its grace again" \
-        PR_CI_TIMEOUT=15 PR_CI_GRACE=3
-    # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
-    # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
-    # round past its own bound — and a bound that a verdict can step over is not a
-    # bound. Here the grace can never be earned inside the timeout.
-    gate_case '0'         1 1 "a verdict that stabilises after the deadline is refused" \
-        PR_CI_TIMEOUT=2 PR_CI_GRACE=60
-    # THE SLEEP MAY NOT OUTRUN THE DEADLINE. Sleeping a full interval when less
-    # than that remains means the gate cannot report its own bound until after the
-    # bound has passed: a one-second timeout with the default thirty-second
-    # interval took thirty seconds to say it had run out of one. The watchdog here
-    # is shorter than that interval, so an uncapped sleep is killed rather than
-    # reporting anything.
-    gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
-        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
-    # NO PROBE STARTS AFTER THE DEADLINE. Clamping an exhausted budget up to one
-    # second bought another request past the bound, and each of those can take its
-    # second plus the watchdog's escalation — the clamp turning the timeout into a
-    # floor. With a one-second bound and a one-second interval, the second poll
-    # would land exactly on the deadline: there must not be one.
-    gate_case '3'         1 1 "no probe is started once the deadline has passed" \
-        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
-    probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
-    # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
-    # deadline, probe again, and only then notice — so `-le 2` accepted the defect
-    # it was written to catch. The bound is checked before the second probe, so
-    # there is no second probe.
-    [ "${probes_after:-0}" -le 1 ] \
-        && pass "…so an expired gate makes no further requests ($probes_after)" \
-        || die "the gate kept probing past its deadline ($probes_after requests)"
-    # …AND NEITHER DOES A PROBE. The helper bounds its own `gh` calls, but at its
-    # own default — so with a one-second gate timeout a hung request ran for a
-    # minute before this loop could look at the clock. A bound the callee does not
-    # know about is not a bound. The stub here reads what it was given and reports
-    # it, so the assertion is on the value passed down rather than on a duration.
-    # A FLOOR OF ONE, because this case exists for the probe-budget assertion below
-    # it, and with grace 1 and interval 1 the acceptance sits on a `SECONDS` tick:
-    # two polls or one, depending on the machine. What it must show is that a green
-    # closes; how many polls that took is the other cases' business.
-    gate_case '0
-0'                    0 1 "the gate still closes on a stable green" PR_CI_GRACE=1
-    first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
-    { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
-        && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
-        || die "the probe bound was '$first', not capped at the 5s the gate had left"
-    gate_case '1'     1 1 "a red head stops the round"
-    gate_case '2'     1 1 "an unreadable check state stops the round"
-    # THE ONE THE GREP COULD NOT SEE: pending must be waited on, not accepted.
-    # A LONGER BOUND FOR THE CASES THAT MUST REACH ACCEPTANCE. Five seconds left
-    # these one second clear of the deadline, so a probe taking any measurable
-    # time pushed them over and they failed as timeouts — a fixture that passes on
-    # a fast machine and reports a defect on a slow one is testing the machine.
-    gate_case '3
-3
-0'                    0 3 "a pending result is waited on, never read as a pass" PR_CI_TIMEOUT=10
-    # …and the wait is bounded, because a wait that never ends is a hang. The queue
-    # runs out and the stub then answers 3 forever.
-    gate_case '3'         1 2 "…and stops once the checks have not settled in time"
-    # A HEAD THE API HAS NOT CAUGHT UP WITH IS NOT AN ANSWER. `gh pr checks` is
-    # addressed by PR number and can serve the previous head for a moment after a
-    # push; the helper reports 5 for it and the gate waits, because the correct
-    # response to "ask again shortly" is not to stop and is certainly not to close.
-    gate_case '5
-5
-0'                    0 3 "a head the API has not caught up with is waited on" PR_CI_TIMEOUT=10
-    # NO CHECKS *YET* IS NOT NO CHECKS. A workflow run is registered a moment after
-    # the head moves, so the first probe after a push legitimately reports `none` on
-    # a repository that does have CI. Taking that as permission to close reproduces
-    # the red-head closure with an extra step.
-    # A GRACE LONGER THAN THE QUEUE. With grace 2 and interval 1 the two `none`s
-    # could earn it before the queued failure was ever reached — the case closed
-    # the round and CI went red on a slow runner while the fast one passed. The
-    # sequence is what this proves, so the grace is set beyond it and cannot be
-    # earned first.
-    gate_case '4
-4
-3
-1'                    1 4 "a transient 'none' followed by a real failure still stops the round" \
-        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
-    # …and a repository that genuinely has no checks is not blocked forever: once
-    # `none` has held for the grace period it is believed.
-    # A floor of one: how many polls a stable `none` takes is the boundary case
-    # above, and pinning it here is the same clock-tick assertion twice.
-    gate_case '4'         0 1 "a repository with no checks has nothing to assert, once that is stable"
-    # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
-    # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
-    # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
-    # comparison fail on every iteration. Both fall back to the default, which the
-    # watchdog would otherwise have to kill — so `rc=124` here is a failure.
-    # A BAD BOUND MUST NOT BECOME AN UNBOUNDED POLLING LOOP. `PR_CI_INTERVAL=0`
-    # sleeps zero seconds and leaves the elapsed count at zero forever; a
-    # non-numeric `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every
-    # iteration. Both fall back to the defaults, and what that is observable as is
-    # PACING: with the fallback interval the gate manages a couple of polls in the
-    # window below, and without it, hundreds. The exit status cannot be the
-    # assertion — falling back to a thirty-minute timeout is the CORRECT
-    # behaviour, so the watchdog stopping the run is expected, not a failure.
-    gate_spin() {   # gate_spin <max calls> <label> [env…]
-        local out rc=0 calls maxc="$1" label="$2"
-        shift 2
-        printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
-        : > "$GATETMP/probe"
-        out="$(run_limited 12 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
-            GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" RB_SCRIPTS="$GATETMP/s" "$@" \
-            bash -c "$gate_fn"'
-                ci_gate 7 0123456789abcdef0123456789abcdef01234567' 2>&1)" || rc=$?
-        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
-        [ "${calls:-0}" -le "$maxc" ] \
-            && pass "$label" \
-            || die "$label — $calls polls in 12s (at most $maxc); the bound was not applied"
-    }
-    gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
-    gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
-    gate_spin 4 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
-    # THE TIMEOUT IS A DURATION, NOT A SUM OF SLEEPS. Counting only the sleeps
-    # excluded the probe time, so two slow `gh` calls per iteration turned a
-    # documented thirty-minute bound into ninety. With a 3s probe and a 1s
-    # interval, a 4s bound is reached on the second poll; counting sleeps alone it
-    # would take five.
-    gate_case '3'         1 1 "the timeout counts the probe's own time, not just the sleeps" \
-        PR_CI_TIMEOUT=4 GATE_DELAY=3
-    gate_slow_calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || gate_slow_calls=0
-    [ "${gate_slow_calls:-0}" -le 3 ] \
-        && pass "…so a slow probe cannot stretch the bound ($gate_slow_calls polls)" \
-        || die "a slow probe stretched the timeout: $gate_slow_calls polls for a 4s bound"
-    rm -rf "$GATETMP"
-fi
+# THE GATE'S OWN BEHAVIOUR IS TESTED IN `test-pr-ci-gate.sh`, against the script.
+# It used to be tested here, by `sed`-ing the function body back out of `SKILL.md`
+# and running that — the only way to execute shell that lives in a Markdown file.
+# What stays here is what belongs here: that the driver CALLS the gate, at every
+# site that accepts a head, pinned to an OID, in the right order.
 
 # ── the loop is PHASED: Codex to clean, then Copilot ───────────────────────
 # Asking both every round buys a Copilot pass on every intermediate commit and
@@ -955,6 +722,55 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     chmod +x "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
     ( cd "$SETUPTMP/repo" && git init -q && git remote add origin git@github.com:acme/widget.git ) \
         >/dev/null 2>&1 || die "the setup probe's checkout could not be created"
+    # ── THE CI BOUNDS SURVIVE THE PROCESS BOUNDARY ─────────────────────────
+    #
+    # The gate is a child process now, and that is exactly where a documented knob
+    # can be lost in silence. `PR_CI_TIMEOUT=3600` ASSIGNED in the operator's shell
+    # was read by the function it replaced; a child sees nothing unless the value
+    # is exported, so the gate would have used its 1800-second default while the
+    # terminal showed the value that was set. `README.md` tells people to set these.
+    #
+    # ASSIGNED, NOT EXPORTED, and the probe is a CHILD — passing it through `env`
+    # would test the harness rather than the setup block, which is how the
+    # behaviour reached review uncovered in the first place.
+    #
+    # `TMPDIR` points into the probe's own tree: the setup block allocates the
+    # round's summary file with `mktemp -t`, and two more runs of it would leave
+    # two more files wherever that points — which the leak check at the end of this
+    # file would report, correctly, against a probe that is not about that.
+    cat "$SCRIPT_DIR/identitylib.sh" \
+        > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+    knob_out="$(cd "$SETUPTMP/repo" && run_limited 60 env -u PR_CI_TIMEOUT \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'PR_CI_TIMEOUT=3600
+                 eval "$1" >/dev/null
+                 bash -c '"'"'printf "child=%s" "${PR_CI_TIMEOUT-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+        || knob_out="FAILED:$knob_out"
+    case "$knob_out" in
+        *child=3600*) pass "a CI bound set without export still reaches the gate's process" ;;
+        *) die "the setup block does not export the CI bounds (got '$knob_out')" ;;
+    esac
+    # …AND THE LOOP VARIABLE DOES NOT LEAK INTO THE OPERATOR'S SHELL. This block
+    # runs in the driving session, so a name it forgets to clean up is written into
+    # that session and stays there — the same class the CI gate's `local`
+    # declarations used to guard, which is now the process boundary's job
+    # everywhere EXCEPT here, because this block genuinely does run in your shell.
+    #
+    # Two things are deliberately NOT asserted, because neither can fail:
+    # `export FOO` on an unset name puts nothing in the environment, so a child
+    # cannot tell that spelling from the guarded one; and the loop cannot abort a
+    # `set -e` session, because bash exempts a `&&` list whose left side fails.
+    # A fixture for either would be a green tick over an unverifiable claim.
+    knob_leak="$(cd "$SETUPTMP/repo" && run_limited 60 env \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'eval "$1" >/dev/null
+                 printf "leak=%s" "${_rb_knob-clean}"' _ "$setup_block" 2>&1)" \
+        || knob_leak="FAILED:$knob_leak"
+    case "$knob_leak" in
+        *leak=clean*) pass "…and the export loop leaves no name behind in that shell" ;;
+        *) die "the setup block leaks its loop variable into the session (got '$knob_leak')" ;;
+    esac
+
     # A readonly definition, in the SAME shell the block runs in — which is the
     # driver's situation, and the only place the case is reachable. `readonly -f`
     # does not survive a process boundary.
@@ -962,21 +778,17 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # `-e`, and the probe is EXPECTED to fail — that is the assertion — so an
     # unguarded assignment terminates the suite here instead of asserting anything.
     setup_rc=0
-    # EVERY function the setup block defines for itself, not just the parser. A
-    # stale `ci_gate` that returns 0 lets a red head close its round — the defect
-    # the gate exists to prevent, arriving through the gate itself — and it is
-    # reachable in exactly the persistent-shell state the parser is cleared for.
-    # EACH CASE GETS THE LIBRARY IT NEEDS, AND MUST ABORT FOR ITS OWN REASON.
+    # THE PARSER IS THE ONLY FUNCTION LEFT TO CLEAR. `ci_gate` was the other one,
+    # and it is a script now — a process cannot be shadowed by a `readonly -f`
+    # definition in the driver's shell, so the case it needed this guard for does
+    # not exist. That is the argument of issue #26 as a deletion: the guard was
+    # never the point, the function-in-a-document was.
     #
-    # Written with one shared empty `identitylib.sh`, the `ci_gate` case passed
-    # while proving nothing: the block aborted at the empty parser, long before it
-    # reached the gate, and "the driver stopped" was true for a reason that had
-    # nothing to do with what was being tested. So the parser case gets an empty
-    # library and the gate case gets the real one — and the expected abort message
-    # is asserted, so a stop for some other reason cannot be mistaken for this one
-    # again.
-    for stale_case in 'rb_identity:empty:could not be cleared' \
-                      'ci_gate:real:a pre-existing ci_gate could not be cleared'; do
+    # THE ABORT MESSAGE IS ASSERTED, not merely a non-zero status. Written with a
+    # shared empty `identitylib.sh`, a second case here once passed while proving
+    # nothing — the block aborted at the empty parser long before reaching what was
+    # under test, and "the driver stopped" was true for the wrong reason.
+    for stale_case in 'rb_identity:empty:could not be cleared'; do
         stale_fn="${stale_case%%:*}"; stale_rest="${stale_case#*:}"
         stale_lib="${stale_rest%%:*}"; stale_msg="${stale_rest#*:}"
         if [ "$stale_lib" = empty ]; then

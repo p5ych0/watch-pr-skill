@@ -448,7 +448,12 @@ plugin docs and open an issue.
   Fix it, push again, and the round continues.
 - **A round waits on "pending":** the checks start when the push lands, so it
   waits for them rather than reading "still running" as a pass. Set
-  `PR_CI_TIMEOUT` if your CI takes longer than thirty minutes.
+  `PR_CI_TIMEOUT` if your CI takes longer than thirty minutes. **Export them**, or
+  set them on the command that starts the session: the CI gate is a separate
+  process, so a bare `PR_CI_TIMEOUT=3600` in your shell is invisible to it and the
+  default applies while your terminal shows the value you set. The driver exports
+  any that are already set when it starts, so `export PR_CI_TIMEOUT=3600` before
+  invoking the skill is enough.
 
 ## License
 
