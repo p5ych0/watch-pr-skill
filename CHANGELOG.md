@@ -127,6 +127,14 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **A reserved word is recognised at the first command word or not at all.**
+  `command coproc` makes it an operand of the builtin, and every bash does an
+  ordinary lookup — unwrapping the wrapper first turned that into the Bash 4
+  construct. An ANSI-C fragment in a delimiter *quotes* as well as decodes, so a
+  body under it does not expand; a redirection target is not an allocation, because
+  a word does not begin after `<`; and the last word on a line carries its quoting
+  like any other, which two of the flush paths were dropping.
+
 - **Four forms of quoting, not two.** `$'coproc'` and `$"coproc"` prevent
   reserved-word recognition as much as `'coproc'` and `\coproc` do, and a command
   word carrying either was not being recorded as quoted. An ANSI-C fragment inside

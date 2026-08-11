@@ -287,7 +287,7 @@ SCAN_PROLOGUE='
                 # THE SAME FLUSH AS THE UNQUOTED BRANCH. `out="$(grep PATTERN f)"`
                 # is the ordinary spelling, and appending the words to the
                 # assignment left `out=grep` with no command in it.
-                if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0 }
+                if (word != "") { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
                 word = ""; saw = 0
                 SC_ARGC++; SC_ARGV[SC_ARGC] = "("; SC_AOP[SC_ARGC] = 1; SC_SUB[SC_ARGC] = 1
                 SC_EFF = SC_EFF substr(l, i, 2)
@@ -306,7 +306,7 @@ SCAN_PROLOGUE='
             if (ch == q) { q = ""; i++; continue }
             SC_EFF = SC_EFF ch; word = word ch; i++; continue
         }
-        if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word }
+        if (saw) { SC_ARGC++; SC_ARGV[SC_ARGC] = word; SC_AOP[SC_ARGC] = 0; SC_WQ[SC_ARGC] = wq }
         # WHERE THE QUOTING STOOD AT THE END, so the next physical line can start
         # from it: a word opened on one physical line and closed on the next is
         # ONE word, and a scan that restarted at every line read that closing
@@ -641,11 +641,14 @@ SCAN_PROLOGUE='
         return out
     }
     # True when `cmd` is the command word of some simple command on this line.
+    # WITHOUT UNWRAPPING. A reserved word is recognised at the FIRST command word or
+    # not at all: `command coproc` makes it an operand of the builtin, and every bash
+    # does an ordinary command lookup — unwrapping the wrapper first turned that into
+    # the Bash 4 construct.
     function cmd_is_unquoted(cmd, i) {
         i = 1
         while (i <= SC_ARGC) {
             i = simple_cmd(i)
-            if (!unwrap()) continue
             if (CMDFN) continue
             if (CMDW == cmd && !CMDQ) return 1
         }
@@ -1294,7 +1297,11 @@ SCAN_PROLOGUE='
                       if (SC_CTX[hdq] == "$" && substr(hdsrc, hdq, 2) == "$\047") {
                           hden2 = ansic_span_end(hdsrc, hdq + 2)
                           if (hden2 > 0) {
+                              # …AND IT QUOTES. An ANSI-C fragment is quoting as
+                              # much as any other, so a body under this delimiter
+                              # does not expand.
                               hdw = hdw ansic_decode(substr(hdsrc, hdq + 2, hden2 - hdq - 2))
+                              hdquoted = 1
                               hdq = hden2; continue
                           }
                       }
@@ -1788,7 +1795,10 @@ RULE_D='
         # the two brackets are not the same answer.
         # …AND THE BOUNDARY ITSELF MUST BE ONE. `\({fd}>out` has an ESCAPED
         # parenthesis, which is an ordinary character in the middle of a word.
-        if (fdi > 1 && (SC_ESC[fdi - 1] || substr(line, fdi - 1, 1) !~ /[[:space:];&|<(]/)) continue
+        # …AND A REDIRECTION OPERATOR IS NOT A BOUNDARY EITHER. `printf x <{fd}>out`
+        # has an ordinary filename `{fd}` as the target of the first redirection; an
+        # allocation begins a word, and a word does not begin after `<`.
+        if (fdi > 1 && (SC_ESC[fdi - 1] || substr(line, fdi - 1, 1) !~ /[[:space:];&|(]/)) continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -2768,6 +2778,12 @@ refute coprocansi "LC_ALL=C \$${sq}coproc${sq} true || :"        D "an ANSI-C qu
 refute coproclocale "LC_ALL=C \$${dq}coproc${dq} true || :"      D "a locale-quoted coproc"
 # …and an ESCAPED parenthesis is an ordinary character, not a command boundary.
 refute fdescparen "printf %s ${bs}({fd}>out"                   D "a brace after an escaped parenthesis"
+# …and a redirection TARGET is not an allocation: a word does not begin after `<`.
+refute fdtarget  "printf x <{fd}>out"                          D "a filename that looks like an allocation"
+# …and a reserved word is recognised at the FIRST command word or not at all.
+refute coproccmd "command coproc || :"                         D "coproc as an operand of the command builtin"
+# …and the LAST word on a line carries its quoting like any other.
+refute coproclast "LC_ALL=C \$${sq}coproc${sq}"                  D "a quoted coproc as the final word"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2918,6 +2934,16 @@ sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
 { [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \
     && pass "a quoted parenthesis does not close a delimiter substitution" \
     || die "the delimiter stopped at a quoted parenthesis ('$sq2_hits')"
+
+# …and that fragment QUOTES, so a body under such a delimiter does not expand.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<x$(printf $%sEOF%s)\n' "$sq" "$sq"
+  printf 'text $(grep -qE "%ss" f) more\n' "$bs"
+  printf 'x$(printf EOF)\n'; } > "$PTMP/substansicq.sh"
+saq_hits="$(scan "$RULE_A" "$PTMP/substansicq.sh")" || saq_hits=SCANFAIL
+{ [ "$saq_hits" != SCANFAIL ] && [ -z "$saq_hits" ]; } \
+    && pass "an ANSI-C fragment in a delimiter suppresses expansion" \
+    || die "a quoted fragment left the body expanding ('$saq_hits')"
 
 # …and an ANSI-C fragment inside it is DECODED, not copied: bash forms the delimiter
 # from the decoded text, so `x$(printf $'E\x4fF')` names `x$(printf EOF)`.
