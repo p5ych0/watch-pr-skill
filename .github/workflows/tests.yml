@@ -78,9 +78,11 @@ jobs:
   #
   # A TEXT SCANNER WAS BUILT FOR THIS AND DELETED. It reached 2,200 lines and
   # fifty-two review rounds; every round it answered one finding and produced the
-  # next, and several of its own defects rejected portable code. `CLAUDE.md`
-  # records the same shape being built and deleted six times before. Running the
-  # thing needs no grammar and cannot be one entry behind.
+  # next, and several of its own defects rejected portable code. `CLAUDE.md` records
+  # the same shape twice more: six successive versions of a structural check on
+  # `return`, each defeated by legal Bash, and each reporting PASS while its stated
+  # invariant was false. Running the thing needs no grammar and cannot be one entry
+  # behind.
   #
   # WHAT IT DOES NOT COVER, stated rather than assumed:
   #
@@ -116,12 +118,26 @@ jobs:
           path: ~/bash32
           key: bash-3.2-${{ runner.os }}
 
+      # THE DIGEST IS PINNED, and the build stops if it does not match. This step
+      # downloads a tarball and runs `configure` and `make` from it, so whatever
+      # arrives executes in CI with the job's permissions; a bare `curl | build`
+      # trusts the network and the mirror to be honest on every run, forever.
+      # 26c990… is the digest of the tarball whose detached GNU signature verifies
+      # against Chet Ramey's key, 7C0135FB088AAF6C66C650B9BB5869F064EA74AB.
+      #
+      # `sha256sum` IS AVAILABLE HERE and only here: the step that removes the
+      # GNU-only tools runs after this one. That ordering is load-bearing.
       - name: Build bash 3.2
         if: steps.cache-bash32.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           mkdir -p /tmp/bash32src && cd /tmp/bash32src
           curl -fsSLO https://ftp.gnu.org/gnu/bash/bash-3.2.tar.gz
+          echo '26c99025b59e30779300b68adb764f824974d267a4d7cc1b347d14a2393f9fb4  bash-3.2.tar.gz' > bash-3.2.tar.gz.sha256
+          sha256sum -c bash-3.2.tar.gz.sha256 || {
+            echo "::error::bash-3.2.tar.gz does not match its pinned digest; refusing to build it"
+            exit 1
+          }
           tar xzf bash-3.2.tar.gz && cd bash-3.2
           # 3.2 predates the compilers on this runner; these two keep it building
           # without changing what the shell accepts.

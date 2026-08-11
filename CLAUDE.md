@@ -146,7 +146,7 @@ category; do not "fix" a script into a stricter mode.
   **Do not build a text scanner for this.** One was, and it is why this bullet is
   short: 2,200 lines and fifty-two review rounds, every round answering one finding
   and producing the next, with several of its own defects rejecting portable code.
-  It is the shape recorded twice more in this file. What it bought over running the
+  It is the shape this file records twice more. What it bought over running the
   suite was unexecuted branches; what it cost was the review budget of an entire
   release.
 
