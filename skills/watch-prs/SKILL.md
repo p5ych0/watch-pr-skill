@@ -220,123 +220,20 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 # passes here" and "the checks pass there" are different claims, and only the
 # first was ever being made.
 #
-# Defined once and called from both push sites, because two copies of a gate is
-# how one of them comes to be missing a rule the other has.
+# THE GATE IS A SCRIPT, not a function defined here.
 #
-# The stale definition is cleared first and the clearing is CHECKED, exactly as
-# for `rb_identity` above: this runs in the driving session's own shell, where an
-# earlier block may have defined `ci_gate`, and `readonly -f` makes the unset fail
-# while leaving the old function installed. A stale gate that returns 0 lets a red
-# head close its round — the defect this whole gate exists to prevent, arriving
-# through the gate itself.
-unset -f ci_gate 2>/dev/null \
-    || { echo "ABORT: a pre-existing ci_gate could not be cleared"; exit 1; }
-ci_gate() {   # ci_gate <pr> <pushed-oid> ; 0 carry on, 1 stop
-    local pr="$1" oid="$2" rc elapsed budget nap stable_rc="" stable_since=0
-    local iv="${PR_CI_INTERVAL:-30}" tmo="${PR_CI_TIMEOUT:-1800}" grace="${PR_CI_GRACE:-90}"
-    # THE BOUNDS ARE VALIDATED BEFORE THE LOOP, and a bad value falls back to the
-    # default rather than disabling the bound. `PR_CI_INTERVAL=0` sleeps zero
-    # seconds and leaves the elapsed count unchanged forever, and a non-numeric
-    # `PR_CI_TIMEOUT` makes the `-ge` comparison fail on every iteration — either
-    # one turns the supposedly bounded gate into an unbounded API-polling loop.
-    # Leading zeros are rejected rather than accepted as digits: Bash reads them
-    # as octal in arithmetic, so `08` aborts and `00` is zero.
-    case "$iv" in  ""|0|0*|*[!0-9]*|??????*) iv=30 ;; esac
-    case "$tmo" in ""|0*|*[!0-9]*|??????*)   tmo=1800 ;; esac
-    case "$grace" in ""|0*|*[!0-9]*|??????*) grace=90 ;; esac
-    local probe="${PR_CI_PROBE_TIMEOUT:-60}"
-    case "$probe" in ""|0|0*|*[!0-9]*|??????*) probe=60 ;; esac
-    # ELAPSED WALL TIME, not the sum of the sleeps. Counting only the sleeps
-    # excludes however long each probe took, so two slow `gh` calls per iteration
-    # silently turned a documented thirty-minute bound into ninety. `$SECONDS` is
-    # wall time and needs no external command; the baseline is a local, so nothing
-    # else in the session has its own reading disturbed.
-    local t0=$SECONDS
-    while :; do
-        # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
-        # number, and the API can still be serving the PREVIOUS head for a moment
-        # after a push — the head confirmation below already retries for exactly
-        # that lag. Asking without the OID meant a green answer about the head
-        # from the round before, which is the last round's answer to this round's
-        # question, and it reads as permission to close.
-        # EACH PROBE IS BOUNDED BY WHAT IS LEFT, not only by its own default. The
-        # helper watchdogs its `gh` calls, but at sixty seconds each — so with
-        # `PR_CI_TIMEOUT=1` a hung request ran for a minute before this loop could
-        # look at the clock at all. A bound the callee does not know about is not
-        # a bound; the remaining budget is passed down.
-        elapsed=$((SECONDS - t0))
-        # AN EXPIRED DEADLINE IS NOT A SHORT DEADLINE. Clamping an exhausted
-        # budget up to one second started another probe past the bound — and each
-        # of those can take its second plus the watchdog's five-second escalation,
-        # so the clamp turned the timeout into a floor. The clock is checked
-        # BEFORE the probe as well as after it, because a sleep that lands exactly
-        # on the deadline would otherwise buy one more request.
-        if [ "$elapsed" -ge "$tmo" ]; then
-            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
-            return 1
-        fi
-        budget=$((tmo - elapsed))
-        [ "$budget" -gt "$probe" ] && budget="$probe"
-        PR_CI_PROBE_TIMEOUT="$budget" "$RB_SCRIPTS"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
-        elapsed=$((SECONDS - t0))
-        # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With
-        # the check at the bottom of the loop, a `PR_CI_TIMEOUT` shorter than
-        # `PR_CI_GRACE` — or simply a probe that returned green after the deadline
-        # — closed the round past its own bound, which is a bound that does not
-        # bind. A gate that has run out of time has no verdict, whatever the last
-        # answer was.
-        if [ "$elapsed" -ge "$tmo" ]; then
-            echo "ABORT: the checks had not settled after ${tmo}s; do not close this round on an unknown state."
-            return 1
-        fi
-        case "$rc" in
-            0|4)
-                # A GOOD ANSWER HAS TO HOLD. Both of these close the round, and
-                # both can be true of an incomplete picture: a push that triggers
-                # two workflows can have the fast one registered and passing
-                # before the second is registered at all, and a run is registered
-                # a moment after the head moves, so the first probe reports `none`
-                # on a repository that does have CI. Closing on either reproduces
-                # the red-head closure with an extra step — the later workflow
-                # appears and fails after the round is already closed.
-                #
-                # So a verdict that would close the round must still be the answer
-                # `grace` seconds later. Anything else resets it, because the
-                # picture changed.
-                if [ "$rc" = "$stable_rc" ] && [ $((elapsed - stable_since)) -ge "$grace" ]; then
-                    if [ "$rc" -eq 4 ]; then
-                        echo "note: no checks are configured; the CI gate has nothing to assert"
-                    fi
-                    return 0
-                fi
-                if [ "$rc" != "$stable_rc" ]; then stable_rc="$rc"; stable_since="$elapsed"; fi ;;
-            1) echo "ABORT: the head you just pushed is RED. Fix it and push again; do not close this round."
-               return 1 ;;
-            3|5) stable_rc=""; stable_since=0 ;;   # running, or the API has not caught up
-            *) echo "ABORT: could not establish the check state (rc=$rc); do not close this round blind."
-               return 1 ;;
-        esac
-        # THE SLEEP IS CAPPED AT WHAT IS LEFT. Sleeping a full interval when less
-        # than that remains means the gate cannot report its own deadline until
-        # after it has passed — `PR_CI_TIMEOUT=1` with the default 30-second
-        # interval took thirty seconds to say it had run out of one. The bound is
-        # then only ever approximately the bound, and the smaller it is set the
-        # more approximate it gets.
-        nap=$((tmo - elapsed))
-        [ "$nap" -gt "$iv" ] && nap="$iv"
-        # `sleep` takes its status like every other call here. A `sleep` that
-        # returned immediately — interrupted, or missing — would spin this loop
-        # against the API until the timeout, and with the elapsed count now taken
-        # from the clock the loop would still be bounded but would poll hard for
-        # the whole of it.
-        sleep "$nap" || { echo "ABORT: the CI wait could not sleep; refusing to spin."; return 1; }
-    done
-}
-# …and the definition that ended up installed is the one just written. A `.`-style
-# failure or a surviving readonly copy is caught above; this catches the case
-# where nothing is defined at all.
-[ "$(type -t ci_gate 2>/dev/null)" = function ] \
-    || { echo "ABORT: the CI gate is not defined"; exit 1; }
+# It was ~100 lines of shell in this document, pasted into your session and called
+# from four sites below. Nothing checked it: the suite, `pr-selfcheck.sh` and the
+# bash 3.2 CI job all cover `scripts/`, and none of them can see shell inside a
+# Markdown file — `test-pr-skill-contract.sh` had to `sed` the function back out of
+# this document to execute it at all. It also needed a clear-and-verify dance
+# around its own definition, because a `readonly -f` copy left over in your shell
+# would silently survive an `unset -f` and a stale gate returning 0 lets a red head
+# close its round. A script cannot be shadowed that way, so all of that is gone
+# with it. Issue #26.
+#
+# `pr-ci-gate.sh <pr> <head-oid>` — 0 carry on, 1 stop. Same bounds, same
+# `PR_CI_*` knobs, same diagnostics.
 # Where each round's summary is written before it is posted. A file, not a shell
 # variable: the text is long, contains backticks and quotes, and passing it
 # inline mangles it. Freshly created per PR and per session, because a reused
@@ -749,7 +646,7 @@ git push || { echo "ABORT: push failed; do not close or re-request this round.";
 # resolved and a summary posted against a red head are a round closed on code that
 # does not build — and in this mode nothing has been resolved or posted yet, so a
 # red head leaves the round genuinely open.
-ci_gate N "$HEAD_PUSHED" || exit 0
+"$RB_SCRIPTS"/pr-ci-gate.sh N "$HEAD_PUSHED" || exit 0
 # reply + resolve threads here
 # One comment carries both. Branch on it — the comment IS the request, so a
 # failed post means no review was queued and the wait step would poll for one
@@ -882,7 +779,7 @@ git push || { echo "ABORT: push failed; no review was queued and the fixes are n
 # The gate, before anything that cannot be taken back. A red head stops here with
 # the threads still open and no summary posted, so the round is genuinely still
 # open and the next push is its continuation rather than a correction.
-ci_gate N "$HEAD_BEFORE" || exit 0
+"$RB_SCRIPTS"/pr-ci-gate.sh N "$HEAD_BEFORE" || exit 0
 HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
@@ -1131,7 +1028,7 @@ fi
 # looks only at REQUIRED checks, which a failing optional one is not. Every path
 # that accepts a verdict as phase-completing has to have seen the checks, not just
 # the paths that pushed something.
-ci_gate N "$CODEX_SHA" || exit 0
+"$RB_SCRIPTS"/pr-ci-gate.sh N "$CODEX_SHA" || exit 0
 
 # THE SUMMARY GOES FIRST, and its post is branched on.
 #
@@ -1451,7 +1348,7 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # checks at all, which makes that probe blind to everything.
 #
 # The same gate, on the head the merge is pinned to.
-ci_gate N "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 0; }
+"$RB_SCRIPTS"/pr-ci-gate.sh N "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 0; }
 
 # (4) Required checks green — through the same helper the round loop uses.
 #

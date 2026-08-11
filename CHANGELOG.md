@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.7] — 2026-08-11
+
+- **The CI gate is a script, not a function defined in `SKILL.md`.** About a
+  hundred lines of shell lived in a fenced block in that document, were pasted into
+  the driving session's shell, and were called from four sites. Nothing checked
+  them: the suite, `pr-selfcheck.sh` and the `macos-shell` job all cover
+  `scripts/`, and none of them can see shell inside a Markdown file —
+  `test-pr-skill-contract.sh` had resorted to `sed`-ing the function back out of
+  the document in order to execute it.
+
+  `pr-ci-gate.sh <pr> <head-oid>` takes the same arguments, honours the same
+  `PR_CI_*` bounds, prints the same diagnostics, and returns the same 0/1. Its
+  behavioural cases moved with it into `test-pr-ci-gate.sh`, where they run the
+  real subject; what stays in the contract test is what belongs there — that the
+  driver *calls* the gate, at every site that accepts a head, pinned to an OID, in
+  the right order.
+
+  Two things disappeared rather than moved. The `unset -f` / clearing-check /
+  `type -t` dance existed only because a function pasted into a session that may
+  already have one can be shadowed by a `readonly -f` copy, and a stale gate
+  returning 0 lets a red head close its round; a process cannot be shadowed that
+  way. And the contract test's check that every name the gate assigns is declared
+  `local` — a leak into the operator's shell — is now enforced by the process
+  boundary instead.
+
+  First step of #26, which records the remaining ~840 lines.
+
 ## [2.0.6] — 2026-08-11
 
 - **`pr-watch.sh` never ran on macOS, and neither did the merge gate in
