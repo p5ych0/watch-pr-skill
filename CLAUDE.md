@@ -136,7 +136,7 @@ category; do not "fix" a script into a stricter mode.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
 - **Portable, and proven by running rather than by reading.** The `macos-shell` CI
-  job runs the whole suite on a bash 3.2 built from source and first on `PATH`,
+  job runs the whole suite on a bash 3.2.57 built from source and first on `PATH`,
   with the GNU-only tools removed. Post-3.2 constructs fail there, and so do the
   differences in PARSING that no feature list contains — an inline `[[ … =~ … ]]`
   pattern with a parenthesis is a syntax error on 3.2, and `pr-watch.sh` carried

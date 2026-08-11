@@ -17,9 +17,18 @@
   Those ran as commands every time the fixture built a stub.
 
 - **CI runs the suite a second time on a machine shaped like a Mac.** A new
-  `macos-shell` job builds bash 3.2 from source, puts it *first on `PATH`* so the
-  suite's `bash -c` calls and `#!/usr/bin/env bash` helpers reach it too, and
-  removes the GNU-only tools. Both defects above were found by it. It closes the
+  `macos-shell` job builds **bash 3.2.57** from source — the base release with the
+  official patch series 001–057 applied, which is the patch level macOS ships —
+  puts it *first on `PATH`* so the suite's `bash -c` calls and
+  `#!/usr/bin/env bash` helpers reach it too, and removes the GNU-only tools.
+
+  The patches are not cosmetic. Building 3.2.0 and calling it "3.2" would have
+  been *more permissive* than a Mac, not less: the environment-function hardening
+  in the 052+ range rejects input the base release accepts, and this suite exports
+  functions. The job now asserts the exact patch level rather than a `3.2` prefix,
+  and both the tarball and the patch series are pinned by digest — the series as
+  one digest over all fifty-seven files concatenated, so any of them changing fails
+  closed. Both defects above were found by it. It closes the
   case for which #15 was filed — `timeout`, `sha1sum` and `seq` had each reached
   the tree and each was caught by review — without asking anything about what the
   text of a script looks like.

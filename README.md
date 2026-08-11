@@ -173,8 +173,8 @@ caveat is gone with the daemons it was about.
 The suite is a mandatory pre-push gate, so a GNU-only construct *in the suite*
 stops a macOS contributor from closing a review round while Ubuntu CI stays green
 — invisible on the machine that introduced it. CI therefore runs the whole suite a
-second time on a machine shaped like a Mac: **bash 3.2 built from source and first
-on `PATH`**, with the GNU-only tools removed. Constructs newer than 3.2 fail there
+second time on a machine shaped like a Mac: **bash 3.2.57 built from source — the base release with the official patch
+series applied, which is the patch level macOS ships — and first on `PATH`**, with the GNU-only tools removed. Constructs newer than 3.2 fail there
 outright, and so do the parsing differences no feature list would contain; a
 command name assembled at runtime — `_a=sha1; _b=sum; "$_a$_b"` — dies on absence,
 which no text scan can see.

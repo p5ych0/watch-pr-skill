@@ -66,11 +66,16 @@ jobs:
   # THIS JOB RUNS THE SUITE RATHER THAN READING IT. Both halves of the difference
   # are set up and the existing tests are the check:
   #
-  #   - Bash is 3.2, the version macOS ships — the base release, where macOS is at
-  #     the 3.2.57 patch level. The 57 patches are bug fixes, so this parser is at
-  #     worst STRICTER than a Mac's: the direction of any difference is a false
-  #     alarm here rather than a miss there, which is the safe one to have. It is
-  #     also the tarball with a detached GNU signature to verify against.
+  #   - Bash is 3.2.57, the patch level macOS ships — the base tarball with the
+  #     official patch series 001 through 057 applied, and the built shell is made
+  #     to say `3.2.57` before anything runs.
+  #
+  #     THE PATCHES ARE NOT OPTIONAL, and the argument for skipping them was
+  #     backwards. "Later patches are bug fixes, so the base parser can only be
+  #     stricter" is false in the direction that matters: the environment-function
+  #     hardening in the 052+ range REJECTS input 3.2.0 accepts, and this suite
+  #     exports functions. A 3.2.0 job would have gone green for behaviour stock
+  #     macOS refuses, which is the failure this whole job exists to prevent.
   #
   #     `mapfile`, `declare -A`, `${x^^}`, `coproc`, `wait -n`,
   #     `shopt -s lastpipe` and every other post-3.2 spelling
@@ -116,6 +121,12 @@ jobs:
     # check. Changing the pin now misses the cache by construction and rebuilds.
     env:
       BASH32_SHA256: 26c99025b59e30779300b68adb764f824974d267a4d7cc1b347d14a2393f9fb4
+      # ONE DIGEST OVER THE WHOLE SERIES, taken across `bash32-001` … `bash32-057`
+      # concatenated in order. Fifty-seven pinned values would be fifty-seven
+      # chances to mistype one; this fails closed on any of them changing, and was
+      # computed from a set whose every detached signature verifies against the
+      # same key as the tarball.
+      BASH32_PATCHES_SHA256: 6839d51fdeff01dcbe5e52c4cc7174cb655d44a110535efe2357c4645aa22230
     steps:
       - uses: actions/checkout@v4
 
@@ -130,7 +141,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bash32
-          key: bash-3.2-${{ runner.os }}-${{ env.BASH32_SHA256 }}
+          key: bash-3.2.57-${{ runner.os }}-${{ env.BASH32_SHA256 }}-${{ env.BASH32_PATCHES_SHA256 }}
 
       # THE DIGEST IS PINNED, and the build stops if it does not match. This step
       # downloads a tarball and runs `configure` and `make` from it, so whatever
@@ -152,7 +163,31 @@ jobs:
             echo "::error::bash-3.2.tar.gz does not match its pinned digest; refusing to build it"
             exit 1
           }
+          # THE PATCH SERIES, verified as one stream before any of it is applied.
+          mkdir -p patches
+          i=1
+          while [ "$i" -le 57 ]; do
+            n="$(printf '%03d' "$i")"
+            curl -fsS -o "patches/bash32-$n" \
+              "https://ftp.gnu.org/gnu/bash/bash-3.2-patches/bash32-$n" || {
+                echo "::error::patch bash32-$n could not be fetched"; exit 1; }
+            i=$((i + 1))
+          done
+          cat patches/bash32-0* > patches.concat
+          echo "$BASH32_PATCHES_SHA256  patches.concat" > patches.sha256
+          sha256sum -c patches.sha256 || {
+            echo "::error::the bash 3.2 patch series does not match its pinned digest; refusing to build it"
+            exit 1
+          }
           tar xzf bash-3.2.tar.gz && cd bash-3.2
+          for p in ../patches/bash32-0*; do
+            patch -p0 -s -i "$p" || { echo "::error::$p did not apply"; exit 1; }
+          done
+          # THE BUILT SHELL MUST SAY 57. `patchlevel.h` is what the version string
+          # is made from, so a series that fetched but half-applied would otherwise
+          # produce a 3.2.x that this job accepts as "3.2".
+          grep -q '^#define PATCHLEVEL 57$' patchlevel.h || {
+            echo "::error::patchlevel.h is not at 57 after applying the series"; exit 1; }
           # 3.2 predates the compilers on this runner; these two keep it building
           # without changing what the shell accepts.
           ./configure --prefix="$HOME/bash32" --without-bash-malloc \
@@ -184,9 +219,12 @@ jobs:
               shebang)   printf '#!/usr/bin/env bash\necho "$BASH_VERSION"\n' > /tmp/probe.sh
                          chmod +x /tmp/probe.sh; got="$(/tmp/probe.sh)" ;;
             esac
+            # THE EXACT PATCH LEVEL, not `3.2*`. A cached or half-applied build
+            # producing 3.2.0 would satisfy a prefix match and quietly test a
+            # parser more permissive than the one macOS runs.
             case "$got" in
-              3.2*) echo "confirmed 3.2 via $probe" ;;
-              *) echo "::error::$probe reached bash $got, not 3.2"; exit 1 ;;
+              3.2.57*) echo "confirmed 3.2.57 via $probe" ;;
+              *) echo "::error::$probe reached bash $got, not 3.2.57"; exit 1 ;;
             esac
           done
           # …and that it REJECTS what it should, so a build that quietly produced a
