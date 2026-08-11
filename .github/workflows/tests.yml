@@ -120,17 +120,39 @@ jobs:
             CFLAGS="-O2 -std=gnu89 -Wno-implicit-function-declaration"
           make -j"$(nproc)" && make install
 
-      - name: Prove it is 3.2
+      # ON PATH, NOT JUST AS THE OUTER INTERPRETER. The suite runs helpers with
+      # `#!/usr/bin/env bash` and calls `bash -c` from inside tests; both resolve
+      # through PATH, so invoking the 3.2 binary directly pinned only the shell that
+      # reads the test FILE and left every nested shell as the runner's bash 5.
+      # A job that proved that much would have been claiming far more than it checked.
+      - name: Put bash 3.2 first on PATH
         run: |
           set -euo pipefail
-          "$HOME/bash32/bin/bash" --version | head -1
-          case "$("$HOME/bash32/bin/bash" -c 'echo "$BASH_VERSION"')" in
-            3.2*) echo "confirmed 3.2" ;;
-            *) echo "::error::not bash 3.2"; exit 1 ;;
-          esac
+          mkdir -p "$HOME/bash32/shim"
+          ln -sf "$HOME/bash32/bin/bash" "$HOME/bash32/shim/bash"
+          echo "$HOME/bash32/shim" >> "$GITHUB_PATH"
+
+      - name: Prove it is 3.2, everywhere it will be used
+        run: |
+          set -euo pipefail
+          bash --version | head -1
+          # The three ways the suite reaches a shell: the command name, a nested
+          # `bash -c`, and a `#!/usr/bin/env bash` script.
+          for probe in 'bash -c' 'nested' 'shebang'; do
+            case "$probe" in
+              'bash -c') got="$(bash -c 'echo "$BASH_VERSION"')" ;;
+              nested)    got="$(bash -c 'bash -c "echo \$BASH_VERSION"')" ;;
+              shebang)   printf '#!/usr/bin/env bash\necho "$BASH_VERSION"\n' > /tmp/probe.sh
+                         chmod +x /tmp/probe.sh; got="$(/tmp/probe.sh)" ;;
+            esac
+            case "$got" in
+              3.2*) echo "confirmed 3.2 via $probe" ;;
+              *) echo "::error::$probe reached bash $got, not 3.2"; exit 1 ;;
+            esac
+          done
           # …and that it REJECTS what it should, so a build that quietly produced a
           # newer bash cannot pass this job silently.
-          if "$HOME/bash32/bin/bash" -c 'declare -A m' 2>/dev/null; then
+          if bash -c 'declare -A m' 2>/dev/null; then
             echo "::error::this bash accepts declare -A; it is not 3.2"
             exit 1
           fi
@@ -149,7 +171,7 @@ jobs:
           for t in test-*.sh; do
             total=$((total + 1))
             echo "::group::$t"
-            if "$HOME/bash32/bin/bash" "$t"; then
+            if bash "$t"; then
               echo "PASS $t"
             else
               echo "::error file=skills/watch-prs/scripts/$t::$t failed under bash 3.2"
