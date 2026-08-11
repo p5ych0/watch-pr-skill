@@ -165,7 +165,9 @@ SCAN_PROLOGUE='
                     if (en > 0) {
                         for (k = i; k <= en; k++) { SC_CTX[k] = "$"; SC_ESC[k] = 0 }
                         SC_EFF = SC_EFF ansic_decode(substr(l, i + 2, en - i - 2))
-                        word = word ansic_decode(substr(l, i + 2, en - i - 2)); saw = 1
+                        # QUOTED, LIKE EVERY OTHER FORM. `$'"'"'…'"'"'` prevents reserved-word
+                        # recognition as much as a quote character does.
+                        word = word ansic_decode(substr(l, i + 2, en - i - 2)); saw = 1; wq = 1
                         i = en + 1; continue
                     }
                 }
@@ -174,7 +176,7 @@ SCAN_PROLOGUE='
                 # `$"…"` IS LOCALE TRANSLATION, and the dollar is not part of the
                 # word: `$"grep"` invokes `grep`, and keeping it produced a command
                 # named `$grep` that no rule recognises.
-                if (substr(l, i, 2) == "$\042") { q = "\042"; saw = 1; i += 2; continue }
+                if (substr(l, i, 2) == "$\042") { q = "\042"; saw = 1; wq = 1; i += 2; continue }
                 if (ch == "\047" || ch == "\042") { q = ch; saw = 1; wq = 1; i++; continue }
                 # Unquoted whitespace ENDS a word; an unquoted control operator ends
                 # one and is a token of its own, so `(test -v x)` has `test` as a
@@ -1285,6 +1287,17 @@ SCAN_PROLOGUE='
                   # BACKSLASH that quotes something is gone too, so `x$(printf E\OF)`
                   # names `x$(printf EOF)`.
                   for (hdq = hdk; hdq < hdj; hdq++) {
+                      # AN ANSI-C FRAGMENT IS DECODED, not copied. Bash forms the
+                      # delimiter from the decoded text, so `x$(printf $'"'"'E\x4fF'"'"')`
+                      # names `x$(printf EOF)` — copying the characters kept the
+                      # quotes and the escape.
+                      if (SC_CTX[hdq] == "$" && substr(hdsrc, hdq, 2) == "$\047") {
+                          hden2 = ansic_span_end(hdsrc, hdq + 2)
+                          if (hden2 > 0) {
+                              hdw = hdw ansic_decode(substr(hdsrc, hdq + 2, hden2 - hdq - 2))
+                              hdq = hden2; continue
+                          }
+                      }
                       if (SC_CTX[hdq] == "" && (substr(hdsrc, hdq, 1) == "\047" ||
                                                 substr(hdsrc, hdq, 1) == "\042")) continue
                       if (SC_CTX[hdq] != "" && !SC_ESC[hdq] && substr(hdsrc, hdq, 1) == SC_CTX[hdq]) continue
@@ -1773,7 +1786,9 @@ RULE_D='
         # `(` OPENS A COMMAND, so `({fd}>file printf x)` really allocates — while
         # `)` ENDS a substitution and the word continues through it, which is why
         # the two brackets are not the same answer.
-        if (fdi > 1 && substr(line, fdi - 1, 1) !~ /[[:space:];&|<(]/) continue
+        # …AND THE BOUNDARY ITSELF MUST BE ONE. `\({fd}>out` has an ESCAPED
+        # parenthesis, which is an ordinary character in the middle of a word.
+        if (fdi > 1 && (SC_ESC[fdi - 1] || substr(line, fdi - 1, 1) !~ /[[:space:];&|<(]/)) continue
         if (substr(line, fdi) ~ /^\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/) {
             report("a {varname} descriptor is Bash 4: " line); return }
     }
@@ -2748,6 +2763,11 @@ plant funcleak   "${sq}function${sq}; mapfile -t values < f || :" D "a builtin a
 plant fdsubshell "({fd}>file printf x) || :"                   D "a descriptor allocation inside a subshell"
 # …while `awk -f prog` takes its program from a FILE, so later words are inputs.
 refute awkprog   "awk -f program.awk ${sq}file${bs}s${sq}"     A "an input file after a program file"
+# …and the ANSI-C and locale forms are quoting too, on a command word.
+refute coprocansi "LC_ALL=C \$${sq}coproc${sq} true || :"        D "an ANSI-C quoted coproc"
+refute coproclocale "LC_ALL=C \$${dq}coproc${dq} true || :"      D "a locale-quoted coproc"
+# …and an ESCAPED parenthesis is an ordinary character, not a command boundary.
+refute fdescparen "printf %s ${bs}({fd}>out"                   D "a brace after an escaped parenthesis"
 # …while `$"grep"` is locale translation and invokes `grep`.
 plant localeword "LC_ALL=C \$${dq}grep${dq} -qE ${sq}${bs}s${sq} ${dq}\$f${dq}" A "an engine written as a locale-quoted word"
 
@@ -2898,6 +2918,18 @@ sq2_hits="$(scan "$RULE_A" "$PTMP/substquote.sh")" || sq2_hits=SCANFAIL
 { [ "$sq2_hits" != SCANFAIL ] && [ -n "$sq2_hits" ]; } \
     && pass "a quoted parenthesis does not close a delimiter substitution" \
     || die "the delimiter stopped at a quoted parenthesis ('$sq2_hits')"
+
+# …and an ANSI-C fragment inside it is DECODED, not copied: bash forms the delimiter
+# from the decoded text, so `x$(printf $'E\x4fF')` names `x$(printf EOF)`.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'cat <<x$(printf $%sE%sx4fF%s)\n' "$sq" "$bs" "$sq"
+  printf 'body text\n'
+  printf 'x$(printf EOF)\n'
+  printf 'grep -qE "%ss" "$f"\n' "$bs"; } > "$PTMP/substansic.sh"
+sa_hits="$(scan "$RULE_A" "$PTMP/substansic.sh")" || sa_hits=SCANFAIL
+{ [ "$sa_hits" != SCANFAIL ] && [ -n "$sa_hits" ]; } \
+    && pass "an ANSI-C fragment in a delimiter is decoded" \
+    || die "the delimiter kept its ANSI-C text ('$sa_hits')"
 
 # …and the quote removal is FULL: a backslash that quotes something is gone from the
 # delimiter too, so `x$(printf E\OF)` names `x$(printf EOF)`.

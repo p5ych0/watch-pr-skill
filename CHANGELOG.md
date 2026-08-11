@@ -127,6 +127,13 @@ stays green: the failure is invisible on the machine that introduces it. Closes
   than the source text, so a quoted `'globstar'` operand counts: the same move as
   judging escape parity on it.
 
+- **Four forms of quoting, not two.** `$'coproc'` and `$"coproc"` prevent
+  reserved-word recognition as much as `'coproc'` and `\coproc` do, and a command
+  word carrying either was not being recorded as quoted. An ANSI-C fragment inside
+  a delimiter is *decoded* rather than copied — bash forms the delimiter from the
+  decoded text. And a boundary character has to be one: `\({fd}>out` has an escaped
+  parenthesis, which is an ordinary character in the middle of a word.
+
 - **Quoting has more than two forms, and declaration state belongs to one command.**
   `\coproc` is not the reserved word for the same reason `'coproc'` is not — the
   quoting, of whatever form, prevents the reading. `'function'; mapfile …` has a
