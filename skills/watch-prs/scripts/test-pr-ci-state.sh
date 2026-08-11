@@ -39,9 +39,13 @@ mkgh() {   # mkgh <stdout> <stderr> <exit>
 printf '%s' "\$*" >> "$TMP/args"
 # THE REAL JQ PROGRAM, run against the payload, whenever one is supplied. A stub
 # that simply echoed a verdict tested the script's dispatch and left the jq that
-# PRODUCES that verdict entirely uncovered — mutants turning `pending` into
-# `green`, and the unknown-bucket catch-all into `green`, both survived the whole
-# suite. The mapping is the part with the consequences, so the mapping is run.
+# PRODUCES that verdict entirely uncovered — mutants turning pending into green,
+# and the unknown-bucket catch-all into green, both survived the whole suite. The
+# mapping is the part with the consequences, so the mapping is run.
+# The delimiter is unquoted because the stub needs \$TMP expanded, so nothing in
+# this body may carry a backtick: the two that named those mutants were being RUN
+# at heredoc time, and the bash 3.2 job is what printed the resulting
+# "command not found".
 if [ -s "$TMP/gh.json" ]; then
     prog=''
     while [ \$# -gt 0 ]; do

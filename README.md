@@ -188,7 +188,11 @@ Three checks, because none of them covers what the others do:
   a check that needs no shell parser.
 - A **bash 3.2 CI job** runs the whole suite under a 3.2 built from source. Every
   post-3.2 construct fails there outright, with no grammar to get right; it covers
-  the paths the suite executes, which is why the text scan keeps its list too.
+  the paths the suite executes, which is why the text scan keeps its list too. Its
+  first green run found a defect fifty rounds old: `pr-watch.sh` could not be
+  *parsed* by 3.2 at all, because an inline `=~` pattern containing a parenthesis is
+  a syntax error there. No list of missing features contains that, which is the
+  argument for running the thing rather than reading it.
 - A **portability CI job** runs the entire suite with the GNU-only tools removed
   from `PATH`. Text cannot see a command name assembled at runtime; absence can.
   It runs in parallel with the normal job, so it extends CI by the difference

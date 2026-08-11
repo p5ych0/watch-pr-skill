@@ -1397,8 +1397,13 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README does not state that Copilot is required"
 fi
 
-# The head-state line is parsed, not substring-matched.
-grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
+# The head-state line is parsed, not substring-matched. The pattern is held in a
+# variable because Bash 3.2 cannot PARSE an inline `=~` pattern containing a
+# parenthesis at all — `pr-watch.sh` carried one for fifty rounds and the bash 3.2
+# CI job is what found it. So both halves are required: the anchored whole-record
+# pattern, and the match that uses it.
+grep -q "RX_STATE='\^PR_REVIEW_STATE" "$SKILL" \
+    && grep -q 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL" \
     && pass "the Codex head-state line is matched as a whole record" \
     || die "the head-state decision is made on a substring or trailing token"
 # …and the record must be ABOUT the PR, reviewer and head that were asked for.

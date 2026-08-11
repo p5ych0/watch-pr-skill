@@ -23,6 +23,28 @@
   chased: a forbidden spelling written as DATA is reported, which was always rule
   B's behaviour and has a fixture saying so.
 
+- **`pr-watch.sh` never parsed on macOS, and the new job found it in its first
+  green run.** Bash 3.2 cannot read a `[[ … =~ … ]]` whose pattern is written inline
+  and contains a parenthesis: it is a *parse* error, `syntax error in conditional
+  expression`, so the script died before its first statement. Three sites carried
+  one — two in `pr-watch.sh`, one in `SKILL.md` — for fifty review rounds, and no
+  text rule saw them because none of them knew to look. The portable spelling holds
+  the pattern in a variable, where it is a string to the parser and a regex to the
+  match.
+
+  This is the case for the job stated in one defect: it is a difference in *parsing*
+  rather than in features, so no list of Bash 4 constructs would have contained it.
+  A lexical rule for the class was added afterwards so the pre-push gate catches the
+  next one, but the job is what found this one. The same run also surfaced two
+  backticks inside an unquoted heredoc in `test-pr-ci-state.sh` — a comment naming
+  two mutants was being *executed* at heredoc time.
+
+- **The bash 3.2 job pinned only the outer interpreter.** It ran the suite under
+  3.2 while every `bash -c` and every `#!/usr/bin/env bash` helper inside it still
+  resolved to the system bash 5 — and `test-pr-review-state.sh` does both. A shim
+  directory at the front of `PATH` pins all three, and the job proves all three
+  report `3.2` before it runs anything.
+
 - **CI ran everything twice.** `push` on every branch plus `pull_request` fired both
   workflows for every push to a PR branch — the same commit, the same answer, twice.
   Pushes to the default branch are covered directly; everything else as a pull

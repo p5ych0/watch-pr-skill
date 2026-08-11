@@ -1030,7 +1030,13 @@ RULE_A='
     # `grep -F` and `fgrep` are FIXED-STRING: a backslash there is a literal, so a
     # fixed-string pattern means the same thing on both platforms, and rejecting it
     # made the gate fail on portable code.
-    if (line ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
+    # ON THE QUOTE-REMOVED TEXT, which the walker already builds. `gr"ep"` IS grep
+    # and `grep '"'"'-F'"'"'` IS fixed-string mode: quote removal happens before the command
+    # sees either, and a raw-line test saw neither. This is not a command model — it
+    # asks nothing about WHICH command a word belongs to, only what the line says
+    # once its quotes are gone.
+    shell_scan(line, SC_Q0); eff = SC_EFF
+    if (eff ~ /(^|[^a-zA-Z_-])(fgrep|grep([[:space:]]+-[A-Za-z-]+)*[[:space:]]+-[A-Za-z]*F)/) return
 
     # Restricted to lines that mention `grep`, `sed` or `awk`, because jq is
     # Oniguruma and DOES support these — a jq program using one is correct, and a
@@ -1046,9 +1052,9 @@ RULE_A='
     # awk it is the standard BACKSPACE escape, and printing one is portable code the
     # first version of this rule rejected. A line naming grep or sed takes the
     # stricter rule, so a line naming both is judged by the boundary meaning.
-    if (line ~ /(grep|sed)/ && esc_class(line, "sSdDwWbBy<>")) {
+    if (eff ~ /(grep|sed)/ && esc_class(line, "sSdDwWbBy<>")) {
         report("GNU regex escape: " line); return }
-    if (line ~ /awk/ && esc_class(line, "sSdDwWBy<>")) {
+    if (eff ~ /awk/ && esc_class(line, "sSdDwWBy<>")) {
         report("gawk-only regex operator: " line); return }'
 
 # ── RULE B: GNU-only command NAMES that cannot occur in prose ──────────────
@@ -1123,6 +1129,7 @@ GNU_ONLY_NAMES='sha1sum sha256sum md5sum realpath tac shuf nproc stdbuf
 # shape, so a third — a second, unguarded use — fails.
 GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 
+
 # ── RULE C WAS REMOVED, AND THIS RECORDS WHY ───────────────────────────────
 #
 # It rejected GNU-only FLAGS on commands that exist everywhere: `sed -i`,
@@ -1139,16 +1146,19 @@ GNU_EXEMPT='test-pr-round-count.sh:sha1sum:2'
 # that is portable where the bare form is not (`sed -ibak`). Each was a real hole,
 # and each fix revealed the next.
 #
-# THE RULES THAT REMAIN HAVE CLOSED SURFACES. POSIX defines no backslash-class
-# escapes, so rule A's set cannot grow. Bash 3.2's missing features are a finite
-# list. A command name is a name. Rule C's surface was option syntax, which is not
-# closed — and this repository already records a structural checker built and
-# deleted six times for exactly that reason.
+# ONE SURFACE THAT REMAINS IS CLOSED: POSIX defines no backslash-class escapes, so
+# rule A's set cannot grow. The other two are BLACKLISTS and are stated as such —
+# a Bash 4 feature or a GNU-only name is added when it is met, and the `=~` parsing
+# rule below was added exactly that way, fifty rounds late. What makes that
+# affordable is that the bash 3.2 job runs the same suite and needs no list at all;
+# these rules only have to be fast enough to run before a push. Rule C's surface was
+# option syntax, which is neither closed nor covered by absence — and this
+# repository already records a structural checker built and deleted six times for
+# exactly that reason.
 #
 # WHAT THIS GIVES UP, plainly: nothing catches `sed -i`, `readlink -f`, `grep -P`,
 # `date -d`, `stat -c`, `xargs -r`, `sort -h` or `echo -e` now. They are review's
 # job. A real loss, traded for a check that terminates.
-
 
 # ── RULE D: Bash 4 constructs, on a platform whose /bin/bash is 3.2 ────────
 #
@@ -1303,6 +1313,17 @@ RULE_D='
     # three spellings and 3.2 has none of them; recognising only the `[[ … ]]` form
     # let the other two through, and they are the ones a script written for
     # portability would reach for.
+    # AN INLINE `=~` PATTERN CONTAINING A PARENTHESIS DOES NOT PARSE ON 3.2. Bash
+    # 3.2 fails the whole script with "syntax error in conditional expression"; the
+    # portable spelling puts the pattern in a variable, where it is a string to the
+    # parser and a regex to the match.
+    #
+    # This is the one rule here that a version difference in PARSING rather than in
+    # features produced, and it is why the list is a blacklist: `pr-watch.sh` carried
+    # it for fifty rounds and the bash 3.2 job is what found it. The check is closed
+    # in the only way that matters — a `(` between `=~` and the end of the test.
+    if (line ~ /=~[^]]*\(/ && line !~ /=~[[:space:]]*[$]/) {
+        report("an inline =~ pattern with a parenthesis does not parse on Bash 3.2: " line); return }
     if (line ~ /\[\[[^]]*[[:space:]]-v[[:space:]]/) {
         report("[[ -v ]] is Bash 4.2: " line); return }
     # NEGATED COUNTS. `[ ! -v token ]` and `test ! -v token` evaluate the same
@@ -1616,6 +1637,10 @@ plant transk   "printf '%s' \"\${items[@]@k}\""      D "the lowercase @k transfo
 # walker closes at the escaped quote, the `;` inside the string reads as a
 # separator, and the command is cut away from its own pattern.
 plant bracestep "for i in {1..5..2}; do :; done"     D "a stepped brace expansion"
+# …and the one a PARSING difference produced rather than a feature: Bash 3.2 cannot
+# read a `[[ =~ ]]` whose pattern has a parenthesis written inline. `pr-watch.sh`
+# carried one for fifty rounds and no text rule saw it; the bash 3.2 job did.
+plant inlinerx "if [[ \"\$l\" =~ ^a(b)c$ ]]; then :; fi"       D "an inline =~ pattern with a parenthesis"
 plant globst   "shopt -s globstar"                  D "globstar, a Bash 4 shell option"
 plant atq      "printf '%s' \"\${@@Q}\""              D "a transformation on the special parameter @"
 plant atup     "printf '%s' \"\${@^^}\""              D "…and case modification on it"
@@ -1639,6 +1664,7 @@ refute() {   # refute <name> <line> <rule> <label>
         && pass "…and accepts $4" \
         || die "the scan rejected the PORTABLE form of $4 ('$hits')"
 }
+refute varrx   "rx=${sq}^a(b)c$${sq}; if [[ \"\$l\" =~ \$rx ]]; then :; fi" D "the same pattern held in a variable"
 refute posix   "grep -qE '^[a-z]+[[:space:]]+[0-9]' \"\$f\"" A "a POSIX character class"
 refute jqline  "gh api x --jq 'test(\"^\\\\s+\$\")'"          A "a \\s inside a jq program"
 # `sed -i ''` is NOT among the accepted forms, and that is the correction: it is
@@ -1672,15 +1698,29 @@ plant dataarg "printf '%s' realpath"                B "a name used as data, whic
 
 
 
-# ── A QUOTED SUBSTITUTION IS STILL A COMMAND ───────────────────────────────
-# `out="$(grep PATTERN f)"` is the ordinary spelling. The quoted branch appended the
-# words to the assignment instead of flushing it, so the command word was `out=grep`
-# and no engine was recognised.
-
-# ── ONLY THE OPERANDS THAT CARRY A PATTERN ─────────────────────────────────
-# `grep x 'file\s'` searches for `x` in a file whose NAME contains a backslash —
-# the same search on both platforms. Concatenating every argument reported the
-# filename as a GNU escape.
+# ── THE ENGINE IS READ AFTER QUOTE REMOVAL ─────────────────────────────────
+# `gr"ep"` IS grep and a quoted `-F` IS fixed-string mode: quote removal happens
+# before the command sees either, and a raw-line test saw neither. This asks nothing
+# about WHICH command a word belongs to — only what the line says once its quotes
+# are gone, which is the walker this file already has.
+printf '#!/usr/bin/env bash\ngr"ep" -E %s "$f" || :\n' "'\\s'" > "$PTMP/asmengine.sh"
+ae4_hits="$(scan "$RULE_A" "$PTMP/asmengine.sh")" || ae4_hits=SCANFAIL
+{ [ "$ae4_hits" != SCANFAIL ] && [ -n "$ae4_hits" ]; } \
+    && pass "an assembled engine name is still the engine" \
+    || die "an assembled grep was not recognised ('$ae4_hits')"
+printf '#!/usr/bin/env bash\ngrep %s-F%s %s "$f"\n' "'" "'" "'\\s'" > "$PTMP/quotedF.sh"
+qf2_hits="$(scan "$RULE_A" "$PTMP/quotedF.sh")" || qf2_hits=SCANFAIL
+{ [ "$qf2_hits" != SCANFAIL ] && [ -z "$qf2_hits" ]; } \
+    && pass "…and a quoted -F is still fixed-string mode" \
+    || die "a quoted -F was not recognised ('$qf2_hits')"
+# …and the exemption belongs to its own SEGMENT. `grep -F x a; grep -E PATTERN b`
+# is two commands, and the split is what keeps the first from excusing the second —
+# which is all the separation these rules need now that they ask nothing else.
+printf '#!/usr/bin/env bash\ngrep -F x a; grep -E %s b\n' "'\\s'" > "$PTMP/twocmds.sh"
+tc_hits="$(scan "$RULE_A" "$PTMP/twocmds.sh")" || tc_hits=SCANFAIL
+{ [ "$tc_hits" != SCANFAIL ] && [ -n "$tc_hits" ]; } \
+    && pass "…and a fixed-string command does not exempt the next one" \
+    || die "grep -F excused a later grep ('$tc_hits')"
 
 # ── AN ARITHMETIC SPAN ENDS WHERE ITS QUOTING SAYS ─────────────────────────
 # Quoted parentheses are data. Counting them never reached depth zero, and the span
@@ -1715,21 +1755,6 @@ ot_hits="$(scan "$RULE_A" "$PTMP/optterm.sh")" || ot_hits=SCANFAIL
 { [ "$ot_hits" != SCANFAIL ] && [ -n "$ot_hits" ]; } \
     && pass "a -F after -- is a filename, not fixed-string mode" \
     || die "an operand after -- was read as an option ('$ot_hits')"
-
-# ── AN ARITHMETIC SPAN IS DATA THROUGHOUT ──────────────────────────────────
-# Consuming only the opener left the expression to the ordinary word rules, so the
-# whitespace inside `$(( a + b ))` flushed the assignment and the operands became
-# words of their own — an invoked command again.
-
-# ── FIXED-STRING MODE BELONGS TO ITS OWN COMMAND ───────────────────────────
-# A segment can hold more than one engine. `grep -F x $(grep PATTERN f)` has a
-# fixed-string outer command and an inner one that is not, and a mode accumulated
-# across both let the outer exempt the inner.
-
-# ── A SUBSTITUTION RUNS A COMMAND OF ITS OWN ───────────────────────────────
-# `out=$(grep PATTERN f)` invokes `grep`. Appending the text to the assignment word
-# left a word called `out=$(grep` and no command at all, so the engine was never
-# recognised and the escape went unreported.
 
 # ── A PENDING LOGICAL LINE SURVIVES THE FILE BOUNDARY ──────────────────────
 # A target whose last line ends in a continuation leaves its text unscanned unless

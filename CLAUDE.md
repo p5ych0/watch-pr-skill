@@ -150,7 +150,12 @@ category; do not "fix" a script into a stricter mode.
      reports a forbidden spelling written as DATA — a stated cost, not a bug.
   2. The **bash 3.2 CI job** runs the whole suite under a 3.2 built from source.
      Every post-3.2 construct simply fails there, with no grammar to get right. It
-     covers executed paths only, which is why the text scan keeps its list.
+     covers executed paths only, which is why the text scan keeps its list. It also
+     catches what no list could: 3.2 differs in PARSING as well as in features — an
+     inline `=~` pattern containing a parenthesis is a syntax error there, and
+     `pr-watch.sh` carried one for fifty rounds. Pin the inner interpreters, not
+     only the outer one; the suite runs `bash -c` and `#!/usr/bin/env bash` helpers
+     throughout, and pinning only the outer shell proves almost nothing.
   3. The **portability CI job** runs the suite with the GNU-only tools removed from
      `PATH` — the only thing that sees a command name built at runtime.
 
