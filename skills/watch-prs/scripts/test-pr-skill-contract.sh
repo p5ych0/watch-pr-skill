@@ -1446,11 +1446,21 @@ skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse chec
 # indented block still starts at column zero where the parser expects it.
 # EVERY FENCE SPELLING MARKDOWN ALLOWS, because the ones it does not recognise are
 # exactly the ones that go unparsed: three backticks or more, tildes as well as
-# backticks, and trailing whitespace after the info string. The closing fence must
-# be the same character and at least as long, which is the rule that lets a longer
-# fence carry a shorter one inside it as literal text.
+# backticks, trailing whitespace after the info string, and METADATA AFTER THE
+# LANGUAGE — Markdown takes the language from the first word of the info string,
+# so ```` ```bash title="merge gate" ```` is a bash block and a pattern demanding
+# nothing but whitespace after `bash` skipped it. The closing fence must be the
+# same character and at least as long, which is the rule that lets a longer fence
+# carry a shorter one inside it as literal text.
+#
+# THE DEDENT REMOVES ONLY WHAT IS THERE. Markdown strips up to the opener's
+# indentation from each body line — up to, not exactly — so a line less indented
+# than its own fence keeps its text. Cutting `ind` characters unconditionally ate
+# the first three characters of a column-zero line inside an indented block and
+# handed `true; then` to the parser, which fails a VALID `SKILL.md` and blocks the
+# update. A false alarm is the wrong direction to be wrong in here.
 [ -n "$skb_dir" ] && awk -v out="$skb_dir" '
-    !inb && /^[ ]{0,3}(```+|~~~+)[ \t]*bash[ \t]*$/ {
+    !inb && /^[ ]{0,3}(```+|~~~+)[ \t]*bash([ \t]|$)/ {
         inb = 1; n++
         match($0, /^[ ]*/); ind = RLENGTH
         match($0, /(`+|~+)/); fence = substr($0, RSTART, RLENGTH)
@@ -1459,7 +1469,9 @@ skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse chec
         match($0, /(`+|~+)/)
         if (RLENGTH >= length(fence) && substr($0, RSTART, 1) == substr(fence, 1, 1)) {
             inb = 0; next } }
-    inb { print substr($0, ind + 1) > (out "/block-" n ".sh") }
+    inb { match($0, /^[ ]*/)
+           cut = (RLENGTH < ind) ? RLENGTH : ind
+           print substr($0, cut + 1) > (out "/block-" n ".sh") }
 ' "$SKILL" || die "the SKILL.md bash blocks could not be extracted"
 # A PLACEHOLDER IS PROSE, NOT A REDIRECTION. The driver is told to substitute
 # `CODEX_SHA=<full 40-hex sha …>` before running the block, and to a parser that
@@ -1485,7 +1497,7 @@ done
 # admits every fence Markdown allows and the extractor must reach the same number:
 # a block the extractor cannot see is then a failure rather than an omission from
 # both sides of an equation.
-skb_want="$(grep -cE '^[ ]{0,3}(`{3,}|~{3,})[[:space:]]*bash[[:space:]]*$' "$SKILL")"; skb_wrc=$?
+skb_want="$(grep -cE '^[ ]{0,3}(`{3,}|~{3,})[[:space:]]*bash([[:space:]]|$)' "$SKILL")"; skb_wrc=$?
 { [ "$skb_wrc" -eq 0 ] && [ "$skb_want" -gt 0 ]; } \
     || die "the bash fences in SKILL.md could not be counted (rc=$skb_wrc)"
 { [ "$skb_bad" -eq 0 ] && [ "$skb_n" -eq "$skb_want" ]; } \
