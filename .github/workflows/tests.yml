@@ -102,6 +102,14 @@ jobs:
   # test and its error are in the log either way.
   macos-shell:
     runs-on: ubuntu-latest
+    # ONE DEFINITION OF THE DIGEST, used by the verification AND by the cache key.
+    # It has to key the cache: the first version of this pin left the key at
+    # `bash-3.2-<os>`, which an earlier UNVERIFIED build had already populated, so
+    # the cache hit skipped the very step that does the checking and the unverified
+    # binary went on `PATH` and ran anyway. A check a stale cache can skip is not a
+    # check. Changing the pin now misses the cache by construction and rebuilds.
+    env:
+      BASH32_SHA256: 26c99025b59e30779300b68adb764f824974d267a4d7cc1b347d14a2393f9fb4
     steps:
       - uses: actions/checkout@v4
 
@@ -116,14 +124,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bash32
-          key: bash-3.2-${{ runner.os }}
+          key: bash-3.2-${{ runner.os }}-${{ env.BASH32_SHA256 }}
 
       # THE DIGEST IS PINNED, and the build stops if it does not match. This step
       # downloads a tarball and runs `configure` and `make` from it, so whatever
       # arrives executes in CI with the job's permissions; a bare `curl | build`
       # trusts the network and the mirror to be honest on every run, forever.
-      # 26c990… is the digest of the tarball whose detached GNU signature verifies
-      # against Chet Ramey's key, 7C0135FB088AAF6C66C650B9BB5869F064EA74AB.
+      # `BASH32_SHA256` is the digest of the tarball whose detached GNU signature
+      # verifies against Chet Ramey's key, 7C0135FB088AAF6C66C650B9BB5869F064EA74AB.
       #
       # `sha256sum` IS AVAILABLE HERE and only here: the step that removes the
       # GNU-only tools runs after this one. That ordering is load-bearing.
@@ -133,7 +141,7 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/bash32src && cd /tmp/bash32src
           curl -fsSLO https://ftp.gnu.org/gnu/bash/bash-3.2.tar.gz
-          echo '26c99025b59e30779300b68adb764f824974d267a4d7cc1b347d14a2393f9fb4  bash-3.2.tar.gz' > bash-3.2.tar.gz.sha256
+          echo "$BASH32_SHA256  bash-3.2.tar.gz" > bash-3.2.tar.gz.sha256
           sha256sum -c bash-3.2.tar.gz.sha256 || {
             echo "::error::bash-3.2.tar.gz does not match its pinned digest; refusing to build it"
             exit 1
