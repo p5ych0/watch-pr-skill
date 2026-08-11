@@ -135,6 +135,27 @@ category; do not "fix" a script into a stricter mode.
   call.
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
+- **Portable, and proven by running rather than by reading.** The `macos-shell` CI
+  job runs the whole suite on a bash 3.2 built from source and first on `PATH`,
+  with the GNU-only tools removed. Post-3.2 constructs fail there, and so do the
+  differences in PARSING that no feature list contains — an inline `[[ … =~ … ]]`
+  pattern with a parenthesis is a syntax error on 3.2, and `pr-watch.sh` carried
+  one from the day it was written. Absence covers the other half: a command name
+  assembled at runtime is invisible to text and dies at once here.
+
+  **Do not build a text scanner for this.** One was, and it is why this bullet is
+  short: 2,200 lines and fifty-two review rounds, every round answering one finding
+  and producing the next, with several of its own defects rejecting portable code.
+  It is the shape recorded twice more in this file. What it bought over running the
+  suite was unexecuted branches; what it cost was the review budget of an entire
+  release.
+
+  Pin the inner interpreters, not only the outer one — the suite runs `bash -c` and
+  `#!/usr/bin/env bash` helpers throughout, and pinning only the outer shell proves
+  almost nothing. A tool stock macOS lacks is still usable: probe it with
+  `command -v` and provide a fallback, as `testlib.sh` does for `timeout`. GNU-only
+  FLAGS and `\s` in a `grep` pattern are review's job — the command exists on both
+  platforms, and BSD `grep` does not fail on `\s`, it matches a literal `s`.
 - Every behaviour change ships its test in the same PR.
 - Prove a new test can fail: revert the fix and confirm the test fails for the
   reason it names. A fixture that passes against the unfixed code is worse than

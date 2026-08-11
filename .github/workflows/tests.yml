@@ -1,8 +1,12 @@
 name: tests
 
+# ONE RUN PER PUSH. `push` on every branch plus `pull_request` fired BOTH for every
+# push to a PR branch — the whole workflow twice, for the same commit, telling us
+# the same thing. Pushes to the default branch are covered directly; everything
+# else is covered as a pull request.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -50,3 +54,206 @@ jobs:
             exit 1
           fi
           echo "all $total test files passed"
+
+  # ── THE SUITE, ON A MACHINE SHAPED LIKE A MAC ──────────────────────────────
+  #
+  # The suite is a mandatory pre-push gate, so a GNU-only construct in it stops a
+  # macOS contributor from closing a review round while Ubuntu CI stays green: the
+  # failure is invisible on the machine that introduces it, which is why review
+  # kept being the thing that caught it. Four had already reached the tree —
+  # `timeout`, `sha1sum`, `seq`, and `\s` in a `grep` pattern.
+  #
+  # THIS JOB RUNS THE SUITE RATHER THAN READING IT. Both halves of the difference
+  # are set up and the existing tests are the check:
+  #
+  #   - Bash is 3.2, the version macOS ships. `mapfile`, `declare -A`, `${x^^}`,
+  #     `coproc`, `wait -n`, `shopt -s lastpipe` and every other post-3.2 spelling
+  #     simply fail. So do the PARSING differences, which no list of features would
+  #     ever have contained: an inline `[[ … =~ … ]]` pattern with a parenthesis is
+  #     a syntax error there, and `pr-watch.sh` carried one from the day it was
+  #     written.
+  #   - The GNU-only tools are gone from `PATH`, which is the only thing that sees
+  #     a command name assembled at runtime: `_a=sha1; _b=sum; "$_a$_b"` is
+  #     invisible to any text scan and dies here at once.
+  #
+  # A TEXT SCANNER WAS BUILT FOR THIS AND DELETED. It reached 2,200 lines and
+  # fifty-two review rounds; every round it answered one finding and produced the
+  # next, and several of its own defects rejected portable code. `CLAUDE.md`
+  # records the same shape being built and deleted six times before. Running the
+  # thing needs no grammar and cannot be one entry behind.
+  #
+  # WHAT IT DOES NOT COVER, stated rather than assumed:
+  #
+  #   - A construct on a branch the suite never takes. Coverage is high — this IS
+  #     the pre-push gate and every helper has a test — but it is not total.
+  #   - A GNU-only FLAG on a portable command: `sed -i`, `readlink -f`, `grep -P`,
+  #     `date -d`. The command exists here, so absence cannot see it.
+  #   - `\s` in a `grep` pattern. BSD `grep` does not FAIL on it; it matches a
+  #     literal `s`, so the suite passes and the behaviour is silently wrong. This
+  #     runner has GNU grep. It is the one item from the original issue that
+  #     nothing here catches, and it is review's job.
+  #   - A use whose failure does not propagate. `for i in $(seq 1 5)` with `seq`
+  #     gone yields an empty list and the loop simply does not run.
+  #
+  # ONE JOB RATHER THAN TWO. Splitting the shell and the tools apart named the
+  # cause more precisely and cost a third more runner minutes for it; the failing
+  # test and its error are in the log either way.
+  macos-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends jq
+
+      # BUILT FROM SOURCE, because no runner image ships a 3.2 and a container
+      # would pin us to someone else's libc. Cached on the version, so the build
+      # runs once.
+      - name: Cache bash 3.2
+        id: cache-bash32
+        uses: actions/cache@v4
+        with:
+          path: ~/bash32
+          key: bash-3.2-${{ runner.os }}
+
+      - name: Build bash 3.2
+        if: steps.cache-bash32.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/bash32src && cd /tmp/bash32src
+          curl -fsSLO https://ftp.gnu.org/gnu/bash/bash-3.2.tar.gz
+          tar xzf bash-3.2.tar.gz && cd bash-3.2
+          # 3.2 predates the compilers on this runner; these two keep it building
+          # without changing what the shell accepts.
+          ./configure --prefix="$HOME/bash32" --without-bash-malloc \
+            CFLAGS="-O2 -std=gnu89 -Wno-implicit-function-declaration"
+          make -j"$(nproc)" && make install
+
+      # ON PATH, NOT JUST AS THE OUTER INTERPRETER. The suite runs helpers with
+      # `#!/usr/bin/env bash` and calls `bash -c` from inside tests; both resolve
+      # through PATH, so invoking the 3.2 binary directly pinned only the shell
+      # that reads the test FILE and left every nested shell as the runner's bash
+      # 5. A job that proved that much would claim far more than it checked.
+      - name: Put bash 3.2 first on PATH
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bash32/shim"
+          ln -sf "$HOME/bash32/bin/bash" "$HOME/bash32/shim/bash"
+          echo "$HOME/bash32/shim" >> "$GITHUB_PATH"
+
+      - name: Prove it is 3.2, everywhere it will be used
+        run: |
+          set -euo pipefail
+          bash --version | head -1
+          # The three ways the suite reaches a shell: the command name, a nested
+          # `bash -c`, and a `#!/usr/bin/env bash` script.
+          for probe in 'bash -c' 'nested' 'shebang'; do
+            case "$probe" in
+              'bash -c') got="$(bash -c 'echo "$BASH_VERSION"')" ;;
+              nested)    got="$(bash -c 'bash -c "echo \$BASH_VERSION"')" ;;
+              shebang)   printf '#!/usr/bin/env bash\necho "$BASH_VERSION"\n' > /tmp/probe.sh
+                         chmod +x /tmp/probe.sh; got="$(/tmp/probe.sh)" ;;
+            esac
+            case "$got" in
+              3.2*) echo "confirmed 3.2 via $probe" ;;
+              *) echo "::error::$probe reached bash $got, not 3.2"; exit 1 ;;
+            esac
+          done
+          # …and that it REJECTS what it should, so a build that quietly produced a
+          # newer bash cannot pass this job silently.
+          if bash -c 'declare -A m' 2>/dev/null; then
+            echo "::error::this bash accepts declare -A; it is not 3.2"
+            exit 1
+          fi
+          echo "confirmed: declare -A is rejected"
+
+      # `awk` IS NOT `gawk`, AND THIS JOB HAS TO KEEP THAT DISTINCTION. POSIX
+      # specifies `awk` and macOS ships one; `gawk` is the GNU name and is what a
+      # portable script must not call. On Ubuntu they are the same file — `awk` is
+      # a symlink chain ending at `/usr/bin/gawk` — so hiding the GNU name removed
+      # the POSIX one with it and every scan in the suite, all of which are written
+      # in awk, died with `command not found`. A real copy under the POSIX name
+      # breaks that chain and survives `/usr/bin/gawk` being moved away.
+      - name: Preserve a POSIX awk before the GNU name goes
+        run: |
+          set -euo pipefail
+          real_awk="$(readlink -f "$(command -v awk)")"
+          sudo cp "$real_awk" /usr/local/bin/awk
+          hash -r 2>/dev/null || true
+          [ "$(command -v awk)" = /usr/local/bin/awk ] || {
+            echo "::error::/usr/local/bin/awk does not win on PATH: $(command -v awk)"
+            exit 1
+          }
+          awk 'BEGIN { exit 0 }' || { echo "::error::the preserved awk does not run"; exit 1; }
+          echo "preserved: $real_awk -> /usr/local/bin/awk"
+
+      - name: Remove the GNU-only tools
+        run: |
+          set -euo pipefail
+          # ABSENT, NOT SHIMMED. A shim that names itself reads better in a log, but
+          # `command -v` still finds it — so a correctly GUARDED use
+          # (`command -v timeout && timeout 5 …`) takes the shim and fails, which is
+          # exactly backwards: the guard's whole point is that the fallback runs.
+          # `testlib.sh` has one, and this job is where it is exercised.
+          #
+          # The `g`-prefixed spellings are the Homebrew names a macOS contributor
+          # may reach for. Hiding them is what the step above preserves `awk` for.
+          tools="timeout sha1sum sha256sum md5sum seq realpath tac shuf nproc
+                 stdbuf truncate dircolors numfmt shred
+                 gsed gawk gdate gcp gln gsort gtimeout gnproc"
+          # UNTIL NONE RESOLVES, not once. A runner can carry a second copy later
+          # in PATH — /usr/bin and /usr/local/bin both having `realpath` is
+          # ordinary — and moving only the first resolution leaves the tool
+          # available while the log says it was hidden.
+          for c in $tools; do
+            while p="$(command -v "$c" 2>/dev/null)"; do
+              sudo mv "$p" "$p.hidden-for-portability-job"
+              echo "hidden: $p"
+              hash -r 2>/dev/null || true
+            done
+          done
+          # Proven gone, not assumed gone, and for EVERY name. Checking three of
+          # twenty let a partial removal look like a clean run — this job would then
+          # be a second, slower copy of the normal one, passing for the reason it
+          # exists to rule out.
+          still=""
+          for c in $tools; do
+            command -v "$c" >/dev/null 2>&1 && still="$still $c"
+          done
+          if [ -n "$still" ]; then
+            echo "::error::still on PATH:$still — this job would prove nothing"
+            exit 1
+          fi
+          # …and the POSIX name still works, which is the whole point of the copy.
+          awk 'BEGIN { exit 0 }' || {
+            echo "::error::awk stopped working when the GNU names were hidden"
+            exit 1
+          }
+          echo "all GNU-only names hidden; POSIX awk intact"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+
+      - name: Run test suite on bash 3.2, without the GNU tools
+        working-directory: skills/watch-prs/scripts
+        run: |
+          set -uo pipefail
+          fail=0 total=0
+          for t in test-*.sh; do
+            total=$((total + 1))
+            echo "::group::$t"
+            if bash "$t"; then
+              echo "PASS $t"
+            else
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2 without the GNU tools"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::one or more of $total test files needs a GNU tool or a bash newer than 3.2"
+            exit 1
+          fi
+          echo "all $total test files pass on bash 3.2 without the GNU tools"

@@ -170,6 +170,20 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
 caveat is gone with the daemons it was about.
 
+The suite is a mandatory pre-push gate, so a GNU-only construct *in the suite*
+stops a macOS contributor from closing a review round while Ubuntu CI stays green
+— invisible on the machine that introduced it. CI therefore runs the whole suite a
+second time on a machine shaped like a Mac: **bash 3.2 built from source and first
+on `PATH`**, with the GNU-only tools removed. Constructs newer than 3.2 fail there
+outright, and so do the parsing differences no feature list would contain; a
+command name assembled at runtime — `_a=sha1; _b=sum; "$_a$_b"` — dies on absence,
+which no text scan can see.
+
+Three things it does not cover, stated rather than assumed: a construct on a branch
+the suite never takes; a GNU-only *flag* on a command that exists everywhere
+(`sed -i`, `readlink -f`, `grep -P`); and `\s` in a `grep` pattern, where BSD
+`grep` does not fail but matches a literal `s`. Those are review's job.
+
 ## Install
 
 ```

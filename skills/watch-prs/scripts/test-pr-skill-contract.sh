@@ -290,18 +290,29 @@ STUBSH
     # then appears and fails after the round is closed. The same registration
     # grace that `none` needs.
     gate_case '0'     0 2 "a green head lets the round close, once that is stable"
+    # Grace beyond the queue, for the same reason as the `none` case below: two
+    # greens could earn a grace of two before the queued failure was reached, and
+    # the case would close the round it exists to see stopped. Anywhere a QUEUE is
+    # the subject, the grace must not be earnable inside it.
     gate_case '0
 0
 3
-1'                    1 4 "…and a green that turns pending then fails still stops the round"
+1'                    1 4 "…and a green that turns pending then fails still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # A CHANGED PICTURE RESTARTS THE GRACE. Green, then a check appearing as
     # pending, then green again is not two seconds of stable green — it is a new
     # answer, and the run that made it pending is the one nobody has seen finish.
     # Without the reset the second green inherits the first one's age and closes
     # immediately, which is the incomplete-picture close this grace exists for.
+    # A GRACE OF THREE, not two, and a call floor with slack. `SECONDS` has
+    # one-second granularity, so with grace 2 and interval 1 the acceptance sat
+    # exactly on a tick: this closed in five polls on one runner and four on
+    # another, and CI failed on the count while the behaviour was identical. The
+    # assertion is that the interruption COST polls, not that it cost exactly five.
     gate_case '0
 3
-0'                    0 5 "a verdict interrupted by a change starts its grace again" PR_CI_TIMEOUT=10
+0'                    0 5 "a verdict interrupted by a change starts its grace again" \
+        PR_CI_TIMEOUT=15 PR_CI_GRACE=3
     # THE DEADLINE OUTRANKS A STABLE VERDICT. With the timeout checked at the
     # bottom of the loop, a `PR_CI_TIMEOUT` shorter than `PR_CI_GRACE` closed the
     # round past its own bound — and a bound that a verdict can step over is not a
@@ -336,8 +347,12 @@ STUBSH
     # minute before this loop could look at the clock. A bound the callee does not
     # know about is not a bound. The stub here reads what it was given and reports
     # it, so the assertion is on the value passed down rather than on a duration.
+    # A FLOOR OF ONE, because this case exists for the probe-budget assertion below
+    # it, and with grace 1 and interval 1 the acceptance sits on a `SECONDS` tick:
+    # two polls or one, depending on the machine. What it must show is that a green
+    # closes; how many polls that took is the other cases' business.
     gate_case '0
-0'                    0 2 "the gate still closes on a stable green" PR_CI_GRACE=1
+0'                    0 1 "the gate still closes on a stable green" PR_CI_GRACE=1
     first="$(head -1 "$GATETMP/probe" 2>/dev/null)" || first=""
     { [ -n "$first" ] && [ "$first" != unset ] && [ "$first" -le 5 ]; } \
         && pass "…and each probe was bounded by the gate's remaining time (${first}s of 5)" \
@@ -366,13 +381,21 @@ STUBSH
     # the head moves, so the first probe after a push legitimately reports `none` on
     # a repository that does have CI. Taking that as permission to close reproduces
     # the red-head closure with an extra step.
+    # A GRACE LONGER THAN THE QUEUE. With grace 2 and interval 1 the two `none`s
+    # could earn it before the queued failure was ever reached — the case closed
+    # the round and CI went red on a slow runner while the fast one passed. The
+    # sequence is what this proves, so the grace is set beyond it and cannot be
+    # earned first.
     gate_case '4
 4
 3
-1'                    1 4 "a transient 'none' followed by a real failure still stops the round"
+1'                    1 4 "a transient 'none' followed by a real failure still stops the round" \
+        PR_CI_GRACE=8 PR_CI_TIMEOUT=20
     # …and a repository that genuinely has no checks is not blocked forever: once
     # `none` has held for the grace period it is believed.
-    gate_case '4'         0 2 "a repository with no checks has nothing to assert, once that is stable"
+    # A floor of one: how many polls a stable `none` takes is the boundary case
+    # above, and pinning it here is the same clock-tick assertion twice.
+    gate_case '4'         0 1 "a repository with no checks has nothing to assert, once that is stable"
     # THE BOUNDS ARE VALIDATED, so a bad value cannot turn a bounded gate into an
     # unbounded polling loop. `PR_CI_INTERVAL=0` sleeps zero seconds and leaves the
     # elapsed count at zero forever; a non-numeric timeout makes the `-ge`
@@ -1374,8 +1397,16 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README does not state that Copilot is required"
 fi
 
-# The head-state line is parsed, not substring-matched.
-grep -q 'CODEX_HEAD_STATE" =~ \^PR_REVIEW_STATE' "$SKILL" \
+# The head-state line is parsed, not substring-matched. The pattern is held in a
+# variable because Bash 3.2 cannot PARSE an inline `=~` pattern containing a
+# parenthesis at all — the macOS shell rejects the whole block with a syntax error.
+#
+# THE WHOLE ASSIGNMENT IS ASSERTED, both anchors included. Checking the prefix and
+# checking that the variable is used leaves the terminal `$` unguarded: without it
+# the pattern accepts `PR_REVIEW_STATE … state=none trailing`, the merge block takes
+# the old-signoff fallback, and both halves of a split assertion still pass.
+grep -qF "RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'" "$SKILL" \
+    && grep -q 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL" \
     && pass "the Codex head-state line is matched as a whole record" \
     || die "the head-state decision is made on a substring or trailing token"
 # …and the record must be ABOUT the PR, reviewer and head that were asked for.

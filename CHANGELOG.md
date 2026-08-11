@@ -1,5 +1,48 @@
 # Changelog
 
+## [2.0.6] — 2026-08-11
+
+- **`pr-watch.sh` never ran on macOS, and neither did the merge gate in
+  `SKILL.md`.** Bash 3.2 — the bash macOS ships — cannot *parse* a
+  `[[ … =~ … ]]` whose pattern is written inline and contains a parenthesis. It
+  is not a feature that degrades: the shell rejects the whole file with
+  `syntax error in conditional expression`, before the first statement runs.
+  Three sites carried one, from the day each was written. The portable spelling
+  holds the pattern in a variable, where it is a string to the parser and a regex
+  to the match.
+
+- **A comment was being executed at here-document time.** `test-pr-ci-state.sh`
+  writes its `gh` stub through an unquoted delimiter — it has to, the stub needs
+  `$TMP` expanded — and a comment inside the body named two mutants in backticks.
+  Those ran as commands every time the fixture built a stub.
+
+- **CI runs the suite a second time on a machine shaped like a Mac.** A new
+  `macos-shell` job builds bash 3.2 from source, puts it *first on `PATH`* so the
+  suite's `bash -c` calls and `#!/usr/bin/env bash` helpers reach it too, and
+  removes the GNU-only tools. Both defects above were found by it. It closes the
+  case for which #15 was filed — `timeout`, `sha1sum` and `seq` had each reached
+  the tree and each was caught by review — without asking anything about what the
+  text of a script looks like.
+
+  The one item from that issue it does **not** close is `\s` in a `grep` pattern:
+  BSD `grep` does not fail on it, it matches a literal `s`, so the suite passes
+  and the behaviour is silently wrong. That is recorded on the issue and left to
+  review.
+
+- **CI ran everything twice.** `push` on every branch plus `pull_request` fired
+  both workflows for every push to a PR branch — the same commit, the same answer,
+  twice. Pushes to the default branch are covered directly; everything else as a
+  pull request.
+
+- **A text scanner for this was built and deleted.** It reached 2,200 lines and
+  fifty-two review rounds. Every round it answered one finding and produced the
+  next, and several of its own defects *rejected portable code*, which is worse
+  than a miss: it converts an unverified assumption into a green tick. What it
+  bought over running the suite was coverage of unexecuted branches; what it cost
+  was the review budget of an entire release. `CLAUDE.md` records the same shape
+  being built and deleted twice before, and now says plainly not to build it a
+  fourth time.
+
 ## [2.0.5] — 2026-08-08
 
 **How a shared library is loaded lives in one place.** The clear-source-verify
