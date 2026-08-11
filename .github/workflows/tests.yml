@@ -282,16 +282,33 @@ jobs:
                 mktemp dirname basename readlink stat
                 date sleep ps kill id whoami uname hostname
                 diff patch tar gzip gunzip curl openssl shasum
-                printf echo test expr sudo make cc python3 perl"
+                expr sudo perl"
+          # `make`, `cc` and `python3` are NOT here, and their absence is asserted
+          # below. macOS ships none of them until the Xcode Command Line Tools are
+          # installed, and `README.md` asks a contributor for `git`, `gh` and `jq`
+          # only — so allowing the runner's copies would let an unguarded use stay
+          # green here and fail for a contributor who did exactly what the README
+          # said. `perl` stays: macOS ships it, and `shasum` is written in it.
+          # `type -P` RATHER THAN `command -v`, and every name must resolve to a
+          # FILE. `command -v` answers with a bare word for a builtin, a function
+          # or an alias, and the first version of this treated any such answer as
+          # "a builtin needs no link" — so a name that failed to resolve for any
+          # other reason was silently skipped and simply missing from the rebuilt
+          # PATH. `type -P` searches the filesystem only, which makes "no path"
+          # unambiguous. Builtins are not on the list at all: `printf`, `echo` and
+          # `test` come with the shell.
           missing=""
           for c in $cmds; do
-            cp_="$(command -v "$c" 2>/dev/null)" || { missing="$missing $c"; continue; }
-            case "$cp_" in
-              /*) ln -sf "$cp_" "$ALLOW/$c" ;;
-              *)  : ;;   # a shell builtin needs no link
-            esac
+            cp_="$(type -P "$c" 2>/dev/null)" && [ -n "$cp_" ] \
+              || { missing="$missing $c"; continue; }
+            ln -sf "$cp_" "$ALLOW/$c"
           done
           [ -z "$missing" ] || { echo "::error::not on this runner:$missing"; exit 1; }
+          # …and the link count matches the list, so a silent skip cannot pass.
+          want="$(printf '%s\n' $cmds | wc -l)"
+          got="$(ls -1 "$ALLOW" | wc -l)"
+          [ "$want" -eq "$got" ] \
+            || { echo "::error::$want commands listed, $got linked"; exit 1; }
           # REPLACED, not prepended. `GITHUB_PATH` only prepends, which would leave
           # every Linux-only name still reachable further along and make this step
           # decorative.
@@ -311,9 +328,13 @@ jobs:
               || { echo "::error::$c is not reachable; the suite cannot run"; exit 1; }
           done
           absent=""
+          # …including the three that are absent on a MAC rather than GNU-only.
+          # `make`, `cc` and `python3` arrive with the Xcode Command Line Tools,
+          # which `README.md` does not ask for.
           for c in flock setsid taskset ionice unshare nsenter getent ip ss \
                    lsns findmnt mountpoint sha1sum sha256sum md5sum seq realpath \
-                   tac shuf nproc stdbuf truncate gawk gsed gdate gtimeout timeout; do
+                   tac shuf nproc stdbuf truncate gawk gsed gdate gtimeout timeout \
+                   make cc python3; do
             ! command -v "$c" >/dev/null 2>&1 || absent="$absent $c"
           done
           [ -z "$absent" ] || { echo "::error::still reachable:$absent"; exit 1; }

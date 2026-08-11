@@ -153,7 +153,10 @@ category; do not "fix" a script into a stricter mode.
   **The job builds its own `PATH`; it does not hide names from the runner's.** A
   denylist of Linux-only commands was tried and was one name behind on every
   round — the same shape as the scanner. `PATH` is replaced with links to the
-  commands stock macOS has, so anything nobody listed simply does not resolve. If
+  commands stock macOS has, so anything nobody listed simply does not resolve. What
+  goes on that list is what a MAC has, not what a developer machine has: `make`,
+  `cc` and `python3` arrive with the Xcode Command Line Tools, which `README.md`
+  does not ask a contributor for, so their absence is asserted too. If
   the job fails with `command not found` for something portable, add it to that
   list; that direction of failure is the safe one.
 
