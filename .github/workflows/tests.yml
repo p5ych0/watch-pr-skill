@@ -282,7 +282,11 @@ jobs:
                 mktemp dirname basename readlink stat
                 date sleep ps kill id whoami uname hostname
                 diff patch tar gzip gunzip curl openssl shasum
-                expr sudo perl"
+                expr perl"
+          # `sudo` IS NOT HERE. Its `secure_path` replaces the caller's PATH with
+          # the system directories, so `sudo sha1sum …` would find the GNU tool
+          # this job exists to hide and pass where a Mac fails. The suite does not
+          # use it; the workflow steps that do run before this one.
           # `make`, `cc` and `python3` are NOT here, and their absence is asserted
           # below. macOS ships none of them until the Xcode Command Line Tools are
           # installed, and `README.md` asks a contributor for `git`, `gh` and `jq`
@@ -309,15 +313,24 @@ jobs:
           got="$(ls -1 "$ALLOW" | wc -l)"
           [ "$want" -eq "$got" ] \
             || { echo "::error::$want commands listed, $got linked"; exit 1; }
-          # REPLACED, not prepended. `GITHUB_PATH` only prepends, which would leave
-          # every Linux-only name still reachable further along and make this step
-          # decorative.
-          echo "PATH=$HOME/bash32/shim:$ALLOW" >> "$GITHUB_ENV"
-          echo "PATH is now $HOME/bash32/shim:$ALLOW"
+          echo "built $got links in $ALLOW"
 
+      # SET PER STEP, NOT FOR THE JOB. `GITHUB_ENV` would carry this `PATH` into
+      # every later step INCLUDING THE POST-STEPS, and `actions/cache` saves in one
+      # of those. Its archive is compressed with `zstd` when `zstd` is on `PATH`
+      # and with `gzip` when it is not, and the compression tool is part of the
+      # cache version — so a run that restored a zstd cache would save a gzip one,
+      # the next run's key would not match it, and bash 3.2.57 would be rebuilt
+      # from source on every single job. Exporting inside the two steps that want
+      # it leaves the runner's own machinery on the PATH it came with.
+      #
+      # REPLACED, not prepended, within those steps: `GITHUB_PATH` only prepends,
+      # which would leave every Linux-only name reachable further along and make
+      # the whole exercise decorative.
       - name: Prove the PATH is the one that was built
         run: |
           set -euo pipefail
+          export PATH="$HOME/bash32/shim:$HOME/macos-path"
           # PROVEN BOTH WAYS. That the allowed commands resolve, so a green run
           # means the suite ran rather than that everything vanished; and that
           # names macOS lacks do NOT, so this job is not a second copy of the
@@ -331,7 +344,9 @@ jobs:
           # …including the three that are absent on a MAC rather than GNU-only.
           # `make`, `cc` and `python3` arrive with the Xcode Command Line Tools,
           # which `README.md` does not ask for.
-          for c in flock setsid taskset ionice unshare nsenter getent ip ss \
+          # …and `sudo` among them: it is not on the list, so a test cannot use it
+          # to escape into the system directories that its `secure_path` points at.
+          for c in sudo flock setsid taskset ionice unshare nsenter getent ip ss \
                    lsns findmnt mountpoint sha1sum sha256sum md5sum seq realpath \
                    tac shuf nproc stdbuf truncate gawk gsed gdate gtimeout timeout \
                    make cc python3; do
@@ -350,6 +365,7 @@ jobs:
         working-directory: skills/watch-prs/scripts
         run: |
           set -uo pipefail
+          export PATH="$HOME/bash32/shim:$HOME/macos-path"
           fail=0 total=0
           for t in test-*.sh; do
             total=$((total + 1))

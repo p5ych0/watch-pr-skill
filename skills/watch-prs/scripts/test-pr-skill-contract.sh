@@ -1444,11 +1444,22 @@ skb_dir="$(mktemp_d)" || { die "no scratch directory for the SKILL.md parse chec
 # The CLOSING fence is matched at its own indentation for the same reason, and the
 # body is dedented by the opener's indent so a here-document terminator inside an
 # indented block still starts at column zero where the parser expects it.
+# EVERY FENCE SPELLING MARKDOWN ALLOWS, because the ones it does not recognise are
+# exactly the ones that go unparsed: three backticks or more, tildes as well as
+# backticks, and trailing whitespace after the info string. The closing fence must
+# be the same character and at least as long, which is the rule that lets a longer
+# fence carry a shorter one inside it as literal text.
 [ -n "$skb_dir" ] && awk -v out="$skb_dir" '
-    !inb && /^[ ]{0,3}```bash$/ { inb = 1; n++
-                                  match($0, /^[ ]*/); ind = RLENGTH; next }
-    inb && /^[ ]{0,3}```$/      { inb = 0; next }
-    inb                         { print substr($0, ind + 1) > (out "/block-" n ".sh") }
+    !inb && /^[ ]{0,3}(```+|~~~+)[ \t]*bash[ \t]*$/ {
+        inb = 1; n++
+        match($0, /^[ ]*/); ind = RLENGTH
+        match($0, /(`+|~+)/); fence = substr($0, RSTART, RLENGTH)
+        next }
+    inb && index($0, fence) && $0 ~ /^[ ]{0,3}(`+|~+)[ \t]*$/ {
+        match($0, /(`+|~+)/)
+        if (RLENGTH >= length(fence) && substr($0, RSTART, 1) == substr(fence, 1, 1)) {
+            inb = 0; next } }
+    inb { print substr($0, ind + 1) > (out "/block-" n ".sh") }
 ' "$SKILL" || die "the SKILL.md bash blocks could not be extracted"
 # A PLACEHOLDER IS PROSE, NOT A REDIRECTION. The driver is told to substitute
 # `CODEX_SHA=<full 40-hex sha …>` before running the block, and to a parser that
@@ -1466,12 +1477,15 @@ for skb in "$skb_dir"/block-*.sh; do
     die "a SKILL.md bash block does not parse under this bash ($(basename "$skb"): $skb_err)"
     skb_bad=1
 done
-# THE COUNT IS EXACT, and it is counted from the file rather than written here.
-# A floor passed while two indented blocks were being skipped; a hard-coded number
-# would go stale the first time a block is added. Counting the openers the same way
-# the extractor finds them, and requiring the two to agree, is what makes a block
-# that was silently dropped a failure.
-skb_want="$(grep -cE '^[ ]{0,3}```bash$' "$SKILL")"; skb_wrc=$?
+# THE COUNT IS EXACT, counted from the file, and DELIBERATELY BROADER THAN THE
+# EXTRACTOR. A floor passed while two indented blocks were being skipped; the fix
+# for that counted openers with the extractor's own predicate, which agrees with
+# itself by construction — a spelling neither one recognises is missing from both,
+# the totals match, and the test reports that every block parses. So this pattern
+# admits every fence Markdown allows and the extractor must reach the same number:
+# a block the extractor cannot see is then a failure rather than an omission from
+# both sides of an equation.
+skb_want="$(grep -cE '^[ ]{0,3}(`{3,}|~{3,})[[:space:]]*bash[[:space:]]*$' "$SKILL")"; skb_wrc=$?
 { [ "$skb_wrc" -eq 0 ] && [ "$skb_want" -gt 0 ]; } \
     || die "the bash fences in SKILL.md could not be counted (rc=$skb_wrc)"
 { [ "$skb_bad" -eq 0 ] && [ "$skb_n" -eq "$skb_want" ]; } \
