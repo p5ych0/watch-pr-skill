@@ -23,6 +23,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-signoff.sh` | Which head a reviewer has signed off clean on, read back from the PR itself. The record is a comment, so it survives the session that made it. |
 | `skills/watch-prs/scripts/pr-ci-state.sh` | Whether the pushed head's checks are green, still running, failing, or absent. |
 | `skills/watch-prs/scripts/pr-ci-gate.sh` | Waits until those checks have settled on the head just pushed, and says whether the round may close. Was a function in `SKILL.md`, where nothing could test it — see #26. |
+| `skills/watch-prs/scripts/pr-close-round.sh` | Closes a review round in two stages with the thread replies between them: `gate` pushes and proves the head green, `post` re-proves that head, posts the summary and requests the next pass. Both orderings — the mention as trigger, and the push as trigger — in one place. 0 gated/closed, 1 stopped, 3 paused. Was 247 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. Takes a reviewers mode: `both`, or `codex-only` which requires the head to BE the reviewed commit. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. |
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
@@ -45,7 +46,7 @@ category; do not "fix" a script into a stricter mode.
 | Mode | Scripts | Why |
 | --- | --- | --- |
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
-| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh`, `pr-ci-state.sh`, `pr-selfcheck.sh` | **`-e` is forbidden here.** Subcommands use exit codes as control flow and several `gh` probes "fail" as normal operation; `pr-selfcheck.sh` is in this row because a `grep` that matches nothing exits 1 as its normal answer. |
+| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh`, `pr-ci-state.sh`, `pr-ci-gate.sh`, `pr-merge-gate.sh`, `pr-signoff.sh`, `pr-close-round.sh`, `pr-selfcheck.sh` | **`-e` is forbidden here.** Subcommands use exit codes as control flow and several `gh` probes "fail" as normal operation; `pr-selfcheck.sh` is in this row because a `grep` that matches nothing exits 1 as its normal answer. |
 
 - **Intentional no-op branches use an explicit `return 0`.** A bare `return`
   after a failed test inherits that test's exit status 1; under strict mode with

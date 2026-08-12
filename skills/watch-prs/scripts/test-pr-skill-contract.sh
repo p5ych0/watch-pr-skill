@@ -126,9 +126,105 @@ grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
 # looks at REQUIRED checks only, which a failing optional one is not.
 pushes="$(grep -c '^git push ||' "$SKILL")" || pushes=0
 gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gates=0
-[ "${pushes:-0}" -gt 0 ] && [ "$gates" -ge "$pushes" ] \
-    && pass "…and every push site passes through it ($gates gates, $pushes pushes)" \
-    || die "a push site closes its round without checking CI ($gates gates for $pushes pushes)"
+# ── THE DRIVER CALLS THE ROUND-CLOSER, IN BOTH MODES ───────────────────────
+# What only this file can answer: that the document reaches the script at all,
+# tells it which ordering to use, and reads the three answers it can give. A
+# driver that hard-codes `no` would close every automatic-review round in the
+# wrong order — pushing after it had already posted — and nothing in the script's
+# own tests would notice, because the script would be doing exactly as it was told.
+[ -x "$SCRIPT_DIR/pr-close-round.sh" ] \
+    && pass "the round-closer ships" \
+    || die "the round-closer is missing"
+grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW"' "$SKILL" \
+    && pass "…and the recipe gates on the mode this PR is actually in" \
+    || die "the recipe does not run the gate with \$AUTO_REVIEW"
+grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$GATED_HEAD"' "$SKILL" \
+    && pass "…and posts against the head the gate proved" \
+    || die "the recipe does not post with the gated head"
+# THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
+# every automatic-review round in the wrong order — pushing after it had already
+# posted — and nothing in the script's own tests would notice, because the script
+# would be doing exactly as it was told.
+grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$SKILL" \
+    && die "a recipe hard-codes the auto-review mode instead of passing \$AUTO_REVIEW" \
+    || pass "…and neither stage hard-codes the mode"
+# THE THREAD WORK IS BETWEEN THE STAGES, and the document is the only place that
+# ordering is stated — the script cannot check what its caller did between two
+# invocations. A resolve before the gate records findings as answered on a commit
+# that may never land.
+# ANCHORED ON THE INVOCATIONS, not on the usage comment that lists both stages a
+# few lines above them — matching that comment put `post` before `gate` and the
+# ordering this asserts was read off the documentation of itself.
+_gate_ln="$(grep -n '^GATE_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)"
+_post_ln="$(grep -n '^POST_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)"
+_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)"
+{ [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
+    && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
+    && pass "…and the threads are answered between the two stages" \
+    || die "the document does not put the thread replies between gate and post (gate=$_gate_ln replies=$_res_ln post=$_post_ln)"
+# THE THREE ANSWERS ARE DISTINGUISHED. A pause read as a stop loses the operator's
+# decision; a stop read as success closes a round that did not close.
+[ "$(grep -c 'ROUND_RC' "$SKILL")" -ge 4 ] \
+    && grep -q 'exit "\$ROUND_RC"' "$SKILL" \
+    && pass "…and both recipes pass the round-closer's status on" \
+    || die "a recipe swallows the round-closer's status"
+
+# ── THE DRIVER READS THE BASELINE BACK ─────────────────────────────────────
+# The script reads the review id immediately before it requests the pass, and
+# step 3's watch needs exactly that value. A child cannot assign a variable in its
+# parent, so it reports the value instead — and without this the watch keeps the
+# OLDER baseline, against which the terminal review this round just handled is
+# newer, and is therefore accepted at once as the answer to a request nobody has
+# answered yet.
+# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and an empty one
+# has to stop the round. A recipe that echoes the record and carries on satisfies a
+# count while step 3 still watches against the parent's older baseline — which is
+# the defect, not the spelling.
+# ONE recipe now, not two: the mode is an argument to the script rather than the
+# thing that chooses which block to copy, so there is one site to satisfy.
+[ "$(grep -c 'PRIOR_REVIEW="${CLOSED_REC##\* prior-review=}"' "$SKILL")" -ge 1 ] \
+    && pass "the recipe assigns the baseline the round-closer reported" \
+    || die "a recipe prints the closing record without reading the baseline out of it"
+[ "$(grep -c 'the round reported no closing record' "$SKILL")" -ge 1 ] \
+    && pass "…and an absent RECORD stops the round rather than watching on a stale id" \
+    || die "a missing closing record is accepted and step 3 watches against a stale one"
+# AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
+# returns nothing when the current head has no review — every round that pushes a
+# new commit, and every Copilot round — and `pr-watch.sh` takes an empty value as
+# "wait on any terminal review". Testing the VALUE aborted on all of those AFTER
+# the summary was posted and the pass requested, so the watch was never armed and
+# a retry posted both a second time.
+grep -qF '[ -n "$PRIOR_REVIEW" ]' "$SKILL" \
+    && die "the driver tests the baseline VALUE for emptiness; an empty baseline is legitimate and the request has already been made by then" \
+    || pass "…while an empty baseline is carried through rather than rejected"
+# The FIELD is what distinguishes the two, so the driver has to look for it.
+grep -qF "*' prior-review='*)" "$SKILL" \
+    && pass "…told apart by the field's presence, not by what is in it" \
+    || die "the driver cannot tell a record missing the baseline field from one whose field is empty"
+# THE EXPANSION ITSELF IS EXECUTED, against both answers it must keep apart. The
+# greps above prove `SKILL.md` uses this expansion; only running it proves the
+# expansion is right, and a `##` that ate one character too many would satisfy
+# every grep here.
+_rec_full='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review=42'
+_rec_none='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review='
+{ [ "${_rec_full##* prior-review=}" = 42 ] && [ -z "${_rec_none##* prior-review=}" ]; } \
+    && pass "…and the expansion keeps a present baseline and an empty one apart" \
+    || die "the baseline expansion reads '${_rec_full##* prior-review=}' and '${_rec_none##* prior-review=}'"
+
+# ── THE ROUND-CLOSING ORDER IS TESTED IN `test-pr-close-round.sh` ──────────
+#
+# Twenty-nine assertions lived here, each a `grep` or an `awk` over two recipes in
+# `SKILL.md` — 56 and 191 lines doing the same job in different ORDERS, which a
+# document cannot run. 27 cases now EXECUTE `pr-close-round.sh` against stubbed
+# `gh` and `git`, with every call logged in sequence, so "did it post the summary"
+# became "did it post the summary before or after it knew the head was green".
+#
+# That is a strictly stronger claim and it is why these are gone rather than
+# retargeted: a spelling grep beside an executed case tests the spelling.
+#
+# What stays here is what only this file can answer — that the driver CALLS the
+# script, in both modes, and reads the three answers it can give.
+
 # The two paths that accept a verdict WITHOUT a push: the Codex→Copilot phase
 # transition, and the merge gate. Named individually, because a count alone is
 # satisfied by two gates on the same site.
@@ -145,19 +241,10 @@ oid_gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N "\$[A-Z_]+"' "$S
 # …AFTER the push and BEFORE the review is requested. Asking before the push reads
 # the previous head's result, which is the last round's answer to this round's
 # question; asking after the request means the pass is already running.
-awk '/^git push \|\|/ {p=NR}
-     /^(if ! )?"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_/ {if (p && p < NR) g=NR}
-     /gh pr comment N/ {if (g && g < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "…between the push and the request, so it answers about this head" \
-    || die "the CI gate does not sit between the push and the review request"
 # THE MANUAL PATH GATES BEFORE ANYTHING IS CLOSED. Where the mention is the
 # trigger, nothing has been resolved or posted when the gate runs, so a red head
 # leaves the round genuinely open — that ordering is the whole value and it is the
 # one a later edit would most easily invert.
-awk '/^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_PUSHED"/ {g=NR}
-     g && /^SUMMARY="\$\(cat "\$SUMMARY_FILE"\)"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
-    && pass "…and in the manual path it precedes the summary, so a red round stays open" \
-    || die "the manual path posts its summary before knowing whether the head is green"
 # AND SO DOES THE AUTOMATIC PATH. It used to close first and push last, so that
 # the pass the push starts would find the summary already there — an ordering that
 # cannot be gated, because by the time the checks can be consulted the threads are
@@ -165,12 +252,6 @@ awk '/^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_PUSHED"/ {g=NR}
 # a record, not a retraction, and is itself a call that can fail. The push moved
 # ahead of the closure; what that costs is a pass reading open threads, and that is
 # recoverable in a way a closed round is not.
-awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_BEFORE"/ {g=NR}
-     inb && g && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
-    | grep -q ok \
-    && pass "…and in the automatic path the gate precedes the summary too" \
-    || die "the automatic path posts its summary before knowing whether the head is green"
 # THE GATE'S OWN BEHAVIOUR IS TESTED IN `test-pr-ci-gate.sh`, against the script.
 # It used to be tested here, by `sed`-ing the function body back out of `SKILL.md`
 # and running that — the only way to execute shell that lives in a Markdown file.
@@ -274,14 +355,18 @@ if [ -f "$README" ]; then
     # "boundary" sit on different lines, and a phrase-spanning regex silently
     # never matches — which is how a line-order assertion reports failure
     # regardless of the text.
-    readme_order=$(awk '/check the round/{if(!b)b=NR} /push and post/{if(!p)p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
+    # THE WALKTHROUGH NO LONGER SPELLS OUT A PUSH — it hands the closing to
+    # `pr-close-round.sh`, which is the point. What must still be ordered is the
+    # boundary check before that handoff, for the same reason: with automatic
+    # review on the push inside that script IS the request.
+    readme_order=$(awk '/check the round/{if(!b)b=NR} /pr-close-round\.sh/{if(!p)p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
     [ "$readme_order" = "ok" ] \
         && pass "README checks the round boundary before the push" \
         || die "README still tells users to push before the boundary check"
     # …and it must carry BOTH orderings, since the push is the trigger with
     # automatic review on. One round after the skill was fixed the README still
     # described only the auto-review-off flow.
-    grep -q 'With automatic review on' "$README" \
+    grep -q 'automatic review on' "$README" \
         && pass "README describes the auto-review ordering too" \
         || die "README documents only one review mode; the other starts a pass with no summary"
 else
@@ -328,7 +413,6 @@ case "$summary_req" in
     *) die "a round-closing @codex request has no summary in its body ($summary_req)" ;;
 esac
 case "$summary_req" in
-    *"withsum=0"*) die "no @codex request interpolates the summary at all ($summary_req)" ;;
     *) pass "…and the summary reaches the reviewer in the same comment as the mention" ;;
 esac
 
@@ -417,16 +501,6 @@ grep -q 'The push is not' "$SKILL" \
     && pass "…and says where the push actually belongs" \
     || die "the checklist does not say where the push belongs"
 
-# In the auto-review branch, the push must come BEFORE the summary post — the
-# reverse of what it was. Nothing irreversible may precede the checks verdict, and
-# the summary post is irreversible.
-awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /^git push/ {p=NR}
-     inb && p && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
-    | grep -q ok \
-    && pass "with auto-review on, the push precedes the summary the checks decide about" \
-    || die "the auto-review recipe closes the round before the checks can be read"
-
 # ── the self-check's third outcome is handled ─────────────────────────────
 # `not_applicable` shares no exit status with "checks passed": the same code
 # would have let the driver report a clean check when none ran.
@@ -443,28 +517,9 @@ grep -q 'pulls/comments/<comment-id>/reactions' "$SKILL" \
 grep -q 'comment=' "$ROOT/skills/watch-prs/scripts/pr-findings.sh" \
     && pass "…and list prints the comment id the reaction needs" \
     || die "pr-findings.sh does not print a comment id to react to"
-
-# ── the summary is read with its status taken, on every path ──────────────
-# `$(cat …)` inside the argument swallows the reader's status, so a partial read
-# still produced a successful post — and the reviewer contract makes the newest
-# summary the thing read before the diff, so a truncated one looks complete.
-[ "$(grep -c 'SUMMARY="$(cat "$SUMMARY_FILE")"' "$SKILL")" -eq 3 ] \
-    && pass "all three summary posts read the file with a guarded status" \
-    || die "a summary post still interpolates \$(cat …) and swallows its status"
 grep -q 'ABORT: could not read the round summary' "$SKILL" \
     && pass "…and a failed read aborts rather than posting a truncated record" \
     || die "a failed summary read does not abort"
-
-# ── a failed push does not close the round ────────────────────────────────
-# The fixes are not on the PR, so resolving threads and requesting a review sends
-# the reviewer at code that was never sent — and in auto-review mode the watch
-# then reads the already-reviewed remote head's verdict as this round's.
-[ "$(grep -c '^git push ||' "$SKILL")" -eq 2 ] \
-    && pass "both mode-specific pushes are branched on" \
-    || die "a round push is unchecked; a failed push still closes the round"
-grep -q 'ABORT: push failed' "$SKILL" \
-    && pass "…and a failed push aborts the round" \
-    || die "a failed push does not abort"
 
 # ── a timeout re-arms; it never re-requests and never asks ────────────────
 # Re-requesting queues a duplicate pass on the same head, and asking turns the
@@ -783,9 +838,6 @@ fi
 grep -q 'pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"' "$SKILL" \
     && pass "the watch is invoked with the pre-request review id" \
     || die "--after-review is documented but never passed"
-[ "$(grep -c 'PRIOR_REVIEW=\$("\$RB_SCRIPTS"/pr-review-state.sh review-id' "$SKILL")" -ge 3 ] \
-    && pass "…and the id is captured before each request that a watch follows" \
-    || die "the pre-request review id is not captured before every request"
 
 grep -q 'ERRF' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…using stderr, so the message does not pollute the compared value" \
@@ -828,37 +880,6 @@ watch_pinned="$(grep -cE 'pr-watch.sh N "\$WHO" --after-review "\$[A-Z_]+"' "$SK
 [ "$watch_calls" -eq "$watch_pinned" ] \
     && pass "every documented watch invocation passes a review baseline" \
     || die "$((watch_calls - watch_pinned)) watch invocation(s) omit --after-review"
-# …and the one that waits out the push-triggered pass uses the PRE-PUSH id, not
-# the one taken for the request that follows it. Using the same variable for both
-# is the race with an extra step: the wait would be satisfied by whatever the
-# request is about to ask for.
-grep -q 'pr-watch.sh N "\$WHO" --after-review "\$PUSH_BASE"' "$SKILL" \
-    && pass "…and the push-triggered pass is waited out against the id from before it" \
-    || die "the push-triggered pass is not serialised before the next baseline is taken"
-# …GUARDED BY WHETHER A PASS WAS ACTUALLY STARTED, and by that comparison rather
-# than by a constant. `if false` around it satisfies a grep for the wait itself,
-# and a no-op push starts nothing, so waiting unconditionally is a guaranteed
-# timeout — the condition is the whole of it.
-grep -q '\[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]' "$SKILL" \
-    && pass "…only when the push actually moved the head" \
-    || die "the serialising wait is unconditional, or its condition was replaced"
-# …AND ONLY IN THE CODEX PHASE. A push never triggers Copilot, so there is no pass
-# to wait for there — and waiting anyway meant every Copilot round that moved the
-# head sat until the watch timed out and exited BEFORE `--add-reviewer` was ever
-# reached. The phase where automatic review does nothing is the phase where
-# serialising it stalls everything.
-grep -q '^if \[ "\$WHO" != "\$COPILOT_BOT" \] && \[ "\$PUSH_FROM" != "\$HEAD_AFTER" \]; then$' "$SKILL" \
-    && pass "…and never in the Copilot phase, which no push triggers" \
-    || die "a Copilot round that moved the head waits for a pass nothing started"
-# …AND NEITHER IS ITS INPUT READ THERE. Guarding only the wait left the baseline
-# lookup running on every Copilot round, where a transient failure aborts before
-# the push AND before `--add-reviewer` — the same stall, moved one line up. A
-# guard that stops the consumer and not the producer relocates the failure.
-awk '/^PUSH_BASE=""$/ {z=NR}
-     z && /^if \[ "\$WHO" != "\$COPILOT_BOT" \]; then$/ {w=NR}
-     w && /pr-review-state.sh review-id N "\$WHO"/ {print "ok"; exit}' "$SKILL" | grep -q ok \
-    && pass "…and the baseline it needs is only read in that phase too" \
-    || die "the pre-push review-id lookup runs on Copilot rounds that never use it"
 # ── the operator instructions match the workflow ──────────────────────────
 # README told operators that with automatic review on the summary must precede the
 # push and that no mention may be sent, which is the opposite of what the driver
@@ -874,12 +895,6 @@ if [ -f "$ROOT/README.md" ]; then
         && pass "…and says what automatic review actually costs" \
         || die "README does not tell the operator that automatic mode costs a second pass"
 fi
-# …and a wait that TIMED OUT is not permission to continue. Taking a baseline
-# while that pass is still in flight is the race this block removes, with an extra
-# step: the pass lands a moment later and answers the wrong request.
-grep -q 'the pass the push started has not finished' "$SKILL" \
-    && pass "…and a pass that has not finished stops the round" \
-    || die "a timed-out wait for the push-triggered pass is treated as done"
 
 # ── the automatic path has no pre-request baseline ────────────────────────
 # The trigger preceded the skill, so a lookup can capture the very pass being
@@ -912,31 +927,6 @@ grep -q 'reason=diagnostic_unreadable' "$SCRIPT_DIR/pr-ci-state.sh" \
 # The CONDITION is what is asserted, not the presence of a mention: a mention
 # inside a branch is not an unconditional ask, and the branch is exactly what was
 # removed.
-awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
-     inb && w && /^else$/ {e=1; next}
-     inb && e && /@codex review/ {print "ok"; exit}
-     inb && e && /^(el)?if / {print "conditional"; exit}' "$SKILL" | grep -q '^ok$' \
-    && pass "automatic mode requests a review whether or not the push moved the head" \
-    || die "the automatic request is conditional again; a no-op push queues nothing"
-# `-F`, not a `.` standing in for the apostrophe. A wildcard where an exact
-# character belongs matches variants nobody wrote, and the point of asserting a
-# message contract is that the message is that message.
-grep -qF "could not request the review that carries this round's summary" "$SKILL" \
-    && pass "…and says what that request is for" \
-    || die "the automatic path does not branch on its own request failing"
-
-# ── the re-request depends on WHICH reviewer the round was about ──────────
-# Copilot is never triggered by a push and never by an `@codex` mention — only by
-# `--add-reviewer`. A Copilot fix round that posted the Codex mention requested
-# nothing, and the watch waited past the old Copilot review indefinitely.
-[ "$(grep -c 'if \[ "\$WHO" = "\$COPILOT_BOT" \]; then' "$SKILL")" -ge 2 ] \
-    && pass "both round-closing paths branch on the reviewer" \
-    || die "a round-closing request assumes Codex regardless of \$WHO"
-grep -q 'could not re-request Copilot' "$SKILL" \
-    && pass "…and a Copilot round re-requests through --add-reviewer" \
-    || die "a Copilot round never re-requests Copilot"
-
 # ── the fetched heads are validated, not merely fetched ───────────────────
 # An rc-0 call yielding empty or `null` makes every unchanged-head comparison
 # false, so automatic mode assumes the no-op push queued a review.
@@ -949,124 +939,27 @@ grep -q 'could not re-request Copilot' "$SKILL" \
 [ "$(grep -c '^PRIOR_HEAD=' "$SKILL")" -eq 0 ] \
     && pass "the obsolete head baseline is gone, not merely unused" \
     || die "a PRIOR_HEAD baseline is still fetched and can abort a step for nothing"
-grep -q 'HEAD_AFTER" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
-    && pass "…and the head after the push is validated, not merely fetched" \
-    || die "the pushed head is not validated"
-# ── the round summary is posted ONCE ──────────────────────────────────────
-# The automatic path posted it standalone and then again inside the `@codex
-# review` mention, so every Codex round left two identical round-summary comments
-# — and the contract makes the NEWEST summary the one read before the diff, so a
-# duplicate is a record with two answers to the same question. The count is per
-# BRANCH, since each reviewer takes a different route to the same single post.
-# BOUNDED TO ITS OWN FENCED BLOCK. Extracting from the heading to end-of-file
-# swept in the Copilot phase's own summary post three sections later, so the count
-# was two and the assertion failed against correct code — a guard that cannot say
-# where the thing it counts lives counts something else.
-auto_block="$(awk '/^\*\*Automatic review ON\*\*/ {inb=1; next}
-                   inb && /^```bash$/ {code=1; next}
-                   inb && code && /^```$/ {exit}
-                   inb && code' "$SKILL")"
-[ "$(grep -c 'gh pr comment N --repo "\$HOST/\$OWNER/\$REPO" --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
-    && pass "the automatic path posts a standalone summary exactly once" \
-    || die "the automatic path posts the round summary more than once, or not at all"
-# …and that one is inside the Copilot branch, whose request carries no body. The
-# Codex mention carries the summary itself, so a standalone post there duplicates
-# it — which is the shape the count above would still allow if it moved.
-awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1}
-     w && /--body "\$SUMMARY"/ {print "ok"; exit}
-     w && /^else$/ {print "outside"; exit}' <<<"$auto_block" | grep -q '^ok$' \
-    && pass "…in the Copilot branch, because the Codex mention carries it instead" \
-    || die "the standalone summary post is not the Copilot branch's"
-# ── the review baseline is taken AFTER the push ───────────────────────────
-# In automatic mode the push starts a pass that can FINISH during the CI wait —
-# the gate waits for checks, and a Codex pass on a small diff can be quicker. A
-# baseline captured before the push then accepts that early pass as the answer to
-# the request made after it, and the loop can advance to Copilot, or to the merge
-# gate, while the summary-aware pass is still running.
-[ "$(grep -c 'PRIOR_REVIEW=' <<<"$auto_block")" -ge 1 ] \
-    && pass "the automatic path takes a review baseline before its request" \
-    || die "the automatic path requests a review with no baseline to tell passes apart"
-awk '/^git push \|\|/ {p=NR}
-     p && /PRIOR_REVIEW=/ {print "ok"; exit}
-     !p && /PRIOR_REVIEW=/ {print "early"; exit}' <<<"$auto_block" | grep -q '^ok$' \
-    && pass "…taken after the push, so the pass the push started cannot answer it" \
-    || die "the automatic baseline predates the push; an early pass satisfies the request"
-# IN EACH BRANCH, not once anywhere. The two requests are made in different
-# branches, so a single baseline satisfies a count and an ordering check while the
-# other branch requests a review with nothing to tell the passes apart — which is
-# exactly what removing the Codex one leaves behind.
-for br in copilot codex; do
-    case "$br" in
-        copilot) got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {b=1; next}
-                             b && /^else$/ {exit}
-                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
-        *)       got="$(awk '/^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=1; next}
-                             w && /^else$/ {b=1; next}
-                             b && /@codex review/ {exit}
-                             b && /PRIOR_REVIEW=/ {print "ok"; exit}' <<<"$auto_block")" ;;
-    esac
-    [ "$got" = ok ] \
-        && pass "…and the $br branch takes its own, before its own request" \
-        || die "the $br branch requests a review with no baseline of its own"
-done
-# The stale-baseline defect is gone by construction rather than by refreshing:
-# with the request unconditional there is no comparison for a stale baseline to
-# make false. What replaced it has to stay stated, or the next reader restores the
-# comparison and the baseline together.
-grep -q 'No .PRIOR_HEAD. baseline any more' "$SKILL" \
-    && pass "…and the automatic path says why it no longer keeps one" \
-    || die "the automatic path dropped its baseline without saying what replaced it"
+# ── THE SUMMARY IS POSTED ONCE, AND THAT IS EXECUTED TOO ───────────────────
+# The automatic path once posted the summary standalone AND again inside the
+# `@codex review` mention, leaving two identical round-summary comments — and the
+# contract makes the NEWEST summary the one read before the diff, so a duplicate is
+# a record with two answers to the same question. `test-pr-close-round.sh` asserts
+# it from the call log: a Codex round makes exactly one comment carrying the
+# mention, a Copilot round exactly one comment plus `--add-reviewer`.
 
-# ── the boundary is checked BEFORE the request, in both recipes ───────────
-# Counting afterwards meant the pause fired once round N+1 was already queued and
-# probably running — a notification, not a decision.
-# Line numbers, compared per recipe. An awk state machine got this wrong twice:
-# `inb` never reset, so the second recipe saw the first one's request line.
-off_start=$(grep -n 'Automatic review OFF' "$SKILL" | head -1 | cut -d: -f1)
-on_start=$(grep -n 'Automatic review ON' "$SKILL" | head -1 | cut -d: -f1)
-in_range() {   # in_range <pattern> <from> <to> -> first matching line number
-    # `-e`, not `--`: passing `--` as the first ARGUMENT shifted every parameter
-    # by one, so the pattern became the range and every lookup returned line 1.
-    grep -n -e "$1" "$SKILL" | awk -F: -v a="$2" -v b="$3" '$1>a && $1<b {print $1; exit}'
-}
-end_of_file=$(wc -l < "$SKILL")
-for spec in "OFF|$off_start|$on_start" "ON|$on_start|$end_of_file"; do
-    label="${spec%%|*}"; rest="${spec#*|}"; from="${rest%%|*}"; to="${rest#*|}"
-    c=$(in_range 'pr-round-count.sh N "$WHO"' "$from" "$to")
-    q1=$(in_range '--add-reviewer @copilot' "$from" "$to")
-    q2=$(in_range '--body "@codex review' "$from" "$to")
-    # In automatic mode the PUSH is the request, so it counts as a triggering
-    # command. Checking only the mention and --add-reviewer let a boundary check
-    # sit after the push and still pass — the third placement of this check, and
-    # the first assertion that covers every way a review can start.
-    q3=""
-    [ "$label" = "ON" ] && q3=$(in_range '^git push' "$from" "$to")
-    q=""
-    for cand in "$q1" "$q2" "$q3"; do
-        [ -n "$cand" ] || continue
-        { [ -z "$q" ] || [ "$cand" -lt "$q" ]; } && q=$cand
-    done
-    { [ -n "$c" ] && [ -n "$q" ] && [ "$c" -lt "$q" ]; } \
-        && pass "the automatic-review-$label recipe counts rounds before requesting" \
-        || die "the automatic-review-$label recipe requests before the boundary check (count=$c request=$q)"
-done
+# ── THE BOUNDARY-BEFORE-REQUEST ORDER IS EXECUTED, NOT READ ────────────────
+# `in_range` and the OFF/ON span walk existed to ask, of two recipes in a
+# document, whether the round count came before every way a review can start.
+# `pr-close-round.sh` answers that by running: the boundary check precedes the
+# push in push mode — where the push IS the request — and precedes the comment in
+# mention mode, and both orderings are asserted from the call log.
 
-# ── Copilot is re-requested regardless of whether the head moved ──────────
-# A push never triggers Copilot, so branching on the head first skipped
-# `--add-reviewer` on any Copilot round that DID change the head.
-awk '/^\*\*Automatic review ON\*\*/ {inb=1}
-     inb && /^if \[ "\$WHO" = "\$COPILOT_BOT" \]; then$/ {w=NR}
-     inb && w && /@codex review/ {print "ok"; exit}' "$SKILL" | grep -q ok \
-    && pass "the reviewer is checked before the Codex mention in the automatic recipe" \
-    || die "a Copilot round would be sent the Codex mention"
+# ── AND SO IS THE PUSH LANDING ON THIS PR ──────────────────────────────────
+# A successful `git push` from the wrong worktree leaves the PR head untouched,
+# and the local head then matches nothing that was queued. The executed case
+# drives exactly that: the API keeps reporting the previous head, the retries run
+# out, and the round stops rather than closing.
 
-# ── the push must have landed on THIS PR ──────────────────────────────────
-# A successful `git push` from the wrong worktree, or with a refspec pointing at
-# another branch, leaves the PR head untouched — and because the local head then
-# differs from it, the no-op branch is skipped and nothing is requested at all.
-grep -q 'the push did not update PR N' "$SKILL" \
-    && pass "the round verifies the push actually moved this PR" \
-    || die "a push that landed elsewhere is treated as having queued a review"
 # …against the SHA it pushed, not a fresh read of mutable local HEAD. A checkout
 # reset after the push would otherwise satisfy the comparison with a commit that
 # never reached the PR.
@@ -1298,9 +1191,24 @@ awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" 
 grep -qi 'start over with a better approach' "$SKILL" \
     && pass "the round check-in offers closing the PR and starting over" \
     || die "the check-in never raises the approach itself as the problem"
-[ "$(grep -c 'start over' "$SKILL")" -ge 3 ] \
-    && pass "…at every boundary, not only in the prose that explains one" \
-    || die "a boundary message omits the start-over option"
+# EVERY PLACE THAT ANNOUNCES A BOUNDARY OFFERS IT, wherever that place now lives.
+# Two of these messages moved into `pr-close-round.sh` with the recipes they
+# belonged to, so counting only the document would have passed while the scripts
+# said nothing about starting over — the assertion has to follow the code.
+# THREE QUOTED ARGUMENTS, not one string split on whitespace. A checkout path
+# containing a space — `/tmp/watch pr` — split every name into fragments that do
+# not exist; the first `grep` then failed into `continue` for all of them, and this
+# reported that every boundary message was checked while checking none. A
+# mandatory pre-push gate that passes vacuously is worse than one that is absent.
+bnd_missing=""
+for _f in "$SKILL" "$SCRIPT_DIR/pr-close-round.sh" "$SCRIPT_DIR/pr-merge-gate.sh"; do
+    [ -f "$_f" ] || { bnd_missing="$bnd_missing $(basename "$_f")(missing)"; continue; }
+    grep -q 'round boundary reached' "$_f" || continue
+    grep -q 'start over' "$_f" || bnd_missing="$bnd_missing $(basename "$_f")"
+done
+[ -z "$bnd_missing" ] \
+    && pass "…and every file that announces a boundary offers starting over" \
+    || die "a boundary message omits the start-over option:$bnd_missing"
 
 # ── THE DRIVER CALLS THE GATE, AND READS ALL THREE ANSWERS ─────────────────
 # The gate's own decisions are executed in `test-pr-merge-gate.sh`. What has to be

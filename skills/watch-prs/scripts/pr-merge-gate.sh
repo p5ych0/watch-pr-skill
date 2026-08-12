@@ -105,11 +105,19 @@ case "$REVIEWERS" in
     both|codex-only) ;;
     *) echo "merge blocked: reviewers must be 'both' or 'codex-only' (got '$REVIEWERS')"; exit 1 ;;
 esac
-# THE REVIEWER LOGINS LIVE IN ONE PLACE, and `test-pr-skill-contract.sh` asserts
-# that `SKILL.md` still names the same two — the driver uses them for the phases
-# and this gate uses them for the verdicts, and two copies drifting apart would
-# mean the gate validating a signoff from an account the driver never asked.
-CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+# THE REVIEWER LOGINS COME FROM `recordlib.sh`, which is the one place they are
+# written. They were literals here until a second script needed them; the copy that
+# drifts is never the one you are looking at, and a login one character wrong
+# matches no record at all — so this gate would report "did not return an exact
+# clean record" for a reviewer that signed off perfectly.
+# BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
+# inheritable: a `recordlib.sh` truncated after the first definition passes the
+# check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
+# as library data — so this would validate a signoff from whatever account that
+# variable named. `rb_load` clears before it sources, which is the whole point.
+rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
+CODEX_BOT="$RB_CODEX_BOT"; COPILOT_BOT="$RB_COPILOT_BOT"
 # WHERE THE RANGE CHECK LOOKS. The driver derived this once and passed it in; a
 # script derives it for itself, and takes the status — a directory retained from a
 # failed probe is a merge decision made about the wrong tree.
@@ -433,7 +441,8 @@ esac
 "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$COPILOT_BOT"; MERGE_ROUNDS_RC=$?
 case "$MERGE_ROUNDS_RC" in
     0) ;;
-    3) echo "PAUSE: round boundary reached; decide with the operator before merging"; exit 3 ;;
+    3) echo "PAUSE: round boundary reached. Decide with the operator before merging: merge now, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"
+       exit 3 ;;
     *) echo "merge blocked: could not establish the round count (rc=$MERGE_ROUNDS_RC)"; exit 1 ;;
 esac
 
