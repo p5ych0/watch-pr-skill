@@ -40,7 +40,13 @@ for h in pr-round-count.sh pr-ci-gate.sh pr-review-state.sh pr-watch.sh; do
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$CALLS"
 _n="\$(basename "\$0" .sh)"
-[ -f "\$W/\${_n}.out" ] && cat "\$W/\${_n}.out"
+# A SECOND ANSWER, WHEN A CASE NEEDS THE WORLD TO CHANGE MID-RUN. The
+# push-triggered pass can FINISH while the CI gate is still settling, and the
+# whole question is which side of that the baseline was read on — so the stub can
+# answer differently the second time it is asked.
+if [ -f "\$W/pushed" ] && [ -f "\$W/\${_n}.after.out" ]; then cat "\$W/\${_n}.after.out"
+elif [ ! -f "\$W/pushed" ] && [ -f "\$W/\${_n}.before.out" ]; then cat "\$W/\${_n}.before.out"
+elif [ -f "\$W/\${_n}.out" ]; then cat "\$W/\${_n}.out"; fi
 exit "\$(cat "\$W/\${_n}.rc" 2>/dev/null || echo 0)"
 STUB
     chmod +x "$DIR/$h"
@@ -49,7 +55,12 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    cat "$W/head.out" 2>/dev/null
+    *" pr view "*)    # SEQUENCED, because the head MOVING is the whole subject of
+                      # some cases: the pre-push read and the post-push read are
+                      # the same call to this stub and must be able to differ.
+                      if [ ! -f "$W/pushed" ] && [ -f "$W/head.before.out" ]
+                      then cat "$W/head.before.out"
+                      else cat "$W/head.out" 2>/dev/null; fi
                       exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
     *" pr comment "*) exit "$(cat "$W/comment.rc" 2>/dev/null || echo 0)" ;;
     *" pr edit "*)    exit "$(cat "$W/edit.rc" 2>/dev/null || echo 0)" ;;
@@ -62,7 +73,11 @@ printf 'git %s\n' "$*" >> "$CALLS"
 case "$1 $2" in
     "rev-parse HEAD") cat "$W/local.out" 2>/dev/null; exit 0 ;;
 esac
-[ "$1" = push ] && exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"
+# THE PUSH MARKS THE WORLD. Cases about "before or after the push" then key their
+# answers on the event itself rather than on a call count — a counter makes the
+# first call special whether or not it precedes the push, so a defect that MOVES a
+# call past the push still gets the first answer and looks correct.
+[ "$1" = push ] && { : > "$W/pushed"; exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"; }
 exit 0
 GITSH
 chmod +x "$TMP/bin/gh" "$TMP/bin/git"
@@ -215,6 +230,42 @@ world; printf '%s\n' "$PREV40" > "$W/head.out"
 # the retry path, and the case exists because the API can serve the previous head
 # for a moment after a push.
 case_is 1 "not the" "a head that never catches up stops the round" "$CODEXBOT" yes
+
+# ── THE BASELINE IS READ BEFORE THE PUSH ───────────────────────────────────
+#
+# This is the one ordering in the script that runs the other way round from
+# everything else: later is normally safer, and here later is WRONG. The push
+# starts a pass; a fast one finishes while the CI gate is still settling; a
+# baseline taken after that captures the COMPLETED pass as the thing to wait past,
+# so the watch waits for a newer pass nobody requested and the round never closes
+# despite being clean.
+#
+# The stub answers `id=1` first and `id=2` afterwards — the completed pass — and
+# the assertion is that the watch was handed the FIRST one.
+# THE HEAD MOVED: the pre-push read reports the previous commit, every read after
+# reports the pushed one. That is what makes a pass have been started at all.
+world
+printf '%s\n' "$PREV40" > "$W/head.before.out"
+printf 'PR_REVIEW_STATE pr=7 review-id=1\n' > "$W/pr-review-state.before.out"
+printf 'PR_REVIEW_STATE pr=7 review-id=2\n' > "$W/pr-review-state.out"
+run "$CODEXBOT" yes >/dev/null
+grep -q 'pr-watch.sh 7 .* --after-review PR_REVIEW_STATE pr=7 review-id=1' "$TMP/calls" \
+    && pass "the watch is given the baseline from BEFORE the push" \
+    || die "the baseline was taken after the push: $(grep pr-watch "$TMP/calls" | head -1)"
+before 'pr-review-state.sh review-id' 'git push' \
+    && pass "…which is to say the review id is read before the push" \
+    || die "the review id is read after the push has already started a pass"
+# …AND NOT AT ALL ON A COPILOT ROUND. A push never triggers Copilot, so reading it
+# there puts a `gh` call that can fail transiently in front of the
+# `--add-reviewer` that is the only thing such a round needs — a stall with no
+# upside.
+world; run "$COPILOTBOT" yes >/dev/null
+grep -q 'pr-review-state.sh review-id' "$TMP/calls" \
+    && pass "a Copilot round still reads its own request baseline" \
+    || die "a Copilot round requests a review with no baseline"
+[ "$(grep -c 'pr-review-state.sh review-id' "$TMP/calls")" -eq 1 ] \
+    && pass "…but only the one it uses, not a pre-push baseline it never will" \
+    || die "a Copilot round reads a pre-push baseline it cannot use"
 
 # ── the arguments ──────────────────────────────────────────────────────────
 world

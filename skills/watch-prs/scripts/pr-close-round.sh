@@ -139,6 +139,24 @@ PUSH_FROM=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq 
 _why="$(sha_reason "$PUSH_FROM")" \
     || { echo "ABORT: the pre-push head is not a full OID ($_why: '$PUSH_FROM')."; exit 1; }
 
+# THE BASELINE IS READ BEFORE THE PUSH, and this is the one ordering in the whole
+# script that runs the other way round from everything else.
+#
+# Everywhere else, later is safer: read the state as close as possible to the
+# decision that uses it. Here later is WRONG. The push starts a pass; a fast one
+# finishes while the CI gate is still settling; and a baseline taken after that
+# captures the completed pass as the thing to wait past — so `pr-watch.sh` waits
+# for a newer pass that nobody requested, times out, and the round never closes
+# despite being clean.
+#
+# Only for reviewers a push can trigger. Copilot is not one, and reading it there
+# put a `gh` call that can fail transiently in front of the `--add-reviewer` that
+# is the only thing a Copilot round needs — a stall with no upside.
+PUSH_BASE=""
+if [ "$WHO" != "$COPILOT_BOT" ]; then
+    PUSH_BASE=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
+        || { echo "ABORT: could not read the review id before the push."; exit 1; }
+fi
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
 "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 
@@ -168,8 +186,6 @@ fi
 # for it would re-arm every timeout forever. Copilot is never triggered by a push
 # at all.
 if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
-    PUSH_BASE=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
-        || { echo "ABORT: could not read the review id before waiting."; exit 1; }
     "$_RB_SELF_DIR"/pr-watch.sh "$PR" "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
     case "$PUSHPASS_RC" in
         0) ;;
