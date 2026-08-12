@@ -651,6 +651,7 @@ decided by **what starts it**, and there are two different answers.
 **Automatic review OFF** — the mention is the trigger, so it can carry the
 summary and the push is inert:
 
+```bash
 # THE ROUND CLOSES THROUGH A SCRIPT. Both recipes — this one and the automatic
 # one below — were prose-embedded shell doing the same job in different ORDERS,
 # and the ordering is the whole content. Nothing executed either. Issue #26.
@@ -663,18 +664,32 @@ summary and the push is inert:
 #
 # `no` is this mode: the `@codex review` mention is the trigger, so it carries the
 # summary in one comment and nothing is queued until that comment is posted.
-"$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" no
-ROUND_RC=$?
+ROUND_OUT="$("$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" no 2>&1)"; ROUND_RC=$?
+printf '%s\n' "$ROUND_OUT"
+# THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
+# before it requests the pass, and step 3's watch needs exactly that value — a
+# child cannot assign a variable here, so it says what the value was. Without
+# this, the watch keeps the OLDER baseline and the terminal review this round just
+# handled is newer than it, so it is accepted at once as the answer to a request
+# nobody has answered yet.
+if [ "$ROUND_RC" -eq 0 ]; then
+    PRIOR_REVIEW="$(printf '%s\n' "$ROUND_OUT" \
+        | sed -n 's/^PR_ROUND_CLOSED .*[[:space:]]prior-review=\(.*\)$/\1/p')"
+    [ -n "$PRIOR_REVIEW" ] \
+        || { echo "ABORT: the round closed without reporting a review baseline; step 3 would watch against a stale one."; exit 1; }
+fi
 case "$ROUND_RC" in
     0) ;;   # the script printed the head it closed on
     3) echo "Stopping here: the operator decides at a round boundary." ;;
     *) echo "The round did not close. The reason is above; do not retry it blind." ;;
 esac
 exit "$ROUND_RC"
+```
 
 **Automatic review ON** — the push starts the pass, so the ordering is decided by
 what is *irreversible*:
 
+```bash
 # THE SAME SCRIPT, THE OTHER ORDER. Here the PUSH is the trigger, so a pass starts
 # before anything can be posted or resolved — and the ordering is then decided by
 # what is IRREVERSIBLE: push, prove the checks, close afterwards.
@@ -689,14 +704,27 @@ what is *irreversible*:
 # superseded by the explicit request the script makes at the end. The trade is a
 # wasted pass against a round that closes on a red head, and only one of those can
 # be undone by the next round.
-"$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" yes
-ROUND_RC=$?
+ROUND_OUT="$("$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" yes 2>&1)"; ROUND_RC=$?
+printf '%s\n' "$ROUND_OUT"
+# THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
+# before it requests the pass, and step 3's watch needs exactly that value — a
+# child cannot assign a variable here, so it says what the value was. Without
+# this, the watch keeps the OLDER baseline and the terminal review this round just
+# handled is newer than it, so it is accepted at once as the answer to a request
+# nobody has answered yet.
+if [ "$ROUND_RC" -eq 0 ]; then
+    PRIOR_REVIEW="$(printf '%s\n' "$ROUND_OUT" \
+        | sed -n 's/^PR_ROUND_CLOSED .*[[:space:]]prior-review=\(.*\)$/\1/p')"
+    [ -n "$PRIOR_REVIEW" ] \
+        || { echo "ABORT: the round closed without reporting a review baseline; step 3 would watch against a stale one."; exit 1; }
+fi
 case "$ROUND_RC" in
     0) ;;
     3) echo "Stopping here: the operator decides at a round boundary." ;;
     *) echo "The round did not close. The reason is above; do not retry it blind." ;;
 esac
 exit "$ROUND_RC"
+```
 
 In the **Copilot phase** the request is `gh pr edit --add-reviewer @copilot`,
 which is not a comment and is never triggered by a push, so the summary is a

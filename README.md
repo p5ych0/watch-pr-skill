@@ -252,18 +252,24 @@ Then:
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`), reply to each thread with what changed,
-   react 👍/👎, and resolve it. Then, **with automatic review off** (the
-   recommended setting), push and post **one comment** that opens with
-   `@codex review` and continues with the round summary — the mention *is* the
-   request, so the account of what changed and the request for the next pass are
-   the same comment. **With automatic review on** the push *is* the request, so
-   the summary must be posted **before** it and no mention is sent at all; a
-   mention would queue a second review of the same head. Either way the summary
-   says what was addressed and what was intentionally skipped, and both checks
-   come *before the push*: with Codex automatic
-   review enabled the push itself requests the next review, so a check placed
-   after it asks you about a round that has already started. A resolved thread is
-   not a record of a fix; the summary is.
+   react 👍/👎, and resolve it. Then hand the closing to
+   **`pr-close-round.sh <PR> <reviewer> <summary-file> <auto-review>`**, which
+   holds both orderings so neither has to be remembered:
+
+   - **automatic review off** (the recommended setting) — the `@codex review`
+     mention *is* the request, so it carries the summary in one comment and
+     nothing is queued until that comment is posted.
+   - **automatic review on** — the *push* is the request, so the push goes first
+     and the summary is posted **after** the checks on it are known. Posting
+     first cannot be gated: by the time the checks can be consulted the summary is
+     already there and cannot be taken back. The pass the push starts reads open
+     threads and no summary, and is superseded by an explicit mention carrying the
+     summary — which is why this mode costs two Codex passes per round.
+
+   Both checks come *before the push*, because with automatic review on the push
+   itself requests the next review and a check placed after it asks you about a
+   round that has already started. The summary says what was addressed and what
+   was intentionally skipped: a resolved thread is not a record of a fix.
 5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
    until it is clean too. Fix commits here carry a `Review-Phase: copilot`
    trailer, which is how the merge gate knows the head advanced only through

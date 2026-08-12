@@ -148,6 +148,24 @@ grep -q 'pr-close-round.sh N "\$WHO" "\$SUMMARY_FILE" yes' "$SKILL" \
     && pass "…and both recipes pass the round-closer's status on" \
     || die "a recipe swallows the round-closer's status"
 
+# ── THE DRIVER READS THE BASELINE BACK ─────────────────────────────────────
+# The script reads the review id immediately before it requests the pass, and
+# step 3's watch needs exactly that value. A child cannot assign a variable in its
+# parent, so it reports the value instead — and without this the watch keeps the
+# OLDER baseline, against which the terminal review this round just handled is
+# newer, and is therefore accepted at once as the answer to a request nobody has
+# answered yet.
+# COUNTING THE TOKEN IS NOT ENOUGH: the value has to be ASSIGNED, and an empty one
+# has to stop the round. A recipe that echoes the record and carries on satisfies a
+# count while step 3 still watches against the parent's older baseline — which is
+# the defect, not the spelling.
+[ "$(grep -c 'PRIOR_REVIEW="$(printf' "$SKILL")" -ge 2 ] \
+    && pass "both recipes assign the baseline the round-closer reported" \
+    || die "a recipe prints the closing record without reading the baseline out of it"
+[ "$(grep -c 'the round closed without reporting a review baseline' "$SKILL")" -ge 2 ] \
+    && pass "…and an absent one stops the round rather than watching on a stale id" \
+    || die "an empty baseline is accepted and step 3 watches against a stale one"
+
 # ── THE ROUND-CLOSING ORDER IS TESTED IN `test-pr-close-round.sh` ──────────
 #
 # Twenty-nine assertions lived here, each a `grep` or an `awk` over two recipes in
@@ -292,14 +310,18 @@ if [ -f "$README" ]; then
     # "boundary" sit on different lines, and a phrase-spanning regex silently
     # never matches — which is how a line-order assertion reports failure
     # regardless of the text.
-    readme_order=$(awk '/check the round/{if(!b)b=NR} /push and post/{if(!p)p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
+    # THE WALKTHROUGH NO LONGER SPELLS OUT A PUSH — it hands the closing to
+    # `pr-close-round.sh`, which is the point. What must still be ordered is the
+    # boundary check before that handoff, for the same reason: with automatic
+    # review on the push inside that script IS the request.
+    readme_order=$(awk '/check the round/{if(!b)b=NR} /pr-close-round\.sh/{if(!p)p=NR} END{print (b && p && b<p) ? "ok" : "bad"}' "$README")
     [ "$readme_order" = "ok" ] \
         && pass "README checks the round boundary before the push" \
         || die "README still tells users to push before the boundary check"
     # …and it must carry BOTH orderings, since the push is the trigger with
     # automatic review on. One round after the skill was fixed the README still
     # described only the auto-review-off flow.
-    grep -q 'With automatic review on' "$README" \
+    grep -q 'automatic review on' "$README" \
         && pass "README describes the auto-review ordering too" \
         || die "README documents only one review mode; the other starts a pass with no summary"
 else
@@ -1128,9 +1150,14 @@ grep -qi 'start over with a better approach' "$SKILL" \
 # Two of these messages moved into `pr-close-round.sh` with the recipes they
 # belonged to, so counting only the document would have passed while the scripts
 # said nothing about starting over — the assertion has to follow the code.
-bnd_files="$SKILL $SCRIPT_DIR/pr-close-round.sh $SCRIPT_DIR/pr-merge-gate.sh"
+# THREE QUOTED ARGUMENTS, not one string split on whitespace. A checkout path
+# containing a space — `/tmp/watch pr` — split every name into fragments that do
+# not exist; the first `grep` then failed into `continue` for all of them, and this
+# reported that every boundary message was checked while checking none. A
+# mandatory pre-push gate that passes vacuously is worse than one that is absent.
 bnd_missing=""
-for _f in $bnd_files; do
+for _f in "$SKILL" "$SCRIPT_DIR/pr-close-round.sh" "$SCRIPT_DIR/pr-merge-gate.sh"; do
+    [ -f "$_f" ] || { bnd_missing="$bnd_missing $(basename "$_f")(missing)"; continue; }
     grep -q 'round boundary reached' "$_f" || continue
     grep -q 'start over' "$_f" || bnd_missing="$bnd_missing $(basename "$_f")"
 done

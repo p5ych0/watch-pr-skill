@@ -110,7 +110,13 @@ esac
 # drifts is never the one you are looking at, and a login one character wrong
 # matches no record at all — so this gate would report "did not return an exact
 # clean record" for a reviewer that signed off perfectly.
+# BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
+# inheritable: a `recordlib.sh` truncated after the first definition passes the
+# check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
+# as library data — so this would validate a signoff from whatever account that
+# variable named. `rb_load` clears before it sources, which is the whole point.
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
 CODEX_BOT="$RB_CODEX_BOT"; COPILOT_BOT="$RB_COPILOT_BOT"
 # WHERE THE RANGE CHECK LOOKS. The driver derived this once and passed it in; a
 # script derives it for itself, and takes the status — a directory retained from a

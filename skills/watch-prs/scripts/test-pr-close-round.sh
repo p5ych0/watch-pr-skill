@@ -214,6 +214,30 @@ world; run "$CODEXBOT" no >/dev/null
 grep -q '@codex review' "$TMP/calls" \
     && pass "a Codex round carries the mention that triggers it" \
     || die "a Codex round did not mention Codex"
+# EXACTLY ONE COMMENT, in each mode and for each reviewer. The automatic path once
+# posted the summary standalone AND again inside the mention, leaving two
+# identical round-summary comments — and the contract makes the NEWEST summary the
+# one read before the diff, so a duplicate is a record with two answers to the
+# same question.
+[ "$(grep -c 'gh pr comment' "$TMP/calls")" -eq 1 ] \
+    && pass "…exactly once, not standalone and again inside the mention" \
+    || die "a Codex round posted $(grep -c 'gh pr comment' "$TMP/calls") summary comments"
+world; run "$COPILOTBOT" no >/dev/null
+[ "$(grep -c 'gh pr comment' "$TMP/calls")" -eq 1 ] \
+    && pass "…and a Copilot round posts exactly one too" \
+    || die "a Copilot round posted $(grep -c 'gh pr comment' "$TMP/calls") summary comments"
+# THE BASELINE IS READ BEFORE THE REQUEST IT IS FOR, not after. Read afterwards it
+# includes the very review the request is meant to supersede, so the watch accepts
+# the old pass as the answer to the new one.
+before 'pr-review-state.sh review-id' 'gh pr edit' \
+    && pass "…and its baseline is read before the request is made" \
+    || die "the request went out before the baseline that will be watched against"
+world; run "$CODEXBOT" yes >/dev/null
+grep -q 'PR_ROUND_CLOSED.*prior-review=' "$TMP/calls" 2>/dev/null || true
+out="$(run "$CODEXBOT" yes)"; body="${out#*|}"
+printf '%s' "$body" | grep -q 'prior-review=PR_REVIEW_STATE' \
+    && pass "…and the closing record carries it back to the driver" \
+    || die "the round closed without reporting the baseline ('$body')"
 grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "a Codex round used --add-reviewer" \
     || pass "…and does not use --add-reviewer"

@@ -50,7 +50,13 @@ unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition";
 # documented as stdout — a caller capturing it would otherwise get nothing for the
 # failures that happen before anything else can.
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
+# BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
+# inheritable: a `recordlib.sh` truncated after the first definition passes the
+# check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
+# as library data — so this would validate a signoff from whatever account that
+# variable named. `rb_load` clears before it sources, which is the whole point.
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
 COPILOT_BOT="$RB_COPILOT_BOT"
@@ -59,7 +65,15 @@ PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
-[ -n "$WHO" ] || { echo "ABORT: a reviewer login is required"; exit 1; }
+# THE REVIEWER IS ONE OF THE TWO THIS LOOP KNOWS. Every branch below asks "is
+# this Copilot?" and treats everything else as Codex, so a typo or a third login
+# silently took the Codex path: the mention was posted, Copilot was never
+# requested, and the round waited on a pass nobody asked for.
+case "$WHO" in
+    "$RB_CODEX_BOT"|"$RB_COPILOT_BOT") ;;
+    "") echo "ABORT: a reviewer login is required"; exit 1 ;;
+    *) echo "ABORT: '$WHO' is not a reviewer this loop drives (expected $RB_CODEX_BOT or $RB_COPILOT_BOT)"; exit 1 ;;
+esac
 [ -n "$SUMMARY_FILE" ] || { echo "ABORT: a summary file is required"; exit 1; }
 # AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
 # than assumed. Guessing wrong here does not fail loudly — it closes the round in
@@ -116,6 +130,13 @@ request_review() {   # request_review ; posts the summary and asks for the pass
 $SUMMARY" \
             || { echo "ABORT: could not request the review that carries this round's summary."; return 1; }
     fi
+    # THE BASELINE GOES BACK TO THE CALLER, in the success record. It is read
+    # here, immediately before the request, and the driver's watch in step 3 needs
+    # exactly this value: without it the watch keeps the parent's OLDER baseline,
+    # and the terminal review this round just handled is newer than that — so it
+    # is accepted at once as the answer to a request that has not been answered.
+    # A child process cannot assign a variable in its parent; it can only say what
+    # the value was.
     RB_PRIOR_REVIEW="$prior"
     return 0
 }
@@ -128,7 +149,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
     request_review || exit 1
-    echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=mention"
+    echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=mention prior-review=$RB_PRIOR_REVIEW"
     exit 0
 fi
 
@@ -195,5 +216,5 @@ if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
 fi
 
 request_review || exit 1
-echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=push"
+echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=push prior-review=$RB_PRIOR_REVIEW"
 exit 0
