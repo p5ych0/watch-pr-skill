@@ -25,6 +25,14 @@
 #
 #     **Review-Signoff:** `chatgpt-codex-connector[bot]` `<40-hex sha>`
 #
+# …and a phase can be REOPENED, which needs a record of its own:
+#
+#     **Review-Signoff-Revoked:** `chatgpt-codex-connector[bot]`
+#
+# Both are scanned together so their ORDER decides. Without the second, choosing
+# "another Codex pass" on an unchanged head left the old signoff standing and a
+# resumed session read the deliberately reopened phase as closed.
+#
 # It is repo-local, survives machines and sessions, is readable by a human
 # scrolling the thread, and can be revoked by posting a newer one. `SKILL.md`
 # writes it when a phase closes; this reads it back.
@@ -98,10 +106,20 @@ while :; do
                  # ANCHORED AT BOTH ENDS. A marker with prose after it — "…is the
                  # format we use" — is documentation, not a signoff, and a
                  # start-anchored pattern accepted it. The line must BE the record.
-                 | (.body | [scan("(?m)^\\*\\*Review-Signoff:\\*\\* `([^`\n]{1,200})` `([0-9a-f]{40})`[[:space:]]*$")]
-                          | last // ["",""])
-                 | select(.[0] == $who)
-               ] | map(.[1]) | last // ""
+                 # BOTH MARKERS, IN ONE SCAN, so their ORDER decides. A phase
+                 # that is deliberately reopened — "another Codex pass" on an
+                 # unchanged head — leaves the old signoff standing, and a resumed
+                 # session would read the reopened phase as closed. A revocation
+                 # is a record too, and the last record wins.
+                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?[[:space:]]*$")]
+                          | last // ["","",""])
+                 | select(.[1] == $who)
+                 # A revocation carries no sha and a signoff must; anything else
+                 # is a malformed line rather than either.
+                 | if .[0] != null then "REVOKED"
+                   elif (.[2] | type) == "string" then .[2]
+                   else empty end
+               ] | last // ""
           end') || { OK=0; break; }
     # THE LAST RECORD ANYWHERE WINS, so a later page supersedes an earlier one and
     # a phase can be reopened by saying so.
@@ -125,6 +143,13 @@ fi
 # EMPTY IS "NONE", AND NONE IS NOT AN ERROR — but it is also not a signoff, and
 # the caller must not be able to confuse the two. The status carries that: 1 says
 # "asked and answered, there is none", 2 says "could not ask".
+# A REVOCATION IS AN ANSWER, and the answer is "no signoff". It is reported as
+# such rather than as an error: the phase is open, which is a fact about the PR
+# and not a failure to read it.
+if [ "$SHA" = REVOKED ]; then
+    echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none reason=revoked"
+    exit 1
+fi
 if [ -z "$SHA" ]; then
     echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none"
     exit 1

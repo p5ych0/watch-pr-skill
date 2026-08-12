@@ -1286,7 +1286,11 @@ Both reviewers have signed off on $COPILOT_SHA, and both signoffs are recorded.
 
   Decide, and say which:
     (a) merge — run the gate below
-    (b) another Codex pass first, as fault tolerance over the Copilot changes
+    (b) another Codex pass first, as fault tolerance over the Copilot changes.
+        POST A REVOCATION BEFORE REQUESTING IT — a comment whose only content is
+        the line **Review-Signoff-Revoked:** followed by the Codex login in
+        backticks. Without it the old signoff still stands, and a session resumed
+        while the new pass is running reads the reopened phase as closed.
 
 Nothing further happens until you say.
 EOF
@@ -1336,18 +1340,55 @@ fi
 # be clean on it.
 RESUMED_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the head to check the resumed signoff against"; exit 0; }
-if [ "$RESUMED_HEAD" != "$CODEX_SHA" ]; then
-    echo "The head has moved since that signoff (head=$RESUMED_HEAD signed=$CODEX_SHA)."
-    echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
-    exit 0
+# WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
+# answers are opposite. Before the Copilot phase, the Codex signoff is the only
+# thing licensing a merge, so the head must still BE that commit. AFTER it, the
+# head has advanced through Copilot fixes BY DESIGN — the merge gate accepts that
+# delta once it has checked the `Review-Phase: copilot` trailers — and demanding
+# equality there rejects the very state the second stop exists in.
+#
+# A recorded COPILOT signoff is what tells the two apart, and it is a fact on the
+# PR rather than a guess about the session.
+COPILOT_SIGNOFF_OUT="$("$RB_SCRIPTS"/pr-signoff.sh N "$COPILOT_BOT" 2>&1)"; COPILOT_SIGNOFF_RC=$?
+case "$COPILOT_SIGNOFF_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC): $COPILOT_SIGNOFF_OUT"; exit 0 ;;
+esac
+if [ "$COPILOT_SIGNOFF_RC" -eq 0 ]; then
+    # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
+    # than the head; the gate is what proves the delta is Copilot-only. What must
+    # still hold is the COPILOT signoff, on the head being merged.
+    COPILOT_SHA="$(printf '%s\n' "$COPILOT_SIGNOFF_OUT" \
+        | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
+    if [ "$RESUMED_HEAD" != "$COPILOT_SHA" ]; then
+        echo "The head has moved since Copilot signed off (head=$RESUMED_HEAD signed=$COPILOT_SHA)."
+        echo "Neither phase is closed on this head: request a review of it before merging."
+        exit 0
+    fi
+    RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); RESUMED_RC=$?
+    if [ "$RESUMED_RC" -ne 0 ]; then
+        echo "Copilot's recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
+        echo "Treat the Copilot phase as open: request a review before merging."
+        exit 0
+    fi
+    echo "Resumed after the Copilot phase: Codex on $CODEX_SHA, Copilot on $COPILOT_SHA, both still standing."
+else
+    # RESUMING BEFORE THE COPILOT PHASE — or in `codex-only`, where there will
+    # never be one. Nothing licenses a delta here, so the head must still BE the
+    # commit Codex signed.
+    if [ "$RESUMED_HEAD" != "$CODEX_SHA" ]; then
+        echo "The head has moved since that signoff (head=$RESUMED_HEAD signed=$CODEX_SHA)."
+        echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
+        exit 0
+    fi
+    RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
+    if [ "$RESUMED_RC" -ne 0 ]; then
+        echo "The recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
+        echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
+        exit 0
+    fi
+    echo "Resumed: Codex signed off on $CODEX_SHA, and that still holds on the current head."
 fi
-RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
-if [ "$RESUMED_RC" -ne 0 ]; then
-    echo "The recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
-    echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
-    exit 0
-fi
-echo "Resumed: Codex signed off on $CODEX_SHA, and that still holds on the current head."
 ```
 
 ### Then: the gate

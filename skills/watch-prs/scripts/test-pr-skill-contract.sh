@@ -1113,17 +1113,29 @@ if [ -f "$ROOT/README.md" ]; then
 fi
 
 
-# The README must not advertise Copilot as optional while the gate requires it:
-# a user would install for a repository without Copilot and find out at merge
-# time that the loop cannot finish.
+# THE README AND THE GATE MUST AGREE ABOUT COPILOT. This assertion used to demand
+# the words "required, not optional", because the gate demanded a clean verdict
+# from both reviewers and there was no way around it — a user installing for a
+# repository without Copilot would have found out at merge time that the loop
+# could not finish.
+#
+# THAT CHANGED, and the assertion changes with it rather than being deleted: the
+# gate now supports `codex-only`, chosen at the stop that closes the Codex phase.
+# What must still be true is that the README describes the SAME arrangement the
+# gate implements — that codex-only is a decision rather than a switch, and that
+# it is narrower rather than looser, because a reader who believes otherwise will
+# reach for it to get around a review.
 if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
     README="$SCRIPT_DIR/../../../README.md"
-    grep -qi 'if you want the second pass' "$README" \
-        && die "README still presents Copilot as optional while the gate requires it" \
-        || pass "README does not present Copilot as optional"
-    grep -qi 'required, not' "$README" \
-        && pass "README says plainly that Copilot is required" \
-        || die "README does not state that Copilot is required"
+    grep -qi 'codex-only' "$README" \
+        && pass "README documents the Codex-only merge the gate supports" \
+        || die "README contradicts the gate: it knows nothing of codex-only"
+    grep -qiE 'narrower|not looser' "$README" \
+        && pass "…and says it is narrower rather than a way around a reviewer" \
+        || die "README presents codex-only as a skip switch"
+    grep -qi 'no switch for is skipping a reviewer' "$README" \
+        && pass "…while still ruling out skipping a reviewer silently" \
+        || die "README no longer rules out a silent skip"
 fi
 
 
@@ -1169,6 +1181,20 @@ printf '%s' "$resume_blk" | grep -q 'RESUMED_HEAD' \
 printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" "\$CODEX_SHA"' \
     && pass "…and the verdict is re-read, because a review can be dismissed" \
     || die "the resume recipe trusts a record that may have been withdrawn"
+# WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
+# answers are opposite. Before the Copilot phase the Codex signoff is the only
+# thing licensing a merge, so the head must still BE that commit. AFTER it the
+# head has advanced through Copilot fixes BY DESIGN, and the merge gate accepts
+# that delta once it has checked the trailers — so demanding equality there
+# rejects the exact state the second stop exists in, and sends the operator back
+# through a Codex phase for nothing.
+printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh N "\$COPILOT_BOT"' \
+    && printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SIGNOFF_RC" -eq 0' \
+    && pass "…and a resume after the Copilot phase is told apart from one before it" \
+    || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"
+printf '%s' "$resume_blk" | grep -q '"\$RESUMED_HEAD" != "\$COPILOT_SHA"' \
+    && pass "…checking the head against COPILOT's signoff on that path" \
+    || die "the post-Copilot resume does not check the head it is about"
 
 # ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
 # The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened

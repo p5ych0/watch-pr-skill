@@ -112,6 +112,29 @@ world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$OLD\`" \
                 "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
 case_is 0 "sha=$SHA" "a later signoff supersedes an earlier one"
 
+# ── A PHASE CAN BE REOPENED, AND THE RECORD HAS TO SAY SO ──────────────────
+# Choosing "another Codex pass" on an unchanged head leaves the old signoff
+# standing: every newer signoff must name a sha, so on an unchanged head there is
+# nothing to supersede it with. A resumed session then reads the deliberately
+# reopened phase as closed and merges on a review that was withdrawn.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
+case_is 1 "reason=revoked" "a revocation after a signoff reopens the phase"
+# …AND ORDER DECIDES, both ways. A signoff after a revocation closes it again,
+# which is what happens when the new pass comes back clean on the same head.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…and a later signoff closes it again"
+# A revocation is about ONE reviewer, like the signoff it revokes.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$OTHER\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…and revoking Copilot's does not revoke Codex's"
+# It obeys the same authorship rule: reopening a phase is as consequential as
+# closing one.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "NONE|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…and a passer-by cannot revoke one"
+
 # ── failing to ask is not "none" ───────────────────────────────────────────
 # This is the whole reason for a separate status. Treating an unreadable answer
 # as "no signoff" merely costs a round; treating it as a signoff would skip a
