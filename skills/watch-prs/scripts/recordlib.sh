@@ -155,3 +155,23 @@ sha_reason() {
 is_full_sha() {
     sha_reason "${1-}" >/dev/null
 }
+
+# ── WHO THE REVIEWERS ARE ──────────────────────────────────────────────────
+#
+# Two logins, one definition. They were written out in `pr-merge-gate.sh` and in
+# `SKILL.md`, and a third copy was about to appear in `pr-close-round.sh` — which
+# is the point at which this repository's own rule applies: a value that more than
+# one caller needs lives in one place, because the copy that drifts is never the
+# one you are looking at.
+#
+# The drift here would be quiet and total. Every verdict check compares a record's
+# `reviewer=` field against one of these as a STRING; a login that is one character
+# wrong matches nothing, so the gate reports "did not return an exact clean record"
+# for a reviewer that signed off perfectly. `test-pr-skill-contract.sh` asserts
+# that `SKILL.md`'s copies still say the same thing, because the document cannot
+# source a shell library.
+#
+# `[bot]` IS NOT A PATTERN. These end in brackets, which a regex reads as a
+# character class — every comparison against them is `[ = ]`, never `[[ =~ ]]`.
+RB_CODEX_BOT='chatgpt-codex-connector[bot]'
+RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'

@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.10] — 2026-08-12
+
+- **Closing a round is a script, and both orderings live in one place.** The two
+  recipes in `SKILL.md` — 56 lines and 191 — did the same job in deliberately
+  different orders, and the order is the whole content: with automatic review OFF
+  the `@codex review` mention is the trigger, so it carries the summary and nothing
+  is queued until it is posted; with automatic review ON the *push* is the trigger,
+  so nothing irreversible may happen before the checks are known.
+
+  Neither was ever executed. `pr-close-round.sh <pr> <reviewer> <summary-file>
+  <auto-review>` takes the mode as an argument and refuses an unrecognised one —
+  guessing wrong there does not fail loudly, it closes the round in the wrong
+  order, which is only visible afterwards.
+
+  `test-pr-close-round.sh` runs it: 27 cases with `gh` and `git` stubbed and every
+  call logged **in sequence**, because "did it post the summary" is a weaker
+  question than "did it post the summary before or after it knew the head was
+  green". Reversing the gate and the request trips two assertions at once. The 29
+  greps and `awk` state machines that used to read those recipes out of the
+  document are deleted rather than retargeted.
+
+- **The reviewer logins have one definition.** They were literals in
+  `pr-merge-gate.sh` and in `SKILL.md`, and a third copy was about to appear. Every
+  verdict check compares a record's `reviewer=` field against one of them as a
+  string, so a login one character wrong matches nothing and the gate reports "did
+  not return an exact clean record" for a reviewer that signed off perfectly. They
+  are `RB_CODEX_BOT` and `RB_COPILOT_BOT` in `recordlib.sh`.
+
+- **The merge gate's round-boundary pause now offers starting over**, like every
+  other boundary message. Found by rewriting the assertion to follow the code —
+  it had been counting occurrences of a phrase in one file, which goes green as
+  soon as the count is reached anywhere.
+
+  Third step of #26. `SKILL.md` is down to 605 lines of bash from 953.
+
 ## [2.0.9] — 2026-08-12
 
 - **The phase transitions are the operator's decision, and the loop stops for
