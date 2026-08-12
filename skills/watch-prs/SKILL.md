@@ -1168,6 +1168,9 @@ earlier head.
 #     0  merged   — the head it names is on the base branch
 #     1  blocked  — a gate refused; the reason is on stdout
 #     3  paused   — a round boundary. NOT a refusal: decide with the operator
+#     4  queued   — the request was accepted but the PR is not MERGED. A merge
+#                   queue does that, and `gh` reports it as success. The head is
+#                   not on the base branch; the session is not finished
 #
 # CODEX_SHA is the FULL 40-hex head Codex signed off on. In the Copilot phase the
 # head moves past it and Codex is deliberately not re-run, so this — not the

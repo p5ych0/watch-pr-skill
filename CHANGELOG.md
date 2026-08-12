@@ -11,7 +11,7 @@
 
   `pr-merge-gate.sh <pr> <codex-sha> <auto-review>` keeps every decision in the
   same order and adds a distinction the block could not express: **0 merged,
-  1 blocked, 3 paused**. The round-boundary pause is not a refusal — a caller that
+  1 blocked, 3 paused, 4 queued**. The round-boundary pause is not a refusal — a caller that
   cannot tell them apart either treats an operator's decision as a failure or a
   failure as a decision, and merging is the largest irreversible action here.
 
