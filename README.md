@@ -441,6 +441,12 @@ plugin docs and open an issue.
   `git remote get-url origin` — run from inside the intended checkout.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
+- **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge
+  queue. `gh` reports success for *adding* the pull request to that queue, so the
+  request was accepted but the head is not on the base branch yet and may still
+  leave the queue without landing. The session is **not** finished: watch the PR
+  until it merges. `REVIEW_MERGE_STRICT=1` is where this happens — the default
+  `--admin` merge bypasses the queue.
 - **A round stops with "the head you just pushed is RED":** working as intended.
   The suite passing locally and the checks passing on the runner are different
   claims — GitHub Actions ignores `SIGPIPE`, runs a different shell, and has no

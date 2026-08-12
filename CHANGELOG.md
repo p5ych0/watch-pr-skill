@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.0.8] — 2026-08-12
+
+- **The merge gate is a script, and its decisions are executed by tests for the
+  first time.** 291 lines lived in a fenced block in `SKILL.md` and were pasted
+  into the driving session's shell. Nothing ran them — which is precisely how that
+  block came to contain a construct the bash macOS ships cannot *parse*, for fifty
+  review rounds, while `test-pr-skill-contract.sh` reported the gate present and
+  correct from twenty-four `grep`s for the spelling of individual lines.
+
+  `pr-merge-gate.sh <pr> <codex-sha> <auto-review>` keeps every decision in the
+  same order and adds a distinction the block could not express: **0 merged,
+  1 blocked, 3 paused, 4 queued**. The round-boundary pause is not a refusal — a caller that
+  cannot tell them apart either treats an operator's decision as a failure or a
+  failure as a decision, and merging is the largest irreversible action here.
+
+  `test-pr-merge-gate.sh` runs it: 43 cases across every refusal path, the pause
+  and the merge itself, with `gh` and each helper stubbed. Among them, executed
+  rather than read: a head lookup that prints a plausible sha and *then* fails; a
+  state record that is well-formed but about another PR, head or reviewer; a
+  verdict line with trailing text; Codex's own record standing in for Copilot's; a
+  GraphQL 200 carrying `errors`; nodes without a boolean `isResolved`; a repeated
+  pagination cursor, which without its guard hangs the gate rather than refusing;
+  and the in-flight auto-review case, paired with its auto-review-off twin so that
+  the setting is demonstrably the only difference.
+
+  The twenty-four spelling greps are deleted rather than retargeted at the script.
+  A grep beside an executed case tests the spelling, not the behaviour.
+
+  `AUTO_REVIEW` is an **argument**, not an environment variable — the lesson from
+  the previous extraction, where a value assigned without `export` reached a
+  function and not a child. This one decides whether an in-flight Codex pass may be
+  ignored, so a silent default is a merge on a verdict nobody read; an unrecognised
+  value is refused rather than assumed to mean `no`.
+
+  **A queued merge is no longer reported as a merge.** `gh pr merge` reports
+  success for *adding* a PR to a merge queue — its own help says so — and the PR
+  can leave that queue later without landing. The block this replaced printed
+  `merged` and finished. The gate now reads the PR state back and reports **4,
+  queued**, because `--admin` bypasses the queue and this is therefore reachable
+  exactly in the mode an operator chose for safety.
+
+  **The gate runs in the repository the session started in.** It derives its
+  identity and range-check root from the current directory, so a `cd` into another
+  checkout between setup and the merge would point every gate — and the `--admin`
+  merge — at whatever PR of *that* repository shares the number.
+
+  Second step of #26. `SKILL.md` is down to ~595 lines of bash from 953.
+
 ## [2.0.7] — 2026-08-11
 
 - **The CI gate is a script, not a function defined in `SKILL.md`.** About a

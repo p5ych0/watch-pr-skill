@@ -23,6 +23,7 @@ PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok
 FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-ci-state.sh
         "$ROOT"/pr-ci-gate.sh
+        "$ROOT"/pr-merge-gate.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh
@@ -86,13 +87,31 @@ chmod +x "$IDTMP/bin/git"
 # credentials — and so that its failure is distinguishable from the guarded one.
 printf '#!/usr/bin/env bash\nexit 1\n' > "$IDTMP/bin/gh"
 chmod +x "$IDTMP/bin/gh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
-    [ -f "$ROOT/$sc" ] || continue
-    case "$sc" in
+# ── ONE DEFINITION OF HOW EACH CALLER IS INVOKED, AND WHAT REFUSING LOOKS LIKE ──
+# `pr-merge-gate.sh` was added to the literal scan and to none of the loops below,
+# which is coverage that reads as coverage without being any. It refuses with 1
+# rather than 2 — it is a gate, and its statuses mean merged/blocked/paused — so
+# the expected status is per-script rather than assumed.
+id_args() {   # id_args <script> ; sets "$@" for that caller
+    case "$1" in
         pr-review-state.sh) set -- state 7 somebody ;;
         pr-findings.sh)     set -- list 7 ;;
-        *)                  set -- 7 ;;   # pr-round-count.sh, pr-ci-state.sh
+        pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
+        pr-merge-gate.sh)   set -- 7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa no ;;
+        *)                  set -- 7 ;;
     esac
+    ID_ARGV=( "$@" )
+}
+id_rc() {   # id_rc <script> ; the status that script uses to refuse
+    case "$1" in
+        pr-merge-gate.sh) printf 1 ;;   # 0 merged, 1 blocked, 3 paused
+        *)                printf 2 ;;   # the helpers' documented error status
+    esac
+}
+ID_CALLERS="pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-merge-gate.sh"
+for sc in $ID_CALLERS; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
     # `env` inside the watchdog, never a PATH on its caller: where GNU `timeout`
     # is missing, `run_limited` polls with its own `sleep` and would inherit it.
     out="$(run_limited 20 env PATH="$IDTMP/bin:$PATH" "$ROOT/$sc" "$@" 2>&1)"
@@ -102,7 +121,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
     # the wrong repository — so an rc-only assertion passes on the unguarded code
     # and proves nothing. `no_origin` is reachable only when the lookup's status
     # was actually taken.
-    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=no_origin'; then
+    if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q 'reason=no_origin'; then
         echo "ok   - $sc rejects an origin lookup that printed before failing"
     else
         echo "FAIL - $sc accepted a failed origin lookup (rc=$rc out='$out')"; idfail=1
@@ -132,13 +151,9 @@ printf '%s\n' "$*" >> "$GH_SPY"
 exit 1
 GHSH
 chmod +x "$STALETMP/bin/gh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
+for sc in $ID_CALLERS; do
     [ -f "$ROOT/$sc" ] || continue
-    case "$sc" in
-        pr-review-state.sh) set -- state 7 somebody ;;
-        pr-findings.sh)     set -- list 7 ;;
-        *)                  set -- 7 ;;   # pr-round-count.sh, pr-ci-state.sh
-    esac
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
     # The helper is run from a copy whose identitylib.sh is empty, with a stale
     # `rb_identity` exported into its environment. `recordlib.sh` and the helper
     # itself are symlinked in, so the ONLY thing this changes is the parser.
@@ -151,7 +166,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
              bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
                       export -f rb_identity
                       exec "$1" "${@:2}"' _ "$STALETMP/run/$sc" "$@" 2>&1)"; rc=$?
-    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
+    if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
         echo "ok   - $sc refuses an empty library even with a parser already defined"
     else
         echo "FAIL - $sc accepted an inherited parser (rc=$rc out='$out')"; idfail=1
@@ -289,21 +304,16 @@ GHSH
 chmod +x "$BSTMP/bin/gh"
 for g in "$ROOT"/*.sh; do ln -sf "$g" "$BSTMP/run/$(basename "$g")"; done
 rm -f "$BSTMP/run/loadlib.sh"; : > "$BSTMP/run/loadlib.sh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-watch.sh; do
+for sc in $ID_CALLERS pr-watch.sh; do
     [ -f "$ROOT/$sc" ] || continue
-    case "$sc" in
-        pr-review-state.sh) set -- state 7 somebody ;;
-        pr-findings.sh)     set -- list 7 ;;
-        pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
-        *)                  set -- 7 ;;
-    esac
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
     : > "$BSTMP/spy"
     bs_out="$(run_limited 20 env GH_SPY="$BSTMP/spy" PATH="$BSTMP/bin:$PATH" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         bash -c 'rb_load() { return 0; }
                  export -f rb_load
                  exec "$1" "${@:2}"' _ "$BSTMP/run/$sc" "$@" 2>&1)"; bs_rc=$?
-    if [ "$bs_rc" -eq 2 ] && printf '%s' "$bs_out" | grep -q 'reason=loadlib_empty'; then
+    if [ "$bs_rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$bs_out" | grep -q 'reason=loadlib_empty'; then
         echo "ok   - $sc refuses an empty loader even with rb_load already defined"
     else
         echo "FAIL - $sc accepted an inherited loader (rc=$bs_rc out='$bs_out')"; idfail=1
@@ -315,6 +325,10 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
         pr-review-state.sh) bs_want='PR_REVIEW_STATE status=error' ;;
         pr-findings.sh) bs_want='PR_FINDINGS status=error' ;;
         pr-round-count.sh) bs_want='PR_ROUND_COUNT status=error' ;;
+        # The gate's sentinel is prose, not a `PR_X status=` line: its consumer is
+        # the operator reading why a merge did not happen, and every refusal it can
+        # make begins the same way.
+        pr-merge-gate.sh) bs_want='merge blocked:' ;;
         *) bs_want='PR_CI_STATE status=error' ;;
     esac
     if printf '%s' "$bs_out" | grep -qF "$bs_want"; then
@@ -371,7 +385,7 @@ if [ "\$1" = "remote" ]; then printf '%s\n' '$remote'; exit 0; fi
 exec "$REAL_GIT" "\$@"
 GITSH
     chmod +x "$SHAPETMP/bin/git"
-    for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
+    for sc in $ID_CALLERS; do
         [ -f "$ROOT/$sc" ] || continue
         case "$sc" in
             pr-review-state.sh) set -- state 7 somebody ;;
@@ -392,7 +406,7 @@ GITSH
             fi
             continue
         fi
-        if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "reason=$want"; then
+        if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q "reason=$want"; then
             echo "ok   - $sc refuses $label"
         else
             echo "FAIL - $sc accepted $label (want reason=$want, rc=$rc out='$out')"; idfail=1
