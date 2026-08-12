@@ -4,10 +4,11 @@
 
 - **The Codex→Copilot transition is a script, and its refusals are executed.** It
   was 176 lines inside `SKILL.md` that nothing ran: capture the head, re-validate
-  Codex against that exact sha, prove its checks, compose the signoff, post it,
-  check the round boundary, stop for the operator, and — on the answer — revoke
-  any stale Copilot signoff and request the pass. `pr-copilot-phase.sh` runs it in
-  two stages, `record` and `open`, with the operator's decision between them,
+  Codex against that exact sha, prove its checks, establish the round boundary,
+  post the signoff, then either stop for the operator or take the pause — and, on
+  the answer, revoke any stale Copilot signoff and request the pass.
+  `pr-copilot-phase.sh` runs it in two stages, `record` and `open`, with the
+  operator's decision between them,
   because the answer can arrive in a different session. `open` re-proves the head
   is still the one Codex signed off; opening the phase against a moved head spends
   the whole phase on one commit and the merge gate on another, and only the gate
@@ -60,8 +61,15 @@
   library rather than in either caller because `pr-close-round.sh` and
   `pr-copilot-phase.sh` both post caller-written text, which is the shape that ends
   up present in one and missing from the other. The rule is anchored exactly as the
-  readers are — start of line — so indenting, quoting inline or fencing still says
-  what the author meant, and the check reports WHICH line to fix.
+  readers are — start of line — so indenting by four spaces or quoting inline still
+  says what the author meant, and the check reports WHICH line to fix. A fenced
+  block is NOT a way round it and is not offered as one: the readers scan the raw
+  comment body, where a line inside a fence still starts at column 0.
+
+  `**Reviewed commit:**` is deliberately not in the set. `pr-round-count.sh` reads
+  it only from a comment whose author is a reviewer bot and whose body also says it
+  found no major issues, so a body these callers post cannot create one — refusing
+  it would stop an author describing the footer while preventing nothing.
 
 - **An assertion that dies instead of failing is worse than none, and three
   shipped.** The ordering checks in `test-pr-skill-contract.sh` read line numbers

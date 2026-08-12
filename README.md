@@ -319,9 +319,10 @@ Then:
    reproduces one of the loop's own record markers — `**Review-Signoff:**`,
    `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
    `**Reviewed commit:**` — is refused rather than published: it would *create*
-   the record it was quoting. Indenting it, quoting it inline or fencing it all
-   still say what you meant, because the readers only honour these at the start of
-   a line.
+   the record it was quoting. Indent it by four spaces or quote it inline with
+   backticks — either still says what you meant, because the readers only honour
+   these at the start of a line. A fenced block does *not* help: the readers scan
+   the raw comment body, where a line inside a fence still starts at column 0.
 
    Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
    `Review-Phase: copilot` trailer, which is how the merge gate knows the head

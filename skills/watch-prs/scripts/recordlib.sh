@@ -207,11 +207,18 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 
 # ── WHAT A READER HONOURS AS A RECORD ──────────────────────────────────────
 #
-# Three markers on this PR are CONTROL, not prose: `pr-signoff.sh` reads
-# `**Review-Signoff:**` and `**Review-Signoff-Revoked:**`, and `pr-round-count.sh`
-# reads `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. Each is
-# anchored to the start of a line, and each is trusted because the comment
-# carrying it was posted by an OWNER, MEMBER or COLLABORATOR.
+# Three markers on this PR are CONTROL, not prose, AND ARE REACHABLE FROM A BODY
+# THESE CALLERS POST: `pr-signoff.sh` reads `**Review-Signoff:**` and
+# `**Review-Signoff-Revoked:**`, and `pr-round-count.sh` reads
+# `**Review-Pause-Acknowledged:**`. Each is anchored to the start of a line, and
+# each is trusted because the comment carrying it came from an OWNER, MEMBER or
+# COLLABORATOR — which the operator driving this loop is.
+#
+# `**Reviewed commit:**` IS NOT IN THAT SET, deliberately. `pr-round-count.sh`
+# reads it only from a comment whose `.user.login` is one of the reviewer bots AND
+# whose body also says it found no major issues, so a body posted by these callers
+# cannot create one. Refusing it here would stop an author describing the footer
+# while preventing nothing.
 #
 # THE BODIES THIS LOOP POSTS ARE COMPOSED FROM UNTRUSTED TEXT. A round summary or
 # a phase account quotes findings, PR descriptions and reviewer comments — so a
@@ -222,10 +229,14 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # pause it promised has already been answered by prose.
 #
 # Rejecting is the fail-closed answer, and it is not an obstacle: these markers
-# are only honoured at the START of a line, so quoting one inline, indenting it,
-# or putting it in a fenced block all still say what the author meant. Rewriting
-# the author's text instead would be a silent edit to a record someone is about to
-# be held to.
+# are only honoured at the START of a line, so indenting one or quoting it inline
+# still says what the author meant. Rewriting the author's text instead would be a
+# silent edit to a record someone is about to be held to.
+#
+# A FENCED BLOCK IS NOT A WAY ROUND IT, and must not be offered as one. The
+# readers scan the comment's raw body, where a line inside a fence still starts at
+# column 0 — the fence is markup to a renderer and nothing at all to a regex. So a
+# fenced marker is honoured, is refused here, and the advice says four spaces.
 #
 # ONE DEFINITION, because two scripts post caller-written bodies —
 # `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
@@ -235,7 +246,7 @@ rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if th
     while IFS= read -r _l || [ -n "$_l" ]; do
         case "$_l" in
             '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
-            '**Review-Pause-Acknowledged:**'*|'**Reviewed commit:**'*)
+            '**Review-Pause-Acknowledged:**'*)
                 _found="$_l"; break ;;
         esac
     done <<EOF

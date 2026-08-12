@@ -164,7 +164,7 @@ BODY="$(cat "$BODY_FILE")" || { echo "ABORT: could not read the phase body."; ex
 # answers never fires again.
 if _marker="$(rb_reserved_marker_line "$BODY")"; then
     echo "ABORT: the phase body starts a line with a marker the loop reads as a record: $_marker"
-    echo "It would be posted under your identity and honoured. Indent it, quote it inline, or put it in a fenced block — those still say what you meant."
+    echo "It would be posted under your identity and honoured. Indent it by four spaces, or quote it inline with backticks — either still says what you meant. A fenced block does NOT help: the line inside it still starts at column 0, which is all the readers look at."
     exit 1
 fi
 

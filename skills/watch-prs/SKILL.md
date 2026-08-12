@@ -953,7 +953,8 @@ Ask Copilot:
 # `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
 # `**Reviewed commit:**` — CREATES the record it was quoting. The script refuses
 # one rather than publishing it. They are only honoured at the start of a line, so
-# indent, quote inline, or fence.
+# indent by four spaces or quote inline. A FENCE DOES NOT HELP — the readers scan
+# the raw body, where a line inside a fence still starts at column 0.
 #
 # THE WRITE IS CHECKED, not only the read the script does. A redirection that
 # truncates the file and then fails — a full filesystem — leaves a non-empty

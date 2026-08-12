@@ -214,8 +214,7 @@ want reject opens_a_thread "$(crec '{in_reply_to_id:42}')" \
 # CREATES the record it was describing.
 for _mk in '**Review-Signoff:** `who` `sha`' \
            '**Review-Signoff-Revoked:** `who`' \
-           '**Review-Pause-Acknowledged:** `who` `10`' \
-           '**Reviewed commit:** `0123456789`'; do
+           '**Review-Pause-Acknowledged:** `who` `10`'; do
     out="$(rb_reserved_marker_line "before
 $_mk
 after")"; rc=$?
@@ -240,13 +239,33 @@ across two lines")"; rc=$?
 [ "$rc" -ne 0 ] \
     && pass "…and a clean body reports nothing" \
     || die "a clean body was refused: '$out'"
+# `**Reviewed commit:**` IS NOT IN THE SET, and that is deliberate rather than an
+# omission. `pr-round-count.sh` reads it only from a comment whose `.user.login` is
+# a reviewer bot and whose body also says it found no major issues, so a body these
+# callers post cannot create one — refusing it would stop an author describing the
+# footer while preventing nothing.
+out="$(rb_reserved_marker_line '**Reviewed commit:** `0123456789`')"; rc=$?
+[ "$rc" -ne 0 ] \
+    && pass "…and a marker no caller-posted body can create is left alone" \
+    || die "the reviewed-commit footer was refused: '$out'"
+
 # THE FIRST ONE IS REPORTED, so the author is told which line to fix rather than
 # that something somewhere is wrong.
-out="$(rb_reserved_marker_line "**Reviewed commit:** \`aaaaaaaaaa\`
+out="$(rb_reserved_marker_line "**Review-Pause-Acknowledged:** \`who\` \`10\`
 **Review-Signoff:** \`who\` \`sha\`")"
-[ "$out" = '**Reviewed commit:** `aaaaaaaaaa`' ] \
+[ "$out" = '**Review-Pause-Acknowledged:** `who` `10`' ] \
     && pass "…naming the first offending line, not merely that there was one" \
     || die "the reported line was '$out'"
+
+# A FENCE IS NOT A WAY ROUND IT, and the advice must not pretend otherwise. The
+# readers scan the raw comment body, where a line inside a fence still starts at
+# column 0 — the fence is markup to a renderer and nothing to a regex.
+out="$(rb_reserved_marker_line '```
+**Review-Signoff:** `who` `sha`
+```')"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '**Review-Signoff:** `who` `sha`' ]; } \
+    && pass "…and a marker inside a fence is still refused, since the readers never see the fence" \
+    || die "a fenced marker was allowed through (rc=$rc out='$out')"
 
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
@@ -288,7 +307,17 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # …and the reserved-marker rule. Two scripts post caller-written bodies,
         # which is exactly the shape that ends up present in one and missing from
         # the other.
-        /\*\*Review-Pause-Acknowledged:\*\*.\)/ { print FILENAME ":" FNR ": reserved marker set" }
+        #
+        # MATCHED ON THE SPELLING A COPY WOULD ACTUALLY USE — the quoted literal
+        # followed by the glob, as a `case` arm. The first version of this line
+        # required the closing `**` to be followed by a single character and then
+        # `)`, which the real spelling never is: after `**` comes a quote, then a
+        # `*`, then `|` or `)`. It matched nothing, so the guard reported clean
+        # against any copy at all — a guard proving its own pattern, not the rule.
+        # `pr-round-count.sh` PRINTS the acknowledgement marker as guidance, in
+        # double quotes and with no glob, which is why the quote-and-glob shape is
+        # what this looks for.
+        /'"'"'\*\*(Review-Signoff|Review-Signoff-Revoked|Review-Pause-Acknowledged|Reviewed commit):\*\*'"'"'\*/ { print FILENAME ":" FNR ": reserved marker set" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -314,6 +343,20 @@ seen="$(scan_inline_rules "$DRIFT")"; drc=$?
 { [ "$drc" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-drifted.sh'; } \
     && pass "…and the scan catches a helper that re-implements one" \
     || die "the drift guard did not catch a planted inline rule (rc=$drc out='$seen')"
+# THE MARKER RULE IS PROVED THE SAME WAY. The planted copy uses the same `case`
+# spelling `recordlib.sh` does, which is what a helper re-implementing it would
+# write — and what the first version of the pattern failed to see.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$_l" in\n'
+  printf "    '**Review-Signoff:**'*|'**Review-Pause-Acknowledged:**'*) return 0 ;;\n"
+  printf 'esac\n'
+} > "$DRIFT/pr-marker-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc4=$?
+{ [ "$drc4" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-marker-copy.sh'; } \
+    && pass "…and catches a helper that re-implements the reserved-marker set" \
+    || die "the drift guard did not catch a planted marker copy (rc=$drc4 out='$seen')"
+rm -f "$DRIFT/pr-marker-copy.sh"
+
 # A helper whose name merely ENDS in the library's name is scanned, not exempted.
 # `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped
 # by a suffix exemption.
