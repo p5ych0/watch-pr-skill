@@ -1195,6 +1195,29 @@ fi
 printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' \
     && pass "…passing the sha captured when the Codex phase closed" \
     || die "the merge gate is not given the validated Codex sha"
+# …AND THE GATE'S STATUS LEAVES THE BLOCK. Every arm of the dispatch ends in an
+# `echo`, whose status is 0, so a block that just falls off the end reports success
+# for a merge that was blocked, paused or queued — and whatever runs it next
+# carries on as though the PR had landed. EXECUTED rather than grepped: the block
+# is run with a stub gate that returns each status, and the block's own status is
+# what is asserted.
+mg_stub="$(mktemp_d)" || { die "no scratch directory for the merge-block probe"; mg_stub=""; }
+[ -n "$mg_stub" ] && for mg_rc in 0 1 3 4; do
+    printf '#!/usr/bin/env bash\nexit %s\n' "$mg_rc" > "$mg_stub/pr-merge-gate.sh"
+    chmod +x "$mg_stub/pr-merge-gate.sh"
+    # THE STATUS IS CAPTURED AT THE POINT IT IS PRODUCED. This file runs under
+    # `-e`, and three of these four probes are EXPECTED to fail — that is the
+    # assertion — so an unguarded assignment ends the suite on the first one
+    # instead of reporting anything.
+    mg_got=0
+    mg_out="$(cd "$mg_stub" && run_limited 20 env \
+        bash -c 'RB_SCRIPTS="$1"; REPO_DIR="$2"; CODEX_SHA=x; AUTO_REVIEW=no
+                 eval "$3" >/dev/null 2>&1' _ "$mg_stub" "$mg_stub" "$merge_blk" 2>&1)" || mg_got=$?
+    [ "$mg_got" -eq "$mg_rc" ] \
+        && pass "the merge block reports the gate's own status ($mg_rc)" \
+        || die "the merge block turned gate status $mg_rc into $mg_got ('$mg_out')"
+done
+[ -n "$mg_stub" ] && rm -rf "$mg_stub"
 # ANCHORED TO THE `MERGE_RC` DISPATCH ITSELF. A bare `3)` matches three unrelated
 # arms elsewhere in this document — the round-count checks — so the assertion
 # passed with the merge gate's pause arm deleted, and the driver would have

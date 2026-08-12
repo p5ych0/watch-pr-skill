@@ -1205,6 +1205,11 @@ case "$MERGE_RC" in
     4) echo "NOT merged: the request was accepted but the PR is not MERGED — a merge queue takes the request without landing it. Do not close this out; confirm on the PR." ;;
     *) echo "Not merged. The reason is above; do not retry it blind." ;;
 esac
+# THE STATUS LEAVES THIS BLOCK. Every arm above ends in an `echo`, whose status is
+# 0 — so without this the block reports success for a blocked, paused or queued
+# merge, and whatever runs it next carries on as though the PR had landed. The
+# distinction the gate exists to draw survives only if it is passed on.
+exit "$MERGE_RC"
 ```
 
 If any gate fails, do **not** merge. Post the reason on the PR and hand it back
