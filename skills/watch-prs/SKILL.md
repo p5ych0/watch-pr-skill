@@ -241,7 +241,14 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 # default while the terminal showed the value you set. That is the one behaviour
 # the move could have changed silently, so it is handled here rather than at each
 # of the four call sites.
-for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT; do
+#
+# `REVIEW_MERGE_STRICT` IS IN THIS LIST FOR THE SAME REASON, and it is the one
+# that matters most: it is the knob that makes the merge SAFER, by handing the
+# decision to GitHub instead of merging with `--admin`. Losing it at the process
+# boundary does not fail — it silently restores the very bypass the operator set it
+# to avoid. The lesson was already learned for the CI bounds; this was the instance
+# it did not get applied to.
+for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT; do
     [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
 done
 unset _rb_knob

@@ -672,6 +672,21 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
         *child=3600*) pass "a CI bound set without export still reaches the gate's process" ;;
         *) die "the setup block does not export the CI bounds (got '$knob_out')" ;;
     esac
+    # …AND `REVIEW_MERGE_STRICT` WITH THEM, which is the one where losing it does
+    # not fail but silently makes the merge LESS safe: unset, the gate keeps
+    # `--admin` and bypasses the branch protection the operator set this to hand
+    # over to GitHub. Asserted separately from the CI bounds because it is a
+    # different kind of loss — those degrade a wait, this degrades a gate.
+    strict_out="$(cd "$SETUPTMP/repo" && run_limited 60 env -u REVIEW_MERGE_STRICT \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'REVIEW_MERGE_STRICT=1
+                 eval "$1" >/dev/null
+                 bash -c '"'"'printf "child=%s" "${REVIEW_MERGE_STRICT-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+        || strict_out="FAILED:$strict_out"
+    case "$strict_out" in
+        *child=1*) pass "…and strict merge mode reaches it too, rather than silently restoring --admin" ;;
+        *) die "REVIEW_MERGE_STRICT does not survive into the merge gate (got '$strict_out')" ;;
+    esac
     # …AND THE LOOP VARIABLE DOES NOT LEAK INTO THE OPERATOR'S SHELL. This block
     # runs in the driving session, so a name it forgets to clean up is written into
     # that session and stays there — the same class the CI gate's `local`

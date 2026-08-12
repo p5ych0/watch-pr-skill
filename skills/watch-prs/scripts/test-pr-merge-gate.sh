@@ -171,6 +171,45 @@ GATE_OWNER='ac me' run_gate >/dev/null
     && pass "the repo slug reaches gh as one argument, spaces and all" \
     || die "a gh call split the repo slug into words ($(grep -c . "$TMP/argv") argv lines)"
 
+# ── WHAT THE GATE ASKS, NOT ONLY WHAT IT IS TOLD ───────────────────────────
+#
+# The cases below vary each helper's exit STATUS, and the stubs ignore their
+# arguments — so a gate that asked the right helper the wrong question would
+# satisfy all of them. These two assertions are the ones the deleted contract
+# greps used to make, and they have to be made SOMEWHERE: this file claimed to
+# cover them and did not.
+# THE ALL-CHECKS GATE IS ASKED ABOUT THE CURRENT HEAD. Handed `$CODEX_SHA`
+# instead, it would validate the older clean head while the required-checks probe
+# stays blind to a failing OPTIONAL check on the head actually being merged.
+#
+# IN A WORLD WHERE THE TWO DIFFER. Asserted against the clean world it proved
+# nothing: there `$CODEX_SHA` IS the head, so a gate asking about the wrong one
+# asks the same question and the fixture cannot tell.
+#
+# THE LOG IS CLEARED IMMEDIATELY BEFORE THE RUN. `world` clears it, but a helper
+# that reads it after any later `run_gate` is reading two runs at once — and one
+# of them was the clean world, whose `$CODEX_SHA` IS the head, so the wrong
+# argument still produced a matching line and this assertion passed under its own
+# mutant.
+codex_none_world; : > "$TMP/calls"; run_gate 7 "$OLD40" no >/dev/null
+grep -qxF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
+    && pass "the all-checks gate is asked about the PR and the CURRENT head" \
+    || die "the all-checks gate was not pinned to the current head ($(grep pr-ci-gate "$TMP/calls" | head -1))"
+# …AND THE THREAD QUERY IS BOUND TO THE DERIVED HOST, OWNER, REPO AND PR. Every
+# world here uses a github.com remote, so a gate that dropped `--hostname` would
+# look identical — on an enterprise host it would follow `GH_HOST` or the CLI
+# default and read threads from the wrong server, immediately before an admin
+# merge.
+world
+GATE_REMOTE='git@github.example.com:acme/widget.git' run_gate >/dev/null
+gql="$(grep -F 'api --hostname' "$TMP/calls" | head -1)"
+{ printf '%s' "$gql" | grep -qF -- '--hostname github.example.com' \
+    && printf '%s' "$gql" | grep -qF -- 'number=7' \
+    && printf '%s' "$gql" | grep -qF -- 'owner=acme' \
+    && printf '%s' "$gql" | grep -qF -- 'repo=widget'; } \
+    && pass "the thread query names the derived host, owner, repo and PR" \
+    || die "the thread query is not bound to the derived identity ('$gql')"
+
 # ── the arguments ──────────────────────────────────────────────────────────
 world
 case_is 1 "needs a PR number" "a non-numeric PR is refused, by name" seven
