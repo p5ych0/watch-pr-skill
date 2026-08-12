@@ -336,14 +336,14 @@ if [ "$AUTO_REVIEW" = "yes" ]; then
     # The pass is already queued by the push that created or updated the PR.
     # Post the account of what to look at WITHOUT a mention, so the reviewer has
     # it, and go straight to the wait.
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "<one paragraph: what this change does and what to look at>"; then
+    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "<one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the PR context — do not enter the wait step."; exit 0
     fi
 else
     # The mention IS the request. Branch on it: a failed post means no review was
     # ever queued, and the wait step would then poll for one until it timed out,
     # reporting "no review arrived" rather than "none was asked for".
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review
 
 <one paragraph: what this change does and what to look at>"; then
         echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
@@ -697,13 +697,13 @@ esac
 # `--add-reviewer`; posting the Codex mention in a Copilot round re-requests the
 # wrong reviewer and leaves the watch waiting past a pass nobody asked for.
 if [ "$WHO" = "$COPILOT_BOT" ]; then
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY"; then
         echo "ABORT: could not post the round summary."; exit 0
     fi
-    if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+    if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
-elif ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+elif ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review
 
 $SUMMARY"; then
     echo "ABORT: could not post the round summary and @codex request."; exit 0
@@ -780,7 +780,7 @@ HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local hea
 # know one was started at all, the review id to recognise its result. Without
 # them, `--after-review` on the explicit request accepts the earlier pass and the
 # loop advances while the summary-aware one is still running.
-PUSH_FROM=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+PUSH_FROM=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the head this push starts from."; exit 0; }
 [[ "$PUSH_FROM" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pre-push head is not a full OID ('$PUSH_FROM')."; exit 0; }
 # CODEX ONLY, like the wait it feeds. Read unconditionally, a transient failure on
@@ -798,7 +798,7 @@ git push || { echo "ABORT: push failed; no review was queued and the fixes are n
 # the threads still open and no summary posted, so the round is genuinely still
 # open and the next push is its continuation rather than a correction.
 "$RB_SCRIPTS"/pr-ci-gate.sh N "$HEAD_BEFORE" || exit 0
-HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+HEAD_AFTER=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not confirm the pushed head."; exit 0; }
 [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] || { echo "ABORT: the pushed head is not a full OID ('$HEAD_AFTER')."; exit 0; }
 # The push must have landed on THIS PR. A successful `git push` from the wrong
@@ -814,7 +814,7 @@ if [ "$HEAD_BEFORE" != "$HEAD_AFTER" ]; then
     for _try in 1 2 3; do
         [ "$HEAD_AFTER" = "$HEAD_BEFORE" ] && break
         sleep 2
-        HEAD_AFTER=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        HEAD_AFTER=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
             || { echo "ABORT: could not re-read the head after pushing."; exit 0; }
         [[ "$HEAD_AFTER" =~ ^[0-9a-f]{40}$ ]] \
             || { echo "ABORT: the re-read head is not a full OID ('$HEAD_AFTER')."; exit 0; }
@@ -877,10 +877,10 @@ if [ "$WHO" = "$COPILOT_BOT" ]; then
     # Copilot's request carries no body, so the summary is its own comment — and
     # it comes FIRST, because `--add-reviewer` starts the pass and the contract
     # says the summary is there to be read before the diff.
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY"; then
         echo "ABORT: could not post the round summary."; exit 0
     fi
-    if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+    if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then
         echo "ABORT: could not re-request Copilot."; exit 0
     fi
 else
@@ -899,7 +899,7 @@ else
     # and before the summary exists, so it reviews without the two things the
     # reviewer contract says it reads first. The explicit request is what queues
     # the pass that has them.
-    if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review
+    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review
 
 $SUMMARY"; then
         echo "ABORT: could not request the review that carries this round's summary."; exit 0
@@ -1008,7 +1008,7 @@ reached.
   # The footer NAMES THE REVIEWER, because the count is per reviewer. An
   # unscoped acknowledgement of 41 Codex rounds is read by a Copilot invocation
   # with 5 and trips its ahead-of-count guard, blocking that phase permanently.
-  gh pr comment N --repo $HOST/$OWNER/$REPO \
+  gh pr comment N --repo "$HOST/$OWNER/$REPO" \
       --body "$(printf 'Continuing after the round check-in.\n\n**Review-Pause-Acknowledged:** `%s` `%s`\n' "$WHO" "$ROUNDS")" \
       || { echo "ABORT: could not record the acknowledgement; do not request another review."; exit 0; }
   ```
@@ -1047,7 +1047,7 @@ Ask Copilot:
 # lookup, that records the new, unreviewed head as the Codex signoff, Copilot is
 # requested against it, and the final gate only discovers the missing Codex
 # verdict after the whole Copilot phase has run.
-CODEX_SHA=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
+CODEX_SHA=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
 # Re-validate Codex on exactly that sha. If it is not clean, the head moved and
 # the Copilot phase must not start.
 CODEX_RECHECK=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
@@ -1129,7 +1129,7 @@ EOF
 # than none: it looks complete.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "$SUMMARY"; then
+if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY"; then
     echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
 fi
 
@@ -1204,11 +1204,11 @@ PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
 #
 # Unconditional: revoking a signoff that does not exist costs one comment, and the
 # branch that decides whether to bother is a branch that can be wrong.
-gh pr comment N --repo $HOST/$OWNER/$REPO \
+gh pr comment N --repo "$HOST/$OWNER/$REPO" \
     --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$COPILOT_BOT")" \
     || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 0; }
 
-if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
+if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then
     echo "ABORT: could not request Copilot — do not enter the Copilot phase."
     echo "This is not permission to skip the pass: decide with the operator."
     exit 0
@@ -1256,7 +1256,7 @@ if [ "$REVIEWERS" != codex-only ]; then
 
 # THE SECOND SIGNOFF IS WRITTEN DOWN TOO, so a later session can see that both
 # phases closed and on which head. Same marker, same anchored read.
-COPILOT_SHA=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+COPILOT_SHA=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the head to record the Copilot signoff"; exit 0; }
 RX_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$COPILOT_SHA" =~ $RX_SHA40 ]]; then
@@ -1273,7 +1273,7 @@ if [ "$COPILOT_RECHECK_RC" -ne 0 ]; then
     echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"
     exit 0
 fi
-gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Codex signed off on `%s`; if those differ, the older Codex result carries only if the merge gate validates that every commit between them is a Review-Phase: copilot fix.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA" "$CODEX_SHA")" \
+gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Codex signed off on `%s`; if those differ, the older Codex result carries only if the merge gate validates that every commit between them is a Review-Phase: copilot fix.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA" "$CODEX_SHA")" \
     || { echo "ABORT: could not record the Copilot signoff"; exit 0; }
 
 # ── STOP. MERGING IS THE OPERATOR'S DECISION ───────────────────────────────
@@ -1357,7 +1357,7 @@ fi
 # So the resumed value is re-validated against the world as it is now, and BOTH
 # halves matter: the head must still be that commit, and the verdict must still
 # be clean on it.
-RESUMED_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+RESUMED_HEAD=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not read the head to check the resumed signoff against"; exit 0; }
 # WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
 # answers are opposite. Before the Copilot phase, the Codex signoff is the only

@@ -167,7 +167,7 @@ awk '/^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_PUSHED"/ {g=NR}
 # recoverable in a way a closed round is not.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
      inb && /^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_BEFORE"/ {g=NR}
-     inb && g && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+     inb && g && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
     | grep -q ok \
     && pass "…and in the automatic path the gate precedes the summary too" \
     || die "the automatic path posts its summary before knowing whether the head is green"
@@ -290,11 +290,11 @@ fi
 
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
-grep -q 'if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
+grep -q 'if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then' "$SKILL" \
     && pass "the Copilot request is branched on before the phase begins" \
     || die "a failed Copilot request still enters the Copilot phase"
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review' "$SKILL" \
+grep -q 'if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -366,7 +366,7 @@ grep -qi 'do not ask' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
+awk '/gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {c=NR}
      /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the Copilot round summary is posted before the review request" \
     || die "Copilot can be requested before the round summary exists"
@@ -422,7 +422,7 @@ grep -q 'The push is not' "$SKILL" \
 # the summary post is irreversible.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
      inb && /^git push/ {p=NR}
-     inb && p && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+     inb && p && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
     | grep -q ok \
     && pass "with auto-review on, the push precedes the summary the checks decide about" \
     || die "the auto-review recipe closes the round before the checks can be read"
@@ -495,7 +495,18 @@ grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
 # A COMPARISON, not a magic number: the count changes whenever a call is added,
 # and a fixed expectation fails for that reason rather than for an unpinned call.
 comment_calls="$(grep -c 'gh pr comment N' "$SKILL")"
-comment_pinned="$(grep -c 'gh pr comment N --repo $HOST/$OWNER/$REPO' "$SKILL")"
+comment_pinned="$(grep -c 'gh pr comment N --repo "$HOST/$OWNER/$REPO"' "$SKILL")"
+# THE SLUG IS QUOTED AT EVERY SITE, and this assertion used to pin the UNQUOTED
+# spelling — so it was enforcing the defect rather than catching it. Nothing in
+# `identitylib.sh` constrains what an owner or repo may contain (its shape checks
+# are on the remote and the host), and the suite covers an owner with a space in
+# it, so an unquoted slug splits into two arguments and the call targets something
+# else or fails. The runtime scripts fixed this in #28; the document had nineteen
+# sites still carrying it.
+unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquoted_slug=0
+[ "${unquoted_slug:-0}" -eq 0 ] \
+    && pass "every --repo in the document quotes the derived slug" \
+    || die "$unquoted_slug --repo call(s) would split an owner containing a space"
 [ "$comment_calls" -eq "$comment_pinned" ] \
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "$((comment_calls - comment_pinned)) gh pr comment call(s) do not pass --repo"
@@ -955,7 +966,7 @@ auto_block="$(awk '/^\*\*Automatic review ON\*\*/ {inb=1; next}
                    inb && /^```bash$/ {code=1; next}
                    inb && code && /^```$/ {exit}
                    inb && code' "$SKILL")"
-[ "$(grep -c 'gh pr comment N --repo \$HOST/\$OWNER/\$REPO --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
+[ "$(grep -c 'gh pr comment N --repo "\$HOST/\$OWNER/\$REPO" --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
     && pass "the automatic path posts a standalone summary exactly once" \
     || die "the automatic path posts the round summary more than once, or not at all"
 # …and that one is inside the Copilot branch, whose request carries no body. The
