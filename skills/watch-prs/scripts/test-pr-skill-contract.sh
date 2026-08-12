@@ -1151,6 +1151,34 @@ else
     pass "no GNU-only sort in the script-resolution fallback"
 fi
 
+# ── A RESUMED SIGNOFF IS RE-VALIDATED, NOT TRUSTED ─────────────────────────
+# The record says Codex WAS clean on that commit when it was written. It does not
+# say the commit is still the head, or that the review still stands — a dismissal
+# leaves the marker untouched. Continuing on it opens a Copilot phase against a
+# head Codex never approved, and spends the whole loop before the merge gate
+# refuses.
+resume_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
+                   sec && /^```bash$/ {inb=1; next}
+                   inb && /^```$/ {exit}
+                   inb' "$SKILL")"
+[ -n "$resume_blk" ] || die "the resume recipe could not be extracted"
+printf '%s' "$resume_blk" | grep -q 'RESUMED_HEAD' \
+    && printf '%s' "$resume_blk" | grep -q '"\$RESUMED_HEAD" != "\$CODEX_SHA"' \
+    && pass "a resumed signoff is checked against the current head" \
+    || die "the resume recipe accepts a signoff for a head that has moved"
+printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" "\$CODEX_SHA"' \
+    && pass "…and the verdict is re-read, because a review can be dismissed" \
+    || die "the resume recipe trusts a record that may have been withdrawn"
+
+# ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
+# The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened
+# with a Copilot recheck that runs unconditionally, and in codex-only there is no
+# Copilot review for it to find — so the driver exited before the gate it had just
+# been taught to call.
+grep -q 'if \[ "\$REVIEWERS" != codex-only \]; then' "$SKILL" \
+    && pass "the Copilot signoff block is skipped when there was no Copilot phase" \
+    || die "codex-only still runs a Copilot recheck it cannot pass"
+
 # ── THE PHASE TRANSITIONS ARE THE OPERATOR'S, NOT THE LOOP'S ───────────────
 #
 # A loop that decides for itself how much review a change is worth will always

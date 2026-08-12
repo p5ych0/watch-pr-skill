@@ -1230,6 +1230,17 @@ a merge. Record it, then put the decision to the operator — the same shape as 
 end of the Codex phase, for the same reason.
 
 ```bash
+# ── ONLY WHEN THERE WAS A COPILOT PHASE ────────────────────────────────────
+#
+# `codex-only` means no Copilot review was ever requested, so there is no verdict
+# to re-check and no second signoff to record. Running this block anyway is how
+# the previous round's fix stayed unreachable: the gate learned the mode while the
+# documented path to it still exited on a Copilot recheck that could not pass.
+#
+# Set this to what was decided at the Codex stop, before running any of step 8.
+REVIEWERS=both   # or `codex-only`
+if [ "$REVIEWERS" != codex-only ]; then
+
 # THE SECOND SIGNOFF IS WRITTEN DOWN TOO, so a later session can see that both
 # phases closed and on which head. Same marker, same anchored read.
 COPILOT_SHA=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
@@ -1280,6 +1291,7 @@ Both reviewers have signed off on $COPILOT_SHA, and both signoffs are recorded.
 Nothing further happens until you say.
 EOF
 exit 0
+fi   # end of the two-reviewer path
 ```
 
 ### Resuming after a stop
@@ -1312,7 +1324,30 @@ RX_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
     echo "ABORT: the recorded signoff did not yield a full 40-hex sha ('$SIGNOFF_OUT')"; exit 0
 fi
-echo "Resumed: Codex signed off on $CODEX_SHA."
+# THE RECORD IS HISTORY, NOT A CURRENT FACT. It says Codex was clean on that
+# commit when it was written — not that the commit is still the head, nor that the
+# review still stands. A dismissal, or a push while the stop was parked, leaves
+# the marker exactly as it was; continuing on it opens a Copilot phase against a
+# head Codex never approved, and the whole loop is spent before the merge gate
+# finally refuses.
+#
+# So the resumed value is re-validated against the world as it is now, and BOTH
+# halves matter: the head must still be that commit, and the verdict must still
+# be clean on it.
+RESUMED_HEAD=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not read the head to check the resumed signoff against"; exit 0; }
+if [ "$RESUMED_HEAD" != "$CODEX_SHA" ]; then
+    echo "The head has moved since that signoff (head=$RESUMED_HEAD signed=$CODEX_SHA)."
+    echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
+    exit 0
+fi
+RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
+if [ "$RESUMED_RC" -ne 0 ]; then
+    echo "The recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
+    echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
+    exit 0
+fi
+echo "Resumed: Codex signed off on $CODEX_SHA, and that still holds on the current head."
 ```
 
 ### Then: the gate
@@ -1363,7 +1398,6 @@ echo "Resumed: Codex signed off on $CODEX_SHA."
 # and in exchange requires the head to BE the commit Codex signed, because the
 # `Review-Phase: copilot` trailers that license a moved head do not exist when
 # there was no Copilot phase.
-REVIEWERS=both   # or `codex-only`, if that is what was decided
 (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
