@@ -689,7 +689,7 @@ PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
 "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 case "$ROUNDS_RC" in
     0) ;;
-    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
+    3) echo "PAUSE: round boundary reached. Decide with the operator before requesting the next pass: continue, merge, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"; exit 0 ;;
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
 esac
 
@@ -762,7 +762,7 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 case "$ROUNDS_RC" in
     0) ;;
-    3) echo "PAUSE: round boundary reached; decide with the operator before requesting the next pass"; exit 0 ;;
+    3) echo "PAUSE: round boundary reached. Decide with the operator before requesting the next pass: continue, merge, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"; exit 0 ;;
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
 esac
 
@@ -960,9 +960,27 @@ nine Codex rounds plus one Copilot round trip a pause that neither loop had
 reached.
 
 - `0` — carry on.
-- `3` — **stop and decide with the operator**: continue, stop and merge, stop and
-  leave open, or abandon. A review loop that never pauses is a loop nobody chose
-  to keep running.
+- `3` — **stop and decide with the operator.** A review loop that never pauses is
+  a loop nobody chose to keep running. Put the options to them in these terms,
+  because the useful ones are not all "carry on or give up":
+
+  - **Continue** — the direction is right and the rounds are converging.
+  - **Merge now** — enough review has happened for what this change is worth.
+  - **Leave it open** — park it; the signoffs are on the PR and a later session
+    resumes from them.
+  - **Close it and start over with a better approach.** This is the option a loop
+    will never propose for itself, and it is the one that check-ins exist to
+    surface. Ten rounds on the same PR is evidence about the APPROACH, not only
+    about the remaining defects: a design that needs a finding fixed every round
+    is usually a design that will keep producing them. This repository has a
+    worked example — a PR spent fifty-two rounds on a text scanner before it was
+    abandoned and rebuilt around running the suite instead, which then took
+    eleven. Nothing in the first fifty-two rounds was wrong on its own terms.
+
+  **Say what the rounds have been about**, not just how many there were. "Ten
+  rounds, each a new false positive in the same parser" and "ten rounds, each a
+  distinct defect the fixes did not cause" are the same number and opposite
+  situations, and the operator cannot tell them apart from a count.
 
   When the operator says continue, RECORD THAT ON THE PR before requesting the
   next review — the gate reads its own acknowledgement back, so without it every
@@ -1083,7 +1101,17 @@ EOF
 # `$CODEX_SHA` is already validated as 40-hex above, and `printf` gives it no
 # chance to be anything else. Appends are checked individually: a partial file
 # reads as a complete summary.
-printf '\nCodex signed off on `%s`. Opening the Copilot phase on the same head.\n\n' \
+# THE SIGNOFF IS WRITTEN DOWN, not just printed. This line is the record the next
+# session reads: `pr-signoff.sh` scans the PR's comments for it, so closing the
+# terminal, changing machine or coming back tomorrow no longer loses the one fact
+# the phasing rests on — that Codex is clean on this exact commit. A value that
+# only exists in a shell variable is the `/tmp` counter mistake v1 made.
+#
+# The marker is a line of its own and anchored when read, so quoting it inside
+# prose signs nothing off.
+printf '\n**Review-Signoff:** `%s` `%s`\n\n' "$CODEX_BOT" "$CODEX_SHA" \
+    >> "$SUMMARY_FILE" || { echo "ABORT: could not write the phase summary."; exit 0; }
+printf 'Codex signed off on `%s`.\n\n' \
     "$CODEX_SHA" >> "$SUMMARY_FILE" || { echo "ABORT: could not write the phase summary."; exit 0; }
 cat >> "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase summary."; exit 0; }
 <what the PR does, and what the Codex phase changed — one paragraph. If Codex
@@ -1117,10 +1145,45 @@ fi
 "$RB_SCRIPTS"/pr-round-count.sh N "$CODEX_BOT"; ROUNDS_RC=$?
 case "$ROUNDS_RC" in
     0) ;;
-    3) echo "PAUSE: round boundary reached; decide with the operator before opening the Copilot phase"; exit 0 ;;
+    3) echo "PAUSE: round boundary reached. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"; exit 0 ;;
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
 esac
 
+# ── STOP. THE NEXT PHASE IS THE OPERATOR'S DECISION ────────────────────────
+#
+# Codex is clean and that is recorded on the PR. What happens next is not the
+# loop's call to make:
+#
+#   MERGE NOW — one reviewer's clean signoff is a legitimate place to stop, and
+#     for a small or urgent change it is often the right one. Run step 8 with
+#     `$CODEX_SHA` as the Codex signoff.
+#
+#   OPEN THE COPILOT PHASE — a second, differently-trained reviewer over the same
+#     head. It costs rounds, and it finds things Codex does not.
+#
+# ASK, THEN STOP. Do not request Copilot because the loop happens to continue in
+# that direction: every Copilot pass costs a round of somebody's attention, and
+# the phase this opens can run as long as the one just finished. The operator is
+# choosing how much more review this change is worth.
+#
+# It is resumable either way. `pr-signoff.sh N "$CODEX_BOT"` reads the signoff
+# back in any later session, so nothing here has to be redone if the answer
+# arrives tomorrow.
+cat <<EOF
+
+Codex has signed off on $CODEX_SHA, and the signoff is recorded on the PR.
+
+  Decide, and say which:
+    (a) merge now on Codex's signoff alone — run step 8
+    (b) open the Copilot phase on the same head — continue below
+
+Nothing further happens until you say. This is resumable: the signoff is on the
+PR, so a later session can pick it up with pr-signoff.sh.
+EOF
+exit 0
+
+# ── ONLY ON (b) ────────────────────────────────────────────────────────────
+# Everything below runs when the operator has asked for the Copilot phase.
 WHO="$COPILOT_BOT"
 # The authoritative review id BEFORE the request, so the watch can tell the new
 # pass from the old one on an unchanged head. Empty is a legitimate answer (no
@@ -1155,6 +1218,56 @@ unreviewed work reached the head.
 
 Run every check immediately before merging — an earlier check answered about an
 earlier head.
+
+### First: record the Copilot signoff, then STOP and ask
+
+Reaching a clean Copilot verdict is the end of the review work, not the start of
+a merge. Record it, then put the decision to the operator — the same shape as the
+end of the Codex phase, for the same reason.
+
+```bash
+# THE SECOND SIGNOFF IS WRITTEN DOWN TOO, so a later session can see that both
+# phases closed and on which head. Same marker, same anchored read.
+COPILOT_SHA=$(gh pr view N --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not read the head to record the Copilot signoff"; exit 0; }
+RX_SHA40='^[0-9a-f]{40}$'
+if ! [[ "$COPILOT_SHA" =~ $RX_SHA40 ]]; then
+    echo "ABORT: the head is not a full 40-hex sha; do not record a signoff for it"; exit 0
+fi
+gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Both review phases are closed on this head.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA")" \
+    || { echo "ABORT: could not record the Copilot signoff"; exit 0; }
+
+# ── STOP. MERGING IS THE OPERATOR'S DECISION ───────────────────────────────
+#
+# Both reviewers are clean and both signoffs are on the PR. Merging is the
+# largest irreversible action this tool takes, and "every gate passed" is an
+# input to that decision rather than the decision itself.
+#
+#   MERGE — run the gate below. It re-checks everything against the head it
+#     merges, because an earlier check answered about an earlier commit.
+#
+#   ANOTHER CODEX PASS — as fault tolerance. The Copilot phase changed the code
+#     after Codex last looked at it, and the merge gate accepts that on the
+#     strength of `Review-Phase: copilot` trailers rather than a fresh review. If
+#     the Copilot rounds were substantial, ask Codex again: go back to step 2 with
+#     `$WHO` set to Codex. The gate will then be evaluated against the newer
+#     signoff.
+#
+# ASK, THEN STOP.
+cat <<EOF
+
+Both reviewers have signed off on $COPILOT_SHA, and both signoffs are recorded.
+
+  Decide, and say which:
+    (a) merge — run the gate below
+    (b) another Codex pass first, as fault tolerance over the Copilot changes
+
+Nothing further happens until you say.
+EOF
+exit 0
+```
+
+### Then: the gate
 
 ```bash
 # THE GATE IS A SCRIPT. It was 291 lines here, pasted into your shell, and

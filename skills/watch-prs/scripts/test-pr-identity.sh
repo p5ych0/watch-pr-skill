@@ -26,6 +26,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-merge-gate.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
+        "$ROOT"/pr-signoff.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
         "$ROOT"/pr-selfcheck.sh

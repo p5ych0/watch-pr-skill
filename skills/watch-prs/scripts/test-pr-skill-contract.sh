@@ -1151,6 +1151,54 @@ else
     pass "no GNU-only sort in the script-resolution fallback"
 fi
 
+# ── THE PHASE TRANSITIONS ARE THE OPERATOR'S, NOT THE LOOP'S ───────────────
+#
+# A loop that decides for itself how much review a change is worth will always
+# decide "more": it has no view of urgency, cost, or what the change is for. Both
+# transitions therefore stop and ask — after Codex is clean, and after Copilot is.
+# The failure this prevents is not a wrong merge; it is a session that quietly
+# spends another phase of somebody's attention because continuing was the
+# direction it happened to be facing.
+grep -q 'THE NEXT PHASE IS THE OPERATOR' "$SKILL" \
+    && pass "a clean Codex verdict stops for the operator rather than opening the Copilot phase" \
+    || die "the driver opens the Copilot phase on its own"
+grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
+    && pass "…and a clean Copilot verdict stops before the merge gate" \
+    || die "the driver walks a clean Copilot verdict straight into a merge"
+# BOTH OPTIONS ARE NAMED AT EACH STOP. "Decide with the operator" without naming
+# the choices is a notification: the operator has to reconstruct what the
+# alternatives even were.
+awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'merge now' \
+    && pass "…naming merging as an alternative to the Copilot phase" \
+    || die "the Codex-clean stop does not offer merging"
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -qi 'fault tolerance' \
+    && pass "…and another Codex pass as an alternative to merging" \
+    || die "the Copilot-clean stop does not offer a further Codex pass"
+# THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
+# resumable rather than a dead end. A decision that arrives tomorrow must not cost
+# the phase that was already finished.
+[ "$(grep -c '\*\*Review-Signoff:\*\*' "$SKILL")" -ge 2 ] \
+    && pass "both phases record their signoff on the PR before stopping" \
+    || die "a phase closes without writing down which head it closed on"
+[ -x "$SCRIPT_DIR/pr-signoff.sh" ] \
+    && grep -q 'pr-signoff.sh' "$SKILL" \
+    && pass "…and the driver knows how to read one back in a later session" \
+    || die "nothing reads the recorded signoff back"
+
+# ── THE CHECK-IN OFFERS STARTING OVER ──────────────────────────────────────
+# Ten rounds is evidence about the APPROACH, not only about the defects left. The
+# option a loop will never propose for itself is abandoning its own work, and it
+# is the one this repository has the strongest evidence for: fifty-two rounds on a
+# text scanner, then eleven on the thing that replaced it.
+grep -qi 'start over with a better approach' "$SKILL" \
+    && pass "the round check-in offers closing the PR and starting over" \
+    || die "the check-in never raises the approach itself as the problem"
+[ "$(grep -c 'start over' "$SKILL")" -ge 3 ] \
+    && pass "…at every boundary, not only in the prose that explains one" \
+    || die "a boundary message omits the start-over option"
+
 # ── THE DRIVER CALLS THE GATE, AND READS ALL THREE ANSWERS ─────────────────
 # The gate's own decisions are executed in `test-pr-merge-gate.sh`. What has to be
 # true HERE is that the document invokes it with what it needs and does not
@@ -1181,10 +1229,15 @@ grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' "$SKILL" \
 #
 # `$CODEX_SHA` is captured and validated in step 7; there is nothing here for the
 # driver to fill in, and the block must be runnable as written.
+# THE BLOCK THAT RUNS THE GATE, not simply the first one under the heading.
+# Step 8 opens with a block that records the Copilot signoff and stops for the
+# operator; taking "the first fenced block after the heading" silently switched
+# targets the moment that was added, and every assertion below then described a
+# different piece of code.
 merge_blk="$(awk '/^## 8\. Merge gate$/ {sec=1}
-                  sec && /^```bash$/ {inb=1; next}
-                  inb && /^```$/ {exit}
-                  inb' "$SKILL")"
+                  sec && /^```bash$/ {inb=1; buf=""; next}
+                  inb && /^```$/ {inb=0; if (buf ~ /pr-merge-gate\.sh/) {printf "%s", buf; exit}; next}
+                  inb {buf = buf $0 "\n"}' "$SKILL")"
 [ -n "$merge_blk" ] || die "the merge-gate block could not be extracted"
 if [ -n "$merge_blk" ]; then
     blk_err="$(printf '%s\n' "$merge_blk" | bash -n 2>&1)" \

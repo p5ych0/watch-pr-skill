@@ -371,7 +371,22 @@ checkout rather than inherit from a clone.
 A watch ends when it reports a verdict, so one arming covers one review. Re-arming
 is part of requesting the next review, not a separate question.
 
-### Round check-in
+#### The phase transitions are yours
+
+The loop does not decide how much review your change is worth. It stops twice and
+asks:
+
+- **When Codex is clean** — merge on that signoff alone, or open the Copilot
+  phase on the same head. One reviewer's clean pass is a legitimate place to stop.
+- **When Copilot is clean** — merge, or ask Codex again as fault tolerance over
+  what the Copilot phase changed.
+
+Both stops are **resumable**. Each signoff is recorded on the pull request as a
+`**Review-Signoff:**` comment naming the reviewer and the exact head, so a
+decision that arrives tomorrow — or on another machine — costs nothing that was
+already done. `pr-signoff.sh <pr> <reviewer>` reads it back.
+
+## Round check-in
 
 A review loop can run many rounds, so it stays *your* decision to keep going
 rather than rubber-stamping an endless back-and-forth: every **10 distinct
