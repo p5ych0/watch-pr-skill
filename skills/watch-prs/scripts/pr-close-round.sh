@@ -2,11 +2,36 @@
 # Close a review round: push the fixes, prove the head is green, post the summary
 # and request the next pass.
 #
-#   pr-close-round.sh <pr> <reviewer-login> <summary-file> <auto-review: yes|no>
+#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no>
+#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <gated-head>
 #
-#   0  closed   — the summary is posted and the next review is requested
+#   0  gated/closed — `gate`: the head is pushed and green, and the threads may
+#                     now be answered. `post`: the summary is posted and the next
+#                     review is requested
 #   1  stopped  — the reason is on stdout; the round is NOT closed
 #   3  paused   — a round boundary. NOT a refusal: the operator decides
+#
+# WHY TWO STAGES, AND WHY THE THREADS GO BETWEEN THEM
+#
+# Answering and RESOLVING the threads belongs after the checks on the pushed head
+# and before the summary — and that is not a detail of presentation, it is the
+# same irreversibility rule the auto-review ordering below is built on. A resolved
+# thread cannot be taken back. Resolve before the gate and a round that then fails
+# to push, or pushes red, has already recorded findings as answered on a commit
+# that never landed or never built; and with auto-review ON the pass the push
+# starts reads threads that are already resolved, so it re-reviews with the
+# findings marked handled and no summary saying what handled them.
+#
+# THE MODEL WRITES THOSE REPLIES, so this cannot be one process: the replies are
+# per-finding prose, the reaction is a judgement (👍/👎), and neither can be
+# derived from anything on this command line. `gate` runs the half that must
+# precede them, `post` runs the half that must follow, and `post` re-proves the
+# head has not moved in between rather than trusting that it did not.
+#
+# The recipes this replaced carried the boundary as a comment — `# reply + resolve
+# threads here`, placed after the gate in BOTH of them. Extracting them without
+# the marker left the driver's own checklist as the only ordering, and that runs
+# before the push. Restoring it is what this split is for.
 #
 # WHY THIS EXISTS AS A SCRIPT
 #
@@ -61,7 +86,19 @@ rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
 COPILOT_BOT="$RB_COPILOT_BOT"
 
-PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"
+# THE STAGE IS FIRST AND HAS NO DEFAULT. A default is the whole defect back: a
+# caller that forgets which half it is running would silently get one, and the one
+# it got would be the one that skips the threads. The old four-argument form
+# lands here as a PR number in stage position and is refused by name.
+STAGE="${1:-}"
+case "$STAGE" in
+    gate|post) ;;
+    "") echo "ABORT: a stage is required: 'gate' (push and prove the head) or 'post' (summarise and request), with the thread replies in between"; exit 1 ;;
+    *) echo "ABORT: '$STAGE' is not a stage; expected 'gate' or 'post' — the thread replies go between them"; exit 1 ;;
+esac
+shift
+
+PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; GATED_HEAD="${5:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
@@ -82,6 +119,25 @@ case "$AUTO_REVIEW" in
     yes|no) ;;
     *) echo "ABORT: auto-review must be 'yes' or 'no' (got '$AUTO_REVIEW')"; exit 1 ;;
 esac
+if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
+
+# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, and it is required in exactly
+# one of them. `post` without it has nothing to check the working tree against and
+# would summarise whatever happens to be there; `gate` given one is a caller that
+# believes it is running the other half, which is worth refusing rather than
+# quietly ignoring.
+case "$STAGE" in
+    post)
+        [ -n "$GATED_HEAD" ] \
+            || { echo "ABORT: 'post' needs the head 'gate' reported, so the summary is about the commit that was proven."; exit 1; }
+        _why="$(sha_reason "$GATED_HEAD")" \
+            || { echo "ABORT: the gated head is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
+        ;;
+    gate)
+        [ -z "$GATED_HEAD" ] \
+            || { echo "ABORT: 'gate' takes no head — it reports one (got '$GATED_HEAD')."; exit 1; }
+        ;;
+esac
 
 # THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read
@@ -97,13 +153,19 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 # Placing it before the mention was not enough: a fix commit on the threshold-th
 # round moved the head and started the next review while the count had not yet
 # run, so the pause fired after the round it was meant to precede was queued.
-"$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$WHO"; ROUNDS_RC=$?
-case "$ROUNDS_RC" in
-    0) ;;
-    3) echo "PAUSE: round boundary reached. Decide with the operator before requesting the next pass: continue, merge, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"
-       exit 3 ;;
-    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 1 ;;
-esac
+#
+# IN `gate` ONLY. By `post` the push has happened and the threads are answered, so
+# a pause there would stop a round that is already irreversibly half-closed — and
+# the count it would be pausing on was checked before any of that.
+if [ "$STAGE" = gate ]; then
+    "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$WHO"; ROUNDS_RC=$?
+    case "$ROUNDS_RC" in
+        0) ;;
+        3) echo "PAUSE: round boundary reached. Decide with the operator before requesting the next pass: continue, merge, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"
+           exit 3 ;;
+        *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 1 ;;
+    esac
+fi
 
 request_review() {   # request_review ; posts the summary and asks for the pass
     # THE BASELINE IS READ IMMEDIATELY BEFORE THE REQUEST, never earlier. A
@@ -141,15 +203,38 @@ $SUMMARY" \
     return 0
 }
 
+if [ "$STAGE" = post ]; then
+    # ── THE THREADS ARE ANSWERED; CLOSE THE ROUND ──────────────────────────
+    # THE HEAD IS RE-PROVEN RATHER THAN ASSUMED. Answering threads takes as long
+    # as it takes, and a commit made in between — an afterthought fix, an amend —
+    # leaves the summary describing one commit while the reviewer reads another.
+    # The gate's green verdict belongs to the commit the gate saw, and only that
+    # one; carrying it forward silently is how a round closes on unproven code.
+    HEAD_NOW=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
+    [ "$HEAD_NOW" = "$GATED_HEAD" ] \
+        || { echo "ABORT: the local head is $HEAD_NOW, not the gated $GATED_HEAD; re-run the gate for what is here now."; exit 1; }
+    # AND ON THE PR, because the local head agreeing proves only that this
+    # checkout did not move. A force-push from elsewhere, or a merge into the
+    # branch, moves the head the reviewer will read while this one stands still.
+    HEAD_API=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        || { echo "ABORT: could not confirm the head before posting."; exit 1; }
+    _why="$(sha_reason "$HEAD_API")" \
+        || { echo "ABORT: the confirmed head is not a full OID ($_why: '$HEAD_API')."; exit 1; }
+    [ "$HEAD_API" = "$GATED_HEAD" ] \
+        || { echo "ABORT: the PR head is $HEAD_API, not the gated $GATED_HEAD; the round would close on a commit that was never proven."; exit 1; }
+    request_review || exit 1
+    echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$GATED_HEAD mode=$_MODE prior-review=$RB_PRIOR_REVIEW"
+    exit 0
+fi
+
 if [ "$AUTO_REVIEW" = no ]; then
     # ── THE MENTION IS THE TRIGGER ─────────────────────────────────────────
     # Nothing is queued until the comment is posted, so the push can be proven
-    # green first and the round closed in one step afterwards.
+    # green first and the threads answered afterwards, with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
     git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
-    request_review || exit 1
-    echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=mention prior-review=$RB_PRIOR_REVIEW"
+    echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
     exit 0
 fi
 
@@ -225,6 +310,5 @@ if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     esac
 fi
 
-request_review || exit 1
-echo "PR_ROUND_CLOSED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=push prior-review=$RB_PRIOR_REVIEW"
+echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=$_MODE"
 exit 0

@@ -135,12 +135,33 @@ gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gate
 [ -x "$SCRIPT_DIR/pr-close-round.sh" ] \
     && pass "the round-closer ships" \
     || die "the round-closer is missing"
-grep -q 'pr-close-round.sh N "\$WHO" "\$SUMMARY_FILE" no' "$SKILL" \
-    && pass "…and the mention-triggered recipe asks for that ordering" \
-    || die "the auto-review-OFF recipe does not close the round in mention mode"
-grep -q 'pr-close-round.sh N "\$WHO" "\$SUMMARY_FILE" yes' "$SKILL" \
-    && pass "…and the push-triggered recipe asks for the other" \
-    || die "the auto-review-ON recipe does not close the round in push mode"
+grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW"' "$SKILL" \
+    && pass "…and the recipe gates on the mode this PR is actually in" \
+    || die "the recipe does not run the gate with \$AUTO_REVIEW"
+grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$GATED_HEAD"' "$SKILL" \
+    && pass "…and posts against the head the gate proved" \
+    || die "the recipe does not post with the gated head"
+# THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
+# every automatic-review round in the wrong order — pushing after it had already
+# posted — and nothing in the script's own tests would notice, because the script
+# would be doing exactly as it was told.
+grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$SKILL" \
+    && die "a recipe hard-codes the auto-review mode instead of passing \$AUTO_REVIEW" \
+    || pass "…and neither stage hard-codes the mode"
+# THE THREAD WORK IS BETWEEN THE STAGES, and the document is the only place that
+# ordering is stated — the script cannot check what its caller did between two
+# invocations. A resolve before the gate records findings as answered on a commit
+# that may never land.
+# ANCHORED ON THE INVOCATIONS, not on the usage comment that lists both stages a
+# few lines above them — matching that comment put `post` before `gate` and the
+# ordering this asserts was read off the documentation of itself.
+_gate_ln="$(grep -n '^GATE_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)"
+_post_ln="$(grep -n '^POST_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)"
+_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)"
+{ [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
+    && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
+    && pass "…and the threads are answered between the two stages" \
+    || die "the document does not put the thread replies between gate and post (gate=$_gate_ln replies=$_res_ln post=$_post_ln)"
 # THE THREE ANSWERS ARE DISTINGUISHED. A pause read as a stop loses the operator's
 # decision; a stop read as success closes a round that did not close.
 [ "$(grep -c 'ROUND_RC' "$SKILL")" -ge 4 ] \
@@ -159,10 +180,12 @@ grep -q 'pr-close-round.sh N "\$WHO" "\$SUMMARY_FILE" yes' "$SKILL" \
 # has to stop the round. A recipe that echoes the record and carries on satisfies a
 # count while step 3 still watches against the parent's older baseline — which is
 # the defect, not the spelling.
-[ "$(grep -c 'PRIOR_REVIEW="$(printf' "$SKILL")" -ge 2 ] \
-    && pass "both recipes assign the baseline the round-closer reported" \
+# ONE recipe now, not two: the mode is an argument to the script rather than the
+# thing that chooses which block to copy, so there is one site to satisfy.
+[ "$(grep -c 'PRIOR_REVIEW="$(printf' "$SKILL")" -ge 1 ] \
+    && pass "the recipe assigns the baseline the round-closer reported" \
     || die "a recipe prints the closing record without reading the baseline out of it"
-[ "$(grep -c 'the round closed without reporting a review baseline' "$SKILL")" -ge 2 ] \
+[ "$(grep -c 'the round closed without reporting a review baseline' "$SKILL")" -ge 1 ] \
     && pass "…and an absent one stops the round rather than watching on a stale id" \
     || die "an empty baseline is accepted and step 3 watches against a stale one"
 

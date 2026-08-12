@@ -251,10 +251,21 @@ Then:
    "no findings".
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
-   (`pr-round-count.sh <PR> <reviewer>`), reply to each thread with what changed,
-   react 👍/👎, and resolve it. Then hand the closing to
-   **`pr-close-round.sh <PR> <reviewer> <summary-file> <auto-review>`**, which
-   holds both orderings so neither has to be remembered:
+   (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to
+   **`pr-close-round.sh`**, which holds both orderings so neither has to be
+   remembered, and runs in **two stages with your thread replies between them**:
+
+   - `gate <PR> <reviewer> <summary-file> <auto-review>` pushes and proves the
+     head is green, and reports it as `head=…`;
+   - **then** reply to each thread with what changed, react 👍/👎, and resolve it;
+   - `post <PR> <reviewer> <summary-file> <auto-review> <head>` re-proves the head
+     has not moved, posts the summary and requests the next pass.
+
+   The threads are answered **after** the gate because a resolve cannot be taken
+   back: resolving first means a round that then fails to push, or pushes red, has
+   already recorded its findings as answered on a commit that never landed.
+
+   The two orderings the script holds:
 
    - **automatic review off** (the recommended setting) — the `@codex review`
      mention *is* the request, so it carries the summary in one comment and

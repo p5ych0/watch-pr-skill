@@ -109,13 +109,33 @@ world() {   # world ; the state in which a round closes cleanly
     # agreeing with itself about a shape the real contract refuses.
     printf '42\n' > "$W/pr-review-state.out"
 }
-run() {   # run [reviewer] [auto] ; prints "<rc>|<output>"
-    local out rc=0
-    printf 'the round summary\n' > "$TMP/summary.md"
+stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
+    local out rc=0 st="$1"; shift
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-        "$DIR/pr-close-round.sh" 7 "${1-$CODEXBOT}" "$TMP/summary.md" "${2-no}" 2>&1)" || rc=$?
+        "$DIR/pr-close-round.sh" "$st" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
+}
+gated_head() {   # gated_head <gate output> ; the head the gate reported
+    printf '%s\n' "$1" | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p'
+}
+# A WHOLE ROUND, THE WAY THE DRIVER RUNS IT: gate, then the thread replies, then
+# post. The replies are the reason this is two stages at all, so the fixture
+# performs them — as a line in the SAME call log — rather than skipping from one
+# stage straight to the other. Ordering assertions can then span the boundary,
+# which is where the ordering that matters actually lives.
+run() {   # run [reviewer] [auto] ; prints "<rc>|<output>" for the whole round
+    local who="${1-$CODEXBOT}" auto="${2-no}" g grc gout rc out head
+    printf 'the round summary\n' > "$TMP/summary.md"
+    g="$(stage gate 7 "$who" "$TMP/summary.md" "$auto")"; grc="${g%%|*}"; gout="${g#*|}"
+    # A GATE THAT DID NOT PASS IS THE WHOLE ANSWER. Running `post` anyway would be
+    # the fixture doing what the driver is forbidden to do.
+    [ "$grc" = 0 ] || { printf '%s|%s' "$grc" "$gout"; return 0; }
+    head="$(gated_head "$gout")"
+    printf 'driver resolveReviewThread\n' >> "$TMP/calls"
+    out="$(stage post 7 "$who" "$TMP/summary.md" "$auto" "$head")"; rc="${out%%|*}"; out="${out#*|}"
+    printf '%s|%s
+%s' "$rc" "$gout" "$out"
 }
 case_is() {   # case_is <want rc> <needle> <label> [reviewer] [auto]
     local got rc body
@@ -205,7 +225,7 @@ case_is 1 "not a full OID" "…and a malformed one is not a head" "$CODEXBOT" ye
 world; : > "$TMP/summary.md"
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    "$DIR/pr-close-round.sh" 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'summary is empty'; } \
     && pass "an empty summary stops the round" \
     || die "an empty summary gave rc=$rc '$got'"
@@ -215,7 +235,7 @@ grep -q 'git push' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    "$DIR/pr-close-round.sh" 7 "$CODEXBOT" "$TMP/nope.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and so does a summary file that is not there" \
     || die "a missing summary file gave rc=$rc"
@@ -321,7 +341,7 @@ grep -q 'pr-review-state.sh review-id' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    "$DIR/pr-close-round.sh" 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'not a reviewer this loop drives'; } \
     && pass "an unrecognised reviewer is refused, by name" \
     || die "an unknown reviewer gave rc=$rc '$got'"
@@ -338,10 +358,15 @@ got="$(run "$COPILOTBOT" yes)"; rc="${got%%|*}"
 [ "$rc" = 1 ] \
     && pass "a Copilot round still fails on the head confirmation it does need" \
     || die "a Copilot round ignored an unreadable head (rc=$rc)"
-world; run "$COPILOTBOT" yes >/dev/null
+# COUNTED WITHIN THE GATE, which is where the pre-push lookup would be. Counting
+# across the whole round would count `post`'s re-proof of the head as well — a
+# different lookup, made for a different reason — so the number would move
+# whenever anything else did, and stop being about the pre-push read at all.
+world; printf 'the round summary\n' > "$TMP/summary.md"
+stage gate 7 "$COPILOTBOT" "$TMP/summary.md" yes >/dev/null
 [ "$(grep -c 'gh pr view' "$TMP/calls")" -eq 1 ] \
-    && pass "…and reads the head once, not twice, since the pre-push one is unused" \
-    || die "a Copilot round made $(grep -c 'gh pr view' "$TMP/calls") head lookups"
+    && pass "…and the gate reads the head once, not twice, since the pre-push one is unused" \
+    || die "a Copilot gate made $(grep -c 'gh pr view' "$TMP/calls") head lookups"
 
 # THE PASS THE PUSH STARTED CAN TIME OUT, and that stops the round: its result
 # would otherwise answer the request made after it.
@@ -369,11 +394,152 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
     _auto="${_r%%|*}"; _want="${_r#*|}"
     got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-        "$DIR/pr-close-round.sh" "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
+        "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF "$_want"; } \
         && pass "refused by name: $_want" \
         || die "'$_pr/$_who/$_auto' gave rc=$rc '$got'"
 done
+
+
+# ── THE THREADS ARE ANSWERED BETWEEN THE STAGES ────────────────────────────
+# This is the ordering the split exists for, and it is the one the call log can
+# only show if the fixture performs the driver's part too. A resolve cannot be
+# taken back: it must not happen until the head is pushed and green, and the
+# summary must not be posted until the resolve has.
+world; run >/dev/null
+before 'git push' 'driver resolveReviewThread' \
+    && pass "the threads are answered AFTER the push" \
+    || die "a thread was resolved before the push: $(cat "$TMP/calls")"
+before 'pr-ci-gate' 'driver resolveReviewThread' \
+    && pass "…and after the checks on what was pushed" \
+    || die "a thread was resolved before the CI gate: $(cat "$TMP/calls")"
+before 'driver resolveReviewThread' 'gh pr comment' \
+    && pass "…and before the summary that says what they were" \
+    || die "the summary preceded the replies: $(cat "$TMP/calls")"
+
+# THE SAME ORDERING IN THE MODE WHERE THE PUSH IS THE TRIGGER — and here the pass
+# the push STARTED must also have finished before anything is resolved, because
+# that pass reads the threads. This is the documented cost of the mode: it reads
+# them OPEN.
+world; printf '%s\n' "$PREV40" > "$W/head.before.out"; run "$CODEXBOT" yes >/dev/null
+before 'pr-watch.sh' 'driver resolveReviewThread' \
+    && pass "with auto-review on, the push's own pass finishes before any resolve" \
+    || die "a thread was resolved while the push's pass was still reading them: $(cat "$TMP/calls")"
+before 'driver resolveReviewThread' 'gh pr comment' \
+    && pass "…and the summary still comes last" \
+    || die "the summary preceded the replies in push mode: $(cat "$TMP/calls")"
+
+# ── EACH STAGE DOES ONLY ITS OWN HALF ──────────────────────────────────────
+# `gate` posting anything is the defect the split removes: it would close the
+# round before the threads it is meant to precede were touched.
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"; rc="${got%%|*}"
+[ "$rc" = 0 ] && pass "the gate alone succeeds" || die "the gate alone gave rc=$rc '${got#*|}'"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "the gate posted a comment" \
+    || pass "…and posts nothing"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "the gate requested a review" \
+    || pass "…and requests nothing"
+# `-F`: the reviewer login ends in `[bot]`, which as a pattern is a character
+# class — an unanchored regex here matched a line the record does not contain.
+printf '%s' "${got#*|}" | grep -qF "PR_ROUND_GATED pr=7 reviewer=$CODEXBOT head=$HEAD40 mode=mention" \
+    && pass "…and reports the head it proved, with the mode it ran in" \
+    || die "the gate's record was '${got#*|}'"
+
+# `post` pushing would push whatever the working tree became while the threads
+# were being answered — past the gate that proved the head it is closing on.
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"; rc="${got%%|*}"
+[ "$rc" = 0 ] && pass "post alone closes the round" || die "post alone gave rc=$rc '${got#*|}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "post pushed" \
+    || pass "…and pushes nothing"
+grep -q 'pr-round-count' "$TMP/calls" \
+    && die "post checked the round boundary, after the push and the replies" \
+    || pass "…and does not re-check the boundary it is already past"
+printf '%s' "${got#*|}" | grep -q 'PR_ROUND_CLOSED .*prior-review=42' \
+    && pass "…and carries the baseline back" \
+    || die "post's record was '${got#*|}'"
+
+# ── THE HEAD `post` CLOSES ON IS THE HEAD `gate` PROVED ────────────────────
+# Answering threads takes as long as it takes. A commit made in between leaves the
+# summary describing one commit while the reviewer reads another, and the gate's
+# green verdict belongs to the first.
+world; printf '%s\n' "$PREV40" > "$W/local.out"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the local head is $PREV40"; } \
+    && pass "a local commit made while the threads were answered stops the close" \
+    || die "a moved local head gave '${got}'"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "it posted the summary about a commit it had not proved" \
+    || pass "…before anything was posted"
+
+# AND ON THE PR, because the local head agreeing proves only that this checkout
+# did not move — a force-push from elsewhere moves the head the reviewer reads.
+world; printf '%s\n' "$PREV40" > "$W/head.out"; printf '%s\n' "$HEAD40" > "$W/local.out"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the PR head is $PREV40"; } \
+    && pass "a head moved on the PR stops the close" \
+    || die "a moved PR head gave '${got}'"
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "it posted the summary about a commit that is no longer the head" \
+    || pass "…before anything was posted"
+
+# An unreadable or malformed confirmation is a stop, never "close anyway".
+world; printf '1\n' > "$W/head.rc"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not confirm the head'; } \
+    && pass "an unreadable head confirmation stops the close" \
+    || die "a failed confirmation gave '${got}'"
+world; printf 'not-a-sha\n' > "$W/head.out"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+    && pass "…and so does one that is not an OID" \
+    || die "a malformed confirmation gave '${got}'"
+
+# ── THE STAGE ITSELF IS NAMED, AND HAS NO DEFAULT ──────────────────────────
+# A default is the whole defect back: a caller that forgets which half it is
+# running would silently get one, and the one it got would skip the threads. The
+# four-argument form this replaced lands here as a PR number in stage position.
+world
+got="$(stage 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'7' is not a stage"; } \
+    && pass "the old four-argument form is refused by name" \
+    || die "the old form gave '${got}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "the old form pushed" \
+    || pass "…having done nothing"
+world; got="$(stage "" 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a stage is required'; } \
+    && pass "an empty stage is refused" \
+    || die "an empty stage gave '${got}'"
+world; got="$(stage close 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'close' is not a stage"; } \
+    && pass "an unknown stage is refused by name" \
+    || die "an unknown stage gave '${got}'"
+
+# THE HANDOFF BELONGS TO EXACTLY ONE STAGE.
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'post' needs the head"; } \
+    && pass "post without the gated head is refused" \
+    || die "post with no head gave '${got}'"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no aaaa)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the gated head is not a full OID'; } \
+    && pass "…and so is an abbreviated one" \
+    || die "post with a short head gave '${got}'"
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'gate' takes no head"; } \
+    && pass "a gate handed a head is refused — that caller thinks it is posting" \
+    || die "gate with a head gave '${got}'"
+
+# ── THE BOUNDARY PAUSES THE GATE, BEFORE THE PUSH ──────────────────────────
+world; printf '3\n' > "$W/pr-round-count.rc"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'round boundary reached'; } \
+    && pass "a round boundary pauses the gate" \
+    || die "a boundary gave '${got}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "it pushed at a round boundary" \
+    || pass "…with nothing pushed and nothing resolved"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

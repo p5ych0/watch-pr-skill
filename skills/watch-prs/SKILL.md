@@ -547,8 +547,16 @@ resolving it. Then, in one pass:
    and a self-check after it has already let the round start. **The push is not
    here** — it belongs to the mode-specific recipe below, because the checks on
    what it pushes decide whether this round may be closed at all;
-4. reply to each thread with what changed, **react to it**, and resolve it — and
+4. **run `pr-close-round.sh gate` — the recipe below** — and only then reply to
+   each thread with what changed, **react to it**, and resolve it, and
    **verify the resolve succeeded** rather than assuming it did.
+
+   **The gate comes first, and this is an ordering, not a preference.** A
+   resolved thread cannot be taken back: resolve before the push and a round that
+   then fails to push, or pushes red, has already recorded its findings as
+   answered on a commit that never landed. With automatic review on it is worse —
+   the pass the push starts reads threads already marked resolved, with no summary
+   saying what resolved them.
    `resolveReviewThread` returns `thread{isResolved}`; read it. A round reported
    as "all threads resolved" when they were not sends the next review over
    findings that were already answered, and the extra volume reads as regression
@@ -571,11 +579,17 @@ resolving it. Then, in one pass:
 
    A failed reaction is a note, not an abort: it is feedback, and losing it must
    not stop a round from closing;
-4. **post the summary and re-request `$WHO`** — after the push, and after the
-   CI gate has said the pushed head is green. Resolving a thread and posting a
-   summary are the irreversible parts of closing a round, so they come last: a
-   comment saying "that round did not really close" is a record, not a retraction,
-   and it is itself a call that can fail.
+4. **run `pr-close-round.sh post`** — which posts the summary and re-requests
+   `$WHO`, after the push, after the CI gate has said the pushed head is green,
+   and after the threads are answered. Resolving a thread and posting a summary
+   are the irreversible parts of closing a round, so they come last: a comment
+   saying "that round did not really close" is a record, not a retraction, and it
+   is itself a call that can fail.
+
+   `post` re-proves the head is still the one `gate` reported — locally and on the
+   PR — because the replies take as long as they take, and a commit made in
+   between leaves the summary describing one commit while the reviewer reads
+   another.
 
    With automatic review on the push also *starts* a pass, and that one cannot be
    held back. It reads open threads and no summary, so it may re-report what this
@@ -649,23 +663,68 @@ decided by **what starts it**, and there are two different answers.
 `$AUTO_REVIEW` was established in step 2 and is carried for the whole PR.
 
 **Automatic review OFF** — the mention is the trigger, so it can carry the
-summary and the push is inert:
+summary and the push is inert. Nothing is queued until that comment is posted,
+which means the gate can prove the head with nothing yet requested.
+
+**Automatic review ON** — the push starts the pass, so the ordering is decided by
+what is *irreversible*: push, prove the checks, close afterwards. Closing first
+and pushing last cannot be gated — by the time the checks on the pushed commit
+can be consulted, the threads are resolved and the summary is posted, and neither
+can be taken back. A later "this round is not closed" comment is a record, not a
+retraction, and is itself a call that can fail.
+
+**The cost of that mode is real and is not hidden:** the pass the push starts
+reads open threads and no summary, so it can re-report findings this round already
+answered. It is superseded by the explicit request `post` makes at the end. The
+trade is a wasted pass against a round that closes on a red head, and only one of
+those can be undone by the next round.
+
+Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
+hard-coded answer — one recipe here, two orders there:
 
 ```bash
-# THE ROUND CLOSES THROUGH A SCRIPT. Both recipes — this one and the automatic
-# one below — were prose-embedded shell doing the same job in different ORDERS,
-# and the ordering is the whole content. Nothing executed either. Issue #26.
+# THE ROUND CLOSES THROUGH A SCRIPT, IN TWO STAGES, with the thread replies
+# between them. Both orderings were prose-embedded shell here, doing the same job
+# in different ORDERS, and the ordering is the whole content. Nothing executed
+# either. Issue #26.
 #
-#   pr-close-round.sh N "$WHO" "$SUMMARY_FILE" no
+#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW"
+#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD"
 #
-#     0  closed   — summary posted, the next pass requested
+#     0  gated (`gate`) / closed (`post`)
 #     1  stopped  — the reason is on stdout; the round is NOT closed
 #     3  paused   — a round boundary. Decide with the operator
 #
-# `no` is this mode: the `@codex review` mention is the trigger, so it carries the
-# summary in one comment and nothing is queued until that comment is posted.
-ROUND_OUT="$("$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" no 2>&1)"; ROUND_RC=$?
-printf '%s\n' "$ROUND_OUT"
+# `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN. It was established in step 2 and the
+# script refuses anything but `yes` or `no`, so the mode this PR is in picks the
+# order INSIDE the script — rather than deciding which of two recipes to copy out
+# of here, which is how the two drifted apart in the first place.
+GATE_OUT="$("$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" 2>&1)"; GATE_RC=$?
+printf '%s\n' "$GATE_OUT"
+case "$GATE_RC" in
+    0) ;;
+    3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
+    *) echo "The round did not close, and nothing has been resolved or posted. The reason is above; do not retry it blind."; exit "$GATE_RC" ;;
+esac
+# THE GATED HEAD IS CARRIED TO `post`, WHICH RE-PROVES IT. A child cannot assign a
+# variable here, so it says what the value was and this reads it back out.
+GATED_HEAD="$(printf '%s\n' "$GATE_OUT" \
+    | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p')"
+[ -n "$GATED_HEAD" ] \
+    || { echo "ABORT: the gate reported no head; there is nothing to hold the summary to."; exit 1; }
+```
+
+**Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.
+The head is pushed and green, so a resolve is a claim that is true when made.
+Then, and only then:
+
+```bash
+# ONLY NOW IS THE ROUND CLOSED. `post` re-proves that the head is still
+# `$GATED_HEAD`, locally and on the PR, before it posts anything: the replies take
+# as long as they take, and the gate's green verdict belongs to the commit the
+# gate saw and to no other.
+POST_OUT="$("$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
+printf '%s\n' "$POST_OUT"
 # THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
 # before it requests the pass, and step 3's watch needs exactly that value — a
 # child cannot assign a variable here, so it says what the value was. Without
@@ -673,55 +732,14 @@ printf '%s\n' "$ROUND_OUT"
 # handled is newer than it, so it is accepted at once as the answer to a request
 # nobody has answered yet.
 if [ "$ROUND_RC" -eq 0 ]; then
-    PRIOR_REVIEW="$(printf '%s\n' "$ROUND_OUT" \
+    PRIOR_REVIEW="$(printf '%s\n' "$POST_OUT" \
         | sed -n 's/^PR_ROUND_CLOSED .*[[:space:]]prior-review=\(.*\)$/\1/p')"
     [ -n "$PRIOR_REVIEW" ] \
         || { echo "ABORT: the round closed without reporting a review baseline; step 3 would watch against a stale one."; exit 1; }
 fi
 case "$ROUND_RC" in
     0) ;;   # the script printed the head it closed on
-    3) echo "Stopping here: the operator decides at a round boundary." ;;
-    *) echo "The round did not close. The reason is above; do not retry it blind." ;;
-esac
-exit "$ROUND_RC"
-```
-
-**Automatic review ON** — the push starts the pass, so the ordering is decided by
-what is *irreversible*:
-
-```bash
-# THE SAME SCRIPT, THE OTHER ORDER. Here the PUSH is the trigger, so a pass starts
-# before anything can be posted or resolved — and the ordering is then decided by
-# what is IRREVERSIBLE: push, prove the checks, close afterwards.
-#
-# Closing first and pushing last cannot be gated: by the time the checks on the
-# pushed commit can be consulted, the threads are resolved and the summary is
-# posted, and neither can be taken back. A later "this round is not closed"
-# comment is a record, not a retraction, and is itself a call that can fail.
-#
-# THE COST IS REAL AND IS NOT HIDDEN: the pass the push starts reads open threads
-# and no summary, so it can re-report findings this round already answered. It is
-# superseded by the explicit request the script makes at the end. The trade is a
-# wasted pass against a round that closes on a red head, and only one of those can
-# be undone by the next round.
-ROUND_OUT="$("$RB_SCRIPTS"/pr-close-round.sh N "$WHO" "$SUMMARY_FILE" yes 2>&1)"; ROUND_RC=$?
-printf '%s\n' "$ROUND_OUT"
-# THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
-# before it requests the pass, and step 3's watch needs exactly that value — a
-# child cannot assign a variable here, so it says what the value was. Without
-# this, the watch keeps the OLDER baseline and the terminal review this round just
-# handled is newer than it, so it is accepted at once as the answer to a request
-# nobody has answered yet.
-if [ "$ROUND_RC" -eq 0 ]; then
-    PRIOR_REVIEW="$(printf '%s\n' "$ROUND_OUT" \
-        | sed -n 's/^PR_ROUND_CLOSED .*[[:space:]]prior-review=\(.*\)$/\1/p')"
-    [ -n "$PRIOR_REVIEW" ] \
-        || { echo "ABORT: the round closed without reporting a review baseline; step 3 would watch against a stale one."; exit 1; }
-fi
-case "$ROUND_RC" in
-    0) ;;
-    3) echo "Stopping here: the operator decides at a round boundary." ;;
-    *) echo "The round did not close. The reason is above; do not retry it blind." ;;
+    *) echo "The threads are answered but the round did not close: no summary was posted and no pass was requested. The reason is above; do not retry it blind." ;;
 esac
 exit "$ROUND_RC"
 ```

@@ -101,7 +101,7 @@ id_args() {   # id_args <script> ; sets "$@" for that caller
         pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
         pr-merge-gate.sh)   set -- 7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa no ;;
         pr-signoff.sh)      set -- 7 somebody ;;
-        pr-close-round.sh) set -- 7 somebody /dev/null no ;;
+        pr-close-round.sh) set -- gate 7 somebody /dev/null no ;;
         *)                  set -- 7 ;;
     esac
     ID_ARGV=( "$@" )
