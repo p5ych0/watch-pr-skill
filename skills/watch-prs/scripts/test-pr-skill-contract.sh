@@ -1175,6 +1175,19 @@ merge_case="$(awk '/^case "\$MERGE_RC" in/ {c=1} c {print} c && /^esac/ {exit}' 
 { [ -n "$merge_case" ] && printf '%s' "$merge_case" | grep -qE '^[[:space:]]*3\)'; } \
     && pass "…and the round-boundary pause is distinguished from a refusal" \
     || die "the driver does not tell a merge-gate pause from a block"
+# …AND A QUEUED MERGE FROM A COMPLETED ONE. `gh pr merge` reports success for
+# ADDING a PR to a merge queue, and the PR can leave that queue without landing.
+# Treating rc 4 as success ends the session with the head not on the base branch.
+{ [ -n "$merge_case" ] && printf '%s' "$merge_case" | grep -qE '^[[:space:]]*4\)'; } \
+    && pass "…and a queued merge is not read as a completed one" \
+    || die "the driver treats a queued merge as merged"
+# THE GATE RUNS IN THE REPOSITORY THIS SESSION STARTED IN. It derives identity and
+# the range-check root from the current directory, so a `cd` into another checkout
+# between setup and the merge would point every gate — and the admin merge — at
+# whatever PR of THAT repository shares this number.
+grep -q 'cd "\$REPO_DIR" && "\$RB_SCRIPTS"/pr-merge-gate.sh' "$SKILL" \
+    && pass "…and the gate is invoked from the captured repository root" \
+    || die "a cd between setup and the merge would repoint every gate"
 
 # ── thread pagination ──────────────────────────────────────────────────────
 # A truncated thread list reads exactly like a shorter review. `SKILL.md` fetches

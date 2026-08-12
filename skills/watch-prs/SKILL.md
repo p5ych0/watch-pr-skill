@@ -1177,11 +1177,18 @@ earlier head.
 # value assigned in your shell without `export` reaches a function and not a child
 # process, and this one decides whether an in-flight Codex pass may be ignored. A
 # silent default there is a merge on a verdict nobody read.
-"$RB_SCRIPTS"/pr-merge-gate.sh N <full 40-hex sha Codex last reviewed clean> "$AUTO_REVIEW"
+# RUN FROM THE REPOSITORY THIS SESSION STARTED IN. The gate derives its identity
+# and its range-check root from the current directory, so a `cd` into another
+# checkout between setup and here would point every gate — and the `--admin` merge
+# — at whatever PR of that repository shares this number. `$REPO_DIR` was captured
+# in the setup block, and everything else in this session already used the identity
+# derived there.
+(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N <full 40-hex sha Codex last reviewed clean> "$AUTO_REVIEW")
 MERGE_RC=$?
 case "$MERGE_RC" in
     0) ;;   # merged; the script printed the head it pinned
     3) echo "Stopping here: the operator decides whether to merge at a round boundary." ;;
+    4) echo "NOT merged: the request was accepted but the PR is not MERGED — a merge queue takes the request without landing it. Do not close this out; confirm on the PR." ;;
     *) echo "Not merged. The reason is above; do not retry it blind." ;;
 esac
 ```

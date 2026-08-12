@@ -7,6 +7,9 @@
 #   0  merged   — the head named in the output is on the base branch
 #   1  blocked  — a gate refused; the reason is on stdout
 #   3  paused   — a round boundary; the operator decides, this is not a refusal
+#   4  queued   — the merge command succeeded but the PR is not MERGED. A merge
+#                 queue accepts the request without landing it, and `gh` reports
+#                 that as success; the head is not on the base branch yet
 #
 # WHY THIS EXISTS AS A SCRIPT
 #
@@ -386,9 +389,26 @@ ADMIN=--admin
 # must stay one word whatever an origin URL contains; `$ADMIN` is either `--admin`
 # or NOTHING, and quoting it would pass an empty argument to `gh` in strict mode.
 # The two look alike and want opposite treatment, which is why this says so.
-if gh pr merge "$PR" --repo "$HOST/$OWNER/$REPO" --squash --delete-branch $ADMIN \
+if ! gh pr merge "$PR" --repo "$HOST/$OWNER/$REPO" --squash --delete-branch $ADMIN \
        --match-head-commit "$HEAD_OID"; then
-    echo "merged $HEAD_OID"
-else
     echo "merge blocked: head moved after the gates ran, branch protection refused (strict mode), or the merge failed."; exit 1
 fi
+# A SUCCESSFUL `gh pr merge` IS NOT NECESSARILY A MERGE. Where the base branch
+# uses a merge queue, `gh` reports success for ADDING the PR to that queue — its
+# own help says so — and the PR can leave the queue later without ever landing.
+# Printing `merged` there tells the driver the work is finished while the head is
+# not on the base branch, which is the one claim this script exists to make
+# truthfully. `--admin` bypasses the queue, so this is reachable exactly in the
+# mode an operator chose for SAFETY.
+#
+# So the state is read back rather than inferred from an exit status.
+MERGED_STATE=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json state --jq '.state' 2>/dev/null); STATE_RC=$?
+if [ "$STATE_RC" -ne 0 ]; then
+    echo "merge queued or unconfirmed: the merge command succeeded but the PR state could not be read (rc=$STATE_RC); confirm before treating $HEAD_OID as merged"
+    exit 4
+fi
+case "$MERGED_STATE" in
+    MERGED) echo "merged $HEAD_OID" ;;
+    *) echo "merge queued: the merge command succeeded but the PR is $MERGED_STATE, not MERGED — a merge queue accepts the request without landing it. Do not treat $HEAD_OID as merged."
+       exit 4 ;;
+esac

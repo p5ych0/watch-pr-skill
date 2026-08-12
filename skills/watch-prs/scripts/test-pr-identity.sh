@@ -151,13 +151,9 @@ printf '%s\n' "$*" >> "$GH_SPY"
 exit 1
 GHSH
 chmod +x "$STALETMP/bin/gh"
-for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
+for sc in $ID_CALLERS; do
     [ -f "$ROOT/$sc" ] || continue
-    case "$sc" in
-        pr-review-state.sh) set -- state 7 somebody ;;
-        pr-findings.sh)     set -- list 7 ;;
-        *)                  set -- 7 ;;   # pr-round-count.sh, pr-ci-state.sh
-    esac
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
     # The helper is run from a copy whose identitylib.sh is empty, with a stale
     # `rb_identity` exported into its environment. `recordlib.sh` and the helper
     # itself are symlinked in, so the ONLY thing this changes is the parser.
@@ -170,7 +166,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh; do
              bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
                       export -f rb_identity
                       exec "$1" "${@:2}"' _ "$STALETMP/run/$sc" "$@" 2>&1)"; rc=$?
-    if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
+    if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
         echo "ok   - $sc refuses an empty library even with a parser already defined"
     else
         echo "FAIL - $sc accepted an inherited parser (rc=$rc out='$out')"; idfail=1

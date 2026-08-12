@@ -34,6 +34,18 @@
   ignored, so a silent default is a merge on a verdict nobody read; an unrecognised
   value is refused rather than assumed to mean `no`.
 
+  **A queued merge is no longer reported as a merge.** `gh pr merge` reports
+  success for *adding* a PR to a merge queue — its own help says so — and the PR
+  can leave that queue later without landing. The block this replaced printed
+  `merged` and finished. The gate now reads the PR state back and reports **4,
+  queued**, because `--admin` bypasses the queue and this is therefore reachable
+  exactly in the mode an operator chose for safety.
+
+  **The gate runs in the repository the session started in.** It derives its
+  identity and range-check root from the current directory, so a `cd` into another
+  checkout between setup and the merge would point every gate — and the `--admin`
+  merge — at whatever PR of *that* repository shares the number.
+
   Second step of #26. `SKILL.md` is down to ~595 lines of bash from 953.
 
 ## [2.0.7] — 2026-08-11

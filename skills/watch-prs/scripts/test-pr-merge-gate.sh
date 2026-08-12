@@ -72,6 +72,8 @@ for _a in "$@"; do printf '%s\n' "$_a"; done >> "$STUB_ARGV"
 # failed page and every case then failed for the same wrong reason.
 _all=" $* "
 case "$_all" in
+    *" --json state "*) cat "$STUB_DIR/gh.state.out" 2>/dev/null
+                        exit "$(cat "$STUB_DIR/gh.state.rc" 2>/dev/null || echo 0)" ;;
     *" pr view "*)   cat "$STUB_DIR/gh.head.out" 2>/dev/null; exit "$(cat "$STUB_DIR/gh.head.rc" 2>/dev/null || echo 0)" ;;
     *" graphql "*)
         # The threads query, paged: each call takes the next answer file.
@@ -91,6 +93,7 @@ world() {   # world ; a world in which the merge SHOULD go through
     STUB_DIR="$TMP/w"; rm -rf "$STUB_DIR"; mkdir -p "$STUB_DIR"
     : > "$TMP/calls"; : > "$TMP/argv"
     printf '%s\n' "$HEAD40" > "$STUB_DIR/gh.head.out"
+    printf 'MERGED\n' > "$STUB_DIR/gh.state.out"
     printf '%s' "$CLEAN_THREADS" > "$STUB_DIR/threads.1.out"
     # Codex has judged this head, so the gate takes the current-head branch and
     # both verdicts describe $HEAD40.
@@ -373,6 +376,15 @@ case_is 1 "could not establish the round count" "…while an unreadable count bl
 # ── (5) the merge itself ───────────────────────────────────────────────────
 world; printf '1' > "$STUB_DIR/gh.merge.rc"
 case_is 1 "head moved after the gates ran" "a refused merge is reported, not assumed"
+# A SUCCESSFUL `gh pr merge` IS NOT NECESSARILY A MERGE. On a base branch with a
+# merge queue, `gh` reports success for ADDING the PR to the queue — and the PR can
+# leave it later without landing. Saying `merged` there tells the driver the work
+# is done while the head is not on the base branch. `--admin` bypasses the queue,
+# so this is reachable exactly in the mode chosen for safety.
+world; printf 'OPEN\n' > "$STUB_DIR/gh.state.out"
+case_is 4 "merge queued" "a queued merge is not reported as a merge"
+world; printf '1' > "$STUB_DIR/gh.state.rc"
+case_is 4 "unconfirmed" "…and a state that cannot be read is not assumed to be merged"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
