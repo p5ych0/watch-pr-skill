@@ -23,6 +23,7 @@ PAT='p5ych0/(pulse|strumok)|p5ych0-(pulse|strumok)|/tmp/(p5ych0-)?(pulse|strumok
 FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-ci-state.sh
         "$ROOT"/pr-ci-gate.sh
+        "$ROOT"/pr-merge-gate.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-findings.sh

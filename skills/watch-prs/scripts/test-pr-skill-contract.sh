@@ -71,30 +71,22 @@ grep -q 'pr-round-count.sh' "$SKILL" \
     && pass "the round check-in is enforced by a script, not only described" \
     || die "skill promises a round check-in with nothing implementing it"
 
-# ── the merge gate resolves the head ONCE and pins every check to it ───────
-# Letting each verdict resolve the head itself lets a push land between them, so
-# both verdicts describe an older commit while the merge pins the newer one.
-# Each reviewer is checked on the head IT reviewed. Checking Codex on $HEAD_OID
-# makes the gate unreachable in the Copilot phase: Codex is deliberately not
-# re-run there, so its verdict on a Copilot-fix commit is `none` forever.
-# Both obvious answers are wrong: always-$HEAD_OID makes the gate unreachable in
-# the Copilot phase, always-$CODEX_SHA ignores a NEW Codex review that auto-review
-# may have produced on the current head — and a body-only CHANGES_REQUESTED leaves
-# no thread for the unresolved gate to catch.
-grep -q 'state N "$CODEX_BOT" "$HEAD_OID"' "$SKILL" \
-    && pass "the gate asks whether Codex has judged the CURRENT head" \
-    || die "the gate never checks for a newer Codex review on the current head"
+# ── THE MERGE GATE'S OWN DECISIONS ARE TESTED IN `test-pr-merge-gate.sh` ───
+#
+# Twenty-four assertions used to live here, each a `grep` for the spelling of one
+# line of a 291-line block in `SKILL.md` — because a fenced block cannot be run,
+# and a grep was the only thing available. Forty-two cases now EXECUTE the gate
+# against stubbed helpers: every refusal path, the pause, and the merge itself.
+# That is a strictly stronger claim, and it is why these are gone rather than
+# retargeted at the script — a spelling grep beside an executed case tests the
+# spelling, not the behaviour.
+#
+# What stays here is what belongs here: that the driver CALLS the gate, with the
+# arguments it needs, and distinguishes the three answers it can give.
+
 grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
     && pass "…and falls back to the recorded signoff when it has not" \
     || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
-grep -qE 'verdict N "\$CODEX_BOT" +"\$HEAD_OID"' "$SKILL" \
-    && pass "…and a current-head Codex judgement wins over the older one" \
-    || die "a newer Codex review on the current head is never honoured"
-# ONLY rc 0 is an answer: this branch decides whether to fall back to the older
-# signoff, so a bad read merges on a state that was never trusted.
-grep -q 'CODEX_STATE_RC" -ne 0' "$SKILL" \
-    && pass "any non-zero Codex head-state status blocks the merge" \
-    || die "only the documented rc 2 blocks — a wrapper failure would fall through"
 # CODEX_SHA has to be captured before the head moves; nothing else records it.
 grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
     && pass "the Codex-signed-off head is captured before the Copilot phase" \
@@ -106,28 +98,9 @@ grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
 grep -qi 'precede the push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
-grep -qE 'verdict N "\$COPILOT_BOT" +"\$HEAD_OID"' "$SKILL" \
-    && pass "Copilot is validated on the current head" \
-    || die "Copilot's verdict is not pinned to \$HEAD_OID"
-# …and the range check is what makes trusting an older Codex signoff safe.
-# The range must measure from the sha the VERDICT describes. Keyed to the stale
-# recorded sha, it demands Copilot trailers across a range Codex has already
-# reviewed in full — blocking a merge both reviewers just approved.
-grep -qE 'pr-merge-range.sh "\$CODEX_EFFECTIVE_SHA" "\$HEAD_OID"' "$SKILL" \
-    && pass "the range check measures from the sha Codex's verdict describes" \
-    || die "the range check is keyed to \$CODEX_SHA even when Codex reviewed the head"
-[ "$(grep -c 'CODEX_EFFECTIVE_SHA=' "$SKILL")" -ge 2 ] \
-    && pass "the effective Codex sha is set on BOTH branches" \
-    || die "the effective Codex sha is not set on every branch"
 grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
     && pass "the Codex signoff SHA is shape-checked before it is trusted" \
     || die "CODEX_SHA is used without validating its shape"
-grep -q 'HEAD_RC' "$SKILL" \
-    && pass "the head lookup checks its exit status" \
-    || die "the head lookup does not branch on its own status"
-grep -q 'CHECKS_RC' "$SKILL" \
-    && pass "the required-checks probe checks its exit status" \
-    || die "the required-checks probe compares output without its status"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -162,9 +135,6 @@ gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gate
 grep -q '^"\$RB_SCRIPTS"/pr-ci-gate.sh N "\$CODEX_SHA"' "$SKILL" \
     && pass "…and a clean verdict does not open the Copilot phase unchecked" \
     || die "a PR that never pushed can enter the Copilot phase with a red head"
-grep -q '^"\$RB_SCRIPTS"/pr-ci-gate.sh N "\$HEAD_OID"' "$SKILL" \
-    && pass "…nor reach the merge with only its required checks read" \
-    || die "the merge gate reads only required checks; a failing optional one passes"
 # …AND EVERY ONE IS ASKED ABOUT A COMMIT. `gh pr checks` is addressed by PR number
 # and the API can still be serving the previous head for a moment after a push, so
 # an unpinned call can return the previous round's green as this round's answer.
@@ -328,26 +298,6 @@ grep -q 'if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review' "
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
-# The merge gate validates the verdict RECORDS, not only the exit codes: this is
-# the final permission, so an rc-swallowing wrapper must not read as clean.
-grep -q 'V_WANT="PR_REVIEW_STATE pr=N sha=' "$SKILL" \
-    && pass "the merge gate requires an exact clean verdict record from both reviewers" \
-    || die "the merge gate trusts the exit codes without checking the records"
-# …and each record must name ITS OWN reviewer and the sha that reviewer judged.
-# Wildcarding pr/sha/reviewer let one clean line satisfy the check for either
-# variable, so a clean Copilot record — or a clean record for a stale sha —
-# passed as Codex's signoff.
-grep -q 'reviewer=\$V_WHO verdict=clean findings=0"' "$SKILL" \
-    && pass "each clean record is bound to the reviewer it is meant to prove" \
-    || die "the merge gate accepts a clean record from any reviewer"
-grep -q '"\$CODEX_BOT|\$CODEX_EFFECTIVE_SHA|\$CODEX_VERDICT"' "$SKILL" \
-    && pass "…on the sha that reviewer actually judged" \
-    || die "the clean records are not bound to the sha each reviewer judged"
-# A literal comparison, not `[[ == ]]`: the bot logins end in `[bot]`, which a
-# pattern context reads as a character class.
-grep -q '\[ "\$V_LINE" != "\$V_WANT" \]' "$SKILL" \
-    && pass "the verdict records are compared literally, not as patterns" \
-    || die "the verdict comparison would read [bot] as a character class"
 
 # ── the round summary and the review request are ONE comment ───────────────
 # The mention IS the request, so splitting them divides the record the reviewer
@@ -409,35 +359,7 @@ grep -qi 'do not ask' "$SKILL" \
     && pass "the watch is armed and re-armed without asking the operator" \
     || die "the skill leaves arming the watch as a question for the operator"
 
-# ── the merge mode is a setting, not a hard-coded bypass ───────────────────
-# `--admin` stays the default because branch protection normally requires an
-# approving review from another account, and neither reviewer is one — dropping
-# it would remove the solo maintainer's merge path rather than tighten the gate.
-# But it must be reachable: strict mode is what closes the window between the
-# last probe and the merge, where a review can change without the head moving.
-grep -q 'REVIEW_MERGE_STRICT' "$SKILL" \
-    && pass "the merge mode is selectable, not a hard-coded --admin" \
-    || die "--admin is unconditional; there is no way to let GitHub enforce protection"
-grep -q 'ADMIN=--admin' "$SKILL" \
-    && pass "…defaulting to --admin so a protected solo repo can still merge" \
-    || die "the default merge mode is not --admin"
-grep -q 'merge N --repo \$HOST/\$OWNER/\$REPO --squash --delete-branch \$ADMIN' "$SKILL" \
-    && pass "…and the merge command uses the selected mode" \
-    || die "the merge command does not use \$ADMIN"
 
-# ── pagination must terminate ──────────────────────────────────────────────
-# A page reporting hasNextPage=true with a cursor already used makes the gate
-# walk that cycle forever. A hang is worse than a blocked merge: nothing times
-# out and the operator waits on a gate that never answers.
-#
-# EVERY cursor, not just the previous one: comparing against the last cursor
-# caught an immediate self-loop but not `null → A → B → A → B …`.
-grep -q 'SEEN="\$SEEN\$NEXT\$RS"' "$SKILL" \
-    && pass "the merge gate records every pagination cursor it has requested" \
-    || die "a cursor cycle would loop the merge gate forever"
-grep -q 'case "\$SEEN" in \*"\$RS\$NEXT\$RS"\*) OK=0; break ;; esac' "$SKILL" \
-    && pass "…and stops when one repeats" \
-    || die "the merge gate does not check the cursor against the ones it has used"
 
 # ── the Copilot summary is posted BEFORE the request ───────────────────────
 # In the Codex phase the mention carries the summary, so the order is settled by
@@ -816,9 +738,6 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     done
     rm -rf "$SETUPTMP"
 fi
-grep -q 'gh api --hostname "\$HOST" graphql' "$SKILL" \
-    && pass "…and the GraphQL calls pass it explicitly" \
-    || die "a graphql call does not pass --hostname"
 
 # ── the accepted merge-mode limitation is recorded on the base ref ────────
 # AGENTS.md makes a dated decision record the only thing that can accept a
@@ -842,17 +761,6 @@ grep -q 'pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"' "$SKILL" \
     && pass "…and the id is captured before each request that a watch follows" \
     || die "the pre-request review id is not captured before every request"
 
-# ── "no required checks" is not "could not tell" ──────────────────────────
-# `gh pr checks --required` exits NON-ZERO when the branch has no required checks
-# at all. Treating every non-zero status as unreadable blocked the merge on every
-# repository without branch protection, permanently — a gate that never opens,
-# not a fail-closed guard. Found by trying to merge, not by reading the code.
-grep -q 'no required checks' "$SKILL" \
-    && pass "the gate distinguishes 'none configured' from a failed probe" \
-    || die "a repo with no required checks can never pass the merge gate"
-grep -q 'the required-checks probe failed' "$SKILL" \
-    && pass "…and a genuinely failed probe still blocks" \
-    || die "the checks probe no longer blocks on a real failure"
 grep -q 'ERRF' "$SCRIPT_DIR/pr-ci-state.sh" \
     && pass "…using stderr, so the message does not pollute the compared value" \
     || die "the checks probe does not capture stderr separately"
@@ -1189,12 +1097,6 @@ if [ -f "$ROOT/README.md" ]; then
         || pass "README does not document a Codex install"
 fi
 
-# A GraphQL 200 can carry both `errors` and structurally valid `data`. The
-# unresolved-thread count answers 0 on partial data, and 0 is merge permission —
-# taken with `--admin`, so nothing downstream catches the omitted thread.
-grep -q 'has("errors") | not' "$SKILL" \
-    && pass "the unresolved-thread gate refuses a response carrying GraphQL errors" \
-    || die "a partial GraphQL response can still produce UNRESOLVED=0"
 
 # The README must not advertise Copilot as optional while the gate requires it:
 # a user would install for a repository without Copilot and find out at merge
@@ -1209,97 +1111,21 @@ if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
         || die "README does not state that Copilot is required"
 fi
 
-# The head-state line is parsed, not substring-matched. The pattern is held in a
-# variable because Bash 3.2 cannot PARSE an inline `=~` pattern containing a
-# parenthesis at all — the macOS shell rejects the whole block with a syntax error.
-#
-# THE WHOLE ASSIGNMENT IS ASSERTED, both anchors included. Checking the prefix and
-# checking that the variable is used leaves the terminal `$` unguarded: without it
-# the pattern accepts `PR_REVIEW_STATE … state=none trailing`, the merge block takes
-# the old-signoff fallback, and both halves of a split assertion still pass.
-grep -qF "RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'" "$SKILL" \
-    && grep -q 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL" \
-    && pass "the Codex head-state line is matched as a whole record" \
-    || die "the head-state decision is made on a substring or trailing token"
-# …and the record must be ABOUT the PR, reviewer and head that were asked for.
-# A well-formed `state=none` for something else took the fallback path and merged
-# on the recorded signoff while Codex had a current-head CHANGES_REQUESTED.
-grep -q '"\$S_PR" != "N" \] || \[ "\$S_WHO" != "\$CODEX_BOT" \] || \[ "\$S_SHA" != "\${HEAD_OID:0:7}"' "$SKILL" \
-    && pass "the head-state record is bound to the PR, reviewer and head requested" \
-    || die "any well-formed state record satisfies the head-state check"
-grep -q 'none|pending|reviewed|blocked|dismissed) ;;' "$SKILL" \
-    && pass "…and validated against the known states" \
-    || die "the parsed head-state is not checked against the known states"
 
-# ── WHY THERE IS NO MARKDOWN PARSER HERE ───────────────────────────────────
-#
-# There was one, for four rounds. `SKILL.md` holds ~950 lines of bash that the
-# driver executes VERBATIM in the operator's shell — on macOS, bash 3.2 — and the
-# merge gate could not be parsed there at all, which nothing caught. So a sweep was
-# added: extract every fenced bash block, `bash -n` each one.
-#
-# Extracting them means parsing Markdown, and that is an unbounded surface in
-# exactly the way this repository has now recorded three times. Each round answered
-# one spelling and produced the next: indented fences, four-backtick fences, tilde
-# fences, trailing whitespace after the info string, metadata after the language,
-# a dedent that ate characters that were not there — and then backticks inside a
-# backtick fence's info string, which CommonMark says is not a fence at all. Two of
-# those defects made the check REJECT VALID SOURCE, which is worse than missing.
-#
-# WHAT REPLACES IT IS THE NARROW LIFT BELOW. It takes two anchored lines by name,
-# needs no grammar, and covers the defect that prompted the sweep. The rest of the
-# gap is real and is not papered over: it is issue #26, whose fix is to stop
-# keeping executable shell in a Markdown file. Bash in a `.sh` file is checked by
-# the whole suite, the 3.2 job and `pr-selfcheck.sh` for free, and no extractor
-# has to exist.
 
-# ── …AND THE FRAGMENT IS RUN, NOT ONLY SPELLED ─────────────────────────────
+# ── WHY THERE IS NO MARKDOWN PARSER, AND NO LIFTED FRAGMENT, HERE ──────────
 #
-# Everything above greps. A grep cannot tell whether the interpreter can PARSE
-# what it matched, and that is the whole subject here: Bash 3.2 rejects an inline
-# `=~` pattern containing a parenthesis with a syntax error, and this block runs in
-# the operator's own shell — which on macOS is that bash. `SKILL.md` is prose to
-# the suite, so nothing else executes it: the `macos-shell` job could stay green
-# with the merge gate unparseable, which is exactly the failure this PR exists to
-# have caught.
+# A sweep that extracted every fenced block and `bash -n`'d it was built and
+# deleted: reaching the code meant parsing Markdown, and four review rounds went
+# to fence spellings — two of whose defects rejected valid source (#25).
 #
-# So the two lines are lifted VERBATIM and executed under whichever bash is running
-# this test — 3.2 in that job. A second inline pattern introduced into the same
-# block fails here rather than on a contributor's Mac.
-rx_assign="$(grep -m1 "^RX_STATE='" "$SKILL")"; rxa_rc=$?
-rx_match="$(grep -m1 'CODEX_HEAD_STATE" =~ \$RX_STATE' "$SKILL")"; rxm_rc=$?
-{ [ "$rxa_rc" -eq 0 ] && [ -n "$rx_assign" ] && [ "$rxm_rc" -eq 0 ] && [ -n "$rx_match" ]; } \
-    || die "the head-state match could not be lifted from SKILL.md (rc=$rxa_rc/$rxm_rc)"
-# The `if` is closed here rather than lifted: the block's own body reads variables
-# this fixture has no business setting, and what is under test is the CONDITION.
-rx_prog="$rx_assign
-CODEX_HEAD_STATE=\"\$1\"
-$rx_match
-    printf 'MATCH %s' \"\${BASH_REMATCH[4]}\"
-else
-    printf 'NOMATCH'
-fi"
-rx_case() {   # rx_case <record> <want> <label>
-    local got rc=0
-    got="$(bash -c "$rx_prog" _ "$1" 2>&1)" || rc=$?
-    { [ "$rc" -eq 0 ] && [ "$got" = "$2" ]; } \
-        && pass "$3" \
-        || die "$3 — got rc=$rc '$got' (wanted '$2')"
-}
-# It PARSES and it MATCHES: a syntax error fails every case below, which is the
-# point, but a fixture that only proved parsing would pass against a pattern that
-# matches nothing at all.
-rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none' \
-    'MATCH none' "the lifted head-state match parses and runs under this bash"
-# TRAILING TEXT IS REJECTED, executed rather than inferred from the spelling. This
-# is the case the terminal anchor exists for: without it the merge block takes the
-# old-signoff fallback on a record that was never about this head.
-rx_case 'PR_REVIEW_STATE pr=25 sha=abc1234 reviewer=chatgpt-codex-connector[bot] state=none trailing' \
-    'NOMATCH' "…and a record with trailing text does not match"
-# …and rc-0 NOISE around a well-formed-looking tail. `warning: cached state=none`
-# is what a wrapper prints before its answer.
-rx_case 'warning: cached state=none' \
-    'NOMATCH' "…nor does a line that merely ends in a state token"
+# What replaced it was narrower: two anchored `grep`s lifted the head-state
+# condition out of `SKILL.md` and executed it, because that condition was the one
+# bash 3.2 could not parse. THAT IS GONE TOO, and for the better reason: the
+# condition is no longer in `SKILL.md`. It moved into `pr-merge-gate.sh` with the
+# rest of the merge decision, where the suite runs it directly and forty-two cases
+# in `test-pr-merge-gate.sh` drive it. Lifting shell out of a document is a
+# workaround for the shell being in a document; #26 is the fix.
 
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
@@ -1310,24 +1136,33 @@ else
     pass "no GNU-only sort in the script-resolution fallback"
 fi
 
-# ── the merge is pinned to the head the gates were evaluated against ───────
-grep -qE -- '--match-head-commit "\$HEAD_OID"' "$SKILL" \
-    && pass "merge is pinned to the gated head" \
-    || die "merge is not pinned with --match-head-commit \"\$HEAD_OID\""
-grep -qE '^[[:space:]]*if gh pr merge' "$SKILL" \
-    && pass "the merge result is branched on" \
-    || die "the merge result is not branched on"
-
-# ── both reviewers gate the merge ──────────────────────────────────────────
-grep -q 'CODEX_RC' "$SKILL" && grep -q 'COPILOT_RC' "$SKILL" \
-    && pass "the merge gate consults BOTH reviewers" \
-    || die "the merge gate does not consult both reviewers"
+# ── THE DRIVER CALLS THE GATE, AND READS ALL THREE ANSWERS ─────────────────
+# The gate's own decisions are executed in `test-pr-merge-gate.sh`. What has to be
+# true HERE is that the document invokes it with what it needs and does not
+# collapse its three outcomes into two — a pause read as a refusal loses the
+# operator's decision, and a refusal read as a pause invites a blind retry.
+[ -x "$SCRIPT_DIR/pr-merge-gate.sh" ] \
+    && grep -q 'pr-merge-gate.sh N ' "$SKILL" \
+    && pass "the driver invokes the merge gate" \
+    || die "nothing in the driver reaches the merge gate"
+# AUTO-REVIEW IS PASSED, and as an argument. Read from the environment it would be
+# invisible to the child unless exported, and it decides whether an in-flight Codex
+# pass may be ignored — a silent default there is a merge on a verdict nobody read.
+grep -q 'pr-merge-gate.sh N .* "\$AUTO_REVIEW"' "$SKILL" \
+    && pass "…passing the auto-review setting as an argument" \
+    || die "the merge gate is not told whether auto-review is on"
+grep -q 'MERGE_RC' "$SKILL" \
+    && grep -qE '^[[:space:]]+3\)' "$SKILL" \
+    && pass "…and the round-boundary pause is distinguished from a refusal" \
+    || die "the driver does not tell a merge-gate pause from a block"
 
 # ── thread pagination ──────────────────────────────────────────────────────
-# A truncated thread list reads exactly like a shorter review, so the contract
-# has to say so in both places it fetches threads.
-[ "$(grep -c 'hasNextPage' "$SKILL")" -ge 2 ] \
-    && pass "thread fetches are paginated in both places" \
+# A truncated thread list reads exactly like a shorter review. `SKILL.md` fetches
+# threads in ONE place now — step 4, where findings are read — because the merge
+# gate's own walk went into `pr-merge-gate.sh`, where a cursor cycle, a malformed
+# `hasNextPage` and a partial response are each an executed case.
+[ "$(grep -c 'hasNextPage' "$SKILL")" -ge 1 ] \
+    && pass "the thread fetch that remains in the document is paginated" \
     || die "a thread fetch is not paginated"
 
 # ── the instruction files carry the scope + issue policy ───────────────────
@@ -1469,39 +1304,23 @@ grep -q 'Review-Pause-Acknowledged:\*\* `%s` `%s`' "$SKILL" \
 # result at all.
 #
 # The six cases that prove it moved to `test-pr-ci-state.sh` with the helper, and
-# they are EXECUTED there rather than read. What remains here is the question only
-# this file can answer: that the merge gate reaches that helper at all. A helper
-# with perfect coverage decides nothing if the gate stopped calling it.
-grep -q '"\$RB_SCRIPTS"/pr-ci-state.sh N --required' "$SKILL" \
-    && pass "the merge gate asks the checks helper, not a second copy of it" \
-    || die "the merge gate no longer calls pr-ci-state.sh"
-# …and it distinguishes "nothing configured" from "could not tell". Collapsing
-# them blocked the merge on every repository without branch protection,
-# permanently — a gate that never opens rather than one that fails closed.
-awk '/pr-ci-state.sh N --required/ {c=NR}
-     c && /^ *4\) echo "note: no required checks configured/ {print "ok"; exit}' "$SKILL" \
-    | grep -q ok \
-    && pass "…and treats 'nothing configured' as its own answer" \
-    || die "a repo with no required checks cannot pass the merge gate"
+# they are EXECUTED there rather than read. The question of whether the MERGE GATE
+# reaches that helper at all moved too — into `test-pr-merge-gate.sh`, which runs
+# the gate against a stubbed `pr-ci-state.sh` and asserts each of rc 1, 2, 3 and 4
+# by its consequence rather than by the presence of a line.
 
 # ── `none` is not permission while auto-review has a pass in flight ────────
 # With auto-review on, every Copilot-fix push queues a Codex pass, and Codex
-# exposes no review record while that pass is queued — which the merge gate read
-# as the same `none` that means "nothing asked Codex about this head". It then
-# fell back to the pre-Copilot signoff and could merge before the in-flight pass
+# exposes no review record while that pass is queued — which the merge gate read as
+# the same `none` that means "nothing asked Codex about this head". It then fell
+# back to the pre-Copilot signoff and could merge before the in-flight pass
 # reported, including a body-only CHANGES_REQUESTED that leaves no unresolved
 # thread for the other gates to catch.
-none_branch="$(awk '/^case "\$CODEX_STATE" in/ { c++ } c == 2 { print } c == 2 && /^esac/ { exit }' "$SKILL")"
-if [ -z "$none_branch" ]; then
-    die "the merge gate no longer has a CODEX_STATE dispatch — has it moved?"
-else
-    printf '%s' "$none_branch" | grep -q 'AUTO_REVIEW.*=.*yes' \
-        && pass "the merge gate distinguishes an in-flight auto-review from no review" \
-        || die "the none branch falls back to the signoff without checking AUTO_REVIEW"
-    printf '%s' "$none_branch" | grep -q 'merge blocked' \
-        && pass "…and blocks rather than trusting the pre-Copilot signoff" \
-        || die "the in-flight case does not block the merge"
-fi
+#
+# THAT CASE IS NOW EXECUTED, in `test-pr-merge-gate.sh`: the gate is run with
+# auto-review on, a head Codex has not judged, and a clean signoff on the older
+# sha — and it must refuse. Reading the `CODEX_STATE` dispatch out of a document
+# with `awk` was what this file could do while the code lived there.
 
 # ── the phase trailer has to be documented as a TRAILER ────────────────────
 # `git` parses trailers from the last paragraph only, so `Review-Phase: copilot`
