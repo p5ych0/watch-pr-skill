@@ -1186,13 +1186,17 @@ earlier head.
 # — at whatever PR of that repository shares this number. `$REPO_DIR` was captured
 # in the setup block, and everything else in this session already used the identity
 # derived there.
-# THE PLACEHOLDER GOES ON AN ASSIGNMENT, never into the command line. `<…>` in
-# argument position is a REDIRECTION to the shell — `<full` opens a file and the
-# remaining words shift into the wrong parameters — so a driver that failed to
-# substitute it would not fail loudly, it would run the gate with the wrong
-# arguments. On an assignment the same text is one word, and an unsubstituted
-# placeholder is rejected by the gate's own sha check.
-CODEX_SHA=<full 40-hex sha of the head Codex last reviewed clean>
+# THERE IS NO PLACEHOLDER HERE, and that is the third attempt at this line.
+#
+# `$CODEX_SHA` was captured and validated in step 7, when the Codex phase closed —
+# the full 40-hex head Codex signed off on, read back and re-checked against its
+# clean verdict before the Copilot phase was allowed to start. Writing it out again
+# here as something for you to fill in was redundant, and it did not work: `<…>` is
+# a REDIRECTION to the shell in argument position AND after an `=`, so an
+# unsubstituted placeholder does not reach the gate's own sha check — the block
+# fails to parse, which is a different failure in a different place.
+#
+# The value is already in this session. Use it.
 (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW")
 MERGE_RC=$?
 case "$MERGE_RC" in

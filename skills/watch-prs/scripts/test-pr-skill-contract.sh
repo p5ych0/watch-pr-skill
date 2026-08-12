@@ -1171,12 +1171,30 @@ grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' "$SKILL" \
 # word shifts into the wrong parameter, so a driver that did not substitute it
 # would run the gate with the wrong arguments rather than failing. The placeholder
 # belongs on the assignment above the call.
-grep -qE '^CODEX_SHA=<' "$SKILL" \
-    && pass "…with the sha placeholder on an assignment, where it is one word" \
-    || die "the Codex sha placeholder is not on an assignment"
-grep -q 'pr-merge-gate.sh N <' "$SKILL" \
-    && die "a placeholder sits in the gate's argument list, where it is a redirection" \
-    || pass "…and never in the argument list"
+# ── THE MERGE BLOCK PARSES, WHICH IS NOT WHAT A GREP CAN TELL YOU ──────────
+#
+# This assertion replaces two greps about WHERE a `<…>` placeholder sat. Both were
+# reasoning about tokenisation from the outside and both were wrong: `<` opens a
+# redirection in argument position AND after an `=`, so an unsubstituted
+# placeholder never reaches the validation it was supposed to reach — the block
+# fails to parse instead. `bash -n` settles it.
+#
+# `$CODEX_SHA` is captured and validated in step 7; there is nothing here for the
+# driver to fill in, and the block must be runnable as written.
+merge_blk="$(awk '/^## 8\. Merge gate$/ {sec=1}
+                  sec && /^```bash$/ {inb=1; next}
+                  inb && /^```$/ {exit}
+                  inb' "$SKILL")"
+[ -n "$merge_blk" ] || die "the merge-gate block could not be extracted"
+if [ -n "$merge_blk" ]; then
+    blk_err="$(printf '%s\n' "$merge_blk" | bash -n 2>&1)" \
+        && pass "the merge-gate block parses as written, with nothing to substitute" \
+        || die "the merge-gate block does not parse ($blk_err)"
+fi
+# …AND IT USES THE SHA THE SESSION ALREADY HAS, rather than asking for one again.
+printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' \
+    && pass "…passing the sha captured when the Codex phase closed" \
+    || die "the merge gate is not given the validated Codex sha"
 # ANCHORED TO THE `MERGE_RC` DISPATCH ITSELF. A bare `3)` matches three unrelated
 # arms elsewhere in this document — the round-count checks — so the assertion
 # passed with the merge gate's pause arm deleted, and the driver would have
