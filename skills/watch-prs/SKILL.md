@@ -930,182 +930,82 @@ A malformed `in_reply_to_id` is a stop, not a reply.
 Ask Copilot:
 
 ```bash
-# Capture the head Codex signed off BEFORE anything moves it. After the first
-# Copilot fix, `gh pr view` reports the new head and nothing else records the old
-# one — the state helper prints a 7-character sha, and the merge gate needs the
-# full 40. Without this the gate cannot be populated correctly at all.
-# The head the CLEAN VERDICT described, re-read and then re-validated — not
-# whatever `gh pr view` reports now. If a push lands between the verdict and this
-# lookup, that records the new, unreviewed head as the Codex signoff, Copilot is
-# requested against it, and the final gate only discovers the missing Codex
-# verdict after the whole Copilot phase has run.
-CODEX_SHA=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) || CODEX_SHA=""
-# Re-validate Codex on exactly that sha. If it is not clean, the head moved and
-# the Copilot phase must not start.
-CODEX_RECHECK=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
-if [ "$CODEX_RECHECK_RC" -ne 0 ]; then
-    echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"
-    exit 0
-fi
-if ! [[ "$CODEX_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "ABORT: could not capture the Codex-signed-off head; do not start the Copilot phase"; exit 0
-fi
-# THE CHECKS ON THAT HEAD, TOO. The CI gate lives at the two push sites in step 5,
-# and a PR whose first review is clean never enters step 5 at all — so a head with
-# a failing check could pass through both phases untouched, and the merge gate
-# looks only at REQUIRED checks, which a failing optional one is not. Every path
-# that accepts a verdict as phase-completing has to have seen the checks, not just
-# the paths that pushed something.
-"$RB_SCRIPTS"/pr-ci-gate.sh N "$CODEX_SHA" || exit 0
-
-# THE SUMMARY GOES FIRST, and its post is branched on.
+# THE TRANSITION IS A SCRIPT, IN TWO STAGES with the operator's decision between
+# them. It was 176 lines here that nothing executed. Issue #26.
 #
-# In the Codex phase the mention carries the summary, so the ordering is settled
-# by construction. Here it is not: `--add-reviewer` is a separate call, and
-# Copilot can begin reading within seconds. Requesting first means a fast pass
-# reviews against the PREVIOUS round's account of what changed and what was
-# skipped — and step 1 makes that account a precondition of asking, not a
-# courtesy. If the summary cannot be posted, there is nothing to request against.
+#   pr-copilot-phase.sh record N "$SUMMARY_FILE"   # prove, record, then ask
+#   pr-copilot-phase.sh open   N "$CODEX_SHA"      # only on the answer (b)
 #
-# WRITTEN HERE, not inherited from step 5. Codex can approve the very first
-# request with no fix round at all, and then step 5 has never run: reusing its
-# file would post an empty body in a fresh session, or — worse, in a long-lived
-# one — a summary left over from another round or another PR. This is the
-# phase-transition summary and it is always about the same thing, so it is
-# always constructed at the point it is used.
-# The WRITE is checked, not only the read below it. A `cat` that truncates the
-# file and then fails — a full filesystem — leaves a non-empty partial body that
-# the guarded read happily returns; a `cat` that cannot open the file at all
-# leaves the PREVIOUS round's contents there to be read as this one's. Either
-# posts an invalid summary and requests Copilot against it.
-# The heredoc is QUOTED, and the one value it needs is written separately.
-# Unquoted, the shell expanded the prose while writing it — and this body is
-# prose you compose from the round, which routinely contains Markdown code spans
-# holding shell text. A summary quoting a finding about `$(gh pr view …)` or a
-# backtick-delimited command line was therefore EXECUTED while being written,
-# and text lifted from an untrusted PR description or a reviewer comment is the
-# same substitution with someone else choosing the command. Where it did not
-# execute, it silently vanished: `$HOST` in quoted prose came out empty and
-# `cat` still succeeded, so the mangling was invisible.
-cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase summary."; exit 0; }
-## Codex phase complete — requesting Copilot
+#     0  recorded / opened
+#     1  stopped — the reason is on stdout; the phase did NOT advance
+#     3  paused  — a round boundary. Decide with the operator
+#
+# WRITE THE ACCOUNT FIRST: one paragraph on what the PR does and what the Codex
+# phase changed. If Codex approved on the first pass with no fix rounds, say that
+# — it is the difference between "nothing was found" and "everything found was
+# addressed". Everything a machine reads back is composed by the script: the
+# signoff marker in the form `pr-signoff.sh` scans for, the sha, and the trailer
+# note. The body is inserted as DATA, so prose quoting a command line is posted
+# rather than executed.
+cat > "$SUMMARY_FILE" <<'EOF'
+<what the PR does, and what the Codex phase changed — one paragraph>
 EOF
-# `$CODEX_SHA` is already validated as 40-hex above, and `printf` gives it no
-# chance to be anything else. Appends are checked individually: a partial file
-# reads as a complete summary.
-# THE SIGNOFF IS WRITTEN DOWN, not just printed. This line is the record the next
-# session reads: `pr-signoff.sh` scans the PR's comments for it, so closing the
-# terminal, changing machine or coming back tomorrow no longer loses the one fact
-# the phasing rests on — that Codex is clean on this exact commit. A value that
-# only exists in a shell variable is the `/tmp` counter mistake v1 made.
-#
-# The marker is a line of its own and anchored when read, so quoting it inside
-# prose signs nothing off.
-printf '\n**Review-Signoff:** `%s` `%s`\n\n' "$CODEX_BOT" "$CODEX_SHA" \
-    >> "$SUMMARY_FILE" || { echo "ABORT: could not write the phase summary."; exit 0; }
-printf 'Codex signed off on `%s`.\n\n' \
-    "$CODEX_SHA" >> "$SUMMARY_FILE" || { echo "ABORT: could not write the phase summary."; exit 0; }
-cat >> "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase summary."; exit 0; }
-<what the PR does, and what the Codex phase changed — one paragraph. If Codex
-approved on the first pass with no fix rounds, say that: it is the difference
-between "nothing was found" and "everything found was addressed".>
-
-Fix commits from here carry a `Review-Phase: copilot` trailer, which is how the
-merge gate knows the head advanced only through Copilot fixes and that Codex's
-signoff still covers it.
-EOF
-# The summary is READ with its status taken, before any of it is posted.
-# `$(cat …)` inside the argument swallows the reader's status, so a partial read
-# still produced a successful `gh pr comment` — and the reviewer contract makes
-# the newest summary the thing read before the diff, so a truncated one is worse
-# than none: it looks complete.
-SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 0; }
-[ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 0; }
-if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY"; then
-    echo "ABORT: could not post the round summary — do not request Copilot yet."; exit 0
-fi
-
-# `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
-# for, so entering the phase would poll for a review nobody asked for and then
-# report a timeout — which reads as "Copilot is slow", not "Copilot was never
-# asked".
-# The boundary is checked HERE too, not only before a re-request. A phase that
-# ends on the threshold-th reviewed head went straight from a clean verdict into
-# the next phase, so the promised pause was skipped in exactly the case it exists
-# for: the loop has run long enough to reach the boundary AND is about to commit
-# to more work.
-"$RB_SCRIPTS"/pr-round-count.sh N "$CODEX_BOT"; ROUNDS_RC=$?
-case "$ROUNDS_RC" in
+PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
+printf '%s\n' "$PHASE_OUT"
+case "$PHASE_RC" in
     0) ;;
-    3) echo "PAUSE: round boundary reached. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"; exit 0 ;;
-    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 0 ;;
+    3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
+    *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."; exit "$PHASE_RC" ;;
 esac
+# THE SIGNED-OFF HEAD IS THE ONE VALUE THAT OUTLIVES THIS STEP. Step 8 needs the
+# full 40 characters of it, and a child cannot assign a variable here — so it
+# reports the value and this reads it back. A later session, which has no shell
+# left to read, gets it from `pr-signoff.sh` instead.
+CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
+    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
+[ -n "$CODEX_SHA" ] \
+    || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
+```
 
-# ── STOP. THE NEXT PHASE IS THE OPERATOR'S DECISION ────────────────────────
-#
-# Codex is clean and that is recorded on the PR. What happens next is not the
-# loop's call to make:
-#
-#   MERGE NOW — one reviewer's clean signoff is a legitimate place to stop, and
-#     for a small or urgent change it is often the right one. Run step 8 with
-#     `$CODEX_SHA` as the Codex signoff.
-#
-#   OPEN THE COPILOT PHASE — a second, differently-trained reviewer over the same
-#     head. It costs rounds, and it finds things Codex does not.
-#
-# ASK, THEN STOP. Do not request Copilot because the loop happens to continue in
-# that direction: every Copilot pass costs a round of somebody's attention, and
-# the phase this opens can run as long as the one just finished. The operator is
-# choosing how much more review this change is worth.
-#
-# It is resumable either way, and RESUMING IS AN EXECUTABLE RECIPE rather than a
-# suggestion — see "Resuming after a stop" below. A later session has no
-# `$CODEX_SHA`: the shell that captured it is gone. Reading it back is the first
-# thing that session must do, and passing an empty one to the merge gate is the
-# failure this whole record exists to prevent.
-cat <<EOF
+**STOP — the next phase is the operator's decision.** `record` has proved Codex
+clean on an exact head, proved that head's checks, and written the signoff onto
+the PR. What happens next is not the loop's call to make:
 
-Codex has signed off on $CODEX_SHA, and the signoff is recorded on the PR.
+- **merge now** — one reviewer's clean signoff is a legitimate place to stop, and
+  for a small or urgent change it is often the right one. Run step 8 with
+  `REVIEWERS=codex-only`, which requires the head to BE `$CODEX_SHA` and is
+  therefore a narrower gate than the two-reviewer one, not a looser one;
+- **open the Copilot phase** — a second, differently-trained reviewer over the
+  same head. It costs rounds, and it finds things Codex does not.
 
-  Decide, and say which:
-    (a) merge now on Codex's signoff alone — run step 8 with REVIEWERS=codex-only,
-        which requires the head to BE this commit and is therefore a narrower
-        gate than the two-reviewer one, not a looser one
-    (b) open the Copilot phase on the same head — continue below
+Ask, then stop. Do not open the phase because the loop happens to continue in
+that direction: every Copilot pass costs a round of somebody's attention, and the
+phase this opens can run as long as the one just finished. It is resumable either
+way — the signoff is on the PR, so a later session reads it back with
+`pr-signoff.sh` rather than needing this shell.
 
-Nothing further happens until you say. This is resumable: the signoff is on the
-PR, so a later session can pick it up with pr-signoff.sh.
-EOF
-exit 0
-
+```bash
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
-# Everything below runs when the operator has asked for the Copilot phase.
+# Everything here runs when the operator has asked for the Copilot phase, and only
+# then. `open` re-proves that the head is still the one Codex signed off, because
+# the answer can arrive in a later session.
+OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
+printf '%s\n' "$OPEN_OUT"
+[ "$OPEN_RC" -eq 0 ] \
+    || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
 WHO="$COPILOT_BOT"
-# The authoritative review id BEFORE the request, so the watch can tell the new
-# pass from the old one on an unchanged head. Empty is a legitimate answer (no
-# review yet); only a failed read is fatal.
-PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-    || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
-
-# ANY EXISTING COPILOT SIGNOFF IS REVOKED FIRST. Entering this phase a second time
-# — after a Codex pass that returned clean without moving the head — leaves the
-# previous Copilot signoff naming that same head. Until the new pass reports,
-# GitHub still exposes the old clean verdict, so a resumed or concurrent session
-# takes the post-Copilot path and merges the phase that was just reopened. The
-# revocation is the only record that it WAS reopened.
-#
-# Unconditional: revoking a signoff that does not exist costs one comment, and the
-# branch that decides whether to bother is a branch that can be wrong.
-gh pr comment N --repo "$HOST/$OWNER/$REPO" \
-    --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$COPILOT_BOT")" \
-    || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 0; }
-
-if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then
-    echo "ABORT: could not request Copilot — do not enter the Copilot phase."
-    echo "This is not permission to skip the pass: decide with the operator."
-    exit 0
-fi
-WHO="$COPILOT_BOT"
+# THE BASELINE COMES BACK IN THE SUCCESS RECORD, and the RECORD is what is checked
+# — not the value. A head with no Copilot review yet has no id, and `pr-watch.sh`
+# takes an empty baseline as "wait on any terminal review"; testing the value for
+# emptiness would abort here, after the pass has already been requested.
+OPEN_REC="$(printf '%s\n' "$OPEN_OUT" | sed -n '/^PR_COPILOT_PHASE_OPENED /p' | tail -1)"
+[ -n "$OPEN_REC" ] \
+    || { echo "ABORT: the phase opened without reporting a record; step 3 would watch against a stale baseline."; exit 1; }
+case "$OPEN_REC" in
+    *' prior-review='*) ;;
+    *) echo "ABORT: the record carries no baseline field; step 3 would watch against a stale one."; exit 1 ;;
+esac
+PRIOR_REVIEW="${OPEN_REC##* prior-review=}"
 ```
 
 Keep `$CODEX_SHA` for step 8. It is the only record of what Codex approved.

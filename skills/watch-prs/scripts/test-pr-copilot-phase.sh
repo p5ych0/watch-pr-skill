@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# Unit tests for pr-copilot-phase.sh.
+#
+# This is the Codex→Copilot transition, which lived in `SKILL.md` as 176 lines of
+# prose-embedded shell that nothing executed. What it does is mostly ORDERING and
+# REFUSING — prove the verdict on an exact sha, prove that sha's checks, record
+# the signoff, and only then ask — so `gh` and the helpers are stubbed and every
+# call is logged in sequence.
+set -uo pipefail
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+. "$SELF_DIR/testlib.sh"
+SCRIPT="$SELF_DIR/pr-copilot-phase.sh"
+
+TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
+
+fail=0
+pass() { printf 'ok   - %s\n' "$1"; }
+die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
+
+HEAD40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+OTHER40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+CODEXBOT='chatgpt-codex-connector[bot]'
+COPILOTBOT='copilot-pull-request-reviewer[bot]'
+
+# ── the harness ────────────────────────────────────────────────────────────
+DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
+cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" "$DIR/" \
+    || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
+# `pr-review-state.sh` ANSWERS TWO DIFFERENT QUESTIONS HERE — `verdict` and
+# `review-id` — and they fail independently, so the stub keys on the subcommand
+# rather than serving one answer to both.
+cat > "$DIR/pr-review-state.sh" <<'STATESH'
+#!/usr/bin/env bash
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+case "${1:-}" in
+    verdict)   cat "$W/verdict.out" 2>/dev/null
+               exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
+    review-id) cat "$W/review-id.out" 2>/dev/null
+               exit "$(cat "$W/review-id.rc" 2>/dev/null || echo 0)" ;;
+esac
+exit 2
+STATESH
+chmod +x "$DIR/pr-review-state.sh"
+for h in pr-ci-gate.sh pr-round-count.sh; do
+    cat > "$DIR/$h" <<STUB
+#!/usr/bin/env bash
+printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$CALLS"
+_n="\$(basename "\$0" .sh)"
+[ -f "\$W/\${_n}.out" ] && cat "\$W/\${_n}.out"
+exit "\$(cat "\$W/\${_n}.rc" 2>/dev/null || echo 0)"
+STUB
+    chmod +x "$DIR/$h"
+done
+# THE COMMENT BODY IS KEPT, not just the fact of the call. A summary that posts
+# the signoff marker mangled, or the caller's paragraph expanded as shell, is a
+# successful `gh pr comment` — so the fixture reads what was actually sent.
+cat > "$TMP/bin/gh" <<'GHSH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$CALLS"
+case " $* " in
+    *" pr view "*)    cat "$W/head.out" 2>/dev/null
+                      exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
+    *" pr comment "*) _b=""
+                      while [ $# -gt 0 ]; do
+                          [ "$1" = --body ] && { _b="$2"; break; }
+                          shift
+                      done
+                      printf '%s' "$_b" >> "$W/posted"
+                      exit "$(cat "$W/comment.rc" 2>/dev/null || echo 0)" ;;
+    *" pr edit "*)    exit "$(cat "$W/edit.rc" 2>/dev/null || echo 0)" ;;
+esac
+exit 0
+GHSH
+chmod +x "$TMP/bin/gh"
+
+world() {   # world ; the state in which the phase advances cleanly
+    W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
+    printf '%s\n' "$HEAD40" > "$W/head.out"
+    printf 'PR_REVIEW_STATE verdict=clean findings=0\n' > "$W/verdict.out"
+    printf '42\n' > "$W/review-id.out"
+    printf 'the paragraph about what changed\n' > "$TMP/body.md"
+}
+run() {   # run <stage> [args…] ; prints "<rc>|<output>"
+    local out rc=0
+    out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
+    printf '%s|%s' "$rc" "$out"
+}
+posted() { cat "$W/posted" 2>/dev/null; }
+# `before <a> <b>` — a happened earlier in the call log than b.
+before() {
+    local la lb
+    la="$(grep -n -- "$1" "$TMP/calls" | head -1 | cut -d: -f1)"
+    lb="$(grep -n -- "$2" "$TMP/calls" | head -1 | cut -d: -f1)"
+    { [ -n "$la" ] && [ -n "$lb" ] && [ "$la" -lt "$lb" ]; }
+}
+
+# ── the phase advances at all ──────────────────────────────────────────────
+world; got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_PHASE_RECORDED pr=7 reviewer=$CODEXBOT codex-sha=$HEAD40"; } \
+    && pass "a clean Codex verdict records the phase" \
+    || die "record gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
+    && pass "…and the stop names the command that opens the phase" \
+    || die "the operator stop does not say how to resume: '${got#*|}'"
+
+# ── WHAT IT POSTS IS THE RECORD SOMETHING LATER READS BACK ─────────────────
+# The marker's format is `pr-signoff.sh`'s: the name and the sha in backticks, on
+# a line of their own. Composed here rather than left to the caller's prose,
+# because a marker one character off signs nothing off and still looks posted.
+posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" \
+    && pass "the summary carries the signoff marker in the form pr-signoff.sh reads" \
+    || die "the posted marker was: $(posted | head -3)"
+posted | grep -qF 'the paragraph about what changed' \
+    && pass "…and the caller's account of the phase" \
+    || die "the caller's body is not in what was posted"
+posted | grep -qF 'Review-Phase: copilot' \
+    && pass "…and the trailer the merge gate depends on" \
+    || die "the trailer note is missing from the summary"
+
+# THE BODY IS DATA, NOT A TEMPLATE. This was a heredoc the shell expanded: a
+# summary quoting a finding about a command substitution EXECUTED it while being
+# written, and text lifted from an untrusted PR description is the same
+# substitution with someone else choosing the command. Where it did not execute it
+# vanished silently, which is worse — `cat` still succeeded.
+world; printf 'before $(touch %s/PWNED) `touch %s/PWNED2` after\n' "$W" "$W" > "$TMP/body.md"
+run record 7 "$TMP/body.md" >/dev/null
+{ [ ! -f "$W/PWNED" ] && [ ! -f "$W/PWNED2" ]; } \
+    && pass "a body containing shell substitutions is not executed while being written" \
+    || die "the body was executed: $(ls "$W")"
+posted | grep -qF '$(touch' \
+    && pass "…and reaches the PR verbatim rather than silently emptied" \
+    || die "the substitution vanished from the posted body: $(posted)"
+
+# ── THE VERDICT AND THE CHECKS ARE ABOUT THE CAPTURED SHA ──────────────────
+# Not about "whatever the API calls the head now". A push landing between the
+# verdict and this lookup records an unreviewed head as the signoff, and the merge
+# gate only discovers the missing verdict after the whole Copilot phase has run.
+world; run record 7 "$TMP/body.md" >/dev/null
+grep -qF "pr-review-state.sh verdict 7 $CODEXBOT $HEAD40" "$TMP/calls" \
+    && pass "the verdict is re-validated against the sha being recorded" \
+    || die "the verdict was not pinned to the captured sha: $(grep review-state "$TMP/calls")"
+grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
+    && pass "…and the checks are asked about that same sha" \
+    || die "the CI gate was not pinned to the captured sha: $(grep ci-gate "$TMP/calls")"
+{ before 'pr-review-state.sh verdict' 'pr-ci-gate' \
+    && before 'pr-ci-gate' 'pr-round-count' \
+    && before 'pr-round-count' 'gh pr comment'; } \
+    && pass "…and nothing is posted until all three have answered" \
+    || die "the phase posted before it had proved the head: $(cat "$TMP/calls")"
+
+# ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
+# A failed probe must never be indistinguishable from a clean phase: the signoff
+# is what a later session trusts, so recording one that was not proven is the
+# failure this whole file exists to prevent.
+nothing_posted() {   # nothing_posted <label>
+    [ -s "$W/posted" ] \
+        && die "$1 — but the signoff was posted anyway" \
+        || pass "$1"
+}
+world; printf '1\n' > "$W/verdict.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'Codex is not clean on the sha being recorded'; } \
+    && pass "a verdict that is not clean stops the phase" \
+    || die "an unclean verdict gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
+world; printf '1\n' > "$W/pr-ci-gate.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "a head whose checks are not green stops the phase" \
+    || die "a failing CI gate gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
+world; printf '1\n' > "$W/head.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not capture the Codex-signed-off head'; } \
+    && pass "an unreadable head stops the phase" \
+    || die "an unreadable head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
+world; printf 'not-a-sha\n' > "$W/head.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+    && pass "a head that is not a full OID stops the phase" \
+    || die "a malformed head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
+# THE ABBREVIATED SHA IS THE ONE THAT MATTERS. `pr-review-state.sh` prints seven
+# characters and the merge gate needs forty, so a phase recorded from the short
+# form populates the gate with something it cannot match.
+world; printf '%s\n' "${HEAD40:0:7}" > "$W/head.out"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and so does an abbreviated one" \
+    || die "a 7-character head gave '${got}'"
+
+# ── THE BOUNDARY PAUSES THE TRANSITION ─────────────────────────────────────
+# A phase that ends on the threshold-th reviewed head went straight from a clean
+# verdict into the next phase, so the pause was skipped in exactly the case it
+# exists for: long enough to reach the boundary AND about to commit to more work.
+world; printf '3\n' > "$W/pr-round-count.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'round boundary reached'; } \
+    && pass "a round boundary pauses the transition" \
+    || die "a boundary gave '${got}'"
+nothing_posted "…before the signoff is recorded"
+
+world; printf '2\n' > "$W/pr-round-count.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "an unreadable round count is a stop, not a pause and not a pass" \
+    || die "an unreadable count gave '${got}'"
+
+# ── THE CALLER'S ACCOUNT IS REQUIRED ───────────────────────────────────────
+world; got="$(run record 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a body file is required'; } \
+    && pass "the phase body is required" \
+    || die "a missing body argument gave '${got}'"
+world; got="$(run record 7 "$TMP/nope.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and a body file that is not there is a stop" \
+    || die "a missing body file gave '${got}'"
+world; : > "$TMP/empty.md"; got="$(run record 7 "$TMP/empty.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the phase body is empty'; } \
+    && pass "…and an empty one is too" \
+    || die "an empty body gave '${got}'"
+grep -q 'gh pr view' "$TMP/calls" \
+    && die "it read the head before reading its own body" \
+    || pass "…refused before any of the proving is done"
+
+# A POST THAT FAILED RECORDED NOTHING, and the message has to say so: the signoff
+# is the thing the next session reads, so "the phase advanced" and "the comment
+# failed" must not look alike.
+world; printf '1\n' > "$W/comment.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the signoff is not recorded'; } \
+    && pass "a failed post stops the phase and says the signoff is not recorded" \
+    || die "a failed post gave '${got}'"
+
+# ── open: THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF ──────────────────
+world; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_COPILOT_PHASE_OPENED pr=7 head=$HEAD40 prior-review=42"; } \
+    && pass "the operator's answer opens the Copilot phase" \
+    || die "open gave '${got}'"
+grep -q -- '--add-reviewer @copilot' "$TMP/calls" \
+    && pass "…by --add-reviewer, which is the only thing that requests Copilot" \
+    || die "Copilot was not requested: $(cat "$TMP/calls")"
+posted | grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`" \
+    && pass "…and any earlier Copilot signoff is revoked" \
+    || die "no revocation was posted: $(posted)"
+before 'gh pr comment' 'gh pr edit' \
+    && pass "…before the request, so no window exists where a stale signoff describes a reopened phase" \
+    || die "the request preceded the revocation: $(cat "$TMP/calls")"
+
+# THE HEAD IS RE-PROVEN, because the operator's answer can arrive in a later
+# session. Opening the phase against a moved head spends it on one commit and the
+# merge gate on another, and only the gate finds out.
+world; printf '%s\n' "$OTHER40" > "$W/head.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the head is $OTHER40, not the $HEAD40"; } \
+    && pass "a head that moved since the signoff stops the phase from opening" \
+    || die "a moved head gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested against a head Codex never signed off" \
+    || pass "…with Copilot not requested"
+[ -s "$W/posted" ] \
+    && die "…but the previous signoff was revoked anyway" \
+    || pass "…and nothing revoked, since the phase did not open"
+
+world; printf '1\n' > "$W/head.rc"; got="$(run open 7 "$HEAD40")"
+[ "${got%%|*}" = 1 ] \
+    && pass "an unreadable head stops the phase from opening" \
+    || die "an unreadable head gave '${got}'"
+
+# THE BASELINE IS READ BEFORE THE REQUEST, and a failed read is fatal: without it
+# the watch cannot tell the new pass from the old one on an unchanged head.
+world; printf '1\n' > "$W/review-id.rc"; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'do not request a review blind'; } \
+    && pass "an unreadable review id stops the phase from opening" \
+    || die "an unreadable review id gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested with no baseline to wait past" \
+    || pass "…with Copilot not requested"
+
+# AN EMPTY BASELINE IS AN ANSWER: a head with no Copilot review yet has no id, and
+# `pr-watch.sh` takes that as "wait on any terminal review".
+world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$'; } \
+    && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
+    || die "an empty baseline gave '${got}'"
+
+world; printf '1\n' > "$W/comment.rc"; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not revoke'; } \
+    && pass "a failed revocation stops the phase from opening" \
+    || die "a failed revocation gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested while a stale signoff still described the head" \
+    || pass "…with Copilot not requested"
+
+world; printf '1\n' > "$W/edit.rc"; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'not permission to skip the pass'; } \
+    && pass "a failed request stops, and says so rather than reading as a slow reviewer" \
+    || die "a failed --add-reviewer gave '${got}'"
+
+world; got="$(run open 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'open' needs the head"; } \
+    && pass "open without the signed-off head is refused" \
+    || die "open with no sha gave '${got}'"
+world; got="$(run open 7 "${HEAD40:0:7}")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+    && pass "…and an abbreviated one is refused, since the merge gate needs forty" \
+    || die "open with a short sha gave '${got}'"
+
+# ── THE STAGE IS NAMED, AND HAS NO DEFAULT ─────────────────────────────────
+# The two halves have an operator decision between them: a caller that gets one
+# when it meant the other has either skipped that decision or re-asked a question
+# already answered.
+world; got="$(run)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a stage is required'; } \
+    && pass "an absent stage is refused" \
+    || die "no stage gave '${got}'"
+world; got="$(run 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'7' is not a stage"; } \
+    && pass "a PR number in stage position is refused by name" \
+    || die "a stageless call gave '${got}'"
+world; got="$(run start 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'start' is not a stage"; } \
+    && pass "an unknown stage is refused by name" \
+    || die "an unknown stage gave '${got}'"
+world; got="$(run record x "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "a PR number that is not a number is refused" \
+    || die "a non-numeric PR gave '${got}'"
+
+if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
+echo "RESULT: PASS"

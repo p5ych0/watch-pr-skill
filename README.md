@@ -297,10 +297,27 @@ Then:
    itself requests the next review and a check placed after it asks you about a
    round that has already started. The summary says what was addressed and what
    was intentionally skipped: a resolved thread is not a record of a fix.
-5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
-   until it is clean too. Fix commits here carry a `Review-Phase: copilot`
-   trailer, which is how the merge gate knows the head advanced only through
-   Copilot fixes and Codex's signoff still covers it — so Codex is not re-run.
+5. **Codex clean → the Copilot phase**, through
+   **`pr-copilot-phase.sh`**, which runs in **two stages with your decision
+   between them**:
+
+   - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
+     against *that exact sha*, proves its checks are green, and writes the
+     signoff onto the PR in the form `pr-signoff.sh` reads back. Then it stops
+     and asks: merge on one reviewer's signoff, or open the second phase. You
+     supply one paragraph on what the PR does and what the Codex phase changed;
+     everything a machine reads back is composed by the script;
+   - `open <PR> <sha>` runs only on the answer. It re-proves the head has not
+     moved since the signoff — the answer can arrive a session later — revokes
+     any earlier Copilot signoff, and requests the pass.
+
+   Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
+   `Review-Phase: copilot` trailer, which is how the merge gate knows the head
+   advanced only through Copilot fixes and Codex's signoff still covers it — so
+   Codex is not re-run.
+
+   The signoff is a comment on the PR rather than a shell variable, so closing
+   the terminal or changing machine does not lose it.
 6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
    everything against the *current* head — both verdicts, the reviewed range,
    unresolved threads, required checks — and merges pinned to that head with

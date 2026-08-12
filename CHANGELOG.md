@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.12] — 2026-08-13
+
+- **The Codex→Copilot transition is a script, and its refusals are executed.** It
+  was 176 lines inside `SKILL.md` that nothing ran: capture the head, re-validate
+  Codex against that exact sha, prove its checks, compose the signoff, post it,
+  check the round boundary, stop for the operator, and — on the answer — revoke
+  any stale Copilot signoff and request the pass. `pr-copilot-phase.sh` runs it in
+  two stages, `record` and `open`, with the operator's decision between them,
+  because the answer can arrive in a different session. `open` re-proves the head
+  is still the one Codex signed off; opening the phase against a moved head spends
+  the whole phase on one commit and the merge gate on another, and only the gate
+  finds out.
+
+  The phase summary was a heredoc the shell expanded. A body quoting a finding
+  about a command substitution was EXECUTED while being written, and text lifted
+  from an untrusted PR description is the same substitution with someone else
+  choosing the command; where it did not execute it vanished silently and `cat`
+  still succeeded. The caller now supplies a body file and the script inserts it as
+  data, composing the signoff marker, the sha and the trailer note itself. A case
+  asserts a body containing `$(…)` and backticks reaches the PR verbatim and
+  creates no files.
+
+  47 cases in `test-pr-copilot-phase.sh`. Seven mutants killed: an unpinned
+  verdict, an unproved head in `open`, a marker without the backticks
+  `pr-signoff.sh` requires, a body expanded as a template, a request before the
+  revocation, a missing CI gate, and a defaulted stage.
+
+- **An assertion that dies instead of failing is worse than none, and three
+  shipped.** The ordering checks in `test-pr-skill-contract.sh` read line numbers
+  with `grep -n … | head -1`, under `set -Eeuo pipefail`. When the line they check
+  was absent — exactly the case they exist for — the unmatched `grep` aborted the
+  whole file: no FAIL, no `RESULT:` line, and a caller grepping for failures saw
+  none. Found by mutating the document and getting silence instead of a failure.
+  Every such lookup is now guarded.
+
+  Fourth step of #26. `SKILL.md` is down to 527 lines of bash from 953.
 ## [2.0.11] — 2026-08-13
 
 - **A review of nothing but replies is named, instead of being guessed at.**
