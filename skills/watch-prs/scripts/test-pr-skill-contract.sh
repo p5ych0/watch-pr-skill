@@ -1166,8 +1166,13 @@ fi
 grep -q 'pr-merge-gate.sh N .* "\$AUTO_REVIEW"' "$SKILL" \
     && pass "…passing the auto-review setting as an argument" \
     || die "the merge gate is not told whether auto-review is on"
-grep -q 'MERGE_RC' "$SKILL" \
-    && grep -qE '^[[:space:]]+3\)' "$SKILL" \
+# ANCHORED TO THE `MERGE_RC` DISPATCH ITSELF. A bare `3)` matches three unrelated
+# arms elsewhere in this document — the round-count checks — so the assertion
+# passed with the merge gate's pause arm deleted, and the driver would have
+# collapsed an operator decision into its generic refusal branch while the suite
+# stayed green.
+merge_case="$(awk '/^case "\$MERGE_RC" in/ {c=1} c {print} c && /^esac/ {exit}' "$SKILL")"
+{ [ -n "$merge_case" ] && printf '%s' "$merge_case" | grep -qE '^[[:space:]]*3\)'; } \
     && pass "…and the round-boundary pause is distinguished from a refusal" \
     || die "the driver does not tell a merge-gate pause from a block"
 

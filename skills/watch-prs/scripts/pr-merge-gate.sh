@@ -41,23 +41,33 @@
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
-    echo "merge blocked: the gate could not resolve its own directory"; exit 1; }
+    echo "merge blocked: reason=lib_dir_unresolvable"; exit 1; }
+# THE BOOTSTRAP FAILURES CARRY `reason=` TOKENS, the same ones every other helper
+# uses. They were prose here, which reads well and is unreadable to the fixtures:
+# `test-pr-identity.sh` asserts the REASON rather than the status, because without
+# the guard a script still fails — just further downstream, against the wrong
+# repository — and an rc-only assertion passes on the unguarded code.
+#
 # The loader, loaded the one way it cannot load itself: clear, source, verify. An
 # exported `rb_load` survives into this shell and an empty `loadlib.sh` still
 # sources successfully, so without the clear the type check accepts the inherited
 # function — and a stale loader is what makes every other load look clean.
 unset -f rb_load 2>/dev/null || {
-    echo "merge blocked: a pre-existing rb_load could not be cleared"; exit 1; }
+    echo "merge blocked: reason=loadlib_stale_definition"; exit 1; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
-    echo "merge blocked: the library loader is unreadable"; exit 1; }
+    echo "merge blocked: reason=loadlib_unreadable"; exit 1; }
 [ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "merge blocked: the library loader defined nothing"; exit 1; }
+    echo "merge blocked: reason=loadlib_empty"; exit 1; }
 # `2>&1` on both: `rb_load` reports on stderr, and every diagnostic this gate
 # produces is documented as stdout — a caller capturing it would otherwise get
 # nothing at all for the failures that happen before anything else can.
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "merge blocked:" 2>&1 || exit 1
-rb_identity || { echo "merge blocked: $RB_IDENTITY_REASON"; exit 1; }
+# `reason=` LIKE EVERY OTHER HELPER. The identity fixtures read that token rather
+# than an exit status, because without the guard these scripts still fail — just
+# further downstream, at the first `gh` call made against the wrong repository —
+# and an rc-only assertion passes on the unguarded code.
+rb_identity || { echo "merge blocked: reason=$RB_IDENTITY_REASON"; exit 1; }
 
 PR="${1:-}"; CODEX_SHA="${2:-}"; AUTO_REVIEW="${3:-}"
 case "$PR" in
