@@ -62,6 +62,10 @@ done
 cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$STUB_CALLS"
+# EACH ARGUMENT ON ITS OWN LINE, as well. `"$*"` joins them, so a slug that was
+# split into two words by a missing pair of quotes looks identical to one that
+# was not — which is exactly the defect this file has to be able to see.
+for _a in "$@"; do printf '%s\n' "$_a"; done >> "$STUB_ARGV"
 # DISPATCHED ON THE WHOLE COMMAND LINE, not on the first two words: the real call
 # is `gh api --hostname <host> graphql …`, so `$2` is an option and a positional
 # match silently fell through to "no output, exit 0" — which the gate reads as a
@@ -85,7 +89,7 @@ CLEAN_THREADS='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo"
 
 world() {   # world ; a world in which the merge SHOULD go through
     STUB_DIR="$TMP/w"; rm -rf "$STUB_DIR"; mkdir -p "$STUB_DIR"
-    : > "$TMP/calls"
+    : > "$TMP/calls"; : > "$TMP/argv"
     printf '%s\n' "$HEAD40" > "$STUB_DIR/gh.head.out"
     printf '%s' "$CLEAN_THREADS" > "$STUB_DIR/threads.1.out"
     # Codex has judged this head, so the gate takes the current-head branch and
@@ -107,8 +111,9 @@ run_gate() {   # run_gate [pr] [codex-sha] [auto] ; prints "<rc>|<output>"
     # default — the fixture would then assert the refusal of a value it never sent.
     local out rc=0
     out="$(cd "$TMP/repo" && run_limited 25 env PATH="$TMP/bin:$PATH" \
-        STUB_DIR="$STUB_DIR" STUB_CALLS="$TMP/calls" \
-        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        STUB_DIR="$STUB_DIR" STUB_CALLS="$TMP/calls" STUB_ARGV="$TMP/argv" \
+        REVIEW_BUS_REMOTE="${GATE_REMOTE:-git@github.com:acme/widget.git}" \
+        ${GATE_OWNER:+REVIEW_BUS_OWNER="$GATE_OWNER"} \
         "$GATEDIR/pr-merge-gate.sh" "${1-7}" "${2-$HEAD40}" "${3-no}" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
@@ -141,11 +146,30 @@ grep -qF -- "--admin" "$TMP/calls" \
 world
 STRICT=1 run_gate >/dev/null 2>&1 || :
 out="$(cd "$TMP/repo" && run_limited 25 env PATH="$TMP/bin:$PATH" STUB_DIR="$STUB_DIR" \
-    STUB_CALLS="$TMP/calls" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    REVIEW_MERGE_STRICT=1 "$GATEDIR/pr-merge-gate.sh" 7 "$HEAD40" no 2>&1)" || :
+    STUB_CALLS="$TMP/calls" STUB_ARGV="$TMP/argv" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_MERGE_STRICT=1 "$GATEDIR/pr-merge-gate.sh" 7 "$HEAD40" no 2>&1)" || :
 grep -qF -- "--squash --delete-branch --match-head-commit" "$TMP/calls" \
     && pass "REVIEW_MERGE_STRICT=1 drops --admin and lets GitHub evaluate" \
     || die "strict mode still merged with --admin ('$out')"
+
+# THE REPO SLUG IS ONE ARGUMENT, whatever an origin URL puts in it. It came out of
+# `SKILL.md` unquoted — harmless in a document nobody runs, a word-splitting bug in
+# a script — so an owner containing a space must still reach `gh` as a single
+# `--repo` operand. `$*` cannot see this, which is why the stub also records each
+# argument on its own line.
+#
+# THE ASSERTION IS THAT NO FRAGMENT EXISTS, not that the whole slug appears
+# somewhere. `argv` accumulates across every `gh` call in the run, so one properly
+# quoted call further down supplied a matching line and the first version of this
+# passed with the defect present — a fixture reporting on a call it was not
+# looking at.
+world
+GATE_OWNER='ac me' run_gate >/dev/null
+{ grep -qxF 'github.com/ac me/widget' "$TMP/argv" \
+    && ! grep -qxF 'github.com/ac' "$TMP/argv" \
+    && ! grep -qxF 'me/widget' "$TMP/argv"; } \
+    && pass "the repo slug reaches gh as one argument, spaces and all" \
+    || die "a gh call split the repo slug into words ($(grep -c . "$TMP/argv") argv lines)"
 
 # ── the arguments ──────────────────────────────────────────────────────────
 world

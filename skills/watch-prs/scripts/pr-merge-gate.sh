@@ -95,7 +95,7 @@ REPO_DIR="$(git rev-parse --show-toplevel)" || {
 # and then failed — command substitution keeps that stdout, so a plausible SHA
 # from a failed fetch would otherwise pass the shape check below.
 HEAD_RC=0
-HEAD_OID=$(gh pr view "$PR" --repo $HOST/$OWNER/$REPO --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
+HEAD_OID=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) || HEAD_RC=$?
 # THROUGH `sha_reason`, like every other place in the plugin that asks what a
 # commit SHA is. The shape was written out here as an inline `=~` pattern, which
 # duplicated `recordlib.sh` — and the version of that spelling further down could
@@ -372,7 +372,11 @@ esac
 # operator decides, which is the point.
 ADMIN=--admin
 [ "${REVIEW_MERGE_STRICT:-}" = "1" ] && ADMIN=""
-if gh pr merge "$PR" --repo $HOST/$OWNER/$REPO --squash --delete-branch $ADMIN \
+# THE SLUG IS QUOTED, and `$ADMIN` deliberately is not. The slug is one word that
+# must stay one word whatever an origin URL contains; `$ADMIN` is either `--admin`
+# or NOTHING, and quoting it would pass an empty argument to `gh` in strict mode.
+# The two look alike and want opposite treatment, which is why this says so.
+if gh pr merge "$PR" --repo "$HOST/$OWNER/$REPO" --squash --delete-branch $ADMIN \
        --match-head-commit "$HEAD_OID"; then
     echo "merged $HEAD_OID"
 else
