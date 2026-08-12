@@ -2,7 +2,10 @@
 # The merge decision: every gate, evaluated immediately before merging, against
 # the head that is merged.
 #
-#   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no>
+#   pr-merge-gate.sh <pr> <codex-sha> <auto-review: yes|no> [reviewers: both|codex-only]
+#
+# `codex-only` merges on the Codex signoff alone, and requires the head to BE the
+# commit Codex signed — a narrower gate than the default, not a looser one.
 #
 #   0  merged   — the head named in the output is on the base branch
 #   1  blocked  — a gate refused; the reason is on stdout
@@ -92,6 +95,15 @@ _why="$(sha_reason "$CODEX_SHA")" || {
 case "$AUTO_REVIEW" in
     yes|no) ;;
     *) echo "merge blocked: the gate needs auto-review as 'yes' or 'no' (got '$AUTO_REVIEW')"; exit 1 ;;
+esac
+# WHICH REVIEWERS THIS MERGE RESTS ON. `both` is the default and the norm; the
+# operator chooses `codex-only` at the stop that follows a clean Codex phase, and
+# it is REFUSED rather than assumed, because "merge on one reviewer" is a decision
+# somebody makes and not a state a script drifts into.
+REVIEWERS="${4:-both}"
+case "$REVIEWERS" in
+    both|codex-only) ;;
+    *) echo "merge blocked: reviewers must be 'both' or 'codex-only' (got '$REVIEWERS')"; exit 1 ;;
 esac
 # THE REVIEWER LOGINS LIVE IN ONE PLACE, and `test-pr-skill-contract.sh` asserts
 # that `SKILL.md` still names the same two — the driver uses them for the phases
@@ -205,9 +217,33 @@ esac
 # $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
 # push landing mid-gate would otherwise leave a verdict describing an older
 # commit while step 5 pins and merges the newer one.
-COPILOT_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
-if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
-    echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 1
+# ── CODEX-ONLY IS A REAL OPTION, AND IT COSTS SOMETHING ────────────────────
+#
+# `SKILL.md` offers "merge now on Codex's signoff alone" when the Codex phase
+# closes. That offer was not reachable: this gate required an exact clean COPILOT
+# record on the head, and with no Copilot review requested there is none — so the
+# menu item existed and could never be chosen.
+#
+# What makes it safe is not skipping a check but replacing it with a stricter one.
+# The two-reviewer path allows the head to have advanced past Codex's signoff,
+# because step (2) proves every commit since carries a `Review-Phase: copilot`
+# trailer. With no Copilot phase there are no such commits, and nothing else
+# licenses the delta — so THE HEAD MUST BE EXACTLY THE COMMIT CODEX SIGNED. That
+# is a narrower gate than the two-reviewer one, not a looser one.
+if [ "$REVIEWERS" = codex-only ]; then
+    if [ "$HEAD_OID" != "$CODEX_SHA" ]; then
+        echo "merge blocked: codex-only merges must be pinned to the reviewed commit, and the head has moved past it (head=${HEAD_OID:0:7} signed=${CODEX_SHA:0:7}). Request a review of this head, or open the Copilot phase."
+        exit 1
+    fi
+    if [ "$CODEX_RC" -ne 0 ]; then
+        echo "merge blocked: codex=$CODEX_RC (1 = not clean, 2 = could not tell)"; exit 1
+    fi
+    COPILOT_VERDICT=""; COPILOT_RC=0
+else
+    COPILOT_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
+    if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
+        echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 1
+    fi
 fi
 # This is the final merge permission, so the exit codes are not taken on trust:
 # an rc-swallowing wrapper or a truncated helper line would otherwise turn an
@@ -223,8 +259,16 @@ fi
 # Every field is known here, so this is a literal string comparison rather than a
 # pattern — `[ = ]`, not `[[ == ]]`, because the bot logins end in `[bot]` and
 # `[[ ]]` would read that as a character class on the right-hand side.
-for SPEC in "$CODEX_BOT|$CODEX_EFFECTIVE_SHA|$CODEX_VERDICT" \
-            "$COPILOT_BOT|$HEAD_OID|$COPILOT_VERDICT"; do
+# Copilot's record is required in the two-reviewer mode and absent by definition
+# in the other; the LIST changes rather than the checking.
+#
+# POSITIONAL PARAMETERS, NOT A PIPELINE. `printf … | while read` puts the loop in
+# a SUBSHELL, where the `exit 1` below would end the subshell and let the gate
+# carry on to the merge — a refusal that does not refuse. The arguments were read
+# into variables at the top, so `set --` has nothing left to clobber.
+set -- "$CODEX_BOT|$CODEX_EFFECTIVE_SHA|$CODEX_VERDICT"
+[ "$REVIEWERS" = codex-only ] || set -- "$@" "$COPILOT_BOT|$HEAD_OID|$COPILOT_VERDICT"
+for SPEC in "$@"; do
     V_WHO="${SPEC%%|*}"; V_REST="${SPEC#*|}"; V_SHA="${V_REST%%|*}"; V_LINE="${V_REST#*|}"
     V_WANT="PR_REVIEW_STATE pr=$PR sha=${V_SHA:0:7} reviewer=$V_WHO verdict=clean findings=0"
     if [ "$V_LINE" != "$V_WANT" ]; then

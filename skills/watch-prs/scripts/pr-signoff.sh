@@ -58,29 +58,70 @@ esac
 # THE LOGIN IS MATCHED AS A STRING, never interpolated into a pattern. These are
 # `…[bot]` logins, where `[` and `]` are regex metacharacters that would silently
 # match something else entirely — the same rule the round counter records.
-SHA=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
-    -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){
-      pullRequest(number:$number){ comments(last:100){ nodes{ body authorAssociation } } }}}' 2>/dev/null \
-    | jq -r --arg who "$WHO" '
-        if has("errors") then error("graphql errors") else . end
-        | .data.repository.pullRequest.comments.nodes as $all
-        | if ($all | type) != "array" then error("malformed comments") else
-          [ $all[]
-            | select((.authorAssociation | type) == "string")
-            | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))
-            | select((.body | type) == "string")
-            # ANCHORED, AND THE LAST ONE WINS. A field-shaped line quoted inside
-            # prose — the documentation in this very file, pasted into a comment —
-            # must not be read as a signoff nobody made, and a later record
-            # supersedes an earlier one so a phase can be reopened by saying so.
-            | (.body | [scan("(?m)^\\*\\*Review-Signoff:\\*\\* `([^`\n]{1,200})` `([0-9a-f]{40})`")]
-                     | last // ["",""])
-            | select(.[0] == $who)
-          ] | map(.[1]) | last // ""
-          end' 2>/dev/null) || {
+#
+# PAGINATED, because `comments(last:100)` loses the record it exists to find. A
+# hundred comments after a signoff is an ordinary long review loop — this
+# repository has PRs well past it — and the marker then falls off the window,
+# `sha=none` comes back, and a resumed session either repeats a finished phase or
+# cannot finish one. A durable record that expires after a hundred comments is not
+# durable.
+#
+# The walk is the merge gate's, for the same reasons: every cursor already
+# requested is remembered so a cycle of any length stops rather than hanging, and
+# any incomplete traversal is an ERROR rather than the answer so far.
+SHA=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
+while :; do
+    PAGE=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
+        -F cursor="$CURSOR" -f query='query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
+          repository(owner:$owner,name:$repo){ pullRequest(number:$number){
+            comments(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
+              nodes{ body authorAssociation } }}}}' 2>/dev/null) || { OK=0; break; }
+    # A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`. The partial
+    # data passes every shape check below while omitting comments, and the answer
+    # taken from it would be "no signoff" — which is the safe direction only until
+    # somebody uses it to decide a phase was never finished.
+    printf '%s' "$PAGE" | jq -e 'has("errors") | not' >/dev/null 2>&1 || { OK=0; break; }
+    # EVERY NODE IS VALIDATED BEFORE ANY IS FILTERED. Discarding a malformed node
+    # silently turns "this response is not trustworthy" into "there is no signoff",
+    # and those are the two answers this helper exists to keep apart. A node
+    # without a string body, or without a readable association, means the response
+    # could not be read — status 2 — not that the record is absent.
+    FOUND=$(printf '%s' "$PAGE" | jq -r --arg who "$WHO" '
+        .data.repository.pullRequest.comments.nodes as $n
+        | if ($n | type) != "array"
+             or any($n[]; type != "object"
+                          or (.body | type) != "string"
+                          or (.authorAssociation | type) != "string")
+          then error("malformed nodes")
+          else [ $n[]
+                 | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))
+                 # ANCHORED AT BOTH ENDS. A marker with prose after it — "…is the
+                 # format we use" — is documentation, not a signoff, and a
+                 # start-anchored pattern accepted it. The line must BE the record.
+                 | (.body | [scan("(?m)^\\*\\*Review-Signoff:\\*\\* `([^`\n]{1,200})` `([0-9a-f]{40})`[[:space:]]*$")]
+                          | last // ["",""])
+                 | select(.[0] == $who)
+               ] | map(.[1]) | last // ""
+          end') || { OK=0; break; }
+    # THE LAST RECORD ANYWHERE WINS, so a later page supersedes an earlier one and
+    # a phase can be reopened by saying so.
+    [ -n "$FOUND" ] && SHA="$FOUND"
+    HAS_NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage') || { OK=0; break; }
+    case "$HAS_NEXT" in
+        false) break ;;
+        true)  ;;
+        *) OK=0; break ;;
+    esac
+    NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.endCursor') || { OK=0; break; }
+    { [ -n "$NEXT" ] && [ "$NEXT" != "null" ]; } || { OK=0; break; }
+    case "$SEEN" in *"$RS$NEXT$RS"*) OK=0; break ;; esac
+    SEEN="$SEEN$NEXT$RS"
+    CURSOR="$NEXT"
+done
+if [ "$OK" -ne 1 ]; then
     echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=unreadable" >&2
     exit 2
-}
+fi
 # EMPTY IS "NONE", AND NONE IS NOT AN ERROR — but it is also not a signoff, and
 # the caller must not be able to confuse the two. The status carries that: 1 says
 # "asked and answered, there is none", 2 says "could not ask".

@@ -1172,6 +1172,14 @@ awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$
     | grep -q 'merge now' \
     && pass "…naming merging as an alternative to the Copilot phase" \
     || die "the Codex-clean stop does not offer merging"
+# …AND THAT OFFER IS REACHABLE. The gate required a clean COPILOT record on the
+# head, so "merge on Codex's signoff alone" was a menu item that could never be
+# chosen. The mode has to be named where it is offered AND passed where the gate
+# is run, or the offer is a dead letter again.
+awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'codex-only' \
+    && pass "…and names the mode that makes it reachable" \
+    || die "the Codex-only offer does not say how to take it"
 awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
     | grep -qi 'fault tolerance' \
     && pass "…and another Codex pass as an alternative to merging" \
@@ -1248,6 +1256,16 @@ fi
 printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' \
     && pass "…passing the sha captured when the Codex phase closed" \
     || die "the merge gate is not given the validated Codex sha"
+# …AND WHICH REVIEWERS THIS MERGE RESTS ON. The stop above offers merging on the
+# Codex signoff alone; without this argument that offer is a menu item the gate
+# rejects, because it demands a clean Copilot record on the head regardless.
+#
+# ASSERTED WHERE `merge_blk` EXISTS. Written higher up the file it ran against an
+# unset variable — `-u` was not in force for it, so it silently compared nothing
+# and reported the gate untold.
+printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW" "\$REVIEWERS"' \
+    && pass "…which the gate is actually told" \
+    || die "the merge gate is never told which reviewers this merge rests on"
 # …AND THE GATE'S STATUS LEAVES THE BLOCK. Every arm of the dispatch ends in an
 # `echo`, whose status is 0, so a block that just falls off the end reports success
 # for a merge that was blocked, paused or queued — and whatever runs it next

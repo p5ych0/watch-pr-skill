@@ -1166,15 +1166,19 @@ esac
 # the phase this opens can run as long as the one just finished. The operator is
 # choosing how much more review this change is worth.
 #
-# It is resumable either way. `pr-signoff.sh N "$CODEX_BOT"` reads the signoff
-# back in any later session, so nothing here has to be redone if the answer
-# arrives tomorrow.
+# It is resumable either way, and RESUMING IS AN EXECUTABLE RECIPE rather than a
+# suggestion — see "Resuming after a stop" below. A later session has no
+# `$CODEX_SHA`: the shell that captured it is gone. Reading it back is the first
+# thing that session must do, and passing an empty one to the merge gate is the
+# failure this whole record exists to prevent.
 cat <<EOF
 
 Codex has signed off on $CODEX_SHA, and the signoff is recorded on the PR.
 
   Decide, and say which:
-    (a) merge now on Codex's signoff alone — run step 8
+    (a) merge now on Codex's signoff alone — run step 8 with REVIEWERS=codex-only,
+        which requires the head to BE this commit and is therefore a narrower
+        gate than the two-reviewer one, not a looser one
     (b) open the Copilot phase on the same head — continue below
 
 Nothing further happens until you say. This is resumable: the signoff is on the
@@ -1234,6 +1238,17 @@ RX_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$COPILOT_SHA" =~ $RX_SHA40 ]]; then
     echo "ABORT: the head is not a full 40-hex sha; do not record a signoff for it"; exit 0
 fi
+# THE VERDICT IS RE-CHECKED AGAINST EXACTLY THIS SHA before it is written down.
+# Only the SHAPE of the head was checked here, so a push landing between the clean
+# verdict and this lookup — or while the operator had the stop parked — recorded
+# the NEW, unreviewed head as Copilot-signed. The durable record would then say
+# both phases closed on a commit neither reviewer saw, and every later session
+# would believe it.
+COPILOT_RECHECK=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
+if [ "$COPILOT_RECHECK_RC" -ne 0 ]; then
+    echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"
+    exit 0
+fi
 gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Both review phases are closed on this head.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA")" \
     || { echo "ABORT: could not record the Copilot signoff"; exit 0; }
 
@@ -1265,6 +1280,39 @@ Both reviewers have signed off on $COPILOT_SHA, and both signoffs are recorded.
 Nothing further happens until you say.
 EOF
 exit 0
+```
+
+### Resuming after a stop
+
+A later session — tomorrow, another machine — has none of the variables the stop
+was reached with. This is the recipe that restores them. Run it before step 8, or
+before continuing into the Copilot phase.
+
+```bash
+# THE STATUSES ARE DISTINGUISHED, because they mean different things and only one
+# of them is permission to continue:
+#
+#   0  a signoff exists — use the sha it names
+#   1  none recorded — the phase is NOT closed. Do not invent one; go and run it
+#   2  could not tell — fail closed. An unreadable answer is not "no signoff",
+#      and treating it as one repeats a phase; treating it as a signoff skips a
+#      review nobody did
+SIGNOFF_OUT="$("$RB_SCRIPTS"/pr-signoff.sh N "$CODEX_BOT" 2>&1)"; SIGNOFF_RC=$?
+case "$SIGNOFF_RC" in
+    0) ;;
+    1) echo "The Codex phase is not closed on this PR — there is no recorded signoff. Run it before merging or opening the Copilot phase."; exit 0 ;;
+    *) echo "ABORT: could not read the signoff record (rc=$SIGNOFF_RC): $SIGNOFF_OUT"; exit 0 ;;
+esac
+# PARSED, not substring-matched, and the shape is checked before it is used: this
+# value is what every gate in step 8 is evaluated against, so a truncated or
+# wrapped line must not become the sha a merge is pinned to.
+CODEX_SHA="$(printf '%s\n' "$SIGNOFF_OUT" \
+    | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
+RX_SHA40='^[0-9a-f]{40}$'
+if ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
+    echo "ABORT: the recorded signoff did not yield a full 40-hex sha ('$SIGNOFF_OUT')"; exit 0
+fi
+echo "Resumed: Codex signed off on $CODEX_SHA."
 ```
 
 ### Then: the gate
@@ -1310,7 +1358,13 @@ exit 0
 # fails to parse, which is a different failure in a different place.
 #
 # The value is already in this session. Use it.
-(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW")
+# REVIEWERS IS `both` UNLESS THE OPERATOR CHOSE OTHERWISE at the stop that closed
+# the Codex phase. `codex-only` is not a weaker gate: it drops Copilot's verdict
+# and in exchange requires the head to BE the commit Codex signed, because the
+# `Review-Phase: copilot` trailers that license a moved head do not exist when
+# there was no Copilot phase.
+REVIEWERS=both   # or `codex-only`, if that is what was decided
+(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
     0) ;;   # merged; the script printed the head it pinned

@@ -117,7 +117,7 @@ run_gate() {   # run_gate [pr] [codex-sha] [auto] ; prints "<rc>|<output>"
         STUB_DIR="$STUB_DIR" STUB_CALLS="$TMP/calls" STUB_ARGV="$TMP/argv" \
         REVIEW_BUS_REMOTE="${GATE_REMOTE:-git@github.com:acme/widget.git}" \
         ${GATE_OWNER:+REVIEW_BUS_OWNER="$GATE_OWNER"} \
-        "$GATEDIR/pr-merge-gate.sh" "${1-7}" "${2-$HEAD40}" "${3-no}" 2>&1)" || rc=$?
+        "$GATEDIR/pr-merge-gate.sh" "${1-7}" "${2-$HEAD40}" "${3-no}" ${4+"$4"} 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
 case_is() {   # case_is <want rc> <needle> <label>
@@ -173,6 +173,52 @@ GATE_OWNER='ac me' run_gate >/dev/null
     && ! grep -qxF 'me/widget' "$TMP/argv"; } \
     && pass "the repo slug reaches gh as one argument, spaces and all" \
     || die "a gh call split the repo slug into words ($(grep -c . "$TMP/argv") argv lines)"
+
+# ── CODEX-ONLY: THE OPTION `SKILL.md` OFFERS MUST BE REACHABLE ─────────────
+#
+# The stop after a clean Codex phase offers "merge now on Codex's signoff alone".
+# That offer was a dead letter: this gate demanded an exact clean COPILOT record
+# on the head, and with no Copilot review requested there is none.
+#
+# What makes it safe is a STRICTER check, not a skipped one. The two-reviewer path
+# tolerates a head that advanced past Codex's signoff because every commit since
+# carries a `Review-Phase: copilot` trailer; with no Copilot phase there are no
+# such commits and nothing licenses the delta, so the head must BE the reviewed
+# commit.
+codex_only_world() {
+    world
+    # No Copilot verdict exists at all — the state this mode is entered from.
+    printf '2' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+    : > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+}
+codex_only_world
+got="$(run_gate 7 "$HEAD40" no)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF 'copilot=2'; } \
+    && pass "the default gate still requires Copilot, so codex-only is a real choice" \
+    || die "the default gate merged without a Copilot verdict (rc=$rc '$body')"
+codex_only_world
+got="$(run_gate 7 "$HEAD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 0 ] && printf '%s' "$body" | grep -qF "merged $HEAD40"; } \
+    && pass "…and codex-only merges on the Codex signoff alone" \
+    || die "codex-only could not merge (rc=$rc '$body')"
+# THE HEAD MUST BE THE COMMIT CODEX SIGNED. This is the check that replaces
+# Copilot's: without it, codex-only would merge a head nobody reviewed.
+codex_none_world
+got="$(run_gate 7 "$OLD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF 'pinned to the reviewed commit'; } \
+    && pass "…and refuses when the head has moved past the signoff" \
+    || die "codex-only merged a head Codex never saw (rc=$rc '$body')"
+codex_only_world; printf '1' > "$STUB_DIR/pr-review-state.$CODEXBOT.rc"
+got="$(run_gate 7 "$HEAD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
+[ "$rc" = 1 ] \
+    && pass "…and a non-clean Codex verdict still blocks it" \
+    || die "codex-only merged without a clean Codex verdict (rc=$rc '$body')"
+# AN UNRECOGNISED MODE IS REFUSED, not read as the permissive one.
+world
+got="$(run_gate 7 "$HEAD40" no everyone)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF "reviewers must be"; } \
+    && pass "…and an unrecognised reviewers mode is refused" \
+    || die "an unknown reviewers mode was accepted (rc=$rc '$body')"
 
 # ── the arguments ──────────────────────────────────────────────────────────
 world

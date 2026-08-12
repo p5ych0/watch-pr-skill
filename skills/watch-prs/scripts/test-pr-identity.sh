@@ -99,6 +99,7 @@ id_args() {   # id_args <script> ; sets "$@" for that caller
         pr-findings.sh)     set -- list 7 ;;
         pr-watch.sh)        set -- 7 somebody --interval 1 --timeout 3 ;;
         pr-merge-gate.sh)   set -- 7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa no ;;
+        pr-signoff.sh)      set -- 7 somebody ;;
         *)                  set -- 7 ;;
     esac
     ID_ARGV=( "$@" )
@@ -109,7 +110,7 @@ id_rc() {   # id_rc <script> ; the status that script uses to refuse
         *)                printf 2 ;;   # the helpers' documented error status
     esac
 }
-ID_CALLERS="pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-merge-gate.sh"
+ID_CALLERS="pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-merge-gate.sh pr-signoff.sh"
 for sc in $ID_CALLERS; do
     [ -f "$ROOT/$sc" ] || continue
     id_args "$sc"; set -- "${ID_ARGV[@]}"
@@ -330,6 +331,7 @@ for sc in $ID_CALLERS pr-watch.sh; do
         # the operator reading why a merge did not happen, and every refusal it can
         # make begins the same way.
         pr-merge-gate.sh) bs_want='merge blocked:' ;;
+        pr-signoff.sh) bs_want='PR_SIGNOFF status=error' ;;
         *) bs_want='PR_CI_STATE status=error' ;;
     esac
     if printf '%s' "$bs_out" | grep -qF "$bs_want"; then

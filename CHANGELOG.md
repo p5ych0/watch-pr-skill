@@ -11,6 +11,15 @@
   *merge* against *another Codex pass as fault tolerance over what the Copilot
   rounds changed*.
 
+- **The Codex-only merge is actually reachable.** The stop above offers "merge now
+  on Codex's signoff alone", and the gate rejected it: it demanded an exact clean
+  Copilot record on the head, and with no Copilot review requested there is none.
+  `pr-merge-gate.sh` takes a reviewers mode now. `codex-only` is not a weaker
+  gate — the two-reviewer path tolerates a head that advanced past Codex's signoff
+  because every commit since carries a `Review-Phase: copilot` trailer, and with no
+  Copilot phase there are no such commits and nothing licenses the delta. So it
+  requires the head to **be** the commit Codex signed, which is narrower.
+
 - **A signoff survives the session that earned it.** The Codex-signed head lived
   in a shell variable and was printed to the terminal, so closing it lost the one
   fact the phasing rests on. Each phase now records
