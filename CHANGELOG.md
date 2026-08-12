@@ -22,7 +22,17 @@
   asserts a body containing `$(…)` and backticks reaches the PR verbatim and
   creates no files.
 
-  47 cases in `test-pr-copilot-phase.sh`. Seven mutants killed: an unpinned
+  `open` also re-reads the VERDICT, not only the head: a review dismissed while
+  the head stood still leaves head-equality passing, and the whole Copilot phase
+  would be spent before the merge gate discovered that the recorded signoff no
+  longer describes a clean review. A recorded signoff is history, not current
+  state. And the round-boundary pause now records the signoff BEFORE it pauses —
+  the pause offers "merge on the Codex signoff", so exiting first left the
+  operator neither a durable signoff nor the sha that path needs, and they had to
+  acknowledge the boundary and re-run the stage to recover a phase already proved
+  clean.
+
+  53 cases in `test-pr-copilot-phase.sh`. Ten mutants killed: an unpinned
   verdict, an unproved head in `open`, a marker without the backticks
   `pr-signoff.sh` requires, a body expanded as a template, a request before the
   revocation, a missing CI gate, and a defaulted stage.

@@ -145,10 +145,15 @@ grep -qF "pr-review-state.sh verdict 7 $CODEXBOT $HEAD40" "$TMP/calls" \
 grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
     && pass "…and the checks are asked about that same sha" \
     || die "the CI gate was not pinned to the captured sha: $(grep ci-gate "$TMP/calls")"
+# NOTHING IS POSTED UNTIL THE HEAD IS PROVED — the verdict and the checks both
+# precede the record. The BOUNDARY follows it, and that ordering is deliberate:
+# the pause offers "merge on the Codex signoff", so the signoff has to exist by
+# then. Nothing in this stage requests a review, so recording before the boundary
+# queues nothing.
 { before 'pr-review-state.sh verdict' 'pr-ci-gate' \
-    && before 'pr-ci-gate' 'pr-round-count' \
-    && before 'pr-round-count' 'gh pr comment'; } \
-    && pass "…and nothing is posted until all three have answered" \
+    && before 'pr-ci-gate' 'gh pr comment' \
+    && before 'gh pr comment' 'pr-round-count'; } \
+    && pass "…and nothing is posted until the head is proved, with the boundary after the record" \
     || die "the phase posted before it had proved the head: $(cat "$TMP/calls")"
 
 # ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
@@ -206,7 +211,20 @@ got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'round boundary reached'; } \
     && pass "a round boundary pauses the transition" \
     || die "a boundary gave '${got}'"
-nothing_posted "…before the signoff is recorded"
+# THE RECORD SURVIVES THE PAUSE. The boundary message offers "merge on the Codex
+# signoff" and "leave it open", so a pause that exited before posting left the
+# operator neither a durable signoff for a later session nor the sha the
+# codex-only merge needs — they had to acknowledge the boundary and re-run this
+# stage to recover a phase that was already proved clean.
+posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" \
+    && pass "…with the signoff recorded, since the pause offers merging on it" \
+    || die "the pause discarded the signoff it offers to merge on: $(posted)"
+printf '%s' "${got#*|}" | grep -qF "codex-sha=$HEAD40" \
+    && pass "…and the sha reported, so the codex-only merge path has it" \
+    || die "the pause reported no sha: '${got#*|}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "the pause opened the Copilot phase anyway" \
+    || pass "…and nothing requested, which is what the pause is for"
 
 world; printf '2\n' > "$W/pr-round-count.rc"
 got="$(run record 7 "$TMP/body.md")"
@@ -269,6 +287,24 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 [ -s "$W/posted" ] \
     && die "…but the previous signoff was revoked anyway" \
     || pass "…and nothing revoked, since the phase did not open"
+
+# A RECORDED SIGNOFF IS HISTORY, NOT CURRENT STATE. A review dismissed while the
+# head stood still leaves the head-equality check passing, so without re-reading
+# the verdict the whole Copilot phase is spent before the merge gate discovers the
+# signoff no longer describes a clean review.
+world; printf '1\n' > "$W/verdict.rc"; got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "Codex is no longer clean on $HEAD40"; } \
+    && pass "a Codex review dismissed on an unchanged head stops the phase from opening" \
+    || die "a same-head dismissal gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested on a signoff that no longer holds" \
+    || pass "…with Copilot not requested"
+[ -s "$W/posted" ] \
+    && die "…but the previous Copilot signoff was revoked anyway" \
+    || pass "…and nothing revoked, since the phase did not open"
+grep -qF "pr-review-state.sh verdict 7 $CODEXBOT $HEAD40" "$TMP/calls" \
+    && pass "…the verdict being re-read against the recorded sha, not the current head" \
+    || die "open did not re-validate the verdict: $(cat "$TMP/calls")"
 
 world; printf '1\n' > "$W/head.rc"; got="$(run open 7 "$HEAD40")"
 [ "${got%%|*}" = 1 ] \

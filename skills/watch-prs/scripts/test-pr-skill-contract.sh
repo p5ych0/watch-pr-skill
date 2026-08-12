@@ -627,6 +627,16 @@ fi
 # `mktemp` can print a plausible path and then fail, and every later write and
 # guarded read would then point at an existing file — a stale summary read back
 # as this round's, which is what the guarded read was added to prevent.
+# THE DOCUMENT'S OWN WRITE IS BRANCHED ON. The phase body is written HERE and read
+# by `pr-copilot-phase.sh`, so an unchecked redirection is a gap between them: a
+# `cat` that truncates and then fails leaves a FRAGMENT that passes the script's
+# non-empty test and is posted as the phase's account, and a failed open leaves
+# the previous round's contents to be posted as this one's. The script cannot see
+# either — by the time it reads, the file looks like a body.
+grep -qF "cat > \"\$SUMMARY_FILE\" <<'EOF' || {" "$SKILL" \
+    && grep -q 'ABORT: could not write the phase body' "$SKILL" \
+    && pass "the phase body write is branched on before the script is asked to read it" \
+    || die "the phase summary is written without checking the write"
 grep -q 'ABORT: could not create the round-summary file' "$SKILL" \
     && pass "the summary file's creation is branched on" \
     || die "mktemp is unchecked; a failed create still yields a path"

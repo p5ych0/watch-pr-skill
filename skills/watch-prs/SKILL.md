@@ -947,24 +947,34 @@ Ask Copilot:
 # signoff marker in the form `pr-signoff.sh` scans for, the sha, and the trailer
 # note. The body is inserted as DATA, so prose quoting a command line is posted
 # rather than executed.
-cat > "$SUMMARY_FILE" <<'EOF'
+# THE WRITE IS CHECKED, not only the read the script does. A redirection that
+# truncates the file and then fails — a full filesystem — leaves a non-empty
+# FRAGMENT that passes the script's own non-empty test and is posted as this
+# phase's account; a failed open leaves the PREVIOUS round's contents there to be
+# posted as this one's.
+cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
 PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
-    0) ;;
-    3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
+    0|3) ;;   # 3 is a pause, and the signoff is recorded either way
     *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."; exit "$PHASE_RC" ;;
 esac
 # THE SIGNED-OFF HEAD IS THE ONE VALUE THAT OUTLIVES THIS STEP. Step 8 needs the
 # full 40 characters of it, and a child cannot assign a variable here — so it
 # reports the value and this reads it back. A later session, which has no shell
 # left to read, gets it from `pr-signoff.sh` instead.
+#
+# READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex signoff",
+# and that path needs this sha: exiting without it made the operator re-run a
+# phase that had already been proved clean, just to recover a value that was
+# printed and thrown away.
 CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
     | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
 [ -n "$CODEX_SHA" ] \
     || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
+[ "$PHASE_RC" -eq 3 ] && { echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."; exit 3; }
 ```
 
 **STOP — the next phase is the operator's decision.** `record` has proved Codex
