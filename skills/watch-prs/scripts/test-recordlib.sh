@@ -207,6 +207,47 @@ want accept opens_a_thread "$(crec '{}')" \
 want reject opens_a_thread "$(crec '{in_reply_to_id:42}')" \
     "…and one with a numeric in_reply_to_id does not"
 
+# ── WHAT A READER HONOURS AS A RECORD ─────────────────────────────────────
+# Three markers on a PR are control, not prose, and the bodies this loop posts are
+# composed from untrusted text — findings, PR descriptions, reviewer comments. A
+# body reproducing one publishes it under an identity the readers trust and
+# CREATES the record it was describing.
+for _mk in '**Review-Signoff:** `who` `sha`' \
+           '**Review-Signoff-Revoked:** `who`' \
+           '**Review-Pause-Acknowledged:** `who` `10`' \
+           '**Reviewed commit:** `0123456789`'; do
+    out="$(rb_reserved_marker_line "before
+$_mk
+after")"; rc=$?
+    { [ "$rc" -eq 0 ] && [ "$out" = "$_mk" ]; } \
+        && pass "a line the readers honour is named: ${_mk%% *}" \
+        || die "${_mk%% *} was not reported (rc=$rc out='$out')"
+done
+# ANCHORED, LIKE THE READERS. They match at the start of a line, so an indented or
+# inline mention is prose — refusing it would stop an author saying what a finding
+# was about, which is most of what a round summary is for.
+for _ok in '    **Review-Signoff:** `who` `sha`' \
+           'see `**Review-Signoff:** x` inline' \
+           'Review-Signoff: without the bold' \
+           '> **Review-Pause-Acknowledged:** quoted'; do
+    out="$(rb_reserved_marker_line "$_ok")"; rc=$?
+    [ "$rc" -ne 0 ] \
+        && pass "…and prose that only mentions one is left alone: ${_ok:0:24}" \
+        || die "prose was refused as a record: '$_ok' -> '$out'"
+done
+out="$(rb_reserved_marker_line "ordinary prose
+across two lines")"; rc=$?
+[ "$rc" -ne 0 ] \
+    && pass "…and a clean body reports nothing" \
+    || die "a clean body was refused: '$out'"
+# THE FIRST ONE IS REPORTED, so the author is told which line to fix rather than
+# that something somewhere is wrong.
+out="$(rb_reserved_marker_line "**Reviewed commit:** \`aaaaaaaaaa\`
+**Review-Signoff:** \`who\` \`sha\`")"
+[ "$out" = '**Reviewed commit:** `aaaaaaaaaa`' ] \
+    && pass "…naming the first offending line, not merely that there was one" \
+    || die "the reported line was '$out'"
+
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
 # hand in a second and third script before this library existed, and every one of
@@ -244,6 +285,10 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         /has\("in_reply_to_id"\)/           { print FILENAME ":" FNR ": reply shape" }
         /\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}T/ { print FILENAME ":" FNR ": timestamp shape" }
         /length == 0 then error\("no pages"\)/ { print FILENAME ":" FNR ": page shape" }
+        # …and the reserved-marker rule. Two scripts post caller-written bodies,
+        # which is exactly the shape that ends up present in one and missing from
+        # the other.
+        /\*\*Review-Pause-Acknowledged:\*\*.\)/ { print FILENAME ":" FNR ": reserved marker set" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null

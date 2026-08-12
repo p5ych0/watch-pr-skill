@@ -80,6 +80,7 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
 # as library data — so this would validate a signoff from whatever account that
 # variable named. `rb_load` clears before it sources, which is the whole point.
+rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
@@ -147,6 +148,18 @@ esac
 # push either.
 SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summary."; exit 1; }
 [ -n "$SUMMARY" ] || { echo "ABORT: the round summary is empty."; exit 1; }
+# THE SUMMARY IS PROSE, AND MUST NOT BECOME A RECORD. It quotes findings, PR
+# descriptions and reviewer comments, and it is posted under an identity
+# `pr-signoff.sh` and `pr-round-count.sh` trust — so a line reproducing one of
+# their markers CREATES the record it was describing: a summary quoting a finding
+# about an acknowledgement becomes that acknowledgement, and the round boundary it
+# answers never fires again. The rule is `recordlib.sh`'s because
+# `pr-copilot-phase.sh` posts a caller-written body too.
+if _marker="$(rb_reserved_marker_line "$SUMMARY")"; then
+    echo "ABORT: the round summary starts a line with a marker the loop reads as a record: $_marker"
+    echo "It would be posted under your identity and honoured. Indent it, quote it inline, or put it in a fenced block — those still say what you meant."
+    exit 1
+fi
 
 # THE BOUNDARY IS CHECKED BEFORE ANY WAY A REVIEW CAN BE REQUESTED — which in
 # auto-review mode means before the PUSH, because there the push IS the request.

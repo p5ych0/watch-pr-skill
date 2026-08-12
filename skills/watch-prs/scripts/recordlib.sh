@@ -204,3 +204,44 @@ is_full_sha() {
 # character class — every comparison against them is `[ = ]`, never `[[ =~ ]]`.
 RB_CODEX_BOT='chatgpt-codex-connector[bot]'
 RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+
+# ── WHAT A READER HONOURS AS A RECORD ──────────────────────────────────────
+#
+# Three markers on this PR are CONTROL, not prose: `pr-signoff.sh` reads
+# `**Review-Signoff:**` and `**Review-Signoff-Revoked:**`, and `pr-round-count.sh`
+# reads `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. Each is
+# anchored to the start of a line, and each is trusted because the comment
+# carrying it was posted by an OWNER, MEMBER or COLLABORATOR.
+#
+# THE BODIES THIS LOOP POSTS ARE COMPOSED FROM UNTRUSTED TEXT. A round summary or
+# a phase account quotes findings, PR descriptions and reviewer comments — so a
+# body reproducing one of these lines publishes it under the operator's identity
+# and CREATES the record it was only describing. A finding that says "the
+# acknowledgement should read `**Review-Pause-Acknowledged:** …`" becomes that
+# acknowledgement: the boundary at round 10 stops firing, silently, because the
+# pause it promised has already been answered by prose.
+#
+# Rejecting is the fail-closed answer, and it is not an obstacle: these markers
+# are only honoured at the START of a line, so quoting one inline, indenting it,
+# or putting it in a fenced block all still say what the author meant. Rewriting
+# the author's text instead would be a silent edit to a record someone is about to
+# be held to.
+#
+# ONE DEFINITION, because two scripts post caller-written bodies —
+# `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
+# that must not be present in one of them and missing from the other.
+rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
+    local _l _found=""
+    while IFS= read -r _l || [ -n "$_l" ]; do
+        case "$_l" in
+            '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
+            '**Review-Pause-Acknowledged:**'*|'**Reviewed commit:**'*)
+                _found="$_l"; break ;;
+        esac
+    done <<EOF
+$1
+EOF
+    [ -n "$_found" ] || return 1
+    printf '%s\n' "$_found"
+    return 0
+}

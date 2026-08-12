@@ -32,10 +32,36 @@
   acknowledge the boundary and re-run the stage to recover a phase already proved
   clean.
 
-  53 cases in `test-pr-copilot-phase.sh`. Ten mutants killed: an unpinned
+  `open` re-reads the head once more immediately before the mutations: a push
+  landing after the equality check but during the verdict or baseline probes left
+  the pinned verdict clean — it is pinned to the old sha — while the revocation and
+  the request landed on the moved PR, and `--add-reviewer` re-requests. And the
+  round count is now read BEFORE anything is published and acted on after: a count
+  that could not be read exited with the signoff already posted, so a later session
+  accepted that record without anyone having established whether a boundary was
+  due.
+
+  67 cases in `test-pr-copilot-phase.sh`. Fifteen mutants killed: an unpinned
   verdict, an unproved head in `open`, a marker without the backticks
   `pr-signoff.sh` requires, a body expanded as a template, a request before the
   revocation, a missing CI gate, and a defaulted stage.
+
+- **Prose that quotes a record becomes that record.** Three markers on a PR are
+  control, not text: `pr-signoff.sh` reads `**Review-Signoff:**` and
+  `**Review-Signoff-Revoked:**`, `pr-round-count.sh` reads
+  `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. The bodies this loop
+  posts are composed from findings, PR descriptions and reviewer comments and go up
+  under an identity those readers trust — so a round summary quoting a finding
+  about an acknowledgement PUBLISHED that acknowledgement, and the operator
+  boundary it answered never fired again. Silently, and at exactly the round the
+  boundary existed for.
+
+  `rb_reserved_marker_line` in `recordlib.sh` refuses such a body. It is in the
+  library rather than in either caller because `pr-close-round.sh` and
+  `pr-copilot-phase.sh` both post caller-written text, which is the shape that ends
+  up present in one and missing from the other. The rule is anchored exactly as the
+  readers are — start of line — so indenting, quoting inline or fencing still says
+  what the author meant, and the check reports WHICH line to fix.
 
 - **An assertion that dies instead of failing is worse than none, and three
   shipped.** The ordering checks in `test-pr-skill-contract.sh` read line numbers

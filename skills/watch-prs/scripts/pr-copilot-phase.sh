@@ -50,6 +50,7 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted as
 # library data — so this would sign off, or revoke, under whatever account that
 # variable named.
+rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
@@ -105,6 +106,20 @@ if [ "$STAGE" = open ]; then
     PRIOR_REVIEW=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
+    # AND RE-READ ONCE MORE, IMMEDIATELY BEFORE THE MUTATIONS. The probes above
+    # take time: a push landing after the equality check but during the verdict or
+    # baseline lookup leaves the pinned verdict still clean — it is pinned to the
+    # old sha — while the revocation and the request land on the moved PR, and
+    # `--add-reviewer` re-requests, so Copilot spends the phase on a head Codex
+    # never signed off. The window cannot be closed entirely; it can be made as
+    # small as the last check before the call.
+    HEAD_STILL=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        || { echo "ABORT: could not re-confirm the head before opening the phase."; exit 1; }
+    _why="$(sha_reason "$HEAD_STILL")" \
+        || { echo "ABORT: the re-read head is not a full OID ($_why: '$HEAD_STILL')."; exit 1; }
+    [ "$HEAD_STILL" = "$CODEX_SHA" ] \
+        || { echo "ABORT: the head moved to $HEAD_STILL while this phase was being proved; nothing was revoked or requested."; exit 1; }
+
     # ANY EXISTING COPILOT SIGNOFF IS REVOKED FIRST. Entering this phase a second
     # time — after a Codex pass that returned clean without moving the head —
     # leaves the previous Copilot signoff naming that same head. Until the new pass
@@ -141,6 +156,17 @@ BODY_FILE="${2:-}"
 # it looks complete.
 BODY="$(cat "$BODY_FILE")" || { echo "ABORT: could not read the phase body."; exit 1; }
 [ -n "$BODY" ] || { echo "ABORT: the phase body is empty; say what the Codex phase changed."; exit 1; }
+# THE BODY IS PROSE, AND MUST NOT BECOME A RECORD. It is composed from findings,
+# PR descriptions and reviewer comments, and this comment is posted under an
+# identity `pr-signoff.sh` and `pr-round-count.sh` trust — so a line reproducing
+# one of their markers CREATES the record it was describing. A quoted finding
+# about an acknowledgement becomes the acknowledgement, and the round boundary it
+# answers never fires again.
+if _marker="$(rb_reserved_marker_line "$BODY")"; then
+    echo "ABORT: the phase body starts a line with a marker the loop reads as a record: $_marker"
+    echo "It would be posted under your identity and honoured. Indent it, quote it inline, or put it in a fenced block — those still say what you meant."
+    exit 1
+fi
 
 # THE HEAD THE CLEAN VERDICT DESCRIBED, re-read and then re-validated — not
 # whatever `gh pr view` reports now. If a push lands between the verdict and this
@@ -179,6 +205,19 @@ CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT"
 # as a template: a summary that quotes a finding about `$(gh pr view …)`, or lifts
 # a backtick-delimited command line out of an untrusted PR description, was
 # EXECUTED while being written when this was a heredoc the shell expanded.
+# THE BOUNDARY IS ESTABLISHED BEFORE ANYTHING IS PUBLISHED, and acted on after.
+# These are two different requirements and the first attempt met only the second:
+# a count that could not be read exited 1 with the signoff already posted, so a
+# later session's `pr-signoff.sh` accepted that record and could open Copilot or
+# take the codex-only merge without anyone having established whether an operator
+# boundary was due. An unreadable count is a stop, and a stop must leave nothing
+# behind.
+"$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; ROUNDS_RC=$?
+case "$ROUNDS_RC" in
+    0|3) ;;
+    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC); nothing recorded"; exit 1 ;;
+esac
+
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
@@ -188,25 +227,14 @@ gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \
 
 echo "PR_PHASE_RECORDED pr=$PR reviewer=$RB_CODEX_BOT codex-sha=$CODEX_SHA"
 
-# THE BOUNDARY IS CHECKED AFTER THE SIGNOFF IS RECORDED AND BEFORE THE PHASE
-# ADVANCES. The pause offers "merge on the Codex signoff" and "leave it open", so
-# exiting before the record was posted left the operator neither a durable signoff
-# for a later session nor the sha the codex-only merge needs — they had to
-# acknowledge the boundary and re-run this stage to recover a phase that was
-# already proved clean. Nothing here requests a review, so recording first queues
-# nothing.
-#
-# It is checked at all because a phase that ends on the threshold-th reviewed head
-# went straight from a clean verdict into the next phase, so the promised pause
-# was skipped in exactly the case it exists for: the loop has run long enough to
-# reach the boundary AND is about to commit to more work.
-"$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; ROUNDS_RC=$?
-case "$ROUNDS_RC" in
-    0) ;;
-    3) echo "PAUSE: round boundary reached. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"
-       exit 3 ;;
-    *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC)"; exit 1 ;;
-esac
+# AND ACTED ON AFTER IT. The pause offers "merge on the Codex signoff" and "leave
+# it open", so exiting before the record was posted left the operator neither a
+# durable signoff for a later session nor the sha the codex-only merge needs.
+# Nothing in this stage requests a review, so publishing before the pause queues
+# nothing — the boundary still precedes everything that commits to more work.
+[ "$ROUNDS_RC" -ne 3 ] || {
+    echo "PAUSE: round boundary reached. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"
+    exit 3; }
 
 # ── STOP. THE NEXT PHASE IS THE OPERATOR'S DECISION ────────────────────────
 # Codex is clean and that is now recorded on the PR. What happens next is not the

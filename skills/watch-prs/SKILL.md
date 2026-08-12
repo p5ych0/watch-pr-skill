@@ -947,6 +947,14 @@ Ask Copilot:
 # signoff marker in the form `pr-signoff.sh` scans for, the sha, and the trailer
 # note. The body is inserted as DATA, so prose quoting a command line is posted
 # rather than executed.
+# THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under your
+# identity, which `pr-signoff.sh` and `pr-round-count.sh` trust, so a line
+# reproducing one of their markers — `**Review-Signoff:**`,
+# `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
+# `**Reviewed commit:**` — CREATES the record it was quoting. The script refuses
+# one rather than publishing it. They are only honoured at the start of a line, so
+# indent, quote inline, or fence.
+#
 # THE WRITE IS CHECKED, not only the read the script does. A redirection that
 # truncates the file and then fails — a full filesystem — leaves a non-empty
 # FRAGMENT that passes the script's own non-empty test and is posted as this
@@ -997,8 +1005,12 @@ way — the signoff is on the PR, so a later session reads it back with
 ```bash
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
-# then. `open` re-proves that the head is still the one Codex signed off, because
-# the answer can arrive in a later session.
+# then. A RECORDED SIGNOFF IS HISTORY, NOT A CURRENT VERDICT: `open` re-reads
+# Codex's verdict against that sha as well as re-proving the head, because a
+# review dismissed while the head stood still leaves head-equality passing and the
+# whole phase would be spent before the merge gate discovered it. The answer can
+# arrive in a later session, so the head is checked again immediately before the
+# request.
 OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \

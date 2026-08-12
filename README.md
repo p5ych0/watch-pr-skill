@@ -307,9 +307,21 @@ Then:
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;
-   - `open <PR> <sha>` runs only on the answer. It re-proves the head has not
-     moved since the signoff — the answer can arrive a session later — revokes
-     any earlier Copilot signoff, and requests the pass.
+   - `open <PR> <sha>` runs only on the answer. **A recorded signoff is history,
+     not a current verdict**, so it re-reads Codex's verdict against that sha as
+     well as re-proving the head has not moved — a review dismissed while the head
+     stood still leaves head-equality passing, and the whole Copilot phase would
+     be spent before the merge gate discovered it. The answer can arrive a session
+     later, so the head is checked again immediately before the request. Then it
+     revokes any earlier Copilot signoff and requests the pass.
+
+   The body you supply is prose and is posted under your identity, so a line that
+   reproduces one of the loop's own record markers — `**Review-Signoff:**`,
+   `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
+   `**Reviewed commit:**` — is refused rather than published: it would *create*
+   the record it was quoting. Indenting it, quoting it inline or fencing it all
+   still say what you meant, because the readers only honour these at the start of
+   a line.
 
    Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
    `Review-Phase: copilot` trailer, which is how the merge gate knows the head

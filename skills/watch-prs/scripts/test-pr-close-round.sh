@@ -430,6 +430,28 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
 done
 
 
+# ── PROSE MUST NOT BECOME A RECORD ────────────────────────────────────────
+# The summary quotes findings, PR descriptions and reviewer comments, and it is
+# posted under an identity `pr-signoff.sh` and `pr-round-count.sh` trust. A line
+# reproducing one of their markers CREATES the record it describes — a summary
+# quoting a finding about an acknowledgement becomes that acknowledgement, and the
+# boundary it answers never fires again. The rule is `recordlib.sh`'s because
+# `pr-copilot-phase.sh` posts a caller-written body too.
+world; printf 'we fixed it, and the record now reads:\n**Review-Pause-Acknowledged:** `codex` `10`\n' > "$TMP/summary.md"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reads as a record'; } \
+    && pass "a summary line that is a control marker is refused" \
+    || die "a summary carrying an acknowledgement marker gave '${got}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "it pushed with a summary that would publish a record" \
+    || pass "…before anything was pushed"
+world; printf 'we fixed it:\n\n    **Review-Signoff:** `x` `y`\n' > "$TMP/summary.md"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while an indented one is prose and passes, as the readers see it" \
+    || die "an indented marker was refused: '${got}'"
+printf 'the round summary\n' > "$TMP/summary.md"
+
 # ── THE THREADS ARE ANSWERED BETWEEN THE STAGES ────────────────────────────
 # This is the ordering the split exists for, and it is the one the call log can
 # only show if the fixture performs the driver's part too. A resolve cannot be

@@ -33,6 +33,10 @@ cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identity
 cat > "$DIR/pr-review-state.sh" <<'STATESH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+# A PUSH CAN LAND WHILE A PROBE RUNS. When the case asks for it, this moves the
+# head during the lookup — which is exactly the window the re-read before the
+# mutations exists to close.
+[ -f "$W/move-head-on-probe" ] && cat "$W/move-head-on-probe" > "$W/head.out"
 case "${1:-}" in
     verdict)   cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
@@ -145,15 +149,16 @@ grep -qF "pr-review-state.sh verdict 7 $CODEXBOT $HEAD40" "$TMP/calls" \
 grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
     && pass "…and the checks are asked about that same sha" \
     || die "the CI gate was not pinned to the captured sha: $(grep ci-gate "$TMP/calls")"
-# NOTHING IS POSTED UNTIL THE HEAD IS PROVED — the verdict and the checks both
-# precede the record. The BOUNDARY follows it, and that ordering is deliberate:
-# the pause offers "merge on the Codex signoff", so the signoff has to exist by
-# then. Nothing in this stage requests a review, so recording before the boundary
-# queues nothing.
+# NOTHING IS PUBLISHED UNTIL ALL THREE HAVE ANSWERED — the verdict, the checks
+# and the round count. Establishing the boundary and ACTING on it are separate:
+# the count is read before the post so an unreadable one leaves nothing behind,
+# and the pause is taken after it, because the pause offers "merge on the Codex
+# signoff" and that signoff has to exist by then. Nothing in this stage requests a
+# review, so publishing before the pause queues nothing.
 { before 'pr-review-state.sh verdict' 'pr-ci-gate' \
-    && before 'pr-ci-gate' 'gh pr comment' \
-    && before 'gh pr comment' 'pr-round-count'; } \
-    && pass "…and nothing is posted until the head is proved, with the boundary after the record" \
+    && before 'pr-ci-gate' 'pr-round-count' \
+    && before 'pr-round-count' 'gh pr comment'; } \
+    && pass "…and nothing is published until the head and the boundary are both established" \
     || die "the phase posted before it had proved the head: $(cat "$TMP/calls")"
 
 # ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
@@ -226,11 +231,19 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     && die "the pause opened the Copilot phase anyway" \
     || pass "…and nothing requested, which is what the pause is for"
 
+# AN UNREADABLE COUNT IS A STOP, AND A STOP LEAVES NOTHING BEHIND. Establishing
+# the boundary before publishing and acting on it after are two requirements: with
+# only the second, a count that could not be read exited with the signoff already
+# posted, and a later session's `pr-signoff.sh` accepted that record without
+# anyone having established whether a boundary was due.
 world; printf '2\n' > "$W/pr-round-count.rc"
 got="$(run record 7 "$TMP/body.md")"
-[ "${got%%|*}" = 1 ] \
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'nothing recorded'; } \
     && pass "an unreadable round count is a stop, not a pause and not a pass" \
     || die "an unreadable count gave '${got}'"
+nothing_posted "…with no signoff a later session could act on"
+before 'pr-round-count' 'gh pr comment' \
+    || pass "…the boundary having been established before anything was published"
 
 # ── THE CALLER'S ACCOUNT IS REQUIRED ───────────────────────────────────────
 world; got="$(run record 7)"
@@ -257,6 +270,32 @@ got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the signoff is not recorded'; } \
     && pass "a failed post stops the phase and says the signoff is not recorded" \
     || die "a failed post gave '${got}'"
+
+# ── PROSE MUST NOT BECOME A RECORD ────────────────────────────────────────
+# The body quotes findings, PR descriptions and reviewer comments, and this
+# comment is posted under an identity `pr-signoff.sh` and `pr-round-count.sh`
+# trust. A line reproducing one of their markers CREATES the record it describes:
+# a quoted finding about an acknowledgement becomes the acknowledgement, and the
+# boundary it answers never fires again.
+for _mk in '**Review-Pause-Acknowledged:** `chatgpt-codex-connector[bot]` `10`' \
+           '**Review-Signoff:** `copilot-pull-request-reviewer[bot]` `deadbeef`' \
+           '**Review-Signoff-Revoked:** `chatgpt-codex-connector[bot]`' \
+           '**Reviewed commit:** `0123456789`'; do
+    world; printf 'the finding said it should read:\n%s\nand that is why\n' "$_mk" > "$TMP/body.md"
+    got="$(run record 7 "$TMP/body.md")"
+    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reads as a record'; } \
+        && pass "a body line that is a control marker is refused: ${_mk%% *}" \
+        || die "a body carrying ${_mk%% *} gave '${got}'"
+    nothing_posted "…and nothing was published under the operator's identity"
+done
+# INDENTED, QUOTED OR FENCED IS STILL PROSE, because the readers anchor these
+# markers to the start of a line. Refusing those too would stop an author saying
+# what a finding was about.
+world; printf 'the finding said:\n\n    **Review-Signoff:** `x` `y`\n\nwhich is why\n' > "$TMP/body.md"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while an indented one is prose and passes, as the readers see it" \
+    || die "an indented marker was refused: '${got}'"
 
 # ── open: THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF ──────────────────
 world; got="$(run open 7 "$HEAD40")"
@@ -327,6 +366,22 @@ world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$'; } \
     && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
+
+# A PUSH DURING THE PROBES. The equality check passed, and the verdict is pinned
+# to the recorded sha so it stays clean — while the revocation and the request
+# would land on the moved PR, and `--add-reviewer` re-requests, so Copilot spends
+# the phase on a head Codex never signed off.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the head moved to $OTHER40"; } \
+    && pass "a push landing while the phase is being proved stops it from opening" \
+    || die "a head moving mid-probe gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested against a head that moved during the probes" \
+    || pass "…with Copilot not requested"
+[ -s "$W/posted" ] \
+    && die "…but the previous Copilot signoff was revoked against the moved head" \
+    || pass "…and nothing revoked"
 
 world; printf '1\n' > "$W/comment.rc"; got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not revoke'; } \
