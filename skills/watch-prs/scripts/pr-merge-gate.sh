@@ -217,6 +217,35 @@ esac
 # $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
 # push landing mid-gate would otherwise leave a verdict describing an older
 # commit while step 5 pins and merges the newer one.
+# ── A REOPENED PHASE MUST NOT BE MERGEABLE FROM A STALE SESSION ────────────
+#
+# When the operator asks for another Codex pass on an unchanged head, the durable
+# revocation is the ONLY thing that records it: GitHub still exposes the old clean
+# verdict until the replacement pass reports. A session that kept the old
+# `CODEX_SHA` — or a second one running concurrently — would satisfy every verdict
+# check below and merge the phase that was explicitly reopened.
+#
+# So the record is consulted, and it is consulted for a CONTRADICTION rather than
+# for permission. Absent is not a contradiction: plenty of merges predate the
+# record and the caller's sha came from somewhere. What blocks is the record
+# saying something ELSE — revoked, or naming a different commit — and a record
+# that cannot be read at all.
+SIGNOFF_LINE=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$CODEX_BOT" 2>&1); SIGNOFF_RC=$?
+case "$SIGNOFF_RC" in
+    0) SIGNOFF_SHA="${SIGNOFF_LINE##*sha=}"
+       if [ "$SIGNOFF_SHA" != "$CODEX_SHA" ]; then
+           echo "merge blocked: the recorded Codex signoff names ${SIGNOFF_SHA:0:7}, not the ${CODEX_SHA:0:7} this merge was asked to use"
+           exit 1
+       fi ;;
+    1) case "$SIGNOFF_LINE" in
+           *reason=revoked*)
+               echo "merge blocked: the Codex signoff has been revoked — that phase was reopened and has not closed again"
+               exit 1 ;;
+           *) ;;   # nothing recorded; the caller's sha is not contradicted
+       esac ;;
+    *) echo "merge blocked: could not read the signoff record (rc=$SIGNOFF_RC): $SIGNOFF_LINE"; exit 1 ;;
+esac
+
 # ── CODEX-ONLY IS A REAL OPTION, AND IT COSTS SOMETHING ────────────────────
 #
 # `SKILL.md` offers "merge now on Codex's signoff alone" when the Codex phase

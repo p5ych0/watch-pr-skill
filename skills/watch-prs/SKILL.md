@@ -1260,7 +1260,7 @@ if [ "$COPILOT_RECHECK_RC" -ne 0 ]; then
     echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"
     exit 0
 fi
-gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Both review phases are closed on this head.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA")" \
+gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Codex signed off on `%s`; if those differ, the older Codex result carries only if the merge gate validates that every commit between them is a Review-Phase: copilot fix.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA" "$CODEX_SHA")" \
     || { echo "ABORT: could not record the Copilot signoff"; exit 0; }
 
 # ── STOP. MERGING IS THE OPERATOR'S DECISION ───────────────────────────────
@@ -1282,7 +1282,13 @@ gh pr comment N --repo $HOST/$OWNER/$REPO --body "$(printf '**Review-Signoff:** 
 # ASK, THEN STOP.
 cat <<EOF
 
-Both reviewers have signed off on $COPILOT_SHA, and both signoffs are recorded.
+Copilot signed off on $COPILOT_SHA. Codex signed off on $CODEX_SHA.
+
+If those are the same commit, both reviewers read the head being merged. If they
+differ, Copilot's fixes moved the head after Codex looked at it — the older Codex
+result is carried forward ONLY if the merge gate validates that every commit
+between them is a Review-Phase: copilot fix, and it refuses if any is not. That
+check has not run yet.
 
   Decide, and say which:
     (a) merge — run the gate below
@@ -1354,17 +1360,18 @@ case "$COPILOT_SIGNOFF_RC" in
     0|1) ;;
     *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC): $COPILOT_SIGNOFF_OUT"; exit 0 ;;
 esac
-if [ "$COPILOT_SIGNOFF_RC" -eq 0 ]; then
+COPILOT_SHA="$(printf '%s\n' "$COPILOT_SIGNOFF_OUT" \
+    | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
+# THE BRANCH TURNS ON WHICH SIGNOFF DESCRIBES THE HEAD, not on whether a Copilot
+# record exists at all. After "another Codex pass" produced fixes, the NEW Codex
+# signoff names the current head while an older Copilot signoff still names the
+# previous one — and choosing the post-Copilot path merely because that historical
+# record exists then reported that neither phase was closed, sending the operator
+# through a review nobody needed.
+if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && [ "$COPILOT_SHA" = "$RESUMED_HEAD" ]; then
     # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
     # than the head; the gate is what proves the delta is Copilot-only. What must
     # still hold is the COPILOT signoff, on the head being merged.
-    COPILOT_SHA="$(printf '%s\n' "$COPILOT_SIGNOFF_OUT" \
-        | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
-    if [ "$RESUMED_HEAD" != "$COPILOT_SHA" ]; then
-        echo "The head has moved since Copilot signed off (head=$RESUMED_HEAD signed=$COPILOT_SHA)."
-        echo "Neither phase is closed on this head: request a review of it before merging."
-        exit 0
-    fi
     RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); RESUMED_RC=$?
     if [ "$RESUMED_RC" -ne 0 ]; then
         echo "Copilot's recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."

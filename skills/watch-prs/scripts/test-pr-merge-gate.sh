@@ -41,7 +41,7 @@ cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identity
     || { die "the probe repository could not be created"; echo "RESULT: FAIL"; exit 1; }
 
 # Each stub answers from a file, so a case sets the world and then runs the gate.
-for h in pr-review-state.sh pr-merge-range.sh pr-ci-gate.sh pr-ci-state.sh pr-round-count.sh; do
+for h in pr-review-state.sh pr-merge-range.sh pr-ci-gate.sh pr-ci-state.sh pr-round-count.sh pr-signoff.sh; do
     cat > "$GATEDIR/$h" <<STUB
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$STUB_CALLS"
@@ -107,6 +107,10 @@ world() {   # world ; a world in which the merge SHOULD go through
     printf '0' > "$STUB_DIR/pr-ci-state.rc"
     printf '0' > "$STUB_DIR/pr-round-count.rc"
     printf '0' > "$STUB_DIR/pr-merge-range.rc"
+    # NOTHING RECORDED is the default world: most merges predate the signoff
+    # record, and the gate must not start demanding one.
+    printf '1' > "$STUB_DIR/pr-signoff.rc"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$STUB_DIR/pr-signoff.out"
 }
 run_gate() {   # run_gate [pr] [codex-sha] [auto] ; prints "<rc>|<output>"
     # `${x-default}`, not `${x:-default}`: an argument that is present and EMPTY is
@@ -418,6 +422,28 @@ world; printf '3' > "$STUB_DIR/pr-round-count.rc"
 case_is 3 "PAUSE" "a round boundary pauses for the operator, with its own status"
 world; printf '2' > "$STUB_DIR/pr-round-count.rc"
 case_is 1 "could not establish the round count" "…while an unreadable count blocks"
+
+# ── A REOPENED PHASE IS NOT MERGEABLE FROM A STALE SESSION ─────────────────
+# "Another Codex pass" on an unchanged head leaves GitHub still exposing the old
+# clean verdict until the replacement reports. The revocation is the only record
+# of the reopening, so a session holding the old sha would otherwise satisfy every
+# verdict check and merge the phase that was deliberately reopened.
+world; printf '1' > "$STUB_DIR/pr-signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "has been revoked" "a revoked Codex signoff blocks the merge"
+# …AND A RECORD NAMING ANOTHER COMMIT IS A CONTRADICTION TOO. The caller's sha and
+# the PR's record disagreeing means one of them is stale, and merging is the wrong
+# way to find out which.
+world; printf '0' > "$STUB_DIR/pr-signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$OLD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "names bbbbbbb" "…and a signoff naming a different head blocks it"
+# ABSENT IS NOT A CONTRADICTION. Requiring a record would refuse every merge on a
+# PR older than the record itself.
+world; case_is 0 "merged" "…while nothing recorded leaves the caller's sha alone"
+# AND AN UNREADABLE RECORD FAILS CLOSED, like every other read here.
+world; printf '2' > "$STUB_DIR/pr-signoff.rc"
+: > "$STUB_DIR/pr-signoff.out"
+case_is 1 "could not read the signoff record" "…and an unreadable record blocks"
 
 # ── (5) the merge itself ───────────────────────────────────────────────────
 world; printf '1' > "$STUB_DIR/gh.merge.rc"

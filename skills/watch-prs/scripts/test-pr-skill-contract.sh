@@ -1192,9 +1192,13 @@ printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh N "\$COPILOT_BOT"' \
     && printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SIGNOFF_RC" -eq 0' \
     && pass "…and a resume after the Copilot phase is told apart from one before it" \
     || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"
-printf '%s' "$resume_blk" | grep -q '"\$RESUMED_HEAD" != "\$COPILOT_SHA"' \
-    && pass "…checking the head against COPILOT's signoff on that path" \
-    || die "the post-Copilot resume does not check the head it is about"
+# THE HEAD CHECK IS THE BRANCH CONDITION ITSELF now, rather than a test inside the
+# post-Copilot arm. It has to be: a stale Copilot signoff naming an older commit
+# used to SELECT that arm and then fail its own head check, reporting that neither
+# phase was closed when the Codex one plainly was.
+printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SHA" = "\$RESUMED_HEAD"' \
+    && pass "…and the post-Copilot arm is chosen only when Copilot signed THIS head" \
+    || die "a stale Copilot signoff still selects the post-Copilot arm"
 
 # ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
 # The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened
@@ -1238,6 +1242,19 @@ awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" 
     | grep -qi 'fault tolerance' \
     && pass "…and another Codex pass as an alternative to merging" \
     || die "the Copilot-clean stop does not offer a further Codex pass"
+# …AND IT DOES NOT CLAIM BOTH REVIEWERS READ THE HEAD. Once Copilot's fixes have
+# moved it, only Copilot signed the current commit; Codex signed an older one and
+# the trailer range that carries it forward has not been validated yet. Saying
+# "both signed off on <head>" at the merge-versus-another-pass decision is a false
+# two-reviews-on-this-commit assurance at precisely the moment it matters.
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'CODEX_SHA' \
+    && pass "…reporting the two signed heads separately rather than as one" \
+    || die "the stop implies both reviewers signed the same commit"
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -qi 'has not run yet' \
+    && pass "…and saying the delta check has not run yet" \
+    || die "the stop presents an unvalidated delta as though it were checked"
 # THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
 # resumable rather than a dead end. A decision that arrives tomorrow must not cost
 # the phase that was already finished.
