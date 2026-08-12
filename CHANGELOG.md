@@ -37,6 +37,17 @@
   greps and `awk` state machines that used to read those recipes out of the
   document are deleted rather than retargeted.
 
+- **An empty review baseline is an answer, not a failure.** `pr-review-state.sh
+  review-id` returns nothing when the current head has no review yet — which is
+  every round that pushes a new commit, and every Copilot round, since a push
+  never triggers one — and `pr-watch.sh` takes an empty baseline as "wait on any
+  terminal review". The driver tested the VALUE for emptiness and aborted, *after*
+  the summary was posted and the pass requested: the watch was never armed, and a
+  retry posted the summary and requested the pass a second time. It now requires
+  the closing RECORD and the `prior-review=` FIELD, and carries an empty value
+  through. The fixture's `pr-watch.sh` stub was refusing that empty value too —
+  stricter than the real script, which is the same defect as a stub that is looser.
+
 - **The reviewer logins have one definition.** They were literals in
   `pr-merge-gate.sh` and in `SKILL.md`, and a third copy was about to appear. Every
   verdict check compares a record's `reviewer=` field against one of them as a

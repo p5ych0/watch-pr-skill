@@ -45,9 +45,22 @@ while [ $# -gt 0 ]; do
     [ "$1" = --after-review ] && { _after="$2"; shift 2; continue; }
     shift
 done
+# THE REAL RULE, BOTH HALVES OF IT (`pr-watch.sh` lines 411-421): a bare id or a
+# `comment:`-prefixed one, and EMPTY is legitimate — a head with no review yet has
+# no id, and the watch takes that as "wait on any terminal review". A stub that
+# refused empty was stricter than the contract, which is the same defect as one
+# that is looser: it makes a fixture pass or fail on a shape the real script does
+# not treat that way.
+case "$_after" in
+    ""|*[0-9]) ;;
+    comment:*[0-9]) ;;
+    *) printf 'PR_REVIEW_WATCH state=error reason=malformed_review_id detail=%s\n' "$_after"
+       exit 2 ;;
+esac
 case "${_after#comment:}" in
-    ""|*[!0-9]*) printf 'PR_REVIEW_WATCH state=error reason=malformed_review_id detail=%s\n' "$_after"
-                 exit 2 ;;
+    ""|*[!0-9]*) [ -z "$_after" ] || {
+           printf 'PR_REVIEW_WATCH state=error reason=malformed_review_id detail=%s\n' "$_after"
+           exit 2; } ;;
 esac
 exit "$(cat "$W/pr-watch.rc" 2>/dev/null || echo 0)"
 WATCHSH
@@ -530,6 +543,37 @@ world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'gate' takes no head"; } \
     && pass "a gate handed a head is refused — that caller thinks it is posting" \
     || die "gate with a head gave '${got}'"
+
+# ── A HEAD WITH NO REVIEW YET REPORTS AN EMPTY BASELINE, AND THAT IS AN ANSWER ─
+# `pr-review-state.sh review-id` returns nothing when the current head has no
+# review — every round that pushes a new commit, and every Copilot round, since a
+# push never triggers one. The record must still carry the field, so the driver
+# can tell "no baseline yet" from "no record at all"; `pr-watch.sh` takes the
+# empty value as "wait on any terminal review".
+world; : > "$W/pr-review-state.out"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_ROUND_CLOSED .* prior-review=$'; } \
+    && pass "a head with no review yet closes, reporting an empty baseline" \
+    || die "an empty baseline gave '${got}'"
+
+# AND THE FIELD IS STILL THERE, which is the whole difference between an answer
+# and a malformed record. Asserted on the record itself rather than on the value,
+# because a record that simply dropped the field also has an "empty" value.
+printf '%s' "${got#*|}" | grep -qF ' prior-review=' \
+    && pass "…with the field present, so an absent record stays distinguishable" \
+    || die "the empty-baseline record dropped the field entirely: '${got#*|}'"
+
+# THE SAME ON THE PATH WHERE THE BASELINE IS ALSO HANDED TO THE WATCH. A first
+# auto-review round has no prior review to wait past, and the gate must not refuse
+# its own empty baseline before the push it exists to make.
+world; : > "$W/pr-review-state.out"; printf '%s\n' "$PREV40" > "$W/head.before.out"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" yes)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'PR_ROUND_GATED'; } \
+    && pass "a first push-triggered round gates on an empty baseline" \
+    || die "an empty push baseline gave '${got}'"
+grep -q -- '--after-review $' "$TMP/calls" \
+    && pass "…and the watch is handed that empty value rather than a substitute" \
+    || die "the push-pass watch was not given the empty baseline: $(grep 'pr-watch' "$TMP/calls")"
 
 # ── THE BOUNDARY PAUSES THE GATE, BEFORE THE PUSH ──────────────────────────
 world; printf '3\n' > "$W/pr-round-count.rc"

@@ -732,10 +732,29 @@ printf '%s\n' "$POST_OUT"
 # handled is newer than it, so it is accepted at once as the answer to a request
 # nobody has answered yet.
 if [ "$ROUND_RC" -eq 0 ]; then
-    PRIOR_REVIEW="$(printf '%s\n' "$POST_OUT" \
-        | sed -n 's/^PR_ROUND_CLOSED .*[[:space:]]prior-review=\(.*\)$/\1/p')"
-    [ -n "$PRIOR_REVIEW" ] \
-        || { echo "ABORT: the round closed without reporting a review baseline; step 3 would watch against a stale one."; exit 1; }
+    # THE RECORD HAS TO BE THERE; THE BASELINE MAY LEGITIMATELY BE EMPTY, and
+    # those are different questions. `pr-review-state.sh review-id` returns
+    # nothing when the current head has no review yet — which is every round that
+    # pushes a new commit, and every Copilot round, since a push never triggers
+    # one — and `pr-watch.sh` takes an empty baseline as "wait on any terminal
+    # review", which is exactly right there.
+    #
+    # Testing the VALUE for emptiness aborted on all of those, AFTER the summary
+    # was posted and the pass requested: the watch was never armed, and a retry
+    # posts the summary and requests the pass a second time.
+    CLOSED_REC="$(printf '%s\n' "$POST_OUT" | sed -n '/^PR_ROUND_CLOSED /p' | tail -1)"
+    [ -n "$CLOSED_REC" ] \
+        || { echo "ABORT: the round reported no closing record; step 3 would watch against a stale baseline."; exit 1; }
+    # THE FIELD IS WHAT IS CHECKED FOR, not what is in it. A record that lost the
+    # field entirely is a malformed answer; a record whose field is empty is an
+    # answer.
+    case "$CLOSED_REC" in
+        *' prior-review='*) ;;
+        *) echo "ABORT: the closing record carries no baseline field; step 3 would watch against a stale one."; exit 1 ;;
+    esac
+    # `prior-review=` IS LAST IN THE RECORD, so everything after it is the value —
+    # and an empty value is carried through rather than rejected.
+    PRIOR_REVIEW="${CLOSED_REC##* prior-review=}"
 fi
 case "$ROUND_RC" in
     0) ;;   # the script printed the head it closed on

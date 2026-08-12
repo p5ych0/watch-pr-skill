@@ -182,12 +182,34 @@ _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)"
 # the defect, not the spelling.
 # ONE recipe now, not two: the mode is an argument to the script rather than the
 # thing that chooses which block to copy, so there is one site to satisfy.
-[ "$(grep -c 'PRIOR_REVIEW="$(printf' "$SKILL")" -ge 1 ] \
+[ "$(grep -c 'PRIOR_REVIEW="${CLOSED_REC##\* prior-review=}"' "$SKILL")" -ge 1 ] \
     && pass "the recipe assigns the baseline the round-closer reported" \
     || die "a recipe prints the closing record without reading the baseline out of it"
-[ "$(grep -c 'the round closed without reporting a review baseline' "$SKILL")" -ge 1 ] \
-    && pass "…and an absent one stops the round rather than watching on a stale id" \
-    || die "an empty baseline is accepted and step 3 watches against a stale one"
+[ "$(grep -c 'the round reported no closing record' "$SKILL")" -ge 1 ] \
+    && pass "…and an absent RECORD stops the round rather than watching on a stale id" \
+    || die "a missing closing record is accepted and step 3 watches against a stale one"
+# AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. `pr-review-state.sh review-id`
+# returns nothing when the current head has no review — every round that pushes a
+# new commit, and every Copilot round — and `pr-watch.sh` takes an empty value as
+# "wait on any terminal review". Testing the VALUE aborted on all of those AFTER
+# the summary was posted and the pass requested, so the watch was never armed and
+# a retry posted both a second time.
+grep -qF '[ -n "$PRIOR_REVIEW" ]' "$SKILL" \
+    && die "the driver tests the baseline VALUE for emptiness; an empty baseline is legitimate and the request has already been made by then" \
+    || pass "…while an empty baseline is carried through rather than rejected"
+# The FIELD is what distinguishes the two, so the driver has to look for it.
+grep -qF "*' prior-review='*)" "$SKILL" \
+    && pass "…told apart by the field's presence, not by what is in it" \
+    || die "the driver cannot tell a record missing the baseline field from one whose field is empty"
+# THE EXPANSION ITSELF IS EXECUTED, against both answers it must keep apart. The
+# greps above prove `SKILL.md` uses this expansion; only running it proves the
+# expansion is right, and a `##` that ate one character too many would satisfy
+# every grep here.
+_rec_full='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review=42'
+_rec_none='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-review='
+{ [ "${_rec_full##* prior-review=}" = 42 ] && [ -z "${_rec_none##* prior-review=}" ]; } \
+    && pass "…and the expansion keeps a present baseline and an empty one apart" \
+    || die "the baseline expansion reads '${_rec_full##* prior-review=}' and '${_rec_none##* prior-review=}'"
 
 # ── THE ROUND-CLOSING ORDER IS TESTED IN `test-pr-close-round.sh` ──────────
 #
