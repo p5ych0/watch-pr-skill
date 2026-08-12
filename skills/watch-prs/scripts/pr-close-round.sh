@@ -155,10 +155,20 @@ fi
 
 # ── THE PUSH IS THE TRIGGER ────────────────────────────────────────────────
 HEAD_BEFORE=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
-PUSH_FROM=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not read the head this push starts from."; exit 1; }
-_why="$(sha_reason "$PUSH_FROM")" \
-    || { echo "ABORT: the pre-push head is not a full OID ($_why: '$PUSH_FROM')."; exit 1; }
+# ONLY WHERE IT IS USED. `PUSH_FROM` answers one question — did the push move the
+# head, and therefore did it start a pass — and a push never starts a Copilot pass.
+# Read unconditionally, a transient failure of this lookup aborted a Copilot round
+# before the push AND before the `--add-reviewer` that is the only thing such a
+# round needs: a stall with no upside, which is the same defect the baseline guard
+# below exists for. The post-push confirmation is NOT guarded: that one is about
+# whether the push landed on this PR at all, which matters for every reviewer.
+PUSH_FROM=""
+if [ "$WHO" != "$COPILOT_BOT" ]; then
+    PUSH_FROM=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        || { echo "ABORT: could not read the head this push starts from."; exit 1; }
+    _why="$(sha_reason "$PUSH_FROM")" \
+        || { echo "ABORT: the pre-push head is not a full OID ($_why: '$PUSH_FROM')."; exit 1; }
+fi
 
 # THE BASELINE IS READ BEFORE THE PUSH, and this is the one ordering in the whole
 # script that runs the other way round from everything else.

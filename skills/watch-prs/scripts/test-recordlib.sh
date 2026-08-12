@@ -281,5 +281,26 @@ grep -q 'is_full_sha' "$SELF_DIR/pr-watch.sh" \
     && pass "…and uses is_full_sha rather than its own regex" \
     || die "pr-watch.sh sources the library but validates its own SHAs"
 
+# ── A TRUNCATED LIBRARY MUST NOT LEAVE THE SECOND CONSTANT INHERITABLE ──────
+# `rb_load` clears before it sources, and it is called once PER SYMBOL. A caller
+# that verified only `RB_CODEX_BOT` accepted a `recordlib.sh` truncated after that
+# definition — and an exported `RB_COPILOT_BOT` from the environment was then
+# taken for library data, so a merge gate would validate a signoff from whatever
+# account that variable named.
+trunc="$(mktemp_d)" || { die "no scratch directory for the truncated-library probe"; trunc=""; }
+if [ -n "$trunc" ]; then
+    cp "$SELF_DIR/loadlib.sh" "$trunc/"
+    # Everything up to and including the Codex login, and nothing after it.
+    awk '/^RB_CODEX_BOT=/ { print; exit } { print }' "$SELF_DIR/recordlib.sh" > "$trunc/recordlib.sh"
+    tr_out="$(run_limited 15 env RB_COPILOT_BOT='attacker[bot]' bash -c '
+        . "$1/loadlib.sh"
+        rb_load "$1" recordlib RB_COPILOT_BOT "PR_X status=error" var || exit 2
+        printf "%s" "$RB_COPILOT_BOT"' _ "$trunc" 2>&1)"; tr_rc=$?
+    { [ "$tr_rc" -ne 0 ] && ! printf '%s' "$tr_out" | grep -q 'attacker'; } \
+        && pass "a library truncated before the second constant is refused, not inherited" \
+        || die "an inherited RB_COPILOT_BOT survived a truncated library (rc=$tr_rc '$tr_out')"
+    rm -rf "$trunc"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

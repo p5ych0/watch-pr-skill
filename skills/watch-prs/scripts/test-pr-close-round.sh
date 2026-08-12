@@ -35,7 +35,24 @@ COPILOTBOT='copilot-pull-request-reviewer[bot]'
 DIR="$TMP/s"; mkdir -p "$DIR" "$TMP/bin"
 cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/identitylib.sh" "$DIR/" \
     || { die "the subject could not be staged"; echo "RESULT: FAIL"; exit 1; }
-for h in pr-round-count.sh pr-ci-gate.sh pr-review-state.sh pr-watch.sh; do
+# `pr-watch.sh` VALIDATES ITS BASELINE, like the real one: a stub that accepts
+# anything cannot tell a well-formed id from the noise that stops the next round.
+cat > "$DIR/pr-watch.sh" <<'WATCHSH'
+#!/usr/bin/env bash
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+_after=""
+while [ $# -gt 0 ]; do
+    [ "$1" = --after-review ] && { _after="$2"; shift 2; continue; }
+    shift
+done
+case "${_after#comment:}" in
+    ""|*[!0-9]*) printf 'PR_REVIEW_WATCH state=error reason=malformed_review_id detail=%s\n' "$_after"
+                 exit 2 ;;
+esac
+exit "$(cat "$W/pr-watch.rc" 2>/dev/null || echo 0)"
+WATCHSH
+chmod +x "$DIR/pr-watch.sh"
+for h in pr-round-count.sh pr-ci-gate.sh pr-review-state.sh; do
     cat > "$DIR/$h" <<STUB
 #!/usr/bin/env bash
 printf '%s %s\n' "\$(basename "\$0")" "\$*" >> "\$CALLS"
@@ -86,7 +103,11 @@ world() {   # world ; the state in which a round closes cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/local.out"
     printf '%s\n' "$HEAD40" > "$W/head.out"
-    printf 'PR_REVIEW_STATE pr=7 review-id=42\n' > "$W/pr-review-state.out"
+    # THE REAL HELPER PRINTS A BARE ID — `42`, or `comment:42`. A stub returning a
+    # structured line let the propagation cases pass on a value `pr-watch.sh`
+    # rejects as `malformed_review_id`, which stops the NEXT round: the fixture was
+    # agreeing with itself about a shape the real contract refuses.
+    printf '42\n' > "$W/pr-review-state.out"
 }
 run() {   # run [reviewer] [auto] ; prints "<rc>|<output>"
     local out rc=0
@@ -235,7 +256,7 @@ before 'pr-review-state.sh review-id' 'gh pr edit' \
 world; run "$CODEXBOT" yes >/dev/null
 grep -q 'PR_ROUND_CLOSED.*prior-review=' "$TMP/calls" 2>/dev/null || true
 out="$(run "$CODEXBOT" yes)"; body="${out#*|}"
-printf '%s' "$body" | grep -q 'prior-review=PR_REVIEW_STATE' \
+printf '%s' "$body" | grep -qE 'prior-review=(comment:)?[0-9]+$' \
     && pass "…and the closing record carries it back to the driver" \
     || die "the round closed without reporting the baseline ('$body')"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -270,10 +291,10 @@ case_is 1 "not the" "a head that never catches up stops the round" "$CODEXBOT" y
 # reports the pushed one. That is what makes a pass have been started at all.
 world
 printf '%s\n' "$PREV40" > "$W/head.before.out"
-printf 'PR_REVIEW_STATE pr=7 review-id=1\n' > "$W/pr-review-state.before.out"
-printf 'PR_REVIEW_STATE pr=7 review-id=2\n' > "$W/pr-review-state.out"
+printf '1\n' > "$W/pr-review-state.before.out"
+printf '2\n' > "$W/pr-review-state.out"
 run "$CODEXBOT" yes >/dev/null
-grep -q 'pr-watch.sh 7 .* --after-review PR_REVIEW_STATE pr=7 review-id=1' "$TMP/calls" \
+grep -q 'pr-watch.sh 7 .* --after-review 1$' "$TMP/calls" \
     && pass "the watch is given the baseline from BEFORE the push" \
     || die "the baseline was taken after the push: $(grep pr-watch "$TMP/calls" | head -1)"
 before 'pr-review-state.sh review-id' 'git push' \
@@ -290,6 +311,54 @@ grep -q 'pr-review-state.sh review-id' "$TMP/calls" \
 [ "$(grep -c 'pr-review-state.sh review-id' "$TMP/calls")" -eq 1 ] \
     && pass "…but only the one it uses, not a pre-push baseline it never will" \
     || die "a Copilot round reads a pre-push baseline it cannot use"
+
+# ── THE FIXES OF THE LAST ROUND, PROVEN ────────────────────────────────────
+# Each of these covers a behaviour that was corrected without a case to hold it.
+
+# AN UNRECOGNISED REVIEWER IS REFUSED. Every branch asks "is this Copilot?", so a
+# typo took the Codex path: the mention was posted, Copilot was never requested,
+# and the round waited on a pass nobody asked for.
+world
+got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$DIR/pr-close-round.sh" 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'not a reviewer this loop drives'; } \
+    && pass "an unrecognised reviewer is refused, by name" \
+    || die "an unknown reviewer gave rc=$rc '$got'"
+grep -q 'git push' "$TMP/calls" \
+    && die "it pushed for a reviewer it does not know" \
+    || pass "…before anything was pushed"
+
+# THE PRE-PUSH LOOKUPS ARE SKIPPED WHERE THEY ARE UNUSED. A push never starts a
+# Copilot pass, so neither the baseline nor the pre-push head is consumed on a
+# Copilot round — and a transient failure of either aborted before the
+# `--add-reviewer` that is the only thing such a round needs.
+world; printf '1' > "$W/head.rc"
+got="$(run "$COPILOTBOT" yes)"; rc="${got%%|*}"
+[ "$rc" = 1 ] \
+    && pass "a Copilot round still fails on the head confirmation it does need" \
+    || die "a Copilot round ignored an unreadable head (rc=$rc)"
+world; run "$COPILOTBOT" yes >/dev/null
+[ "$(grep -c 'gh pr view' "$TMP/calls")" -eq 1 ] \
+    && pass "…and reads the head once, not twice, since the pre-push one is unused" \
+    || die "a Copilot round made $(grep -c 'gh pr view' "$TMP/calls") head lookups"
+
+# THE PASS THE PUSH STARTED CAN TIME OUT, and that stops the round: its result
+# would otherwise answer the request made after it.
+world
+printf '%s\n' "$PREV40" > "$W/head.before.out"
+printf '1' > "$W/pr-watch.rc"
+case_is 1 "has not finished" "a push-started pass that never finishes stops the round" "$CODEXBOT" yes
+world
+printf '%s\n' "$PREV40" > "$W/head.before.out"
+printf '2' > "$W/pr-watch.rc"
+case_is 1 "could not observe" "…and an unobservable one stops it too" "$CODEXBOT" yes
+
+# A FAILED COPILOT RE-REQUEST STOPS THE ROUND. `--add-reviewer` is the only thing
+# that triggers Copilot, so a round that posted its summary and failed here has
+# announced a pass that will never come.
+world; printf '1' > "$W/edit.rc"
+case_is 1 "could not re-request Copilot" "a failed Copilot re-request stops the round" "$COPILOTBOT" no
 
 # ── the arguments ──────────────────────────────────────────────────────────
 world
