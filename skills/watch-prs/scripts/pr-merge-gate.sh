@@ -230,21 +230,31 @@ esac
 # record and the caller's sha came from somewhere. What blocks is the record
 # saying something ELSE — revoked, or naming a different commit — and a record
 # that cannot be read at all.
-SIGNOFF_LINE=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$CODEX_BOT" 2>&1); SIGNOFF_RC=$?
-case "$SIGNOFF_RC" in
-    0) SIGNOFF_SHA="${SIGNOFF_LINE##*sha=}"
-       if [ "$SIGNOFF_SHA" != "$CODEX_SHA" ]; then
-           echo "merge blocked: the recorded Codex signoff names ${SIGNOFF_SHA:0:7}, not the ${CODEX_SHA:0:7} this merge was asked to use"
-           exit 1
-       fi ;;
-    1) case "$SIGNOFF_LINE" in
-           *reason=revoked*)
-               echo "merge blocked: the Codex signoff has been revoked — that phase was reopened and has not closed again"
-               exit 1 ;;
-           *) ;;   # nothing recorded; the caller's sha is not contradicted
-       esac ;;
-    *) echo "merge blocked: could not read the signoff record (rc=$SIGNOFF_RC): $SIGNOFF_LINE"; exit 1 ;;
-esac
+# ONE CHECK, BOTH REVIEWERS. Written out twice it was written out once: the Codex
+# half landed and the Copilot half did not, and the hole it leaves is identical —
+# a Copilot phase reopened on an unchanged head leaves its old signoff naming that
+# same head, so a resumed or concurrent session merges on a verdict that was
+# withdrawn. See CLAUDE.md § Tests on rules that apply to more than one caller.
+signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will use>
+    local who="$1" want="$2" line rc=0 got
+    line=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
+    case "$rc" in
+        0) got="${line##*sha=}"
+           if [ "$got" != "$want" ]; then
+               echo "merge blocked: the recorded $who signoff names ${got:0:7}, not the ${want:0:7} this merge was asked to use"
+               return 1
+           fi
+           return 0 ;;
+        1) case "$line" in
+               *reason=revoked*)
+                   echo "merge blocked: the $who signoff has been revoked — that phase was reopened and has not closed again"
+                   return 1 ;;
+               *) return 0 ;;   # nothing recorded; the caller's sha is not contradicted
+           esac ;;
+        *) echo "merge blocked: could not read the $who signoff record (rc=$rc): $line"; return 1 ;;
+    esac
+}
+signoff_contradicts "$CODEX_BOT" "$CODEX_SHA" || exit 1
 
 # ── CODEX-ONLY IS A REAL OPTION, AND IT COSTS SOMETHING ────────────────────
 #
@@ -269,6 +279,9 @@ if [ "$REVIEWERS" = codex-only ]; then
     fi
     COPILOT_VERDICT=""; COPILOT_RC=0
 else
+    # …AND COPILOT'S RECORD, ON THE HEAD BEING MERGED. Only in this mode: there is
+    # no Copilot phase to reopen in the other one.
+    signoff_contradicts "$COPILOT_BOT" "$HEAD_OID" || exit 1
     COPILOT_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
     if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
         echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 1

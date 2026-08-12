@@ -1200,6 +1200,19 @@ printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SHA" = "\$RESUMED_HEAD"' \
     && pass "…and the post-Copilot arm is chosen only when Copilot signed THIS head" \
     || die "a stale Copilot signoff still selects the post-Copilot arm"
 
+# ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
+# Entering the Copilot phase a second time — after a Codex pass that came back
+# clean without moving the head — leaves the previous Copilot signoff naming that
+# same head. Until the new pass reports, GitHub still exposes the old clean
+# verdict, so a resumed or concurrent session takes the post-Copilot path and
+# merges the phase that was just reopened.
+awk '/--add-reviewer @copilot/ {print NR": "$0}' "$SKILL" | head -1 >/dev/null
+awk 'BEGIN{rev=0}
+     /Review-Signoff-Revoked/ {rev=NR}
+     /--add-reviewer @copilot/ {if (rev && rev < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "a Copilot signoff is revoked before the phase is requested again" \
+    || die "re-requesting Copilot leaves its old signoff standing"
+
 # ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
 # The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened
 # with a Copilot recheck that runs unconditionally, and in codex-only there is no

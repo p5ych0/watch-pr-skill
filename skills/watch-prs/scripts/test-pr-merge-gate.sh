@@ -443,7 +443,25 @@ world; case_is 0 "merged" "…while nothing recorded leaves the caller's sha alo
 # AND AN UNREADABLE RECORD FAILS CLOSED, like every other read here.
 world; printf '2' > "$STUB_DIR/pr-signoff.rc"
 : > "$STUB_DIR/pr-signoff.out"
-case_is 1 "could not read the signoff record" "…and an unreadable record blocks"
+case_is 1 "could not read the" "…and an unreadable record blocks"
+
+# …AND THE SAME HOLDS FOR COPILOT, whose phase can be reopened the same way. The
+# Codex half of this landed a round before the Copilot half, which is what a rule
+# written out twice looks like: one copy.
+world; printf '1' > "$STUB_DIR/pr-signoff.$COPILOTBOT.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
+    > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
+case_is 1 "has been revoked" "a revoked Copilot signoff blocks the merge too"
+# …and it is NOT consulted in codex-only, where there is no Copilot phase to
+# reopen — a stale Copilot revocation must not block a merge it has nothing to do
+# with.
+codex_only_world; printf '1' > "$STUB_DIR/pr-signoff.$COPILOTBOT.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
+    > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
+got="$(run_gate 7 "$HEAD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
+[ "$rc" = 0 ] \
+    && pass "…and a Copilot revocation does not block a codex-only merge" \
+    || die "a codex-only merge was blocked by a Copilot record (rc=$rc '$body')"
 
 # ── (5) the merge itself ───────────────────────────────────────────────────
 world; printf '1' > "$STUB_DIR/gh.merge.rc"

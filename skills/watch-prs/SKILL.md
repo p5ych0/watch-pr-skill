@@ -1195,6 +1195,19 @@ WHO="$COPILOT_BOT"
 PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
     || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
 
+# ANY EXISTING COPILOT SIGNOFF IS REVOKED FIRST. Entering this phase a second time
+# — after a Codex pass that returned clean without moving the head — leaves the
+# previous Copilot signoff naming that same head. Until the new pass reports,
+# GitHub still exposes the old clean verdict, so a resumed or concurrent session
+# takes the post-Copilot path and merges the phase that was just reopened. The
+# revocation is the only record that it WAS reopened.
+#
+# Unconditional: revoking a signoff that does not exist costs one comment, and the
+# branch that decides whether to bother is a branch that can be wrong.
+gh pr comment N --repo $HOST/$OWNER/$REPO \
+    --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$COPILOT_BOT")" \
+    || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 0; }
+
 if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then
     echo "ABORT: could not request Copilot — do not enter the Copilot phase."
     echo "This is not permission to skip the pass: decide with the operator."
