@@ -1183,7 +1183,14 @@ earlier head.
 # — at whatever PR of that repository shares this number. `$REPO_DIR` was captured
 # in the setup block, and everything else in this session already used the identity
 # derived there.
-(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N <full 40-hex sha Codex last reviewed clean> "$AUTO_REVIEW")
+# THE PLACEHOLDER GOES ON AN ASSIGNMENT, never into the command line. `<…>` in
+# argument position is a REDIRECTION to the shell — `<full` opens a file and the
+# remaining words shift into the wrong parameters — so a driver that failed to
+# substitute it would not fail loudly, it would run the gate with the wrong
+# arguments. On an assignment the same text is one word, and an unsubstituted
+# placeholder is rejected by the gate's own sha check.
+CODEX_SHA=<full 40-hex sha of the head Codex last reviewed clean>
+(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW")
 MERGE_RC=$?
 case "$MERGE_RC" in
     0) ;;   # merged; the script printed the head it pinned

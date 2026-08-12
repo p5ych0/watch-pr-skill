@@ -1163,9 +1163,20 @@ fi
 # AUTO-REVIEW IS PASSED, and as an argument. Read from the environment it would be
 # invisible to the child unless exported, and it decides whether an in-flight Codex
 # pass may be ignored — a silent default there is a merge on a verdict nobody read.
-grep -q 'pr-merge-gate.sh N .* "\$AUTO_REVIEW"' "$SKILL" \
+grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' "$SKILL" \
     && pass "…passing the auto-review setting as an argument" \
     || die "the merge gate is not told whether auto-review is on"
+# …AND THE SHA REACHES IT AS A VARIABLE, not as a placeholder in argument
+# position. `<…>` there is a redirection: `<full` opens a file and every later
+# word shifts into the wrong parameter, so a driver that did not substitute it
+# would run the gate with the wrong arguments rather than failing. The placeholder
+# belongs on the assignment above the call.
+grep -qE '^CODEX_SHA=<' "$SKILL" \
+    && pass "…with the sha placeholder on an assignment, where it is one word" \
+    || die "the Codex sha placeholder is not on an assignment"
+grep -q 'pr-merge-gate.sh N <' "$SKILL" \
+    && die "a placeholder sits in the gate's argument list, where it is a redirection" \
+    || pass "…and never in the argument list"
 # ANCHORED TO THE `MERGE_RC` DISPATCH ITSELF. A bare `3)` matches three unrelated
 # arms elsewhere in this document — the round-count checks — so the assertion
 # passed with the merge gate's pause arm deleted, and the driver would have
