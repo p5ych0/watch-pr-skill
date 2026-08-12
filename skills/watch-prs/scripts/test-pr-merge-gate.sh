@@ -135,6 +135,44 @@ case_is() {   # case_is <want rc> <needle> <label>
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
 
+# ── EVERY FIXTURE IS DEFINED HERE, ABOVE EVERY CASE ────────────────────────
+#
+# Bash defines a function when it EXECUTES the definition, so a call from higher
+# up the file is an external command lookup that fails with 127 — and with no
+# `-e` here the case then runs against whatever state the PREVIOUS case left.
+# That happened twice in this file, in two different places, and both times the
+# assertion passed while testing something other than what it named. Keeping the
+# definitions together, before anything calls them, is what stops it recurring.
+
+# ── CODEX-ONLY: THE OPTION `SKILL.md` OFFERS MUST BE REACHABLE ─────────────
+#
+# The stop after a clean Codex phase offers "merge now on Codex's signoff alone".
+# That offer was a dead letter: this gate demanded an exact clean COPILOT record
+# on the head, and with no Copilot review requested there is none.
+#
+# What makes it safe is a STRICTER check, not a skipped one. The two-reviewer path
+# tolerates a head that advanced past Codex's signoff because every commit since
+# carries a `Review-Phase: copilot` trailer; with no Copilot phase there are no
+# such commits and nothing licenses the delta, so the head must BE the reviewed
+# commit.
+codex_only_world() {
+    world
+    # No Copilot verdict exists at all — the state this mode is entered from.
+    printf '2' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+    : > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+}
+
+# A WORLD IN WHICH CODEX HAS NOT JUDGED THIS HEAD, and its recorded signoff on the
+# older sha is clean. Two cases below turn on exactly this shape: the auto-review
+# pair, and the range check that makes trusting an older signoff safe.
+codex_none_world() {
+    world
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=none\n' "${HEAD40:0:7}" "$CODEXBOT" \
+        > "$STUB_DIR/pr-review-state.state.out"
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0' "${OLD40:0:7}" "$CODEXBOT" \
+        > "$STUB_DIR/pr-review-state.$CODEXBOT.out"
+}
+
 # ── the merge happens at all ───────────────────────────────────────────────
 # FIRST, because every other case here asserts a refusal — and a gate that can
 # never merge would satisfy all of them while being useless. This is the case that
@@ -178,23 +216,6 @@ GATE_OWNER='ac me' run_gate >/dev/null
     && pass "the repo slug reaches gh as one argument, spaces and all" \
     || die "a gh call split the repo slug into words ($(grep -c . "$TMP/argv") argv lines)"
 
-# ── CODEX-ONLY: THE OPTION `SKILL.md` OFFERS MUST BE REACHABLE ─────────────
-#
-# The stop after a clean Codex phase offers "merge now on Codex's signoff alone".
-# That offer was a dead letter: this gate demanded an exact clean COPILOT record
-# on the head, and with no Copilot review requested there is none.
-#
-# What makes it safe is a STRICTER check, not a skipped one. The two-reviewer path
-# tolerates a head that advanced past Codex's signoff because every commit since
-# carries a `Review-Phase: copilot` trailer; with no Copilot phase there are no
-# such commits and nothing licenses the delta, so the head must BE the reviewed
-# commit.
-codex_only_world() {
-    world
-    # No Copilot verdict exists at all — the state this mode is entered from.
-    printf '2' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
-    : > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
-}
 codex_only_world
 got="$(run_gate 7 "$HEAD40" no)"; rc="${got%%|*}"; body="${got#*|}"
 { [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF 'copilot=2'; } \
@@ -268,16 +289,6 @@ world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=elsewhere\n' "${HEA
     > "$STUB_DIR/pr-review-state.state.out"
 case_is 1 "unknown Codex head state" "an unrecognised state is refused, not treated as none"
 
-# A WORLD IN WHICH CODEX HAS NOT JUDGED THIS HEAD, and its recorded signoff on the
-# older sha is clean. Two cases below turn on exactly this shape: the auto-review
-# pair, and the range check that makes trusting an older signoff safe.
-codex_none_world() {
-    world
-    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=none\n' "${HEAD40:0:7}" "$CODEXBOT" \
-        > "$STUB_DIR/pr-review-state.state.out"
-    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0' "${OLD40:0:7}" "$CODEXBOT" \
-        > "$STUB_DIR/pr-review-state.$CODEXBOT.out"
-}
 
 # NOT YET ANSWERED IS NOT NOTHING TO ANSWER. With auto-review on, every push
 # queues a Codex pass and Codex exposes no record while it runs — which reads
