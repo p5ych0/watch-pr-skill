@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.0.9] — 2026-08-12
+
+- **The phase transitions are the operator's decision, and the loop stops for
+  them.** A clean Codex verdict used to open the Copilot phase by itself, and a
+  clean Copilot verdict walked into the merge gate. Neither is the loop's call: it
+  has no view of urgency, or cost, or what the change is for, so left alone it
+  always decides "more review". It now stops twice — after Codex, offering
+  *merge now* against *open the Copilot phase*; and after Copilot, offering
+  *merge* against *another Codex pass as fault tolerance over what the Copilot
+  rounds changed*.
+
+- **The Codex-only merge is actually reachable.** The stop above offers "merge now
+  on Codex's signoff alone", and the gate rejected it: it demanded an exact clean
+  Copilot record on the head, and with no Copilot review requested there is none.
+  `pr-merge-gate.sh` takes a reviewers mode now. `codex-only` is not a weaker
+  gate — the two-reviewer path tolerates a head that advanced past Codex's signoff
+  because every commit since carries a `Review-Phase: copilot` trailer, and with no
+  Copilot phase there are no such commits and nothing licenses the delta. So it
+  requires the head to **be** the commit Codex signed, which is narrower.
+
+- **A signoff survives the session that earned it.** The Codex-signed head lived
+  in a shell variable and was printed to the terminal, so closing it lost the one
+  fact the phasing rests on. Each phase now records
+  `**Review-Signoff:** <reviewer> <sha>` on the pull request, and
+  **`pr-signoff.sh`** reads it back: repo-local, machine-independent, visible to a
+  human scrolling the thread, and supersedable by a later record. It is what makes
+  the two stops resumable rather than dead ends. Only OWNER, MEMBER or
+  COLLABORATOR comments count — a signoff skips a review phase, so a passer-by
+  must not be able to grant one — and a marker quoted inside prose is not a
+  signoff, which the anchored read enforces.
+
+- **The round check-in offers closing the PR and starting over.** It said "decide
+  with the operator" and named continue, merge, leave open, abandon. The option it
+  never raised is the one a loop cannot raise for itself: that ten rounds is
+  evidence about the *approach* rather than about the defects left. This
+  repository has the worked example — fifty-two rounds on a text scanner, then
+  eleven on what replaced it. The check-in now says so, and asks for what the
+  rounds have been *about* rather than only how many there were.
+
 ## [2.0.8] — 2026-08-12
 
 - **The merge gate is a script, and its decisions are executed by tests for the

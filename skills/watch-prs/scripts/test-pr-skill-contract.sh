@@ -167,7 +167,7 @@ awk '/^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_PUSHED"/ {g=NR}
 # recoverable in a way a closed round is not.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
      inb && /^"\$RB_SCRIPTS"\/pr-ci-gate\.sh N "\$HEAD_BEFORE"/ {g=NR}
-     inb && g && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+     inb && g && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
     | grep -q ok \
     && pass "…and in the automatic path the gate precedes the summary too" \
     || die "the automatic path posts its summary before knowing whether the head is green"
@@ -290,11 +290,11 @@ fi
 
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
-grep -q 'if ! gh pr edit N --repo $HOST/$OWNER/$REPO --add-reviewer @copilot; then' "$SKILL" \
+grep -q 'if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then' "$SKILL" \
     && pass "the Copilot request is branched on before the phase begins" \
     || die "a failed Copilot request still enters the Copilot phase"
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --repo $HOST/$OWNER/$REPO --body "@codex review' "$SKILL" \
+grep -q 'if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -366,7 +366,7 @@ grep -qi 'do not ask' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {c=NR}
+awk '/gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {c=NR}
      /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
     && pass "the Copilot round summary is posted before the review request" \
     || die "Copilot can be requested before the round summary exists"
@@ -422,7 +422,7 @@ grep -q 'The push is not' "$SKILL" \
 # the summary post is irreversible.
 awk '/^\*\*Automatic review ON\*\*/ {inb=1}
      inb && /^git push/ {p=NR}
-     inb && p && /gh pr comment N --repo \$HOST\/\$OWNER\/\$REPO --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
+     inb && p && /gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {print "ok"; exit}' "$SKILL" \
     | grep -q ok \
     && pass "with auto-review on, the push precedes the summary the checks decide about" \
     || die "the auto-review recipe closes the round before the checks can be read"
@@ -495,7 +495,18 @@ grep -q 'ABORT: could not locate the plugin helper scripts' "$SKILL" \
 # A COMPARISON, not a magic number: the count changes whenever a call is added,
 # and a fixed expectation fails for that reason rather than for an unpinned call.
 comment_calls="$(grep -c 'gh pr comment N' "$SKILL")"
-comment_pinned="$(grep -c 'gh pr comment N --repo $HOST/$OWNER/$REPO' "$SKILL")"
+comment_pinned="$(grep -c 'gh pr comment N --repo "$HOST/$OWNER/$REPO"' "$SKILL")"
+# THE SLUG IS QUOTED AT EVERY SITE, and this assertion used to pin the UNQUOTED
+# spelling — so it was enforcing the defect rather than catching it. Nothing in
+# `identitylib.sh` constrains what an owner or repo may contain (its shape checks
+# are on the remote and the host), and the suite covers an owner with a space in
+# it, so an unquoted slug splits into two arguments and the call targets something
+# else or fails. The runtime scripts fixed this in #28; the document had nineteen
+# sites still carrying it.
+unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquoted_slug=0
+[ "${unquoted_slug:-0}" -eq 0 ] \
+    && pass "every --repo in the document quotes the derived slug" \
+    || die "$unquoted_slug --repo call(s) would split an owner containing a space"
 [ "$comment_calls" -eq "$comment_pinned" ] \
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "$((comment_calls - comment_pinned)) gh pr comment call(s) do not pass --repo"
@@ -955,7 +966,7 @@ auto_block="$(awk '/^\*\*Automatic review ON\*\*/ {inb=1; next}
                    inb && /^```bash$/ {code=1; next}
                    inb && code && /^```$/ {exit}
                    inb && code' "$SKILL")"
-[ "$(grep -c 'gh pr comment N --repo \$HOST/\$OWNER/\$REPO --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
+[ "$(grep -c 'gh pr comment N --repo "\$HOST/\$OWNER/\$REPO" --body "\$SUMMARY"' <<<"$auto_block")" -eq 1 ] \
     && pass "the automatic path posts a standalone summary exactly once" \
     || die "the automatic path posts the round summary more than once, or not at all"
 # …and that one is inside the Copilot branch, whose request carries no body. The
@@ -1113,17 +1124,29 @@ if [ -f "$ROOT/README.md" ]; then
 fi
 
 
-# The README must not advertise Copilot as optional while the gate requires it:
-# a user would install for a repository without Copilot and find out at merge
-# time that the loop cannot finish.
+# THE README AND THE GATE MUST AGREE ABOUT COPILOT. This assertion used to demand
+# the words "required, not optional", because the gate demanded a clean verdict
+# from both reviewers and there was no way around it — a user installing for a
+# repository without Copilot would have found out at merge time that the loop
+# could not finish.
+#
+# THAT CHANGED, and the assertion changes with it rather than being deleted: the
+# gate now supports `codex-only`, chosen at the stop that closes the Codex phase.
+# What must still be true is that the README describes the SAME arrangement the
+# gate implements — that codex-only is a decision rather than a switch, and that
+# it is narrower rather than looser, because a reader who believes otherwise will
+# reach for it to get around a review.
 if [ -f "$SCRIPT_DIR/../../../README.md" ]; then
     README="$SCRIPT_DIR/../../../README.md"
-    grep -qi 'if you want the second pass' "$README" \
-        && die "README still presents Copilot as optional while the gate requires it" \
-        || pass "README does not present Copilot as optional"
-    grep -qi 'required, not' "$README" \
-        && pass "README says plainly that Copilot is required" \
-        || die "README does not state that Copilot is required"
+    grep -qi 'codex-only' "$README" \
+        && pass "README documents the Codex-only merge the gate supports" \
+        || die "README contradicts the gate: it knows nothing of codex-only"
+    grep -qiE 'narrower|not looser' "$README" \
+        && pass "…and says it is narrower rather than a way around a reviewer" \
+        || die "README presents codex-only as a skip switch"
+    grep -qi 'no switch for is skipping a reviewer' "$README" \
+        && pass "…while still ruling out skipping a reviewer silently" \
+        || die "README no longer rules out a silent skip"
 fi
 
 
@@ -1150,6 +1173,134 @@ if grep -vE '^[[:space:]]*#' "$SKILL" | grep -q 'sort -V'; then
 else
     pass "no GNU-only sort in the script-resolution fallback"
 fi
+
+# ── A RESUMED SIGNOFF IS RE-VALIDATED, NOT TRUSTED ─────────────────────────
+# The record says Codex WAS clean on that commit when it was written. It does not
+# say the commit is still the head, or that the review still stands — a dismissal
+# leaves the marker untouched. Continuing on it opens a Copilot phase against a
+# head Codex never approved, and spends the whole loop before the merge gate
+# refuses.
+resume_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
+                   sec && /^```bash$/ {inb=1; next}
+                   inb && /^```$/ {exit}
+                   inb' "$SKILL")"
+[ -n "$resume_blk" ] || die "the resume recipe could not be extracted"
+printf '%s' "$resume_blk" | grep -q 'RESUMED_HEAD' \
+    && printf '%s' "$resume_blk" | grep -q '"\$RESUMED_HEAD" != "\$CODEX_SHA"' \
+    && pass "a resumed signoff is checked against the current head" \
+    || die "the resume recipe accepts a signoff for a head that has moved"
+printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" "\$CODEX_SHA"' \
+    && pass "…and the verdict is re-read, because a review can be dismissed" \
+    || die "the resume recipe trusts a record that may have been withdrawn"
+# WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
+# answers are opposite. Before the Copilot phase the Codex signoff is the only
+# thing licensing a merge, so the head must still BE that commit. AFTER it the
+# head has advanced through Copilot fixes BY DESIGN, and the merge gate accepts
+# that delta once it has checked the trailers — so demanding equality there
+# rejects the exact state the second stop exists in, and sends the operator back
+# through a Codex phase for nothing.
+printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh N "\$COPILOT_BOT"' \
+    && printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SIGNOFF_RC" -eq 0' \
+    && pass "…and a resume after the Copilot phase is told apart from one before it" \
+    || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"
+# THE HEAD CHECK IS THE BRANCH CONDITION ITSELF now, rather than a test inside the
+# post-Copilot arm. It has to be: a stale Copilot signoff naming an older commit
+# used to SELECT that arm and then fail its own head check, reporting that neither
+# phase was closed when the Codex one plainly was.
+printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SHA" = "\$RESUMED_HEAD"' \
+    && pass "…and the post-Copilot arm is chosen only when Copilot signed THIS head" \
+    || die "a stale Copilot signoff still selects the post-Copilot arm"
+
+# ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
+# Entering the Copilot phase a second time — after a Codex pass that came back
+# clean without moving the head — leaves the previous Copilot signoff naming that
+# same head. Until the new pass reports, GitHub still exposes the old clean
+# verdict, so a resumed or concurrent session takes the post-Copilot path and
+# merges the phase that was just reopened.
+awk '/--add-reviewer @copilot/ {print NR": "$0}' "$SKILL" | head -1 >/dev/null
+awk 'BEGIN{rev=0}
+     /Review-Signoff-Revoked/ {rev=NR}
+     /--add-reviewer @copilot/ {if (rev && rev < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
+    && pass "a Copilot signoff is revoked before the phase is requested again" \
+    || die "re-requesting Copilot leaves its old signoff standing"
+
+# ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
+# The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened
+# with a Copilot recheck that runs unconditionally, and in codex-only there is no
+# Copilot review for it to find — so the driver exited before the gate it had just
+# been taught to call.
+grep -q 'if \[ "\$REVIEWERS" != codex-only \]; then' "$SKILL" \
+    && pass "the Copilot signoff block is skipped when there was no Copilot phase" \
+    || die "codex-only still runs a Copilot recheck it cannot pass"
+
+# ── THE PHASE TRANSITIONS ARE THE OPERATOR'S, NOT THE LOOP'S ───────────────
+#
+# A loop that decides for itself how much review a change is worth will always
+# decide "more": it has no view of urgency, cost, or what the change is for. Both
+# transitions therefore stop and ask — after Codex is clean, and after Copilot is.
+# The failure this prevents is not a wrong merge; it is a session that quietly
+# spends another phase of somebody's attention because continuing was the
+# direction it happened to be facing.
+grep -q 'THE NEXT PHASE IS THE OPERATOR' "$SKILL" \
+    && pass "a clean Codex verdict stops for the operator rather than opening the Copilot phase" \
+    || die "the driver opens the Copilot phase on its own"
+grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
+    && pass "…and a clean Copilot verdict stops before the merge gate" \
+    || die "the driver walks a clean Copilot verdict straight into a merge"
+# BOTH OPTIONS ARE NAMED AT EACH STOP. "Decide with the operator" without naming
+# the choices is a notification: the operator has to reconstruct what the
+# alternatives even were.
+awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'merge now' \
+    && pass "…naming merging as an alternative to the Copilot phase" \
+    || die "the Codex-clean stop does not offer merging"
+# …AND THAT OFFER IS REACHABLE. The gate required a clean COPILOT record on the
+# head, so "merge on Codex's signoff alone" was a menu item that could never be
+# chosen. The mode has to be named where it is offered AND passed where the gate
+# is run, or the offer is a dead letter again.
+awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'codex-only' \
+    && pass "…and names the mode that makes it reachable" \
+    || die "the Codex-only offer does not say how to take it"
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -qi 'fault tolerance' \
+    && pass "…and another Codex pass as an alternative to merging" \
+    || die "the Copilot-clean stop does not offer a further Codex pass"
+# …AND IT DOES NOT CLAIM BOTH REVIEWERS READ THE HEAD. Once Copilot's fixes have
+# moved it, only Copilot signed the current commit; Codex signed an older one and
+# the trailer range that carries it forward has not been validated yet. Saying
+# "both signed off on <head>" at the merge-versus-another-pass decision is a false
+# two-reviews-on-this-commit assurance at precisely the moment it matters.
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -q 'CODEX_SHA' \
+    && pass "…reporting the two signed heads separately rather than as one" \
+    || die "the stop implies both reviewers signed the same commit"
+awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+    | grep -qi 'has not run yet' \
+    && pass "…and saying the delta check has not run yet" \
+    || die "the stop presents an unvalidated delta as though it were checked"
+# THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
+# resumable rather than a dead end. A decision that arrives tomorrow must not cost
+# the phase that was already finished.
+[ "$(grep -c '\*\*Review-Signoff:\*\*' "$SKILL")" -ge 2 ] \
+    && pass "both phases record their signoff on the PR before stopping" \
+    || die "a phase closes without writing down which head it closed on"
+[ -x "$SCRIPT_DIR/pr-signoff.sh" ] \
+    && grep -q 'pr-signoff.sh' "$SKILL" \
+    && pass "…and the driver knows how to read one back in a later session" \
+    || die "nothing reads the recorded signoff back"
+
+# ── THE CHECK-IN OFFERS STARTING OVER ──────────────────────────────────────
+# Ten rounds is evidence about the APPROACH, not only about the defects left. The
+# option a loop will never propose for itself is abandoning its own work, and it
+# is the one this repository has the strongest evidence for: fifty-two rounds on a
+# text scanner, then eleven on the thing that replaced it.
+grep -qi 'start over with a better approach' "$SKILL" \
+    && pass "the round check-in offers closing the PR and starting over" \
+    || die "the check-in never raises the approach itself as the problem"
+[ "$(grep -c 'start over' "$SKILL")" -ge 3 ] \
+    && pass "…at every boundary, not only in the prose that explains one" \
+    || die "a boundary message omits the start-over option"
 
 # ── THE DRIVER CALLS THE GATE, AND READS ALL THREE ANSWERS ─────────────────
 # The gate's own decisions are executed in `test-pr-merge-gate.sh`. What has to be
@@ -1181,10 +1332,15 @@ grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' "$SKILL" \
 #
 # `$CODEX_SHA` is captured and validated in step 7; there is nothing here for the
 # driver to fill in, and the block must be runnable as written.
+# THE BLOCK THAT RUNS THE GATE, not simply the first one under the heading.
+# Step 8 opens with a block that records the Copilot signoff and stops for the
+# operator; taking "the first fenced block after the heading" silently switched
+# targets the moment that was added, and every assertion below then described a
+# different piece of code.
 merge_blk="$(awk '/^## 8\. Merge gate$/ {sec=1}
-                  sec && /^```bash$/ {inb=1; next}
-                  inb && /^```$/ {exit}
-                  inb' "$SKILL")"
+                  sec && /^```bash$/ {inb=1; buf=""; next}
+                  inb && /^```$/ {inb=0; if (buf ~ /pr-merge-gate\.sh/) {printf "%s", buf; exit}; next}
+                  inb {buf = buf $0 "\n"}' "$SKILL")"
 [ -n "$merge_blk" ] || die "the merge-gate block could not be extracted"
 if [ -n "$merge_blk" ]; then
     blk_err="$(printf '%s\n' "$merge_blk" | bash -n 2>&1)" \
@@ -1195,6 +1351,16 @@ fi
 printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' \
     && pass "…passing the sha captured when the Codex phase closed" \
     || die "the merge gate is not given the validated Codex sha"
+# …AND WHICH REVIEWERS THIS MERGE RESTS ON. The stop above offers merging on the
+# Codex signoff alone; without this argument that offer is a menu item the gate
+# rejects, because it demands a clean Copilot record on the head regardless.
+#
+# ASSERTED WHERE `merge_blk` EXISTS. Written higher up the file it ran against an
+# unset variable — `-u` was not in force for it, so it silently compared nothing
+# and reported the gate untold.
+printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW" "\$REVIEWERS"' \
+    && pass "…which the gate is actually told" \
+    || die "the merge gate is never told which reviewers this merge rests on"
 # …AND THE GATE'S STATUS LEAVES THE BLOCK. Every arm of the dispatch ends in an
 # `echo`, whose status is 0, so a block that just falls off the end reports success
 # for a merge that was blocked, paused or queued — and whatever runs it next

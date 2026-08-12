@@ -129,13 +129,21 @@ usually mean the change is too large, and splitting the PR is the faster route.
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
   Until it is linked, `@codex` replies with a setup link instead of a review —
   that reply is the diagnostic.
-- **Copilot code review available to the repository.** This is required, not
-  optional: the merge gate demands a clean verdict from *both* reviewers, and the
-  Copilot phase stops rather than skipping if the request cannot be made. On a
-  repository without Copilot the loop runs its Codex phase and then cannot
-  finish. There is deliberately no skip switch — a gate with a documented way
-  around it stops being a gate — so if you want a Codex-only loop, stop after the
-  Codex phase and merge by hand.
+- **Copilot code review**, if you want the two-reviewer loop. It is the default
+  and the norm: the merge gate demands a clean verdict from *both* reviewers, and
+  the Copilot phase stops rather than skipping if the request cannot be made.
+
+  **A Codex-only merge is supported, and it is a decision rather than a switch.**
+  When the Codex phase closes, the loop stops and asks; choosing to merge there
+  runs the gate in `codex-only` mode. That mode is **narrower**, not looser: the
+  two-reviewer path tolerates a head that advanced past Codex's signoff because
+  every commit since carries a `Review-Phase: copilot` trailer, and with no Copilot
+  phase there are no such commits and nothing licenses the delta — so it requires
+  the head to *be* the commit Codex signed.
+
+  What there is deliberately no switch for is skipping a reviewer *silently*. The
+  mode is named at the stop, passed to the gate explicitly, and an unrecognised
+  value is refused rather than read as the permissive one.
 
 No daemon, no `codex` CLI, no `inotify-tools`, no systemd.
 
@@ -371,7 +379,22 @@ checkout rather than inherit from a clone.
 A watch ends when it reports a verdict, so one arming covers one review. Re-arming
 is part of requesting the next review, not a separate question.
 
-### Round check-in
+#### The phase transitions are yours
+
+The loop does not decide how much review your change is worth. It stops twice and
+asks:
+
+- **When Codex is clean** — merge on that signoff alone, or open the Copilot
+  phase on the same head. One reviewer's clean pass is a legitimate place to stop.
+- **When Copilot is clean** — merge, or ask Codex again as fault tolerance over
+  what the Copilot phase changed.
+
+Both stops are **resumable**. Each signoff is recorded on the pull request as a
+`**Review-Signoff:**` comment naming the reviewer and the exact head, so a
+decision that arrives tomorrow — or on another machine — costs nothing that was
+already done. `pr-signoff.sh <pr> <reviewer>` reads it back.
+
+## Round check-in
 
 A review loop can run many rounds, so it stays *your* decision to keep going
 rather than rubber-stamping an endless back-and-forth: every **10 distinct

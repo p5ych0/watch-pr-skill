@@ -20,9 +20,10 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-merge-range.sh` | Whether every commit since the reviewed SHA is a review-fix commit reachable from it. |
 | `skills/watch-prs/scripts/pr-findings.sh` | The unresolved findings, paginated and shape-validated, and the body of a blocking review. |
 | `skills/watch-prs/scripts/pr-round-count.sh` | How many rounds this PR has had, and whether this is an operator check-in boundary. |
+| `skills/watch-prs/scripts/pr-signoff.sh` | Which head a reviewer has signed off clean on, read back from the PR itself. The record is a comment, so it survives the session that made it. |
 | `skills/watch-prs/scripts/pr-ci-state.sh` | Whether the pushed head's checks are green, still running, failing, or absent. |
 | `skills/watch-prs/scripts/pr-ci-gate.sh` | Waits until those checks have settled on the head just pushed, and says whether the round may close. Was a function in `SKILL.md`, where nothing could test it — see #26. |
-| `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
+| `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. Takes a reviewers mode: `both`, or `codex-only` which requires the head to BE the reviewed commit. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. |
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is — one definition, sourced by every helper that reads the API. |
