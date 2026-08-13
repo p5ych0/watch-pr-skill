@@ -65,6 +65,20 @@
   `signoff_vouches`, because the existing `signoff_contradicts` answers "does a
   record disagree" and NOTHING RECORDED is not a disagreement.
 
+  **A head is not a moment.** The first version of that acceptance took a signoff
+  naming the same sha as proof the operator had answered — but a signoff recorded
+  for an EARLIER clean review on an unchanged head would then vouch for a LATER
+  replies-only review nobody read. The record must be newer than the review it
+  answers, so `pr-signoff.sh` carries `at=<createdAt>` (before `sha=`, because
+  every caller reads the sha with `${line##*sha=}` and a field after it would be
+  swallowed into the value) and `pr-review-state.sh` gained `review-at`. Equal
+  timestamps refuse: GitHub stamps to the second, and merge permission is not a
+  coin toss.
+
+  The replies-only record is matched in full for the same reason — a `*` between
+  `findings=` and the suffix accepted an empty count and any appended field, and
+  that shape both bypasses the status gate and can authorise a merge.
+
   `in_reply_to_id: null` is "no parent", not a malformed record. github.com omits
   the key, so a first version rejected null as unreadable — and a host that
   serialises its nullable fields would then have made every ordinary finding page

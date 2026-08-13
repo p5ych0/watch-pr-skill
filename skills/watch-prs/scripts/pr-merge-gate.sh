@@ -273,10 +273,28 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
 # the record is ever compared, so it asks this instead; the PROOF that an operator
 # vouched stays where the records are checked in full.
 replies_only_line() {   # replies_only_line <reviewer> <sha> <line> ; 0 if that shape
-    case "$3" in
-        "PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=findings findings="*" source=replies-only") return 0 ;;
+    # MATCHED IN FULL, LIKE EVERY OTHER RECORD HERE. A `*` between `findings=` and
+    # the suffix accepted an empty count and any field anyone appended —
+    # `findings= source=replies-only`, or `findings=1 extra=x` — and this shape
+    # bypasses the status gate and can authorise a merge, so it is the last place
+    # to be relaxed about a wildcard.
+    #
+    # The prefix is compared as a LITERAL, never interpolated into a regex: these
+    # logins end in `[bot]`, which a regex reads as a character class.
+    local prefix="PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=findings findings="
+    local rest="${3#"$prefix"}"
+    [ "$rest" != "$3" ] || return 1
+    case "$rest" in
+        *" source=replies-only") ;;
+        *) return 1 ;;
     esac
-    return 1
+    local n="${rest% source=replies-only}"
+    case "$n" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    # A replies-only review HAS comments; a zero count is a different record.
+    [ "$n" -ge 1 ] 2>/dev/null || return 1
+    return 0
 }
 rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may read on
     [ "$3" -eq 0 ] && return 0
@@ -284,10 +302,28 @@ rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may
     return 1
 }
 signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
-    local who="$1" want="$2" line rc=0
+    local who="$1" want="$2" line rc=0 at rat arc=0
     line=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
     [ "${line##*sha=}" = "$want" ] || return 1
+    # A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
+    # same sha does not say that: a signoff recorded for an earlier CLEAN review on
+    # an unchanged head would vouch for a later replies-only review that nobody
+    # read. So the record must be NEWER than the review it is answering.
+    at="${line#*at=}"; at="${at%% *}"
+    case "$at" in
+        ""|*[!0-9TZ:-]*) echo "merge blocked: the $who signoff record carries no usable timestamp ('$line')"; return 1 ;;
+    esac
+    rat=$("$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
+    [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
+    [ -n "$rat" ] || { echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer"; return 1; }
+    # EQUAL IS NOT NEWER. GitHub timestamps are second-resolution, so a tie cannot
+    # be ordered — and this is merge permission, so an unorderable pair is a
+    # refusal rather than a coin toss. The same rule the verdict snapshot applies
+    # to a comment against a review.
+    [ "$at" \> "$rat" ] || {
+        echo "merge blocked: the $who signoff was recorded at $at, not after the review at $rat — it cannot be an answer to it"
+        return 1; }
     return 0
 }
 signoff_contradicts "$CODEX_BOT" "$CODEX_SHA" || exit 1

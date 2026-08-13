@@ -391,8 +391,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|review-at) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|review-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -429,6 +429,27 @@ main() {
     # The id of the authoritative review on this head, or empty when there is
     # none. A caller waiting for a re-request on an UNCHANGED head has nothing
     # else to tell the new pass from the old one.
+    # WHEN THE AUTHORITATIVE REVIEW LANDED. The merge gate needs it to tell an
+    # operator's answer from a leftover: a signoff recorded for an earlier clean
+    # review on the SAME HEAD would otherwise vouch for a later replies-only review
+    # nobody read. A head is not a moment.
+    if [ "$cmd" = "review-at" ]; then
+        local at
+        at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
+            if type != "array" then error("bad shape")
+            else [ .[]
+                   | select(.commit_id == $h)
+                   | select(.submitted_at != null)
+                   | select(.submitted_at | canonical_utc)
+                   | .submitted_at ] | sort | last // ""
+            end' 2>/dev/null)" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        printf '%s\n' "$at"
+        return 0
+    fi
+
     if [ "$cmd" = "review-id" ]; then
         local snap
         snap="$(head_review_snapshot "$pr" "$who" "$head")" || {
