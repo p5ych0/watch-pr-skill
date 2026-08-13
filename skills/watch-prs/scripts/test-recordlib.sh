@@ -267,6 +267,35 @@ out="$(rb_reserved_marker_line '```
     && pass "…and a marker inside a fence is still refused, since the readers never see the fence" \
     || die "a fenced marker was allowed through (rc=$rc out='$out')"
 
+# ── WHAT REQUESTS A REVIEW ────────────────────────────────────────────────
+# A comment CONTAINING `@codex review` is a Codex request — anywhere in it, not
+# only at the start of a line. Two callers post a body with no request intended,
+# so a quoted mention starts a pass nobody asked for.
+for _t in 'please @codex review this' \
+          'the finding said to post `@codex review` afterwards' \
+          'and then @CODEX REVIEW happens' \
+          'trailing @Codex Review'; do
+    rb_review_trigger "$_t"; rc=$?
+    [ "$rc" -eq 0 ] \
+        && pass "text that would request a pass is reported: ${_t:0:28}" \
+        || die "a trigger was missed (rc=$rc): '$_t'"
+done
+for _t in 'codex review without the at' \
+          'ordinary prose about the loop' \
+          '@codex, review this later' \
+          '@codexreview'; do
+    rb_review_trigger "$_t"; rc=$?
+    [ "$rc" -eq 1 ] \
+        && pass "…and text that would not is left alone: ${_t:0:28}" \
+        || die "a non-trigger was reported (rc=$rc): '$_t'"
+done
+# THE THREE ANSWERS ARE DISTINGUISHED, because a caller that cannot tell must stop
+# rather than post. `0` requests, `1` does not, and anything else is unknown.
+rb_review_trigger ""; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "…and empty text requests nothing" \
+    || die "empty text gave rc=$rc"
+
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
 # hand in a second and third script before this library existed, and every one of
@@ -318,6 +347,9 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # double quotes and with no glob, which is why the quote-and-glob shape is
         # what this looks for.
         /'"'"'\*\*(Review-Signoff|Review-Signoff-Revoked|Review-Pause-Acknowledged|Reviewed commit):\*\*'"'"'\*/ { print FILENAME ":" FNR ": reserved marker set" }
+        # …and the review trigger. Two callers must refuse it and a third writes
+        # it deliberately, which is exactly the split that ends up wrong in one.
+        /\*'"'"'@codex review'"'"'\*\)/ { print FILENAME ":" FNR ": review trigger" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -356,6 +388,16 @@ seen="$(scan_inline_rules "$DRIFT")"; drc4=$?
     && pass "…and catches a helper that re-implements the reserved-marker set" \
     || die "the drift guard did not catch a planted marker copy (rc=$drc4 out='$seen')"
 rm -f "$DRIFT/pr-marker-copy.sh"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$_b" in\n'
+  printf "    *'@codex review'*) return 0 ;;\n"
+  printf 'esac\n'
+} > "$DRIFT/pr-trigger-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc5=$?
+{ [ "$drc5" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-trigger-copy.sh'; } \
+    && pass "…and catches a helper that re-implements the review trigger" \
+    || die "the drift guard did not catch a planted trigger copy (rc=$drc5 out='$seen')"
+rm -f "$DRIFT/pr-trigger-copy.sh"
 
 # A helper whose name merely ENDS in the library's name is scanned, not exempted.
 # `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped

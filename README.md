@@ -321,7 +321,14 @@ Then:
    `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
    *create* the record it was quoting. (`**Reviewed commit:**` is not among them:
    that one is only read from a reviewer bot's own comment, so writing it here
-   creates nothing and is left alone.) Indent it by four spaces or quote it inline with
+   creates nothing and is left alone.)
+
+   For the same reason a body that contains **`@codex review`** is refused where
+   the comment is posted on its own — the phase summary, and a Copilot round's
+   summary. Any comment containing that text requests a Codex pass, so quoting it
+   out of a finding starts one nobody asked for, in a phase that has just stopped
+   or moved on. In a *Codex* round the mention is the request and the script
+   writes it itself, so quoting it there changes nothing and is allowed. Indent it by four spaces or quote it inline with
    backticks — either still says what you meant, because the readers only honour
    these at the start of a line. A fenced block does *not* help: the readers scan
    the raw comment body, where a line inside a fence still starts at column 0.

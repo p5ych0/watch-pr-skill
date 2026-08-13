@@ -256,3 +256,29 @@ EOF
     printf '%s\n' "$_found"
     return 0
 }
+
+# ── WHAT REQUESTS A REVIEW ─────────────────────────────────────────────────
+#
+# A comment CONTAINING `@codex review` is a request for a Codex pass — the skill's
+# own table says so, and that is the whole trigger. It does not have to be at the
+# start of a line, and nothing else about the comment matters.
+#
+# So a caller-written body that QUOTES the mention — out of a PR description, a
+# finding, or this repository's own documentation — requests a pass when it is
+# posted. Two places post such a body with no Codex request intended: the phase
+# summary, which stops for the operator immediately afterwards, and a Copilot
+# round's summary, where only Copilot should be re-requested. In both the quoted
+# mention starts a Codex pass nobody asked for, against a phase that has either
+# stopped or moved on.
+#
+# Matched case-insensitively and anywhere in the text, which is broader than the
+# marker rule deliberately: a marker is only honoured at the start of a line, and
+# this is not.
+rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not, 2 could not tell
+    local _lc
+    _lc="$(printf '%s' "${1-}" | LC_ALL=C tr '[:upper:]' '[:lower:]')" || return 2
+    case "$_lc" in
+        *'@codex review'*) return 0 ;;
+    esac
+    return 1
+}

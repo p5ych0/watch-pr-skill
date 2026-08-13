@@ -51,6 +51,7 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
 # library data — so this would sign off, or revoke, under whatever account that
 # variable named.
 rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_review_trigger "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
@@ -99,6 +100,35 @@ if [ "$STAGE" = open ]; then
     CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
     [ "$CODEX_RECHECK_RC" -eq 0 ] \
         || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_RECHECK) — the signoff is history, not a current verdict; do not open the Copilot phase"; exit 1; }
+
+    # THE RECORDED SIGNOFF IS READ BACK, not just the verdict. Reopening the Codex
+    # phase over an unchanged head posts a REVOCATION and requests a new pass, and
+    # GitHub keeps serving the old clean verdict until that pass reports — so the
+    # verdict check above still passes on a phase that was deliberately reopened,
+    # and this would revoke Copilot's signoff and re-request it underneath.
+    CODEX_RECORD=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT"); RECORD_RC=$?
+    case "$RECORD_RC" in
+        0) ;;
+        1) echo "ABORT: there is no current Codex signoff on this PR ($CODEX_RECORD) — it was revoked or never recorded; do not open the Copilot phase"; exit 1 ;;
+        *) echo "ABORT: could not read the recorded Codex signoff (rc=$RECORD_RC)"; exit 1 ;;
+    esac
+    case "$CODEX_RECORD" in
+        *" sha=$CODEX_SHA"*) ;;
+        *) echo "ABORT: the recorded Codex signoff is not for $CODEX_SHA ($CODEX_RECORD); do not open the Copilot phase"; exit 1 ;;
+    esac
+
+    # AND THE BOUNDARY IS ENFORCED AGAIN HERE. `record` publishes the signoff
+    # before it pauses, deliberately — so a later session can read that signoff
+    # back and arrive here with the boundary still unacknowledged. Checking only in
+    # `record` meant the pause was skipped by the very resume path the published
+    # signoff exists to enable.
+    "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; OPEN_ROUNDS_RC=$?
+    case "$OPEN_ROUNDS_RC" in
+        0) ;;
+        3) echo "PAUSE: round boundary reached and not acknowledged. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"
+           exit 3 ;;
+        *) echo "ABORT: could not establish the round count (rc=$OPEN_ROUNDS_RC); nothing revoked or requested"; exit 1 ;;
+    esac
 
     # The authoritative review id BEFORE the request, so the watch can tell the new
     # pass from the old one on an unchanged head. Empty is a legitimate answer (no
@@ -162,6 +192,18 @@ BODY="$(cat "$BODY_FILE")" || { echo "ABORT: could not read the phase body."; ex
 # one of their markers CREATES the record it was describing. A quoted finding
 # about an acknowledgement becomes the acknowledgement, and the round boundary it
 # answers never fires again.
+# AND MUST NOT REQUEST A REVIEW EITHER. This summary is posted on its own and the
+# script stops for the operator immediately afterwards, so a body quoting
+# `@codex review` — out of a PR description, a finding, or this repository's own
+# documentation — starts a Codex pass against a phase that has just stopped.
+rb_review_trigger "$BODY"; _trig_rc=$?
+case "$_trig_rc" in
+    1) ;;
+    0) echo "ABORT: the phase body contains '@codex review', which requests a Codex pass on its own."
+       echo "This summary is posted standalone and the loop stops after it, so that pass would answer nobody. Break the mention up, or describe it without the @."
+       exit 1 ;;
+    *) echo "ABORT: could not tell whether the phase body requests a review (rc=$_trig_rc)"; exit 1 ;;
+esac
 if _marker="$(rb_reserved_marker_line "$BODY")"; then
     echo "ABORT: the phase body starts a line with a marker the loop reads as a record: $_marker"
     echo "It would be posted under your identity and honoured. Indent it by four spaces, or quote it inline with backticks — either still says what you meant. A fenced block does NOT help: the line inside it still starts at column 0, which is all the readers look at."

@@ -46,6 +46,13 @@ esac
 exit 2
 STATESH
 chmod +x "$DIR/pr-review-state.sh"
+cat > "$DIR/pr-signoff.sh" <<'SIGNSH'
+#!/usr/bin/env bash
+printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+[ -f "$W/signoff.out" ] && cat "$W/signoff.out"
+exit "$(cat "$W/signoff.rc" 2>/dev/null || echo 0)"
+SIGNSH
+chmod +x "$DIR/pr-signoff.sh"
 for h in pr-ci-gate.sh pr-round-count.sh; do
     cat > "$DIR/$h" <<STUB
 #!/usr/bin/env bash
@@ -83,6 +90,7 @@ world() {   # world ; the state in which the phase advances cleanly
     printf '%s\n' "$HEAD40" > "$W/head.out"
     printf 'PR_REVIEW_STATE verdict=clean findings=0\n' > "$W/verdict.out"
     printf '42\n' > "$W/review-id.out"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
     printf 'the paragraph about what changed\n' > "$TMP/body.md"
 }
 run() {   # run <stage> [args…] ; prints "<rc>|<output>"
@@ -287,6 +295,21 @@ for _mk in '**Review-Pause-Acknowledged:** `chatgpt-codex-connector[bot]` `10`' 
         || die "a body carrying ${_mk%% *} gave '${got}'"
     nothing_posted "…and nothing was published under the operator's identity"
 done
+# A QUOTED `@codex review` REQUESTS A PASS. A comment CONTAINING it is the
+# trigger, and this summary is posted standalone with the loop stopping right
+# after — so the quoted mention starts a Codex pass that answers nobody.
+world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/body.md"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "contains '@codex review'"; } \
+    && pass "a body quoting the Codex trigger is refused" \
+    || die "a body quoting @codex review gave '${got}'"
+nothing_posted "…and nothing was posted to request that pass"
+world; printf 'and then @CODEX REVIEW is posted\n' > "$TMP/body.md"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…in any case, since the trigger is not case-sensitive" \
+    || die "an upper-case trigger gave '${got}'"
+
 # `**Reviewed commit:**` IS NOT REFUSED: `pr-round-count.sh` reads it only from a
 # reviewer bot's own comment, so a body posted here cannot create one.
 world; printf 'the footer reads:\n**Reviewed commit:** `0123456789`\n' > "$TMP/body.md"
@@ -390,6 +413,50 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 [ -s "$W/posted" ] \
     && die "…but the previous Copilot signoff was revoked against the moved head" \
     || pass "…and nothing revoked"
+
+# A REVOKED CODEX SIGNOFF MEANS THE PHASE WAS REOPENED. Reopening the Codex phase
+# over an unchanged head posts a revocation and requests a new pass, and GitHub
+# keeps serving the OLD clean verdict until that pass reports — so the verdict
+# check passes and only the recorded signoff says what happened.
+world; printf '1\n' > "$W/signoff.rc"; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+    && pass "a revoked Codex signoff stops the phase from opening" \
+    || die "a revoked signoff gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested underneath a reopened Codex phase" \
+    || pass "…with Copilot not requested"
+[ -s "$W/posted" ] \
+    && die "…but Copilot's signoff was revoked anyway" \
+    || pass "…and nothing revoked"
+
+# …AND A SIGNOFF FOR A DIFFERENT HEAD IS NOT THIS ONE.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$OTHER40" > "$W/signoff.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'not for'; } \
+    && pass "a recorded signoff naming another head stops the phase from opening" \
+    || die "a mismatched signoff gave '${got}'"
+
+# THE BOUNDARY IS ENFORCED AGAIN WHEN OPENING. `record` publishes the signoff
+# before it pauses, so a later session can read that signoff back and arrive here
+# with the boundary still unacknowledged — the pause skipped by the very resume
+# path the published signoff exists to enable.
+world; printf '3\n' > "$W/pr-round-count.rc"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'not acknowledged'; } \
+    && pass "an unacknowledged round boundary pauses the phase from opening" \
+    || die "an unacknowledged boundary gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested past an unacknowledged boundary" \
+    || pass "…with Copilot not requested"
+[ -s "$W/posted" ] \
+    && die "…but Copilot's signoff was revoked anyway" \
+    || pass "…and nothing revoked"
+world; printf '2\n' > "$W/pr-round-count.rc"
+got="$(run open 7 "$HEAD40")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and an unreadable count there is a stop, not a pass" \
+    || die "an unreadable count on open gave '${got}'"
 
 world; printf '1\n' > "$W/comment.rc"; got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not revoke'; } \

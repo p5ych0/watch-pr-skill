@@ -74,6 +74,26 @@
   found no major issues, so a body these callers post cannot create one — refusing
   it would stop an author describing the footer while preventing nothing.
 
+- **Quoting the trigger requests a pass.** Any comment CONTAINING `@codex review`
+  is a Codex request — the skill's own table says so — and two callers post a
+  caller-written body with no request intended: the phase summary, after which the
+  loop stops for the operator, and a Copilot round's summary, where only Copilot
+  should be re-requested. A body quoting the mention out of a finding or a PR
+  description started a Codex pass against a phase that had just stopped or moved
+  on. `rb_review_trigger` refuses one in both; in a *Codex* round the mention IS
+  the request and `pr-close-round.sh` writes it itself, so quoting it there changes
+  nothing and is allowed.
+
+- **`open` reads the recorded signoff, not only the verdict, and re-enforces the
+  boundary.** Reopening the Codex phase over an unchanged head posts a revocation
+  and requests a new pass, and GitHub keeps serving the OLD clean verdict until
+  that pass reports — so the verdict recheck passed on a phase that had been
+  deliberately reopened, and `open` would have revoked Copilot's signoff and
+  re-requested it underneath. And because `record` publishes the signoff *before*
+  it pauses, a later session could read that signoff back and reach `open` with the
+  boundary still unacknowledged: the pause skipped by the very resume path the
+  published signoff exists to enable. Both are checked before either mutation.
+
 - **An assertion that dies instead of failing is worse than none, and three
   shipped.** The ordering checks in `test-pr-skill-contract.sh` read line numbers
   with `grep -n … | head -1`, under `set -Eeuo pipefail`. When the line they check

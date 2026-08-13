@@ -452,6 +452,30 @@ got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
     || die "an indented marker was refused: '${got}'"
 printf 'the round summary\n' > "$TMP/summary.md"
 
+# ── A COPILOT ROUND MUST NOT REQUEST CODEX ────────────────────────────────
+# A comment CONTAINING `@codex review` is the trigger, and a Copilot round posts
+# its summary on its own — so a summary quoting the mention out of a finding or a
+# PR description requests Codex in the middle of the Copilot phase, which is the
+# phase ordering this loop exists to keep.
+world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
+got="$(stage gate 7 "$COPILOTBOT" "$TMP/summary.md" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "contains '@codex review'"; } \
+    && pass "a Copilot round's summary quoting the Codex trigger is refused" \
+    || die "a Copilot summary quoting the trigger gave '${got}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "it pushed with a summary that would request Codex" \
+    || pass "…before anything was pushed"
+
+# IN A CODEX ROUND THE MENTION IS THE REQUEST, and this script writes it itself,
+# so a body that also carries one changes nothing and must not be refused —
+# quoting a finding is most of what a round summary does.
+world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while a Codex round, whose request IS the mention, is left alone" \
+    || die "a Codex summary quoting the trigger was refused: '${got}'"
+printf 'the round summary\n' > "$TMP/summary.md"
+
 # ── THE THREADS ARE ANSWERED BETWEEN THE STAGES ────────────────────────────
 # This is the ordering the split exists for, and it is the one the call log can
 # only show if the fixture performs the driver's part too. A resolve cannot be

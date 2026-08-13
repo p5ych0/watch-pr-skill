@@ -81,6 +81,7 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
 # as library data — so this would validate a signoff from whatever account that
 # variable named. `rb_load` clears before it sources, which is the whole point.
 rb_load "$_RB_SELF_DIR" recordlib rb_reserved_marker_line "ABORT:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_review_trigger "ABORT:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
@@ -155,6 +156,22 @@ SUMMARY="$(cat "$SUMMARY_FILE")" || { echo "ABORT: could not read the round summ
 # about an acknowledgement becomes that acknowledgement, and the round boundary it
 # answers never fires again. The rule is `recordlib.sh`'s because
 # `pr-copilot-phase.sh` posts a caller-written body too.
+# AND IN A COPILOT ROUND IT MUST NOT REQUEST A CODEX PASS. A comment CONTAINING
+# `@codex review` is the trigger, and a Copilot round posts its summary on its
+# own — so a summary quoting the mention out of a finding or a PR description
+# requests Codex in the middle of the Copilot phase, which is the phase ordering
+# this loop exists to keep. In a CODEX round the mention is the request and this
+# script writes it itself, so a body that also carries one changes nothing.
+if [ "$WHO" = "$COPILOT_BOT" ]; then
+    rb_review_trigger "$SUMMARY"; _trig_rc=$?
+    case "$_trig_rc" in
+        1) ;;
+        0) echo "ABORT: this is a Copilot round and the summary contains '@codex review', which requests a Codex pass on its own."
+           echo "Only Copilot should be re-requested here. Break the mention up, or describe it without the @."
+           exit 1 ;;
+        *) echo "ABORT: could not tell whether the round summary requests a review (rc=$_trig_rc)"; exit 1 ;;
+    esac
+fi
 if _marker="$(rb_reserved_marker_line "$SUMMARY")"; then
     echo "ABORT: the round summary starts a line with a marker the loop reads as a record: $_marker"
     echo "It would be posted under your identity and honoured. Indent it by four spaces, or quote it inline with backticks — either still says what you meant. A fenced block does NOT help: the line inside it still starts at column 0, which is all the readers look at."

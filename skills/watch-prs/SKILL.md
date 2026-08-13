@@ -958,6 +958,12 @@ Ask Copilot:
 # indent by four spaces or quote inline. A FENCE DOES NOT HELP — the readers scan
 # the raw body, where a line inside a fence still starts at column 0.
 #
+# AND IT MUST NOT CONTAIN `@codex review`. Any comment containing that text
+# requests a Codex pass; this summary is posted on its own and the loop stops
+# right after it, so a quoted mention starts a pass that answers nobody. The
+# script refuses one. In a Codex ROUND the mention is the request and
+# `pr-close-round.sh` writes it itself, so quoting it there changes nothing.
+#
 # THE WRITE IS CHECKED, not only the read the script does. A redirection that
 # truncates the file and then fails — a full filesystem — leaves a non-empty
 # FRAGMENT that passes the script's own non-empty test and is posted as this
