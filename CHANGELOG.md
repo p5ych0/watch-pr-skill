@@ -52,6 +52,25 @@
   fix round and pauses the close-round gate, and the contract test requires every
   status the watch can exit with to be in the table the driver reads.
 
+  **And the stop has an end, or it is only a different deadlock.** The verdict
+  stays non-clean while that review is the newest, so re-running the watch returns
+  4 again, no thread exists to resolve, and re-requesting is forbidden — the first
+  version traded a deadlock for a permanent pause. The operator's answer now
+  becomes state: if the comment was a clean verdict they record the
+  `**Review-Signoff:**` line, and the merge gate accepts it FOR THAT SHAPE ONLY —
+  a `source=replies-only` verdict plus a signoff naming that head merges and says
+  so; a review with real findings is not a question anyone was asked, so a signoff
+  never carries one. If the comment was a finding, fixing it moves the head and
+  the round is ordinary again. Absence is not permission: the gate has a positive
+  `signoff_vouches`, because the existing `signoff_contradicts` answers "does a
+  record disagree" and NOTHING RECORDED is not a disagreement.
+
+  `in_reply_to_id: null` is "no parent", not a malformed record. github.com omits
+  the key, so a first version rejected null as unreadable — and a host that
+  serialises its nullable fields would then have made every ordinary finding page
+  unreadable, stopping the watch with rc 2 on every review. A string or an object
+  still is malformed.
+
   Both reviewer contracts now say to post a clean verdict as the review body or an
   issue comment rather than as a reply, since a reply-only review costs an operator
   a read — `AGENTS.md` and `.github/copilot-instructions.md`, plus `SKILL.md` and

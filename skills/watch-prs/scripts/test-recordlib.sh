@@ -182,8 +182,14 @@ want accept valid_review_comment "$(crec '{in_reply_to_id:42}')" \
 # THE MALFORMED SPELLINGS ARE THE POINT. A presence-only test read every one of
 # these as "this is a reply" and discarded the row, so a page of them counted zero
 # findings — which is `clean`, on a payload nothing could read.
-want reject valid_review_comment "$(crec '{in_reply_to_id:null}')" \
-    "…while an explicit null is rejected, not read as a reply"
+# NULL IS "NO PARENT", NOT A MALFORMED RECORD. github.com omits the key today, so
+# a first version rejected null as unreadable — and a host that serialises its
+# nullable fields would then have made every ordinary finding page unreadable,
+# stopping the watch with rc 2 on every review.
+want accept valid_review_comment "$(crec '{in_reply_to_id:null}')" \
+    "…and an explicit null, which is the same statement in another serialisation"
+want accept opens_a_thread "$(crec '{in_reply_to_id:null}')" \
+    "…which opens a thread, exactly as an absent key does"
 want reject valid_review_comment "$(crec '{in_reply_to_id:"7"}')" \
     "…and so is a string"
 want reject valid_review_comment "$(crec '{in_reply_to_id:{}}')" \

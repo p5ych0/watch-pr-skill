@@ -371,7 +371,19 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
 # A MALFORMED `in_reply_to_id` IS UNREADABLE, NOT A REPLY. A presence-only test
 # discarded such a row silently, so a page of them counted zero — which is clean,
 # on a payload nothing could read.
-for bad in 'null' '"7"' '{}'; do
+# NULL IS NOT MALFORMED — it is "no parent", the same as an absent key, so the
+# comment OPENS a thread and counts as an ordinary finding. Rejecting it would
+# make every finding page unreadable on a host that serialises nullable fields.
+printf '[{"user":{"login":"%s"},"id":9,"body":"x","created_at":"2026-01-01T00:00:00Z","in_reply_to_id":null}]' \
+    "$BOT" > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "a null in_reply_to_id is a top-level finding, not a reply and not malformed" \
+    || die "a null in_reply_to_id gave rc=$rc '$out'"
+
+for bad in '"7"' '{}' '[42]'; do
     printf '[{"user":{"login":"%s"},"id":8,"body":"x","created_at":"2026-01-01T00:00:00Z","in_reply_to_id":%s}]' \
         "$BOT" "$bad" > "$TMP/comments-950.json"
     out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \

@@ -262,6 +262,34 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
         *) echo "merge blocked: could not read the $who signoff record (rc=$rc): $line"; return 1 ;;
     esac
 }
+# THE OTHER DIRECTION, AND IT IS NOT THE SAME QUESTION. `signoff_contradicts`
+# answers "does a record disagree with this sha", and NOTHING RECORDED is not a
+# disagreement — so it passes. That is right where a signoff is a cross-check, and
+# wrong where one is the authority: the replies-only path below merges BECAUSE an
+# operator vouched, so absence there must refuse.
+# A NON-ZERO STATUS THAT IS STILL AN ANSWER. `verdict` exits 1 for a review whose
+# comments are all replies, the same as for one with findings — the STATUS cannot
+# tell them apart, only the record can. The rc gate below would refuse it before
+# the record is ever compared, so it asks this instead; the PROOF that an operator
+# vouched stays where the records are checked in full.
+replies_only_line() {   # replies_only_line <reviewer> <sha> <line> ; 0 if that shape
+    case "$3" in
+        "PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=findings findings="*" source=replies-only") return 0 ;;
+    esac
+    return 1
+}
+rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may read on
+    [ "$3" -eq 0 ] && return 0
+    [ "$3" -eq 1 ] && replies_only_line "$1" "$2" "$4" && return 0
+    return 1
+}
+signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
+    local who="$1" want="$2" line rc=0
+    line=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
+    [ "$rc" -eq 0 ] || return 1
+    [ "${line##*sha=}" = "$want" ] || return 1
+    return 0
+}
 signoff_contradicts "$CODEX_BOT" "$CODEX_SHA" || exit 1
 
 # ── CODEX-ONLY IS A REAL OPTION, AND IT COSTS SOMETHING ────────────────────
@@ -282,7 +310,7 @@ if [ "$REVIEWERS" = codex-only ]; then
         echo "merge blocked: codex-only merges must be pinned to the reviewed commit, and the head has moved past it (head=${HEAD_OID:0:7} signed=${CODEX_SHA:0:7}). Request a review of this head, or open the Copilot phase."
         exit 1
     fi
-    if [ "$CODEX_RC" -ne 0 ]; then
+    if ! rc_answered "$CODEX_BOT" "$CODEX_EFFECTIVE_SHA" "$CODEX_RC" "$CODEX_VERDICT"; then
         echo "merge blocked: codex=$CODEX_RC (1 = not clean, 2 = could not tell)"; exit 1
     fi
     COPILOT_VERDICT=""; COPILOT_RC=0
@@ -291,7 +319,8 @@ else
     # no Copilot phase to reopen in the other one.
     signoff_contradicts "$COPILOT_BOT" "$HEAD_OID" || exit 1
     COPILOT_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
-    if [ "$CODEX_RC" -ne 0 ] || [ "$COPILOT_RC" -ne 0 ]; then
+    if ! rc_answered "$CODEX_BOT" "$CODEX_EFFECTIVE_SHA" "$CODEX_RC" "$CODEX_VERDICT" \
+       || ! rc_answered "$COPILOT_BOT" "$HEAD_OID" "$COPILOT_RC" "$COPILOT_VERDICT"; then
         echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 1
     fi
 fi
@@ -322,7 +351,35 @@ for SPEC in "$@"; do
     V_WHO="${SPEC%%|*}"; V_REST="${SPEC#*|}"; V_SHA="${V_REST%%|*}"; V_LINE="${V_REST#*|}"
     V_WANT="PR_REVIEW_STATE pr=$PR sha=${V_SHA:0:7} reviewer=$V_WHO verdict=clean findings=0"
     if [ "$V_LINE" != "$V_WANT" ]; then
-        echo "merge blocked: $V_WHO did not return an exact clean record for ${V_SHA:0:7} ('$V_LINE')"; exit 1
+        # THE ONE VERDICT AN OPERATOR CAN ANSWER FOR. A review whose comments are
+        # ALL replies says `source=replies-only`: there is nothing for
+        # `pr-findings.sh` to list and it is not a signoff, because a verdict
+        # followed by explanation and a verdict followed by a retraction read the
+        # same. The loop stops and a human reads the comment — and until now that
+        # was where it ENDED. The verdict could never become clean, no round could
+        # close, and this gate blocked forever: a deadlock traded for a permanent
+        # pause.
+        #
+        # So the operator's own record answers it. `pr-signoff.sh` already carries
+        # a head-bound statement from an OWNER, MEMBER or COLLABORATOR, and
+        # `signoff_contradicts` has already proved that record names THIS sha —
+        # the check runs above, for every reviewer, before this loop.
+        #
+        # NARROW ON PURPOSE. It applies only to `source=replies-only`, never to a
+        # review with findings, an unreadable state, or a missing verdict: those
+        # are not questions an operator was asked. A signoff is not a way to merge
+        # past a reviewer.
+        if replies_only_line "$V_WHO" "$V_SHA" "$V_LINE"; then
+            # AND THE RECORD MUST BE THERE. Absence is not permission.
+            if signoff_vouches "$V_WHO" "$V_SHA"; then
+                echo "note: $V_WHO left only replies on ${V_SHA:0:7}; merging on the signoff an operator recorded for that head after reading them"
+            else
+                echo "merge blocked: $V_WHO left only replies on ${V_SHA:0:7} and no operator has recorded a signoff for that head — read the reply and record one, or fix what it says and push"
+                exit 1
+            fi
+        else
+            echo "merge blocked: $V_WHO did not return an exact clean record for ${V_SHA:0:7} ('$V_LINE')"; exit 1
+        fi
     fi
 done
 

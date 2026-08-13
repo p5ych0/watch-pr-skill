@@ -259,6 +259,12 @@ Then:
    is nothing to fix and it is not a signoff, so one comment gets read by a human.
    Both round-closing paths honour that status, so a push-triggered pass cannot
    slip past it either.
+
+   **Your answer becomes state, so the stop ends.** If the comment was a clean
+   verdict, the skill records a `**Review-Signoff:**` line for that reviewer and
+   head, and the merge gate accepts it *for that shape only*. If it was a finding,
+   fix it and push — the head moves and the round is ordinary again. With no
+   signoff recorded the gate refuses and says which of the two to do.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

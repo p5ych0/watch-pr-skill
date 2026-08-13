@@ -423,6 +423,22 @@ question — and none of those can be told apart by reading the text. Entering s
 which is the loop this status exists to end. Say what the comment was, and let
 the operator decide.
 
+**AND THE DECISION IS RECORDED, or the stop is just a different deadlock.** The
+verdict stays non-clean for as long as that review is the newest one: re-running
+the watch returns 4 again, there is no thread to resolve, and re-requesting is
+forbidden. So the operator's answer has to become state:
+
+- **it was a clean verdict** — record the signoff for that reviewer and head, the
+  same `**Review-Signoff:**` line step 7 writes. The merge gate accepts it *for
+  this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
+  that head merges, and says so in its output. A review with real findings is not
+  a question anyone was asked, so a signoff never carries one;
+- **it was a finding** — fix it and push. The head moves, the round is ordinary
+  again, and nothing needs an override.
+
+Absence is not permission: with no signoff recorded, the gate refuses and names
+what to do.
+
 The states it reports, and what each means:
 
 | state | meaning |

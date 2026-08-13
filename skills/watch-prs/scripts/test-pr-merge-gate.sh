@@ -320,6 +320,51 @@ case_is 1 "did not return an exact clean record" "…and Codex's own record does
 world; printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
 case_is 1 "copilot=1" "a non-clean Copilot verdict blocks"
 
+# ── A REPLIES-ONLY VERDICT IS THE ONE AN OPERATOR CAN ANSWER ──────────────
+# A review whose comments are ALL replies is neither answer: nothing for
+# `pr-findings.sh` to list, and not a signoff, because a verdict followed by
+# explanation reads exactly like one followed by a retraction. The loop stops for
+# a human — and without this the stop was where it ENDED: the verdict could never
+# become clean, so this gate blocked forever. A deadlock traded for a permanent
+# pause is not a fix.
+replies_only() {   # replies_only <bot> ; that reviewer left only replies on the head
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only' \
+        "${HEAD40:0:7}" "$1" > "$STUB_DIR/pr-review-state.$1.out"
+    printf '1' > "$STUB_DIR/pr-review-state.$1.rc"
+}
+vouched() {   # vouched <bot> ; an operator recorded a signoff for THIS head
+    printf '0' > "$STUB_DIR/pr-signoff.rc"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$1" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+}
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+case_is 0 "left only replies" "a replies-only verdict merges on the signoff an operator recorded"
+
+# WITHOUT THAT RECORD IT REFUSES. `signoff_contradicts` answers "does a record
+# disagree", and nothing recorded is not a disagreement — so reusing it here would
+# have merged a replies-only head that no human ever read.
+world; replies_only "$COPILOTBOT"
+case_is 1 "no operator has recorded a signoff" "…and refuses when nobody has recorded one"
+
+# …AND THE RECORD HAS TO NAME THIS HEAD.
+world; replies_only "$COPILOTBOT"
+printf '0' > "$STUB_DIR/pr-signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$COPILOTBOT" "$OLD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "signoff names" "…and refuses when the record names another head"
+
+# THE EXEMPTION IS FOR THAT SHAPE ONLY. A review with real findings is not a
+# question an operator was asked, so a recorded signoff must not carry it.
+world; vouched "$COPILOTBOT"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=2' "${HEAD40:0:7}" "$COPILOTBOT" \
+    > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+# It refuses at the status gate rather than the record comparison, which is
+# earlier and equally final — so what this asserts is the OUTCOME and the absence
+# of the note, not which line said no.
+got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qv 'merging on the signoff'; } \
+    && pass "…while a signoff does not carry a review that has findings" \
+    || die "a signoff carried a review with findings — rc=$rc out='$body'"
+
 # ── WHAT THE GATE ASKS, NOT ONLY WHAT IT IS TOLD ───────────────────────────
 #
 # PLACED AFTER `codex_none_world` IS DEFINED. Bash defines a function when it
