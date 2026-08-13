@@ -595,10 +595,19 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
 # enumeration out of Markdown, which this repository has twice paid for and
 # deleted. So the count is PINNED instead: adding or removing a marker fails here
 # with a message naming both documents, and the prose is then read by a human.
-_mk_arms="$(grep -c "^            '\*\*Review" "$SCRIPT_DIR/recordlib.sh")" || _mk_arms=0
-[ "$_mk_arms" -eq 2 ] \
+# DERIVED FROM THE CASE ARMS, NOT COUNTED BY LINE. The first version counted
+# SOURCE LINES and looped over three hard-coded names: deleting one marker from a
+# line that carries two left the count at 2 and the loop still found all three
+# names in the documents, so the suite passed while the runtime accepted a marker
+# the docs said it refused — the exact drift this exists to prevent. The set is
+# read out of the `case` arms now, so membership and cardinality both come from
+# the rule.
+_mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'\*" "$SCRIPT_DIR/recordlib.sh" \
+    | sed "s/^'\*\*//; s/\*\*'\*$//" | sort -u)" || true
+_mk_n="$(printf '%s\n' "$_mk_set" | grep -c . )" || _mk_n=0
+[ "$_mk_n" -eq 3 ] \
     && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
-    || die "the reserved-marker set changed ($_mk_arms case lines, expected 2) — update SKILL.md and README.md, then this count"
+    || die "the reserved-marker set changed ($_mk_n markers, expected 3: $(printf '%s' "$_mk_set" | tr '\n' ' ')) — update SKILL.md and README.md, then this count"
 # SCOPED TO THE REFUSAL PASSAGE, not to the file. Both documents name these
 # markers elsewhere — `README.md` documents the acknowledgement's own format in the
 # round-boundary section — so a whole-file `grep` is satisfied by a mention that
@@ -610,7 +619,7 @@ _readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/READ
 { [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \
     && pass "…and both layers still carry the passage that tells an author about them" \
     || die "the refusal passage is gone from SKILL.md or README.md (skill=${#_skill_pass} readme=${#_readme_pass})"
-for _m in 'Review-Signoff:' 'Review-Signoff-Revoked:' 'Review-Pause-Acknowledged:'; do
+for _m in $_mk_set; do
     { printf '%s' "$_skill_pass" | grep -qF "**$_m**" \
         && printf '%s' "$_readme_pass" | grep -qF "**$_m**"; } \
         && pass "…and $_m is named in both layers an author reads" \
