@@ -307,13 +307,17 @@ Then:
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;
-   - `open <PR> <sha>` runs only on the answer. **A recorded signoff is history,
-     not a current verdict**, so it re-reads Codex's verdict against that sha as
-     well as re-proving the head has not moved — a review dismissed while the head
-     stood still leaves head-equality passing, and the whole Copilot phase would
-     be spent before the merge gate discovered it. The answer can arrive a session
-     later, so the head is checked again immediately before the request. Then it
-     revokes any earlier Copilot signoff and requests the pass.
+   - `open <PR> <sha>` runs only on the answer, and proves the phase is still
+     open before it changes anything: the head is unmoved, Codex's **live verdict**
+     on that sha is clean, and the **recorded Codex signoff** still names it. A
+     recorded signoff is history, not a current verdict — and a revocation is how a
+     phase is deliberately reopened, while GitHub keeps serving the old clean
+     verdict until the new pass reports, so neither check answers for the other.
+     It also **re-enforces the round boundary**, because the signoff is published
+     before the pause and a later session can resume straight into this stage; that
+     is why `open` can stop for you rather than proceeding. All of it runs again
+     immediately before the mutations, since none of these need the head to move.
+     Then it revokes any earlier Copilot signoff and requests the pass.
 
    The body you supply is prose and is posted under your identity, so a line that
    reproduces one of the record markers a reader trusts from *you* —
@@ -321,17 +325,23 @@ Then:
    `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
    *create* the record it was quoting. (`**Reviewed commit:**` is not among them:
    that one is only read from a reviewer bot's own comment, so writing it here
-   creates nothing and is left alone.)
+   creates nothing and is left alone.) **To keep one:** indent it by four spaces
+   or quote it inline with backticks — either still says what you meant, because
+   the readers only honour these at the start of a line. A fenced block does *not*
+   help: the readers scan the raw comment body, where a line inside a fence still
+   starts at column 0.
 
-   For the same reason a body that contains **`@codex review`** is refused where
-   the comment is posted on its own — the phase summary, and a Copilot round's
-   summary. Any comment containing that text requests a Codex pass, so quoting it
-   out of a finding starts one nobody asked for, in a phase that has just stopped
-   or moved on. In a *Codex* round the mention is the request and the script
-   writes it itself, so quoting it there changes nothing and is allowed. Indent it by four spaces or quote it inline with
-   backticks — either still says what you meant, because the readers only honour
-   these at the start of a line. A fenced block does *not* help: the readers scan
-   the raw comment body, where a line inside a fence still starts at column 0.
+   For a related reason a body containing **`@codex review`** is refused where the
+   comment is posted on its own — the phase summary, and a Copilot round's summary.
+   Any comment containing that text requests a Codex pass, so quoting it out of a
+   finding starts one nobody asked for, in a phase that has just stopped or moved
+   on. In a *Codex* round the mention is the request and the script writes it
+   itself, so quoting it there changes nothing and is allowed.
+
+   **The remedy is a different one, and indenting is not it.** This trigger is
+   matched case-insensitively *anywhere* in the body, not at the start of a line —
+   so an indented, quoted or fenced mention still requests the pass and is still
+   refused. Break it up, or write it without the `@`.
 
    Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
    `Review-Phase: copilot` trailer, which is how the merge gate knows the head

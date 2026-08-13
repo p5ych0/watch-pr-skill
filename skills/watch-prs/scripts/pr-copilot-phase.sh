@@ -85,37 +85,47 @@ if [ "$STAGE" = open ]; then
     # a session later, so this is re-proven rather than assumed. Requesting
     # Copilot while the head has moved past the signoff spends the entire phase
     # on one commit and the merge gate on another, and only the gate finds out.
-    HEAD_NOW=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-        || { echo "ABORT: could not read the current head; do not open the phase blind."; exit 1; }
-    _why="$(sha_reason "$HEAD_NOW")" \
-        || { echo "ABORT: the current head is not a full OID ($_why: '$HEAD_NOW')."; exit 1; }
-    [ "$HEAD_NOW" = "$CODEX_SHA" ] \
-        || { echo "ABORT: the head is $HEAD_NOW, not the $CODEX_SHA Codex signed off; re-run the Codex phase for what is there now."; exit 1; }
+    # WHETHER THE CODEX PHASE IS STILL OPEN ON THIS COMMIT — one definition, asked
+    # TWICE. Every one of these can change while the probes below run without the
+    # head moving: another session dismisses the verdict, or posts a Codex
+    # revocation to reopen the phase. Checking once at the top proves a state that
+    # may not survive to the mutations, so this runs again immediately before them.
+    phase_still_open() {
+        local head recheck rc record
+        head=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+            || { echo "ABORT: could not read the current head; do not open the phase blind."; return 1; }
+        _why="$(sha_reason "$head")" \
+            || { echo "ABORT: the current head is not a full OID ($_why: '$head')."; return 1; }
+        [ "$head" = "$CODEX_SHA" ] \
+            || { echo "ABORT: the head is $head, not the $CODEX_SHA Codex signed off; re-run the Codex phase for what is there now."; return 1; }
 
-    # AND THE VERDICT IS RE-READ, because an unchanged head does not mean an
-    # unchanged verdict. A review dismissed while the head stood still leaves this
-    # equality passing and the recorded signoff describing a phase that is no
-    # longer clean — and a recorded signoff is HISTORY, not current state. Without
-    # this the whole Copilot phase is spent before the merge gate discovers it.
-    CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
-    [ "$CODEX_RECHECK_RC" -eq 0 ] \
-        || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_RECHECK) — the signoff is history, not a current verdict; do not open the Copilot phase"; exit 1; }
+        # THE VERDICT, because an unchanged head does not mean an unchanged
+        # verdict: a review dismissed while the head stood still leaves the
+        # equality passing and the recorded signoff describing a phase that is no
+        # longer clean.
+        recheck=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); rc=$?
+        [ "$rc" -eq 0 ] \
+            || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($recheck) — the signoff is history, not a current verdict; do not open the Copilot phase"; return 1; }
 
-    # THE RECORDED SIGNOFF IS READ BACK, not just the verdict. Reopening the Codex
-    # phase over an unchanged head posts a REVOCATION and requests a new pass, and
-    # GitHub keeps serving the old clean verdict until that pass reports — so the
-    # verdict check above still passes on a phase that was deliberately reopened,
-    # and this would revoke Copilot's signoff and re-request it underneath.
-    CODEX_RECORD=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT"); RECORD_RC=$?
-    case "$RECORD_RC" in
-        0) ;;
-        1) echo "ABORT: there is no current Codex signoff on this PR ($CODEX_RECORD) — it was revoked or never recorded; do not open the Copilot phase"; exit 1 ;;
-        *) echo "ABORT: could not read the recorded Codex signoff (rc=$RECORD_RC)"; exit 1 ;;
-    esac
-    case "$CODEX_RECORD" in
-        *" sha=$CODEX_SHA"*) ;;
-        *) echo "ABORT: the recorded Codex signoff is not for $CODEX_SHA ($CODEX_RECORD); do not open the Copilot phase"; exit 1 ;;
-    esac
+        # AND THE RECORDED SIGNOFF, which is the only thing that says the phase was
+        # deliberately REOPENED. Reopening posts a revocation and requests a new
+        # pass, and GitHub keeps serving the old clean verdict until that pass
+        # reports — so the verdict alone still passes on a reopened phase.
+        record=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT"); rc=$?
+        case "$rc" in
+            0) ;;
+            1) echo "ABORT: there is no current Codex signoff on this PR ($record) — it was revoked or never recorded; do not open the Copilot phase"; return 1 ;;
+            *) echo "ABORT: could not read the recorded Codex signoff (rc=$rc)"; return 1 ;;
+        esac
+        case "$record" in
+            *" sha=$CODEX_SHA"*) ;;
+            *) echo "ABORT: the recorded Codex signoff is not for $CODEX_SHA ($record); do not open the Copilot phase"; return 1 ;;
+        esac
+        return 0
+    }
+    # Once here, so a phase that is already closed costs one round-trip rather than
+    # the whole probe sequence.
+    phase_still_open || exit 1
 
     # AND THE BOUNDARY IS ENFORCED AGAIN HERE. `record` publishes the signoff
     # before it pauses, deliberately — so a later session can read that signoff
@@ -129,12 +139,6 @@ if [ "$STAGE" = open ]; then
            exit 3 ;;
         *) echo "ABORT: could not establish the round count (rc=$OPEN_ROUNDS_RC); nothing revoked or requested"; exit 1 ;;
     esac
-
-    # The authoritative review id BEFORE the request, so the watch can tell the new
-    # pass from the old one on an unchanged head. Empty is a legitimate answer (no
-    # review yet); only a failed read is fatal.
-    PRIOR_REVIEW=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
-        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
     # AND RE-READ ONCE MORE, IMMEDIATELY BEFORE THE MUTATIONS. The probes above
     # take time: a push landing after the equality check but during the verdict or
@@ -150,6 +154,12 @@ if [ "$STAGE" = open ]; then
     [ "$HEAD_STILL" = "$CODEX_SHA" ] \
         || { echo "ABORT: the head moved to $HEAD_STILL while this phase was being proved; nothing was revoked or requested."; exit 1; }
 
+    # …AND SO IS EVERYTHING ELSE THAT CAN CHANGE WITHOUT IT. A dismissal or a Codex
+    # revocation posted while the probes above ran leaves the head where it was, so
+    # the head check alone would pass and this would revoke Copilot's signoff and
+    # request a pass underneath a phase somebody had just reopened.
+    phase_still_open || exit 1
+
     # ANY EXISTING COPILOT SIGNOFF IS REVOKED FIRST. Entering this phase a second
     # time — after a Codex pass that returned clean without moving the head —
     # leaves the previous Copilot signoff naming that same head. Until the new pass
@@ -162,6 +172,16 @@ if [ "$STAGE" = open ]; then
     gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" \
         --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$RB_COPILOT_BOT")" \
         || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 1; }
+
+    # THE BASELINE IS READ HERE, after the revocation and immediately before the
+    # request. Read earlier, a Copilot pass already in flight on this unchanged head
+    # could finish during the probes or the revocation — and `pr-watch.sh
+    # --after-review` would then accept that pre-request review as the answer to a
+    # request made after it, advancing the phase on a pass nobody asked for.
+    #
+    # Empty is a legitimate answer (no review yet); only a failed read is fatal.
+    PRIOR_REVIEW=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
+        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
     # for, so entering the phase would poll for a review nobody asked for and then

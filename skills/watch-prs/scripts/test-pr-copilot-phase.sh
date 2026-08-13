@@ -38,9 +38,18 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
 # mutations exists to close.
 [ -f "$W/move-head-on-probe" ] && cat "$W/move-head-on-probe" > "$W/head.out"
 case "${1:-}" in
-    verdict)   cat "$W/verdict.out" 2>/dev/null
+    verdict)   _n=$(( $(cat "$W/verdict.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$W/verdict.n"
+               if [ "$_n" -ge 2 ] && [ -f "$W/verdict.2.rc" ]; then
+                   cat "$W/verdict.2.out" 2>/dev/null; exit "$(cat "$W/verdict.2.rc")"
+               fi
+               cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
-    review-id) cat "$W/review-id.out" 2>/dev/null
+    review-id) # THE BASELINE IS READ ONCE, LAST. A pass that lands during the
+               # probes must not be the value handed to `--after-review`, so the
+               # fixture can change what this returns after the revocation.
+               [ -f "$W/posted" ] && [ -f "$W/review-id.after.out" ] \
+                   && { cat "$W/review-id.after.out"; exit 0; }
+               cat "$W/review-id.out" 2>/dev/null
                exit "$(cat "$W/review-id.rc" 2>/dev/null || echo 0)" ;;
 esac
 exit 2
@@ -49,6 +58,13 @@ chmod +x "$DIR/pr-review-state.sh"
 cat > "$DIR/pr-signoff.sh" <<'SIGNSH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+# A SECOND ANSWER, FOR THE SECOND ASK. The phase is proved twice — once up front
+# and once immediately before the mutations — and the whole question is what
+# happens when another session changes something in between. `.2` is that change.
+_n=$(( $(cat "$W/signoff.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$W/signoff.n"
+if [ "$_n" -ge 2 ] && [ -f "$W/signoff.2.out" ]; then
+    cat "$W/signoff.2.out"; exit "$(cat "$W/signoff.2.rc" 2>/dev/null || echo 0)"
+fi
 [ -f "$W/signoff.out" ] && cat "$W/signoff.out"
 exit "$(cat "$W/signoff.rc" 2>/dev/null || echo 0)"
 SIGNSH
@@ -397,6 +413,42 @@ world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$'; } \
     && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
+
+# A DISMISSAL OR A REVOCATION DURING THE PROBES. Neither moves the head, so the
+# head check alone passes — and the phase is proved twice for exactly this: once
+# up front, once immediately before the mutations.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.2.out"
+printf '1\n' > "$W/signoff.2.rc"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+    && pass "a Codex signoff revoked while the phase was being proved stops it" \
+    || die "a mid-probe revocation gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested underneath a phase reopened mid-probe" \
+    || pass "…with Copilot not requested"
+
+world; printf '1\n' > "$W/verdict.2.rc"
+printf 'PR_REVIEW_STATE verdict=none reason=dismissed\n' > "$W/verdict.2.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+    && pass "…and so does a verdict dismissed while it was being proved" \
+    || die "a mid-probe dismissal gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested on a verdict withdrawn mid-probe" \
+    || pass "…with Copilot not requested"
+
+# THE BASELINE IS THE LAST THING READ BEFORE THE REQUEST. A Copilot pass already
+# in flight on this unchanged head can finish during the probes or the revocation,
+# and a baseline captured earlier would let `--after-review` accept that
+# pre-request review as the answer to a request made after it.
+world; printf '7\n' > "$W/review-id.out"; printf '99\n' > "$W/review-id.after.out"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'prior-review=99'; } \
+    && pass "the baseline is read after the revocation, so a pass landing meanwhile is waited past" \
+    || die "the baseline was captured before the revocation: '${got}'"
+before 'gh pr comment' 'pr-review-state.sh review-id' \
+    && pass "…and the call order says so" \
+    || die "the baseline was read before the revocation: $(cat "$TMP/calls")"
 
 # A PUSH DURING THE PROBES. The equality check passed, and the verdict is pinned
 # to the recorded sha so it stays clean — while the revocation and the request

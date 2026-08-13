@@ -964,6 +964,11 @@ Ask Copilot:
 # script refuses one. In a Codex ROUND the mention is the request and
 # `pr-close-round.sh` writes it itself, so quoting it there changes nothing.
 #
+# THE REMEDY IS NOT THE SAME ONE. That trigger is matched case-insensitively
+# ANYWHERE in the body, not at the start of a line — so indenting it, quoting it
+# inline or fencing it changes nothing and the summary is still refused. Break the
+# mention up, or write it without the `@`.
+#
 # THE WRITE IS CHECKED, not only the read the script does. A redirection that
 # truncates the file and then fails — a full filesystem — leaves a non-empty
 # FRAGMENT that passes the script's own non-empty test and is posted as this
@@ -1014,12 +1019,24 @@ way — the signoff is on the PR, so a later session reads it back with
 ```bash
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
-# then. A RECORDED SIGNOFF IS HISTORY, NOT A CURRENT VERDICT: `open` re-reads
-# Codex's verdict against that sha as well as re-proving the head, because a
-# review dismissed while the head stood still leaves head-equality passing and the
-# whole phase would be spent before the merge gate discovered it. The answer can
-# arrive in a later session, so the head is checked again immediately before the
-# request.
+# then. `open` PROVES THE PHASE IS STILL OPEN before it changes anything, and all
+# three parts are needed because none of them requires the head to move:
+#
+#   · the head is unmoved;
+#   · Codex's LIVE verdict on that sha is clean — a recorded signoff is history,
+#     and a review dismissed while the head stood still leaves head-equality
+#     passing;
+#   · the RECORDED Codex signoff still names it — a revocation is how a phase is
+#     deliberately reopened, and GitHub serves the old clean verdict until the new
+#     pass reports, so the verdict alone cannot see it.
+#
+# It re-enforces the ROUND BOUNDARY too, which is why `open` can return 3: the
+# signoff is published before `record` pauses, so a later session can resume
+# straight into this stage with the boundary unacknowledged.
+#
+# ALL OF IT RUNS TWICE — once up front, and again immediately before the mutations
+# — because another session can change any of it while the probes in between are
+# running.
 OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \

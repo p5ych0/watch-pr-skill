@@ -84,6 +84,11 @@
   the request and `pr-close-round.sh` writes it itself, so quoting it there changes
   nothing and is allowed.
 
+  **Its remedy is not the marker remedy**, and the documentation said otherwise for
+  a round: the trigger matches case-insensitively ANYWHERE in the body, so
+  indenting or fencing a mention changes nothing — it has to be broken up or
+  written without the `@`. The marker rule is the line-anchored one.
+
 - **`open` reads the recorded signoff, not only the verdict, and re-enforces the
   boundary.** Reopening the Codex phase over an unchanged head posts a revocation
   and requests a new pass, and GitHub keeps serving the OLD clean verdict until
