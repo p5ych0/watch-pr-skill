@@ -44,6 +44,14 @@
   which is worse than the stuck loop it replaced. The tail is spelled out rather
   than made optional, and three unagreed tails are asserted to be refused.
 
+  **And it has its own exit status, 4, because every caller branches on status.**
+  Saying it in the record alone taught exactly one consumer: the driver's step 3
+  table still sent the round on to step 4, where there is nothing to fix, and
+  `pr-close-round.sh` — waiting on the pass a push starts — took the 0 and closed
+  the round. Both are the stop not happening. `4` now stops the driver before the
+  fix round and pauses the close-round gate, and the contract test requires every
+  status the watch can exit with to be in the table the driver reads.
+
   Both reviewer contracts now say to post a clean verdict as the review body or an
   issue comment rather than as a reply, since a reply-only review costs an operator
   a read — `AGENTS.md` and `.github/copilot-instructions.md`, plus `SKILL.md` and

@@ -300,6 +300,21 @@ grep -qi 'Monitor' "$SKILL" \
 grep -q 'WATCH_RC' "$SKILL" \
     && pass "the driver branches on the watch's status" \
     || die "the watch's exit status is not acted on"
+# EVERY STATUS THE WATCH CAN EXIT WITH IS IN THE TABLE. `4` — the review carried
+# comments and every one was a reply — was added to the script and to step 7 and
+# not to the table the driver reads at step 3, so the driver went on to the fix
+# round, found nothing to fix, closed it on nothing and requested another pass:
+# the loop the status exists to end.
+for _rc in 0 1 2 4; do
+    grep -q "^| \`$_rc\` |" "$SKILL" \
+        && pass "…including status $_rc" \
+        || die "the watch can exit $_rc and the driver's table does not say what to do"
+done
+# …and `4` does not send the driver into the round.
+_rc4="$(grep -n '^| `4` |' "$SKILL" | head -1 | cut -d: -f1)" || true
+[ -n "$_rc4" ] && sed -n "${_rc4}p" "$SKILL" | grep -qi 'stop' \
+    && pass "…and status 4 stops rather than continuing into the fix round" \
+    || die "status 4 does not tell the driver to stop"
 
 grep -q 'pr-findings.sh list' "$SKILL" \
     && pass "the findings read is delegated to a tested script" \

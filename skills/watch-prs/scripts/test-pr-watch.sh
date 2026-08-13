@@ -193,6 +193,19 @@ out="$(VERDICT='verdict=findings findings=1 source=replies-only' VERDICT_RC=1 \
     && printf '%s' "$out" | grep -q 'source=replies-only'; } \
     && pass "a replies-only verdict is READY, and says so where the operator reads it" \
     || die "the replies-only stop did not surface (rc=$rc out='$out')"
+# AND IT HAS ITS OWN STATUS, because every caller branches on status. Saying it
+# only in the record left `pr-close-round.sh` — which waits on the pass a push
+# starts and checks the status — taking the 0 and closing the round, which is the
+# stop not happening.
+[ "$rc" -eq 4 ] \
+    && pass "…with a status of its own, so a caller that reads only the status still stops" \
+    || die "a replies-only verdict exited $rc, which callers cannot tell from actionable"
+# The ordinary findings verdict must NOT take that status.
+seq_set reviewed
+out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…while a verdict with real findings is still an ordinary actionable 0" \
+    || die "a plain findings verdict exited $rc"
 
 # AND THE GRAMMAR IS STILL A GRAMMAR. The tail is spelled out rather than made
 # optional, so a field nobody agreed on is still refused — a trailing `.*` here

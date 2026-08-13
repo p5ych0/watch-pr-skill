@@ -254,9 +254,11 @@ Then:
    sometimes delivers a clean verdict as a reply, and that is *not* exempted:
    the real verdict is followed by paragraphs of explanation, and a retraction is
    also a paragraph after the verdict line, so nothing in the text separates
-   them. When a review is nothing but replies the skill reports
-   `source=replies-only` and **stops for you** — there is nothing to fix and it
-   is not a signoff, so one comment gets read by a human.
+   them. When a review is nothing but replies the watch reports
+   `source=replies-only` and exits **4**, and the skill **stops for you** — there
+   is nothing to fix and it is not a signoff, so one comment gets read by a human.
+   Both round-closing paths honour that status, so a push-triggered pass cannot
+   slip past it either.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

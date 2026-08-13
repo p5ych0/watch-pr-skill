@@ -397,8 +397,8 @@ rather than a question worth relaying; `README.md § Watching without prompts`
 says what to add.
 
 Re-arm on `WATCH_RC` 1 as well: a timeout means the verdict has not arrived yet,
-not that the round is over. Only `0` (verdict in hand) and `2` (fail closed) end
-the watch for that round.
+not that the round is over. Only `0` (verdict in hand), `2` (fail closed) and `4`
+(the operator decides) end the watch for that round.
 
 It prints on **change**, not on every poll, so a long wait does not bury the
 session in identical lines:
@@ -414,6 +414,14 @@ PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verd
 | `0` | terminal state reached, verdict on the last line | step 4 |
 | `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask: that is the manual loop this replaces. |
 | `2` | the state could not be read | **fail closed** — never treat it as "no findings" |
+| `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** There is nothing for `pr-findings.sh` to list and this is not a signoff, so there is no round to fix and none to close. Put the comment to the operator and wait. |
+
+**`4` does not continue into the fix round, and that is the whole point of it.**
+A reviewer sometimes answers on an existing thread — a verdict, a correction, a
+question — and none of those can be told apart by reading the text. Entering step
+4 there finds no findings, closes the round on nothing and requests another pass,
+which is the loop this status exists to end. Say what the comment was, and let
+the operator decide.
 
 The states it reports, and what each means:
 
