@@ -949,9 +949,11 @@ Ask Copilot:
 # rather than executed.
 # THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under your
 # identity, which `pr-signoff.sh` and `pr-round-count.sh` trust, so a line
-# reproducing one of their markers — `**Review-Signoff:**`,
-# `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
-# `**Reviewed commit:**` — CREATES the record it was quoting. The script refuses
+# reproducing one of the markers they honour FROM YOU — `**Review-Signoff:**`,
+# `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**` — CREATES the
+# record it was quoting. `**Reviewed commit:**` is NOT one of them: it is read
+# only from a reviewer bot's own comment, so writing it here creates nothing and
+# is left alone. The script refuses
 # one rather than publishing it. They are only honoured at the start of a line, so
 # indent by four spaces or quote inline. A FENCE DOES NOT HELP — the readers scan
 # the raw body, where a line inside a fence still starts at column 0.

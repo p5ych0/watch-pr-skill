@@ -584,6 +584,39 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "$((comment_calls - comment_pinned)) gh pr comment call(s) do not pass --repo"
 
+# ── THE REFUSED MARKERS ARE DOCUMENTED WHERE AN AUTHOR WILL LOOK ──────────
+# The set lives in `recordlib.sh`; `SKILL.md` and `README.md` tell an author which
+# lines their body may not start with. This has drifted twice in this PR alone —
+# once by documenting a marker the rule had stopped refusing, once by offering a
+# fenced block as a way round it — so the forward direction is checked here.
+#
+# WHAT THIS CANNOT DO: it cannot tell that prose lists a marker the rule does NOT
+# refuse. That is the drift that happened, and catching it means parsing an inline
+# enumeration out of Markdown, which this repository has twice paid for and
+# deleted. So the count is PINNED instead: adding or removing a marker fails here
+# with a message naming both documents, and the prose is then read by a human.
+_mk_arms="$(grep -c "^            '\*\*Review" "$SCRIPT_DIR/recordlib.sh")" || _mk_arms=0
+[ "$_mk_arms" -eq 2 ] \
+    && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
+    || die "the reserved-marker set changed ($_mk_arms case lines, expected 2) — update SKILL.md and README.md, then this count"
+# SCOPED TO THE REFUSAL PASSAGE, not to the file. Both documents name these
+# markers elsewhere — `README.md` documents the acknowledgement's own format in the
+# round-boundary section — so a whole-file `grep` is satisfied by a mention that
+# has nothing to do with what an author may write. That is the "the token also
+# appears elsewhere" trap, and the first version of this check fell into it: a
+# marker deleted from the refusal list still passed.
+_skill_pass="$(awk '/^# THE BODY IS PROSE AND MUST NOT BECOME A RECORD/{c=12} c-->0' "$SKILL")" || true
+_readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/README.md")" || true
+{ [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \
+    && pass "…and both layers still carry the passage that tells an author about them" \
+    || die "the refusal passage is gone from SKILL.md or README.md (skill=${#_skill_pass} readme=${#_readme_pass})"
+for _m in 'Review-Signoff:' 'Review-Signoff-Revoked:' 'Review-Pause-Acknowledged:'; do
+    { printf '%s' "$_skill_pass" | grep -qF "**$_m**" \
+        && printf '%s' "$_readme_pass" | grep -qF "**$_m**"; } \
+        && pass "…and $_m is named in both layers an author reads" \
+        || die "$_m is refused by the rule but missing from the refusal passage in SKILL.md or README.md"
+done
+
 # ── the shipping manifest lists every runtime helper ──────────────────────
 # CLAUDE.md calls everything unlisted "documentation", so an incomplete table is
 # not a cosmetic gap — it tells a maintainer that four executable helpers are

@@ -316,10 +316,12 @@ Then:
      revokes any earlier Copilot signoff and requests the pass.
 
    The body you supply is prose and is posted under your identity, so a line that
-   reproduces one of the loop's own record markers — `**Review-Signoff:**`,
-   `**Review-Signoff-Revoked:**`, `**Review-Pause-Acknowledged:**`,
-   `**Reviewed commit:**` — is refused rather than published: it would *create*
-   the record it was quoting. Indent it by four spaces or quote it inline with
+   reproduces one of the record markers a reader trusts from *you* —
+   `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`,
+   `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
+   *create* the record it was quoting. (`**Reviewed commit:**` is not among them:
+   that one is only read from a reviewer bot's own comment, so writing it here
+   creates nothing and is left alone.) Indent it by four spaces or quote it inline with
    backticks — either still says what you meant, because the readers only honour
    these at the start of a line. A fenced block does *not* help: the readers scan
    the raw comment body, where a line inside a fence still starts at column 0.
