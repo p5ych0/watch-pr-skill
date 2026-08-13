@@ -2,45 +2,45 @@
 
 ## [2.0.11] — 2026-08-13
 
-- **A reply is not a finding, and counting it as one stopped the loop dead.**
-  `pr-review-state.sh verdict` counted every comment row attached to the
-  authoritative review. A reviewer's own verdict is sometimes delivered as a REPLY
-  on an existing thread — "No blocking findings on `87ad552`" arrived exactly that
-  way — and was counted as one finding.
+- **A review of nothing but replies is named, instead of being guessed at.**
+  `pr-review-state.sh verdict` counts every comment row attached to the
+  authoritative review, and a reviewer's own verdict is sometimes delivered as a
+  REPLY on an existing thread — "No blocking findings on `87ad552`" arrived exactly
+  that way.
 
-  That is terminal rather than merely wrong. The count cannot drop, because the
-  comment *is* the verdict: there is no thread to resolve and no fix to make, so
-  the loop never closes and the merge gate blocks a PR its reviewer has passed.
-  `pr-findings.sh` reported nothing to fix at the same moment, which is how the two
-  disagreed — one asks for unresolved threads, the other was counting comment rows.
+  Counted as a finding, that is terminal rather than merely wrong: the count cannot
+  drop, because the comment *is* the verdict. There is no thread to resolve and no
+  fix to make, so the loop never closes and the merge gate blocks a PR its reviewer
+  has passed. `pr-findings.sh` reported nothing to fix at the same moment, which is
+  how the two disagreed — one asks for unresolved threads, the other counts comment
+  rows.
 
-  A finding OPENS a thread; a reply continues one already counted by its opener —
-  but **only the verdict itself is skipped**, not every reply. Dropping all replies
-  was the first attempt and it was wrong: a blocking finding posted as a reply on
-  an already-resolved thread would go too, and `pr-findings.sh` cannot surface a
-  resolved thread, so BOTH gates read clean and the PR merges with the finding
-  unaddressed. That trades a stuck loop for a wrong merge.
+  **The exemption is gone, and that is the finding of three review rounds.** A
+  reply is not exempt: dropping every reply let a blocking finding posted as one
+  merge unseen; matching the phrase let a reply that NEGATED it read as clean;
+  matching a whole LINE let a reply that carries the verdict line and retracts it
+  two lines later read as clean. The third is the general case — the real verdict
+  is followed by paragraphs of explanation, and a retraction is also a paragraph
+  after the verdict line. Separating them means a denylist of words meaning
+  "except", one word behind forever, which this repository has already paid for
+  once and written a rule against.
 
-  So a reply is skipped only when some LINE of it IS the verdict and names this
-  head — `No blocking findings on \`<sha>\`.` A substring test was not enough: a
-  reply that quotes or negates the verdict ("the prior verdict said no blocking
-  findings on `<sha>`, but this is still broken") contains both the phrase and the
-  sha, so a blocking finding read as the clean verdict. Anything else a reply says
-  counts, which fails closed: an unrecognised phrasing stalls the round, and a
-  stalled round is visible and recoverable in a way a merged finding is not.
-  Head-bound on purpose, since "no blocking findings on `<old sha>`" says nothing
-  about the commit being gated.
-
-  Both reviewer contracts say where to put a clean verdict so the loop can read
-  it, since this changes what a reply has to look like — `AGENTS.md` and
-  `.github/copilot-instructions.md`, plus `SKILL.md` and `README.md` for the
-  driver and the user.
+  So every comment counts, as before — and the answer now says WHEN THEY WERE ALL
+  REPLIES. `verdict=findings findings=1 source=replies-only` is neither answer:
+  `pr-findings.sh` lists nothing to fix and it is not a signoff, so the driver
+  stops and a human reads one comment. That is the stuck loop solved where it can
+  be solved honestly, rather than by guessing at intent.
 
   Every row is validated first. `in_reply_to_id` is absent or a number, never null
   and never a string, so a presence-only test silently discarded a malformed row as
   a reply — and a page of those counted zero, which is `clean`. `recordlib.sh` gains
-  `valid_review_comment` and `opens_a_thread`, because "is this a finding" is asked
-  in more than one place and the answer is that field.
+  `valid_review_comment` and `opens_a_thread`, with their own accept/reject cases
+  and a drift-guard entry, because a shared definition cannot be the untested one.
+
+  Both reviewer contracts now say to post a clean verdict as the review body or an
+  issue comment rather than as a reply, since a reply-only review costs an operator
+  a read — `AGENTS.md` and `.github/copilot-instructions.md`, plus `SKILL.md` and
+  `README.md` for the driver and the user.
 
   The fixture pins the REAL payload shape, checked against the API: a top-level
   comment OMITS `in_reply_to_id` and a reply carries it, so a fixture written as

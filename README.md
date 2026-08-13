@@ -250,12 +250,13 @@ Then:
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings".
 
-   A review carries findings when it has comments that **open** threads. A
-   *reply* on an existing thread does not count — reviewers sometimes deliver a
-   clean verdict that way — but only when some line of it *is* the verdict and
-   names the head, as in ``No blocking findings on `abc1234`.`` Anything else a
-   reply says still counts, so a reply that quotes or argues with a verdict is
-   never mistaken for one.
+   Every comment on the review counts as a finding, replies included. A reviewer
+   sometimes delivers a clean verdict as a reply, and that is *not* exempted:
+   the real verdict is followed by paragraphs of explanation, and a retraction is
+   also a paragraph after the verdict line, so nothing in the text separates
+   them. When a review is nothing but replies the skill reports
+   `source=replies-only` and **stops for you** — there is nothing to fix and it
+   is not a signoff, so one comment gets read by a human.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

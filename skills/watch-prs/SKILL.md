@@ -892,11 +892,17 @@ disappeared whenever that file did.
 
 When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done.
 
-That verdict counts the comments that **open** threads on the reviewer's newest
-review. A reply on an existing thread is not a finding — reviewers sometimes post
-a clean verdict as one — but only when a line of it *is* the verdict and names
-the head; anything else a reply says still counts, so an argument about a verdict
-is never read as one. A malformed `in_reply_to_id` is a stop, not a reply.
+That verdict counts the comments on the reviewer's newest review: a comment that OPENS a thread is a finding, and a reply is one too.
+A reply is NOT exempt, even when it carries a clean verdict: the real verdict is
+followed by paragraphs of explanation and a retraction is also a paragraph after
+the verdict line, so no reading of the text separates them.
+
+When a review's comments are ALL replies the answer says `source=replies-only`.
+That is neither answer: `pr-findings.sh` lists nothing to fix, and it is not a
+signoff. **Stop and put it to the operator** — one comment has to be read by a
+human. Do not re-request, and do not treat it as clean.
+
+A malformed `in_reply_to_id` is a stop, not a reply.
 Ask Copilot:
 
 ```bash

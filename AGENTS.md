@@ -210,18 +210,15 @@ stays reportable however many times it has been resolved.
 
 ### Say a clean verdict where the loop can read it
 
-**Where you post a clean verdict changes whether the loop can read it.** The
-driver counts the comments on your review to decide whether it carries findings.
-A comment that OPENS a thread is a finding. A REPLY on an existing thread is not
-— but the driver only treats it as your verdict when some line of it *is* the
-verdict and names the head being reviewed, like:
+**Where you post a clean verdict decides whether the loop can act on it.** Every
+comment on your review counts as a finding, replies included — a reply is not
+exempt, because a verdict followed by explanation and a verdict followed by a
+retraction look the same to anything reading the text.
 
-    No blocking findings on `abc1234`.
-
-Anything else in a reply counts as a finding, deliberately: a reply that quotes or
-argues with a verdict must not be mistaken for one. So a clean verdict delivered
-as a reply that does not name the head leaves the round open, and the author has
-nothing to fix — say it on its own line, with the sha.
+So a review whose only content is a reply stops the loop for a human: nothing to
+fix, and not a signoff. **Post a clean verdict as the review body, or as an issue
+comment — not as a reply on an existing thread.** A finding belongs in a comment
+that opens a thread, where the author can answer and resolve it.
 
 ### Review statically — do not run anything
 

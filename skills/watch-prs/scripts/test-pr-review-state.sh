@@ -319,94 +319,54 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
     && pass "…and the verdict is clean, so the phase can move on" \
     || die "newer clean comment gave rc=$rc '$out'"
 
-# ── verdict: a REPLY is not a finding ──────────────────────────────────────
-# A reviewer's own verdict is sometimes delivered as a REPLY on an existing
-# thread. "No blocking findings on <sha>" arrived that way on #33 and was counted
-# as one finding — and that is terminal rather than merely wrong: the count cannot
-# drop, because the comment IS the verdict, so the loop never closes and the merge
-# gate blocks a PR its reviewer has passed. `pr-findings.sh` showed nothing to fix
-# at the same moment, which is how the two disagreed.
+# ── verdict: a reply counts, and a review of nothing BUT replies is named ──
+# A reviewer's clean verdict is sometimes delivered as a REPLY — "No blocking
+# findings on <sha>" arrived that way — and counting it as a finding leaves the
+# loop stuck, because the count cannot drop: the comment IS the verdict. Three
+# attempts to exempt it failed, the last generally: the real verdict is followed
+# by paragraphs of explanation, and a retraction is also a paragraph after the
+# verdict line. Telling those apart needs a denylist of words meaning "except".
 #
-# THE PAYLOAD SHAPE IS THE REAL ONE, checked against the API: a top-level comment
-# OMITS `in_reply_to_id`, and a reply carries it. A fixture that spelled the
-# top-level case as `"in_reply_to_id": null` would pass a `select(. == null)` test
-# that the live payload fails.
+# So a reply counts, and the ANSWER says when they were all replies. There is
+# nothing to fix and it is not a signoff — the driver stops for the operator.
 mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 950
 printf '[%s]' "$(mk_rc 1 '"## Review\n\nNo blocking findings on `aaaaaaa`."' 42)" \
     > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
-    && pass "a verdict delivered as a reply does not read as a finding" \
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1 source=replies-only'; } \
+    && pass "a review whose only comment is a reply is named, not read as either answer" \
     || die "a reply-only review gave rc=$rc '$out'"
 
-# A TOP-LEVEL COMMENT IS STILL A FINDING. The rule must not have been widened into
-# "count nothing".
-printf '[%s]' "$(mk_rc 2 '"this is wrong"')" > "$TMP/comments-950.json"
+# THE RETRACTION CASE, which is why there is no exemption: the verdict line is
+# there, and so is the correction. No reading of the text separates this from the
+# verdict followed by its explanation.
+printf '[%s]' "$(mk_rc 2 '"No blocking findings on `aaaaaaa`.\n\nCorrection: this still crashes."' 42)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=1'; } \
+    && pass "…so a reply that carries a verdict line and then retracts it never clears" \
+    || die "a retracting reply gave rc=$rc '$out'"
+
+# A TOP-LEVEL COMMENT IS A FINDING, and is not named as replies-only.
+printf '[%s]' "$(mk_rc 3 '"this is wrong"')" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-    && pass "…while a top-level comment still is one" \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "…while a top-level comment is a finding like any other" \
     || die "a top-level comment gave rc=$rc '$out'"
 
-# AND THE TWO ARE COUNTED TOGETHER CORRECTLY: two findings and a reply is two.
-printf '[%s,%s,%s]' \
-    "$(mk_rc 3 '"one"')" \
-    "$(mk_rc 4 '"No blocking findings on `aaaaaaa`."' 3)" \
-    "$(mk_rc 5 '"two"')" > "$TMP/comments-950.json"
+# A REVIEW CARRYING BOTH is not replies-only: there is something to fix.
+printf '[%s,%s]' "$(mk_rc 4 '"one"')" "$(mk_rc 5 '"a follow-up"' 4)" \
+    > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=2'; } \
-    && pass "…and a review carrying both counts only the findings" \
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "…and a review carrying both counts both, without the name" \
     || die "a mixed review gave rc=$rc '$out'"
-# A BLOCKING FINDING POSTED AS A REPLY STILL COUNTS. Dropping every reply was the
-# first attempt at this fix and it was wrong: `pr-findings.sh` cannot surface a
-# resolved thread, so both gates would read clean and the PR would merge with the
-# finding unaddressed. A stuck round is recoverable; a wrong merge is not.
-printf '[%s]' "$(mk_rc 6 '"This is still broken and must not merge."' 3)" \
-    > "$TMP/comments-950.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-    && pass "a blocking finding posted as a reply still counts" \
-    || die "a blocking reply gave rc=$rc '$out'"
-
-# AND THE EXEMPTION IS HEAD-BOUND: "no blocking findings on <another sha>" says
-# nothing about the commit being gated.
-printf '[%s]' "$(mk_rc 7 '"No blocking findings on `bbbbbbb`."' 3)" \
-    > "$TMP/comments-950.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-    && pass "…and a clean verdict naming another head does not clear this one" \
-    || die "an other-head clean reply gave rc=$rc '$out'"
-
-# A REPLY THAT QUOTES OR NEGATES THE VERDICT IS NOT THE VERDICT. Substring
-# matching classified "the prior verdict said no blocking findings on <sha>, but
-# this is still broken" as clean, because the phrase and the head are both in it —
-# and on a resolved thread that is a merge with the finding unaddressed. Some LINE
-# has to BE the verdict.
-for _neg in '"The prior verdict said no blocking findings on `aaaaaaa`, but this path is still broken."' \
-            '"Not true that there are no blocking findings on `aaaaaaa` — see below."' \
-            '"> No blocking findings on `aaaaaaa`.\n\nThat was wrong; this still crashes."'; do
-    printf '[%s]' "$(mk_rc 9 "$_neg" 3)" > "$TMP/comments-950.json"
-    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-            run verdict 7 "$BOT" 2>&1)"; rc=$?
-    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-        && pass "a reply that quotes or negates the verdict still counts" \
-        || die "a negating reply gave rc=$rc '$out' for $_neg"
-done
-
-# …WHILE THE REAL ONE STILL CLEARS, prose and heading and all. This is the shape
-# the reviewer actually posts, so a rule that refused it would put back the stuck
-# loop this whole change exists to remove.
-printf '[%s]' "$(mk_rc 10 '"## Review\n\nNo blocking findings on `aaaaaaa`.\n\nThe shared helper looks right, and the tests cover both directions."' 3)" \
-    > "$TMP/comments-950.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
-    && pass "…and the verdict as the reviewer actually writes it still clears" \
-    || die "the real verdict shape gave rc=$rc '$out'"
 
 # A MALFORMED `in_reply_to_id` IS UNREADABLE, NOT A REPLY. A presence-only test
 # discarded such a row silently, so a page of them counted zero — which is clean,

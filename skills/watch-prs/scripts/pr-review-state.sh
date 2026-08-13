@@ -288,37 +288,40 @@ head_review_snapshot() {
 
 # Count the inline comments of ONE known review id. 0 = count printed · 2 = fail.
 review_comment_count() {
-    local pr="$1" id="$2" head="$3" raw n
+    local pr="$1" id="$2" raw n
     case "$id" in
         ""|*[!0-9]*) return 2 ;;
     esac
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
-    # A REPLY IS NOT A FINDING — BUT ONLY WHEN IT IS THE VERDICT ITSELF.
+    # EVERY COMMENT COUNTS, INCLUDING REPLIES — and the answer says when they were
+    # ALL replies, so the caller can tell a review with findings from a review
+    # whose only content is conversation.
     #
-    # This counted every comment row, and a reviewer's verdict is sometimes
-    # delivered as a REPLY on an existing thread — "No blocking findings on
-    # <sha>" arrived that way — which counted as one finding. That is terminal:
-    # the count cannot drop, because the comment IS the verdict, so the loop never
-    # closes and the gate blocks a PR its reviewer passed.
+    # THREE ATTEMPTS AT EXEMPTING THE VERDICT ITSELF FAILED, and the third failed
+    # for a reason that generalises. A reviewer's clean verdict is sometimes
+    # delivered as a reply — "No blocking findings on <sha>" — and counting it as a
+    # finding leaves the loop stuck: the count cannot drop, because the comment IS
+    # the verdict. So the exemption looked necessary. But:
     #
-    # DROPPING ALL REPLIES WAS THE WRONG FIX, and this is the second attempt. A
-    # blocking finding posted as a reply on an already-resolved thread would be
-    # dropped too — and `pr-findings.sh` cannot surface a resolved thread, so BOTH
-    # gates read clean and the PR merges with the finding unaddressed. The first
-    # version documented that as an accepted limitation; it is not one, because it
-    # trades a stuck loop for a wrong merge.
+    #   · dropping every reply let a blocking finding posted as one merge unseen;
+    #   · matching the phrase let a reply that NEGATED it — "the prior verdict said
+    #     no blocking findings on <sha>, but this is still broken" — read as clean;
+    #   · matching a whole LINE let a reply that carries the verdict line and then
+    #     retracts it two lines later read as clean.
     #
-    # So a reply is skipped only when it is RECOGNISABLY this reviewer's clean
-    # verdict FOR THIS HEAD: it names the head and says it found nothing. Anything
-    # else a reply says counts, which fails closed — an unrecognised phrasing
-    # stalls the round, and a stalled round is visible and recoverable in a way a
-    # merged finding is not.
+    # The third is the general case: the real verdict is followed by paragraphs of
+    # explanation, and a retraction is also a paragraph after the verdict line.
+    # Telling them apart means knowing which words mean "except" — a denylist, one
+    # word behind forever, which this repository has already paid for once and
+    # written a rule against.
     #
-    # Head-bound on purpose: "no blocking findings on <old sha>" says nothing
-    # about the commit being gated.
-    n=$(printf '%s' "$raw" | jq -s --arg head "${head:0:7}" "$RECORDLIB_JQ"'
+    # So the exemption is gone. A reply counts, the same as before this was ever
+    # touched, and the stuck loop is solved where it can be solved honestly: this
+    # says `replies-only`, `pr-findings.sh` shows nothing to fix, and the driver
+    # stops for the operator instead of spinning. A human reads one comment.
+    n=$(printf '%s' "$raw" | jq -s -r "$RECORDLIB_JQ"'
         # EVERY ROW IS VALIDATED FIRST. `in_reply_to_id` is absent or a number and
         # never null or a string, so anything else is a payload this cannot read —
         # and a presence-only test silently discarded such a row as a reply, so a
@@ -327,26 +330,14 @@ review_comment_count() {
         | [.[][]] as $rows
         | if any($rows[]; valid_review_comment | not)
           then error("malformed review comment")
-          else [ $rows[]
-                 # THE WHOLE LINE, NOT A SUBSTRING. A reply that QUOTES or NEGATES
-                 # the verdict — "the prior verdict said no blocking findings on
-                 # <sha>, but this is still broken" — contains the phrase and the
-                 # sha, so a substring test classified a blocking finding as the
-                 # clean verdict and dropped it. On a resolved thread that is a
-                 # merge with the finding unaddressed.
-                 #
-                 # So some LINE has to BE the verdict: optional heading marks and
-                 # spaces, the canonical sentence, the head, and nothing else on
-                 # it. Anything the reviewer adds goes on its own lines, which is
-                 # what the real verdict looks like.
-                 | select(opens_a_thread
-                          or ((.body // "") | ascii_downcase | split("\n")
-                              | any(.[]; test("^ *#{0,6} *no blocking findings on `?" + $head + "[0-9a-f]*`?\\.? *\r?$"))
-                              | not)) ]
-               | length
+          else "\([$rows[]] | length):\([$rows[] | select(opens_a_thread)] | length)"
           end' 2>/dev/null) || return 2
+    # `<total>:<that opened a thread>`, and BOTH have to be numbers. A partial
+    # answer here is the one that decides a merge.
     case "$n" in
-        ""|*[!0-9]*) return 2 ;;
+        *[!0-9:]*|*:*:*|:*|*:|"") return 2 ;;
+        *:*) ;;
+        *) return 2 ;;
     esac
     printf '%s' "$n"
 }
@@ -371,15 +362,28 @@ clean_verdict() {
     # there is no review to count them against. Counting is skipped rather than
     # faked, and the re-check below still guards against the state moving.
     case "$id" in
-        comment:*) n=0 ;;
-        *) n="$(review_comment_count "$pr" "$id" "$head")" || return 2 ;;
+        comment:*) n="0:0" ;;
+        *) n="$(review_comment_count "$pr" "$id")" || return 2 ;;
     esac
     snap2="$(head_review_snapshot "$pr" "$who" "$head")" || return 2
     if [ "$snap2" != "$snap1" ]; then
         printf 'changed'
         return 1
     fi
-    [ "$n" -eq 0 ] 2>/dev/null || { printf 'findings:%s' "$n"; return 1; }
+    # THE SHAPE COMES BACK WITH THE COUNT. A review whose comments are ALL replies
+    # carries no finding anyone can act on — `pr-findings.sh` lists nothing — but it
+    # is not clean either: a reply can retract a verdict, and no reading of the text
+    # can tell that from a verdict followed by its explanation. So it is reported as
+    # what it is, and the driver stops for the operator rather than spinning.
+    local total="${n%%:*}" opens="${n##*:}"
+    [ "$total" -eq 0 ] 2>/dev/null || {
+        if [ "$opens" -eq 0 ] 2>/dev/null; then
+            printf 'findings:%s:replies-only' "$total"
+        else
+            printf 'findings:%s' "$total"
+        fi
+        return 1
+    }
     printf 'clean'
     return 0
 }
@@ -451,6 +455,11 @@ main() {
         2) echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=error reason=unreadable"; return 2 ;;
     esac
     case "$out" in
+        findings:*:replies-only)
+            _f="${out#findings:}"; _f="${_f%%:*}"
+            # NAMED, because the driver must not read it as either answer: there is
+            # nothing to fix and it is not a signoff. A human reads the reply.
+            echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=findings findings=$_f source=replies-only" ;;
         findings:*) echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=findings findings=${out#findings:}" ;;
         changed)    echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=none reason=review_state_changed" ;;
         *)          echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=none reason=$out" ;;
