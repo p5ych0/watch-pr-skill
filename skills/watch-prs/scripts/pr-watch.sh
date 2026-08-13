@@ -7,6 +7,14 @@
 #   0  a terminal state was reached — the last line says which
 #   1  the timeout expired first
 #   2  the state could not be read — fail closed, do NOT treat as "no findings"
+#   4  the review carried comments and every one of them was a REPLY. There is
+#      nothing for `pr-findings.sh` to list and it is not a signoff, so this is
+#      neither "fix these" nor "move on": a human reads the one comment.
+#
+#      IT HAS ITS OWN STATUS BECAUSE EVERY CALLER ALREADY BRANCHES ON STATUS. The
+#      first attempt said it only in the record, and the one caller that was not
+#      taught to read the record — `pr-close-round.sh`, waiting on the pass a push
+#      started — took the 0 and closed the round, which is the stop not happening.
 #
 # This exists because v2 removed v1's response monitor along with the bus, and
 # with it the only channel that surfaced a finished review into the session. The
@@ -486,7 +494,15 @@ while :; do
             # finished clean review and started the next phase on.
             case "$v_field/$vrc" in
                 clean/0)    [ "$v_tail" = " findings=0" ] || v_field="" ;;
-                findings/1) [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]] || v_field="" ;;
+                # `source=replies-only` is a THIRD shape, not a looser one: the
+                # review carried comments, all of them replies, so there is
+                # nothing for `pr-findings.sh` to list and it is not a signoff.
+                # The tail is spelled out rather than made optional, because a
+                # trailing `.*` here would accept any field anyone ever appends —
+                # and this grammar exists to catch exactly that.
+                findings/1) [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]] \
+                                || [[ "$v_tail" =~ ^\ findings=[0-9]+\ source=replies-only$ ]] \
+                                || v_field="" ;;
                 none/1)     [[ "$v_tail" =~ ^\ reason=[a-z_]+$ ]] || v_field="" ;;
                 *)          v_field="" ;;
             esac
@@ -590,6 +606,12 @@ while :; do
                 printf 'PR_REVIEW_READY pr=%s reviewer=%s state=%s verdict=%s%s\n' \
                     "$PR" "$WHO" "$state" "$v_field" "$v_tail"
                 printf '%s\n' "$verdict"
+                # READY EITHER WAY — the verdict is in hand and the watch is over.
+                # The STATUS is what separates "act on this" from "somebody read
+                # this", because that is what callers branch on.
+                case "$v_tail" in
+                    *" source=replies-only") exit 4 ;;
+                esac
                 exit 0
             fi
             ;;

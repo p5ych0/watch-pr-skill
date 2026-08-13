@@ -397,8 +397,8 @@ rather than a question worth relaying; `README.md § Watching without prompts`
 says what to add.
 
 Re-arm on `WATCH_RC` 1 as well: a timeout means the verdict has not arrived yet,
-not that the round is over. Only `0` (verdict in hand) and `2` (fail closed) end
-the watch for that round.
+not that the round is over. Only `0` (verdict in hand), `2` (fail closed) and `4`
+(the operator decides) end the watch for that round.
 
 It prints on **change**, not on every poll, so a long wait does not bury the
 session in identical lines:
@@ -414,6 +414,30 @@ PR_REVIEW_READY  pr=10 reviewer=chatgpt-codex-connector[bot] state=reviewed verd
 | `0` | terminal state reached, verdict on the last line | step 4 |
 | `1` | timed out — the review is still in flight | **re-arm the same watch.** Do not re-request: that queues a duplicate pass on the same head. Do not ask: that is the manual loop this replaces. |
 | `2` | the state could not be read | **fail closed** — never treat it as "no findings" |
+| `4` | the review carried comments and **every one was a reply** | **STOP. Do not go to step 4.** There is nothing for `pr-findings.sh` to list and this is not a signoff, so there is no round to fix and none to close. Put the comment to the operator and wait. |
+
+**`4` does not continue into the fix round, and that is the whole point of it.**
+A reviewer sometimes answers on an existing thread — a verdict, a correction, a
+question — and none of those can be told apart by reading the text. Entering step
+4 there finds no findings, closes the round on nothing and requests another pass,
+which is the loop this status exists to end. Say what the comment was, and let
+the operator decide.
+
+**AND THE DECISION IS RECORDED, or the stop is just a different deadlock.** The
+verdict stays non-clean for as long as that review is the newest one: re-running
+the watch returns 4 again, there is no thread to resolve, and re-requesting is
+forbidden. So the operator's answer has to become state:
+
+- **it was a clean verdict** — record the signoff for that reviewer and head, the
+  same `**Review-Signoff:**` line step 7 writes. The merge gate accepts it *for
+  this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
+  that head merges, and says so in its output. A review with real findings is not
+  a question anyone was asked, so a signoff never carries one;
+- **it was a finding** — fix it and push. The head moves, the round is ordinary
+  again, and nothing needs an override.
+
+Absence is not permission: with no signoff recorded, the gate refuses and names
+what to do.
 
 The states it reports, and what each means:
 
@@ -891,6 +915,18 @@ disappeared whenever that file did.
 ## 7. Codex is clean — now the Copilot phase
 
 When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done.
+
+That verdict counts the comments on the reviewer's newest review: a comment that OPENS a thread is a finding, and a reply is one too.
+A reply is NOT exempt, even when it carries a clean verdict: the real verdict is
+followed by paragraphs of explanation and a retraction is also a paragraph after
+the verdict line, so no reading of the text separates them.
+
+When a review's comments are ALL replies the answer says `source=replies-only`.
+That is neither answer: `pr-findings.sh` lists nothing to fix, and it is not a
+signoff. **Stop and put it to the operator** — one comment has to be read by a
+human. Do not re-request, and do not treat it as clean.
+
+A malformed `in_reply_to_id` is a stop, not a reply.
 Ask Copilot:
 
 ```bash

@@ -295,10 +295,49 @@ review_comment_count() {
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
-    n=$(printf '%s' "$raw" | jq -s "$RECORDLIB_JQ"'
-        pages_or_error | [.[][]] | length' 2>/dev/null) || return 2
+    # EVERY COMMENT COUNTS, INCLUDING REPLIES — and the answer says when they were
+    # ALL replies, so the caller can tell a review with findings from a review
+    # whose only content is conversation.
+    #
+    # THREE ATTEMPTS AT EXEMPTING THE VERDICT ITSELF FAILED, and the third failed
+    # for a reason that generalises. A reviewer's clean verdict is sometimes
+    # delivered as a reply — "No blocking findings on <sha>" — and counting it as a
+    # finding leaves the loop stuck: the count cannot drop, because the comment IS
+    # the verdict. So the exemption looked necessary. But:
+    #
+    #   · dropping every reply let a blocking finding posted as one merge unseen;
+    #   · matching the phrase let a reply that NEGATED it — "the prior verdict said
+    #     no blocking findings on <sha>, but this is still broken" — read as clean;
+    #   · matching a whole LINE let a reply that carries the verdict line and then
+    #     retracts it two lines later read as clean.
+    #
+    # The third is the general case: the real verdict is followed by paragraphs of
+    # explanation, and a retraction is also a paragraph after the verdict line.
+    # Telling them apart means knowing which words mean "except" — a denylist, one
+    # word behind forever, which this repository has already paid for once and
+    # written a rule against.
+    #
+    # So the exemption is gone. A reply counts, the same as before this was ever
+    # touched, and the stuck loop is solved where it can be solved honestly: this
+    # says `replies-only`, `pr-findings.sh` shows nothing to fix, and the driver
+    # stops for the operator instead of spinning. A human reads one comment.
+    n=$(printf '%s' "$raw" | jq -s -r "$RECORDLIB_JQ"'
+        # EVERY ROW IS VALIDATED FIRST. `in_reply_to_id` is absent or a number and
+        # never null or a string, so anything else is a payload this cannot read —
+        # and a presence-only test silently discarded such a row as a reply, so a
+        # page of them counted zero, which is `clean`.
+        pages_or_error
+        | [.[][]] as $rows
+        | if any($rows[]; valid_review_comment | not)
+          then error("malformed review comment")
+          else "\([$rows[]] | length):\([$rows[] | select(opens_a_thread)] | length)"
+          end' 2>/dev/null) || return 2
+    # `<total>:<that opened a thread>`, and BOTH have to be numbers. A partial
+    # answer here is the one that decides a merge.
     case "$n" in
-        ""|*[!0-9]*) return 2 ;;
+        *[!0-9:]*|*:*:*|:*|*:|"") return 2 ;;
+        *:*) ;;
+        *) return 2 ;;
     esac
     printf '%s' "$n"
 }
@@ -323,7 +362,7 @@ clean_verdict() {
     # there is no review to count them against. Counting is skipped rather than
     # faked, and the re-check below still guards against the state moving.
     case "$id" in
-        comment:*) n=0 ;;
+        comment:*) n="0:0" ;;
         *) n="$(review_comment_count "$pr" "$id")" || return 2 ;;
     esac
     snap2="$(head_review_snapshot "$pr" "$who" "$head")" || return 2
@@ -331,7 +370,20 @@ clean_verdict() {
         printf 'changed'
         return 1
     fi
-    [ "$n" -eq 0 ] 2>/dev/null || { printf 'findings:%s' "$n"; return 1; }
+    # THE SHAPE COMES BACK WITH THE COUNT. A review whose comments are ALL replies
+    # carries no finding anyone can act on — `pr-findings.sh` lists nothing — but it
+    # is not clean either: a reply can retract a verdict, and no reading of the text
+    # can tell that from a verdict followed by its explanation. So it is reported as
+    # what it is, and the driver stops for the operator rather than spinning.
+    local total="${n%%:*}" opens="${n##*:}"
+    [ "$total" -eq 0 ] 2>/dev/null || {
+        if [ "$opens" -eq 0 ] 2>/dev/null; then
+            printf 'findings:%s:replies-only' "$total"
+        else
+            printf 'findings:%s' "$total"
+        fi
+        return 1
+    }
     printf 'clean'
     return 0
 }
@@ -339,8 +391,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|review-at) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|review-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -377,6 +429,27 @@ main() {
     # The id of the authoritative review on this head, or empty when there is
     # none. A caller waiting for a re-request on an UNCHANGED head has nothing
     # else to tell the new pass from the old one.
+    # WHEN THE AUTHORITATIVE REVIEW LANDED. The merge gate needs it to tell an
+    # operator's answer from a leftover: a signoff recorded for an earlier clean
+    # review on the SAME HEAD would otherwise vouch for a later replies-only review
+    # nobody read. A head is not a moment.
+    if [ "$cmd" = "review-at" ]; then
+        local at
+        at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
+            if type != "array" then error("bad shape")
+            else [ .[]
+                   | select(.commit_id == $h)
+                   | select(.submitted_at != null)
+                   | select(.submitted_at | canonical_utc)
+                   | .submitted_at ] | sort | last // ""
+            end' 2>/dev/null)" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        printf '%s\n' "$at"
+        return 0
+    fi
+
     if [ "$cmd" = "review-id" ]; then
         local snap
         snap="$(head_review_snapshot "$pr" "$who" "$head")" || {
@@ -403,6 +476,11 @@ main() {
         2) echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=error reason=unreadable"; return 2 ;;
     esac
     case "$out" in
+        findings:*:replies-only)
+            _f="${out#findings:}"; _f="${_f%%:*}"
+            # NAMED, because the driver must not read it as either answer: there is
+            # nothing to fix and it is not a signoff. A human reads the reply.
+            echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=findings findings=$_f source=replies-only" ;;
         findings:*) echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=findings findings=${out#findings:}" ;;
         changed)    echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=none reason=review_state_changed" ;;
         *)          echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=none reason=$out" ;;

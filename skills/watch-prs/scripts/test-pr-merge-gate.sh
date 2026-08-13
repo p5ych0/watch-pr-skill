@@ -320,6 +320,93 @@ case_is 1 "did not return an exact clean record" "…and Codex's own record does
 world; printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
 case_is 1 "copilot=1" "a non-clean Copilot verdict blocks"
 
+# ── A REPLIES-ONLY VERDICT IS THE ONE AN OPERATOR CAN ANSWER ──────────────
+# A review whose comments are ALL replies is neither answer: nothing for
+# `pr-findings.sh` to list, and not a signoff, because a verdict followed by
+# explanation reads exactly like one followed by a retraction. The loop stops for
+# a human — and without this the stop was where it ENDED: the verdict could never
+# become clean, so this gate blocked forever. A deadlock traded for a permanent
+# pause is not a fix.
+replies_only() {   # replies_only <bot> ; that reviewer left only replies on the head
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only' \
+        "${HEAD40:0:7}" "$1" > "$STUB_DIR/pr-review-state.$1.out"
+    printf '1' > "$STUB_DIR/pr-review-state.$1.rc"
+}
+# `at=` COMES BEFORE `sha=` in the real record, because every caller reads the sha
+# with `${line##*sha=}` and a field after it would be swallowed into the value.
+# The fixture carries the real order so it proves the real parse.
+vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
+    printf '0' > "$STUB_DIR/pr-signoff.rc"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s sha=%s\n' \
+        "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+    # WHEN THE REVIEW LANDED, so "newer than" can be decided at all.
+    printf '2026-01-01T00:00:00Z\n' > "$STUB_DIR/pr-review-state.review-at.out"
+}
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+case_is 0 "left only replies" "a replies-only verdict merges on the signoff an operator recorded"
+
+# WITHOUT THAT RECORD IT REFUSES. `signoff_contradicts` answers "does a record
+# disagree", and nothing recorded is not a disagreement — so reusing it here would
+# have merged a replies-only head that no human ever read.
+world; replies_only "$COPILOTBOT"
+case_is 1 "no operator has recorded a signoff" "…and refuses when nobody has recorded one"
+
+# THE RECORD IS MATCHED IN FULL. A `*` between `findings=` and the suffix accepts
+# an empty count and any field anyone appends — and this shape bypasses the status
+# gate and can authorise a merge, so it is the last place to be relaxed about a
+# wildcard. Each of these must fall through to the ordinary refusal.
+for _bad in 'verdict=findings findings= source=replies-only' \
+            'verdict=findings findings=1 extra=x source=replies-only' \
+            'verdict=findings findings=0 source=replies-only' \
+            'verdict=findings findings=1x source=replies-only'; do
+    world; vouched "$COPILOTBOT"
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s %s' "${HEAD40:0:7}" "$COPILOTBOT" "$_bad" \
+        > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+    printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+    got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
+    { [ "$rc" = 1 ] && printf '%s' "$body" | grep -qv 'merging on the signoff'; } \
+        && pass "a near-miss replies-only record is not authorised: ${_bad#verdict=findings }" \
+        || die "a loose record was authorised: '$_bad' rc=$rc out='$body'"
+done
+
+# A HEAD IS NOT A MOMENT. A signoff recorded for an EARLIER clean review on the
+# same head must not vouch for a LATER replies-only review that nobody read —
+# naming the same sha says nothing about which came first.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT" '2025-12-31T00:00:00Z'
+case_is 1 "cannot be an answer to it" "a signoff older than the review does not answer it"
+# EQUAL IS NOT NEWER: GitHub stamps to the second, so a tie cannot be ordered, and
+# merge permission is not a coin toss.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT" '2026-01-01T00:00:00Z'
+case_is 1 "cannot be an answer to it" "…and one recorded in the same second does not either"
+# A record with no usable timestamp is a refusal, not a pass.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$COPILOTBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "no usable timestamp" "…and a record with no timestamp is refused"
+# And a head with no submitted review has nothing for a signoff to answer.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+: > "$STUB_DIR/pr-review-state.review-at.out"
+case_is 1 "nothing for a signoff to answer" "…and a head with no review cannot be vouched for"
+
+# …AND THE RECORD HAS TO NAME THIS HEAD.
+world; replies_only "$COPILOTBOT"
+printf '0' > "$STUB_DIR/pr-signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$COPILOTBOT" "$OLD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "signoff names" "…and refuses when the record names another head"
+
+# THE EXEMPTION IS FOR THAT SHAPE ONLY. A review with real findings is not a
+# question an operator was asked, so a recorded signoff must not carry it.
+world; vouched "$COPILOTBOT"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=2' "${HEAD40:0:7}" "$COPILOTBOT" \
+    > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+# It refuses at the status gate rather than the record comparison, which is
+# earlier and equally final — so what this asserts is the OUTCOME and the absence
+# of the note, not which line said no.
+got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
+{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qv 'merging on the signoff'; } \
+    && pass "…while a signoff does not carry a review that has findings" \
+    || die "a signoff carried a review with findings — rc=$rc out='$body'"
+
 # ── WHAT THE GATE ASKS, NOT ONLY WHAT IT IS TOLD ───────────────────────────
 #
 # PLACED AFTER `codex_none_world` IS DEFINED. Bash defines a function when it

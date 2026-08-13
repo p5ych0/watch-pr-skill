@@ -54,6 +54,19 @@ chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH" GH_FIXTURE_DIR="$TMP"
 
 run() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+# A REVIEW COMMENT ROW, in the shape the API sends: `user` and `created_at` are
+# always present, and `in_reply_to_id` is ABSENT on a top-level comment. The
+# counter validates all three, so a minimal `{id, body}` row is a malformed
+# payload rather than a convenient shorthand.
+mk_rc() {   # mk_rc <id> <body> [in_reply_to_id]
+    if [ -n "${3:-}" ]; then
+        printf '{"user":{"login":"%s"},"id":%s,"body":%s,"created_at":"2026-01-01T00:00:00Z","in_reply_to_id":%s}' \
+            "$BOT" "$1" "$2" "$3"
+    else
+        printf '{"user":{"login":"%s"},"id":%s,"body":%s,"created_at":"2026-01-01T00:00:00Z"}' \
+            "$BOT" "$1" "$2"
+    fi
+}
 mk_reviews() {   # <state> <submitted_at|null> <id>
     printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"%s","submitted_at":%s,"id":%s}]' \
         "$BOT" "$HEAD40" "$1" "$2" "$3" > "$TMP/reviews.json"
@@ -306,6 +319,81 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
     && pass "…and the verdict is clean, so the phase can move on" \
     || die "newer clean comment gave rc=$rc '$out'"
 
+# ── verdict: a reply counts, and a review of nothing BUT replies is named ──
+# A reviewer's clean verdict is sometimes delivered as a REPLY — "No blocking
+# findings on <sha>" arrived that way — and counting it as a finding leaves the
+# loop stuck, because the count cannot drop: the comment IS the verdict. Three
+# attempts to exempt it failed, the last generally: the real verdict is followed
+# by paragraphs of explanation, and a retraction is also a paragraph after the
+# verdict line. Telling those apart needs a denylist of words meaning "except".
+#
+# So a reply counts, and the ANSWER says when they were all replies. There is
+# nothing to fix and it is not a signoff — the driver stops for the operator.
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 950
+printf '[%s]' "$(mk_rc 1 '"## Review\n\nNo blocking findings on `aaaaaaa`."' 42)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1 source=replies-only'; } \
+    && pass "a review whose only comment is a reply is named, not read as either answer" \
+    || die "a reply-only review gave rc=$rc '$out'"
+
+# THE RETRACTION CASE, which is why there is no exemption: the verdict line is
+# there, and so is the correction. No reading of the text separates this from the
+# verdict followed by its explanation.
+printf '[%s]' "$(mk_rc 2 '"No blocking findings on `aaaaaaa`.\n\nCorrection: this still crashes."' 42)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=1'; } \
+    && pass "…so a reply that carries a verdict line and then retracts it never clears" \
+    || die "a retracting reply gave rc=$rc '$out'"
+
+# A TOP-LEVEL COMMENT IS A FINDING, and is not named as replies-only.
+printf '[%s]' "$(mk_rc 3 '"this is wrong"')" > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "…while a top-level comment is a finding like any other" \
+    || die "a top-level comment gave rc=$rc '$out'"
+
+# A REVIEW CARRYING BOTH is not replies-only: there is something to fix.
+printf '[%s,%s]' "$(mk_rc 4 '"one"')" "$(mk_rc 5 '"a follow-up"' 4)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "…and a review carrying both counts both, without the name" \
+    || die "a mixed review gave rc=$rc '$out'"
+
+# A MALFORMED `in_reply_to_id` IS UNREADABLE, NOT A REPLY. A presence-only test
+# discarded such a row silently, so a page of them counted zero — which is clean,
+# on a payload nothing could read.
+# NULL IS NOT MALFORMED — it is "no parent", the same as an absent key, so the
+# comment OPENS a thread and counts as an ordinary finding. Rejecting it would
+# make every finding page unreadable on a host that serialises nullable fields.
+printf '[{"user":{"login":"%s"},"id":9,"body":"x","created_at":"2026-01-01T00:00:00Z","in_reply_to_id":null}]' \
+    "$BOT" > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && printf '%s' "$out" | grep -qv 'replies-only' \
+    && pass "a null in_reply_to_id is a top-level finding, not a reply and not malformed" \
+    || die "a null in_reply_to_id gave rc=$rc '$out'"
+
+for bad in '"7"' '{}' '[42]'; do
+    printf '[{"user":{"login":"%s"},"id":8,"body":"x","created_at":"2026-01-01T00:00:00Z","in_reply_to_id":%s}]' \
+        "$BOT" "$bad" > "$TMP/comments-950.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+            run verdict 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a malformed in_reply_to_id ($bad) is a stop, not a silent clean" \
+        || die "in_reply_to_id=$bad gave rc=$rc '$out'"
+done
+rm -f "$TMP/comments-950.json"
+
 # The other direction: an OLDER clean comment must not beat a newer review.
 mk_reviews CHANGES_REQUESTED '"2026-01-03T00:00:00Z"' 941
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
@@ -420,7 +508,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&
     && pass "verdict: approved with zero comments => clean (0)" \
     || die "verdict: clean case gave rc=$rc '$out'"
 
-printf '[{"path":"a.sh","line":1,"body":"x"},{"path":"b.sh","line":2,"body":"y"}]' > "$TMP/comments-31.json"
+printf '[%s,%s]' "$(mk_rc 1 '"x"')" "$(mk_rc 2 '"y"')" > "$TMP/comments-31.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
     && pass "verdict: inline comments => findings (1)" \

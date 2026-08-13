@@ -208,6 +208,18 @@ reply shows the change, or a base-ref authority accepted it) and say what you ar
 relying on. A material correctness or fail-closed finding recorded as skipped
 stays reportable however many times it has been resolved.
 
+### Say a clean verdict where the loop can read it
+
+**Where you post a clean verdict decides whether the loop can act on it.** Every
+comment on your review counts as a finding, replies included — a reply is not
+exempt, because a verdict followed by explanation and a verdict followed by a
+retraction look the same to anything reading the text.
+
+So a review whose only content is a reply stops the loop for a human: nothing to
+fix, and not a signoff. **Post a clean verdict as the review body, or as an issue
+comment — not as a reply on an existing thread.** A finding belongs in a comment
+that opens a thread, where the author can answer and resolve it.
+
 ### Review statically — do not run anything
 
 **This is a read-only review. Do not set up an environment, install

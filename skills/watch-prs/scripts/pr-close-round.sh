@@ -306,6 +306,14 @@ if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     case "$PUSHPASS_RC" in
         0) ;;
         1) echo "ABORT: the pass the push started has not finished; its result would answer the next request."; exit 1 ;;
+        # THE PASS SAID NOTHING ANYONE CAN ACT ON. Every comment it left was a
+        # reply, so there is nothing for `pr-findings.sh` to list and it is not a
+        # signoff. Closing the round here would resolve the previous round's
+        # threads, post a summary and request another pass — past the one thing
+        # that needs to happen, which is a human reading that comment. Paused
+        # rather than aborted: nothing is wrong, a decision is owed.
+        4) echo "PAUSE: the pass the push started left only replies — nothing to fix and no signoff. Read it with the operator before closing this round."
+           exit 3 ;;
         *) echo "ABORT: could not observe the pass the push started (rc=$PUSHPASS_RC)"; exit 1 ;;
     esac
 fi

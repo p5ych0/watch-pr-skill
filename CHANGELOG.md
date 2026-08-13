@@ -1,5 +1,103 @@
 # Changelog
 
+## [2.0.11] — 2026-08-13
+
+- **A review of nothing but replies is named, instead of being guessed at.**
+  `pr-review-state.sh verdict` counts every comment row attached to the
+  authoritative review, and a reviewer's own verdict is sometimes delivered as a
+  REPLY on an existing thread — "No blocking findings on `87ad552`" arrived exactly
+  that way.
+
+  Counted as a finding, that is terminal rather than merely wrong: the count cannot
+  drop, because the comment *is* the verdict. There is no thread to resolve and no
+  fix to make, so the loop never closes and the merge gate blocks a PR its reviewer
+  has passed. `pr-findings.sh` reported nothing to fix at the same moment, which is
+  how the two disagreed — one asks for unresolved threads, the other counts comment
+  rows.
+
+  **The exemption is gone, and that is the finding of three review rounds.** A
+  reply is not exempt: dropping every reply let a blocking finding posted as one
+  merge unseen; matching the phrase let a reply that NEGATED it read as clean;
+  matching a whole LINE let a reply that carries the verdict line and retracts it
+  two lines later read as clean. The third is the general case — the real verdict
+  is followed by paragraphs of explanation, and a retraction is also a paragraph
+  after the verdict line. Separating them means a denylist of words meaning
+  "except", one word behind forever, which this repository has already paid for
+  once and written a rule against.
+
+  So every comment counts, as before — and the answer now says WHEN THEY WERE ALL
+  REPLIES. `verdict=findings findings=1 source=replies-only` is neither answer:
+  `pr-findings.sh` lists nothing to fix and it is not a signoff, so the driver
+  stops and a human reads one comment. That is the stuck loop solved where it can
+  be solved honestly, rather than by guessing at intent.
+
+  Every row is validated first. `in_reply_to_id` is absent or a number, never null
+  and never a string, so a presence-only test silently discarded a malformed row as
+  a reply — and a page of those counted zero, which is `clean`. `recordlib.sh` gains
+  `valid_review_comment` and `opens_a_thread`, with their own accept/reject cases
+  and a drift-guard entry, because a shared definition cannot be the untested one.
+
+  `pr-watch.sh` learned the shape in the same change, because a new record is only
+  a signal if its consumer accepts it: the watch validates the verdict tail
+  strictly, so `source=replies-only` was classified as inconsistent, exited 2 and
+  printed no `PR_REVIEW_READY` at all — the operator stop silently not happening,
+  which is worse than the stuck loop it replaced. The tail is spelled out rather
+  than made optional, and three unagreed tails are asserted to be refused.
+
+  **And it has its own exit status, 4, because every caller branches on status.**
+  Saying it in the record alone taught exactly one consumer: the driver's step 3
+  table still sent the round on to step 4, where there is nothing to fix, and
+  `pr-close-round.sh` — waiting on the pass a push starts — took the 0 and closed
+  the round. Both are the stop not happening. `4` now stops the driver before the
+  fix round and pauses the close-round gate, and the contract test requires every
+  status the watch can exit with to be in the table the driver reads.
+
+  **And the stop has an end, or it is only a different deadlock.** The verdict
+  stays non-clean while that review is the newest, so re-running the watch returns
+  4 again, no thread exists to resolve, and re-requesting is forbidden — the first
+  version traded a deadlock for a permanent pause. The operator's answer now
+  becomes state: if the comment was a clean verdict they record the
+  `**Review-Signoff:**` line, and the merge gate accepts it FOR THAT SHAPE ONLY —
+  a `source=replies-only` verdict plus a signoff naming that head merges and says
+  so; a review with real findings is not a question anyone was asked, so a signoff
+  never carries one. If the comment was a finding, fixing it moves the head and
+  the round is ordinary again. Absence is not permission: the gate has a positive
+  `signoff_vouches`, because the existing `signoff_contradicts` answers "does a
+  record disagree" and NOTHING RECORDED is not a disagreement.
+
+  **A head is not a moment.** The first version of that acceptance took a signoff
+  naming the same sha as proof the operator had answered — but a signoff recorded
+  for an EARLIER clean review on an unchanged head would then vouch for a LATER
+  replies-only review nobody read. The record must be newer than the review it
+  answers, so `pr-signoff.sh` carries `at=<createdAt>` (before `sha=`, because
+  every caller reads the sha with `${line##*sha=}` and a field after it would be
+  swallowed into the value) and `pr-review-state.sh` gained `review-at`. Equal
+  timestamps refuse: GitHub stamps to the second, and merge permission is not a
+  coin toss.
+
+  The replies-only record is matched in full for the same reason — a `*` between
+  `findings=` and the suffix accepted an empty count and any appended field, and
+  that shape both bypasses the status gate and can authorise a merge.
+
+  `in_reply_to_id: null` is "no parent", not a malformed record. github.com omits
+  the key, so a first version rejected null as unreadable — and a host that
+  serialises its nullable fields would then have made every ordinary finding page
+  unreadable, stopping the watch with rc 2 on every review. A string or an object
+  still is malformed.
+
+  Both reviewer contracts now say to post a clean verdict as the review body or an
+  issue comment rather than as a reply, since a reply-only review costs an operator
+  a read — `AGENTS.md` and `.github/copilot-instructions.md`, plus `SKILL.md` and
+  `README.md` for the driver and the user.
+
+  The fixture pins the REAL payload shape, checked against the API: a top-level
+  comment OMITS `in_reply_to_id` and a reply carries it, so a fixture written as
+  `"in_reply_to_id": null` would prove nothing about the live case. Cases cover a
+  reply-only review, a top-level comment, a review carrying both, a blocking reply,
+  a clean verdict naming another head, and three malformed `in_reply_to_id`
+  spellings. Found while driving #33; filed as #34 rather than fixed there, because
+  a merge-critical helper does not belong in a PR about something else.
+
 ## [2.0.10] — 2026-08-12
 
 - **Closing a round is a script, and both orderings live in one place.** The two

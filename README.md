@@ -249,6 +249,22 @@ Then:
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings".
+
+   Every comment on the review counts as a finding, replies included. A reviewer
+   sometimes delivers a clean verdict as a reply, and that is *not* exempted:
+   the real verdict is followed by paragraphs of explanation, and a retraction is
+   also a paragraph after the verdict line, so nothing in the text separates
+   them. When a review is nothing but replies the watch reports
+   `source=replies-only` and exits **4**, and the skill **stops for you** — there
+   is nothing to fix and it is not a signoff, so one comment gets read by a human.
+   Both round-closing paths honour that status, so a push-triggered pass cannot
+   slip past it either.
+
+   **Your answer becomes state, so the stop ends.** If the comment was a clean
+   verdict, the skill records a `**Review-Signoff:**` line for that reviewer and
+   head, and the merge gate accepts it *for that shape only*. If it was a finding,
+   fix it and push — the head moves and the round is ordinary again. With no
+   signoff recorded the gate refuses and says which of the two to do.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

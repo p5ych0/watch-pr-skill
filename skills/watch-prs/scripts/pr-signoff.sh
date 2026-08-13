@@ -77,13 +77,13 @@ esac
 # The walk is the merge gate's, for the same reasons: every cursor already
 # requested is remembered so a cycle of any length stops rather than hanging, and
 # any incomplete traversal is an ERROR rather than the answer so far.
-SHA=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
+SHA=""; SIGNED_AT=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
 while :; do
     PAGE=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
         -F cursor="$CURSOR" -f query='query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
           repository(owner:$owner,name:$repo){ pullRequest(number:$number){
             comments(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
-              nodes{ body authorAssociation } }}}}' 2>/dev/null) || { OK=0; break; }
+              nodes{ body authorAssociation createdAt } }}}}' 2>/dev/null) || { OK=0; break; }
     # A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`. The partial
     # data passes every shape check below while omitting comments, and the answer
     # taken from it would be "no signoff" — which is the safe direction only until
@@ -94,15 +94,22 @@ while :; do
     # and those are the two answers this helper exists to keep apart. A node
     # without a string body, or without a readable association, means the response
     # could not be read — status 2 — not that the record is absent.
-    FOUND=$(printf '%s' "$PAGE" | jq -r --arg who "$WHO" '
+    FOUND=$(printf '%s' "$PAGE" | jq -r --arg who "$WHO" "$RECORDLIB_JQ"'
         .data.repository.pullRequest.comments.nodes as $n
         | if ($n | type) != "array"
              or any($n[]; type != "object"
                           or (.body | type) != "string"
-                          or (.authorAssociation | type) != "string")
+                          or (.authorAssociation | type) != "string"
+                          # WHEN the record was made. A signoff answers a review,
+                          # and a merge gate cannot tell an answer from a leftover
+                          # without knowing which came first — so a comment with no
+                          # timestamp is a malformed record here, not one with an
+                          # unknown date.
+                          or ((.createdAt | canonical_utc) | not))
           then error("malformed nodes")
           else [ $n[]
                  | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))
+                 | .createdAt as $c
                  # ANCHORED AT BOTH ENDS. A marker with prose after it — "…is the
                  # format we use" — is documentation, not a signoff, and a
                  # start-anchored pattern accepted it. The line must BE the record.
@@ -116,14 +123,17 @@ while :; do
                  | select(.[1] == $who)
                  # A revocation carries no sha and a signoff must; anything else
                  # is a malformed line rather than either.
-                 | if .[0] != null then "REVOKED"
-                   elif (.[2] | type) == "string" then .[2]
+                 | . as $m
+                 | if $m[0] != null then "REVOKED\t" + $c
+                   elif ($m[2] | type) == "string" then $m[2] + "\t" + $c
                    else empty end
                ] | last // ""
           end') || { OK=0; break; }
     # THE LAST RECORD ANYWHERE WINS, so a later page supersedes an earlier one and
     # a phase can be reopened by saying so.
-    [ -n "$FOUND" ] && SHA="$FOUND"
+    # `<sha-or-REVOKED>\t<createdAt>`; the timestamp travels with the record so the
+    # caller never has to guess which of two comments it is holding.
+    [ -n "$FOUND" ] && { SHA="${FOUND%%$'\t'*}"; SIGNED_AT="${FOUND#*$'\t'}"; }
     HAS_NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage') || { OK=0; break; }
     case "$HAS_NEXT" in
         false) break ;;
@@ -162,5 +172,8 @@ fi
 _why="$(sha_reason "$SHA")" || {
     echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=$_why sha=$SHA" >&2
     exit 2; }
-echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=$SHA"
+# `at=` COMES BEFORE `sha=`, and that is not cosmetic: every caller reads the sha
+# with `${line##*sha=}`, so a field appended after it would be swallowed into the
+# value and the gate would compare a sha against a sha-plus-timestamp.
+echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT sha=$SHA"
 exit 0

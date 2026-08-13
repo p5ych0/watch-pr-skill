@@ -37,8 +37,11 @@ comments() {   # comments <assoc>|<body> …
     local nodes="" spec assoc body
     for spec in "$@"; do
         assoc="${spec%%|*}"; body="${spec#*|}"
-        nodes="$nodes$(printf '{"authorAssociation":"%s","body":%s},' \
-            "$assoc" "$(printf '%s' "$body" | jq -Rs .)")"
+        # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
+        # review, and the merge gate cannot tell an answer from a leftover without
+        # knowing which came first. A node without one is malformed.
+        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
+            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[%s]}}}}}' "${nodes%,}"
 }
@@ -102,9 +105,9 @@ case_is 1 "sha=none" "…and one with prose trailing it does not sign off either
 # review nobody did.
 world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "a node missing its fields is unreadable, not absent"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","body":7}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","body":7}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and so is a body that is not a string"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"body":"x"}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","body":"x"}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and an association that is not a string"
 
 # ── the LAST one wins, so a phase can be reopened ──────────────────────────
@@ -156,8 +159,11 @@ page() {   # page <hasNext> <endCursor> <assoc>|<body> …
     shift 2
     for spec in "$@"; do
         assoc="${spec%%|*}"; body="${spec#*|}"
-        nodes="$nodes$(printf '{"authorAssociation":"%s","body":%s},' \
-            "$assoc" "$(printf '%s' "$body" | jq -Rs .)")"
+        # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
+        # review, and the merge gate cannot tell an answer from a leftover without
+        # knowing which came first. A node without one is malformed.
+        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
+            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":%s,"endCursor":%s},"nodes":[%s]}}}}}' \
         "$has" "$cur" "${nodes%,}"

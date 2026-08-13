@@ -392,6 +392,22 @@ printf '%s\n' "$PREV40" > "$W/head.before.out"
 printf '2' > "$W/pr-watch.rc"
 case_is 1 "could not observe" "…and an unobservable one stops it too" "$CODEXBOT" yes
 
+# AND A PASS THAT LEFT ONLY REPLIES PAUSES IT. Nothing for `pr-findings.sh` to
+# list and no signoff, so closing here would resolve the previous round's threads,
+# post a summary and request another pass — straight past the one thing that has
+# to happen, which is a human reading that comment. Paused rather than aborted:
+# nothing is wrong, a decision is owed.
+world
+printf '%s\n' "$PREV40" > "$W/head.before.out"
+printf '4' > "$W/pr-watch.rc"
+case_is 3 "left only replies" "a push-started pass that left only replies pauses the round" "$CODEXBOT" yes
+grep -q 'gh pr comment' "$TMP/calls" \
+    && die "it posted a summary past the operator stop" \
+    || pass "…with nothing posted"
+grep -q -- '--add-reviewer\|@codex review' "$TMP/calls" \
+    && die "it requested another pass past the operator stop" \
+    || pass "…and nothing requested"
+
 # A FAILED COPILOT RE-REQUEST STOPS THE ROUND. `--add-reviewer` is the only thing
 # that triggers Copilot, so a round that posted its summary and failed here has
 # announced a pass that will never come.
