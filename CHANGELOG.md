@@ -21,12 +21,20 @@
   resolved thread, so BOTH gates read clean and the PR merges with the finding
   unaddressed. That trades a stuck loop for a wrong merge.
 
-  So a reply is skipped only when it is recognisably the reviewer's clean verdict
-  FOR THIS HEAD — it names the head and says it found nothing. Anything else a
-  reply says counts, which fails closed: an unrecognised phrasing stalls the round,
-  and a stalled round is visible and recoverable in a way a merged finding is not.
+  So a reply is skipped only when some LINE of it IS the verdict and names this
+  head — `No blocking findings on \`<sha>\`.` A substring test was not enough: a
+  reply that quotes or negates the verdict ("the prior verdict said no blocking
+  findings on `<sha>`, but this is still broken") contains both the phrase and the
+  sha, so a blocking finding read as the clean verdict. Anything else a reply says
+  counts, which fails closed: an unrecognised phrasing stalls the round, and a
+  stalled round is visible and recoverable in a way a merged finding is not.
   Head-bound on purpose, since "no blocking findings on `<old sha>`" says nothing
   about the commit being gated.
+
+  Both reviewer contracts say where to put a clean verdict so the loop can read
+  it, since this changes what a reply has to look like — `AGENTS.md` and
+  `.github/copilot-instructions.md`, plus `SKILL.md` and `README.md` for the
+  driver and the user.
 
   Every row is validated first. `in_reply_to_id` is absent or a number, never null
   and never a string, so a presence-only test silently discarded a malformed row as

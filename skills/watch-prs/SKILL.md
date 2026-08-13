@@ -891,6 +891,12 @@ disappeared whenever that file did.
 ## 7. Codex is clean — now the Copilot phase
 
 When `pr-review-state.sh verdict N "$CODEX_BOT"` exits 0, the Codex loop is done.
+
+That verdict counts the comments that **open** threads on the reviewer's newest
+review. A reply on an existing thread is not a finding — reviewers sometimes post
+a clean verdict as one — but only when a line of it *is* the verdict and names
+the head; anything else a reply says still counts, so an argument about a verdict
+is never read as one. A malformed `in_reply_to_id` is a stop, not a reply.
 Ask Copilot:
 
 ```bash

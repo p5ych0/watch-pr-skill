@@ -167,6 +167,40 @@ sha_case "${SHA40%?}A"                                     reject "uppercase hex
 sha_case '*'                                               reject "a glob"
 sha_case '[0-9a-f]'                                        reject "a bracket expression"
 
+# ── valid_review_comment and opens_a_thread ───────────────────────────────
+# The rows hanging off `pulls/N/reviews/<id>/comments`. `in_reply_to_id` says
+# whether a comment OPENS a thread or continues one, and that decides whether
+# `pr-review-state.sh` counts it as a finding — so its SHAPE decides a merge.
+crec() {   # crec <field-overrides-as-jq> -> a review-comment record
+    jq -c -n '{user:{login:"bot"},id:1,body:"text",
+               created_at:"2026-01-01T00:00:00Z"} + '"$1"
+}
+want accept valid_review_comment "$(crec '{}')" \
+    "a top-level review comment, with no in_reply_to_id, is accepted"
+want accept valid_review_comment "$(crec '{in_reply_to_id:42}')" \
+    "…and a reply carrying a numeric one is accepted"
+# THE MALFORMED SPELLINGS ARE THE POINT. A presence-only test read every one of
+# these as "this is a reply" and discarded the row, so a page of them counted zero
+# findings — which is `clean`, on a payload nothing could read.
+want reject valid_review_comment "$(crec '{in_reply_to_id:null}')" \
+    "…while an explicit null is rejected, not read as a reply"
+want reject valid_review_comment "$(crec '{in_reply_to_id:"7"}')" \
+    "…and so is a string"
+want reject valid_review_comment "$(crec '{in_reply_to_id:{}}')" \
+    "…and an object"
+want reject valid_review_comment "$(crec '{in_reply_to_id:[42]}')" \
+    "…and an array"
+# It still inherits everything a comment record must have.
+want reject valid_review_comment "$(crec '{created_at:null}')" \
+    "…and a review comment with no timestamp is still malformed"
+want reject valid_review_comment "$(crec '{user:"notanobject"}')" \
+    "…and so is one with no actor"
+
+want accept opens_a_thread "$(crec '{}')" \
+    "a comment with no in_reply_to_id opens a thread"
+want reject opens_a_thread "$(crec '{in_reply_to_id:42}')" \
+    "…and one with a numeric in_reply_to_id does not"
+
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
 # hand in a second and third script before this library existed, and every one of
@@ -198,6 +232,10 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # duplicated rule has not found the duplication.
         /\*\[!0-9a-f\]\*/                    { print FILENAME ":" FNR ": commit_id shape (shell case)" }
         /\$\{#[A-Za-z_]+\}" -(eq|ne) 40/      { print FILENAME ":" FNR ": commit_id length (shell)" }
+        # …and the reply/finding distinction. A helper asking this inline is one
+        # that has stopped VALIDATING the field, which is exactly how a malformed
+        # value became a silent "clean".
+        /has\("in_reply_to_id"\)/           { print FILENAME ":" FNR ": reply shape" }
         /\^\[0-9\]\{4\}-\[0-9\]\{2\}-\[0-9\]\{2\}T/ { print FILENAME ":" FNR ": timestamp shape" }
         /length == 0 then error\("no pages"\)/ { print FILENAME ":" FNR ": page shape" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
@@ -249,6 +287,15 @@ seen="$(scan_inline_rules "$DRIFT")"; drc2=$?
     && pass "…including the shell spelling of the SHA rule" \
     || die "the drift guard missed a shell-spelled SHA check (rc=$drc2 out='$seen')"
 rm -f "$DRIFT/pr-shelldrift.sh"
+# …and the reply-shape rule, planted the way a helper would actually write it.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'jq %s[.[] | select(has("in_reply_to_id") | not)] | length%s\n' "'" "'"
+} > "$DRIFT/pr-reply-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
+{ [ "$drc6" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-reply-copy.sh'; } \
+    && pass "…and catches a helper that asks the reply question inline" \
+    || die "the drift guard did not catch a planted reply-shape copy (rc=$drc6 out='$seen')"
+rm -f "$DRIFT/pr-reply-copy.sh"
 # An unreadable file is a failed scan, not a clean one — the same rule the
 # library itself encodes, applied to the guard that enforces it.
 printf '#!/usr/bin/env bash\n: \n' > "$DRIFT/pr-unreadable.sh"

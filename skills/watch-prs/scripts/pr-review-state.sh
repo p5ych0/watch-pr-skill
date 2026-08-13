@@ -328,12 +328,21 @@ review_comment_count() {
         | if any($rows[]; valid_review_comment | not)
           then error("malformed review comment")
           else [ $rows[]
+                 # THE WHOLE LINE, NOT A SUBSTRING. A reply that QUOTES or NEGATES
+                 # the verdict — "the prior verdict said no blocking findings on
+                 # <sha>, but this is still broken" — contains the phrase and the
+                 # sha, so a substring test classified a blocking finding as the
+                 # clean verdict and dropped it. On a resolved thread that is a
+                 # merge with the finding unaddressed.
+                 #
+                 # So some LINE has to BE the verdict: optional heading marks and
+                 # spaces, the canonical sentence, the head, and nothing else on
+                 # it. Anything the reviewer adds goes on its own lines, which is
+                 # what the real verdict looks like.
                  | select(opens_a_thread
-                          or ((.body // "" | ascii_downcase) as $b
-                              | (($b | test("no blocking findings"))
-                                 or ($b | test("didn.t find any major issues"))
-                                 or ($b | test("no major issues")))
-                                and ($b | test($head)) | not)) ]
+                          or ((.body // "") | ascii_downcase | split("\n")
+                              | any(.[]; test("^ *#{0,6} *no blocking findings on `?" + $head + "[0-9a-f]*`?\\.? *\r?$"))
+                              | not)) ]
                | length
           end' 2>/dev/null) || return 2
     case "$n" in

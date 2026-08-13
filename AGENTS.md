@@ -208,6 +208,21 @@ reply shows the change, or a base-ref authority accepted it) and say what you ar
 relying on. A material correctness or fail-closed finding recorded as skipped
 stays reportable however many times it has been resolved.
 
+### Say a clean verdict where the loop can read it
+
+**Where you post a clean verdict changes whether the loop can read it.** The
+driver counts the comments on your review to decide whether it carries findings.
+A comment that OPENS a thread is a finding. A REPLY on an existing thread is not
+— but the driver only treats it as your verdict when some line of it *is* the
+verdict and names the head being reviewed, like:
+
+    No blocking findings on `abc1234`.
+
+Anything else in a reply counts as a finding, deliberately: a reply that quotes or
+argues with a verdict must not be mistaken for one. So a clean verdict delivered
+as a reply that does not name the head leaves the round open, and the author has
+nothing to fix — say it on its own line, with the sha.
+
 ### Review statically — do not run anything
 
 **This is a read-only review. Do not set up an environment, install

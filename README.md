@@ -249,6 +249,13 @@ Then:
    itself. It is armed and re-armed as part of each round without asking you —
    see **Watching without prompts**. An unreadable state is a stop, never
    "no findings".
+
+   A review carries findings when it has comments that **open** threads. A
+   *reply* on an existing thread does not count — reviewers sometimes deliver a
+   clean verdict that way — but only when some line of it *is* the verdict and
+   names the head, as in ``No blocking findings on `abc1234`.`` Anything else a
+   reply says still counts, so a reply that quotes or argues with a verdict is
+   never mistaken for one.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

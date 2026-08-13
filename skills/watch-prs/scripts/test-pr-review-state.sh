@@ -381,6 +381,33 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
     && pass "…and a clean verdict naming another head does not clear this one" \
     || die "an other-head clean reply gave rc=$rc '$out'"
 
+# A REPLY THAT QUOTES OR NEGATES THE VERDICT IS NOT THE VERDICT. Substring
+# matching classified "the prior verdict said no blocking findings on <sha>, but
+# this is still broken" as clean, because the phrase and the head are both in it —
+# and on a resolved thread that is a merge with the finding unaddressed. Some LINE
+# has to BE the verdict.
+for _neg in '"The prior verdict said no blocking findings on `aaaaaaa`, but this path is still broken."' \
+            '"Not true that there are no blocking findings on `aaaaaaa` — see below."' \
+            '"> No blocking findings on `aaaaaaa`.\n\nThat was wrong; this still crashes."'; do
+    printf '[%s]' "$(mk_rc 9 "$_neg" 3)" > "$TMP/comments-950.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+            run verdict 7 "$BOT" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+        && pass "a reply that quotes or negates the verdict still counts" \
+        || die "a negating reply gave rc=$rc '$out' for $_neg"
+done
+
+# …WHILE THE REAL ONE STILL CLEARS, prose and heading and all. This is the shape
+# the reviewer actually posts, so a rule that refused it would put back the stuck
+# loop this whole change exists to remove.
+printf '[%s]' "$(mk_rc 10 '"## Review\n\nNo blocking findings on `aaaaaaa`.\n\nThe shared helper looks right, and the tests cover both directions."' 3)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
+    && pass "…and the verdict as the reviewer actually writes it still clears" \
+    || die "the real verdict shape gave rc=$rc '$out'"
+
 # A MALFORMED `in_reply_to_id` IS UNREADABLE, NOT A REPLY. A presence-only test
 # discarded such a row silently, so a page of them counted zero — which is clean,
 # on a payload nothing could read.
