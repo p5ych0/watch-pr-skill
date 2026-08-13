@@ -47,12 +47,15 @@
   `pr-signoff.sh` requires, a body expanded as a template, a request before the
   revocation, a missing CI gate, and a defaulted stage.
 
-- **Prose that quotes a record becomes that record.** Three markers on a PR are
+- **Prose that quotes a record becomes that record.** Four markers on a PR are
   control, not text: `pr-signoff.sh` reads `**Review-Signoff:**` and
   `**Review-Signoff-Revoked:**`, `pr-round-count.sh` reads
-  `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. The bodies this loop
-  posts are composed from findings, PR descriptions and reviewer comments and go up
-  under an identity those readers trust — so a round summary quoting a finding
+  `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. **Three of them a
+  caller-authored body can create**, and those are the three
+  `rb_reserved_marker_line` refuses; the fourth is covered below. The bodies this
+  loop
+  posts are composed from findings, PR descriptions and reviewer comments and go
+  up under an identity those readers trust — so a round summary quoting a finding
   about an acknowledgement PUBLISHED that acknowledgement, and the operator
   boundary it answered never fired again. Silently, and at exactly the round the
   boundary existed for.
