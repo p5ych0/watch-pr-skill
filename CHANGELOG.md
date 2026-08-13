@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.11] — 2026-08-13
+
+- **A reply is not a finding, and counting it as one stopped the loop dead.**
+  `pr-review-state.sh verdict` counted every comment row attached to the
+  authoritative review. A reviewer's own verdict is sometimes delivered as a REPLY
+  on an existing thread — "No blocking findings on `87ad552`" arrived exactly that
+  way — and was counted as one finding.
+
+  That is terminal rather than merely wrong. The count cannot drop, because the
+  comment *is* the verdict: there is no thread to resolve and no fix to make, so
+  the loop never closes and the merge gate blocks a PR its reviewer has passed.
+  `pr-findings.sh` reported nothing to fix at the same moment, which is how the two
+  disagreed — one asks for unresolved threads, the other was counting comment rows.
+
+  A finding OPENS a thread; a reply continues one already counted by its opener.
+  The count now skips replies. What it gives up is a finding replied onto an
+  already-resolved thread, and that one is invisible to `pr-findings.sh` too, so
+  the driver could never have acted on it — the previous behaviour did not catch
+  it either, it just refused to finish.
+
+  The fixture pins the REAL payload shape, checked against the API: a top-level
+  comment OMITS `in_reply_to_id` and a reply carries it, so a fixture written as
+  `"in_reply_to_id": null` would prove nothing about the live case. Cases cover a
+  reply-only review, a top-level comment, and a review carrying both. Found while
+  driving #33; filed as #34 rather than fixed there, because a merge-critical
+  helper does not belong in a PR about something else.
+
 ## [2.0.10] — 2026-08-12
 
 - **Closing a round is a script, and both orderings live in one place.** The two

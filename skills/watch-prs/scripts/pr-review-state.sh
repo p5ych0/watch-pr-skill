@@ -295,8 +295,23 @@ review_comment_count() {
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
+    # REPLIES ARE NOT FINDINGS. This counted every comment row attached to the
+    # review, and a reviewer's own verdict is sometimes delivered as a REPLY on an
+    # existing thread — "No blocking findings on <sha>" arrived that way on #33 and
+    # was counted as one finding. That is terminal rather than merely wrong: the
+    # count cannot drop, because the comment IS the verdict, so the loop can never
+    # close and the merge gate blocks a PR its reviewer has passed. `pr-findings.sh`
+    # meanwhile showed nothing to fix, which is how the two disagreed.
+    #
+    # A finding OPENS a thread. A reply continues one that is already counted by
+    # its opener, so dropping replies loses nothing a caller could act on — and the
+    # residue it does lose, a finding replied onto an already-resolved thread, is
+    # invisible to `pr-findings.sh` too, so the driver could never have fixed it.
+    #
+    # `in_reply_to_id` is ABSENT on a top-level comment rather than null, so the
+    # test is on the key's presence.
     n=$(printf '%s' "$raw" | jq -s "$RECORDLIB_JQ"'
-        pages_or_error | [.[][]] | length' 2>/dev/null) || return 2
+        pages_or_error | [.[][] | select(has("in_reply_to_id") | not)] | length' 2>/dev/null) || return 2
     case "$n" in
         ""|*[!0-9]*) return 2 ;;
     esac

@@ -306,6 +306,46 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
     && pass "…and the verdict is clean, so the phase can move on" \
     || die "newer clean comment gave rc=$rc '$out'"
 
+# ── verdict: a REPLY is not a finding ──────────────────────────────────────
+# A reviewer's own verdict is sometimes delivered as a REPLY on an existing
+# thread. "No blocking findings on <sha>" arrived that way on #33 and was counted
+# as one finding — and that is terminal rather than merely wrong: the count cannot
+# drop, because the comment IS the verdict, so the loop never closes and the merge
+# gate blocks a PR its reviewer has passed. `pr-findings.sh` showed nothing to fix
+# at the same moment, which is how the two disagreed.
+#
+# THE PAYLOAD SHAPE IS THE REAL ONE, checked against the API: a top-level comment
+# OMITS `in_reply_to_id`, and a reply carries it. A fixture that spelled the
+# top-level case as `"in_reply_to_id": null` would pass a `select(. == null)` test
+# that the live payload fails.
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 950
+printf '[{"id":1,"in_reply_to_id":42,"body":"No blocking findings on abc1234."}]' \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
+    && pass "a verdict delivered as a reply does not read as a finding" \
+    || die "a reply-only review gave rc=$rc '$out'"
+
+# A TOP-LEVEL COMMENT IS STILL A FINDING. The rule must not have been widened into
+# "count nothing".
+printf '[{"id":2,"body":"this is wrong"}]' > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && pass "…while a top-level comment still is one" \
+    || die "a top-level comment gave rc=$rc '$out'"
+
+# AND THE TWO ARE COUNTED TOGETHER CORRECTLY: two findings and a reply is two.
+printf '[{"id":3,"body":"one"},{"id":4,"in_reply_to_id":3,"body":"a follow-up"},{"id":5,"body":"two"}]' \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=2'; } \
+    && pass "…and a review carrying both counts only the findings" \
+    || die "a mixed review gave rc=$rc '$out'"
+rm -f "$TMP/comments-950.json"
+
 # The other direction: an OLDER clean comment must not beat a newer review.
 mk_reviews CHANGES_REQUESTED '"2026-01-03T00:00:00Z"' 941
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
