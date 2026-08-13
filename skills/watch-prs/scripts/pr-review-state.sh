@@ -288,30 +288,54 @@ head_review_snapshot() {
 
 # Count the inline comments of ONE known review id. 0 = count printed · 2 = fail.
 review_comment_count() {
-    local pr="$1" id="$2" raw n
+    local pr="$1" id="$2" head="$3" raw n
     case "$id" in
         ""|*[!0-9]*) return 2 ;;
     esac
     if ! raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$id/comments" --paginate 2>/dev/null); then
         return 2
     fi
-    # REPLIES ARE NOT FINDINGS. This counted every comment row attached to the
-    # review, and a reviewer's own verdict is sometimes delivered as a REPLY on an
-    # existing thread — "No blocking findings on <sha>" arrived that way on #33 and
-    # was counted as one finding. That is terminal rather than merely wrong: the
-    # count cannot drop, because the comment IS the verdict, so the loop can never
-    # close and the merge gate blocks a PR its reviewer has passed. `pr-findings.sh`
-    # meanwhile showed nothing to fix, which is how the two disagreed.
+    # A REPLY IS NOT A FINDING — BUT ONLY WHEN IT IS THE VERDICT ITSELF.
     #
-    # A finding OPENS a thread. A reply continues one that is already counted by
-    # its opener, so dropping replies loses nothing a caller could act on — and the
-    # residue it does lose, a finding replied onto an already-resolved thread, is
-    # invisible to `pr-findings.sh` too, so the driver could never have fixed it.
+    # This counted every comment row, and a reviewer's verdict is sometimes
+    # delivered as a REPLY on an existing thread — "No blocking findings on
+    # <sha>" arrived that way — which counted as one finding. That is terminal:
+    # the count cannot drop, because the comment IS the verdict, so the loop never
+    # closes and the gate blocks a PR its reviewer passed.
     #
-    # `in_reply_to_id` is ABSENT on a top-level comment rather than null, so the
-    # test is on the key's presence.
-    n=$(printf '%s' "$raw" | jq -s "$RECORDLIB_JQ"'
-        pages_or_error | [.[][] | select(has("in_reply_to_id") | not)] | length' 2>/dev/null) || return 2
+    # DROPPING ALL REPLIES WAS THE WRONG FIX, and this is the second attempt. A
+    # blocking finding posted as a reply on an already-resolved thread would be
+    # dropped too — and `pr-findings.sh` cannot surface a resolved thread, so BOTH
+    # gates read clean and the PR merges with the finding unaddressed. The first
+    # version documented that as an accepted limitation; it is not one, because it
+    # trades a stuck loop for a wrong merge.
+    #
+    # So a reply is skipped only when it is RECOGNISABLY this reviewer's clean
+    # verdict FOR THIS HEAD: it names the head and says it found nothing. Anything
+    # else a reply says counts, which fails closed — an unrecognised phrasing
+    # stalls the round, and a stalled round is visible and recoverable in a way a
+    # merged finding is not.
+    #
+    # Head-bound on purpose: "no blocking findings on <old sha>" says nothing
+    # about the commit being gated.
+    n=$(printf '%s' "$raw" | jq -s --arg head "${head:0:7}" "$RECORDLIB_JQ"'
+        # EVERY ROW IS VALIDATED FIRST. `in_reply_to_id` is absent or a number and
+        # never null or a string, so anything else is a payload this cannot read —
+        # and a presence-only test silently discarded such a row as a reply, so a
+        # page of them counted zero, which is `clean`.
+        pages_or_error
+        | [.[][]] as $rows
+        | if any($rows[]; valid_review_comment | not)
+          then error("malformed review comment")
+          else [ $rows[]
+                 | select(opens_a_thread
+                          or ((.body // "" | ascii_downcase) as $b
+                              | (($b | test("no blocking findings"))
+                                 or ($b | test("didn.t find any major issues"))
+                                 or ($b | test("no major issues")))
+                                and ($b | test($head)) | not)) ]
+               | length
+          end' 2>/dev/null) || return 2
     case "$n" in
         ""|*[!0-9]*) return 2 ;;
     esac
@@ -339,7 +363,7 @@ clean_verdict() {
     # faked, and the re-check below still guards against the state moving.
     case "$id" in
         comment:*) n=0 ;;
-        *) n="$(review_comment_count "$pr" "$id")" || return 2 ;;
+        *) n="$(review_comment_count "$pr" "$id" "$head")" || return 2 ;;
     esac
     snap2="$(head_review_snapshot "$pr" "$who" "$head")" || return 2
     if [ "$snap2" != "$snap1" ]; then

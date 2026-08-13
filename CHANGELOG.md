@@ -14,18 +14,33 @@
   `pr-findings.sh` reported nothing to fix at the same moment, which is how the two
   disagreed — one asks for unresolved threads, the other was counting comment rows.
 
-  A finding OPENS a thread; a reply continues one already counted by its opener.
-  The count now skips replies. What it gives up is a finding replied onto an
-  already-resolved thread, and that one is invisible to `pr-findings.sh` too, so
-  the driver could never have acted on it — the previous behaviour did not catch
-  it either, it just refused to finish.
+  A finding OPENS a thread; a reply continues one already counted by its opener —
+  but **only the verdict itself is skipped**, not every reply. Dropping all replies
+  was the first attempt and it was wrong: a blocking finding posted as a reply on
+  an already-resolved thread would go too, and `pr-findings.sh` cannot surface a
+  resolved thread, so BOTH gates read clean and the PR merges with the finding
+  unaddressed. That trades a stuck loop for a wrong merge.
+
+  So a reply is skipped only when it is recognisably the reviewer's clean verdict
+  FOR THIS HEAD — it names the head and says it found nothing. Anything else a
+  reply says counts, which fails closed: an unrecognised phrasing stalls the round,
+  and a stalled round is visible and recoverable in a way a merged finding is not.
+  Head-bound on purpose, since "no blocking findings on `<old sha>`" says nothing
+  about the commit being gated.
+
+  Every row is validated first. `in_reply_to_id` is absent or a number, never null
+  and never a string, so a presence-only test silently discarded a malformed row as
+  a reply — and a page of those counted zero, which is `clean`. `recordlib.sh` gains
+  `valid_review_comment` and `opens_a_thread`, because "is this a finding" is asked
+  in more than one place and the answer is that field.
 
   The fixture pins the REAL payload shape, checked against the API: a top-level
   comment OMITS `in_reply_to_id` and a reply carries it, so a fixture written as
   `"in_reply_to_id": null` would prove nothing about the live case. Cases cover a
-  reply-only review, a top-level comment, and a review carrying both. Found while
-  driving #33; filed as #34 rather than fixed there, because a merge-critical
-  helper does not belong in a PR about something else.
+  reply-only review, a top-level comment, a review carrying both, a blocking reply,
+  a clean verdict naming another head, and three malformed `in_reply_to_id`
+  spellings. Found while driving #33; filed as #34 rather than fixed there, because
+  a merge-critical helper does not belong in a PR about something else.
 
 ## [2.0.10] — 2026-08-12
 

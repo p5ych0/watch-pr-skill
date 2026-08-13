@@ -110,6 +110,26 @@ def valid_comment_record:
     and (.body == null or (.body | type) == "string")
     and (.created_at | canonical_utc);
 
+# A REVIEW comment — the rows hanging off `pulls/N/reviews/<id>/comments`.
+#
+# Same fields as a review-thread comment plus the one that says whether it OPENS a
+# thread or continues one: `in_reply_to_id` is ABSENT on a top-level comment and a
+# NUMBER on a reply. It is never null and never a string, so anything else is a
+# payload this code cannot read.
+#
+# That distinction decides a merge. `pr-review-state.sh` treats a reply as
+# continuing a thread its opener already accounts for, so a presence-only test
+# silently discarded any row carrying a malformed value — and a page of those
+# counted as zero findings, which is `clean`. A field whose shape decides a gate
+# has to be validated, not merely looked for.
+def valid_review_comment:
+    valid_comment_record
+    and ((has("in_reply_to_id") | not) or ((.in_reply_to_id | type) == "number"));
+
+# Whether a review comment OPENS a thread. One definition, because "is this a
+# finding" is asked in more than one place and the answer is this field.
+def opens_a_thread: (has("in_reply_to_id") | not);
+
 # A page from a `--paginate` read, slurped with `-s`.
 #
 # `jq -s` slurps into an array of PAGES. Empty input slurps to ZERO pages, and

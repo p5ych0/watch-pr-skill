@@ -54,6 +54,19 @@ chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH" GH_FIXTURE_DIR="$TMP"
 
 run() { REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" "$@"; }
+# A REVIEW COMMENT ROW, in the shape the API sends: `user` and `created_at` are
+# always present, and `in_reply_to_id` is ABSENT on a top-level comment. The
+# counter validates all three, so a minimal `{id, body}` row is a malformed
+# payload rather than a convenient shorthand.
+mk_rc() {   # mk_rc <id> <body> [in_reply_to_id]
+    if [ -n "${3:-}" ]; then
+        printf '{"user":{"login":"%s"},"id":%s,"body":%s,"created_at":"2026-01-01T00:00:00Z","in_reply_to_id":%s}' \
+            "$BOT" "$1" "$2" "$3"
+    else
+        printf '{"user":{"login":"%s"},"id":%s,"body":%s,"created_at":"2026-01-01T00:00:00Z"}' \
+            "$BOT" "$1" "$2"
+    fi
+}
 mk_reviews() {   # <state> <submitted_at|null> <id>
     printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"%s","submitted_at":%s,"id":%s}]' \
         "$BOT" "$HEAD40" "$1" "$2" "$3" > "$TMP/reviews.json"
@@ -319,7 +332,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
 # top-level case as `"in_reply_to_id": null` would pass a `select(. == null)` test
 # that the live payload fails.
 mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 950
-printf '[{"id":1,"in_reply_to_id":42,"body":"No blocking findings on abc1234."}]' \
+printf '[%s]' "$(mk_rc 1 '"## Review\n\nNo blocking findings on `aaaaaaa`."' 42)" \
     > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
@@ -329,7 +342,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
 
 # A TOP-LEVEL COMMENT IS STILL A FINDING. The rule must not have been widened into
 # "count nothing".
-printf '[{"id":2,"body":"this is wrong"}]' > "$TMP/comments-950.json"
+printf '[%s]' "$(mk_rc 2 '"this is wrong"')" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
@@ -337,13 +350,49 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
     || die "a top-level comment gave rc=$rc '$out'"
 
 # AND THE TWO ARE COUNTED TOGETHER CORRECTLY: two findings and a reply is two.
-printf '[{"id":3,"body":"one"},{"id":4,"in_reply_to_id":3,"body":"a follow-up"},{"id":5,"body":"two"}]' \
-    > "$TMP/comments-950.json"
+printf '[%s,%s,%s]' \
+    "$(mk_rc 3 '"one"')" \
+    "$(mk_rc 4 '"No blocking findings on `aaaaaaa`."' 3)" \
+    "$(mk_rc 5 '"two"')" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=2'; } \
     && pass "…and a review carrying both counts only the findings" \
     || die "a mixed review gave rc=$rc '$out'"
+# A BLOCKING FINDING POSTED AS A REPLY STILL COUNTS. Dropping every reply was the
+# first attempt at this fix and it was wrong: `pr-findings.sh` cannot surface a
+# resolved thread, so both gates would read clean and the PR would merge with the
+# finding unaddressed. A stuck round is recoverable; a wrong merge is not.
+printf '[%s]' "$(mk_rc 6 '"This is still broken and must not merge."' 3)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && pass "a blocking finding posted as a reply still counts" \
+    || die "a blocking reply gave rc=$rc '$out'"
+
+# AND THE EXEMPTION IS HEAD-BOUND: "no blocking findings on <another sha>" says
+# nothing about the commit being gated.
+printf '[%s]' "$(mk_rc 7 '"No blocking findings on `bbbbbbb`."' 3)" \
+    > "$TMP/comments-950.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run verdict 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
+    && pass "…and a clean verdict naming another head does not clear this one" \
+    || die "an other-head clean reply gave rc=$rc '$out'"
+
+# A MALFORMED `in_reply_to_id` IS UNREADABLE, NOT A REPLY. A presence-only test
+# discarded such a row silently, so a page of them counted zero — which is clean,
+# on a payload nothing could read.
+for bad in 'null' '"7"' '{}'; do
+    printf '[{"user":{"login":"%s"},"id":8,"body":"x","created_at":"2026-01-01T00:00:00Z","in_reply_to_id":%s}]' \
+        "$BOT" "$bad" > "$TMP/comments-950.json"
+    out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+            run verdict 7 "$BOT" 2>&1)"; rc=$?
+    [ "$rc" -eq 2 ] \
+        && pass "a malformed in_reply_to_id ($bad) is a stop, not a silent clean" \
+        || die "in_reply_to_id=$bad gave rc=$rc '$out'"
+done
 rm -f "$TMP/comments-950.json"
 
 # The other direction: an OLDER clean comment must not beat a newer review.
@@ -460,7 +509,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&
     && pass "verdict: approved with zero comments => clean (0)" \
     || die "verdict: clean case gave rc=$rc '$out'"
 
-printf '[{"path":"a.sh","line":1,"body":"x"},{"path":"b.sh","line":2,"body":"y"}]' > "$TMP/comments-31.json"
+printf '[%s,%s]' "$(mk_rc 1 '"x"')" "$(mk_rc 2 '"y"')" > "$TMP/comments-31.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
     && pass "verdict: inline comments => findings (1)" \
