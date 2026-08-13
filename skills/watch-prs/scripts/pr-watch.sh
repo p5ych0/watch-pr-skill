@@ -486,7 +486,15 @@ while :; do
             # finished clean review and started the next phase on.
             case "$v_field/$vrc" in
                 clean/0)    [ "$v_tail" = " findings=0" ] || v_field="" ;;
-                findings/1) [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]] || v_field="" ;;
+                # `source=replies-only` is a THIRD shape, not a looser one: the
+                # review carried comments, all of them replies, so there is
+                # nothing for `pr-findings.sh` to list and it is not a signoff.
+                # The tail is spelled out rather than made optional, because a
+                # trailing `.*` here would accept any field anyone ever appends —
+                # and this grammar exists to catch exactly that.
+                findings/1) [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]] \
+                                || [[ "$v_tail" =~ ^\ findings=[0-9]+\ source=replies-only$ ]] \
+                                || v_field="" ;;
                 none/1)     [[ "$v_tail" =~ ^\ reason=[a-z_]+$ ]] || v_field="" ;;
                 *)          v_field="" ;;
             esac

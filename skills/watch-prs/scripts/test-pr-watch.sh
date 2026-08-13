@@ -179,6 +179,35 @@ out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interva
     && pass "a not-clean verdict is still an actionable READY" \
     || die "rc 1 was treated as unreadable (rc=$rc out='$out')"
 
+# ── a review of nothing but replies reaches the operator ──────────────────
+# `source=replies-only` is a third verdict shape: the review carried comments, all
+# of them replies, so `pr-findings.sh` lists nothing to fix and it is not a
+# signoff. The whole point is that a human sees it — so the grammar has to accept
+# it, and the tail has to survive into the READY line the Monitor surfaces. A
+# strict tail that knew only ` findings=N` classified it as inconsistent, exited 2
+# and printed no READY at all, which is the stop silently not happening.
+seq_set reviewed
+out="$(VERDICT='verdict=findings findings=1 source=replies-only' VERDICT_RC=1 \
+        run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && printf '%s' "$out" | grep -q 'source=replies-only'; } \
+    && pass "a replies-only verdict is READY, and says so where the operator reads it" \
+    || die "the replies-only stop did not surface (rc=$rc out='$out')"
+
+# AND THE GRAMMAR IS STILL A GRAMMAR. The tail is spelled out rather than made
+# optional, so a field nobody agreed on is still refused — a trailing `.*` here
+# would accept anything anyone ever appends, which is what this check exists to
+# stop.
+for badtail in 'verdict=findings findings=1 source=whatever' \
+               'verdict=findings findings=1 source=replies-only extra=1' \
+               'verdict=findings findings=1 replies-only'; do
+    seq_set reviewed
+    out="$(VERDICT="$badtail" VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'inconsistent_verdict'; } \
+        && pass "…while an unagreed tail ('${badtail#verdict=findings }') is still refused" \
+        || die "a malformed tail was accepted: '$badtail' (rc=$rc out='$out')"
+done
+
 # ── a state parsed out of a malformed line is not a state ──────────────────
 # A helper that exits 0 but prints a line with no `state=` field left the WHOLE
 # line in $state; the watch then polled to the ordinary timeout (rc 1), which the
@@ -248,6 +277,7 @@ done
 # The verdict shapes that AGREE with the state are accepted — each with the exit
 # status the helper actually pairs it with.
 for spec in 'verdict=clean findings=0|0|reviewed' 'verdict=findings findings=3|1|reviewed' \
+            'verdict=findings findings=1 source=replies-only|1|reviewed' \
             'verdict=none reason=blocked|1|blocked' 'verdict=none reason=dismissed|1|dismissed'; do
     vout="${spec%%|*}"; rest="${spec#*|}"; vrc="${rest%%|*}"; vstate="${rest#*|}"
     seq_set "$vstate"

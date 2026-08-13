@@ -37,6 +37,13 @@
   `valid_review_comment` and `opens_a_thread`, with their own accept/reject cases
   and a drift-guard entry, because a shared definition cannot be the untested one.
 
+  `pr-watch.sh` learned the shape in the same change, because a new record is only
+  a signal if its consumer accepts it: the watch validates the verdict tail
+  strictly, so `source=replies-only` was classified as inconsistent, exited 2 and
+  printed no `PR_REVIEW_READY` at all — the operator stop silently not happening,
+  which is worse than the stuck loop it replaced. The tail is spelled out rather
+  than made optional, and three unagreed tails are asserted to be refused.
+
   Both reviewer contracts now say to post a clean verdict as the review body or an
   issue comment rather than as a reply, since a reply-only review costs an operator
   a read — `AGENTS.md` and `.github/copilot-instructions.md`, plus `SKILL.md` and
