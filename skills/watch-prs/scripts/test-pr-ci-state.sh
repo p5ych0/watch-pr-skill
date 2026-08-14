@@ -315,18 +315,46 @@ hang_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=2 \
     && pass "…including the head lookup that precedes it" \
     || die "a hung head lookup was waited on (rc=$hang_rc '$hang_out')"
 # A malformed bound falls back to the default rather than removing the watchdog.
-for bad in 0 '' notanumber 007; do
+# THE WATCHDOG ONLY HAS TO OUTLAST THE BOUND THE BAD VALUE WOULD HAVE SET.
+#
+# Being killed by the fixture's watchdog is the correct outcome: the default is
+# 60s, so a run that is still going when the watchdog fires proves the bad value
+# did not become the bound. But the watchdog was 20s for every case and the cases
+# waited all of it — eighty seconds of the suite spent proving four fallbacks.
+#
+# What each case has to outlast is the bound its own value WOULD have set if the
+# guard were removed:
+#
+#   0, '', notanumber → arithmetic reads them as zero or errors, so the deadline
+#                       is already spent and the script reports it AT ONCE. Three
+#                       seconds is far more than enough to tell that from a run
+#                       that is still going.
+#   007              → Bash reads it as octal SEVEN, so the failure mode returns
+#                       at about seven seconds. A three-second watchdog could not
+#                       tell that from the fallback, so this one keeps ten.
+# TWO LOOPS, EACH WITH A LITERAL BOUND. `run_limited` takes its seconds as a
+# literal — `test-testlib.sh` scans for anything else as environment prefixed onto
+# the watchdog rather than onto the subject, which is a real defect it exists to
+# catch, so the bound is not lifted into a variable to save three lines.
+for bad in 0 '' notanumber; do
     : > "$TMP/args"
     b_rc=0
-    b_out="$(run_limited 20 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT="$bad" \
+    b_out="$(run_limited 3 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT="$bad" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)" || b_rc=$?
-    # The default is 60s and the fixture's watchdog is 20s, so being killed at 20
-    # is the CORRECT outcome here: it proves the bad value did not become the
-    # bound. An immediate return would mean the value was used.
     [ "$b_rc" -eq 124 ] \
         && pass "PR_CI_PROBE_TIMEOUT='$bad' falls back rather than becoming the bound" \
         || die "PR_CI_PROBE_TIMEOUT='$bad' was used as the bound (rc=$b_rc)"
 done
+# `007` NEEDS THE LONGER ONE. Bash reads it as octal SEVEN, so if the guard were
+# removed the run would end at about seven seconds on its own — and a three-second
+# watchdog could not tell that from the sixty-second fallback still running.
+: > "$TMP/args"
+b_rc=0
+b_out="$(run_limited 10 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=007 \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)" || b_rc=$?
+[ "$b_rc" -eq 124 ] \
+    && pass "PR_CI_PROBE_TIMEOUT='007' falls back rather than becoming the bound" \
+    || die "PR_CI_PROBE_TIMEOUT='007' was used as the bound (rc=$b_rc)"
 
 # ── a `none` diagnostic from a probe that DIED is not a verdict ────────────
 # `gh` reports "nothing to report" by exiting 1 with that message on stderr. A
