@@ -1042,9 +1042,15 @@ way — the signoff is on the PR, so a later session reads it back with
 # signoff is published before `record` pauses, so a later session can resume
 # straight into this stage with the boundary unacknowledged.
 #
-# ALL OF IT RUNS TWICE — once up front, and again immediately before the mutations
-# — because another session can change any of it while the probes in between are
-# running.
+# ALL OF IT RUNS THREE TIMES — up front, before the revocation, and again after
+# it — because another session can change any of it while the probes in between
+# are running, and the revocation is itself a mutation with the request still to
+# come.
+#
+# THE ORDER IS revoke → prove → baseline → request. Two constraints pull against
+# each other: the proof wants to be last, and the Copilot BASELINE must be last or
+# a pass landing in between is accepted as the answer to a request made after it.
+# This is the proof as late as the baseline rule allows.
 OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \

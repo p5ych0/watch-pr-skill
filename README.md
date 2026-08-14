@@ -315,8 +315,12 @@ Then:
      verdict until the new pass reports, so neither check answers for the other.
      It also **re-enforces the round boundary**, because the signoff is published
      before the pause and a later session can resume straight into this stage; that
-     is why `open` can stop for you rather than proceeding. All of it runs again
-     immediately before the mutations, since none of these need the head to move.
+     is why `open` can stop for you rather than proceeding. All of it runs **three
+     times** — up front, before the revocation, and again after it — because none
+     of these need the head to move, and the revocation is itself a change with the
+     request still to come. The order is revoke → prove → baseline → request: the
+     proof as late as it can be while the Copilot baseline stays last, which it
+     must be or a pass landing in between answers a request made after it.
      Then it revokes any earlier Copilot signoff and requests the pass.
 
    The body you supply is prose and is posted under your identity, so a line that
