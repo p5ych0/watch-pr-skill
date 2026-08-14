@@ -339,6 +339,94 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "…in a stable order rather than the order they finished in" \
     || die "the failures were not ordered: $out"
 
+# ── the runner failing is not an empty suite ───────────────────────────────
+# THE FAIL-OPEN THIS SECTION IS MOST EXPOSED TO. `xargs` writes the failures to
+# stdout, so a runner that cannot start writes NOTHING — and nothing is exactly
+# what a clean suite looks like. Unchecked, the gate reports `status=clean` on a
+# suite it never ran, which is the outcome every rule in CLAUDE.md § Bash
+# conventions exists to make impossible.
+#
+# The same for the sort: it consumes the failure list, so a sort that dies having
+# written nothing erases findings that were already in hand.
+BROKEN="$TMP/broken"; mkdir -p "$BROKEN"
+REAL_SORT="$(command -v sort)" || die "no sort on PATH"
+# THE STUBS ARE SCOPED TO THE STEP UNDER TEST, and that is not fussiness. This
+# script sorts and greps in section 1 as well, so a tool that fails for everyone
+# aborts long before the suite runs and the case then passes on the wrong `exit 2`
+# entirely — which is what the first version of this fixture did.
+#
+# `xargs` needs no scoping: nothing else here runs it.
+printf '#!/usr/bin/env bash\nexit 3\n' > "$BROKEN/xargs"
+# `sort` does. It is given the failure list, whose every line is a path to a
+# `test-*.sh`; section 1 sorts variable names, which are not paths. So the stub
+# reads its input and fails only for the one it is aimed at.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'in="$(cat)"\n'
+  printf 'case "$in" in *"/test-"*) exit 3 ;; esac\n'
+  printf 'printf %%s "$in" | exec %s "$@"\n' "$REAL_SORT"
+} > "$BROKEN/sort"
+chmod +x "$BROKEN/xargs" "$BROKEN/sort"
+
+broken_case() {   # broken_case <tool> <expected reason> <make the suite fail?>
+    local tool="$1" reason="$2" failing="$3" only out rc
+    only="$TMP/only-$tool"; rm -rf "$only"; mkdir -p "$only"
+    ln -sf "$BROKEN/$tool" "$only/$tool"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    # The sort only runs when there IS a failure list to sort.
+    [ "$failing" = yes ] && printf '#!/usr/bin/env bash\nexit 1\n' \
+        > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+    out="$(PATH="$only:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "$reason"; } \
+        && pass "a broken $tool fails the check closed rather than reporting clean" \
+        || die "a broken $tool did not fail closed (rc=$rc out='$out')"
+    printf '%s' "$out" | grep -q 'the whole suite passes' \
+        && die "a broken $tool still reported the suite as passing: $out" \
+        || pass "…and does not claim the suite passed"
+}
+broken_case xargs suite_runner_failed no
+broken_case sort  suite_sort_failed   yes
+rm -rf "$BROKEN"
+
+# ── a checkout path that xargs would rewrite ───────────────────────────────
+# `xargs` strips backslashes and quotes from its input unless the records are
+# NUL-delimited. A checkout under `watch\prs` then hands every worker a path that
+# does not exist, and the gate BLOCKS THE PUSH claiming those tests failed rather
+# than admitting it never ran them. The wrong answer and the confident one.
+BSROOT="$TMP/back\\slash"
+mkdir -p "$BSROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$BSROOT/skills/watch-prs/SKILL.md"
+addscript "$BSROOT" pr-thing.sh 'exit 0'
+addtest "$BSROOT" test-pr-thing.sh
+out="$("$SCRIPT" "$BSROOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "a checkout path containing a backslash still runs its tests" \
+    || die "the backslash path was not preserved (rc=$rc out='$out')"
+
+# ── the load bound survives a leading-zero zero ────────────────────────────
+# `xargs -P 0` is UNLIMITED, and `00` passes any digits-only validation. What that
+# defeats is not tidiness: the degree is a load bound, and the cases it protects
+# are the timing-sensitive ones this suite has already been bitten by (#38).
+#
+# OBSERVED AS DURATION, because the degree is not otherwise visible. Eight files
+# that each sleep a second take at least four seconds four-at-a-time and about one
+# unbounded, so the gap is the whole of the assertion.
+JOBROOT="$(mkroot "$OK_SKILL")"
+addscript "$JOBROOT" pr-thing.sh 'exit 0'
+addtest "$JOBROOT" test-pr-thing.sh
+for n in 1 2 3 4 5 6 7 8; do
+    printf '#!/usr/bin/env bash\nsleep 1\nexit 0\n' \
+        > "$JOBROOT/skills/watch-prs/scripts/test-slow-$n.sh"
+    chmod +x "$JOBROOT/skills/watch-prs/scripts/test-slow-$n.sh"
+done
+started=$SECONDS
+out="$(RB_SUITE_JOBS=00 "$SCRIPT" "$JOBROOT" 2>&1)"; rc=$?
+elapsed=$((SECONDS - started))
+{ [ "$rc" -eq 0 ] && [ "$elapsed" -ge 2 ]; } \
+    && pass "RB_SUITE_JOBS=00 falls back to the bound instead of running unbounded" \
+    || die "00 was taken as a degree (rc=$rc elapsed=${elapsed}s out='$out')"
+
 # ── a repository that is not this plugin is NOT an error ──────────────────
 # One installed copy drives every project, so the working repo is usually a
 # consumer with no `skills/watch-prs/` tree. Reporting rc 2 there made a

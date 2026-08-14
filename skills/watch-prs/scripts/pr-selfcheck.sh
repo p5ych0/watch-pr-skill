@@ -419,32 +419,67 @@ done
 # 4.3 and this suite runs on 3.2.57 in CI. `xargs` is on the mac-shaped PATH.
 suite_fail=0
 suite_jobs="${RB_SUITE_JOBS:-4}"
-case "$suite_jobs" in ""|*[!0-9]*|0) suite_jobs=4 ;; esac
-# The names are collected first so the runner has no glob to interpret and an
-# empty directory is distinguishable from a directory of failures.
-suite_list=""
+# THE SAME VALIDATION SHAPE THE CI GATE USES, and for the same reason: a bad value
+# falls back rather than disabling the bound. Leading zeros are rejected rather
+# than read as digits — `xargs -P 0` is UNLIMITED parallelism, so `00` satisfying
+# a digits-only test would start every file at once and defeat the load bound
+# this degree exists to be. Six digits or more is refused for the same reason a
+# bound is refused anywhere here: it is not a degree, it is a typo.
+case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
+# Counted first, so an empty directory is distinguishable from a directory of
+# failures — and counted by the same glob that feeds the runner, so the two
+# cannot disagree about what is in scope.
+suite_files=0
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
-    suite_list="$suite_list$t
-"
+    suite_files=$((suite_files + 1))
 done
-if [ -n "$suite_list" ]; then
+if [ "$suite_files" -gt 0 ]; then
     # A FILE THAT FAILS PRINTS ITS NAME AND NOTHING ELSE PRINTS ANYTHING, so
     # interleaving cannot corrupt the result: each line of this output is one
-    # whole name written by one `printf`. The runner's own status is checked too —
-    # `xargs` exits non-zero when a command it ran did, which is the expected case
-    # here, so the OUTPUT is what decides and the status only has to be readable.
-    suite_out="$(printf '%s' "$suite_list" | xargs -P "$suite_jobs" -I{} \
-        sh -c 'bash "$1" >/dev/null 2>&1 || printf "%s\n" "$1"' _ {} 2>/dev/null)"
+    # whole name written by one `printf`.
+    #
+    # NUL-DELIMITED INPUT, because xargs' default parsing consumes backslashes and
+    # quotes before `{}` is substituted. A checkout under `/tmp/watch\prs` then
+    # hands every worker `/tmp/watchprs/test-….sh`, which does not exist — so the
+    # gate blocks claiming those tests FAILED rather than admitting it never ran
+    # them. The names are emitted straight from the glob rather than through a
+    # variable, because a shell variable cannot hold the NUL that separates them.
+    suite_out="$(for t in "$SCRIPTS"/test-*.sh; do
+            [ -e "$t" ] || continue
+            printf '%s\0' "$t"
+        done | xargs -0 -P "$suite_jobs" -I{} \
+            sh -c 'bash "$1" >/dev/null 2>&1 || printf "%s\n" "$1"' _ {})"; suite_rc=$?
+    # THE RUNNER'S OWN STATUS IS AN ANSWER, AND IT IS NOT THE WORKERS'. The worker
+    # cannot fail: it prints a name when its file does and exits 0 either way. So a
+    # non-zero here is `xargs` itself unable to run — a `-P` value outside its
+    # range, or no `xargs` at all — and its stdout is empty when that happens.
+    # Ignoring it is precisely the fail-open this whole script exists to prevent:
+    # no output reads as "no failures" and the gate reports CLEAN having run
+    # nothing. Its stderr is deliberately not discarded, since that diagnostic is
+    # the only account of why.
+    [ "$suite_rc" -eq 0 ] || {
+        echo "PR_SELFCHECK status=error reason=suite_runner_failed rc=$suite_rc jobs=$suite_jobs" >&2
+        exit 2
+    }
     if [ -n "$suite_out" ]; then
         # Sorted, because the order files finish in is not the order they are
         # listed in and a gate that reports its findings in a different order on
         # every run is a gate people stop reading.
+        #
+        # THE SORT HAS A STATUS TOO, and it fails the same way: a `sort` that dies
+        # having written nothing would erase the failure list inside the here-doc
+        # that consumed it, and the gate would pass on a suite it had just watched
+        # fail.
+        suite_sorted="$(printf '%s\n' "$suite_out" | sort)" || {
+            echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
+            exit 2
+        }
         while IFS= read -r t; do
             [ -n "$t" ] || continue
             note failing_test "$(basename "$t") fails"; suite_fail=1
         done <<EOF
-$(printf '%s' "$suite_out" | sort)
+$suite_sorted
 EOF
     fi
 fi
