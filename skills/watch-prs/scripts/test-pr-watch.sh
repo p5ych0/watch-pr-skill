@@ -1043,7 +1043,12 @@ done
 for good in 1754000000 10000000000 99999999999; do
     printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$good" > "$BIGCLOCK/date"
     chmod +x "$BIGCLOCK/date"
-    seq_set none
+    # TERMINAL ON THE FIRST POLL, so the watch exits by itself. This clock is
+    # FIXED — every reading is the same epoch — so elapsed never grows and the
+    # timeout never arrives: with a non-terminal state the case sat until the
+    # watchdog killed it, twenty seconds each and three of them. The question here
+    # is only whether the epoch is ACCEPTED, which one poll answers.
+    seq_set reviewed
     out="$(run_limited 20 env PATH="$BIGCLOCK:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
            SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
     printf '%s' "$out" | grep -q 'clock_unreadable' \
