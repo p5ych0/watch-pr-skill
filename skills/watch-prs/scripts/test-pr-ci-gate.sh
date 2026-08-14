@@ -245,18 +245,28 @@ STUBSH
     # window below, and without it, hundreds. The exit status cannot be the
     # assertion — falling back to a thirty-minute timeout is the CORRECT
     # behaviour, so the watchdog stopping the run is expected, not a failure.
+    #
+    # THE WINDOW IS SHORT BECAUSE THE SEPARATION IS A RATIO, NOT A DURATION. What
+    # is being told apart is a thirty-second interval from a zero-second one, so
+    # in any window at all the first manages one poll and the second manages
+    # hundreds. It ran for twelve seconds and the extra nine were spent
+    # re-confirming a poll that had already not happened in the first three.
+    #
+    # The window is a variable so the diagnostic cannot drift from the bound it
+    # reports — they were two literals, and only one of them would have been
+    # changed here.
     gate_spin() {   # gate_spin <max calls> <label> [env…]
-        local out rc=0 calls maxc="$1" label="$2"
+        local out rc=0 calls maxc="$1" label="$2" win=3
         shift 2
         printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
         : > "$GATETMP/probe"
-        out="$(run_limited 12 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+        out="$(run_limited "$win" env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
             GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" "$@" \
             "$GATETMP/s/pr-ci-gate.sh" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
         calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
         [ "${calls:-0}" -le "$maxc" ] \
             && pass "$label" \
-            || die "$label — $calls polls in 12s (at most $maxc); the bound was not applied"
+            || die "$label — $calls polls in ${win}s (at most $maxc); the bound was not applied"
     }
     gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
     gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
