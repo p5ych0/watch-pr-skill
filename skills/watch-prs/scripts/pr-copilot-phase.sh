@@ -173,6 +173,14 @@ if [ "$STAGE" = open ]; then
         --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$RB_COPILOT_BOT")" \
         || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 1; }
 
+    # AND ONCE MORE, AFTER THE REVOCATION. The check above sits before a mutation
+    # and two network calls, so it is not "immediately before the request" — the
+    # revocation comment and the baseline lookup are both windows in which Codex's
+    # verdict can be dismissed, its signoff revoked, or the head moved. The
+    # baseline still has to be read LAST, so this is as close to the request as the
+    # two constraints allow.
+    phase_still_open || exit 1
+
     # THE BASELINE IS READ HERE, after the revocation and immediately before the
     # request. Read earlier, a Copilot pass already in flight on this unchanged head
     # could finish during the probes or the revocation — and `pr-watch.sh

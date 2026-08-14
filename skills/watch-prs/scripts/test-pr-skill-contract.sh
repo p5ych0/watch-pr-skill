@@ -467,6 +467,22 @@ grep -qi 'do not ask' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
+# THE ORDINARY PATH LEAVES THE BLOCK SUCCEEDING. The last command in a block IS
+# the block's status, and `[ "$PHASE_RC" -eq 3 ] && …` is FALSE when the phase
+# recorded normally — so a driver saw a step that did everything right exit 1, and
+# would stop or retry instead of reaching the operator decision. Executed rather
+# than grepped: the shape of the last statement is the whole defect.
+_tail_ok=0
+( PHASE_RC=0; CODEX_SHA=abc
+  if [ "$PHASE_RC" -eq 3 ]; then echo "pause"; exit 3; fi ) >/dev/null 2>&1 && _tail_ok=1
+[ "$_tail_ok" -eq 1 ] \
+    && pass "the record block's ordinary path leaves it succeeding" \
+    || die "the record block exits non-zero when the phase recorded normally"
+# …and the document uses that shape rather than the trailing `&&` that did not.
+grep -q 'if \[ "\$PHASE_RC" -eq 3 \]; then' "$SKILL" \
+    && pass "…and SKILL.md branches with an if, not a trailing &&" \
+    || die "the record block ends in a test whose false value becomes the block's status"
+
 # THE TRANSITION'S TWO STAGES ARE IN ORDER, with the operator's decision between
 # them — `record` proves and posts, the document stops and asks, and only the
 # answer runs `open`. Anchored on the invocations, not on the usage comment that

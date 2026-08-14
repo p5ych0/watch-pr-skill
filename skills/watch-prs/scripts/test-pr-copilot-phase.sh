@@ -62,6 +62,12 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
 # and once immediately before the mutations — and the whole question is what
 # happens when another session changes something in between. `.2` is that change.
 _n=$(( $(cat "$W/signoff.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$W/signoff.n"
+# `.3` is the state changing DURING THE REVOCATION — the phase is proved a third
+# time between that comment and the request, because the revocation is itself a
+# mutation and the window after it is the one the request lands in.
+if [ "$_n" -ge 3 ] && [ -f "$W/signoff.3.out" ]; then
+    cat "$W/signoff.3.out"; exit "$(cat "$W/signoff.3.rc" 2>/dev/null || echo 0)"
+fi
 if [ "$_n" -ge 2 ] && [ -f "$W/signoff.2.out" ]; then
     cat "$W/signoff.2.out"; exit "$(cat "$W/signoff.2.rc" 2>/dev/null || echo 0)"
 fi
@@ -449,6 +455,35 @@ got="$(run open 7 "$HEAD40")"
 before 'gh pr comment' 'pr-review-state.sh review-id' \
     && pass "…and the call order says so" \
     || die "the baseline was read before the revocation: $(cat "$TMP/calls")"
+
+# AND THE STATE CHANGING DURING THE REVOCATION ITSELF. The revocation is a
+# mutation and two calls used to follow it, so a check placed before it is not
+# "immediately before the request": the phase can be reopened in the window the
+# request lands in, and Copilot would be asked underneath it.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.3.out"
+printf '1\n' > "$W/signoff.3.rc"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+    && pass "a phase reopened during the revocation stops the request" \
+    || die "a revocation-window reopen gave '${got}'"
+grep -q -- '--add-reviewer' "$TMP/calls" \
+    && die "Copilot was requested after the phase was reopened mid-revocation" \
+    || pass "…with Copilot not requested"
+
+# THE THREE CONSTRAINTS TOGETHER, in the order they have to hold: the phase is
+# proved after the revocation, and the baseline is still the LAST thing read
+# before the request. Neither can be satisfied by moving the other.
+world; run open 7 "$HEAD40" >/dev/null
+{ before 'gh pr comment' 'pr-review-state.sh review-id' \
+    && before 'pr-review-state.sh review-id' 'gh pr edit'; } \
+    && pass "the baseline is read after the revocation and last before the request" \
+    || die "the baseline is not last: $(cat "$TMP/calls")"
+_rev="$(grep -n 'gh pr comment' "$TMP/calls" | head -1 | cut -d: -f1)"
+_base="$(grep -n 'pr-review-state.sh review-id' "$TMP/calls" | head -1 | cut -d: -f1)"
+_proof="$(awk -v a="$_rev" -v b="$_base" 'NR>a && NR<b && /pr-signoff.sh/ {print NR; exit}' "$TMP/calls")"
+[ -n "$_proof" ] \
+    && pass "…with the phase proved again between the two" \
+    || die "no phase proof between the revocation and the baseline: $(cat "$TMP/calls")"
 
 # A PUSH DURING THE PROBES. The equality check passed, and the verdict is pinned
 # to the recorded sha so it stays clean — while the revocation and the request

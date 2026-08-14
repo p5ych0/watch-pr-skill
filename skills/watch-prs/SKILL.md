@@ -996,7 +996,15 @@ CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
     | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
 [ -n "$CODEX_SHA" ] \
     || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
-[ "$PHASE_RC" -eq 3 ] && { echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."; exit 3; }
+# AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
+# status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the ordinary
+# path, which left a phase that recorded and parsed perfectly exiting 1. A driver
+# reads that as a failed step and stops or retries instead of reaching the
+# operator decision, on the one path where nothing went wrong.
+if [ "$PHASE_RC" -eq 3 ]; then
+    echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
+    exit 3
+fi
 ```
 
 **STOP — the next phase is the operator's decision.** `record` has proved Codex

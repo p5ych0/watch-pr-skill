@@ -89,6 +89,25 @@
   indenting or fencing a mention changes nothing — it has to be broken up or
   written without the `@`. The marker rule is the line-anchored one.
 
+- **`open` proves the phase is still open at every window it can close in.** The
+  head, the live verdict and the recorded Codex signoff are one predicate, asked
+  up front, again immediately before the mutations, and once more AFTER the
+  revocation — that comment is itself a mutation, and the window between it and
+  the request is the one the request lands in. The ordering is decided by two
+  constraints pulling against each other: the proof wants to be last, and the
+  Copilot BASELINE must be last or a pass landing during the probes is accepted as
+  the answer to a request made after it. So it is revoke, prove, baseline, request,
+  and the fixture asserts that order rather than only its parts.
+
+- **The record block reported failure on its ordinary path.** A trailing
+  `[ "$PHASE_RC" -eq 3 ] && { … }` was the last command in `SKILL.md`'s block, so
+  its FALSE value became the block's status: a phase that recorded, posted and
+  parsed perfectly exited 1, and a driver reads that as a failed step and stops or
+  retries — on the one path where nothing went wrong. It is an `if` now, and the
+  contract test EXECUTES that shape rather than grepping for it, because the defect
+  is what the last statement's status IS rather than how it is spelled.
+
+
 - **`open` reads the recorded signoff, not only the verdict, and re-enforces the
   boundary.** Reopening the Codex phase over an unchanged head posts a revocation
   and requests a new pass, and GitHub keeps serving the OLD clean verdict until
