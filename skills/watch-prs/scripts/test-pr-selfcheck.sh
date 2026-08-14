@@ -308,6 +308,36 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'failing_test'; } \
     && pass "a failing test is a finding" \
     || die "failing test not caught (rc=$rc out='$out')"
+# AND IT NAMES THE FILE. The suite runs concurrently now, so the name no longer
+# comes from the loop variable of the thing being run — it is carried back out of
+# a runner that is writing several files' results into one stream. A finding that
+# says only "a test fails" would satisfy the assertion above.
+printf '%s' "$out" | grep -q 'test-pr-thing.sh' \
+    && pass "…and the finding names which one" \
+    || die "the finding did not name test-pr-thing.sh: $out"
+
+# ── two failing tests, because one cannot show interleaving ────────────────
+# The runner writes each failure as one whole line from one `printf`, which is
+# what makes concurrent output safe to read back. With a single failing file that
+# property is untested: any implementation reports one name correctly.
+R="$(mkroot "$OK_SKILL")"
+for n in alpha omega; do
+    addscript "$R" "pr-$n.sh" 'exit 0'
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+    chmod +x "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+done
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
+    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+    && pass "two failing tests are both reported" \
+    || die "not both failures were reported (rc=$rc out='$out')"
+# REPORTED IN A STABLE ORDER. Files finish in whatever order the machine gives
+# them, so without the sort the same two failures print in a different order from
+# run to run — and a gate whose output reshuffles is one people stop reading.
+{ printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
+    | sed -n '1p' | grep -q 'alpha'; } \
+    && pass "…in a stable order rather than the order they finished in" \
+    || die "the failures were not ordered: $out"
 
 # ── a repository that is not this plugin is NOT an error ──────────────────
 # One installed copy drives every project, so the working repo is usually a

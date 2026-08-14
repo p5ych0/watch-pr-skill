@@ -408,6 +408,11 @@ look is green about an incomplete picture.
 every variable `SKILL.md` uses is assigned in it, every script parses, every
 helper it drives is shipped, every script has a test, and the suite passes.
 
+The suite is the slow part, so it runs four files at a time — they share no
+state, and four at a time is ~85s where one after another is ~208s. Set
+`RB_SUITE_JOBS` to change the degree; a value that is not a positive number falls
+back to four rather than disabling the bound.
+
 It exists because this plugin's own PR took nineteen review rounds, and almost
 none of the findings were subtle. Rounds are the expensive part of the loop —
 each is a review pass, a fix, a summary and a wait — so a finding caught before

@@ -398,11 +398,56 @@ done
 [ "$untested" -eq 0 ] && ok "every helper and shared library has a matching test"
 
 # ── 5. the suite passes ────────────────────────────────────────────────────
+#
+# RUN CONCURRENTLY, because the files are independent and this is the gate a
+# person waits at. Each builds its own scratch directory under `mktemp -d`, stubs
+# its own `gh`, and shares no state with any other — so the `for` loop this
+# replaced was sequential for no reason beyond being the obvious thing to write.
+# One after another it is ~208s; four at a time it is ~85s. See issue #52.
+#
+# ONLY HERE. The CI workflow keeps its loop: it wraps each file in a `::group::`
+# and reports a failure with `::error file=`, and that structure is worth more on
+# a machine nobody is waiting at than the wall clock is.
+#
+# THE DEGREE IS NOT DERIVED FROM THE MACHINE. `nproc` is one of the commands the
+# `macos-shell` job asserts is UNREACHABLE, so sizing this from the core count
+# would fail precisely where portability is being proven. Four is enough on any
+# machine: the floor is the slowest single file, and that is most of the wall
+# clock at four already.
+#
+# `xargs -P` rather than background jobs and `wait`, because `wait -n` is bash
+# 4.3 and this suite runs on 3.2.57 in CI. `xargs` is on the mac-shaped PATH.
 suite_fail=0
+suite_jobs="${RB_SUITE_JOBS:-4}"
+case "$suite_jobs" in ""|*[!0-9]*|0) suite_jobs=4 ;; esac
+# The names are collected first so the runner has no glob to interpret and an
+# empty directory is distinguishable from a directory of failures.
+suite_list=""
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
-    bash "$t" >/dev/null 2>&1 || { note failing_test "$(basename "$t") fails"; suite_fail=1; }
+    suite_list="$suite_list$t
+"
 done
+if [ -n "$suite_list" ]; then
+    # A FILE THAT FAILS PRINTS ITS NAME AND NOTHING ELSE PRINTS ANYTHING, so
+    # interleaving cannot corrupt the result: each line of this output is one
+    # whole name written by one `printf`. The runner's own status is checked too —
+    # `xargs` exits non-zero when a command it ran did, which is the expected case
+    # here, so the OUTPUT is what decides and the status only has to be readable.
+    suite_out="$(printf '%s' "$suite_list" | xargs -P "$suite_jobs" -I{} \
+        sh -c 'bash "$1" >/dev/null 2>&1 || printf "%s\n" "$1"' _ {} 2>/dev/null)"
+    if [ -n "$suite_out" ]; then
+        # Sorted, because the order files finish in is not the order they are
+        # listed in and a gate that reports its findings in a different order on
+        # every run is a gate people stop reading.
+        while IFS= read -r t; do
+            [ -n "$t" ] || continue
+            note failing_test "$(basename "$t") fails"; suite_fail=1
+        done <<EOF
+$(printf '%s' "$suite_out" | sort)
+EOF
+    fi
+fi
 [ "$suite_fail" -eq 0 ] && ok "the whole suite passes"
 
 if [ "$findings" -gt 0 ]; then

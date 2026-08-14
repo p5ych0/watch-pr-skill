@@ -197,6 +197,15 @@ category; do not "fix" a script into a stricter mode.
   fail=0; for t in test-*.sh; do bash "$t" || { echo "FAIL $t"; fail=1; }; done; exit $fail
   ```
 
+  **`pr-selfcheck.sh` does not run it that way, and the difference is deliberate.**
+  The files are independent — each builds its own scratch directory and stubs its
+  own `gh` — so the pre-push gate runs four at a time and takes ~85s where the
+  loop above takes ~208s. CI keeps the loop because it wraps each file in a
+  `::group::` and reports failures with `::error file=`, and that structure is
+  worth more on a machine nobody is waiting at. `RB_SUITE_JOBS` sets the degree;
+  it is not derived from the core count, because the `macos-shell` job asserts
+  `nproc` is unreachable. See issue #52.
+
 ## Documentation sync
 
 A behaviour change updates every layer that describes it: `SKILL.md` (what the
