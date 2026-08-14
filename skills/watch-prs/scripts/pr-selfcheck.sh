@@ -39,6 +39,27 @@
 # several probes fail as normal operation. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
+# ── the validated scratch directory ────────────────────────────────────────
+# Section 5 needs somewhere to write its index list, and `mktemp` can print a
+# plausible path and then fail — or be shadowed by something that prints `/` and
+# exits 0. With a recursive cleanup trap behind it that is an `rm -rf` over
+# whatever it turned out to be, which is the exact accident `mktemp_d` was
+# written for. Reaching for the shared one rather than checking inline, because a
+# rule that applies to more than one caller lives in a library here.
+_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
+    echo "PR_SELFCHECK status=error reason=lib_dir_unresolvable" >&2; exit 2; }
+# The loader, loaded the one way it cannot load itself. An exported `rb_load`
+# survives into this shell and an empty `loadlib.sh` still sources successfully,
+# so without the clear the type check accepts the inherited function — and a stale
+# loader is what makes every other load look clean. See loadlib.sh and issue #22.
+unset -f rb_load 2>/dev/null || {
+    echo "PR_SELFCHECK status=error reason=loadlib_stale_definition" >&2; exit 2; }
+. "$_RB_SELF_DIR/loadlib.sh" || {
+    echo "PR_SELFCHECK status=error reason=loadlib_unreadable" >&2; exit 2; }
+[ "$(type -t rb_load 2>/dev/null)" = function ] || {
+    echo "PR_SELFCHECK status=error reason=loadlib_empty" >&2; exit 2; }
+rb_load "$_RB_SELF_DIR" testlib mktemp_d "PR_SELFCHECK status=error" || exit 2
+
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
 # non-zero, and command substitution keeps it — so the check would scan a tree
@@ -438,11 +459,27 @@ case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
 # So the runner is handed the numbers 1..N and nothing else. Digits survive every
 # parser on both sides, `sort -n` orders them, and the parent already knows which
 # path each one means, because it wrote them itself in the same glob order.
-suite_dir="$(mktemp -d "${TMPDIR:-/tmp}/pr-selfcheck.XXXXXX")" || {
+# THE PATH IS PROVEN BEFORE THE TRAP IS ARMED, not after. `mktemp_d` requires it
+# to be non-empty, absolute, not `/`, and an existing directory — the last of
+# which is what proves `mktemp` created it rather than merely printed it. An
+# unchecked assignment here arms `rm -rf` over whatever came back.
+suite_root="$(mktemp_d)" || {
     echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
     exit 2
 }
-trap 'rm -rf "$suite_dir" 2>/dev/null || true; true' EXIT
+# …AND THE RECURSIVE DELETE ONLY EVER REACHES A DIRECTORY THIS SCRIPT CREATED.
+# Validation cannot close this on its own: a `mktemp` that is shadowed or broken
+# can name an EXISTING directory, which is absolute, is not `/`, and is there — so
+# it satisfies every test `mktemp_d` can apply, and the trap then removes someone
+# else's tree. A plain `mkdir` cannot: it fails when the name is taken, so what is
+# armed below is a path that did not exist a moment ago. The parent is released
+# with `rmdir`, which refuses a directory that has anything else in it.
+suite_dir="$suite_root/suite"
+mkdir "$suite_dir" || {
+    echo "PR_SELFCHECK status=error reason=suite_scratch_unusable" >&2
+    exit 2
+}
+trap 'rm -rf "$suite_dir" 2>/dev/null; rmdir "$suite_root" 2>/dev/null; true' EXIT
 suite_files=0
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
@@ -456,14 +493,21 @@ if [ "$suite_files" -gt 0 ]; then
     # A FAILING FILE PRINTS ITS INDEX AND NOTHING ELSE PRINTS ANYTHING, so
     # interleaving cannot corrupt the result: each line is one whole number written
     # by one `printf`.
+    #
+    # THE SCRATCH PATH TRAVELS IN THE ENVIRONMENT, NOT IN THE ARGUMENT LIST. `-I{}`
+    # rewrites its token in EVERY initial argument, not only the one meant for it —
+    # so a `TMPDIR` of `/tmp/cache{}` had each worker handed a directory that does
+    # not exist, and the mandatory pre-push gate refused with `suite_runner_failed`
+    # over tests that were fine. The environment is inherited rather than
+    # substituted, so there is nothing there for `-I` to rewrite.
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             printf '%s\0' "$n"
-        done | xargs -0 -P "$suite_jobs" -I{} sh -c '
-            p="$(cat "$1/$2")" || exit 3
-            bash "$p" >/dev/null 2>&1 || printf "%s\n" "$2"
-        ' _ "$suite_dir" {})"; suite_rc=$?
+        done | RB_SUITE_DIR="$suite_dir" xargs -0 -P "$suite_jobs" -I{} sh -c '
+            p="$(cat "$RB_SUITE_DIR/$1")" || exit 3
+            bash "$p" >/dev/null 2>&1 || printf "%s\n" "$1"
+        ' _ {})"; suite_rc=$?
     # THE RUNNER'S STATUS IS AN ANSWER, AND IT IS NOT "A TEST FAILED". A failing
     # test makes the worker print a number and exit 0; the worker exits non-zero
     # only when it cannot read its own entry, and `xargs` does when it cannot run

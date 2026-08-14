@@ -10,10 +10,11 @@
   sequential because a `for` loop is the obvious thing to write.
 
   `pr-selfcheck.sh` now runs four at a time and takes ~85s. `RB_SUITE_JOBS` sets
-  the degree; a value that is not a positive number falls back to four rather than
-  disabling the bound, and `SKILL.md` exports it, because the gate is a child
-  process and a knob that does not cross that boundary silently does nothing while
-  the terminal shows the value you set. CI keeps its sequential loop: it groups and
+  the degree, and takes one to five digits with no leading zero — `0`, `00` and
+  `01` are all refused, and fall back to four rather than disabling the bound.
+  `SKILL.md` exports it, because the gate is a child process and a knob that does
+  not cross that boundary silently does nothing while the terminal shows the value
+  you set. CI keeps its sequential loop: it groups and
   annotates each file, and that is worth more on a machine nobody is waiting at.
 
   Three things a concurrent runner gets wrong that a loop cannot. Its status is an

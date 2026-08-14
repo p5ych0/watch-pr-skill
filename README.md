@@ -409,9 +409,15 @@ every variable `SKILL.md` uses is assigned in it, every script parses, every
 helper it drives is shipped, every script has a test, and the suite passes.
 
 The suite is the slow part, so it runs four files at a time — they share no
-state, and four at a time is ~85s where one after another is ~208s. Set
-`RB_SUITE_JOBS` to change the degree; a value that is not a positive number falls
-back to four rather than disabling the bound.
+state, and four at a time is ~85s where one after another is ~208s.
+
+`RB_SUITE_JOBS` changes the degree. It takes **one to five digits, no leading
+zero**: `1` and `12` are degrees, while `0`, `00`, `01` and `soon` are not, and
+neither is a six-digit number. Anything outside that falls back to four rather
+than disabling the bound — `xargs -P 0` means *unlimited*, so a spelling of zero
+that slipped through would start every file at once, and the degree exists to be
+a load bound. Export it if you set it in a shell that then drives the skill; the
+gate is a child process.
 
 It exists because this plugin's own PR took nineteen review rounds, and almost
 none of the findings were subtle. Rounds are the expensive part of the loop —

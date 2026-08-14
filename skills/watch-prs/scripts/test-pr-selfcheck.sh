@@ -435,28 +435,95 @@ printf '%s' "$out" | grep -q 'test-pr-thing.sh fails' \
     && pass "…and the one it reports is the test that actually failed" \
     || die "the reported name was fabricated: $out"
 
-# ── the load bound survives a leading-zero zero ────────────────────────────
-# `xargs -P 0` is UNLIMITED, and `00` passes any digits-only validation. What that
-# defeats is not tidiness: the degree is a load bound, and the cases it protects
-# are the timing-sensitive ones this suite has already been bitten by (#38).
+# ── the degree that actually reaches the runner ────────────────────────────
+# OBSERVED, NOT TIMED. The first version of this ran eight one-second files and
+# asserted on elapsed seconds. `$SECONDS` has one-second resolution, so an
+# unbounded run crossing two ticks reports 2 and passes — the mutant survives
+# intermittently, which is worse than no case. And the margin was never there to
+# begin with: eight files four-at-a-time is about two seconds, not four.
 #
-# OBSERVED AS DURATION, because the degree is not otherwise visible. Eight files
-# that each sleep a second take at least four seconds four-at-a-time and about one
-# unbounded, so the gap is the whole of the assertion.
-JOBROOT="$(mkroot "$OK_SKILL")"
-addscript "$JOBROOT" pr-thing.sh 'exit 0'
-addtest "$JOBROOT" test-pr-thing.sh
-for n in 1 2 3 4 5 6 7 8; do
-    printf '#!/usr/bin/env bash\nsleep 1\nexit 0\n' \
-        > "$JOBROOT/skills/watch-prs/scripts/test-slow-$n.sh"
-    chmod +x "$JOBROOT/skills/watch-prs/scripts/test-slow-$n.sh"
-done
-started=$SECONDS
-out="$(RB_SUITE_JOBS=00 "$SCRIPT" "$JOBROOT" 2>&1)"; rc=$?
-elapsed=$((SECONDS - started))
-{ [ "$rc" -eq 0 ] && [ "$elapsed" -ge 2 ]; } \
-    && pass "RB_SUITE_JOBS=00 falls back to the bound instead of running unbounded" \
-    || die "00 was taken as a degree (rc=$rc elapsed=${elapsed}s out='$out')"
+# So the stub records the argument list `xargs` was called with and answers the
+# question directly: which `-P` did the gate ask for?
+JOBSTUB="$TMP/jobstub"; mkdir -p "$JOBSTUB"
+REAL_XARGS="$(command -v xargs)" || die "no xargs on PATH"
+cat > "$JOBSTUB/xargs" <<XARGSSH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$RB_JOBS_LOG"
+exec "$REAL_XARGS" "\$@"
+XARGSSH
+chmod +x "$JOBSTUB/xargs"
+jobs_case() {   # jobs_case <RB_SUITE_JOBS or "" for unset> <expected -P> <label>
+    local want="$2" label="$3" log rc out got
+    log="$TMP/jobs.log"; : > "$log"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    if [ -n "$1" ]; then
+        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" RB_SUITE_JOBS="$1" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    else
+        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    fi
+    got="$(grep -o -- '-P [0-9]*' "$log" | head -1)"
+    { [ "$rc" -eq 0 ] && [ "$got" = "-P $want" ]; } \
+        && pass "$label" \
+        || die "$label — got '$got', wanted '-P $want' (rc=$rc out='$out')"
+}
+jobs_case ""   4 "the default degree is four"
+# THE OPERATOR CONTROL IS EXERCISED, not merely exported. Nothing else here would
+# notice `suite_jobs` being hard-coded: the fallback case only proves the bound
+# stays bounded, and the contract case only proves the name crosses the process
+# boundary.
+jobs_case 1    1 "…and a valid override reaches the runner"
+# `xargs -P 00` is UNLIMITED, and `00` passes any digits-only validation. What
+# that defeats is not tidiness — the degree is a load bound, and the cases it
+# protects are the timing-sensitive ones this suite has already been bitten by.
+jobs_case 00   4 "…while every spelling of zero falls back to the bound"
+jobs_case 01   4 "…and so does a leading-zero one, which the documented grammar refuses"
+jobs_case soon 4 "…and a value that is not a number at all"
+rm -rf "$JOBSTUB"
+
+# ── a TMPDIR containing xargs' replacement token ───────────────────────────
+# `-I{}` rewrites its token in EVERY initial argument. The scratch directory was
+# passed as one, so a `TMPDIR` of `/tmp/cache{}` handed each worker a path that
+# does not exist and the gate refused with `suite_runner_failed` over tests that
+# were fine — a mandatory pre-push gate blocking on its own plumbing.
+BRACEDIR="$TMP/cache{}"
+mkdir -p "$BRACEDIR"
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+addtest "$R" test-pr-thing.sh
+out="$(TMPDIR="$BRACEDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "a TMPDIR containing {} does not break the runner" \
+    || die "the replacement token in TMPDIR reached the workers (rc=$rc out='$out')"
+
+# ── a mktemp that succeeds and returns something unusable ──────────────────
+# The scratch directory has a recursive cleanup trap behind it, so an unchecked
+# `mktemp` that prints `/` and exits 0 arms `rm -rf /`. That is what `mktemp_d`
+# is for, and this case is the reason it is loaded here rather than trusted.
+#
+# The canary is a real directory inside the fixture: if the gate ever runs its
+# cleanup over what `mktemp` returned, the canary is what goes.
+LIARDIR="$TMP/liar"; mkdir -p "$LIARDIR"
+CANARY="$TMP/canary"; mkdir -p "$CANARY"; : > "$CANARY/keep"
+printf '#!/usr/bin/env bash\nprintf %%s "%s"\nexit 0\n' "$CANARY" > "$LIARDIR/mktemp"
+chmod +x "$LIARDIR/mktemp"
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+addtest "$R" test-pr-thing.sh
+out="$(PATH="$LIARDIR:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+# An EXISTING directory is what `mktemp_d` cannot reject — it is absolute, not
+# `/`, and it is there — so this case is about the trap, not the validation: the
+# gate must not delete a directory it did not create.
+[ -f "$CANARY/keep" ] \
+    && pass "a lying mktemp does not get the gate to delete an existing directory" \
+    || die "the cleanup trap removed a directory mktemp merely named"
+printf '#!/usr/bin/env bash\nprintf /\nexit 0\n' > "$LIARDIR/mktemp"
+out="$(PATH="$LIARDIR:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'no_suite_scratch'; } \
+    && pass "…and a mktemp that returns / fails the check closed" \
+    || die "a root scratch path was accepted (rc=$rc out='$out')"
+rm -rf "$LIARDIR"
 
 # ── a repository that is not this plugin is NOT an error ──────────────────
 # One installed copy drives every project, so the working repo is usually a
