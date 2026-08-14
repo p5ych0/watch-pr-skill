@@ -992,10 +992,19 @@ esac
 # and that path needs this sha: exiting without it made the operator re-run a
 # phase that had already been proved clean, just to recover a value that was
 # printed and thrown away.
+# EXACTLY FORTY HEX, AND EXACTLY ONE OF THEM. `[0-9a-f]*` matched `codex-sha=a`
+# and left a non-empty value, so the emptiness test below passed and step 8 was
+# handed something that is not a commit — and two matching records would have
+# produced two lines in one variable. The resume parser at the bottom of this file
+# already spells it this way; this one did not, which is the same rule written
+# twice and kept in one place.
 CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
-    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
-[ -n "$CODEX_SHA" ] \
-    || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
+    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]\{40\}\)$/\1/p' | tail -1)"
+case "$CODEX_SHA" in
+    *[!0-9a-f]*|"") echo "ABORT: the phase recorded no usable head; step 8 would have nothing to gate on."; exit 1 ;;
+esac
+[ "${#CODEX_SHA}" -eq 40 ] \
+    || { echo "ABORT: the phase reported a head that is not a full OID ('$CODEX_SHA')."; exit 1; }
 # AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
 # status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the ordinary
 # path, which left a phase that recorded and parsed perfectly exiting 1. A driver

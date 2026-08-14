@@ -89,6 +89,15 @@
   indenting or fencing a mention changes nothing — it has to be broken up or
   written without the `@`. The marker rule is the line-anchored one.
 
+- **The head the driver carries forward is a full OID, or nothing.** The parser
+  that reads `codex-sha=` out of the phase record captured `[0-9a-f]*`, so
+  `codex-sha=a` produced a non-empty value, passed the emptiness test, and handed
+  step 8 something that is not a commit; two matching records would have produced
+  two lines in one variable. It takes exactly forty hex from the last matching
+  record and length-checks the result — the spelling the resume parser at the
+  bottom of the same file already used, which is the same rule written twice and
+  now agreeing.
+
 - **`open` proves the phase is still open at every window it can close in.** The
   head, the live verdict and the recorded Codex signoff are one predicate, asked
   up front, again immediately before the mutations, and once more AFTER the
@@ -124,7 +133,11 @@
   was absent — exactly the case they exist for — the unmatched `grep` aborted the
   whole file: no FAIL, no `RESULT:` line, and a caller grepping for failures saw
   none. Found by mutating the document and getting silence instead of a failure.
-  Every such lookup is now guarded.
+  Every such lookup is now guarded — including four the first pass missed, which
+  is the same defect surviving its own fix. The mutation shows the shape exactly:
+  with the guard, removing the line a check looks for produces two FAILs and a
+  `RESULT: FAIL`; without it, zero FAILs and no `RESULT:` line at all, because the
+  file dies where the lookup was.
 
   Fourth step of #26. `SKILL.md` is down to 527 lines of bash from 953.
 ## [2.0.11] — 2026-08-13

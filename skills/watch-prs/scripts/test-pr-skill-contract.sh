@@ -101,9 +101,15 @@ grep -qi 'precede the push' "$SKILL" \
 # The capture accepts only hex, so a mangled record cannot populate the merge
 # gate with something that is not a sha. `pr-copilot-phase.sh` validates the shape
 # where it is produced, and `test-pr-copilot-phase.sh` runs that.
-grep -qF 'codex-sha=\([0-9a-f]*\)' "$SKILL" \
-    && pass "…through a capture that accepts only hex" \
+# EXACTLY FORTY, not "only hex". `[0-9a-f]*` accepted `codex-sha=a` and left a
+# non-empty value, so the emptiness test passed and step 8 was handed something
+# that is not a commit.
+grep -qF 'codex-sha=\([0-9a-f]\{40\}\)$' "$SKILL" \
+    && pass "…through a capture that accepts exactly a full OID" \
     || die "CODEX_SHA is used without validating its shape"
+grep -qF '[ "${#CODEX_SHA}" -eq 40 ]' "$SKILL" \
+    && pass "…and the captured value is length-checked before it is used" \
+    || die "the captured head is trusted without checking its length"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -506,8 +512,8 @@ grep -q 'pr-selfcheck.sh' "$SKILL" \
 # before any later `git push` code block, which stayed true while the checklist
 # told the driver to push in step 2 and self-check in step 3 — so a driver
 # following the sequence pushed before running the check meant to prevent it.
-self_step="$(grep -nE '^[0-9]+\. \*\*run the self-check' "$SKILL" | head -1 | cut -d: -f1)"
-push_step="$(grep -nE '^[0-9]+\. \*\*check the round boundary' "$SKILL" | head -1 | cut -d: -f1)"
+self_step="$(grep -nE '^[0-9]+\. \*\*run the self-check' "$SKILL" | head -1 | cut -d: -f1)" || true
+push_step="$(grep -nE '^[0-9]+\. \*\*check the round boundary' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$self_step" ] && [ -n "$push_step" ] && [ "$self_step" -lt "$push_step" ]; } \
     && pass "…and the numbered procedure runs it before the step that pushes" \
     || die "the checklist pushes before the self-check that is meant to prevent it"
@@ -518,8 +524,8 @@ grep -q 'SELF_RC' "$SKILL" \
 # ── the first request respects the review mode too ─────────────────────────
 # With auto-review on, opening or pushing the PR has already queued a pass, so an
 # unconditional mention queues a SECOND review of the same head.
-sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)"
-req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)"
+sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)" || true
+req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
