@@ -250,6 +250,15 @@ _why="$(sha_reason "$CODEX_SHA")" \
 
 # RE-VALIDATED ON EXACTLY THAT SHA. If it is not clean, the head moved and the
 # phase must not advance.
+# THE SIGNOFF RECORD AS IT STANDS BEFORE ANY OF THIS, captured so an intervening
+# change is visible later. It is not validated here — there may legitimately be
+# none, or a revocation this very pass is answering — only remembered.
+SIGNOFF_BEFORE=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_BEFORE_RC=$?
+case "$SIGNOFF_BEFORE_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not read the current Codex signoff record (rc=$SIGNOFF_BEFORE_RC): $SIGNOFF_BEFORE"; exit 1 ;;
+esac
+
 CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
 [ "$CODEX_RECHECK_RC" -eq 0 ] \
     || { echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"; exit 1; }
@@ -287,6 +296,35 @@ case "$ROUNDS_RC" in
     0|3) ;;
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC); nothing recorded"; exit 1 ;;
 esac
+
+# PROVED AGAIN, IMMEDIATELY BEFORE PUBLISHING. The checks above are followed by
+# two probes, and posting a signoff is the one irreversible thing this stage does:
+# a `Review-Signoff` comment written after somebody else's `Review-Signoff-Revoked`
+# SUPERSEDES it, because the last record wins. GitHub can still be serving the old
+# clean verdict, so a later `open` would then see a current signoff and a clean
+# verdict and request Copilot underneath a phase that was deliberately reopened.
+#
+# The head and the verdict are re-read for the same reason they are in `open` —
+# neither needs the head to move.
+HEAD_STILL=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-confirm the head before recording the signoff."; exit 1; }
+[ "$HEAD_STILL" = "$CODEX_SHA" ] \
+    || { echo "ABORT: the head moved to $HEAD_STILL while this phase was being proved; nothing was recorded."; exit 1; }
+RECHECK_AGAIN=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RECHECK_AGAIN_RC=$?
+[ "$RECHECK_AGAIN_RC" -eq 0 ] \
+    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RECHECK_AGAIN); nothing was recorded."; exit 1; }
+
+# AND THE RECORD MUST NOT HAVE MOVED UNDER US. Comparing it whole is the check:
+# what matters is that somebody wrote something in between, not what they wrote —
+# an intervening revocation and an intervening signoff are both reasons to stop
+# and neither needs interpreting.
+SIGNOFF_NOW=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
+case "$SIGNOFF_NOW_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not re-read the Codex signoff record (rc=$SIGNOFF_NOW_RC): $SIGNOFF_NOW"; exit 1 ;;
+esac
+{ [ "$SIGNOFF_NOW_RC" -eq "$SIGNOFF_BEFORE_RC" ] && [ "$SIGNOFF_NOW" = "$SIGNOFF_BEFORE" ]; } \
+    || { echo "ABORT: the Codex signoff record changed while this phase was being proved ('$SIGNOFF_BEFORE' -> '$SIGNOFF_NOW'); nothing was recorded."; exit 1; }
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \

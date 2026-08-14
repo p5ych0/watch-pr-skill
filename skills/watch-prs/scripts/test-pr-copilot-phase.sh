@@ -92,7 +92,15 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    cat "$W/head.out" 2>/dev/null
+    *" pr view "*)    # A SECOND ANSWER, when a case needs the head to move DURING
+                      # the probes. Keyed on a file only those cases create, so
+                      # every other case sees the single answer it always did.
+                      _n=$(( $(cat "$W/head.n" 2>/dev/null || echo 0) + 1 ))
+                      printf '%s' "$_n" > "$W/head.n"
+                      if [ "$_n" -ge 2 ] && [ -f "$W/head.2.out" ]; then
+                          cat "$W/head.2.out"; exit 0
+                      fi
+                      cat "$W/head.out" 2>/dev/null
                       exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
     *" pr comment "*) _b=""
                       while [ $# -gt 0 ]; do
@@ -190,6 +198,43 @@ grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
     && before 'pr-round-count' 'gh pr comment'; } \
     && pass "…and nothing is published until the head and the boundary are both established" \
     || die "the phase posted before it had proved the head: $(cat "$TMP/calls")"
+
+# ── THE PHASE IS PROVED AGAIN IMMEDIATELY BEFORE THE SIGNOFF IS PUBLISHED ──
+# Posting a signoff is the irreversible act of this stage, and it is preceded by
+# two probes. A `**Review-Signoff:**` written after somebody else's
+# `**Review-Signoff-Revoked:**` SUPERSEDES it — last record wins — so a phase
+# deliberately reopened during the CI or round-count probe would be silently
+# closed again, and a later `open` would request Copilot underneath it.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.2.out"
+printf '1\n' > "$W/signoff.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'signoff record changed'; } \
+    && pass "a revocation posted during the probes stops the record" \
+    || die "an intervening revocation gave '${got}'"
+nothing_posted "…and nothing was published over it"
+
+# THE HEAD AND THE VERDICT TOO, for the same reason they are re-read in `open`.
+world; printf '%s\n' "$OTHER40" > "$W/head.2.out"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "a head that moved during the probes stops the record" \
+    || die "a moved head during record gave '${got}'"
+world; printf '1\n' > "$W/verdict.2.rc"; printf 'PR_REVIEW_STATE verdict=none reason=dismissed\n' > "$W/verdict.2.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+    && pass "…and so does a verdict dismissed during them" \
+    || die "a mid-probe dismissal during record gave '${got}'"
+nothing_posted "…with nothing published"
+
+# AND A RECORD THAT DID NOT MOVE STILL PUBLISHES — including the ordinary case
+# where a previous phase was reopened and THIS pass is the answer to it, which is
+# a revocation present in BOTH reads rather than an intervening one.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] \
+    && pass "a revocation this pass is answering does not stop it" \
+    || die "a pre-existing revocation blocked the record: '${got}'"
 
 # ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
 # A failed probe must never be indistinguishable from a clean phase: the signoff

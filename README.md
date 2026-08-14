@@ -303,7 +303,10 @@ Then:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
      against *that exact sha*, proves its checks are green, and writes the
-     signoff onto the PR in the form `pr-signoff.sh` reads back. Then it stops
+     signoff onto the PR in the form `pr-signoff.sh` reads back — re-proving the
+     head, the verdict **and the signoff record** immediately before it publishes,
+     because a signoff written after somebody else's revocation supersedes it and
+     would quietly close a phase that was deliberately reopened. Then it stops
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;

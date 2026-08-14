@@ -98,6 +98,17 @@
   bottom of the same file already used, which is the same rule written twice and
   now agreeing.
 
+- **`record` proves the phase again immediately before it publishes the signoff.**
+  Posting one is the irreversible act of that stage, and two probes run before it —
+  so a `**Review-Signoff:**` written after somebody else's `**Review-Signoff-Revoked:**`
+  SUPERSEDES it, because the last record wins. GitHub can still be serving the old
+  clean verdict, so a later `open` would see a current signoff and a clean verdict
+  and request Copilot underneath a phase that was deliberately reopened. The head,
+  the verdict and the signoff RECORD are re-read; the record is compared whole,
+  because what matters is that somebody wrote something in between rather than what
+  they wrote — and a revocation present in both reads is the ordinary case of a
+  pass answering it, which still publishes.
+
 - **`open` proves the phase is still open at every window it can close in.** The
   head, the live verdict and the recorded Codex signoff are one predicate, asked
   up front, again immediately before the mutations, and once more AFTER the
