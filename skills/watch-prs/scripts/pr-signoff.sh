@@ -77,13 +77,13 @@ esac
 # The walk is the merge gate's, for the same reasons: every cursor already
 # requested is remembered so a cycle of any length stops rather than hanging, and
 # any incomplete traversal is an ERROR rather than the answer so far.
-SHA=""; SIGNED_AT=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
+SHA=""; SIGNED_AT=""; SIGNED_ID=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
 while :; do
     PAGE=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
         -F cursor="$CURSOR" -f query='query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
           repository(owner:$owner,name:$repo){ pullRequest(number:$number){
             comments(first:100, after:$cursor){ pageInfo{hasNextPage endCursor}
-              nodes{ body authorAssociation createdAt } }}}}' 2>/dev/null) || { OK=0; break; }
+              nodes{ id body authorAssociation createdAt } }}}}' 2>/dev/null) || { OK=0; break; }
     # A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`. The partial
     # data passes every shape check below while omitting comments, and the answer
     # taken from it would be "no signoff" — which is the safe direction only until
@@ -105,11 +105,18 @@ while :; do
                           # without knowing which came first — so a comment with no
                           # timestamp is a malformed record here, not one with an
                           # unknown date.
-                          or ((.createdAt | canonical_utc) | not))
+                          or ((.createdAt | canonical_utc) | not)
+                          # THE IDENTITY OF THE COMMENT ITSELF. Timestamps here are
+                          # second-resolution, so two revocations posted in the
+                          # same second are indistinguishable by time alone — and
+                          # a caller comparing snapshots to see whether the record
+                          # MOVED would read a replaced revocation as unchanged.
+                          or (.id | type) != "string")
           then error("malformed nodes")
           else [ $n[]
                  | select(.authorAssociation | IN("OWNER","MEMBER","COLLABORATOR"))
                  | .createdAt as $c
+                 | .id as $cid
                  # ANCHORED AT BOTH ENDS. A marker with prose after it — "…is the
                  # format we use" — is documentation, not a signoff, and a
                  # start-anchored pattern accepted it. The line must BE the record.
@@ -124,8 +131,8 @@ while :; do
                  # A revocation carries no sha and a signoff must; anything else
                  # is a malformed line rather than either.
                  | . as $m
-                 | if $m[0] != null then "REVOKED\t" + $c
-                   elif ($m[2] | type) == "string" then $m[2] + "\t" + $c
+                 | if $m[0] != null then "REVOKED\t" + $c + "\t" + $cid
+                   elif ($m[2] | type) == "string" then $m[2] + "\t" + $c + "\t" + $cid
                    else empty end
                ] | last // ""
           end') || { OK=0; break; }
@@ -133,7 +140,12 @@ while :; do
     # a phase can be reopened by saying so.
     # `<sha-or-REVOKED>\t<createdAt>`; the timestamp travels with the record so the
     # caller never has to guess which of two comments it is holding.
-    [ -n "$FOUND" ] && { SHA="${FOUND%%$'\t'*}"; SIGNED_AT="${FOUND#*$'\t'}"; }
+    [ -n "$FOUND" ] && {
+        SHA="${FOUND%%$'\t'*}"
+        _rest="${FOUND#*$'\t'}"
+        SIGNED_AT="${_rest%%$'\t'*}"
+        SIGNED_ID="${_rest#*$'\t'}"
+    }
     HAS_NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage') || { OK=0; break; }
     case "$HAS_NEXT" in
         false) break ;;
@@ -162,7 +174,7 @@ if [ "$SHA" = REVOKED ]; then
     # one revocation had been REPLACED by another, so the records compared equal and
     # the change was invisible. The timestamp is what makes two revocations
     # distinguishable.
-    echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT sha=none reason=revoked"
+    echo "PR_SIGNOFF pr=$PR reviewer=$WHO id=$SIGNED_ID at=$SIGNED_AT sha=none reason=revoked"
     exit 1
 fi
 if [ -z "$SHA" ]; then
@@ -180,5 +192,7 @@ _why="$(sha_reason "$SHA")" || {
 # `at=` COMES BEFORE `sha=`, and that is not cosmetic: every caller reads the sha
 # with `${line##*sha=}`, so a field appended after it would be swallowed into the
 # value and the gate would compare a sha against a sha-plus-timestamp.
-echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT sha=$SHA"
+# `id=` AND `at=` BOTH COME BEFORE `sha=`: every caller reads the sha with
+# `${line##*sha=}`, so a field after it would be swallowed into the value.
+echo "PR_SIGNOFF pr=$PR reviewer=$WHO id=$SIGNED_ID at=$SIGNED_AT sha=$SHA"
 exit 0

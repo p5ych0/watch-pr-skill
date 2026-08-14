@@ -44,7 +44,11 @@ case "${1:-}" in
                fi
                cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
-    review-at) cat "$W/review-at.out" 2>/dev/null
+    review-at) # ASKING THIS IS A NETWORK CALL, and a case needs the world to
+               # change during it — that is the window the final signoff snapshot
+               # has to close.
+               [ -f "$W/revoke-during-review-at" ] && cp "$W/revoke-during-review-at" "$W/signoff.out"
+               cat "$W/review-at.out" 2>/dev/null
                exit "$(cat "$W/review-at.rc" 2>/dev/null || echo 0)" ;;
     review-id) # THE BASELINE IS READ ONCE, LAST. A pass that lands during the
                # probes must not be the value handed to `--after-review`, so the
@@ -234,7 +238,7 @@ nothing_posted "…with nothing published"
 # where a previous phase was reopened and THIS pass is the answer to it, which is
 # a revocation present in BOTH reads rather than an intervening one.
 # A REVOCATION THIS PASS IS ANSWERING — the verdict landed AFTER it — publishes.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
@@ -245,7 +249,7 @@ got="$(run record 7 "$TMP/body.md")"
 # GitHub serving the PREVIOUS clean verdict until the new pass reports, so a
 # `record` in that window would publish a signoff using the very verdict the
 # reopening was called on.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-05T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-05T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the verdict that reopening was called on'; } \
@@ -255,25 +259,49 @@ nothing_posted "…with nothing published"
 
 # EQUAL IS NOT NEWER: GitHub stamps to the second, and closing a reopened phase is
 # not a coin toss.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-03T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-03T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 1 ] \
     && pass "…and a revocation in the same second as the verdict stops it too" \
     || die "a tie was resolved in favour of publishing: '${got}'"
 
+# A REVOCATION POSTED WHILE `review-at` IS IN FLIGHT. That lookup was added to
+# order a revocation against the verdict, and it is a network call — so if it ran
+# after the last signoff snapshot, a reopening during it would be missed and the
+# summary would go up over it. The snapshot is the last read before posting.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_9 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/revoke-during-review-at"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'signoff record changed'; } \
+    && pass "a revocation posted while the verdict time was being read stops the record" \
+    || die "a revocation during review-at was missed: '${got}'"
+nothing_posted "…with nothing published over it"
+
 # ONE REVOCATION REPLACED BY ANOTHER is a change, and the record must show it.
 # Without a timestamp both snapshots read `sha=none reason=revoked` and compared
 # equal, so the second reopening was invisible and the signoff went up over it.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
-printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-04T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.2.out"
+printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_2 at=2026-01-04T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.2.out"
 printf '1\n' > "$W/signoff.2.rc"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'signoff record changed'; } \
     && pass "a revocation replaced by a newer one is seen as a change" \
     || die "two revocations compared equal: '${got}'"
 nothing_posted "…with nothing published over the second reopening"
+
+# …AND ONE REPLACED WITHIN THE SAME SECOND. Timestamps here are second-resolution,
+# so time alone cannot tell these apart — only the identity of the comment can.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_1 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s id=IC_2 at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.2.out"
+printf '1\n' > "$W/signoff.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'signoff record changed'; } \
+    && pass "…and one replaced within the same second is still a change" \
+    || die "two same-second revocations compared equal: '${got}'"
 
 # ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
 # A failed probe must never be indistinguishable from a clean phase: the signoff

@@ -242,6 +242,27 @@ mk_clean_comment() {   # <sha10> [phrase] [login] [created_at]
 }
 printf '[]' > "$TMP/noreviews.json"
 mk_clean_comment "${HEAD40:0:10}"
+
+# ── review-at: WHEN THE AUTHORITATIVE VERDICT LANDED ───────────────────────
+# The phase and merge gates order records against this, so an INCOMPLETE snapshot
+# presented as a complete one is the failure that matters.
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        run review-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '^2'; } \
+    && pass "review-at reports a verdict that arrived as a COMMENT, not only as a review" \
+    || die "review-at gave rc=$rc '$out' for a comment-borne verdict"
+
+# A REVIEWS FETCH THAT FAILED IS NOT "NO REVIEWS". With a clean comment still
+# readable, the status of the nested fetch was thrown away by the surrounding
+# substitution and the comment's time was returned as though authoritative — so a
+# newer review that could supersede it was simply omitted, and the caller ordered a
+# revocation against a snapshot that was never complete.
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 GH_ICOMMENTS="$TMP/icomments.json" \
+        run review-at 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "…and a failed reviews fetch is a stop, even when a comment is readable" \
+    || die "a failed reviews fetch gave rc=$rc '$out'"
+
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
 printf '%s' "$out" | grep -q 'state=reviewed' \

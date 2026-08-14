@@ -40,8 +40,9 @@ comments() {   # comments <assoc>|<body> …
         # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
         # review, and the merge gate cannot tell an answer from a leftover without
         # knowing which came first. A node without one is malformed.
-        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
-            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
+        _cid=$(( ${_cid:-0} + 1 ))
+        nodes="$nodes$(printf '{"id":"IC_%s","authorAssociation":"%s","createdAt":"%s","body":%s},' \
+            "$_cid" "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[%s]}}}}}' "${nodes%,}"
 }
@@ -105,9 +106,9 @@ case_is 1 "sha=none" "…and one with prose trailing it does not sign off either
 # review nobody did.
 world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "a node missing its fields is unreadable, not absent"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","body":7}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"IC_x","authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","body":7}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and so is a body that is not a string"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","body":"x"}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"id":"IC_x","authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","body":"x"}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and an association that is not a string"
 
 # ── the LAST one wins, so a phase can be reopened ──────────────────────────
@@ -130,6 +131,10 @@ case_is 1 "reason=revoked" "a revocation after a signoff reopens the phase"
 # `pr-copilot-phase.sh` needs it to tell a revocation its verdict answers from one
 # the verdict predates.
 case_is 1 "at=" "…and says when, so two revocations are distinguishable"
+# TIME ALONE IS NOT AN IDENTITY. GitHub stamps to the second, so a revocation
+# REPLACED by another in the same second produced two identical records and a
+# caller comparing snapshots read the second reopening as no change at all.
+case_is 1 "id=" "…and carries the identity of the comment, which a second cannot"
 # …AND ORDER DECIDES, both ways. A signoff after a revocation closes it again,
 # which is what happens when the new pass comes back clean on the same head.
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
@@ -169,8 +174,9 @@ page() {   # page <hasNext> <endCursor> <assoc>|<body> …
         # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
         # review, and the merge gate cannot tell an answer from a leftover without
         # knowing which came first. A node without one is malformed.
-        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
-            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
+        _cid=$(( ${_cid:-0} + 1 ))
+        nodes="$nodes$(printf '{"id":"IC_%s","authorAssociation":"%s","createdAt":"%s","body":%s},' \
+            "$_cid" "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":%s,"endCursor":%s},"nodes":[%s]}}}}}' \
         "$has" "$cur" "${nodes%,}"

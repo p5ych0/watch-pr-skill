@@ -323,18 +323,10 @@ RECHECK_AGAIN=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT"
 [ "$RECHECK_AGAIN_RC" -eq 0 ] \
     || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RECHECK_AGAIN); nothing was recorded."; exit 1; }
 
-# AND THE RECORD MUST NOT HAVE MOVED UNDER US. Comparing it whole is the check:
-# what matters is that somebody wrote something in between, not what they wrote —
-# an intervening revocation and an intervening signoff are both reasons to stop
-# and neither needs interpreting.
-SIGNOFF_NOW=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
-case "$SIGNOFF_NOW_RC" in
-    0|1) ;;
-    *) echo "ABORT: could not re-read the Codex signoff record (rc=$SIGNOFF_NOW_RC): $SIGNOFF_NOW"; exit 1 ;;
-esac
-{ [ "$SIGNOFF_NOW_RC" -eq "$SIGNOFF_BEFORE_RC" ] && [ "$SIGNOFF_NOW" = "$SIGNOFF_BEFORE" ]; } \
-    || { echo "ABORT: the Codex signoff record changed while this phase was being proved ('$SIGNOFF_BEFORE' -> '$SIGNOFF_NOW'); nothing was recorded."; exit 1; }
-
+# ORDERED BEFORE THE FINAL SIGNOFF SNAPSHOT, deliberately. This asks the API when
+# the verdict landed, and a network call after the last snapshot is a window of
+# its own — a revocation posted during it would be missed and the signoff would go
+# up over the reopening. The snapshot comparison is the LAST thing before posting.
 # A REVOCATION THIS PASS IS ANSWERING, OR ONE IT WOULD CANCEL. Both look the same
 # in the record — `sha=none reason=revoked` in each snapshot — and the difference
 # is WHEN the clean verdict landed relative to it.
@@ -360,6 +352,18 @@ case "$SIGNOFF_BEFORE" in
             || { echo "ABORT: the Codex verdict on $CODEX_SHA landed at $_verdict_at, not after the revocation at $_rev_at — it is the verdict that reopening was called on; nothing was recorded."; exit 1; }
         ;;
 esac
+
+# AND THE RECORD MUST NOT HAVE MOVED UNDER US. Comparing it whole is the check:
+# what matters is that somebody wrote something in between, not what they wrote —
+# an intervening revocation and an intervening signoff are both reasons to stop
+# and neither needs interpreting.
+SIGNOFF_NOW=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
+case "$SIGNOFF_NOW_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not re-read the Codex signoff record (rc=$SIGNOFF_NOW_RC): $SIGNOFF_NOW"; exit 1 ;;
+esac
+{ [ "$SIGNOFF_NOW_RC" -eq "$SIGNOFF_BEFORE_RC" ] && [ "$SIGNOFF_NOW" = "$SIGNOFF_BEFORE" ]; } \
+    || { echo "ABORT: the Codex signoff record changed while this phase was being proved ('$SIGNOFF_BEFORE' -> '$SIGNOFF_NOW'); nothing was recorded."; exit 1; }
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \

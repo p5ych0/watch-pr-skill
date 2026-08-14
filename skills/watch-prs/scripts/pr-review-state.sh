@@ -441,7 +441,18 @@ main() {
     # moment the verdict is currently resting on.
     if [ "$cmd" = "review-at" ]; then
         local at cinfo cts crc
-        at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
+        # THE FETCH'S OWN STATUS, taken before anything is concluded from what it
+        # printed. `$(reviewer_reviews …)` inside another substitution throws the
+        # status away, so a reviews endpoint that failed while a clean COMMENT
+        # remained readable answered with the comment's time as though it were
+        # authoritative — an incomplete snapshot presented as a complete one, in a
+        # value the phase and merge gates order records against.
+        local reviews
+        reviews="$(reviewer_reviews "$pr" "$who")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        at="$(printf '%s' "$reviews" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
             if type != "array" then error("bad shape")
             else [ .[]
                    | select(.commit_id == $h)
