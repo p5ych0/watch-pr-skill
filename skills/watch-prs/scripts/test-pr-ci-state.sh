@@ -325,10 +325,15 @@ hang_out="$(run_limited 30 env PATH="$TMP/bin:$PATH" PR_CI_PROBE_TIMEOUT=2 \
 # What each case has to outlast is the bound its own value WOULD have set if the
 # guard were removed:
 #
-#   0, '', notanumber → arithmetic reads them as zero or errors, so the deadline
-#                       is already spent and the script reports it AT ONCE. Three
-#                       seconds is far more than enough to tell that from a run
-#                       that is still going.
+#   0, notanumber → arithmetic reads them as zero or errors, so the deadline is
+#                    already spent and the script reports it AT ONCE. Three seconds
+#                    is far more than enough to tell that from a run still going.
+#   ''             → defended by a DIFFERENT line, and the case is here for that
+#                    one. `${PR_CI_PROBE_TIMEOUT:-60}` substitutes on empty, so
+#                    the guard below never sees it and removing the guard leaves a
+#                    sixty-second deadline untouched. Its mutation is `:-` to `-`;
+#                    with that, the empty value reaches arithmetic, reads as zero,
+#                    and the case fails at three seconds like the others.
 #   007              → Bash reads it as octal SEVEN, so the failure mode returns
 #                       at about seven seconds. A three-second watchdog could not
 #                       tell that from the fallback, so this one keeps ten.
