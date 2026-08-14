@@ -429,12 +429,18 @@ main() {
     # The id of the authoritative review on this head, or empty when there is
     # none. A caller waiting for a re-request on an UNCHANGED head has nothing
     # else to tell the new pass from the old one.
-    # WHEN THE AUTHORITATIVE REVIEW LANDED. The merge gate needs it to tell an
+    # WHEN THE AUTHORITATIVE VERDICT LANDED. The merge gate needs it to tell an
     # operator's answer from a leftover: a signoff recorded for an earlier clean
     # review on the SAME HEAD would otherwise vouch for a later replies-only review
     # nobody read. A head is not a moment.
+    #
+    # BOTH CHANNELS, like the snapshot itself. A clean verdict arrives as a REVIEW
+    # or as a comment — Codex uses both — so reporting only the review's time said
+    # "no verdict" about a head whose verdict was a comment, and every caller
+    # comparing against it then had nothing to order. The newest of the two is the
+    # moment the verdict is currently resting on.
     if [ "$cmd" = "review-at" ]; then
-        local at
+        local at cinfo cts crc
         at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
             if type != "array" then error("bad shape")
             else [ .[]
@@ -446,6 +452,17 @@ main() {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
+        cinfo="$(clean_comment_for_head "$pr" "$who" "$head")"; crc=$?
+        case "$crc" in
+            0) cts="${cinfo#*$'\t'}"
+               # The LATER of the two, compared as canonical UTC strings — the same
+               # ordering `head_review_snapshot` uses to decide which one is
+               # authoritative in the first place.
+               if [ -z "$at" ] || [ "$cts" \> "$at" ]; then at="$cts"; fi ;;
+            1) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+               return 2 ;;
+        esac
         printf '%s\n' "$at"
         return 0
     fi

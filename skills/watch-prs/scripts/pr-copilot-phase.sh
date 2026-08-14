@@ -232,7 +232,16 @@ case "$_trig_rc" in
        exit 1 ;;
     *) echo "ABORT: could not tell whether the phase body requests a review (rc=$_trig_rc)"; exit 1 ;;
 esac
-if _marker="$(rb_reserved_marker_line "$BODY")"; then
+# THE THREE ANSWERS ARE DISTINGUISHED. `if` treated every non-zero status as
+# "no reserved marker", so a scan that could not run — its heredoc needs a
+# temporary file on bash 3.2 — read as permission to post, and a control line
+# would go up under the operator's identity because a disk filled up.
+_marker="$(rb_reserved_marker_line "$BODY")"; _mrc=$?
+case "$_mrc" in
+    1) ;;
+    2) echo "ABORT: could not check the phase body for reserved markers (rc=$_mrc); refusing to post text nothing has read."; exit 1 ;;
+esac
+if [ "$_mrc" -eq 0 ]; then
     echo "ABORT: the phase body starts a line with a marker the loop reads as a record: $_marker"
     echo "It would be posted under your identity and honoured. Indent it by four spaces, or quote it inline with backticks — either still says what you meant. A fenced block does NOT help: the line inside it still starts at column 0, which is all the readers look at."
     exit 1
@@ -325,6 +334,32 @@ case "$SIGNOFF_NOW_RC" in
 esac
 { [ "$SIGNOFF_NOW_RC" -eq "$SIGNOFF_BEFORE_RC" ] && [ "$SIGNOFF_NOW" = "$SIGNOFF_BEFORE" ]; } \
     || { echo "ABORT: the Codex signoff record changed while this phase was being proved ('$SIGNOFF_BEFORE' -> '$SIGNOFF_NOW'); nothing was recorded."; exit 1; }
+
+# A REVOCATION THIS PASS IS ANSWERING, OR ONE IT WOULD CANCEL. Both look the same
+# in the record — `sha=none reason=revoked` in each snapshot — and the difference
+# is WHEN the clean verdict landed relative to it.
+#
+# Reopening a phase on an unchanged head posts a revocation and requests a new
+# pass, and GitHub keeps serving the PREVIOUS clean verdict until that pass
+# reports. So a `record` run in that window sees a revocation and a clean verdict
+# and, without this, publishes a signoff that cancels the reopening — using the
+# very verdict the reopening was called on.
+case "$SIGNOFF_BEFORE" in
+    *reason=revoked*)
+        _rev_at="${SIGNOFF_BEFORE#*at=}"; _rev_at="${_rev_at%% *}"
+        case "$_rev_at" in
+            ""|*[!0-9TZ:-]*) echo "ABORT: the Codex revocation on this PR carries no usable timestamp ('$SIGNOFF_BEFORE'); nothing was recorded."; exit 1 ;;
+        esac
+        _verdict_at=$("$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") || {
+            echo "ABORT: could not read when Codex's verdict on $CODEX_SHA landed; nothing was recorded."; exit 1; }
+        [ -n "$_verdict_at" ] \
+            || { echo "ABORT: Codex's phase was reopened and no verdict on $CODEX_SHA can be placed after it; nothing was recorded."; exit 1; }
+        # EQUAL IS NOT NEWER. GitHub stamps to the second, so a tie cannot be
+        # ordered — and closing a reopened phase is not a coin toss.
+        [ "$_verdict_at" \> "$_rev_at" ] \
+            || { echo "ABORT: the Codex verdict on $CODEX_SHA landed at $_verdict_at, not after the revocation at $_rev_at — it is the verdict that reopening was called on; nothing was recorded."; exit 1; }
+        ;;
+esac
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \

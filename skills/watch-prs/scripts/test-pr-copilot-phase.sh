@@ -44,6 +44,8 @@ case "${1:-}" in
                fi
                cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
+    review-at) cat "$W/review-at.out" 2>/dev/null
+               exit "$(cat "$W/review-at.rc" 2>/dev/null || echo 0)" ;;
     review-id) # THE BASELINE IS READ ONCE, LAST. A pass that lands during the
                # probes must not be the value handed to `--after-review`, so the
                # fixture can change what this returns after the revocation.
@@ -120,7 +122,9 @@ world() {   # world ; the state in which the phase advances cleanly
     printf '%s\n' "$HEAD40" > "$W/head.out"
     printf 'PR_REVIEW_STATE verdict=clean findings=0\n' > "$W/verdict.out"
     printf '42\n' > "$W/review-id.out"
-    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z sha=%s\n' "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
+    # WHEN THE VERDICT LANDED, so a revocation can be placed against it.
+    printf '2026-01-03T00:00:00Z\n' > "$W/review-at.out"
     printf 'the paragraph about what changed\n' > "$TMP/body.md"
 }
 run() {   # run <stage> [args…] ; prints "<rc>|<output>"
@@ -229,12 +233,47 @@ nothing_posted "…with nothing published"
 # AND A RECORD THAT DID NOT MOVE STILL PUBLISHES — including the ordinary case
 # where a previous phase was reopened and THIS pass is the answer to it, which is
 # a revocation present in BOTH reads rather than an intervening one.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+# A REVOCATION THIS PASS IS ANSWERING — the verdict landed AFTER it — publishes.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "a revocation this pass is answering does not stop it" \
     || die "a pre-existing revocation blocked the record: '${got}'"
+
+# …AND ONE IT WOULD CANCEL DOES STOP IT. Reopening on an unchanged head leaves
+# GitHub serving the PREVIOUS clean verdict until the new pass reports, so a
+# `record` in that window would publish a signoff using the very verdict the
+# reopening was called on.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-05T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the verdict that reopening was called on'; } \
+    && pass "…while one the verdict predates stops it, rather than cancelling the reopening" \
+    || die "a stale verdict closed a reopened phase: '${got}'"
+nothing_posted "…with nothing published"
+
+# EQUAL IS NOT NEWER: GitHub stamps to the second, and closing a reopened phase is
+# not a coin toss.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-03T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and a revocation in the same second as the verdict stops it too" \
+    || die "a tie was resolved in favour of publishing: '${got}'"
+
+# ONE REVOCATION REPLACED BY ANOTHER is a change, and the record must show it.
+# Without a timestamp both snapshots read `sha=none reason=revoked` and compared
+# equal, so the second reopening was invisible and the signoff went up over it.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-04T00:00:00Z sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.2.out"
+printf '1\n' > "$W/signoff.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'signoff record changed'; } \
+    && pass "a revocation replaced by a newer one is seen as a change" \
+    || die "two revocations compared equal: '${got}'"
+nothing_posted "…with nothing published over the second reopening"
 
 # ── EVERY PROOF IS A STOP, AND NOTHING IS RECORDED WHEN ONE FAILS ──────────
 # A failed probe must never be indistinguishable from a clean phase: the signoff
@@ -376,6 +415,20 @@ got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 1 ] \
     && pass "…in any case, since the trigger is not case-sensitive" \
     || die "an upper-case trigger gave '${got}'"
+
+# A SCAN THAT COULD NOT RUN MUST NOT READ AS "CLEAN". The heredoc it reads through
+# needs a temporary file on bash 3.2, so a full filesystem makes it fail — and
+# treating every non-zero status as "no reserved marker" posts text nothing has
+# read, under an identity the readers trust.
+world; printf 'ordinary prose\n' > "$TMP/body.md"
+cp "$DIR/recordlib.sh" "$TMP/recordlib.keep"
+printf '\nrb_reserved_marker_line() { return 2; }\n' >> "$DIR/recordlib.sh"
+got="$(run record 7 "$TMP/body.md")"
+cp "$TMP/recordlib.keep" "$DIR/recordlib.sh"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not check the phase body'; } \
+    && pass "a marker scan that could not run stops the phase" \
+    || die "a failed marker scan gave '${got}'"
+nothing_posted "…and nothing was published unread"
 
 # `**Reviewed commit:**` IS NOT REFUSED: `pr-round-count.sh` reads it only from a
 # reviewer bot's own comment, so a body posted here cannot create one.

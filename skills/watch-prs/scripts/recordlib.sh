@@ -241,17 +241,28 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # ONE DEFINITION, because two scripts post caller-written bodies —
 # `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
 # that must not be present in one of them and missing from the other.
-rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
-    local _l _found=""
+# 0 a reserved line was found (and printed) · 1 there is none · 2 COULD NOT TELL.
+#
+# The third status is not decoration. The scan reads its input through a heredoc,
+# which bash 3.2 backs with a temporary file — so a full or read-only filesystem
+# makes the redirection fail, the loop never runs, and the old `return 1` said
+# "no reserved marker" about text nothing had looked at. Both callers treat 1 as
+# permission to post, so that is a control record published under the operator's
+# identity because a disk filled up.
+rb_reserved_marker_line() {   # <text> ; prints the first reserved line
+    local _l _found="" _read=0
     while IFS= read -r _l || [ -n "$_l" ]; do
         case "$_l" in
             '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
             '**Review-Pause-Acknowledged:**'*)
                 _found="$_l"; break ;;
         esac
-    done <<EOF
+    done <<EOF && _read=1
 $1
 EOF
+    # THE REDIRECTION'S OWN STATUS, taken before anything is concluded from what
+    # the loop did or did not find.
+    [ "$_read" -eq 1 ] || return 2
     [ -n "$_found" ] || return 1
     printf '%s\n' "$_found"
     return 0

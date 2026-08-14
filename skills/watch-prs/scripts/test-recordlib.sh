@@ -296,6 +296,28 @@ rb_review_trigger ""; rc=$?
     && pass "…and empty text requests nothing" \
     || die "empty text gave rc=$rc"
 
+# A SCAN THAT COULD NOT RUN IS NOT "NO MARKER". The heredoc this reads through is
+# backed by a temporary file on bash 3.2, so a full or read-only filesystem makes
+# the redirection fail — and the old `return 1` said "clean" about text nothing had
+# looked at, which both callers treat as permission to post.
+out="$(rb_reserved_marker_line "ordinary prose")"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "clean text answers 1, not 0 or 2" \
+    || die "clean text gave rc=$rc"
+out="$(rb_reserved_marker_line "**Review-Signoff:** \`who\` \`sha\`")"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…a reserved line answers 0" \
+    || die "a reserved line gave rc=$rc"
+# THE THIRD ANSWER IS PROVEN IN THE CALLERS, not here. Making the heredoc actually
+# fail needs a filesystem this suite must not create — an unwritable `TMPDIR` does
+# not do it on every bash, and a fixture that cannot force the condition it names
+# is the kind that passes for the wrong reason. `test-pr-copilot-phase.sh` and
+# `test-pr-close-round.sh` each stage a library whose scan returns 2 and assert
+# their caller refuses to post, which is the behaviour that matters.
+grep -q 'return 2' "$SELF_DIR/recordlib.sh" \
+    && pass "…and the scan has a third answer for a scan that could not run" \
+    || die "the marker scan cannot report that it failed"
+
 # ── the drift guard ───────────────────────────────────────────────────────
 # Centralising is not a one-time act. Each of these rules was re-implemented by
 # hand in a second and third script before this library existed, and every one of

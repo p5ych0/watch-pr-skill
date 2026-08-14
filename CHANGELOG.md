@@ -98,6 +98,31 @@
   bottom of the same file already used, which is the same rule written twice and
   now agreeing.
 
+- **A revocation the verdict answers, or one it would cancel.** Both look identical
+  in the record, and the difference is WHEN the clean verdict landed relative to it.
+  Reopening a phase on an unchanged head posts a revocation and requests a new pass,
+  and GitHub keeps serving the PREVIOUS clean verdict until that pass reports — so
+  `record` in that window would publish a signoff cancelling the reopening, using
+  the very verdict it was called on. The verdict must now POSTDATE the revocation,
+  and equal refuses.
+
+  For that to be decidable, two records grew a timestamp. `pr-signoff.sh` carries
+  `at=` on a REVOCATION as well as a signoff: without it, one revocation replaced
+  by another compared equal to it, so a second reopening during the probes was
+  invisible. And `pr-review-state.sh review-at` now reports whichever channel the
+  verdict actually arrived on — a clean verdict comes as a review OR as a comment,
+  and reporting only the review's time said "no verdict" about a head whose verdict
+  was a comment, which is how Codex delivered the one on this very PR.
+
+- **A marker scan that could not run is not "no marker".** The scan reads its input
+  through a heredoc, which bash 3.2 backs with a temporary file — so a full or
+  read-only filesystem makes the redirection fail, and `return 1` said "clean"
+  about text nothing had looked at. Both callers treat that as permission to post,
+  so a control line would go up under the operator's identity because a disk filled
+  up. The scan has a third status now, and both callers branch on it; each has a
+  fixture staging a library whose scan cannot answer, asserting nothing is posted
+  and nothing is pushed.
+
 - **`record` proves the phase again immediately before it publishes the signoff.**
   Posting one is the irreversible act of that stage, and two probes run before it —
   so a `**Review-Signoff:**` written after somebody else's `**Review-Signoff-Revoked:**`

@@ -476,6 +476,21 @@ got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
     || die "a Codex summary quoting the trigger was refused: '${got}'"
 printf 'the round summary\n' > "$TMP/summary.md"
 
+# A SCAN THAT COULD NOT RUN MUST NOT READ AS "CLEAN" here either — the summary is
+# posted under the same trusted identity.
+world; printf 'ordinary prose\n' > "$TMP/summary.md"
+cp "$DIR/recordlib.sh" "$TMP/recordlib.keep"
+printf '\nrb_reserved_marker_line() { return 2; }\n' >> "$DIR/recordlib.sh"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+cp "$TMP/recordlib.keep" "$DIR/recordlib.sh"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not check the round summary'; } \
+    && pass "a marker scan that could not run stops the round" \
+    || die "a failed marker scan gave '${got}'"
+grep -q 'git push' "$TMP/calls" \
+    && die "it pushed with a summary nothing had read" \
+    || pass "…before anything was pushed"
+printf 'the round summary\n' > "$TMP/summary.md"
+
 # ── THE THREADS ARE ANSWERED BETWEEN THE STAGES ────────────────────────────
 # This is the ordering the split exists for, and it is the one the call log can
 # only show if the fixture performs the driver's part too. A resolve cannot be

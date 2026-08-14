@@ -172,7 +172,16 @@ if [ "$WHO" = "$COPILOT_BOT" ]; then
         *) echo "ABORT: could not tell whether the round summary requests a review (rc=$_trig_rc)"; exit 1 ;;
     esac
 fi
-if _marker="$(rb_reserved_marker_line "$SUMMARY")"; then
+# THE THREE ANSWERS ARE DISTINGUISHED. `if` treated every non-zero status as
+# "no reserved marker", so a scan that could not run — its heredoc needs a
+# temporary file on bash 3.2 — read as permission to post, and a control line
+# would go up under the operator's identity because a disk filled up.
+_marker="$(rb_reserved_marker_line "$SUMMARY")"; _mrc=$?
+case "$_mrc" in
+    1) ;;
+    2) echo "ABORT: could not check the round summary for reserved markers (rc=$_mrc); refusing to post text nothing has read."; exit 1 ;;
+esac
+if [ "$_mrc" -eq 0 ]; then
     echo "ABORT: the round summary starts a line with a marker the loop reads as a record: $_marker"
     echo "It would be posted under your identity and honoured. Indent it by four spaces, or quote it inline with backticks — either still says what you meant. A fenced block does NOT help: the line inside it still starts at column 0, which is all the readers look at."
     exit 1

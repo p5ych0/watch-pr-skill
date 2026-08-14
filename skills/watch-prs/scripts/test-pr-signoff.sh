@@ -123,6 +123,13 @@ case_is 0 "sha=$SHA" "a later signoff supersedes an earlier one"
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
                 "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
 case_is 1 "reason=revoked" "a revocation after a signoff reopens the phase"
+# THE REVOCATION CARRIES ITS TIMESTAMP TOO. A caller comparing two snapshots to
+# see whether anything moved underneath it got `sha=none reason=revoked` both
+# times when one revocation had been REPLACED by another — the records compared
+# equal, so the second reopening was invisible and a signoff went up over it. And
+# `pr-copilot-phase.sh` needs it to tell a revocation its verdict answers from one
+# the verdict predates.
+case_is 1 "at=" "…and says when, so two revocations are distinguishable"
 # …AND ORDER DECIDES, both ways. A signoff after a revocation closes it again,
 # which is what happens when the new pass comes back clean on the same head.
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \

@@ -20,7 +20,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-merge-range.sh` | Whether every commit since the reviewed SHA is a review-fix commit reachable from it. |
 | `skills/watch-prs/scripts/pr-findings.sh` | The unresolved findings, paginated and shape-validated, and the body of a blocking review. |
 | `skills/watch-prs/scripts/pr-round-count.sh` | How many rounds this PR has had, and whether this is an operator check-in boundary. |
-| `skills/watch-prs/scripts/pr-signoff.sh` | Which head a reviewer has signed off clean on, read back from the PR itself. The record is a comment, so it survives the session that made it. |
+| `skills/watch-prs/scripts/pr-signoff.sh` | Which head a reviewer has signed off clean on, read back from the PR itself. The record is a comment, so it survives the session that made it, and it carries `at=` — a revocation without one is indistinguishable from the revocation it replaced, and a signoff without one cannot be placed against the review it claims to answer. |
 | `skills/watch-prs/scripts/pr-ci-state.sh` | Whether the pushed head's checks are green, still running, failing, or absent. |
 | `skills/watch-prs/scripts/pr-ci-gate.sh` | Waits until those checks have settled on the head just pushed, and says whether the round may close. Was a function in `SKILL.md`, where nothing could test it — see #26. |
 | `skills/watch-prs/scripts/pr-close-round.sh` | Closes a review round in two stages with the thread replies between them: `gate` pushes and proves the head green, `post` re-proves that head, posts the summary and requests the next pass. Both orderings — the mention as trigger, and the push as trigger — in one place. 0 gated/closed, 1 stopped, 3 paused. Was 247 lines in `SKILL.md` — see #26. |

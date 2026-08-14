@@ -157,7 +157,12 @@ fi
 # such rather than as an error: the phase is open, which is a fact about the PR
 # and not a failure to read it.
 if [ "$SHA" = REVOKED ]; then
-    echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none reason=revoked"
+    # `at=` ON THE REVOCATION TOO. A caller comparing two snapshots to see whether
+    # anything changed underneath it got `sha=none reason=revoked` both times when
+    # one revocation had been REPLACED by another, so the records compared equal and
+    # the change was invisible. The timestamp is what makes two revocations
+    # distinguishable.
+    echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT sha=none reason=revoked"
     exit 1
 fi
 if [ -z "$SHA" ]; then
