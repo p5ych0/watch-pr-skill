@@ -246,17 +246,28 @@ STUBSH
     # assertion — falling back to a thirty-minute timeout is the CORRECT
     # behaviour, so the watchdog stopping the run is expected, not a failure.
     #
-    # THE WINDOW IS SHORT BECAUSE THE SEPARATION IS A RATIO, NOT A DURATION. What
-    # is being told apart is a thirty-second interval from a zero-second one, so
-    # in any window at all the first manages one poll and the second manages
-    # hundreds. It ran for twelve seconds and the extra nine were spent
-    # re-confirming a poll that had already not happened in the first three.
+    # THE CEILING CARRIES THIS, NOT THE LENGTH OF THE WINDOW. The documented
+    # fallback is thirty seconds, so inside a five-second window a gate that
+    # applied it polls EXACTLY ONCE — it polls, sleeps thirty, and the watchdog
+    # stops it. A second poll inside the window means the interval was at most
+    # four seconds, and that fails here.
+    #
+    # A CEILING OF FOUR IN A TWELVE-SECOND WINDOW WAS THE WEAKER TEST, not the
+    # stronger one. It rejected a fallback of three seconds or less and ACCEPTED
+    # a regression to four, while costing more than twice the wall clock; this
+    # rejects four as well. Measured, at each value, against a fallback mutated
+    # from thirty: 0 spins to 569 polls, 1 gives 5, 3 and 4 give 2 — all
+    # rejected — and 5 gives 1, which is where both versions stop seeing it.
+    #
+    # The headroom the old ceiling bought is headroom nothing needs: one poll per
+    # window is not a race, because the second poll cannot happen until the
+    # interval has elapsed.
     #
     # The window is a variable so the diagnostic cannot drift from the bound it
     # reports — they were two literals, and only one of them would have been
     # changed here.
     gate_spin() {   # gate_spin <max calls> <label> [env…]
-        local out rc=0 calls maxc="$1" label="$2" win=3
+        local out rc=0 calls maxc="$1" label="$2" win=5
         shift 2
         printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
         : > "$GATETMP/probe"
@@ -268,9 +279,9 @@ STUBSH
             && pass "$label" \
             || die "$label — $calls polls in ${win}s (at most $maxc); the bound was not applied"
     }
-    gate_spin 4 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
-    gate_spin 4 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
-    gate_spin 4 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
+    gate_spin 1 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
+    gate_spin 1 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
+    gate_spin 1 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
     # THE TIMEOUT IS A DURATION, NOT A SUM OF SLEEPS. Counting only the sleeps
     # excluded the probe time, so two slow `gh` calls per iteration turned a
     # documented thirty-minute bound into ninety. With a 3s probe and a 1s
