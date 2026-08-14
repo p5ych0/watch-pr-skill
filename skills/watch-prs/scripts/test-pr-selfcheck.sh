@@ -497,33 +497,52 @@ out="$(TMPDIR="$BRACEDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a TMPDIR containing {} does not break the runner" \
     || die "the replacement token in TMPDIR reached the workers (rc=$rc out='$out')"
 
-# ── a mktemp that succeeds and returns something unusable ──────────────────
-# The scratch directory has a recursive cleanup trap behind it, so an unchecked
-# `mktemp` that prints `/` and exits 0 arms `rm -rf /`. That is what `mktemp_d`
-# is for, and this case is the reason it is loaded here rather than trusted.
+# ── the scratch directory, and what it must never remove ───────────────────
+# A recursive delete is armed on that directory, so what has to hold is that this
+# run created it. Two earlier shapes did not establish that and both removed
+# somebody else's directory: validating `mktemp`'s answer accepts an EXISTING
+# directory, and taking a subdirectory while releasing the parent with `rmdir`
+# removed a pre-existing parent that happened to be empty.
 #
-# The canary is a real directory inside the fixture: if the gate ever runs its
-# cleanup over what `mktemp` returned, the canary is what goes.
-LIARDIR="$TMP/liar"; mkdir -p "$LIARDIR"
-CANARY="$TMP/canary"; mkdir -p "$CANARY"; : > "$CANARY/keep"
-printf '#!/usr/bin/env bash\nprintf %%s "%s"\nexit 0\n' "$CANARY" > "$LIARDIR/mktemp"
-chmod +x "$LIARDIR/mktemp"
+# The canary is `TMPDIR` itself, in both states, because that is the directory the
+# gate is closest to deleting and never should.
+for state in populated empty; do
+    CANARY="$TMP/canary-$state"; rm -rf "$CANARY"; mkdir -p "$CANARY"
+    [ "$state" = populated ] && : > "$CANARY/keep"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    out="$(TMPDIR="$CANARY" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && [ -d "$CANARY" ]; } \
+        && pass "a $state TMPDIR survives the run that scratched inside it" \
+        || die "the gate removed its own TMPDIR ($state, rc=$rc out='$out')"
+    # …AND LEAVES NOTHING OF ITS OWN BEHIND. A cleanup narrowed until it is safe
+    # can be narrowed until it does nothing, and an empty TMPDIR is where that
+    # would show: the scratch directory is the only thing the run puts here.
+    left="$(ls -A "$CANARY" 2>/dev/null | grep -c 'pr-selfcheck')" || left=0
+    [ "$left" -eq 0 ] \
+        && pass "…and the run's own scratch directory is gone" \
+        || die "the scratch directory leaked into $state TMPDIR"
+done
+[ -f "$TMP/canary-populated/keep" ] \
+    && pass "…and what was already in it is untouched" \
+    || die "the gate removed a file it did not create"
+
+# ── a TMPDIR that cannot hold a scratch directory ──────────────────────────
+# The gate cannot run its suite without somewhere to write, and "cannot" must not
+# look like "clean". `mkdir` under a path that is a FILE fails every time, which
+# is the same shape as a read-only or full temp area.
+NOTADIR="$TMP/not-a-dir"; : > "$NOTADIR"
 R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-thing.sh 'exit 0'
 addtest "$R" test-pr-thing.sh
-out="$(PATH="$LIARDIR:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
-# An EXISTING directory is what `mktemp_d` cannot reject — it is absolute, not
-# `/`, and it is there — so this case is about the trap, not the validation: the
-# gate must not delete a directory it did not create.
-[ -f "$CANARY/keep" ] \
-    && pass "a lying mktemp does not get the gate to delete an existing directory" \
-    || die "the cleanup trap removed a directory mktemp merely named"
-printf '#!/usr/bin/env bash\nprintf /\nexit 0\n' > "$LIARDIR/mktemp"
-out="$(PATH="$LIARDIR:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+out="$(TMPDIR="$NOTADIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'no_suite_scratch'; } \
-    && pass "…and a mktemp that returns / fails the check closed" \
-    || die "a root scratch path was accepted (rc=$rc out='$out')"
-rm -rf "$LIARDIR"
+    && pass "a TMPDIR that cannot hold a scratch directory fails closed" \
+    || die "an unusable TMPDIR did not fail closed (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'the whole suite passes' \
+    && die "…and it claimed the suite passed anyway: $out" \
+    || pass "…and does not claim the suite passed"
 
 # ── a repository that is not this plugin is NOT an error ──────────────────
 # One installed copy drives every project, so the working repo is usually a

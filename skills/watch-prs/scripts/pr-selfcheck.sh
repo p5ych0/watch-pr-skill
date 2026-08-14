@@ -39,27 +39,6 @@
 # several probes fail as normal operation. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
-# ── the validated scratch directory ────────────────────────────────────────
-# Section 5 needs somewhere to write its index list, and `mktemp` can print a
-# plausible path and then fail — or be shadowed by something that prints `/` and
-# exits 0. With a recursive cleanup trap behind it that is an `rm -rf` over
-# whatever it turned out to be, which is the exact accident `mktemp_d` was
-# written for. Reaching for the shared one rather than checking inline, because a
-# rule that applies to more than one caller lives in a library here.
-_RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
-    echo "PR_SELFCHECK status=error reason=lib_dir_unresolvable" >&2; exit 2; }
-# The loader, loaded the one way it cannot load itself. An exported `rb_load`
-# survives into this shell and an empty `loadlib.sh` still sources successfully,
-# so without the clear the type check accepts the inherited function — and a stale
-# loader is what makes every other load look clean. See loadlib.sh and issue #22.
-unset -f rb_load 2>/dev/null || {
-    echo "PR_SELFCHECK status=error reason=loadlib_stale_definition" >&2; exit 2; }
-. "$_RB_SELF_DIR/loadlib.sh" || {
-    echo "PR_SELFCHECK status=error reason=loadlib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "PR_SELFCHECK status=error reason=loadlib_empty" >&2; exit 2; }
-rb_load "$_RB_SELF_DIR" testlib mktemp_d "PR_SELFCHECK status=error" || exit 2
-
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
 # non-zero, and command substitution keeps it — so the check would scan a tree
@@ -459,27 +438,35 @@ case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
 # So the runner is handed the numbers 1..N and nothing else. Digits survive every
 # parser on both sides, `sort -n` orders them, and the parent already knows which
 # path each one means, because it wrote them itself in the same glob order.
-# THE PATH IS PROVEN BEFORE THE TRAP IS ARMED, not after. `mktemp_d` requires it
-# to be non-empty, absolute, not `/`, and an existing directory — the last of
-# which is what proves `mktemp` created it rather than merely printed it. An
-# unchecked assignment here arms `rm -rf` over whatever came back.
-suite_root="$(mktemp_d)" || {
+# THE DIRECTORY IS CREATED HERE, NOT NAMED BY SOMETHING ELSE, and that is the
+# whole of the argument. A recursive delete is armed on it, so the property that
+# has to hold is "this did not exist a moment ago" — and NO INSPECTION OF A PATH
+# CAN ESTABLISH THAT. Two rounds of review were spent discovering it: validating
+# `mktemp`'s answer rejects `/` but not an existing directory, which is absolute,
+# is not `/`, and is there; taking a subdirectory of it and releasing the parent
+# with `rmdir` then removed a pre-existing parent that happened to be EMPTY.
+#
+# `mkdir` settles it in one syscall. It fails when the name is taken — by a
+# directory, a file, or a symlink — so a name it accepts is a name nothing else
+# held, and the trap can only ever reach what this run made. Nothing above it is
+# touched: `${TMPDIR:-/tmp}` is somebody else's directory whatever it contains.
+#
+# A few candidates, because the name is predictable and someone who pre-creates
+# it should cost this run a retry rather than the round. Exhausting them fails
+# closed, which is the right direction: the alternative is a gate that reports
+# clean without having run the suite.
+suite_dir=""
+_sd_try=0
+while [ "$_sd_try" -lt 8 ]; do
+    _sd_try=$((_sd_try + 1))
+    _sd_cand="${TMPDIR:-/tmp}/pr-selfcheck.$$.$_sd_try.${RANDOM:-0}"
+    if mkdir "$_sd_cand" 2>/dev/null; then suite_dir="$_sd_cand"; break; fi
+done
+[ -n "$suite_dir" ] || {
     echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
     exit 2
 }
-# …AND THE RECURSIVE DELETE ONLY EVER REACHES A DIRECTORY THIS SCRIPT CREATED.
-# Validation cannot close this on its own: a `mktemp` that is shadowed or broken
-# can name an EXISTING directory, which is absolute, is not `/`, and is there — so
-# it satisfies every test `mktemp_d` can apply, and the trap then removes someone
-# else's tree. A plain `mkdir` cannot: it fails when the name is taken, so what is
-# armed below is a path that did not exist a moment ago. The parent is released
-# with `rmdir`, which refuses a directory that has anything else in it.
-suite_dir="$suite_root/suite"
-mkdir "$suite_dir" || {
-    echo "PR_SELFCHECK status=error reason=suite_scratch_unusable" >&2
-    exit 2
-}
-trap 'rm -rf "$suite_dir" 2>/dev/null; rmdir "$suite_root" 2>/dev/null; true' EXIT
+trap 'rm -rf "$suite_dir" 2>/dev/null; true' EXIT
 suite_files=0
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
