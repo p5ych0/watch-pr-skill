@@ -63,7 +63,59 @@ fi
 printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=%s\n' "$pr" "$who" "$ans"
 exit 0
 SH
-run() { PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" "$@"; }
+# ── TIME THE SUBJECT BELIEVES IN, WITHOUT WAITING FOR IT ───────────────────
+# `pr-watch.sh` reads the clock with `date +%s` and paces itself with `sleep`,
+# both external commands — so the fixture can own them without the subject
+# changing at all. `sleep N` ADVANCES the clock by N and returns at once; `date`
+# reports it. Time then passes exactly when the subject decides to wait, which is
+# both instant and deterministic: the poll counts these cases assert stop
+# depending on how loaded the runner is.
+FASTCLOCK="$TMP/fastclock"; mkdir -p "$FASTCLOCK"
+printf '1754000000\n' > "$TMP/now"
+# Resolved BEFORE the stub directory can be on any PATH, and asserted, because a
+# stub that cannot find the real thing would silently become the no-op this file
+# exists to avoid.
+REAL_SLEEP="$(command -v sleep)" \
+    || { printf 'FAIL - no sleep on PATH\n'; echo "RESULT: FAIL"; exit 1; }
+cat > "$FASTCLOCK/sleep" <<SLEEPSH
+#!/usr/bin/env bash
+# A WHOLE-SECOND SLEEP IS THE WATCH'S OWN PACING: move the clock, return at once.
+#
+# A FRACTIONAL ONE IS NOT. \`probe()\` ticks in fifths of a second, and each tick
+# paces a REAL child — the helper the watch started a moment ago. Treating those
+# as a successful no-op let the tick loop spend its whole \`limit * 5\` budget in
+# microseconds and kill a healthy helper as a probe timeout, which is the
+# load-dependent failure owning the clock is meant to REMOVE rather than move.
+# So a fractional sleep really sleeps, and leaves the clock alone: the fake clock
+# is the watch's pacing, and the probe's tick is not pacing, it is yielding.
+#
+# It yields for a SHORTER real interval than asked, uniformly. What the tick has
+# to be is comfortably longer than the helper it waits on — these helpers are
+# small Bash stubs that answer in about ten milliseconds — and 0.05 keeps that
+# ratio at roughly five to one per tick, and twenty-five to one or better over a
+# probe's whole budget, while costing a quarter of what 0.2 does across the two
+# hundred probes this file runs. What it must never be is zero, which is the
+# defect above.
+case "\${1:-}" in
+    [0-9]*.[0-9]*) exec "$REAL_SLEEP" 0.05 ;;
+    ''|*[!0-9]*)   exec "$REAL_SLEEP" "\$@" ;;
+esac
+_c="\$(cat "\$FAKE_NOW" 2>/dev/null || echo 0)"
+printf '%s\n' "\$((_c + \$1))" > "\$FAKE_NOW"
+exit 0
+SLEEPSH
+cat > "$FASTCLOCK/date" <<'DATESH'
+#!/usr/bin/env bash
+# Only `+%s` is faked; anything else is the real thing, so a case that formats a
+# date still gets one.
+case "${1:-}" in
+    +%s) cat "$FAKE_NOW" 2>/dev/null || exit 1 ;;
+    *)   exec /usr/bin/env -u PATH /bin/date "$@" ;;
+esac
+DATESH
+chmod +x "$FASTCLOCK/sleep" "$FASTCLOCK/date"
+run() { PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" \
+        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" "$@"; }
 seq_set() { printf '%s\n' "$@" > "$TMP/seq"; rm -f "$TMP/seq.n"; }
 
 # ── a terminal state ends the watch, with its verdict ──────────────────────
@@ -901,6 +953,37 @@ for huge in 18446744073709551616 340282366920938463463374607431768211456; do
         || pass "…and announced no timeout"
 done
 
+# ── a helper that answers within the deadline, but not instantly ───────────
+# The probe budget is a REAL duration even when the watch's own pacing is not,
+# because what it bounds is a real child process. A six-second deadline buys
+# thirty ticks, which is one and a half real seconds of the fixture's tick, and
+# the helper takes half of one — so the probe must wait for it and report its
+# answer rather than kill it.
+#
+# This is the case that fails if the fixture's `sleep` ever treats a fractional
+# argument as a successful no-op again: the tick loop would then burn all thirty
+# ticks in about a tenth of a second and kill a healthy helper as a probe
+# timeout, and the watch would report state=timeout instead of the verdict.
+#
+# Invoked directly rather than through `run()`, which pins its own state script.
+mkstub "$TMP/slowish.sh" <<SLOWISH
+"$REAL_SLEEP" 0.5
+[ "\$1" = "verdict" ] && {
+    printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s verdict=clean findings=0\n' "\$2" "\$3"
+    exit 0
+}
+printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=reviewed\n' "\$2" "\$3"
+exit 0
+SLOWISH
+out="$(run_limited 30 env PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" \
+        PR_WATCH_STATE_SCRIPT="$TMP/slowish.sh" HEAD40="$HEAD40" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 6 2>&1)"; rc=$?
+case "$rc:$out" in
+    0:*PR_REVIEW_READY*verdict=clean*)
+        pass "a helper that answers within the deadline is waited for, not killed" ;;
+    *)  die "a helper answering in half a second was killed as a timeout: rc=$rc '$out'" ;;
+esac
+
 # ── a failed polling clock tears the probe down before returning ───────────
 # The capability check at the top of `probe` succeeds, so this path is reached
 # with a LIVE child. Returning 125 on the clock failure alone left that `gh`
@@ -914,7 +997,6 @@ ORPH="$TMP/orph"; mkdir -p "$ORPH"
 for b in bash sh date true false kill sed grep printf env mktemp cat rm wc awk tr; do
     p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$ORPH/$b"
 done
-REAL_SLEEP="$(command -v sleep)"
 # THE WHOLE-SECOND PATH IS FORCED, so there is no capability/tick ambiguity to
 # race against. `probe()` uses the same `sleep 0.2` for its fractional-capability
 # check as for its polling tick, and no marker can tell them apart from inside the
