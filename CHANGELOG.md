@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.13] — 2026-08-14
+
+- **The pre-push gate ran twelve independent test files one after another.** The
+  suite is what a person waits at before every round, and at ~208s it was long
+  enough to be worth skipping — which is the failure, because it is the check that
+  keeps the same handful of mistakes from reaching a reviewer. The files share no
+  state: each builds its own scratch directory and stubs its own `gh`. They were
+  sequential because a `for` loop is the obvious thing to write.
+
+  `pr-selfcheck.sh` now runs four at a time and takes ~85s. `RB_SUITE_JOBS` sets
+  the degree; a value that is not a positive number falls back to four rather than
+  disabling the bound, and `SKILL.md` exports it, because the gate is a child
+  process and a knob that does not cross that boundary silently does nothing while
+  the terminal shows the value you set. CI keeps its sequential loop: it groups and
+  annotates each file, and that is worth more on a machine nobody is waiting at.
+
+  Three things a concurrent runner gets wrong that a loop cannot. Its status is an
+  answer: `xargs` writes failures to stdout, so a runner that cannot start writes
+  nothing — and nothing is what a clean suite looks like, so an unchecked status
+  reported `status=clean` on a suite that never ran. The parallelism degree is a
+  load bound, and `xargs -P 00` is unlimited, so every spelling of zero has to be
+  refused rather than only the literal one. And a path cannot travel through the
+  runner: `xargs` eats backslashes unless its input is NUL-delimited, and a newline
+  in a directory name splits one failure into two on the way back — inventing a
+  test name and inflating the count. The runner is handed indices instead, and the
+  parent maps them back through the glob it wrote them from.
+
 ## [2.0.12] — 2026-08-13
 
 - **The Codex→Copilot transition is a script, and its refusals are executed.** It

@@ -357,14 +357,21 @@ REAL_SORT="$(command -v sort)" || die "no sort on PATH"
 #
 # `xargs` needs no scoping: nothing else here runs it.
 printf '#!/usr/bin/env bash\nexit 3\n' > "$BROKEN/xargs"
-# `sort` does. It is given the failure list, whose every line is a path to a
-# `test-*.sh`; section 1 sorts variable names, which are not paths. So the stub
+# `sort` does. It is given the failure list, whose every line is an INDEX — digits
+# and nothing else; section 1 sorts variable names, which are not. So the stub
 # reads its input and fails only for the one it is aimed at.
-{ printf '#!/usr/bin/env bash\n'
-  printf 'in="$(cat)"\n'
-  printf 'case "$in" in *"/test-"*) exit 3 ;; esac\n'
-  printf 'printf %%s "$in" | exec %s "$@"\n' "$REAL_SORT"
-} > "$BROKEN/sort"
+cat > "$BROKEN/sort" <<SORTSH
+#!/usr/bin/env bash
+# NOT \`exec\` INSIDE THE PIPELINE. That replaces the subshell, not this script, so
+# the parent went on to the refusal below and every sort failed — including the
+# one this stub is meant to let through.
+in="\$(cat)"
+if [ -z "\$in" ] || printf '%s' "\$in" | tr -d '0-9\n' | grep -q .; then
+    printf '%s' "\$in" | "$REAL_SORT" "\$@"
+    exit \$?
+fi
+exit 3
+SORTSH
 chmod +x "$BROKEN/xargs" "$BROKEN/sort"
 
 broken_case() {   # broken_case <tool> <expected reason> <make the suite fail?>
@@ -403,6 +410,30 @@ out="$("$SCRIPT" "$BSROOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
     && pass "a checkout path containing a backslash still runs its tests" \
     || die "the backslash path was not preserved (rc=$rc out='$out')"
+
+# ── a checkout path containing a newline, with a FAILING test in it ────────
+# The NUL-delimited input protects the path on the way IN. On the way back the
+# channel is the worker's stdout, and a newline in a directory name splits one
+# path into two records there — so the gate invents a test name and reports two
+# findings where there is one. That is why the runner carries an index rather than
+# a path: digits survive every parser on both sides.
+#
+# It has to be a FAILING test, because a passing one never travels that channel.
+NLROOT="$TMP/two
+lines"
+mkdir -p "$NLROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$NLROOT/skills/watch-prs/SKILL.md"
+addscript "$NLROOT" pr-thing.sh 'exit 0'
+printf '#!/usr/bin/env bash\nexit 1\n' > "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$("$SCRIPT" "$NLROOT" 2>&1)"; rc=$?
+nfind="$(printf '%s\n' "$out" | grep -c 'finding=failing_test')" || nfind=0
+{ [ "$rc" -eq 1 ] && [ "$nfind" -eq 1 ]; } \
+    && pass "a newline in the checkout path is one finding, not two" \
+    || die "the newline split the failure record (rc=$rc findings=$nfind out='$out')"
+printf '%s' "$out" | grep -q 'test-pr-thing.sh fails' \
+    && pass "…and the one it reports is the test that actually failed" \
+    || die "the reported name was fabricated: $out"
 
 # ── the load bound survives a leading-zero zero ────────────────────────────
 # `xargs -P 0` is UNLIMITED, and `00` passes any digits-only validation. What that

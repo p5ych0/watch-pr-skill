@@ -248,7 +248,12 @@ CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-revi
 # boundary does not fail — it silently restores the very bypass the operator set it
 # to avoid. The lesson was already learned for the CI bounds; this was the instance
 # it did not get applied to.
-for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT; do
+# `RB_SUITE_JOBS` IS HERE FOR THE SAME REASON AND NOTHING MORE. `pr-selfcheck.sh`
+# runs the suite concurrently and takes its degree from that name, and step 5a
+# starts it as a CHILD — so an operator who lowers it in this shell without
+# exporting it watches the gate go on running four at a time while the terminal
+# shows the value they set. The quiet kind of wrong, like the CI bounds above.
+for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
     [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
 done
 unset _rb_knob

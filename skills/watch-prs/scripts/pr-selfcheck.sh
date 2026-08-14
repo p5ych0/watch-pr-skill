@@ -426,38 +426,52 @@ suite_jobs="${RB_SUITE_JOBS:-4}"
 # this degree exists to be. Six digits or more is refused for the same reason a
 # bound is refused anywhere here: it is not a degree, it is a typo.
 case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
-# Counted first, so an empty directory is distinguishable from a directory of
-# failures — and counted by the same glob that feeds the runner, so the two
-# cannot disagree about what is in scope.
+# THE PATH NEVER TRAVELS THROUGH THE RUNNER; AN INDEX DOES.
+#
+# Every delimiter a path can contain is a path some checkout has. `xargs`' default
+# parsing eats backslashes and quotes, so the input is NUL-delimited — but the
+# failure channel is the worker's stdout, and a newline in a directory name would
+# split one path into two records there, inventing test names and inflating the
+# count. There is no `-0` for the way back: sorting NUL-delimited records needs
+# GNU `sort -z`, which stock macOS does not have.
+#
+# So the runner is handed the numbers 1..N and nothing else. Digits survive every
+# parser on both sides, `sort -n` orders them, and the parent already knows which
+# path each one means, because it wrote them itself in the same glob order.
+suite_dir="$(mktemp -d "${TMPDIR:-/tmp}/pr-selfcheck.XXXXXX")" || {
+    echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
+    exit 2
+}
+trap 'rm -rf "$suite_dir" 2>/dev/null || true; true' EXIT
 suite_files=0
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
     suite_files=$((suite_files + 1))
+    printf '%s' "$t" > "$suite_dir/$suite_files" || {
+        echo "PR_SELFCHECK status=error reason=suite_list_unwritable" >&2
+        exit 2
+    }
 done
 if [ "$suite_files" -gt 0 ]; then
-    # A FILE THAT FAILS PRINTS ITS NAME AND NOTHING ELSE PRINTS ANYTHING, so
-    # interleaving cannot corrupt the result: each line of this output is one
-    # whole name written by one `printf`.
-    #
-    # NUL-DELIMITED INPUT, because xargs' default parsing consumes backslashes and
-    # quotes before `{}` is substituted. A checkout under `/tmp/watch\prs` then
-    # hands every worker `/tmp/watchprs/test-….sh`, which does not exist — so the
-    # gate blocks claiming those tests FAILED rather than admitting it never ran
-    # them. The names are emitted straight from the glob rather than through a
-    # variable, because a shell variable cannot hold the NUL that separates them.
-    suite_out="$(for t in "$SCRIPTS"/test-*.sh; do
-            [ -e "$t" ] || continue
-            printf '%s\0' "$t"
-        done | xargs -0 -P "$suite_jobs" -I{} \
-            sh -c 'bash "$1" >/dev/null 2>&1 || printf "%s\n" "$1"' _ {})"; suite_rc=$?
-    # THE RUNNER'S OWN STATUS IS AN ANSWER, AND IT IS NOT THE WORKERS'. The worker
-    # cannot fail: it prints a name when its file does and exits 0 either way. So a
-    # non-zero here is `xargs` itself unable to run — a `-P` value outside its
-    # range, or no `xargs` at all — and its stdout is empty when that happens.
-    # Ignoring it is precisely the fail-open this whole script exists to prevent:
-    # no output reads as "no failures" and the gate reports CLEAN having run
-    # nothing. Its stderr is deliberately not discarded, since that diagnostic is
-    # the only account of why.
+    # A FAILING FILE PRINTS ITS INDEX AND NOTHING ELSE PRINTS ANYTHING, so
+    # interleaving cannot corrupt the result: each line is one whole number written
+    # by one `printf`.
+    suite_out="$(n=0
+        while [ "$n" -lt "$suite_files" ]; do
+            n=$((n + 1))
+            printf '%s\0' "$n"
+        done | xargs -0 -P "$suite_jobs" -I{} sh -c '
+            p="$(cat "$1/$2")" || exit 3
+            bash "$p" >/dev/null 2>&1 || printf "%s\n" "$2"
+        ' _ "$suite_dir" {})"; suite_rc=$?
+    # THE RUNNER'S STATUS IS AN ANSWER, AND IT IS NOT "A TEST FAILED". A failing
+    # test makes the worker print a number and exit 0; the worker exits non-zero
+    # only when it cannot read its own entry, and `xargs` does when it cannot run
+    # at all — a `-P` outside its range, or no `xargs` on PATH. Either way stdout
+    # is empty, and empty is what a clean suite looks like: ignoring this status is
+    # precisely the fail-open the rest of this script exists to prevent, since the
+    # gate would report CLEAN having run nothing. Its stderr is deliberately not
+    # discarded, because that diagnostic is the only account of why.
     [ "$suite_rc" -eq 0 ] || {
         echo "PR_SELFCHECK status=error reason=suite_runner_failed rc=$suite_rc jobs=$suite_jobs" >&2
         exit 2
@@ -465,19 +479,33 @@ if [ "$suite_files" -gt 0 ]; then
     if [ -n "$suite_out" ]; then
         # Sorted, because the order files finish in is not the order they are
         # listed in and a gate that reports its findings in a different order on
-        # every run is a gate people stop reading.
+        # every run is a gate people stop reading. Numerically, because these are
+        # numbers and a lexical sort would put 10 before 2.
         #
         # THE SORT HAS A STATUS TOO, and it fails the same way: a `sort` that dies
         # having written nothing would erase the failure list inside the here-doc
         # that consumed it, and the gate would pass on a suite it had just watched
         # fail.
-        suite_sorted="$(printf '%s\n' "$suite_out" | sort)" || {
+        suite_sorted="$(printf '%s\n' "$suite_out" | sort -n)" || {
             echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
             exit 2
         }
-        while IFS= read -r t; do
-            [ -n "$t" ] || continue
-            note failing_test "$(basename "$t") fails"; suite_fail=1
+        while IFS= read -r n; do
+            [ -n "$n" ] || continue
+            t="$(cat "$suite_dir/$n")" || {
+                echo "PR_SELFCHECK status=error reason=suite_list_unreadable index=$n" >&2
+                exit 2
+            }
+            # ONE LINE PER FINDING, whatever the name contains. A newline inside a
+            # filename would otherwise print as two findings to anything reading
+            # this output, which is the same defect the index avoids upstream.
+            b="$(basename "$t")"
+            # Substituted on the CAPTURED name, not in the pipeline that produces
+            # it: `basename` ends its output with a newline, so translating inside
+            # the substitution turns that terminator into a trailing space and the
+            # finding reads `… .sh  fails`.
+            b="$(printf '%s' "$b" | tr '\n' ' ')"
+            note failing_test "$b fails"; suite_fail=1
         done <<EOF
 $suite_sorted
 EOF
