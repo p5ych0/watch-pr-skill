@@ -217,8 +217,15 @@ manifested, not just what changed.
 
 **A PR closes one issue.** Build the smallest thing that closes it: no
 opportunistic hardening, no generalising a specific fix, no second concern
-because the file is already open. A defect found mid-work gets filed, not fixed —
-even when the fix is small.
+because the file is already open. An **unrelated or pre-existing** defect found
+mid-work gets filed, not fixed — even when the fix is small.
+
+**A defect this PR introduced is not deferrable**, and neither is one introduced
+by a review fix: those are this round's work and must be repaired before merge.
+Filing a regression you just caused would ship it behind an issue number, which
+is the opposite of what one-change-per-PR is for. `README.md` states the same
+rule from the author's side — a regression the fix itself introduces is always
+this round's work.
 
 **Split complex work into sequential sub-issues** and land them one after
 another. If a fix needs a behaviour change in a helper, that helper change is its
