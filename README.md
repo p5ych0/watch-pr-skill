@@ -297,10 +297,63 @@ Then:
    itself requests the next review and a check placed after it asks you about a
    round that has already started. The summary says what was addressed and what
    was intentionally skipped: a resolved thread is not a record of a fix.
-5. **Codex clean → the Copilot phase.** Request Copilot and repeat steps 3–4
-   until it is clean too. Fix commits here carry a `Review-Phase: copilot`
-   trailer, which is how the merge gate knows the head advanced only through
-   Copilot fixes and Codex's signoff still covers it — so Codex is not re-run.
+5. **Codex clean → the Copilot phase**, through
+   **`pr-copilot-phase.sh`**, which runs in **two stages with your decision
+   between them**:
+
+   - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
+     against *that exact sha*, proves its checks are green, and writes the
+     signoff onto the PR in the form `pr-signoff.sh` reads back. Then it stops
+     and asks: merge on one reviewer's signoff, or open the second phase. You
+     supply one paragraph on what the PR does and what the Codex phase changed;
+     everything a machine reads back is composed by the script;
+   - `open <PR> <sha>` runs only on the answer, and proves the phase is still
+     open before it changes anything: the head is unmoved, Codex's **live verdict**
+     on that sha is clean, and the **recorded Codex signoff** still names it. A
+     recorded signoff is history, not a current verdict — and a revocation is how a
+     phase is deliberately reopened, while GitHub keeps serving the old clean
+     verdict until the new pass reports, so neither check answers for the other.
+     It also **re-enforces the round boundary**, because the signoff is published
+     before the pause and a later session can resume straight into this stage; that
+     is why `open` can stop for you rather than proceeding. All of it runs **three
+     times** — up front, before the revocation, and again after it — because none
+     of these need the head to move, and the revocation is itself a change with the
+     request still to come. The order is revoke → prove → baseline → request: the
+     proof as late as it can be while the Copilot baseline stays last, which it
+     must be or a pass landing in between answers a request made after it.
+     Then it revokes any earlier Copilot signoff and requests the pass.
+
+   The body you supply is prose and is posted under your identity, so a line that
+   reproduces one of the record markers a reader trusts from *you* —
+   `**Review-Signoff:**`, `**Review-Signoff-Revoked:**`,
+   `**Review-Pause-Acknowledged:**` — is refused rather than published: it would
+   *create* the record it was quoting. (`**Reviewed commit:**` is not among them:
+   that one is only read from a reviewer bot's own comment, so writing it here
+   creates nothing and is left alone.) **To keep one:** indent it by four spaces
+   or quote it inline with backticks — either still says what you meant, because
+   the readers only honour these at the start of a line. A fenced block does *not*
+   help: the readers scan the raw comment body, where a line inside a fence still
+   starts at column 0.
+
+   For a related reason a body containing **`@codex review`** is refused where the
+   comment is posted on its own — the phase summary, and a Copilot round's summary.
+   Any comment containing that text requests a Codex pass, so quoting it out of a
+   finding starts one nobody asked for, in a phase that has just stopped or moved
+   on. In a *Codex* round the mention is the request and the script writes it
+   itself, so quoting it there changes nothing and is allowed.
+
+   **The remedy is a different one, and indenting is not it.** This trigger is
+   matched case-insensitively *anywhere* in the body, not at the start of a line —
+   so an indented, quoted or fenced mention still requests the pass and is still
+   refused. Break it up, or write it without the `@`.
+
+   Then repeat steps 3–4 until Copilot is clean too. Fix commits here carry a
+   `Review-Phase: copilot` trailer, which is how the merge gate knows the head
+   advanced only through Copilot fixes and Codex's signoff still covers it — so
+   Codex is not re-run.
+
+   The signoff is a comment on the PR rather than a shell variable, so closing
+   the terminal or changing machine does not lose it.
 6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
    everything against the *current* head — both verdicts, the reviewed range,
    unresolved threads, required checks — and merges pinned to that head with

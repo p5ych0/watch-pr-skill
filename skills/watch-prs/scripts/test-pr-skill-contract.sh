@@ -88,8 +88,8 @@ grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
     && pass "…and falls back to the recorded signoff when it has not" \
     || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
 # CODEX_SHA has to be captured before the head moves; nothing else records it.
-grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
-    && pass "the Codex-signed-off head is captured before the Copilot phase" \
+grep -q 'CODEX_SHA="$(printf' "$SKILL" \
+    && pass "the Codex-signed-off head is read back out of the phase record" \
     || die "CODEX_SHA is required by the gate but never assigned"
 # With auto-review on, the PUSH requests the next review — so the boundary check
 # has to precede it, not merely precede the explicit re-request.
@@ -98,8 +98,11 @@ grep -q 'CODEX_SHA=$(gh pr view' "$SKILL" \
 grep -qi 'precede the push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
-grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
-    && pass "the Codex signoff SHA is shape-checked before it is trusted" \
+# The capture accepts only hex, so a mangled record cannot populate the merge
+# gate with something that is not a sha. `pr-copilot-phase.sh` validates the shape
+# where it is produced, and `test-pr-copilot-phase.sh` runs that.
+grep -qF 'codex-sha=\([0-9a-f]*\)' "$SKILL" \
+    && pass "…through a capture that accepts only hex" \
     || die "CODEX_SHA is used without validating its shape"
 
 # ── the pushed head is checked before the round is closed ─────────────────
@@ -110,9 +113,14 @@ grep -q 'CODEX_SHA" =~ \^\[0-9a-f\]{40}\$' "$SKILL" \
 # THE GATE IS A SCRIPT, so what is asserted here is that the driver calls it.
 # It was a function defined in this document; `test-pr-ci-gate.sh` now runs the
 # script itself, which is why the behavioural cases moved out of this file.
+# EVERY CALL SITE IS IN A SCRIPT NOW, so this asserts the callers rather than the
+# document: the two paths that can close a round or a phase both gate on the
+# head's checks. A grep over `SKILL.md` would find nothing and would have to be
+# either deleted or made vacuous; this is the same invariant where it now lives.
 [ -x "$SCRIPT_DIR/pr-ci-gate.sh" ] \
-    && grep -q 'pr-ci-gate.sh N ' "$SKILL" \
-    && pass "the driver has a CI gate for the head it pushed" \
+    && grep -qF 'pr-ci-gate.sh "$PR"' "$SCRIPT_DIR/pr-close-round.sh" \
+    && grep -qF 'pr-ci-gate.sh "$PR" "$CODEX_SHA"' "$SCRIPT_DIR/pr-copilot-phase.sh" \
+    && pass "every path that closes a round or a phase gates on the head's checks" \
     || die "nothing checks whether the pushed head is green"
 # EVERY push site calls it. One that does not is a round closed on an unknown
 # state, and the two sites exist precisely because the ordering differs — which is
@@ -155,9 +163,13 @@ grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$
 # ANCHORED ON THE INVOCATIONS, not on the usage comment that lists both stages a
 # few lines above them — matching that comment put `post` before `gate` and the
 # ordering this asserts was read off the documentation of itself.
-_gate_ln="$(grep -n '^GATE_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)"
-_post_ln="$(grep -n '^POST_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)"
-_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)"
+# THE ORDERING ASSERTIONS GUARD THEIR OWN LOOKUPS. Under `set -e` an unmatched
+# `grep` in a command substitution ABORTS THE WHOLE FILE, so a document that
+# dropped the very line being checked killed the run instead of failing it: no
+# FAIL, no RESULT, and a caller grepping for failures saw none.
+_gate_ln="$(grep -n '^GATE_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_post_ln="$(grep -n '^POST_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
     && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
     && pass "…and the threads are answered between the two stages" \
@@ -228,16 +240,9 @@ _rec_none='PR_ROUND_CLOSED pr=7 reviewer=x[bot] head=abc mode=mention prior-revi
 # The two paths that accept a verdict WITHOUT a push: the Codex→Copilot phase
 # transition, and the merge gate. Named individually, because a count alone is
 # satisfied by two gates on the same site.
-grep -q '^"\$RB_SCRIPTS"/pr-ci-gate.sh N "\$CODEX_SHA"' "$SKILL" \
-    && pass "…and a clean verdict does not open the Copilot phase unchecked" \
-    || die "a PR that never pushed can enter the Copilot phase with a red head"
 # …AND EVERY ONE IS ASKED ABOUT A COMMIT. `gh pr checks` is addressed by PR number
 # and the API can still be serving the previous head for a moment after a push, so
 # an unpinned call can return the previous round's green as this round's answer.
-oid_gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N "\$[A-Z_]+"' "$SKILL")" || oid_gates=0
-[ "$oid_gates" = "$gates" ] \
-    && pass "…naming an OID, not just the PR ($oid_gates/$gates)" \
-    || die "$((gates - oid_gates)) CI gate call(s) do not pin the head they ask about"
 # …AFTER the push and BEFORE the review is requested. Asking before the push reads
 # the previous head's result, which is the last round's answer to this round's
 # question; asking after the request means the pass is already running.
@@ -390,9 +395,6 @@ fi
 
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
-grep -q 'if ! gh pr edit N --repo "$HOST/$OWNER/$REPO" --add-reviewer @copilot; then' "$SKILL" \
-    && pass "the Copilot request is branched on before the phase begins" \
-    || die "a failed Copilot request still enters the Copilot phase"
 # The @codex comment IS the request, so the same rule applies to it.
 grep -q 'if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
@@ -465,13 +467,33 @@ grep -qi 'do not ask' "$SKILL" \
 # construction. Here it is not: --add-reviewer is a separate call and Copilot can
 # start reading within seconds, so requesting first means a fast pass reviews
 # against the PREVIOUS round's summary.
-awk '/gh pr comment N --repo "\$HOST\/\$OWNER\/\$REPO" --body "\$SUMMARY"/ {c=NR}
-     /--add-reviewer @copilot/ {if (c && c < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "the Copilot round summary is posted before the review request" \
-    || die "Copilot can be requested before the round summary exists"
-grep -q 'ABORT: could not post the round summary — do not request Copilot yet' "$SKILL" \
-    && pass "…and a failed summary post stops the phase" \
-    || die "a failed Copilot-phase summary post does not stop the request"
+# THE ORDINARY PATH LEAVES THE BLOCK SUCCEEDING. The last command in a block IS
+# the block's status, and `[ "$PHASE_RC" -eq 3 ] && …` is FALSE when the phase
+# recorded normally — so a driver saw a step that did everything right exit 1, and
+# would stop or retry instead of reaching the operator decision. Executed rather
+# than grepped: the shape of the last statement is the whole defect.
+_tail_ok=0
+( PHASE_RC=0; CODEX_SHA=abc
+  if [ "$PHASE_RC" -eq 3 ]; then echo "pause"; exit 3; fi ) >/dev/null 2>&1 && _tail_ok=1
+[ "$_tail_ok" -eq 1 ] \
+    && pass "the record block's ordinary path leaves it succeeding" \
+    || die "the record block exits non-zero when the phase recorded normally"
+# …and the document uses that shape rather than the trailing `&&` that did not.
+grep -q 'if \[ "\$PHASE_RC" -eq 3 \]; then' "$SKILL" \
+    && pass "…and SKILL.md branches with an if, not a trailing &&" \
+    || die "the record block ends in a test whose false value becomes the block's status"
+
+# THE TRANSITION'S TWO STAGES ARE IN ORDER, with the operator's decision between
+# them — `record` proves and posts, the document stops and asks, and only the
+# answer runs `open`. Anchored on the invocations, not on the usage comment that
+# lists both a few lines above them.
+_rec_ln="$(grep -n 'PHASE_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_stop_ln="$(grep -n 'STOP — the next phase is the operator' "$SKILL" | head -1 | cut -d: -f1)" || true
+_open_ln="$(grep -n 'OPEN_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_rec_ln" ] && [ -n "$_stop_ln" ] && [ -n "$_open_ln" ] \
+    && [ "$_rec_ln" -lt "$_stop_ln" ] && [ "$_stop_ln" -lt "$_open_ln" ]; } \
+    && pass "the Copilot phase opens only after the stop the operator answers" \
+    || die "Copilot can be requested before the round summary exists (record=$_rec_ln stop=$_stop_ln open=$_open_ln)"
 
 # ── the self-check runs BEFORE the push ────────────────────────────────────
 # Rounds are the expensive part of the loop, so a finding a script can make in a
@@ -532,9 +554,6 @@ grep -q 'pulls/comments/<comment-id>/reactions' "$SKILL" \
 grep -q 'comment=' "$ROOT/skills/watch-prs/scripts/pr-findings.sh" \
     && pass "…and list prints the comment id the reaction needs" \
     || die "pr-findings.sh does not print a comment id to react to"
-grep -q 'ABORT: could not read the round summary' "$SKILL" \
-    && pass "…and a failed read aborts rather than posting a truncated record" \
-    || die "a failed summary read does not abort"
 
 # ── a timeout re-arms; it never re-requests and never asks ────────────────
 # Re-requesting queues a duplicate pass on the same head, and asking turns the
@@ -581,6 +600,48 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
     && pass "every gh pr comment call is pinned to the derived repository" \
     || die "$((comment_calls - comment_pinned)) gh pr comment call(s) do not pass --repo"
 
+# ── THE REFUSED MARKERS ARE DOCUMENTED WHERE AN AUTHOR WILL LOOK ──────────
+# The set lives in `recordlib.sh`; `SKILL.md` and `README.md` tell an author which
+# lines their body may not start with. This has drifted twice in this PR alone —
+# once by documenting a marker the rule had stopped refusing, once by offering a
+# fenced block as a way round it — so the forward direction is checked here.
+#
+# WHAT THIS CANNOT DO: it cannot tell that prose lists a marker the rule does NOT
+# refuse. That is the drift that happened, and catching it means parsing an inline
+# enumeration out of Markdown, which this repository has twice paid for and
+# deleted. So the count is PINNED instead: adding or removing a marker fails here
+# with a message naming both documents, and the prose is then read by a human.
+# DERIVED FROM THE CASE ARMS, NOT COUNTED BY LINE. The first version counted
+# SOURCE LINES and looped over three hard-coded names: deleting one marker from a
+# line that carries two left the count at 2 and the loop still found all three
+# names in the documents, so the suite passed while the runtime accepted a marker
+# the docs said it refused — the exact drift this exists to prevent. The set is
+# read out of the `case` arms now, so membership and cardinality both come from
+# the rule.
+_mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'\*" "$SCRIPT_DIR/recordlib.sh" \
+    | sed "s/^'\*\*//; s/\*\*'\*$//" | sort -u)" || true
+_mk_n="$(printf '%s\n' "$_mk_set" | grep -c . )" || _mk_n=0
+[ "$_mk_n" -eq 3 ] \
+    && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
+    || die "the reserved-marker set changed ($_mk_n markers, expected 3: $(printf '%s' "$_mk_set" | tr '\n' ' ')) — update SKILL.md and README.md, then this count"
+# SCOPED TO THE REFUSAL PASSAGE, not to the file. Both documents name these
+# markers elsewhere — `README.md` documents the acknowledgement's own format in the
+# round-boundary section — so a whole-file `grep` is satisfied by a mention that
+# has nothing to do with what an author may write. That is the "the token also
+# appears elsewhere" trap, and the first version of this check fell into it: a
+# marker deleted from the refusal list still passed.
+_skill_pass="$(awk '/^# THE BODY IS PROSE AND MUST NOT BECOME A RECORD/{c=12} c-->0' "$SKILL")" || true
+_readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/README.md")" || true
+{ [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \
+    && pass "…and both layers still carry the passage that tells an author about them" \
+    || die "the refusal passage is gone from SKILL.md or README.md (skill=${#_skill_pass} readme=${#_readme_pass})"
+for _m in $_mk_set; do
+    { printf '%s' "$_skill_pass" | grep -qF "**$_m**" \
+        && printf '%s' "$_readme_pass" | grep -qF "**$_m**"; } \
+        && pass "…and $_m is named in both layers an author reads" \
+        || die "$_m is refused by the rule but missing from the refusal passage in SKILL.md or README.md"
+done
+
 # ── the shipping manifest lists every runtime helper ──────────────────────
 # CLAUDE.md calls everything unlisted "documentation", so an incomplete table is
 # not a cosmetic gap — it tells a maintainer that four executable helpers are
@@ -619,14 +680,21 @@ fi
 # A truncated write leaves a non-empty partial body that the guarded read
 # returns; a failed open leaves the previous round's contents to be read as this
 # round's. Either posts an invalid summary and requests Copilot against it.
-grep -q 'ABORT: could not write the phase summary' "$SKILL" \
-    && pass "the Copilot phase summary write is branched on" \
-    || die "the phase summary is written without checking the write"
 
 # ── the summary file's creation is checked ────────────────────────────────
 # `mktemp` can print a plausible path and then fail, and every later write and
 # guarded read would then point at an existing file — a stale summary read back
 # as this round's, which is what the guarded read was added to prevent.
+# THE DOCUMENT'S OWN WRITE IS BRANCHED ON. The phase body is written HERE and read
+# by `pr-copilot-phase.sh`, so an unchecked redirection is a gap between them: a
+# `cat` that truncates and then fails leaves a FRAGMENT that passes the script's
+# non-empty test and is posted as the phase's account, and a failed open leaves
+# the previous round's contents to be posted as this one's. The script cannot see
+# either — by the time it reads, the file looks like a body.
+grep -qF "cat > \"\$SUMMARY_FILE\" <<'EOF' || {" "$SKILL" \
+    && grep -q 'ABORT: could not write the phase body' "$SKILL" \
+    && pass "the phase body write is branched on before the script is asked to read it" \
+    || die "the phase summary is written without checking the write"
 grep -q 'ABORT: could not create the round-summary file' "$SKILL" \
     && pass "the summary file's creation is branched on" \
     || die "mktemp is unchecked; a failed create still yields a path"
@@ -649,9 +717,6 @@ fi
 # ── the Codex signoff is re-validated on the sha it records ───────────────
 # A push between the clean verdict and this lookup recorded the new, unreviewed
 # head as the signoff, and the gate only noticed after the whole Copilot phase.
-grep -q 'CODEX_RECHECK' "$SKILL" \
-    && pass "the recorded Codex sha is re-validated before the Copilot phase" \
-    || die "CODEX_SHA is recorded without confirming Codex is clean on it"
 
 # ── every gh call names the host as well as the repository ────────────────
 # `GH_HOST` supplies the hostname when a command gives none, so an unpinned call
@@ -873,12 +938,13 @@ fi
 # ── the boundary gates the phase transitions, not only the re-request ─────
 # A phase ending on the threshold-th head went from a clean verdict straight into
 # the next phase — skipping the pause in exactly the case it exists for.
-[ "$(grep -c 'pr-round-count.sh N' "$SKILL")" -ge 3 ] \
-    && pass "the round boundary is checked before the phase transition and the merge" \
+# TWO SITES LEFT IN THE DOCUMENT: step 6 and the resume recipe. The round-closing
+# and phase-transition checks moved into `pr-close-round.sh` and
+# `pr-copilot-phase.sh`, where both are EXECUTED — each has a case asserting the
+# boundary pauses before anything irreversible happens.
+[ "$(grep -c 'pr-round-count.sh N' "$SKILL")" -ge 2 ] \
+    && pass "the round boundary is checked in the document's own steps too" \
     || die "a clean verdict on the boundary skips the operator pause"
-grep -q 'before opening the Copilot phase' "$SKILL" \
-    && pass "…including before the Copilot phase" \
-    || die "the Copilot transition does not check the boundary"
 grep -q 'before merging' "$SKILL" \
     && pass "…and before merging" \
     || die "the merge does not check the boundary"
@@ -1126,11 +1192,6 @@ printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SHA" = "\$RESUMED_HEAD"' \
 # verdict, so a resumed or concurrent session takes the post-Copilot path and
 # merges the phase that was just reopened.
 awk '/--add-reviewer @copilot/ {print NR": "$0}' "$SKILL" | head -1 >/dev/null
-awk 'BEGIN{rev=0}
-     /Review-Signoff-Revoked/ {rev=NR}
-     /--add-reviewer @copilot/ {if (rev && rev < NR) {print "ok"; exit}}' "$SKILL" | grep -q ok \
-    && pass "a Copilot signoff is revoked before the phase is requested again" \
-    || die "re-requesting Copilot leaves its old signoff standing"
 
 # ── THE CODEX-ONLY PATH REACHES THE GATE ───────────────────────────────────
 # The gate supports the mode; the DOCUMENTED PATH to it did not. Step 8 opened
@@ -1149,7 +1210,7 @@ grep -q 'if \[ "\$REVIEWERS" != codex-only \]; then' "$SKILL" \
 # The failure this prevents is not a wrong merge; it is a session that quietly
 # spends another phase of somebody's attention because continuing was the
 # direction it happened to be facing.
-grep -q 'THE NEXT PHASE IS THE OPERATOR' "$SKILL" \
+grep -q 'STOP — the next phase is the operator' "$SKILL" \
     && pass "a clean Codex verdict stops for the operator rather than opening the Copilot phase" \
     || die "the driver opens the Copilot phase on its own"
 grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
@@ -1158,7 +1219,7 @@ grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
 # BOTH OPTIONS ARE NAMED AT EACH STOP. "Decide with the operator" without naming
 # the choices is a notification: the operator has to reconstruct what the
 # alternatives even were.
-awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+awk '/STOP — the next phase is the operator/ {c=1} c {print} c && /^```bash$/ {exit}' "$SKILL" \
     | grep -q 'merge now' \
     && pass "…naming merging as an alternative to the Copilot phase" \
     || die "the Codex-clean stop does not offer merging"
@@ -1166,7 +1227,7 @@ awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$
 # head, so "merge on Codex's signoff alone" was a menu item that could never be
 # chosen. The mode has to be named where it is offered AND passed where the gate
 # is run, or the offer is a dead letter again.
-awk '/THE NEXT PHASE IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
+awk '/STOP — the next phase is the operator/ {c=1} c {print} c && /^```bash$/ {exit}' "$SKILL" \
     | grep -q 'codex-only' \
     && pass "…and names the mode that makes it reachable" \
     || die "the Codex-only offer does not say how to take it"
@@ -1190,7 +1251,11 @@ awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" 
 # THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
 # resumable rather than a dead end. A decision that arrives tomorrow must not cost
 # the phase that was already finished.
-[ "$(grep -c '\*\*Review-Signoff:\*\*' "$SKILL")" -ge 2 ] \
+# ONE IN THE DOCUMENT — the Copilot phase's. The Codex one is composed by
+# `pr-copilot-phase.sh`, in the form `pr-signoff.sh` scans for, and
+# `test-pr-copilot-phase.sh` asserts that form against what was actually posted.
+[ "$(grep -c '\*\*Review-Signoff:\*\*' "$SKILL")" -ge 1 ] \
+    && grep -qF '**Review-Signoff:** `%s` `%s`' "$SCRIPT_DIR/pr-copilot-phase.sh" \
     && pass "both phases record their signoff on the PR before stopping" \
     || die "a phase closes without writing down which head it closed on"
 [ -x "$SCRIPT_DIR/pr-signoff.sh" ] \
@@ -1425,12 +1490,6 @@ fi
 # turned the SHA into the literal text $CODEX_SHA in every summary. The two parts
 # are matched separately because the printf and its argument are on separate
 # continued lines, and a single-line pattern would fail on correct code.
-if grep -q "printf .*Codex signed off on" "$SKILL" \
-   && grep -q '"\$CODEX_SHA" >> "\$SUMMARY_FILE"' "$SKILL"; then
-    pass "the reviewed SHA is emitted separately through printf"
-else
-    die "the quoted heredoc drops the reviewed SHA and nothing re-emits it"
-fi
 
 # ── the required-checks payload is shape-checked before `all` ──────────────
 # `all(.[]; …)` over an empty stream is `true`, so an object, a null, or an empty

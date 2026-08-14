@@ -204,3 +204,81 @@ is_full_sha() {
 # character class — every comparison against them is `[ = ]`, never `[[ =~ ]]`.
 RB_CODEX_BOT='chatgpt-codex-connector[bot]'
 RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
+
+# ── WHAT A READER HONOURS AS A RECORD ──────────────────────────────────────
+#
+# Three markers on this PR are CONTROL, not prose, AND ARE REACHABLE FROM A BODY
+# THESE CALLERS POST: `pr-signoff.sh` reads `**Review-Signoff:**` and
+# `**Review-Signoff-Revoked:**`, and `pr-round-count.sh` reads
+# `**Review-Pause-Acknowledged:**`. Each is anchored to the start of a line, and
+# each is trusted because the comment carrying it came from an OWNER, MEMBER or
+# COLLABORATOR — which the operator driving this loop is.
+#
+# `**Reviewed commit:**` IS NOT IN THAT SET, deliberately. `pr-round-count.sh`
+# reads it only from a comment whose `.user.login` is one of the reviewer bots AND
+# whose body also says it found no major issues, so a body posted by these callers
+# cannot create one. Refusing it here would stop an author describing the footer
+# while preventing nothing.
+#
+# THE BODIES THIS LOOP POSTS ARE COMPOSED FROM UNTRUSTED TEXT. A round summary or
+# a phase account quotes findings, PR descriptions and reviewer comments — so a
+# body reproducing one of these lines publishes it under the operator's identity
+# and CREATES the record it was only describing. A finding that says "the
+# acknowledgement should read `**Review-Pause-Acknowledged:** …`" becomes that
+# acknowledgement: the boundary at round 10 stops firing, silently, because the
+# pause it promised has already been answered by prose.
+#
+# Rejecting is the fail-closed answer, and it is not an obstacle: these markers
+# are only honoured at the START of a line, so indenting one or quoting it inline
+# still says what the author meant. Rewriting the author's text instead would be a
+# silent edit to a record someone is about to be held to.
+#
+# A FENCED BLOCK IS NOT A WAY ROUND IT, and must not be offered as one. The
+# readers scan the comment's raw body, where a line inside a fence still starts at
+# column 0 — the fence is markup to a renderer and nothing at all to a regex. So a
+# fenced marker is honoured, is refused here, and the advice says four spaces.
+#
+# ONE DEFINITION, because two scripts post caller-written bodies —
+# `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
+# that must not be present in one of them and missing from the other.
+rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
+    local _l _found=""
+    while IFS= read -r _l || [ -n "$_l" ]; do
+        case "$_l" in
+            '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
+            '**Review-Pause-Acknowledged:**'*)
+                _found="$_l"; break ;;
+        esac
+    done <<EOF
+$1
+EOF
+    [ -n "$_found" ] || return 1
+    printf '%s\n' "$_found"
+    return 0
+}
+
+# ── WHAT REQUESTS A REVIEW ─────────────────────────────────────────────────
+#
+# A comment CONTAINING `@codex review` is a request for a Codex pass — the skill's
+# own table says so, and that is the whole trigger. It does not have to be at the
+# start of a line, and nothing else about the comment matters.
+#
+# So a caller-written body that QUOTES the mention — out of a PR description, a
+# finding, or this repository's own documentation — requests a pass when it is
+# posted. Two places post such a body with no Codex request intended: the phase
+# summary, which stops for the operator immediately afterwards, and a Copilot
+# round's summary, where only Copilot should be re-requested. In both the quoted
+# mention starts a Codex pass nobody asked for, against a phase that has either
+# stopped or moved on.
+#
+# Matched case-insensitively and anywhere in the text, which is broader than the
+# marker rule deliberately: a marker is only honoured at the start of a line, and
+# this is not.
+rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not, 2 could not tell
+    local _lc
+    _lc="$(printf '%s' "${1-}" | LC_ALL=C tr '[:upper:]' '[:lower:]')" || return 2
+    case "$_lc" in
+        *'@codex review'*) return 0 ;;
+    esac
+    return 1
+}

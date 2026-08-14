@@ -28,6 +28,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-signoff.sh
         "$ROOT"/pr-close-round.sh
+        "$ROOT"/pr-copilot-phase.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
         "$ROOT"/pr-selfcheck.sh
@@ -102,6 +103,7 @@ id_args() {   # id_args <script> ; sets "$@" for that caller
         pr-merge-gate.sh)   set -- 7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa no ;;
         pr-signoff.sh)      set -- 7 somebody ;;
         pr-close-round.sh) set -- gate 7 somebody /dev/null no ;;
+        pr-copilot-phase.sh) set -- record 7 /dev/null ;;
         *)                  set -- 7 ;;
     esac
     ID_ARGV=( "$@" )
@@ -110,10 +112,11 @@ id_rc() {   # id_rc <script> ; the status that script uses to refuse
     case "$1" in
         pr-merge-gate.sh) printf 1 ;;   # 0 merged, 1 blocked, 3 paused
         pr-close-round.sh) printf 1 ;;   # 0 closed, 1 stopped, 3 paused
+        pr-copilot-phase.sh) printf 1 ;;   # 0 recorded/opened, 1 stopped, 3 paused
         *)                printf 2 ;;   # the helpers' documented error status
     esac
 }
-ID_CALLERS="pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-merge-gate.sh pr-signoff.sh pr-close-round.sh"
+ID_CALLERS="pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-merge-gate.sh pr-signoff.sh pr-close-round.sh pr-copilot-phase.sh"
 for sc in $ID_CALLERS; do
     [ -f "$ROOT/$sc" ] || continue
     id_args "$sc"; set -- "${ID_ARGV[@]}"
@@ -335,6 +338,7 @@ for sc in $ID_CALLERS pr-watch.sh; do
         # make begins the same way.
         pr-merge-gate.sh) bs_want='merge blocked:' ;;
         pr-close-round.sh) bs_want='ABORT:' ;;
+        pr-copilot-phase.sh) bs_want='ABORT:' ;;
         pr-signoff.sh) bs_want='PR_SIGNOFF status=error' ;;
         *) bs_want='PR_CI_STATE status=error' ;;
     esac

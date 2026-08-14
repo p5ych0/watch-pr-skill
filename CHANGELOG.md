@@ -1,5 +1,132 @@
 # Changelog
 
+## [2.0.12] — 2026-08-13
+
+- **The Codex→Copilot transition is a script, and its refusals are executed.** It
+  was 176 lines inside `SKILL.md` that nothing ran: capture the head, re-validate
+  Codex against that exact sha, prove its checks, establish the round boundary,
+  post the signoff, then either stop for the operator or take the pause — and, on
+  the answer, revoke any stale Copilot signoff and request the pass.
+  `pr-copilot-phase.sh` runs it in two stages, `record` and `open`, with the
+  operator's decision between them,
+  because the answer can arrive in a different session. `open` re-proves the head
+  is still the one Codex signed off; opening the phase against a moved head spends
+  the whole phase on one commit and the merge gate on another, and only the gate
+  finds out.
+
+  The phase summary was a heredoc the shell expanded. A body quoting a finding
+  about a command substitution was EXECUTED while being written, and text lifted
+  from an untrusted PR description is the same substitution with someone else
+  choosing the command; where it did not execute it vanished silently and `cat`
+  still succeeded. The caller now supplies a body file and the script inserts it as
+  data, composing the signoff marker, the sha and the trailer note itself. A case
+  asserts a body containing `$(…)` and backticks reaches the PR verbatim and
+  creates no files.
+
+  `open` also re-reads the VERDICT, not only the head: a review dismissed while
+  the head stood still leaves head-equality passing, and the whole Copilot phase
+  would be spent before the merge gate discovered that the recorded signoff no
+  longer describes a clean review. A recorded signoff is history, not current
+  state. And the round-boundary pause now records the signoff BEFORE it pauses —
+  the pause offers "merge on the Codex signoff", so exiting first left the
+  operator neither a durable signoff nor the sha that path needs, and they had to
+  acknowledge the boundary and re-run the stage to recover a phase already proved
+  clean.
+
+  `open` re-reads the head once more immediately before the mutations: a push
+  landing after the equality check but during the verdict or baseline probes left
+  the pinned verdict clean — it is pinned to the old sha — while the revocation and
+  the request landed on the moved PR, and `--add-reviewer` re-requests. And the
+  round count is now read BEFORE anything is published and acted on after: a count
+  that could not be read exited with the signoff already posted, so a later session
+  accepted that record without anyone having established whether a boundary was
+  due.
+
+  67 cases in `test-pr-copilot-phase.sh`. Fifteen mutants killed: an unpinned
+  verdict, an unproved head in `open`, a marker without the backticks
+  `pr-signoff.sh` requires, a body expanded as a template, a request before the
+  revocation, a missing CI gate, and a defaulted stage.
+
+- **Prose that quotes a record becomes that record.** Four markers on a PR are
+  control, not text: `pr-signoff.sh` reads `**Review-Signoff:**` and
+  `**Review-Signoff-Revoked:**`, `pr-round-count.sh` reads
+  `**Review-Pause-Acknowledged:**` and `**Reviewed commit:**`. **Three of them a
+  caller-authored body can create**, and those are the three
+  `rb_reserved_marker_line` refuses; the fourth is covered below. The bodies this
+  loop
+  posts are composed from findings, PR descriptions and reviewer comments and go
+  up under an identity those readers trust — so a round summary quoting a finding
+  about an acknowledgement PUBLISHED that acknowledgement, and the operator
+  boundary it answered never fired again. Silently, and at exactly the round the
+  boundary existed for.
+
+  `rb_reserved_marker_line` in `recordlib.sh` refuses such a body. It is in the
+  library rather than in either caller because `pr-close-round.sh` and
+  `pr-copilot-phase.sh` both post caller-written text, which is the shape that ends
+  up present in one and missing from the other. The rule is anchored exactly as the
+  readers are — start of line — so indenting by four spaces or quoting inline still
+  says what the author meant, and the check reports WHICH line to fix. A fenced
+  block is NOT a way round it and is not offered as one: the readers scan the raw
+  comment body, where a line inside a fence still starts at column 0.
+
+  `**Reviewed commit:**` is deliberately not in the set. `pr-round-count.sh` reads
+  it only from a comment whose author is a reviewer bot and whose body also says it
+  found no major issues, so a body these callers post cannot create one — refusing
+  it would stop an author describing the footer while preventing nothing.
+
+- **Quoting the trigger requests a pass.** Any comment CONTAINING `@codex review`
+  is a Codex request — the skill's own table says so — and two callers post a
+  caller-written body with no request intended: the phase summary, after which the
+  loop stops for the operator, and a Copilot round's summary, where only Copilot
+  should be re-requested. A body quoting the mention out of a finding or a PR
+  description started a Codex pass against a phase that had just stopped or moved
+  on. `rb_review_trigger` refuses one in both; in a *Codex* round the mention IS
+  the request and `pr-close-round.sh` writes it itself, so quoting it there changes
+  nothing and is allowed.
+
+  **Its remedy is not the marker remedy**, and the documentation said otherwise for
+  a round: the trigger matches case-insensitively ANYWHERE in the body, so
+  indenting or fencing a mention changes nothing — it has to be broken up or
+  written without the `@`. The marker rule is the line-anchored one.
+
+- **`open` proves the phase is still open at every window it can close in.** The
+  head, the live verdict and the recorded Codex signoff are one predicate, asked
+  up front, again immediately before the mutations, and once more AFTER the
+  revocation — that comment is itself a mutation, and the window between it and
+  the request is the one the request lands in. The ordering is decided by two
+  constraints pulling against each other: the proof wants to be last, and the
+  Copilot BASELINE must be last or a pass landing during the probes is accepted as
+  the answer to a request made after it. So it is revoke, prove, baseline, request,
+  and the fixture asserts that order rather than only its parts.
+
+- **The record block reported failure on its ordinary path.** A trailing
+  `[ "$PHASE_RC" -eq 3 ] && { … }` was the last command in `SKILL.md`'s block, so
+  its FALSE value became the block's status: a phase that recorded, posted and
+  parsed perfectly exited 1, and a driver reads that as a failed step and stops or
+  retries — on the one path where nothing went wrong. It is an `if` now, and the
+  contract test EXECUTES that shape rather than grepping for it, because the defect
+  is what the last statement's status IS rather than how it is spelled.
+
+
+- **`open` reads the recorded signoff, not only the verdict, and re-enforces the
+  boundary.** Reopening the Codex phase over an unchanged head posts a revocation
+  and requests a new pass, and GitHub keeps serving the OLD clean verdict until
+  that pass reports — so the verdict recheck passed on a phase that had been
+  deliberately reopened, and `open` would have revoked Copilot's signoff and
+  re-requested it underneath. And because `record` publishes the signoff *before*
+  it pauses, a later session could read that signoff back and reach `open` with the
+  boundary still unacknowledged: the pause skipped by the very resume path the
+  published signoff exists to enable. Both are checked before either mutation.
+
+- **An assertion that dies instead of failing is worse than none, and three
+  shipped.** The ordering checks in `test-pr-skill-contract.sh` read line numbers
+  with `grep -n … | head -1`, under `set -Eeuo pipefail`. When the line they check
+  was absent — exactly the case they exist for — the unmatched `grep` aborted the
+  whole file: no FAIL, no `RESULT:` line, and a caller grepping for failures saw
+  none. Found by mutating the document and getting silence instead of a failure.
+  Every such lookup is now guarded.
+
+  Fourth step of #26. `SKILL.md` is down to 527 lines of bash from 953.
 ## [2.0.11] — 2026-08-13
 
 - **A review of nothing but replies is named, instead of being guessed at.**
