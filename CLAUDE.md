@@ -213,6 +213,35 @@ driver needs a watch tool and both reviewers run in GitHub's cloud rather than
 from anything installed here. Entries explain the failure that was fixed and how it
 manifested, not just what changed.
 
+## One change per pull request
+
+**A PR closes one issue.** Build the smallest thing that closes it: no
+opportunistic hardening, no generalising a specific fix, no second concern
+because the file is already open. An **unrelated or pre-existing** defect found
+mid-work gets filed, not fixed — even when the fix is small.
+
+**A defect this PR introduced is not deferrable**, and neither is one introduced
+by a review fix: those are this round's work and must be repaired before merge.
+Filing a regression you just caused would ship it behind an issue number, which
+is the opposite of what one-change-per-PR is for. `README.md` states the same
+rule from the author's side — a regression the fix itself introduces is always
+this round's work.
+
+**Split complex work into sequential sub-issues** and land them one after
+another. If a fix needs a behaviour change in a helper, that helper change is its
+own PR first — `pr-review-state.sh`'s reply counting had to land as #35 before
+#33 could reach a signoff at all.
+
+This is written down because breaking it cost a release. #33 set out to extract
+the Codex→Copilot transition and grew concurrency hardening on the way; the
+review then found defects in the FIXES rather than in the change — two of them
+introduced by the previous round's fix — and the loop narrowed without
+converging. Four commits were dropped from the PR and re-filed as #37 and #39.
+
+`README.md` states the reader-facing half of this: rounds that keep finding
+defects in the fixes usually mean the change is too large, and splitting the PR
+is the faster route.
+
 ## Stating the task
 
 The reviewers judge relevance against what the PR says it set out to do, so the
