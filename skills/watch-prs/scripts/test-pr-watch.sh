@@ -63,7 +63,35 @@ fi
 printf 'PR_REVIEW_STATE pr=%s sha=abc1234 reviewer=%s state=%s\n' "$pr" "$who" "$ans"
 exit 0
 SH
-run() { PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" "$@"; }
+# ── TIME THE SUBJECT BELIEVES IN, WITHOUT WAITING FOR IT ───────────────────
+# `pr-watch.sh` reads the clock with `date +%s` and paces itself with `sleep`,
+# both external commands — so the fixture can own them without the subject
+# changing at all. `sleep N` ADVANCES the clock by N and returns at once; `date`
+# reports it. Time then passes exactly when the subject decides to wait, which is
+# both instant and deterministic: the poll counts these cases assert stop
+# depending on how loaded the runner is.
+FASTCLOCK="$TMP/fastclock"; mkdir -p "$FASTCLOCK"
+printf '1754000000\n' > "$TMP/now"
+cat > "$FASTCLOCK/sleep" <<'SLEEPSH'
+#!/usr/bin/env bash
+_n="${1:-0}"
+case "$_n" in ''|*[!0-9]*) _n=0 ;; esac
+_c="$(cat "$FAKE_NOW" 2>/dev/null || echo 0)"
+printf '%s\n' "$((_c + _n))" > "$FAKE_NOW"
+exit 0
+SLEEPSH
+cat > "$FASTCLOCK/date" <<'DATESH'
+#!/usr/bin/env bash
+# Only `+%s` is faked; anything else is the real thing, so a case that formats a
+# date still gets one.
+case "${1:-}" in
+    +%s) cat "$FAKE_NOW" 2>/dev/null || exit 1 ;;
+    *)   exec /usr/bin/env -u PATH /bin/date "$@" ;;
+esac
+DATESH
+chmod +x "$FASTCLOCK/sleep" "$FASTCLOCK/date"
+run() { PATH="$FASTCLOCK:$PATH" FAKE_NOW="$TMP/now" \
+        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" HEAD40="$HEAD40" "$SCRIPT" "$@"; }
 seq_set() { printf '%s\n' "$@" > "$TMP/seq"; rm -f "$TMP/seq.n"; }
 
 # ── a terminal state ends the watch, with its verdict ──────────────────────
