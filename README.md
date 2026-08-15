@@ -65,6 +65,12 @@ because breaking it turns a three-round PR into a long one:
   and raises it with you rather than deciding by building — and keeps that
   discussion out of the review request, where a design proposal reads as a work
   order.
+- **Prefer removing the dependency over guarding it.** Where a finding can be
+  answered either by adding a check or by changing the shape so the problem cannot
+  arise, the session takes the second whenever it is not larger, and says on the
+  thread which it took **and why**. A check is a name, and names can be shadowed, mis-parsed
+  or forgotten; the fixes that have actually ended a run of review rounds here
+  were the ones that removed something rather than watched it.
 - **Validate a finding before acting on it.** Reviewers can be wrong, or right
   about a defect and wrong about its cause. The session reproduces the claim
   first, and where it does not hold, says so in the thread with evidence instead
@@ -496,8 +502,11 @@ asks:
 
 - **When Codex is clean** — merge on that signoff alone, or open the Copilot
   phase on the same head. One reviewer's clean pass is a legitimate place to stop.
-- **When Copilot is clean** — merge, or ask Codex again as fault tolerance over
-  what the Copilot phase changed.
+- **When Copilot is clean** — merge, or, *if the Copilot phase produced
+  commits*, ask Codex again as fault tolerance over what it changed. Where the
+  phase produced none, both signoffs name the same commit and that option is not
+  offered: Codex has already reviewed the head being merged, so the pass would
+  cost a revocation and a round for a verdict that cannot differ.
 
 Both stops are **resumable**. Each signoff is recorded on the pull request as a
 `**Review-Signoff:**` comment naming the reviewer and the exact head, so a

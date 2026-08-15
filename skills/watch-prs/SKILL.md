@@ -83,6 +83,16 @@ the summary rides with the `@codex review` mention and a design proposal there i
 a work order. Open an issue for it, reference the number, and raise it with the
 operator outside the review request.
 
+**Prefer removing the dependency over guarding it.** When a finding names
+something that can go wrong, there are usually two answers: add a check that
+catches it, or change the shape so it cannot arise. Take the second whenever it
+is not larger. A check is a name, and a name can be shadowed, mis-parsed,
+locked, or simply forgotten by the next person — each of those has ended a round
+in this repository, and each time the fix that finally held was subtractive:
+reading data instead of expanding it, leaving an environment instead of
+sanitising it, holding a list in an array instead of a string. Say on the thread
+which of the two you took and why, so the reviewer is not left inferring it.
+
 **Every change you make must be reviewable as a fix.** Bundling an unrelated
 change into a review-fix commit hides it: the reviewer reads the round summary,
 sees a list of findings, and has no reason to look for anything else. That is how
@@ -1144,23 +1154,43 @@ gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$(printf '**Review-Signoff:*
 #   MERGE — run the gate below. It re-checks everything against the head it
 #     merges, because an earlier check answered about an earlier commit.
 #
-#   ANOTHER CODEX PASS — as fault tolerance. The Copilot phase changed the code
-#     after Codex last looked at it, and the merge gate accepts that on the
-#     strength of `Review-Phase: copilot` trailers rather than a fresh review. If
-#     the Copilot rounds were substantial, ask Codex again: go back to step 2 with
-#     `$WHO` set to Codex. The gate will then be evaluated against the newer
-#     signoff.
+#   ANOTHER CODEX PASS — as fault tolerance, and ONLY IF THE COPILOT PHASE
+#     PRODUCED COMMITS. Where it did, the head moved after Codex last looked at
+#     it and the merge gate accepts that on the strength of `Review-Phase:
+#     copilot` trailers rather than a fresh review; if those rounds were
+#     substantial, ask Codex again by going back to step 2 with `$WHO` set to
+#     Codex, and the gate is then evaluated against the newer signoff.
+#
+#     WHERE IT PRODUCED NONE, the two signoffs name the same commit and this
+#     option is not offered, because Codex has already reviewed exactly what is
+#     being merged. Taking it costs a revocation, a round and a reopened phase
+#     for a verdict that cannot differ — and a session that resumes into the
+#     reopened phase reads it as a Copilot phase to run again. That is not
+#     hypothetical: it is what #55 was raised for.
 #
 # ASK, THEN STOP.
+if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then
+cat <<EOF
+
+Copilot signed off on $COPILOT_SHA, and so did Codex — one commit, both
+reviewers, and it is the head being merged. Nothing has changed since either
+looked, so there is no fault-tolerance pass to run over it.
+
+  Decide, and say which:
+    (a) merge — run the gate below
+    (b) stop and leave the PR open
+
+Nothing further happens until you say.
+EOF
+else
 cat <<EOF
 
 Copilot signed off on $COPILOT_SHA. Codex signed off on $CODEX_SHA.
 
-If those are the same commit, both reviewers read the head being merged. If they
-differ, Copilot's fixes moved the head after Codex looked at it — the older Codex
-result is carried forward ONLY if the merge gate validates that every commit
-between them is a Review-Phase: copilot fix, and it refuses if any is not. That
-check has not run yet.
+Those differ, so Copilot's fixes moved the head after Codex looked at it — the
+older Codex result is carried forward ONLY if the merge gate validates that every
+commit between them is a Review-Phase: copilot fix, and it refuses if any is not.
+That check has not run yet.
 
   Decide, and say which:
     (a) merge — run the gate below
@@ -1172,6 +1202,7 @@ check has not run yet.
 
 Nothing further happens until you say.
 EOF
+fi
 exit 0
 fi   # end of the two-reviewer path
 ```

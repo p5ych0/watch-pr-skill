@@ -55,6 +55,96 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
     && pass "skill states the one-time connector prerequisite" \
     || die "skill does not tell the operator to link the Codex connector"
 
+# ── the round rules keep their polarity ────────────────────────────────────
+# `SKILL.md` binds the SIZE of a round elsewhere; this is the one that binds its
+# SHAPE, and it is the rule that ended each long run of rounds in this repository
+# while every added check merely raised the cost of the next attempt. A later edit
+# that drops it — or reverses it into a preference for guarding — leaves the
+# driver with no instruction at all on the choice that matters most.
+#
+skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
+    || die "could not flatten SKILL.md"
+# ANCHORED TO THE START OF THE LINE, which is the only place a negation cannot be
+# put in front of. This took three attempts and each one was a substring the
+# negation still contained:
+#
+#   `removing the dependency over guarding it`   ← `**Do not prefer …**` contains it
+#   `**Prefer removing …**`                      ← `Do not **Prefer …**` contains it
+#   `^**Prefer removing …**`                     ← nothing can precede it
+#
+# The lesson is not about this pattern. Twice I reasoned about what a reversal
+# would look like instead of writing the one someone would actually write, and
+# twice the reasoning was the thing that produced the hole.
+#
+# WHAT THIS CANNOT DO, so nobody mistakes it for more. It catches the instruction
+# being DELETED or INVERTED IN PLACE, which is what a maintainer edit looks like.
+# It cannot catch a negation added elsewhere — `… guarding it.** Do not follow
+# this rule.` later in the same paragraph, or a contradiction in the next one.
+# There is no anchor for that: every heading in this file is inline with its
+# prose, so an end anchor would have to match the sentence that follows, which
+# will legitimately be reworded; and the mutation simply moves to the next line.
+# Establishing that prose does not contradict itself is reading, not grepping,
+# and this repository has already built and deleted a 2,200-line scanner over
+# exactly that boundary.
+grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
+    && pass "skill states the preference for removing a dependency over guarding it" \
+    || die "skill no longer tells the driver to prefer removal over a guard"
+# …AND THE HALF THAT MAKES THE CHOICE REVIEWABLE. Deleting the sentence that
+# requires the reason, while leaving the preference heading in place, leaves a
+# driver that still chooses correctly and never says why — and a finding thread
+# without the reason is one nobody can check the choice against. `README.md`
+# promises this behaviour too, so it is a separate assertion rather than an
+# extension of the one above.
+# THE LOCATION IS PART OF THE RULE, and this check did not carry it: rewriting
+# `Say on the thread` to `Say in the round summary` left the trailing fragment
+# intact and the check green. That edit puts the rationale in the comment that
+# carries the `@codex review` mention, where a description of work still to be
+# done is read as a work order — the incident this file records elsewhere — and
+# it desynchronises the driver from the reviewer copies, whose own assertions
+# were strengthened for this a round earlier while the shipped contract was left
+# behind. FLATTENED and VERBATIM, because the clause wraps and because a
+# fragment is what failed.
+grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" \
+    && pass "skill requires the choice to be explained, on the thread" \
+    || die "skill no longer requires the driver to say on the thread which fix shape it took, and why"
+
+# ── the fault-tolerance pass needs something to review ─────────────────────
+#
+# #55 was raised because it ran when the Copilot phase had produced no commits:
+# both signoffs name one sha, the pass re-reviews what Codex already signed off,
+# and it costs a revocation and a reopened phase for a verdict that cannot
+# differ — a session resuming into that reopened phase reads it as a Copilot
+# phase to run again.
+#
+# The GUARD is asserted, not the prose, because prose is what failed: the option
+# was described as conditional in the operator's ear while the branch offering it
+# ran unconditionally. This is one of the narrow lifts #26 allows — an anchored
+# match on a condition, no grammar — and it is worth one here because `SKILL.md`'s
+# bash has no other coverage at all.
+grep -qF 'if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then' <<<"$skill_flat" \
+    && pass "the post-Copilot decision branches on whether the phase produced commits" \
+    || die "SKILL.md offers the same post-Copilot options whether or not Copilot committed"
+# …AND THE OPTION IS ABSENT FROM THE EQUAL-SHA BRANCH, which is the half that
+# matters. A branch that exists and offers the pass anyway satisfies the check
+# above while changing nothing.
+_ft_same="$(sed -n '/if \[ "\$COPILOT_SHA" = "\$CODEX_SHA" \]; then/,/^else$/p' "$SKILL")" \
+    || die "could not read the equal-sha branch"
+grep -qi 'fault.tolerance pass to run' <<<"$_ft_same" \
+    && pass "the equal-sha branch says why there is no pass to run" \
+    || die "the equal-sha branch does not explain the absent fault-tolerance pass"
+# …AND ITS MENU IS A WHITELIST, not one forbidden phrase. The first version of
+# this rejected the wording `another Codex pass`, which rephrasing option (b) to
+# `run the fault-tolerance pass first` walks straight past — the driver reoffers
+# the pass over commits that do not exist while its only executable coverage
+# stays green. This repository has been here before: assert what must appear.
+# Every option line in the branch is matched against the exact allowed set, so a
+# reworded (b) and an added (c) both fail.
+_ft_opts="$(grep '^    ([a-z]) ' <<<"$_ft_same")"
+[ "$_ft_opts" = "    (a) merge — run the gate below
+    (b) stop and leave the PR open" ] \
+    && pass "the equal-sha branch offers merge or stop, and nothing else" \
+    || die "the equal-sha branch's options are not merge-or-stop (got: $_ft_opts)"
+
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
     && pass "skill states the fail-closed rule" \
@@ -1627,8 +1717,6 @@ grep -q 'proposal rather than an instruction' "$SKILL" \
 # routinely span continuation lines: a line-based match saw only one token of a
 # split invocation and reported clean. Third time line-wrapping has defeated a
 # check in this PR, which is why the flattened copy is taken once and reused.
-skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
-    || die "could not flatten SKILL.md for the endpoint check"
 # The scans below use herestrings rather than `printf | grep`: under `pipefail`,
 # `grep -q` exiting at the first match SIGPIPEs the producer and the pipeline
 # reports the match as ABSENT — the fail-open direction. The fixture demonstrating
@@ -2375,6 +2463,14 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     # alteration fail — negated, reworded, or weakened — and the cost is precisely
     # the property wanted for contract text: changing it is a deliberate act that
     # updates this list, not a quiet edit that still satisfies a pattern.
+    #
+    # THE FIX-SHAPE RULE IS IN THIS LIST FOR BOTH OF THOSE REASONS AT ONCE. It
+    # arrived as two substring greps, and each fell to the wall above: `guard where
+    # a removal would do` survives "…is **not** a finding", and `which of the two
+    # they took and why` survives moving the explanation back to the round summary
+    # — which is the regression this round fixed, passing its own check. The two
+    # clauses below carry the polarity and the location inside the matched text,
+    # so neither edit can be made without failing here.
     case "$name" in
         AGENTS.md)
             req_clauses=(
@@ -2382,6 +2478,10 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 '**the consequence** — what ends up wrong, in terms of what this tool does'
                 'The author is expected to assert the consequence in a test, and can only do that if you state it'
                 'if the same defect exists in a second copy **that this PR also changes**, say so'
+                '**The fault-tolerance pass needs commits to review.**'
+                'A change that offers the pass on an equal-sha head, or that removes the'
+                '**A guard where a removal would do is a finding.**'
+                'The author is required to say **on the thread** which of the two they took and why'
             ) ;;
         copilot-instructions.md)
             req_clauses=(
@@ -2389,6 +2489,10 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'the **consequence** in terms of what this tool does'
                 'the author is expected to assert that consequence in a test'
                 'naming any second copy of the same defect **that this PR also changes**'
+                '**The fault-tolerance pass needs commits to review.**'
+                'A change that offers the pass on an equal-sha head, or that removes the'
+                '**A guard where a removal would do is a finding.**'
+                'The author is required to say **on the thread** which of the two they took and why'
             ) ;;
         *) req_clauses=() ;;
     esac

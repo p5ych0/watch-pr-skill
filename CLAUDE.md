@@ -74,6 +74,51 @@ category; do not "fix" a script into a stricter mode.
   substitution keeps it, so a call that emitted a plausible SHA and then errored
   reads as success unless the status is checked and the shape validated.
 
+### Already paid for
+
+Each of these was found, fixed, and then made again in a later round of the same
+pull request. Read it before writing a defence or a fixture; it is cheaper than
+rediscovering them.
+
+- **A shell function shadows any name** — external, builtin, or the `command` and
+  `builtin` prefixes used to bypass one. Prefer a **reserved word** (`[[`, `if`)
+  or an **assignment**: the parser handles those and no function can take their
+  place. A postcondition cannot be written with the thing it checks for, and two
+  checks behind one prefix are one check.
+- **A list of names is wrong by omission.** Clearing "the names the verdict
+  depends on" missed `read` and `[`. Enumerate everything, or change the shape so
+  no list is needed.
+- **A defence written for a shell means nothing where no shell runs.** `xargs`
+  execs its program, so `command env …` asks for a program *called* `command` —
+  which exists on some machines and not on CI.
+- **The startup hook runs before the script does**, and only some of what it
+  leaves can be undone from inside. A `readonly IFS` or a `readonly -f` function
+  cannot: re-exec with `BASH_ENV` and `ENV` removed instead, and guard that
+  re-exec with a marker rather than with the evidence, since the hook can `unset
+  BASH_ENV` on its way out. Inherited tracing CAN be undone — `set +x`, after
+  clearing any shadowing function — so it needs no re-exec of its own, and neither
+  does a plain `IFS=`, which another assignment answers. Reaching for the re-exec
+  where a one-line fix exists is the over-building this section is here to stop. The hook can also erase the
+  evidence that it ran, so guard that re-exec with a marker rather than with the
+  evidence — and clear the marker, or every child inherits it.
+- **Assert the concrete outcome, and keep absence checks as well as — never
+  instead of — that.** "Not clean" alone has passed against a hang, a malformed
+  record and a crash. But where forbidden output is part of the contract, its
+  absence still has to be asserted: a run that emits the right error sentinel AND
+  a stray `status=clean` has violated fail-closed, and only the absence check
+  sees it.
+- **A forger in a fixture must be narrow and must otherwise work.** One that
+  forges every call breaks the harness; one that produces a malformed result is
+  rejected by a different check, and the case then passes either way.
+- **Combine states.** A readonly helper is harmless; a shadowed `[` is harmless;
+  together they skip a re-exec. Separate cases cannot see it.
+- **"Bash rejects this spelling" is a fact about a parser; "this cannot be
+  inherited" is a claim about every route into the process.** `function 'a*b'` is
+  rejected and `env 'BASH_FUNC_a*b%%=…'` is imported. Never remove a guard on the
+  strength of one route.
+- **A comment that argues against the code beside it is an instruction**, and it
+  will be followed.
+
 ## Repo-agnostic invariant
 
 - No hard-coded owner, repo, or branch name in the scripts or in `SKILL.md`. The
@@ -250,6 +295,36 @@ converging. Four commits were dropped from the PR and re-filed as #37 and #39.
 `README.md` states the reader-facing half of this: rounds that keep finding
 defects in the fixes usually mean the change is too large, and splitting the PR
 is the faster route.
+
+## One change per review round
+
+The rule above bounds what a **pull request** may contain. This one bounds what a
+**round** may contain, and that is where the cost actually accumulates: #53's
+change — running the suite four files at a time — never had a finding against it.
+Every one of its twenty-seven rounds was surface the fixes exposed.
+
+- **Fix what the finding names, and nothing else.** The PR-scope rule already
+  forbids the second concern because the file is open; at round scope nothing did,
+  and a round that answers a finding with more than the finding named is how a
+  review starts converging on the fixes instead of on the change. A broader change
+  is an issue and a line in the round summary, exactly as at PR scope.
+- **Prefer removing the dependency over guarding it.** A guard is a name, and
+  names can be shadowed, mis-parsed or forgotten; a removed dependency stays
+  removed. This is the single rule that ended each class in #53, and reaching for
+  another check is what extended them. `SKILL.md` carries the driver-facing copy,
+  including the requirement to say on the finding thread which of the two was
+  taken and why.
+- **Read the thread and the previous round's diff before writing.** A finding
+  answered without reading what the last round did is how the same defect is
+  fixed, re-broken and re-found — three rounds of #58 were a check that passed
+  against the edit it existed to stop, each one written without re-reading the
+  one before it.
+- **The fault-tolerance pass runs only if the Copilot phase produced commits**,
+  and is bound by every rule above. It reviews those commits; it is not an
+  opening to revisit the design. Where the phase produced none, both signoffs
+  name the same commit and the pass would re-review something Codex has already
+  signed off — which costs a revocation, a round, and a reopened phase, for a
+  verdict that cannot differ.
 
 ## Stating the task
 

@@ -86,6 +86,25 @@ the PR changes behaviour around them, out of scope if it merely moves lines.
 Attachable to a line in this PR's diff, with the problem, its impact, and a
 concrete fix or test. Prefer no finding over speculative feedback.
 
+**A guard where a removal would do is a finding.** Where a change answers a
+problem by adding a check, and changing the shape would make the problem
+impossible at no greater cost, say so — a check is a name, and names can be
+shadowed, mis-parsed or forgotten, while a removed dependency stays removed. The
+author is required to say **on the thread** which of the two they took and why —
+that is where the reasoning belongs and where you will find it, so ask for it
+there when it is missing. Do not judge this by the round summary: a session that
+explained the choice on the thread and did not repeat it in the summary has
+complied.
+
+**The fault-tolerance pass needs commits to review.** After Copilot signs off,
+`SKILL.md` offers the operator one more Codex pass over what the Copilot phase
+changed. Where that phase produced NOTHING, both signoffs name the same commit,
+Codex has already reviewed the head being merged, and the pass costs a
+revocation, a round and a reopened phase for a verdict that cannot differ — a
+session resuming into the reopened phase reads it as a Copilot phase to run
+again. A change that offers the pass on an equal-sha head, or that removes the
+condition distinguishing the two, is a blocking finding.
+
 **Fail-closed is a review criterion.** Every fetch, parse, and probe must either
 propagate a non-zero status or emit a distinguished sentinel that every caller
 rejects. An unguarded failure is indistinguishable from a good answer: an errored
