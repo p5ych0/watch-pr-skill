@@ -72,7 +72,11 @@ set -uo pipefail
 #
 # Exported functions do NOT need this: one arrives non-readonly however it was
 # marked in the shell that exported it, so the clearing reaches those.
-if [ -n "${BASH_ENV-}" ] || [ -n "${ENV-}" ]; then
+# `[[`, NOT `[`. The hook has already run when this line is reached, so a `[`
+# function it defined would intercept the guard and skip the very re-exec that
+# exists to escape it. `[[` is a reserved word: the parser handles it and no
+# function can take its place.
+if [[ -n ${BASH_ENV-} || -n ${ENV-} ]]; then
     exec env -u BASH_ENV -u ENV bash "$0" "$@"
 fi
 
@@ -113,11 +117,15 @@ fi
 # flag and clears nothing, so the function survives and the postcondition below
 # refuses a run that was fine. `function -v { …; }` is a name bash accepts.
 #
-# `IFS` FIRST, because this shell did not necessarily choose it. `BASH_ENV` is
-# sourced before the script body runs, so a startup file setting `IFS=-` is
-# already in effect here — and `for idx in $suite_failed` further down splits on
-# it too, so an inherited value would get to decide how the verdict is read.
-# Normalised rather than saved and restored, for that reason.
+# `IFS` FIRST, because this shell did not necessarily choose it — and after the
+# re-exec above it usually has. Bash never inherits an exported `IFS`; it resets
+# it at startup, so the only way a strange one reaches this line is a startup hook
+# setting it in a process that did NOT re-exec, which is what happens when `exec`
+# or `env` is itself shadowed. That is the layer this normalisation belongs to.
+#
+# `for idx in $suite_failed` further down splits on it too, so an inherited value
+# would get to decide how the verdict is read. Normalised rather than saved and
+# restored, for that reason.
 #
 # An assignment is also the one construct in this neighbourhood that cannot be
 # shadowed: there is no `IFS` function to write.

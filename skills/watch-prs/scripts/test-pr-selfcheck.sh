@@ -637,6 +637,20 @@ out="$(run_limited 60 env BASH_ENV="$ROFN" "$SCRIPT" "$R10" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
     && pass "a readonly function from a startup hook does not block a valid run" \
     || die "a harmless readonly function was treated as a forgery (rc=$rc out='$out')"
+# …AND WITH THE GUARD'S OWN TEST SHADOWED IN THE SAME HOOK. The hook runs before
+# the guard, so a `[` defined there intercepts it and the re-exec never happens —
+# after which the readonly helper cannot be cleared and a valid checkout is
+# refused. `[[` is a reserved word and has no such hole. The two states are only
+# dangerous together, which is why neither separate case caught it.
+ROFN2="$TMP/rofn2.sh"
+{ builtin printf 'helper() { :; }\n'
+  builtin printf 'readonly -f helper\n'
+  builtin printf '[() { return 1; }\n'
+} > "$ROFN2"
+out="$(run_limited 60 env BASH_ENV="$ROFN2" "$SCRIPT" "$R10" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…even when the same hook shadows the test the guard is written with" \
+    || die "a shadowed [ skipped the re-exec (rc=$rc out='$out')"
 
 # ── a startup hook that cannot be unset ────────────────────────────────────
 # `readonly BASH_ENV` in the hook makes the parent's `unset -v` fail, and that
@@ -654,25 +668,47 @@ out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
     && pass "a readonly startup hook cannot talk over the record channel" \
     || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
 
-# ── a startup file that changes how this script reads its own data ─────────
-# `BASH_ENV` is sourced BEFORE the script body, so an `IFS` set there is already
-# in effect when the clearing loop expands `compgen`'s output. With `IFS=-`, the
-# name `-v` splits into an empty field and `v`; nothing clears `-v`; and the
-# postcondition refuses a run that was fine. Unsetting `BASH_ENV` afterwards
-# cannot undo an assignment that already happened, which is why the fix is to
-# normalise `IFS` rather than to clear the variable earlier.
+# ── a startup file changing how this script reads, with no way out of it ───
+# `IFS=-` in a hook splits `-v` into an empty field and `v`, so nothing clears
+# `-v` and the postcondition refuses a run that was fine.
+#
+# THE RE-EXEC USUALLY MAKES THAT UNREACHABLE, which is why this case forges `exec`
+# as well. Bash never inherits an exported `IFS` — it resets it at startup — so
+# the only way a strange one reaches the clearing is a hook setting it in a
+# process that did not step out of the hook. Without the forged `exec` this case
+# is green whether the normalisation exists or not, which is what it was before.
 IFSENV="$TMP/ifsenv.sh"
 { builtin printf 'IFS=-\n'
   builtin printf 'function -v { :; }\n'
   builtin printf 'export -f -- -v\n'
 } > "$IFSENV"
+NOEXEC="$TMP/noexec.sh"
+{ builtin printf 'exec() { return 0; }\n'; builtin printf 'export -f exec\n'; } > "$NOEXEC"
 R5="$(mkroot "$OK_SKILL")"
 addscript "$R5" pr-thing.sh 'exit 0'
 addtest "$R5" test-pr-thing.sh
-out="$(run_limited 60 env BASH_ENV="$IFSENV" "$SCRIPT" "$R5" 2>&1)"; rc=$?
+out="$(. "$NOEXEC"; run_limited 60 env BASH_ENV="$IFSENV" "$SCRIPT" "$R5" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
-    && pass "an inherited IFS does not block a valid run" \
+    && pass "an inherited IFS does not block a valid run, even with no way out of the hook" \
     || die "IFS from a startup file broke the clearing (rc=$rc out='$out')"
+# …AND THE FAILURE LIST IS WHERE IT ACTUALLY BITES. The clearing reads its names
+# rather than expanding them, so `IFS` cannot reach it — but `for idx in
+# $suite_failed` further down still splits on it. With `IFS=-` the whole list
+# becomes ONE token, no index resolves, and two failing tests are reported as
+# `status=clean`. That is the forged-clean direction, not the blocked-run one, so
+# it is the case worth having.
+R5B="$(mkroot "$OK_SKILL")"
+for n in alpha omega; do
+    addscript "$R5B" "pr-$n.sh" 'exit 0'
+    builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
+    chmod +x "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
+done
+IFSONLY="$TMP/ifsonly.sh"
+builtin printf 'IFS=-\n' > "$IFSONLY"
+out="$(. "$NOEXEC"; run_limited 60 env BASH_ENV="$IFSONLY" "$SCRIPT" "$R5B" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-alpha.sh fails'; } \
+    && pass "…and failing tests are still reported under it, not swallowed" \
+    || die "an inherited IFS swallowed the failures (rc=$rc out='$out')"
 
 # ── a startup file that talks over the record channel ──────────────────────
 # A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and
