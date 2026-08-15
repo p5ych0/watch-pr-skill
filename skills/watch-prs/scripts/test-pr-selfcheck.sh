@@ -617,6 +617,27 @@ builtin printf '%s' "$out" | command grep -q 'status=clean' \
     && die "one forged prefix answered for both checks and the suite reported clean: $out" \
     || pass "one forged prefix cannot answer for both halves of the postcondition"
 
+# ── a startup hook leaving something that cannot be unset ──────────────────
+# `readonly -f` makes a function `unset` REFUSES to remove, so a hook defining one
+# leaves it installed however thorough the clearing is — and the postcondition
+# then refuses a run over a function that shadows nothing this script uses. That
+# is a mandatory gate blocking a valid checkout because of something harmless in
+# someone's shell.
+#
+# It cannot be fixed from inside the process, which is why the fix is to not be in
+# that process: the script re-execs once with the hook variables removed, so the
+# hook never runs. Exported functions need no such thing — one arrives
+# non-readonly however it was marked in the shell that exported it.
+ROFN="$TMP/rofn.sh"
+{ builtin printf 'helper() { :; }\n'; builtin printf 'readonly -f helper\n'; } > "$ROFN"
+R10="$(mkroot "$OK_SKILL")"
+addscript "$R10" pr-thing.sh 'exit 0'
+addtest "$R10" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$ROFN" "$SCRIPT" "$R10" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a readonly function from a startup hook does not block a valid run" \
+    || die "a harmless readonly function was treated as a forgery (rc=$rc out='$out')"
+
 # ── a startup hook that cannot be unset ────────────────────────────────────
 # `readonly BASH_ENV` in the hook makes the parent's `unset -v` fail, and that
 # failure is deliberately ignored — so the workers would go on sourcing it and

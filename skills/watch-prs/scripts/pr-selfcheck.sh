@@ -39,6 +39,43 @@
 # several probes fail as normal operation. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
+# ── THE STARTUP HOOK RUNS BEFORE THIS FILE DOES, SO STEP OUT OF IT ─────────
+#
+# A non-interactive bash sources `$BASH_ENV` before the script body, and what it
+# leaves behind cannot always be undone from in here: `helper() { :; };
+# readonly -f helper` is a function `unset` REFUSES to remove, so the clearing
+# below cannot clear it and the postcondition would refuse a run over something
+# entirely harmless. `readonly BASH_ENV` in the same hook makes the variable
+# itself unsettable. Both are the failure direction an operator feels — a
+# mandatory gate blocking a valid checkout.
+#
+# Re-exec once, with the hook variables removed, so it never runs at all. `env -u`
+# rather than `env -i`: the whole environment is carried through minus those two
+# names, so there is no allowlist to leave something out of — and an allowlist is
+# a shape that has already been wrong twice in this file.
+#
+# THE CONDITION IS THE GUARD, so there is no sentinel. Re-exec only when one of
+# the hook variables is actually set; after `env -u` neither is, so the second
+# instance does not qualify and there is no loop to prevent.
+#
+# A sentinel was tried and is worse in two ways. It is inherited: the gate exports
+# it, so the workers, the tests they run and the nested copies of this script that
+# `test-pr-selfcheck.sh` invokes would each skip their own re-exec and stand in
+# the hook they were meant to step out of — the suite caught exactly that, a case
+# passing standalone and failing inside the gate. And it is settable from outside:
+# anyone who exports it disables the protection, which is a guard that can be
+# switched off by the environment it exists to defend against.
+#
+# If `exec` or `env` is itself shadowed the re-exec silently does not happen, and
+# the clearing and postcondition below are still there; this is the cheap layer,
+# not the only one.
+#
+# Exported functions do NOT need this: one arrives non-readonly however it was
+# marked in the shell that exported it, so the clearing reaches those.
+if [ -n "${BASH_ENV-}" ] || [ -n "${ENV-}" ]; then
+    exec env -u BASH_ENV -u ENV bash "$0" "$@"
+fi
+
 # ── INHERITED FUNCTIONS ARE CLEARED BEFORE ANYTHING DEPENDS ON A NAME ──────
 #
 # An exported shell function is inherited by this process and shadows the name it
