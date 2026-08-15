@@ -87,6 +87,15 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
 grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
     && pass "skill states the preference for removing a dependency over guarding it" \
     || die "skill no longer tells the driver to prefer removal over a guard"
+# …AND THE HALF THAT MAKES THE CHOICE REVIEWABLE. Deleting the sentence that
+# requires the reason, while leaving the preference heading in place, leaves a
+# driver that still chooses correctly and never says why — and a round summary
+# without the reason is one nobody can check the choice against. `README.md`
+# promises this behaviour too, so it is a separate assertion rather than an
+# extension of the one above.
+grep -q 'which of the two you took and why' "$SKILL" \
+    && pass "skill requires the choice to be explained on the thread" \
+    || die "skill no longer requires the driver to say which fix shape it took, and why"
 
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \

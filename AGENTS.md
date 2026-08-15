@@ -155,6 +155,13 @@ Every finding must be attachable to a line in this PR's diff, and must state the
 problem, its impact, and a concrete fix or test. Prefer no finding over
 speculative feedback.
 
+**A guard where a removal would do is a finding.** Where a change answers a
+problem by adding a check, and changing the shape would make the problem
+impossible at no greater cost, say so — a check is a name, and names can be
+shadowed, mis-parsed or forgotten, while a removed dependency stays removed. The
+author is required to say on the thread which of the two they took and why, so a
+round summary that does not is itself worth raising.
+
 **Fail-closed is a review criterion.** Every fetch, parse, and probe must either
 propagate a non-zero status or emit a distinguished sentinel that every caller
 rejects. An unguarded failure is indistinguishable from a *good* answer: an
