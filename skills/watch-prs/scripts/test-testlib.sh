@@ -423,19 +423,31 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
         # twice from the deleted structural checker — and a violation carrying one
         # would then go unreported, turning a false positive into a false negative.
         #
-        # A CONTINUATION DOES NOT MAKE THE NEXT LINE CODE. The first version of
-        # this skipped comments only where `buf` was empty, on the theory that a
-        # `#` opening a continued line is joined into the command. Bash says
-        # otherwise: after the backslash-newline is removed the `#` still begins a
-        # word, so it starts a comment — and that comment ENDS the command.
-        # Measured, not reasoned: `printf 'A=%s\n' one \` followed by `# two`
-        # prints `A=one` and nothing else, and the line after it runs as a new
-        # command. Keeping the buffer open there appended the prose and reported
-        # the false positive this change exists to remove.
+        # ONLY WHERE NOTHING IS PENDING, AND THAT IS A FAIL-CLOSED CHOICE rather
+        # than a claim about bash. Bash treats a `#` after an unquoted
+        # backslash-newline as a comment that ENDS the command — measured, not
+        # reasoned: `printf \047A=%s\\n\047 one \` then `# two` prints `A=one`
+        # alone. But it is a comment only where the continuation left no quote
+        # open, and deciding THAT needs the quote tracking this repository has
+        # twice refused to build (`CLAUDE.md`, on the deleted structural checker).
         #
-        # So a whole-line comment closes any pending continuation and is then
-        # discarded — never concatenated.
-        /^[[:space:]]*#/ { if (buf != "") emit(); next }
+        # Acting on the bash rule without it costs more than it buys. Both of
+        # these are real violations, and both went UNREPORTED when a pending
+        # continuation was closed at the comment:
+        #
+        #   PATH=/x MSG="a \        |   PATH="/x:$PATH" \
+        #   # b" run_limited 5 cmd   |   # …run_limited…, not PATH=…
+        #                            |   run_limited 5 cmd
+        #
+        # In the first the `#` is quoted data; in the second the assignment
+        # persists into the command after the comment. A guard that misses a real
+        # violation is worse than one that questions a comment, so where the rule
+        # cannot be decided the text is KEPT and the guard is allowed to fire.
+        #
+        # The cost is a false positive on a continuation followed by prose naming
+        # both tokens — see #64, and the fixture below pins it so the trade is
+        # deliberate rather than forgotten.
+        buf == "" && /^[[:space:]]*#/ { next }
         {
             if (start == 0) start = FNR
             line = $0
@@ -502,11 +514,12 @@ printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" MSG="a # b" run_limited 5 "$
 # comment; a scanner that keeps the buffer open appends it and reports the
 # violation the comment is describing.
 printf '#!/usr/bin/env bash\n: \\\n# `run_limited N env …`, not `PATH=… run_limited`, so the subject sees it\n' > "$SEENTMP/test-contcomment.sh"
-# …AND THE COMMENT MUST CLOSE THE COMMAND, not merely be skipped. Skipping it
-# while leaving the buffer open joins two unrelated commands, and the FIRST one's
-# compliant `run_limited N env` then exempts the second one's violation — a false
-# negative in the direction that matters, produced by the half-fix.
-printf '#!/usr/bin/env bash\nrun_limited 5 env true \\\n# a note between them\nout="$(PATH="/x:$PATH" run_limited 9 "$SCRIPT" a)"\n' > "$SEENTMP/test-contjoin.sh"
+# …and the two shapes that pay for that choice: a `#` that is quoted DATA because
+# the continuation left a quote open, and an assignment that persists into the
+# command after the comment. Both are real violations, and both go unreported the
+# moment a pending continuation is closed at a comment.
+printf '#!/usr/bin/env bash\nout="$(PATH=/x MSG="a \\\n# b" run_limited 5 cmd)"\n' > "$SEENTMP/test-quotehash.sh"
+printf '#!/usr/bin/env bash\nPATH="/x:$PATH" \\\n# `run_limited N env …`, not `PATH=… run_limited`\nrun_limited 5 cmd\n' > "$SEENTMP/test-pathassign.sh"
 # The whole reporting path, not just the scan: this is the branch that aborted.
 report_watchdog_path_misuse "$SEENTMP" > "$TMP/seen.out"; rep_rc=$?
 [ "$rep_rc" -eq 1 ] \
@@ -526,12 +539,18 @@ printf '%s' "$seen" | grep -q 'test-split.sh' \
 printf '%s' "$seen" | grep -q 'test-comment.sh' \
     && die "a comment DESCRIBING the rule was reported as a violation of it: '$seen'" \
     || pass "…while a comment describing the rule is not reported as breaking it"
+# THE ACCEPTED COST, PINNED. A comment after a continuation is still joined,
+# because whether it is a comment at all depends on quote state — so this shape
+# is reported, and that is the fail-closed direction, not an oversight. #64.
 printf '%s' "$seen" | grep -q 'test-contcomment.sh' \
-    && die "prose after a continuation was concatenated into the command: '$seen'" \
-    || pass "…including after a continuation, where bash ends the command too"
-printf '%s' "$seen" | grep -q 'test-contjoin.sh' \
-    && pass "…and the comment closes the command, so the next one is judged alone" \
-    || die "a compliant call before a comment exempted a violation after it: '$seen'"
+    && pass "…while prose after a continuation is still questioned, which is #64" \
+    || die "a continued comment stopped being reported; check #64's two shapes first: '$seen'"
+printf '%s' "$seen" | grep -q 'test-quotehash.sh' \
+    && pass "…and a hash that is quoted data across a continuation is not a comment" \
+    || die "a quoted '#' across a continuation hid a real violation: '$seen'"
+printf '%s' "$seen" | grep -q 'test-pathassign.sh' \
+    && pass "…and an assignment persisting past a comment is still a violation" \
+    || die "a PATH assignment before a comment hid the run_limited after it: '$seen'"
 printf '%s' "$seen" | grep -q 'test-hashstring.sh' \
     && pass "…and a violation carrying a '#' inside a string is still caught" \
     || die "stripping went past a whole-line comment and lost a real violation: '$seen'"
