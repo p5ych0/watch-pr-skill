@@ -62,6 +62,8 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
 # that drops it — or reverses it into a preference for guarding — leaves the
 # driver with no instruction at all on the choice that matters most.
 #
+skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
+    || die "could not flatten SKILL.md"
 # ANCHORED TO THE START OF THE LINE, which is the only place a negation cannot be
 # put in front of. This took three attempts and each one was a substring the
 # negation still contained:
@@ -93,9 +95,18 @@ grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
 # without the reason is one nobody can check the choice against. `README.md`
 # promises this behaviour too, so it is a separate assertion rather than an
 # extension of the one above.
-grep -q 'which of the two you took and why' "$SKILL" \
-    && pass "skill requires the choice to be explained on the thread" \
-    || die "skill no longer requires the driver to say which fix shape it took, and why"
+# THE LOCATION IS PART OF THE RULE, and this check did not carry it: rewriting
+# `Say on the thread` to `Say in the round summary` left the trailing fragment
+# intact and the check green. That edit puts the rationale in the comment that
+# carries the `@codex review` mention, where a description of work still to be
+# done is read as a work order — the incident this file records elsewhere — and
+# it desynchronises the driver from the reviewer copies, whose own assertions
+# were strengthened for this a round earlier while the shipped contract was left
+# behind. FLATTENED and VERBATIM, because the clause wraps and because a
+# fragment is what failed.
+grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" \
+    && pass "skill requires the choice to be explained, on the thread" \
+    || die "skill no longer requires the driver to say on the thread which fix shape it took, and why"
 
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
@@ -1669,8 +1680,6 @@ grep -q 'proposal rather than an instruction' "$SKILL" \
 # routinely span continuation lines: a line-based match saw only one token of a
 # split invocation and reported clean. Third time line-wrapping has defeated a
 # check in this PR, which is why the flattened copy is taken once and reused.
-skill_flat="$(tr '\n' ' ' < "$SKILL" | tr -s ' ')" \
-    || die "could not flatten SKILL.md for the endpoint check"
 # The scans below use herestrings rather than `printf | grep`: under `pipefail`,
 # `grep -q` exiting at the first match SIGPIPEs the producer and the pipeline
 # reports the match as ABSENT — the fail-open direction. The fixture demonstrating
