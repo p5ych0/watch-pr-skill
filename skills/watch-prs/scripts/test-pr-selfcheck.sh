@@ -634,6 +634,30 @@ out="$(command() { if [ "$1" = sort ]; then cat >/dev/null; builtin printf 'P 1\
     && pass "…and neither can an exported command" \
     || die "a shadowed command forged a pass (rc=$rc out='$out')"
 
+# …AND AN `unset` THAT CLEARS NOTHING. The clearing itself is one of the names
+# that can be shadowed: an exported `unset() { return 0; }` reports success and
+# removes nothing, leaving the forgeable prefixes installed. So the postcondition
+# is checked rather than the status trusted — `unset` is on the verified list for
+# exactly that reason — and the run is refused rather than continued with a prefix
+# that no longer means what the rest of the file assumes.
+#
+# THE FORGER HAS TO BE ONE THAT WOULD OTHERWISE WORK. My first version rewrote
+# every call and produced a malformed record, so the run was refused by the record
+# grammar and the case passed without the postcondition existing at all — a green
+# tick for the wrong reason. This one forges only the failing-record format and
+# passes every other call through, and it reaches `status=clean` when the
+# postcondition is removed. Checked both ways.
+out="$(unset() { return 0; }
+       builtin() { shift; if [ "$1" = 'F %s\n' ]; then command printf 'P %s\n' "$2"; else command printf "$@"; fi; }
+       export -f unset builtin
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "an unset that clears nothing is refused, not worked around" \
+    || die "a no-op unset left the forgers installed (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and it reported clean anyway: $out" \
+    || pass "…and nothing was reported clean"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to

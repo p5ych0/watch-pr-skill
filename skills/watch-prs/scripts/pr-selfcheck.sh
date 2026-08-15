@@ -64,6 +64,22 @@ set -uo pipefail
 # wrong thing. That is a limitation rather than a hole, and it is written here
 # rather than left for a reader to rediscover.
 unset -f builtin command printf sort xargs basename tr bash 2>/dev/null || true
+# …AND THE CLEARING IS PROVEN, because `unset` is one of the names that can be
+# shadowed, and an exported `unset() { return 0; }` reports success while removing
+# nothing. Taking its status is therefore not a check — the postcondition is.
+# `unset` is on the list being verified for exactly that reason.
+#
+# This does not terminate the regress either: `declare` can be shadowed in turn.
+# What it does is cost an attacker another exported name for each level, and it
+# refuses outright rather than continuing with a prefix that no longer means what
+# the rest of this file assumes.
+for _rb_n in builtin command printf sort xargs basename tr bash unset; do
+    if declare -F "$_rb_n" >/dev/null 2>&1; then
+        echo "PR_SELFCHECK status=error reason=inherited_function name=$_rb_n" >&2
+        exit 2
+    fi
+done
+unset -v _rb_n 2>/dev/null || true
 
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
