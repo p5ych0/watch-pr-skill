@@ -420,8 +420,9 @@ zero**: `1` and `12` are degrees, while `0`, `00`, `01` and `soon` are not, and
 neither is a six-digit number. Anything outside that falls back to four rather
 than disabling the bound — `xargs -P 0` means *unlimited*, so a spelling of zero
 that slipped through would start every file at once, and the degree exists to be
-a load bound. Export it if you set it in a shell that then drives the skill; the
-gate is a child process.
+a load bound. Setting it in the shell you drive the skill from is enough: the
+skill exports it, along with the other knobs, because the gate runs as a child
+process.
 
 It exists because this plugin's own PR took nineteen review rounds, and almost
 none of the findings were subtle. Rounds are the expensive part of the loop —

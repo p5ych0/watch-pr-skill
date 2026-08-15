@@ -459,6 +459,22 @@ for t in "$SCRIPTS"/test-*.sh; do
     suite_names[$suite_files]="$t"
 done
 if [ "$suite_files" -gt 0 ]; then
+    # `builtin` FOR `printf`, `command` FOR THE REST. A function shadows any name,
+    # builtin or external, so the records themselves are as forgeable as the tools
+    # that carry them: an exported `printf` that rewrites `F %s` to `P %s` turns a
+    # failing worker's record into a passing one at the moment it is written, and
+    # everything downstream sees a complete, correctly ordered, all-passing set.
+    #
+    # The two bypasses are not interchangeable. `command printf` would run
+    # `/usr/bin/printf`, a different program with its own quirks; `builtin xargs`
+    # does not exist. Each name takes the one that means "the real thing" for what
+    # it is.
+    #
+    # `note` and `ok` are deliberately NOT hardened. A shadowed `printf` there
+    # changes the TEXT of a finding, not whether one was recorded — the counter
+    # still increments and the gate still exits non-zero — so it cannot forge a
+    # clean verdict, which is the property being defended.
+    #
     # `command` ON EVERY EXTERNAL HERE, because an exported shell function is
     # inherited by this process and shadows the name. That is not hypothetical in
     # this file: an exported `umask` function defeated the scratch directory's
@@ -507,7 +523,7 @@ if [ "$suite_files" -gt 0 ]; then
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
-            printf '%s:%s\0' "$n" "${suite_names[$n]}"
+            builtin printf '%s:%s\0' "$n" "${suite_names[$n]}"
         done | command xargs -0 -P "$suite_jobs" -n 1 bash -c '
             rec="$1"
             i="${rec%%:*}"
@@ -515,9 +531,9 @@ if [ "$suite_files" -gt 0 ]; then
             # The file going missing between the parent listing it and this worker
             # reaching it is the one thing left that the parent cannot see. It is
             # neither a pass nor a failure.
-            [ -e "$p" ] || { printf "M %s\n" "$i"; exit 0; }
-            if command bash "$p" >/dev/null 2>&1; then printf "P %s\n" "$i"
-            else printf "F %s\n" "$i"; fi
+            [ -e "$p" ] || { builtin printf "M %s\n" "$i"; exit 0; }
+            if command bash "$p" >/dev/null 2>&1; then builtin printf "P %s\n" "$i"
+            else builtin printf "F %s\n" "$i"; fi
             exit 0
         ' _)"; suite_rc=$?
     # The runner's status is still taken. It is no longer the only thing taken,
@@ -531,7 +547,7 @@ if [ "$suite_files" -gt 0 ]; then
     # so the findings come out in the glob's order rather than the order the
     # machine happened to finish in. A gate whose output reshuffles between runs is
     # a gate people stop reading.
-    suite_sorted="$(printf '%s\n' "$suite_out" | command sort -k2 -n)" || {
+    suite_sorted="$(builtin printf '%s\n' "$suite_out" | command sort -k2 -n)" || {
         echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
         exit 2
     }
@@ -587,7 +603,7 @@ EOF
         # ONE LINE PER FINDING, whatever the name contains. A newline inside a
         # filename would otherwise print as two findings to anything reading this
         # output.
-        b="$(printf '%s' "$b" | command tr '\n' ' ')"
+        b="$(builtin printf '%s' "$b" | command tr '\n' ' ')"
         note failing_test "$b fails"; suite_fail=1
     done
 fi

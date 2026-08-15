@@ -592,6 +592,22 @@ out="$(bash() { if [ "${1#*/test-}" != "$1" ]; then return 0; fi; command bash "
     && pass "…and an exported bash cannot stand in for the test itself" \
     || die "the test run was forged by a function (rc=$rc out='$out')"
 
+# …AND THE RECORD ITSELF, which is as forgeable as the tools that carry it. An
+# exported `printf` that rewrites the failing verdict at the moment it is written
+# leaves everything downstream looking at a complete, correctly ordered,
+# all-passing set. `builtin printf` is the bypass here — `command printf` would
+# run a different program.
+#
+# The function is narrow for the same reason the interpreter's was: it forges only
+# the record format and passes every other use through, so the case cannot pass
+# because it broke something unrelated.
+out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; else builtin printf "$@"; fi; }
+       export -f printf
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported printf cannot rewrite a failing record" \
+    || die "a forged record format was accepted (rc=$rc out='$out')"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to
