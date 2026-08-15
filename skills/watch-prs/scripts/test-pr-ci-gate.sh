@@ -246,7 +246,17 @@ STUBSH
     # assertion — falling back to a thirty-minute timeout is the CORRECT
     # behaviour, so the watchdog stopping the run is expected, not a failure.
     #
-    # THE CEILING CARRIES THIS, NOT THE LENGTH OF THE WINDOW. The documented
+    # THE CEILING CARRIES ONLY THE FIRST OF THE THREE. `PR_CI_INTERVAL=0` is the
+    # one that spins — 569 polls unguarded — and a ceiling sees that. The other two
+    # do not spin at all when their guard is removed, so until #50 they asserted
+    # nothing: `PR_CI_INTERVAL=soon` leaves the sleep unclamped and polls
+    # ONCE, and `PR_CI_TIMEOUT=soon` dies on `set -u` before its FIRST poll. Both
+    # were comfortably under the ceiling, and both passed for the opposite of the
+    # reason they name. The two assertions in `gate_spin` above are what actually
+    # separates a paced gate from a dead one; this ceiling remains the one that
+    # catches the spin.
+    #
+    # THE CEILING'S OWN SIZING, NOT THE LENGTH OF THE WINDOW. The documented
     # fallback is thirty seconds, so inside a six-second window a gate that
     # applied it polls EXACTLY ONCE — it polls, sleeps thirty, and the watchdog
     # stops it. A second poll inside the window means the interval was at most
@@ -286,6 +296,26 @@ STUBSH
         [ "${calls:-0}" -le "$maxc" ] \
             && pass "$label" \
             || die "$label — $calls polls in ${win}s (at most $maxc); the bound was not applied"
+        # THE POLL COUNT ALONE ACCEPTED A GATE THAT HAD DIED, and two of the three
+        # cases below rested on it entirely — #50. A gate that stops on its first
+        # iteration polls once, which is under any ceiling, so "few polls" is
+        # satisfied by pacing and by death alike. What separates them is that a
+        # PACED gate is still waiting when the window closes, and the watchdog is
+        # what ends it: rc=124, from either arm of `run_limited`.
+        [ "$rc" = 124 ] \
+            && pass "…and it was still waiting when the window closed" \
+            || die "$label — exited rc=$rc inside ${win}s; it stopped rather than pacing"
+        # …AND THE ABSENCE CHECK AS WELL AS, NEVER INSTEAD OF, THAT. An unvalidated
+        # bound reaches the shell as an operand, and the shell says so on stderr —
+        # `[: soon: integer expected`, then `soon: unbound variable` where `set -u`
+        # sees it in an arithmetic expansion. Neither moves the poll count, and the
+        # second kills the gate outright, which is the failure the rc check catches
+        # from the other side.
+        case "$out" in
+            *'integer expected'*|*'unbound variable'*)
+                die "$label — an unvalidated bound reached the shell: $out" ;;
+            *)  pass "…and no unvalidated bound reached the shell" ;;
+        esac
     }
     gate_spin 1 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
     gate_spin 1 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
