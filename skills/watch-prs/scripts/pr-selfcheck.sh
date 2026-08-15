@@ -39,6 +39,32 @@
 # several probes fail as normal operation. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
+# ── INHERITED FUNCTIONS ARE CLEARED BEFORE ANYTHING DEPENDS ON A NAME ──────
+#
+# An exported shell function is inherited by this process and shadows the name it
+# is called by — builtin or external, it makes no difference. That is not
+# hypothetical here: an exported `umask` function defeated a mode narrowing
+# earlier in this PR's history, and an exported `sort` can rewrite a failing test
+# record into a passing one, which forges the verdict this whole script exists to
+# produce.
+#
+# `command` and `builtin` are the prefixes everything below uses to reach the real
+# thing, and they are ordinary builtins, so they are shadowable in exactly the
+# same way. Clearing them first is what makes the rest of the file mean anything.
+#
+# THIS DOES NOT CLOSE THE CLASS, AND SAYING SO IS THE POINT. `unset` can itself be
+# shadowed; `set -o posix` would make special builtins outrank functions and fix
+# that, except a function named `set` defeats the `set`. Verified, not assumed —
+# the regress has no terminator inside the process.
+#
+# What it does close is every version of the attack that does not also shadow
+# `unset`. What is left needs a parent shell that is already executing arbitrary
+# code as the developer, and such a shell can edit the tests, this script, or the
+# commit — so a gate defending its own arithmetic against it is defending the
+# wrong thing. That is a limitation rather than a hole, and it is written here
+# rather than left for a reader to rediscover.
+unset -f builtin command printf sort xargs basename tr bash 2>/dev/null || true
+
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
 # non-zero, and command substitution keeps it — so the check would scan a tree

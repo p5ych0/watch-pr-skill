@@ -608,6 +608,32 @@ out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; els
     && pass "…and an exported printf cannot rewrite a failing record" \
     || die "a forged record format was accepted (rc=$rc out='$out')"
 
+# …AND THE PREFIXES THEMSELVES. `command` and `builtin` are ordinary builtins, so
+# a function of either name shadows them — which makes them forgeable exactly like
+# what they were introduced to protect. Verified rather than assumed: with both
+# exported, `builtin printf "F %s\n"` produced `P`.
+#
+# The script clears inherited definitions of every name its verdict depends on
+# before it depends on one.
+out="$(builtin() { shift; command printf "P %s\n" "$2"; }
+       export -f builtin
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported builtin cannot forge the record it is meant to protect" \
+    || die "a shadowed builtin forged a pass (rc=$rc out='$out')"
+#
+# NARROW, like the others. A `command()` that forges everything also forges the
+# watchdog's and the harness's own calls, and the case then fails because it broke
+# its surroundings rather than because the subject was fooled — which is what the
+# first version of this did. This one forges only the sort of the record stream
+# and passes every other use through to the real builtin.
+out="$(command() { if [ "$1" = sort ]; then cat >/dev/null; builtin printf 'P 1\n'; else builtin command "$@"; fi; }
+       export -f command
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and neither can an exported command" \
+    || die "a shadowed command forged a pass (rc=$rc out='$out')"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to
