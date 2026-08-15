@@ -412,8 +412,9 @@ The suite is the slow part, so it runs four files at a time — they share no
 state, and four at a time is ~85s where one after another is ~208s.
 
 It writes nothing outside itself to do this, and every test reports back whether
-it passed or failed — so a runner that quietly ran nothing is an error rather
-than a clean suite.
+it passed, failed, or had vanished before it could run — so a runner that quietly
+ran nothing is an error rather than a clean suite, and a test that disappeared
+mid-run is neither a pass nor a failure.
 
 `RB_SUITE_JOBS` changes the degree. It takes **one to five digits, no leading
 zero**: `1` and `12` are degrees, while `0`, `00`, `01` and `soon` are not, and

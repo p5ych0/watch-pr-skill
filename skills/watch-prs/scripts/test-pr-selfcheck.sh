@@ -668,35 +668,19 @@ out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
     && pass "a readonly startup hook cannot talk over the record channel" \
     || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
 
-# ── a startup file changing how this script reads, with no way out of it ───
-# `IFS=-` in a hook splits `-v` into an empty field and `v`, so nothing clears
-# `-v` and the postcondition refuses a run that was fine.
+# ── a startup file changing how this script reads its own data ─────────────
+# `IFS` cannot reach the CLEARING: those names are read with `while IFS= read -r`
+# and quoted, so they survive any separator. What it does reach is the failure
+# list — `for idx in $suite_failed` splits on it. With `IFS=-` the whole list
+# becomes ONE token, no index resolves, and two failing tests are reported as
+# `status=clean`: the forged-clean direction rather than the blocked-run one.
 #
-# THE RE-EXEC USUALLY MAKES THAT UNREACHABLE, which is why this case forges `exec`
-# as well. Bash never inherits an exported `IFS` — it resets it at startup — so
-# the only way a strange one reaches the clearing is a hook setting it in a
-# process that did not step out of the hook. Without the forged `exec` this case
-# is green whether the normalisation exists or not, which is what it was before.
-IFSENV="$TMP/ifsenv.sh"
-{ builtin printf 'IFS=-\n'
-  builtin printf 'function -v { :; }\n'
-  builtin printf 'export -f -- -v\n'
-} > "$IFSENV"
+# `exec` is forged so the re-exec cannot rescue it. Bash never inherits an
+# exported `IFS` — it resets it at startup — so a hook in a process that did not
+# step out of the hook is the only route left, and that is the layer the
+# normalisation belongs to.
 NOEXEC="$TMP/noexec.sh"
 { builtin printf 'exec() { return 0; }\n'; builtin printf 'export -f exec\n'; } > "$NOEXEC"
-R5="$(mkroot "$OK_SKILL")"
-addscript "$R5" pr-thing.sh 'exit 0'
-addtest "$R5" test-pr-thing.sh
-out="$(. "$NOEXEC"; run_limited 60 env BASH_ENV="$IFSENV" "$SCRIPT" "$R5" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
-    && pass "an inherited IFS does not block a valid run, even with no way out of the hook" \
-    || die "IFS from a startup file broke the clearing (rc=$rc out='$out')"
-# …AND THE FAILURE LIST IS WHERE IT ACTUALLY BITES. The clearing reads its names
-# rather than expanding them, so `IFS` cannot reach it — but `for idx in
-# $suite_failed` further down still splits on it. With `IFS=-` the whole list
-# becomes ONE token, no index resolves, and two failing tests are reported as
-# `status=clean`. That is the forged-clean direction, not the blocked-run one, so
-# it is the case worth having.
 R5B="$(mkroot "$OK_SKILL")"
 for n in alpha omega; do
     addscript "$R5B" "pr-$n.sh" 'exit 0'
@@ -706,8 +690,12 @@ done
 IFSONLY="$TMP/ifsonly.sh"
 builtin printf 'IFS=-\n' > "$IFSONLY"
 out="$(. "$NOEXEC"; run_limited 60 env BASH_ENV="$IFSONLY" "$SCRIPT" "$R5B" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-alpha.sh fails'; } \
-    && pass "…and failing tests are still reported under it, not swallowed" \
+# BOTH NAMES, because the point is that the whole list survives. Requiring only
+# the first would stay green while a regression dropped everything after it.
+{ [ "$rc" -eq 1 ] \
+    && builtin printf '%s' "$out" | command grep -q 'test-pr-alpha.sh fails' \
+    && builtin printf '%s' "$out" | command grep -q 'test-pr-omega.sh fails'; } \
+    && pass "failing tests are still reported under an inherited IFS, all of them" \
     || die "an inherited IFS swallowed the failures (rc=$rc out='$out')"
 
 # ── a startup file that talks over the record channel ──────────────────────

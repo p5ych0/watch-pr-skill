@@ -30,8 +30,9 @@
   records carry anything, and only a number comes back, which cannot carry a
   delimiter at all.
 
-  Every worker reports back, pass or fail, and the parent requires one record per
-  file. Checking only for failures cannot tell "nothing failed" from "nothing
+  Every worker reports back — pass, fail, or that its file had gone missing before
+  it ran — and the parent requires one record per file, refusing that third answer
+  rather than guessing which of the other two it meant. Checking only for failures cannot tell "nothing failed" from "nothing
   ran": an inherited `xargs() { return 0; }` consumes no input, exits 0 and prints
   nothing, which is exactly what a clean suite looks like — and a status check
   does not see it either, because it succeeded.
