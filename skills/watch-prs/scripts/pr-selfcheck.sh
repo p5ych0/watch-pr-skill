@@ -83,6 +83,20 @@ set -uo pipefail
 # "not a valid identifier". A `set -f` here would guard a case the shell makes
 # unreachable, and it could not be given a fixture, which is how unexercised
 # guards accumulate.
+# `IFS` FIRST, because every unquoted expansion below splits on it and this shell
+# did not necessarily choose it. `BASH_ENV` is sourced before this script's body
+# runs, so a startup file setting `IFS=-` is already in effect here: the name `-v`
+# then splits into an empty field and `v`, nothing clears `-v`, and the
+# postcondition refuses a run that was fine. Unsetting `BASH_ENV` afterwards
+# cannot undo an assignment that has already happened.
+#
+# It is normalised rather than saved and restored, and it stays normalised for the
+# rest of the file: `for idx in $suite_failed` splits on it too, and an inherited
+# `IFS` has no business deciding how this script reads its own data.
+#
+# An assignment is also the one construct in this neighbourhood that cannot be
+# shadowed — there is no function to intercept it.
+IFS=$' \t\n'
 for _rb_f in $(compgen -A function 2>/dev/null); do
     unset -f -- "$_rb_f" 2>/dev/null || true
 done

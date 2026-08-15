@@ -522,6 +522,26 @@ jobs_case 01   4 "…and so does a leading-zero one, which the documented gramma
 jobs_case soon 4 "…and a value that is not a number at all"
 rm -rf "$JOBSTUB"
 
+# ── a startup file that changes how this script reads its own data ─────────
+# `BASH_ENV` is sourced BEFORE the script body, so an `IFS` set there is already
+# in effect when the clearing loop expands `compgen`'s output. With `IFS=-`, the
+# name `-v` splits into an empty field and `v`; nothing clears `-v`; and the
+# postcondition refuses a run that was fine. Unsetting `BASH_ENV` afterwards
+# cannot undo an assignment that already happened, which is why the fix is to
+# normalise `IFS` rather than to clear the variable earlier.
+IFSENV="$TMP/ifsenv.sh"
+{ builtin printf 'IFS=-\n'
+  builtin printf 'function -v { :; }\n'
+  builtin printf 'export -f -- -v\n'
+} > "$IFSENV"
+R5="$(mkroot "$OK_SKILL")"
+addscript "$R5" pr-thing.sh 'exit 0'
+addtest "$R5" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$IFSENV" "$SCRIPT" "$R5" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "an inherited IFS does not block a valid run" \
+    || die "IFS from a startup file broke the clearing (rc=$rc out='$out')"
+
 # ── a startup file that talks over the record channel ──────────────────────
 # A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and
 # the workers report their verdict on stdout — so a startup file that prints
