@@ -735,6 +735,62 @@ out="$(. "$ODDFN"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
     && pass "a benign function named like an option is cleared, not a refusal" \
     || die "an option-shaped function name blocked a valid run (rc=$rc out='$out')"
 
+# …AND THE REFUSAL ITSELF, whose `builtin exit` can be swallowed. In that branch
+# functions are known to have survived, so the name doing the refusing may be one
+# of them: a `builtin()` that returns for the `exit` call alone lets the run print
+# `inherited_function` and then CARRY ON to a clean verdict. The bare `exit 2`
+# behind it is what stops that, and nothing exercised it until now.
+FORGE3="$TMP/exitforge.sh"
+cat > "$FORGE3" <<'FORGESH'
+unset() { return 0; }
+builtin() { if command [ "$1" = exit ]; then return 0; fi; command builtin "$@"; }
+export -f unset builtin
+FORGESH
+out="$(. "$FORGE3"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "a swallowed builtin exit still stops the run" \
+    || die "the refusal was swallowed (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and it went on to report clean: $out" \
+    || pass "…and did not go on to a verdict"
+
+# ── strict mode survives an exported set ───────────────────────────────────
+# `set -uo pipefail` runs at the top of the file, BEFORE the clearing, so an
+# exported `set() { return 0; }` swallows it and the options are off for the whole
+# run. `pipefail` off is the dangerous half: the status of a pipeline is its LAST
+# stage's, so a middle stage that emits its normal output and then fails is
+# invisible — `chk` sees 0 and the gate reports a verdict from an extraction that
+# did not complete.
+#
+# THE PROBE HAS TO FAIL WHERE grep IS NOT LAST, which is the assignment scan
+# (`grep -oE … | sed … | sort -u`). A stub that failed on every call broke
+# `strip_comments` first, where grep IS last, and that aborts with or without
+# pipefail — so the case passed either way and proved nothing. This one keys on
+# `-oE`.
+REAL_GREP="$(command -v grep)" || die "no grep on PATH"
+STRICT="$TMP/strictforge"; rm -rf "$STRICT"; mkdir -p "$STRICT"
+cat > "$STRICT/grep" <<GREPSH
+#!/usr/bin/env bash
+for _a in "\$@"; do
+    if [ "\$_a" = "-oE" ]; then "$REAL_GREP" "\$@"; exit 3; fi
+done
+exec "$REAL_GREP" "\$@"
+GREPSH
+chmod +x "$STRICT/grep"
+FORGE4="$TMP/setforge.sh"
+cat > "$FORGE4" <<'FORGESH'
+set() { return 0; }
+export -f set
+FORGESH
+# A ROOT WITH NO SCRIPTS, so only section 1 runs: the stub is on PATH for the
+# whole invocation, and letting it reach the eighteen-file suite would break the
+# tests themselves rather than the extraction this case is about.
+BARE="$(mkroot "$OK_SKILL")"
+out="$(. "$FORGE4"; run_limited 60 env PATH="$STRICT:$PATH" "$SCRIPT" "$BARE" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'step=assigned'; } \
+    && pass "an exported set does not leave pipefail off for the run" \
+    || die "a failing middle stage was hidden (rc=$rc out='$out')"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to

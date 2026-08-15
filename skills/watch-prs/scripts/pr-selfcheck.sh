@@ -72,16 +72,20 @@ set -uo pipefail
 #
 # So nothing inherited survives, whatever it is called. Clearing a benign exported
 # function costs this process nothing: it does not use any.
-# `--`, AND GLOBBING OFF, because a function name is not an option and not a
-# pattern. `unset -f -v` reads `-v` as a flag and clears nothing, and an unquoted
-# expansion lets a name containing `*` or `[` match filenames instead of itself —
-# either way a benign function survives and the postcondition below blocks a run
-# that was fine.
-builtin set -f
+# `--`, BECAUSE A FUNCTION NAME IS NOT AN OPTION. `unset -f -v` reads `-v` as a
+# flag and clears nothing, so the function survives and the postcondition below
+# refuses a run that was fine. `function -v { …; }` is a name bash accepts.
+#
+# GLOBBING IS NOT SUPPRESSED HERE, and that is deliberate rather than an
+# oversight. The expansion is unquoted, so a name containing `*`, `?` or `[` would
+# match filenames instead of itself — but bash does not permit such a name:
+# `function '*'`, `function 'a*b'` and `function 'x[1]'` are each rejected with
+# "not a valid identifier". A `set -f` here would guard a case the shell makes
+# unreachable, and it could not be given a fixture, which is how unexercised
+# guards accumulate.
 for _rb_f in $(compgen -A function 2>/dev/null); do
     unset -f -- "$_rb_f" 2>/dev/null || true
 done
-builtin set +f
 # …AND THE CLEARING IS PROVEN, because `unset` is itself among the things that can
 # be shadowed: an exported `unset() { return 0; }` reports success and removes
 # nothing. Its status is not a check; this is. Refusing beats continuing with a
@@ -108,6 +112,17 @@ if [[ -n $_rb_left ]]; then
     exit 2
 fi
 unset -v _rb_f _rb_left 2>/dev/null || true
+# …AND STRICT MODE IS APPLIED AGAIN, because the `set -uo pipefail` at the top of
+# this file ran BEFORE the clearing and an exported `set() { return 0; }` would
+# have swallowed it. The options were then off for the whole run: `pipefail` off
+# is the dangerous half, since a middle stage that emits its normal output and
+# then fails is invisible — `chk` sees the last stage's 0 and the gate reports a
+# verdict from an extraction that did not complete.
+#
+# Cheap and unconditional rather than conditional on having detected anything: the
+# cost is one builtin call, and deciding whether it is needed means trusting the
+# same names again.
+set -uo pipefail
 
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
