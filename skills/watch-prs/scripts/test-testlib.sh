@@ -396,6 +396,14 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
     # The same pass joins continued lines, since the assignment and the call are
     # routinely split across them, and that used to be a second unguarded scan.
     out="$(awk '
+        # ONE definition of what an offender is, reached from both the end of a
+        # command and the comment that closes one. Written out twice, the comment
+        # boundary would be the copy that drifts.
+        function emit() {
+            if (buf ~ /PATH=/ && buf ~ /run_limited/ && buf !~ /run_limited [0-9]+ env /)
+                print FILENAME ":" start ": " buf
+            buf = ""; start = 0
+        }
         FNR == 1 { buf = ""; start = 0 }
         # EXACT basename, not a suffix — the same rule as the recordlib guard:
         # a suffix match also exempts a file merely NAMED like the exempt one.
@@ -415,19 +423,26 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
         # twice from the deleted structural checker — and a violation carrying one
         # would then go unreported, turning a false positive into a false negative.
         #
-        # ONLY WHEN NOT MID-CONTINUATION. A `#` opening a continued line is joined
-        # into the command rather than starting a comment, so `buf` being empty is
-        # what distinguishes a comment from a continuation that looks like one.
-        buf == "" && /^[[:space:]]*#/ { next }
+        # A CONTINUATION DOES NOT MAKE THE NEXT LINE CODE. The first version of
+        # this skipped comments only where `buf` was empty, on the theory that a
+        # `#` opening a continued line is joined into the command. Bash says
+        # otherwise: after the backslash-newline is removed the `#` still begins a
+        # word, so it starts a comment — and that comment ENDS the command.
+        # Measured, not reasoned: `printf 'A=%s\n' one \` followed by `# two`
+        # prints `A=one` and nothing else, and the line after it runs as a new
+        # command. Keeping the buffer open there appended the prose and reported
+        # the false positive this change exists to remove.
+        #
+        # So a whole-line comment closes any pending continuation and is then
+        # discarded — never concatenated.
+        /^[[:space:]]*#/ { if (buf != "") emit(); next }
         {
             if (start == 0) start = FNR
             line = $0
             sub(/\\$/, " ", line)
             buf = buf line
             if ($0 ~ /\\$/) next
-            if (buf ~ /PATH=/ && buf ~ /run_limited/ && buf !~ /run_limited [0-9]+ env /)
-                print FILENAME ":" start ": " buf
-            buf = ""; start = 0
+            emit()
         }
     ' "$dir"/test-*.sh 2>"$errf")"; rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
@@ -483,6 +498,15 @@ printf '#!/usr/bin/env bash\n# `run_limited N env …`, not `PATH=… run_limite
 # and proves nothing. Here the strip removes the call itself, so the offender
 # goes unreported and the case fails.
 printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" MSG="a # b" run_limited 5 "$SCRIPT" a)"\n' > "$SEENTMP/test-hashstring.sh"
+# A CONTINUATION FOLLOWED BY THE SAME PROSE. Bash ends the command at that
+# comment; a scanner that keeps the buffer open appends it and reports the
+# violation the comment is describing.
+printf '#!/usr/bin/env bash\n: \\\n# `run_limited N env …`, not `PATH=… run_limited`, so the subject sees it\n' > "$SEENTMP/test-contcomment.sh"
+# …AND THE COMMENT MUST CLOSE THE COMMAND, not merely be skipped. Skipping it
+# while leaving the buffer open joins two unrelated commands, and the FIRST one's
+# compliant `run_limited N env` then exempts the second one's violation — a false
+# negative in the direction that matters, produced by the half-fix.
+printf '#!/usr/bin/env bash\nrun_limited 5 env true \\\n# a note between them\nout="$(PATH="/x:$PATH" run_limited 9 "$SCRIPT" a)"\n' > "$SEENTMP/test-contjoin.sh"
 # The whole reporting path, not just the scan: this is the branch that aborted.
 report_watchdog_path_misuse "$SEENTMP" > "$TMP/seen.out"; rep_rc=$?
 [ "$rep_rc" -eq 1 ] \
@@ -502,6 +526,12 @@ printf '%s' "$seen" | grep -q 'test-split.sh' \
 printf '%s' "$seen" | grep -q 'test-comment.sh' \
     && die "a comment DESCRIBING the rule was reported as a violation of it: '$seen'" \
     || pass "…while a comment describing the rule is not reported as breaking it"
+printf '%s' "$seen" | grep -q 'test-contcomment.sh' \
+    && die "prose after a continuation was concatenated into the command: '$seen'" \
+    || pass "…including after a continuation, where bash ends the command too"
+printf '%s' "$seen" | grep -q 'test-contjoin.sh' \
+    && pass "…and the comment closes the command, so the next one is judged alone" \
+    || die "a compliant call before a comment exempted a violation after it: '$seen'"
 printf '%s' "$seen" | grep -q 'test-hashstring.sh' \
     && pass "…and a violation carrying a '#' inside a string is still caught" \
     || die "stripping went past a whole-line comment and lost a real violation: '$seen'"
