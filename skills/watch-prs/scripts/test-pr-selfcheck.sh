@@ -522,20 +522,24 @@ jobs_case 01   4 "…and so does a leading-zero one, which the documented gramma
 jobs_case soon 4 "…and a value that is not a number at all"
 rm -rf "$JOBSTUB"
 
-# ── a TMPDIR containing xargs' replacement token ───────────────────────────
-# `-I{}` rewrites its token in EVERY initial argument. The scratch directory was
-# passed as one, so a `TMPDIR` of `/tmp/cache{}` handed each worker a path that
-# does not exist and the gate refused with `suite_runner_failed` over tests that
-# were fine — a mandatory pre-push gate blocking on its own plumbing.
-BRACEDIR="$TMP/cache{}"
-mkdir -p "$BRACEDIR"
-R="$(mkroot "$OK_SKILL")"
-addscript "$R" pr-thing.sh 'exit 0'
-addtest "$R" test-pr-thing.sh
-out="$(TMPDIR="$BRACEDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
-    && pass "a TMPDIR containing {} does not break the runner" \
-    || die "the replacement token in TMPDIR reached the workers (rc=$rc out='$out')"
+# ── a startup file that talks over the record channel ──────────────────────
+# A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and
+# the workers report their verdict on stdout — so a startup file that prints
+# anything lands in the record stream beside the `P`, `F` and `M` lines and the
+# parser refuses a run in which every test passed.
+#
+# This is a regression this change introduced: the sequential loop it replaced ran
+# `bash "$t" >/dev/null 2>&1` and discarded startup output with everything else. A
+# worker that has to SAY something cannot.
+BENV="$TMP/benv.sh"
+builtin printf 'echo POLLUTION\n' > "$BENV"
+R4="$(mkroot "$OK_SKILL")"
+addscript "$R4" pr-thing.sh 'exit 0'
+addtest "$R4" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$BENV" "$SCRIPT" "$R4" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a BASH_ENV that prints does not corrupt the record stream" \
+    || die "startup output reached the records (rc=$rc out='$out')"
 
 # ── an exported function forging a clean result ────────────────────────────
 # A SHELL FUNCTION SHADOWS A COMMAND NAME, and an exported one is inherited by
@@ -617,8 +621,9 @@ out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; els
 # before it depends on one.
 #
 # NARROW, like the others: it forges the failing-record format and passes every
-# other call through. A blanket forger breaks the script's own `builtin set -f`
-# and the case then fails because it wrecked its surroundings.
+# other call through. A blanket forger breaks the script's own use of the name and
+# the case then fails because it wrecked its surroundings rather than because the
+# subject was fooled.
 out="$(builtin() { if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
        export -f builtin
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
@@ -716,9 +721,12 @@ builtin printf '%s' "$out" | command grep -q 'status=clean' \
 # ── a benign function whose name looks like an option ──────────────────────
 # `unset -f -v` reads `-v` as a flag and clears nothing, so the postcondition then
 # refuses a run that was perfectly fine — a mandatory pre-push gate blocked by a
-# harmless function in someone's shell. `--` ends option parsing; globbing is off
-# while the names are expanded, so a name containing `*` or `[` is not matched
-# against filenames either.
+# harmless function in someone's shell. `--` ends option parsing.
+#
+# ONLY THE OPTION HALF IS COVERED, because only the option half exists. A name
+# containing `*` or `[` would be a globbing hazard, but bash rejects
+# `function '*'`, `function 'a*b'` and `function 'x[1]'` as "not a valid
+# identifier", so no such name can be inherited and there is nothing to guard.
 R2="$(mkroot "$OK_SKILL")"
 addscript "$R2" pr-thing.sh 'exit 0'
 addtest "$R2" test-pr-thing.sh

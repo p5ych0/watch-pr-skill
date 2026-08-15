@@ -86,6 +86,20 @@ set -uo pipefail
 for _rb_f in $(compgen -A function 2>/dev/null); do
     unset -f -- "$_rb_f" 2>/dev/null || true
 done
+# `BASH_ENV` GOES WITH THEM, because a non-interactive `bash -c` SOURCES it before
+# running its command — and the workers report their verdict on stdout. A startup
+# file that prints anything therefore lands in the record stream beside the `P`,
+# `F` and `M` lines, and the parser refuses a run in which every test passed.
+#
+# It is unset here rather than suppressed at the worker, so the tests the workers
+# run are clean too: a fixture that captures output would otherwise get the same
+# text mixed into whatever it was asserting. `ENV` for the same reason, since a
+# shell invoked as `sh` reads that one.
+#
+# This is a regression this change introduced. The sequential loop it replaced ran
+# `bash "$t" >/dev/null 2>&1`, which discarded startup output along with
+# everything else; a worker that has to SAY something cannot.
+unset -v BASH_ENV ENV 2>/dev/null || true
 # …AND THE CLEARING IS PROVEN, because `unset` is itself among the things that can
 # be shadowed: an exported `unset() { return 0; }` reports success and removes
 # nothing. Its status is not a check; this is. Refusing beats continuing with a
