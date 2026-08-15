@@ -833,6 +833,20 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
         *child=1*) pass "…and strict merge mode reaches it too, rather than silently restoring --admin" ;;
         *) die "REVIEW_MERGE_STRICT does not survive into the merge gate (got '$strict_out')" ;;
     esac
+    # …AND `RB_SUITE_JOBS`, which crosses the same boundary at step 5a. The gate
+    # runs the suite concurrently and reads its degree from that name; without the
+    # export an operator who lowers it here watches the gate go on running four at
+    # a time while their terminal shows the value they set.
+    jobs_out="$(cd "$SETUPTMP/repo" && run_limited 60 env -u RB_SUITE_JOBS \
+        CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" TMPDIR="$SETUPTMP" \
+        bash -c 'RB_SUITE_JOBS=1
+                 eval "$1" >/dev/null
+                 bash -c '"'"'printf "child=%s" "${RB_SUITE_JOBS-unset}"'"'"'' _ "$setup_block" 2>&1)" \
+        || jobs_out="FAILED:$jobs_out"
+    case "$jobs_out" in
+        *child=1*) pass "…and the suite concurrency reaches the pre-push gate's process" ;;
+        *) die "RB_SUITE_JOBS does not survive into pr-selfcheck.sh (got '$jobs_out')" ;;
+    esac
     # …AND THE LOOP VARIABLE DOES NOT LEAK INTO THE OPERATOR'S SHELL. This block
     # runs in the driving session, so a name it forgets to clean up is written into
     # that session and stays there — the same class the CI gate's `local`

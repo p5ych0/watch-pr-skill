@@ -1,5 +1,54 @@
 # Changelog
 
+## [2.0.13] — 2026-08-14
+
+- **The pre-push gate ran its eighteen independent test files one after another.** The
+  suite is what a person waits at before every round, and at ~208s it was long
+  enough to be worth skipping — which is the failure, because it is the check that
+  keeps the same handful of mistakes from reaching a reviewer. The files share no
+  state: each builds its own scratch directory and stubs its own `gh`. They were
+  sequential because a `for` loop is the obvious thing to write.
+
+  `pr-selfcheck.sh` now runs four at a time and takes ~85s. `RB_SUITE_JOBS` sets
+  the degree, and takes one to five digits with no leading zero — `0`, `00` and
+  `01` are all refused, and fall back to four rather than disabling the bound.
+  `SKILL.md` exports it, because the gate is a child process and a knob that does
+  not cross that boundary silently does nothing while the terminal shows the value
+  you set. CI keeps its sequential loop: it groups and
+  annotates each file, and that is worth more on a machine nobody is waiting at.
+
+  Nothing is written outside the process. The first version kept the list of files
+  in a scratch directory under `TMPDIR` and spent five review rounds defending it —
+  trust `mktemp`, validate its answer, take a subdirectory, create it outright,
+  make it private, check the parent's sticky bit — and the next finding was a
+  `TMPDIR` owned by another user, which the sticky bit does nothing about. Every
+  one of those was real, and all of them were about a shared directory the work
+  never needed: the list is a shell array, so nothing is written to a filesystem
+  and no path reaches a worker through a file anyone else can reach. Each worker
+  is handed the exact path the parent captured, paired with its index, and
+  answers with the index alone — the path travels outward, where NUL-delimited
+  records carry anything, and only a number comes back, which cannot carry a
+  delimiter at all.
+
+  Every worker reports back — pass, fail, or that its file had gone missing before
+  it ran — and the parent requires one record per file, refusing that third answer
+  rather than guessing which of the other two it meant. Checking only for failures cannot tell "nothing failed" from "nothing
+  ran": an inherited `xargs() { return 0; }` consumes no input, exits 0 and prints
+  nothing, which is exactly what a clean suite looks like — and a status check
+  does not see it either, because it succeeded.
+
+  Three things a concurrent runner gets wrong that a loop cannot. Its status is an
+  answer: `xargs` writes failures to stdout, so a runner that cannot start writes
+  nothing — and nothing is what a clean suite looks like, so an unchecked status
+  reported `status=clean` on a suite that never ran. The parallelism degree is a
+  load bound, and `xargs -P 00` is unlimited, so every spelling of zero has to be
+  refused rather than only the literal one. And a path cannot travel through the
+  runner: `xargs` eats backslashes unless its input is NUL-delimited, and a newline
+  in a directory name splits one failure into two on the way back — inventing a
+  test name and inflating the count. So the path travels outward inside a
+  NUL-delimited record and only its index comes back, an index being the one thing
+  that cannot carry a delimiter.
+
 ## [2.0.12] — 2026-08-13
 
 - **The Codex→Copilot transition is a script, and its refusals are executed.** It

@@ -308,6 +308,886 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'failing_test'; } \
     && pass "a failing test is a finding" \
     || die "failing test not caught (rc=$rc out='$out')"
+# AND IT NAMES THE FILE. The suite runs concurrently now, so the name no longer
+# comes from the loop variable of the thing being run — it is carried back out of
+# a runner that is writing several files' results into one stream. A finding that
+# says only "a test fails" would satisfy the assertion above.
+printf '%s' "$out" | grep -q 'test-pr-thing.sh' \
+    && pass "…and the finding names which one" \
+    || die "the finding did not name test-pr-thing.sh: $out"
+
+# ── two failing tests, both reported ───────────────────────────────────────
+# The runner writes each failure as one whole record, which is what makes
+# concurrent output safe to read back. One failing file cannot show that.
+R="$(mkroot "$OK_SKILL")"
+for n in alpha omega; do
+    addscript "$R" "pr-$n.sh" 'exit 0'
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+    chmod +x "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+done
+out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
+    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+    && pass "two failing tests are both reported" \
+    || die "not both failures were reported (rc=$rc out='$out')"
+
+# ── …and reported in the glob's order, not the runner's ────────────────────
+# THE RUNNER IS MADE TO REPORT BACKWARDS, rather than the tests being made to
+# finish backwards. Two earlier versions tried the latter and neither was sound:
+# with both tests exiting immediately the scheduler produced the sorted order by
+# itself, and making `alpha` wait on a marker `omega` writes only proves omega's
+# SCRIPT got that far — its worker still has to return from `bash` and reach the
+# `printf` that emits the record, so alpha's worker can still emit first.
+#
+# Every one of those attempts was trying to control a race. This does not have
+# one: a stub `xargs` consumes the index stream and reports every index as failed
+# in DESCENDING order, so the only thing that can put `alpha` before `omega` in
+# the output is the gate's own `sort -n`.
+REVSTUB="$TMP/revstub"; rm -rf "$REVSTUB"; mkdir -p "$REVSTUB"
+cat > "$REVSTUB/xargs" <<'REVSH'
+#!/usr/bin/env bash
+# The input is read and discarded: what this stub asserts is the PARENT's
+# ordering, so what the workers would have done is not part of the question.
+# It still reports one record per index, because the parent counts them.
+cat >/dev/null
+n="$RB_REV_COUNT"
+while [ "$n" -ge 1 ]; do printf 'F %s\n' "$n"; n=$((n - 1)); done
+exit 0
+REVSH
+chmod +x "$REVSTUB/xargs"
+# The environment goes INSIDE the watchdog, via `env`, rather than being
+# prefixed onto it. Where GNU `timeout` is missing — the portable fallback
+# this suite exists to support — the watchdog polls with its own `sleep`, so
+# a stub directory prefixed onto the caller lands on the watchdog's search
+# path as well as the subject's. `test-testlib.sh` enforces that, and
+# enforced it against this very line while it was written the other way.
+out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
+    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+    && pass "a runner reporting backwards still names both files" \
+    || die "the reversed runner lost a failure (rc=$rc out='$out')"
+{ printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
+    | sed -n '1p' | grep -q 'alpha'; } \
+    && pass "…in the glob's order rather than the order they were reported in" \
+    || die "the failures were not ordered: $out"
+rm -rf "$REVSTUB"
+
+# ── the runner failing is not an empty suite ───────────────────────────────
+# THE FAIL-OPEN THIS SECTION IS MOST EXPOSED TO. `xargs` writes the failures to
+# stdout, so a runner that cannot start writes NOTHING — and nothing is exactly
+# what a clean suite looks like. Unchecked, the gate reports `status=clean` on a
+# suite it never ran, which is the outcome every rule in CLAUDE.md § Bash
+# conventions exists to make impossible.
+#
+# The same for the sort: it consumes the failure list, so a sort that dies having
+# written nothing erases findings that were already in hand.
+BROKEN="$TMP/broken"; mkdir -p "$BROKEN"
+REAL_SORT="$(command -v sort)" || die "no sort on PATH"
+# THE STUBS ARE SCOPED TO THE STEP UNDER TEST, and that is not fussiness. This
+# script sorts and greps in section 1 as well, so a tool that fails for everyone
+# aborts long before the suite runs and the case then passes on the wrong `exit 2`
+# entirely — which is what the first version of this fixture did.
+#
+# `xargs` needs no scoping: nothing else here runs it.
+printf '#!/usr/bin/env bash\nexit 3\n' > "$BROKEN/xargs"
+# `sort` does. It is given the failure list, whose every line is an INDEX — digits
+# and nothing else; section 1 sorts variable names, which are not. So the stub
+# reads its input and fails only for the one it is aimed at.
+cat > "$BROKEN/sort" <<SORTSH
+#!/usr/bin/env bash
+# NOT \`exec\` INSIDE THE PIPELINE. That replaces the subshell, not this script, so
+# the parent went on to the refusal below and every sort failed — including the
+# one this stub is meant to let through.
+in="\$(cat)"
+# The gate's own sort is handed one record per test: a verdict letter, a space,
+# and an index. Section 1 sorts variable names, which are not that. Empty input
+# passes through, since the clean-tree case sorts an empty list there.
+if [ -z "\$in" ] || printf '%s' "\$in" | grep -qv '^[PFM] [0-9][0-9]*\$'; then
+    printf '%s' "\$in" | "$REAL_SORT" "\$@"
+    exit \$?
+fi
+exit 3
+SORTSH
+chmod +x "$BROKEN/xargs" "$BROKEN/sort"
+
+broken_case() {   # broken_case <tool> <expected reason> <make the suite fail?>
+    local tool="$1" reason="$2" failing="$3" only out rc
+    only="$TMP/only-$tool"; rm -rf "$only"; mkdir -p "$only"
+    ln -sf "$BROKEN/$tool" "$only/$tool"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    # The sort only runs when there IS a failure list to sort.
+    [ "$failing" = yes ] && printf '#!/usr/bin/env bash\nexit 1\n' \
+        > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+    out="$(PATH="$only:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "$reason"; } \
+        && pass "a broken $tool fails the check closed rather than reporting clean" \
+        || die "a broken $tool did not fail closed (rc=$rc out='$out')"
+    printf '%s' "$out" | grep -q 'the whole suite passes' \
+        && die "a broken $tool still reported the suite as passing: $out" \
+        || pass "…and does not claim the suite passed"
+}
+broken_case xargs suite_runner_failed no
+broken_case sort  suite_sort_failed   yes
+rm -rf "$BROKEN"
+
+# ── a checkout path that xargs would rewrite ───────────────────────────────
+# `xargs` strips backslashes and quotes from its input unless the records are
+# NUL-delimited. A checkout under `watch\prs` then hands every worker a path that
+# does not exist, and the gate BLOCKS THE PUSH claiming those tests failed rather
+# than admitting it never ran them. The wrong answer and the confident one.
+BSROOT="$TMP/back\\slash"
+mkdir -p "$BSROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$BSROOT/skills/watch-prs/SKILL.md"
+addscript "$BSROOT" pr-thing.sh 'exit 0'
+addtest "$BSROOT" test-pr-thing.sh
+out="$("$SCRIPT" "$BSROOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "a checkout path containing a backslash still runs its tests" \
+    || die "the backslash path was not preserved (rc=$rc out='$out')"
+
+# ── a checkout path containing a newline, with a FAILING test in it ────────
+# The NUL-delimited input protects the path on the way IN. On the way back the
+# channel is the worker's stdout, and a newline in a directory name splits one
+# path into two records there — so the gate invents a test name and reports two
+# findings where there is one. That is why the runner carries an index rather than
+# a path: digits survive every parser on both sides.
+#
+# It has to be a FAILING test, because a passing one never travels that channel.
+NLROOT="$TMP/two
+lines"
+mkdir -p "$NLROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$NLROOT/skills/watch-prs/SKILL.md"
+addscript "$NLROOT" pr-thing.sh 'exit 0'
+printf '#!/usr/bin/env bash\nexit 1\n' > "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$("$SCRIPT" "$NLROOT" 2>&1)"; rc=$?
+nfind="$(printf '%s\n' "$out" | grep -c 'finding=failing_test')" || nfind=0
+{ [ "$rc" -eq 1 ] && [ "$nfind" -eq 1 ]; } \
+    && pass "a newline in the checkout path is one finding, not two" \
+    || die "the newline split the failure record (rc=$rc findings=$nfind out='$out')"
+printf '%s' "$out" | grep -q 'test-pr-thing.sh fails' \
+    && pass "…and the one it reports is the test that actually failed" \
+    || die "the reported name was fabricated: $out"
+
+# ── the degree that actually reaches the runner ────────────────────────────
+# OBSERVED, NOT TIMED. The first version of this ran eight one-second files and
+# asserted on elapsed seconds. `$SECONDS` has one-second resolution, so an
+# unbounded run crossing two ticks reports 2 and passes — the mutant survives
+# intermittently, which is worse than no case. And the margin was never there to
+# begin with: eight files four-at-a-time is about two seconds, not four.
+#
+# So the stub records the argument list `xargs` was called with and answers the
+# question directly: which `-P` did the gate ask for?
+JOBSTUB="$TMP/jobstub"; mkdir -p "$JOBSTUB"
+REAL_XARGS="$(command -v xargs)" || die "no xargs on PATH"
+cat > "$JOBSTUB/xargs" <<XARGSSH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "\$RB_JOBS_LOG"
+exec "$REAL_XARGS" "\$@"
+XARGSSH
+chmod +x "$JOBSTUB/xargs"
+jobs_case() {   # jobs_case <RB_SUITE_JOBS or "" for unset> <expected -P> <label>
+    local want="$2" label="$3" log rc out got
+    log="$TMP/jobs.log"; : > "$log"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    if [ -n "$1" ]; then
+        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" RB_SUITE_JOBS="$1" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    else
+        # `env -u`, NOT merely "do not set it". This file runs inside a suite the
+        # operator may have started with a degree of their own, and an inherited
+        # value would make this case assert THEIR number while claiming to prove
+        # the default.
+        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" env -u RB_SUITE_JOBS "$SCRIPT" "$R" 2>&1)"; rc=$?
+    fi
+    got="$(grep -o -- '-P [0-9]*' "$log" | head -1)"
+    { [ "$rc" -eq 0 ] && [ "$got" = "-P $want" ]; } \
+        && pass "$label" \
+        || die "$label — got '$got', wanted '-P $want' (rc=$rc out='$out')"
+}
+jobs_case ""   4 "the default degree is four"
+# THE OPERATOR CONTROL IS EXERCISED, not merely exported. Nothing else here would
+# notice `suite_jobs` being hard-coded: the fallback case only proves the bound
+# stays bounded, and the contract case only proves the name crosses the process
+# boundary.
+jobs_case 1    1 "…and a valid override reaches the runner"
+# `xargs -P 00` is UNLIMITED, and `00` passes any digits-only validation. What
+# that defeats is not tidiness — the degree is a load bound, and the cases it
+# protects are the timing-sensitive ones this suite has already been bitten by.
+jobs_case 00   4 "…while every spelling of zero falls back to the bound"
+jobs_case 01   4 "…and so does a leading-zero one, which the documented grammar refuses"
+jobs_case soon 4 "…and a value that is not a number at all"
+# THE LENGTH BOUND HAS EDGES, and only the edges are worth pinning: five digits is
+# the largest accepted and six the smallest refused. Without the `??????*` arm a
+# degree of 999999 reaches `xargs`, which starts every one of the eighteen files
+# at once — and the timing-sensitive ones are exactly what the bound protects.
+jobs_case 99999  99999 "…while five digits is a degree, being the largest accepted"
+jobs_case 999999 4     "…and six is a typo, being the smallest refused"
+rm -rf "$JOBSTUB"
+
+# ── a function name that is a glob, arriving the only way it can ───────────
+# `function 'a*b'` is rejected as "not a valid identifier", and I removed the
+# globbing guard once on exactly that evidence. It was the wrong conclusion from a
+# true observation: bash refuses to DEFINE such a name and imports one from the
+# environment without complaint.
+#
+#   env 'BASH_FUNC_a*b%%=() { :; }' bash -c …
+#
+# Unquoted, that name expands against the working directory. This case runs the
+# gate from a directory holding `aXb` and `aYb`, so without `set -f` those two are
+# unset instead and `a*b` survives to fail the postcondition — a valid run blocked.
+#
+# Whitespace needs no such guard and gets no case: bash rejects `two words` on
+# IMPORT as well as on definition, with "error importing function definition".
+GLOBDIR="$TMP/globcwd"; rm -rf "$GLOBDIR"; mkdir -p "$GLOBDIR"
+: > "$GLOBDIR/aXb"; : > "$GLOBDIR/aYb"
+R6="$(mkroot "$OK_SKILL")"
+addscript "$R6" pr-thing.sh 'exit 0'
+addtest "$R6" test-pr-thing.sh
+out="$(cd "$GLOBDIR" && run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a glob-shaped inherited name is cleared, not expanded" \
+    || die "a glob-shaped name blocked a valid run (rc=$rc out='$out')"
+# …AND WITH `set` NEUTRALISED, which is the interaction the separate cases miss.
+# A guard spelled `set -f` is a name someone can swallow; reading the names
+# instead of expanding them needs no guard, so there is nothing left to swallow.
+out="$(cd "$GLOBDIR" && set() { return 0; }
+       export -f set
+       run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…even when the guard a lesser fix would have used is itself shadowed" \
+    || die "a forged set defeated the glob handling (rc=$rc out='$out')"
+
+# ── an enumerator that reports nothing ─────────────────────────────────────
+# The thing doing the enumerating is itself a name. An exported
+# `compgen() { return 0; }` reports nothing, so nothing is cleared — and a
+# postcondition that asks the same question agrees that nothing is left, while
+# every forger stays installed and the verdict becomes theirs.
+#
+# The bootstrap clears that name first and then calls through `builtin`, and the
+# postcondition asks twice through two different builtins.
+FORGE5="$TMP/compgenforge.sh"
+cat > "$FORGE5" <<'FORGESH'
+compgen() { return 0; }
+command() {
+    if builtin [ "$1" = sort ]; then builtin printf 'P 1
+'; else builtin command "$@"; fi
+}
+export -f compgen command
+FORGESH
+# ITS OWN ROOT, WITH A FAILING TEST. `mkroot` recreates one shared path, so a
+# `$R` captured earlier in this file names whatever the most recent call put
+# there — and a case asserting "not clean" against a root that legitimately
+# passes is a case that cannot fail.
+R7="$(mkroot "$OK_SKILL")"
+addscript "$R7" pr-thing.sh 'exit 0'
+builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(. "$FORGE5"; run_limited 60 "$SCRIPT" "$R7" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an enumerator that reports nothing cannot hide the functions it lists" \
+    || die "a forged compgen changed the verdict (rc=$rc out='$out')"
+
+# ── one forged prefix answering for both checks ────────────────────────────
+# Asking twice through the same prefix is asking once. A `builtin()` that reports
+# nothing for `compgen` AND for `declare` makes both halves of the postcondition
+# agree that nothing is left, while the same function rewrites the failing record
+# — so one name buys the whole verdict. One call goes through the prefix and one
+# goes direct now, so a forgery has to cover `builtin` and `declare` consistently.
+FORGE6="$TMP/prefixforge.sh"
+cat > "$FORGE6" <<'FORGESH'
+unset() { return 0; }
+builtin() {
+    if command [ "${1-}" = compgen ]; then return 0; fi
+    if command [ "${1-}" = declare ]; then return 0; fi
+    if command [ "${1-}" = unset ]; then return 0; fi
+    if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+}
+export -f unset builtin
+FORGESH
+R8="$(mkroot "$OK_SKILL")"
+addscript "$R8" pr-thing.sh 'exit 0'
+builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(. "$FORGE6"; run_limited 60 "$SCRIPT" "$R8" 2>&1)"; rc=$?
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "one forged prefix answered for both checks and the suite reported clean: $out" \
+    || pass "one forged prefix cannot answer for both halves of the postcondition"
+
+# ── a startup hook leaving something that cannot be unset ──────────────────
+# `readonly -f` makes a function `unset` REFUSES to remove, so a hook defining one
+# leaves it installed however thorough the clearing is — and the postcondition
+# then refuses a run over a function that shadows nothing this script uses. That
+# is a mandatory gate blocking a valid checkout because of something harmless in
+# someone's shell.
+#
+# It cannot be fixed from inside the process, which is why the fix is to not be in
+# that process: the script re-execs once with the hook variables removed, so the
+# hook never runs. Exported functions need no such thing — one arrives
+# non-readonly however it was marked in the shell that exported it.
+ROFN="$TMP/rofn.sh"
+{ builtin printf 'helper() { :; }\n'; builtin printf 'readonly -f helper\n'; } > "$ROFN"
+R10="$(mkroot "$OK_SKILL")"
+addscript "$R10" pr-thing.sh 'exit 0'
+addtest "$R10" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$ROFN" "$SCRIPT" "$R10" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a readonly function from a startup hook does not block a valid run" \
+    || die "a harmless readonly function was treated as a forgery (rc=$rc out='$out')"
+# …AND WITH THE GUARD'S OWN TEST SHADOWED IN THE SAME HOOK. The hook runs before
+# the guard, so a `[` defined there intercepts it and the re-exec never happens —
+# after which the readonly helper cannot be cleared and a valid checkout is
+# refused. `[[` is a reserved word and has no such hole. The two states are only
+# dangerous together, which is why neither separate case caught it.
+ROFN2="$TMP/rofn2.sh"
+{ builtin printf 'helper() { :; }\n'
+  builtin printf 'readonly -f helper\n'
+  builtin printf '[() { return 1; }\n'
+} > "$ROFN2"
+out="$(run_limited 60 env BASH_ENV="$ROFN2" "$SCRIPT" "$R10" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…even when the same hook shadows the test the guard is written with" \
+    || die "a shadowed [ skipped the re-exec (rc=$rc out='$out')"
+
+# ── a startup hook that cannot be unset ────────────────────────────────────
+# `readonly BASH_ENV` in the hook makes the parent's `unset -v` fail, and that
+# failure is deliberately ignored — so the workers would go on sourcing it and
+# mixing its output into the record stream. They are launched through `env -u`
+# instead, which removes the variable from their environment whatever this
+# shell's attributes say.
+ROENV="$TMP/roenv.sh"
+{ builtin printf 'readonly BASH_ENV\n'; builtin printf 'echo POLLUTION\n'; } > "$ROENV"
+R9="$(mkroot "$OK_SKILL")"
+addscript "$R9" pr-thing.sh 'exit 0'
+addtest "$R9" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a readonly startup hook cannot talk over the record channel" \
+    || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
+
+# ── a caller with tracing switched on ──────────────────────────────────────
+# An exported `SHELLOPTS=xtrace` turns tracing on in this process and every
+# worker, and `BASH_XTRACEFD=1` puts that trace on stdout — inside every command
+# substitution. The postcondition reads its own trace as a leftover function name
+# and refuses a valid checkout before the records are even reached; with the
+# records, the trace lands between them and the parser calls them malformed.
+#
+# It is a valid state for a caller to be in. The sequential loop this replaced
+# discarded the tests' output and never noticed; a worker that has to SAY
+# something cannot.
+NOEXEC2="$TMP/noexec2.sh"
+{ builtin printf 'exec() { return 0; }\n'; builtin printf 'export -f exec\n'; } > "$NOEXEC2"
+XT="$(mkroot "$OK_SKILL")"
+addscript "$XT" pr-thing.sh 'exit 0'
+addtest "$XT" test-pr-thing.sh
+out="$(run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "inherited tracing does not reach the record channel" \
+    || die "xtrace from the caller broke the run (rc=$rc out='$out')"
+# …AND THE GUARD DOES NOT LOOP. `SHELLOPTS` is set in every bash whether it was
+# inherited or not, so a re-exec conditioned on it never terminates. The condition
+# is `$-`, which carries `x` only when tracing is really on. A watchdog is not the
+# assertion here — reaching a verdict at all is.
+builtin printf '%s' "$out" | command grep -q 'PR_SELFCHECK' \
+    && pass "…and the guard that strips it terminates" \
+    || die "the re-exec did not reach a verdict: $out"
+# …AND WITH `exec` SWALLOWED, so the re-exec cannot strip anything. `SHELLOPTS` is
+# readonly in the child and cannot be unset, but `set +x` turns the option off —
+# after the clearing, so `set` is the builtin rather than whatever was exported.
+#
+# A BENIGN `exec` FUNCTION IS ENOUGH. This is not the hostile combination I
+# declined to pin last round: nothing here forges a verdict, the outcome is a
+# valid checkout refused, and the fix is one line rather than an assertion about
+# bash versions.
+out="$(. "$NOEXEC2"; run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…and tracing is stripped even when the re-exec is swallowed" \
+    || die "a swallowed re-exec left tracing on the record channel (rc=$rc out='$out')"
+
+# ── a startup file that talks over the record channel ──────────────────────
+# A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and
+# the workers report their verdict on stdout — so a startup file that prints
+# anything lands in the record stream beside the `P`, `F` and `M` lines and the
+# parser refuses a run in which every test passed.
+#
+# This is a regression this change introduced: the sequential loop it replaced ran
+# `bash "$t" >/dev/null 2>&1` and discarded startup output with everything else. A
+# worker that has to SAY something cannot.
+BENV="$TMP/benv.sh"
+builtin printf 'echo POLLUTION\n' > "$BENV"
+R4="$(mkroot "$OK_SKILL")"
+addscript "$R4" pr-thing.sh 'exit 0'
+addtest "$R4" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$BENV" "$SCRIPT" "$R4" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a BASH_ENV that prints does not corrupt the record stream" \
+    || die "startup output reached the records (rc=$rc out='$out')"
+
+# ── an exported function forging a clean result ────────────────────────────
+# A SHELL FUNCTION SHADOWS A COMMAND NAME, and an exported one is inherited by
+# this process. That is not hypothetical here: an exported `umask` function
+# defeated the scratch directory's narrowing before that directory was removed.
+# What is at stake now is the verdict itself.
+#
+# `sort` is handed the records, so a function that rewrites `F ` to `P ` produces
+# a complete, correctly ordered, all-passing set — every check the parent makes is
+# satisfied and a failing test reports clean. `xargs` can forge the whole set
+# without running anything at all.
+#
+# `command` bypasses functions and keeps PATH resolution, which is the distinction
+# needed: the stubs the rest of this file installs on PATH must still work, and
+# they do — every other case here depends on it.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(sort() { command sed 's/^F /P /'; }
+       export -f sort
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported sort cannot turn a failing record into a passing one" \
+    || die "a forged pass was accepted (rc=$rc out='$out')"
+# …AND THE SAME FOR THE RUNNER, which can forge the whole set rather than edit it.
+out="$(xargs() { printf 'P 1\n'; }
+       export -f xargs
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported xargs cannot answer for tests it never ran" \
+    || die "a forged result set was accepted (rc=$rc out='$out')"
+
+# …AND THE INTERPRETER THE WORKER RUNS THE TEST WITH. `xargs` execs the worker
+# directly, so THAT `bash` is resolved by PATH and cannot be shadowed — but the
+# `bash "$p"` inside the worker's own script can be, and a function there chooses
+# what runs instead of the test.
+#
+# The fixture's function is narrow on purpose: it forges only invocations that
+# look like a test file, and passes everything else through. A blanket
+# `bash() { return 0; }` would also shadow the syntax check in section 2 and the
+# case would then pass for a reason that has nothing to do with the worker.
+#
+# NO `case` INSIDE THE COMMAND SUBSTITUTION. A `case` pattern ends with `)`, and
+# bash 3.2 miscounts that against the closing `)` of `$( … )` — the substitution
+# terminates early, the rest of the body is run as a command, and the case fails
+# with the tail of its own function as an error message. It passed here and the
+# `macos-shell` job rejected it, which is that job working: a parsing difference
+# no feature list contains. A `#` substring test needs no parentheses.
+out="$(bash() { if [ "${1#*/test-}" != "$1" ]; then return 0; fi; command bash "$@"; }
+       export -f bash
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported bash cannot stand in for the test itself" \
+    || die "the test run was forged by a function (rc=$rc out='$out')"
+
+# …AND THE RECORD ITSELF, which is as forgeable as the tools that carry it. An
+# exported `printf` that rewrites the failing verdict at the moment it is written
+# leaves everything downstream looking at a complete, correctly ordered,
+# all-passing set. `builtin printf` is the bypass here — `command printf` would
+# run a different program.
+#
+# The function is narrow for the same reason the interpreter's was: it forges only
+# the record format and passes every other use through, so the case cannot pass
+# because it broke something unrelated.
+out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; else builtin printf "$@"; fi; }
+       export -f printf
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported printf cannot rewrite a failing record" \
+    || die "a forged record format was accepted (rc=$rc out='$out')"
+
+# …AND THE PREFIXES THEMSELVES. `command` and `builtin` are ordinary builtins, so
+# a function of either name shadows them — which makes them forgeable exactly like
+# what they were introduced to protect. Verified rather than assumed: with both
+# exported, `builtin printf "F %s\n"` produced `P`.
+#
+# The script clears inherited definitions of every name its verdict depends on
+# before it depends on one.
+#
+# NARROW, like the others: it forges the failing-record format and passes every
+# other call through. A blanket forger breaks the script's own use of the name and
+# the case then fails because it wrecked its surroundings rather than because the
+# subject was fooled.
+out="$(builtin() { if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
+       export -f builtin
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported builtin cannot forge the record it is meant to protect" \
+    || die "a shadowed builtin forged a pass (rc=$rc out='$out')"
+#
+# NARROW, like the others. A `command()` that forges everything also forges the
+# watchdog's and the harness's own calls, and the case then fails because it broke
+# its surroundings rather than because the subject was fooled — which is what the
+# first version of this did. This one forges only the sort of the record stream
+# and passes every other use through to the real builtin.
+out="$(command() { if [ "$1" = sort ]; then cat >/dev/null; builtin printf 'P 1\n'; else builtin command "$@"; fi; }
+       export -f command
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and neither can an exported command" \
+    || die "a shadowed command forged a pass (rc=$rc out='$out')"
+
+# …AND AN `unset` THAT CLEARS NOTHING. The clearing itself is one of the names
+# that can be shadowed: an exported `unset() { return 0; }` reports success and
+# removes nothing, leaving the forgeable prefixes installed. So the postcondition
+# is checked rather than the status trusted — `unset` is on the verified list for
+# exactly that reason — and the run is refused rather than continued with a prefix
+# that no longer means what the rest of the file assumes.
+#
+# THE FORGER HAS TO BE ONE THAT WOULD OTHERWISE WORK. My first version rewrote
+# every call and produced a malformed record, so the run was refused by the record
+# grammar and the case passed without the postcondition existing at all — a green
+# tick for the wrong reason. This one forges only the failing-record format and
+# passes every other call through, and it reaches `status=clean` when the
+# postcondition is removed. Checked both ways.
+#
+# IT HAS TO DEFEAT `builtin unset` TOO. The bootstrap routes its clearing through
+# `builtin`, so a forged `unset` alone is simply bypassed and the clearing works —
+# which is the right outcome, and not the one this case is about. Forging both is
+# what leaves the functions installed and makes the postcondition the only thing
+# standing between them and the verdict.
+out="$(unset() { return 0; }
+       builtin() {
+           if [ "${1-}" = unset ]; then return 0; fi
+           if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+       }
+       export -f unset builtin
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "an unset that clears nothing is refused, not worked around" \
+    || die "a no-op unset left the forgers installed (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and it reported clean anyway: $out" \
+    || pass "…and nothing was reported clean"
+
+# …AND A NAME THE FIRST VERSION OF THE LIST FORGOT. `read` parses the records, so
+# an exported one can ignore the here-doc entirely and hand back `P 1 … P n` until
+# the count is satisfied: a genuinely failing test becomes a complete all-pass set
+# and the gate returns clean. `[` is the same — it decides every comparison in the
+# count check — and so are `test`, `exit`, `declare`, `local`, `shift` and `eval`.
+#
+# That is why the script clears EVERY inherited function rather than a list of
+# names. A list is wrong by omission, and this case is the omission that proved it.
+FORGE="$TMP/readforge.sh"
+cat > "$FORGE" <<'FORGESH'
+read() {
+    if [ "$1" = -r ]; then
+        if [ "${suite_seen:-0}" -ge "${suite_files:-0}" ]; then return 1; fi
+        eval "$2=\"P \$((suite_seen + 1))\""
+        return 0
+    fi
+    builtin read "$@"
+}
+export -f read
+FORGESH
+out="$(. "$FORGE"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported read cannot fabricate the record stream" \
+    || die "a forged read was accepted (rc=$rc out='$out')"
+
+# …AND A POSTCONDITION THAT CANNOT BE ANSWERED BY THE THING IT CHECKS FOR. `[` is
+# an ordinary builtin, so an exported one that answers false to the emptiness test
+# sends the refusal branch the benign way while every forger stays installed. The
+# check is written with `[[`, a reserved word the parser handles, which no
+# function can take the place of.
+FORGE2="$TMP/allforge.sh"
+cat > "$FORGE2" <<'FORGESH'
+unset() { return 0; }
+[() { if command [ "$1" = -n ]; then return 1; fi; command [ "$@"; }
+builtin() {
+    if command [ "${1-}" = unset ]; then return 0; fi
+    if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+}
+export -f unset [ builtin
+FORGESH
+#
+# ASSERTED POSITIVELY — rc 2 and the reason — rather than as "did not say clean".
+# With `[` used for the postcondition, this forger does not produce a clean
+# verdict: it produces a HANG, which the watchdog then kills. A case that only
+# required the absence of `status=clean` therefore passed either way, which is the
+# same wrong-reason pass this file has already shipped once and had to correct.
+out="$(. "$FORGE2"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "a shadowed [ cannot make the postcondition answer for itself" \
+    || die "the postcondition was answered by the thing it checks for (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and the suite was reported clean: $out" \
+    || pass "…and nothing was reported clean"
+
+# ── a benign function whose name looks like an option ──────────────────────
+# `unset -f -v` reads `-v` as a flag and clears nothing, so the postcondition then
+# refuses a run that was perfectly fine — a mandatory pre-push gate blocked by a
+# harmless function in someone's shell. `--` ends option parsing.
+#
+# THE GLOB HALF HAS ITS OWN CASE ABOVE, by the import route. `function 'a*b'` is
+# rejected as "not a valid identifier", which is what once persuaded me the case
+# was unreachable — but a crafted environment entry is imported, and the names are
+# read rather than expanded now, so neither splitting nor globbing can touch them.
+R2="$(mkroot "$OK_SKILL")"
+addscript "$R2" pr-thing.sh 'exit 0'
+addtest "$R2" test-pr-thing.sh
+# `function -v`, not `-v()`. The keyword form is what makes an option-shaped name
+# definable at all — the parenthesis form is rejected — and a fixture that failed
+# to define it would pass while proving nothing, which the first version did.
+ODDFN="$TMP/oddname.sh"
+cat > "$ODDFN" <<'ODDSH'
+function -v { :; }
+export -f -- -v
+ODDSH
+out="$(. "$ODDFN"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a benign function named like an option is cleared, not a refusal" \
+    || die "an option-shaped function name blocked a valid run (rc=$rc out='$out')"
+
+# …AND THE REFUSAL ITSELF, whose `builtin exit` can be swallowed. In that branch
+# functions are known to have survived, so the name doing the refusing may be one
+# of them: a `builtin()` that returns for the `exit` call alone lets the run print
+# `inherited_function` and then CARRY ON to a clean verdict. The bare `exit 2`
+# behind it is what stops that, and nothing exercised it until now.
+FORGE3="$TMP/exitforge.sh"
+cat > "$FORGE3" <<'FORGESH'
+unset() { return 0; }
+builtin() {
+    if command [ "$1" = exit ]; then return 0; fi
+    if command [ "$1" = unset ]; then return 0; fi
+    command builtin "$@"
+}
+export -f unset builtin
+FORGESH
+out="$(. "$FORGE3"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "a swallowed builtin exit still stops the run" \
+    || die "the refusal was swallowed (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and it went on to report clean: $out" \
+    || pass "…and did not go on to a verdict"
+
+# ── strict mode survives an exported set ───────────────────────────────────
+# `set -uo pipefail` runs at the top of the file, BEFORE the clearing, so an
+# exported `set() { return 0; }` swallows it and the options are off for the whole
+# run. `pipefail` off is the dangerous half: the status of a pipeline is its LAST
+# stage's, so a middle stage that emits its normal output and then fails is
+# invisible — `chk` sees 0 and the gate reports a verdict from an extraction that
+# did not complete.
+#
+# THE PROBE HAS TO FAIL WHERE grep IS NOT LAST, which is the assignment scan
+# (`grep -oE … | sed … | sort -u`). A stub that failed on every call broke
+# `strip_comments` first, where grep IS last, and that aborts with or without
+# pipefail — so the case passed either way and proved nothing. This one keys on
+# `-oE`.
+REAL_GREP="$(command -v grep)" || die "no grep on PATH"
+STRICT="$TMP/strictforge"; rm -rf "$STRICT"; mkdir -p "$STRICT"
+cat > "$STRICT/grep" <<GREPSH
+#!/usr/bin/env bash
+for _a in "\$@"; do
+    if [ "\$_a" = "-oE" ]; then "$REAL_GREP" "\$@"; exit 3; fi
+done
+exec "$REAL_GREP" "\$@"
+GREPSH
+chmod +x "$STRICT/grep"
+FORGE4="$TMP/setforge.sh"
+cat > "$FORGE4" <<'FORGESH'
+set() { return 0; }
+export -f set
+FORGESH
+# A ROOT WITH NO SCRIPTS, so only section 1 runs: the stub is on PATH for the
+# whole invocation, and letting it reach the eighteen-file suite would break the
+# tests themselves rather than the extraction this case is about.
+BARE="$(mkroot "$OK_SKILL")"
+out="$(. "$FORGE4"; run_limited 60 env PATH="$STRICT:$PATH" "$SCRIPT" "$BARE" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'step=assigned'; } \
+    && pass "an exported set does not leave pipefail off for the run" \
+    || die "a failing middle stage was hidden (rc=$rc out='$out')"
+
+# ── a runner or sorter that succeeds and says nothing ──────────────────────
+# THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
+# consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to
+# the record list. Both produce EXACTLY what a suite in which nothing failed
+# produces, so "no failures reported" and "nothing ran" become the same
+# observation — and the gate reports clean having run no tests at all.
+#
+# What separates them is counting: every worker reports pass or fail, and the
+# parent requires one record per file.
+noop_case() {   # noop_case <tool> <label>
+    local tool="$1" label="$2" only out rc
+    only="$TMP/noop-$tool"; rm -rf "$only"; mkdir -p "$only"
+    # IT CONSUMES ITS INPUT before exiting. A stub that exits immediately leaves
+    # whatever is upstream writing into a closed pipe, so section 1's own
+    # `grep | sed | sort -u` takes SIGPIPE and the run dies at `extraction_failed
+    # rc=141` — sometimes. That is a race, and it is the intermittent failure
+    # recorded on #38: the case asserts `suite_incomplete` and got a different
+    # error whenever the timing went the other way.
+    { printf '#!/usr/bin/env bash\n'
+      printf 'cat >/dev/null\n'
+      printf 'exit 0\n'
+    } > "$only/$tool"
+    chmod +x "$only/$tool"
+    R="$(mkroot "$OK_SKILL")"
+    addscript "$R" pr-thing.sh 'exit 0'
+    addtest "$R" test-pr-thing.sh
+    out="$(PATH="$only:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_incomplete'; } \
+        && pass "$label" \
+        || die "$label — rc=$rc out='$out'"
+    printf '%s' "$out" | grep -q 'the whole suite passes' \
+        && die "$label — it reported the suite as passing: $out" \
+        || pass "…and does not claim the suite passed"
+    rm -rf "$only"
+}
+noop_case xargs "a runner that succeeds without running anything is not a clean suite"
+noop_case sort  "…and neither is a sorter that discards the records"
+
+# ── a runner that answers for the same file twice ──────────────────────────
+# A TOTAL IS NOT A SET. Counting records and comparing the total to the file count
+# accepted `P 1` twice with two files — neither test needed to run, and the gate
+# reported clean. The records arrive sorted, so the nth must BE index n, which
+# rejects a duplicate, a gap, and an out-of-range index with one comparison.
+DUPSTUB="$TMP/dupstub"; rm -rf "$DUPSTUB"; mkdir -p "$DUPSTUB"
+cat > "$DUPSTUB/xargs" <<'DUPSH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'P 1\nP 1\n'
+exit 0
+DUPSH
+chmod +x "$DUPSTUB/xargs"
+R="$(mkroot "$OK_SKILL")"
+for n in alpha omega; do
+    addscript "$R" "pr-$n.sh" 'exit 0'
+    addtest "$R" "test-pr-$n.sh"
+done
+out="$(PATH="$DUPSTUB:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_record_unexpected'; } \
+    && pass "two answers for one file are not two files having run" \
+    || die "a duplicated index satisfied the count (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'the whole suite passes' \
+    && die "…and it reported the suite as passing: $out" \
+    || pass "…and does not claim the suite passed"
+rm -rf "$DUPSTUB"
+
+# ── a failing test that removes itself ─────────────────────────────────────
+# The names used to come from a SECOND walk of the directory, taken after the run.
+# A test that deletes itself and then fails — `rm "$0"; exit 1` — made that walk
+# one entry shorter, so the failing index matched nothing, no finding was
+# recorded, and the gate printed clean over a test it had just watched fail.
+# Capturing the names before anything runs is what makes the index always
+# resolvable.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-alpha.sh 'exit 0'
+addtest "$R" test-pr-alpha.sh
+addscript "$R" pr-zulu.sh 'exit 0'
+printf '#!/usr/bin/env bash\nrm "$0"\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
+out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-zulu.sh fails'; } \
+    && pass "a failing test that deleted itself is still reported, by name" \
+    || die "a self-deleting failure went unreported (rc=$rc out='$out')"
+
+# ── a test that renames itself while the suite is running ──────────────────
+# THE WORKER USED TO RESOLVE AN INDEX AGAINST A FRESH GLOB, which is a second walk
+# of the directory and carries the same failure the naming walk did. Run one at a
+# time, if the first test renames itself so it sorts after the second and then
+# passes, worker 2 re-globs and runs the RENAMED FIRST TEST again: it reports a
+# pass, the second test never runs, and a complete set of passes reports clean
+# over the failing test nobody executed.
+#
+# The second test therefore FAILS. A version that skips it reports clean; a
+# version that runs the path it was handed reports the failure.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-aaa.sh 'exit 0'
+addscript "$R" pr-bbb.sh 'exit 0'
+cat > "$R/skills/watch-prs/scripts/test-pr-aaa.sh" <<AAASH
+#!/usr/bin/env bash
+mv "\$0" "\$(dirname "\$0")/test-pr-zzz.sh"
+exit 0
+AAASH
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
+         "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails'; } \
+    && pass "a test that renames itself does not make another one vanish" \
+    || die "the renamed test displaced the failing one (rc=$rc out='$out')"
+
+# ── a checkout deep enough to exceed a replacement string ──────────────────
+# BSD `xargs` caps a replacement string at 255 bytes (`-S replsize`), so passing
+# the path through `-I` would fail this gate on stock macOS for a checkout nested
+# deeply enough — while GNU CI, which has no such cap and no `-S` option to
+# emulate one, stayed green. That is the shape of defect the `macos-shell` job
+# exists for, and it is why the record is APPENDED as an argument rather than
+# substituted.
+#
+# The case is portable: it asserts a deep checkout works, which is true on both
+# platforms with `-n 1` and false on one of them with `-I`.
+DEEP="$TMP/deep"
+rm -rf "$DEEP"
+seg="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+DEEPROOT="$DEEP/$seg/$seg/$seg/$seg/$seg/$seg/$seg"
+mkdir -p "$DEEPROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$DEEPROOT/skills/watch-prs/SKILL.md"
+addscript "$DEEPROOT" pr-thing.sh 'exit 0'
+addtest "$DEEPROOT" test-pr-thing.sh
+deep_len="$(printf '%s' "$DEEPROOT/skills/watch-prs/scripts/test-pr-thing.sh" | wc -c | tr -d ' ')"
+[ "$deep_len" -gt 255 ] \
+    && pass "the deep-checkout fixture really is past the 255-byte limit ($deep_len)" \
+    || die "the deep-checkout fixture is only $deep_len bytes; it proves nothing"
+out="$(run_limited 60 "$SCRIPT" "$DEEPROOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "…and a checkout that deep still runs its suite" \
+    || die "a deeply nested checkout could not run (rc=$rc out='$out')"
+rm -rf "$DEEP"
+
+# ── a captured path that is gone before its worker reaches it ──────────────
+# THE WORKER'S OWN BRANCH, not the parent's parser. The stub below fabricates an
+# `M` record and so proves only that the parent honours one; delete the worker's
+# existence check and that case still passes, while a missing script is reported
+# as an ordinary failing test — a real answer about a test that never ran.
+#
+# One at a time, so the ordering is not a race: the first test deletes the second,
+# whose path the parent captured before anything started.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-aaa.sh 'exit 0'
+addscript "$R" pr-bbb.sh 'exit 0'
+cat > "$R/skills/watch-prs/scripts/test-pr-aaa.sh" <<AAASH
+#!/usr/bin/env bash
+rm -f "\$(dirname "\$0")/test-pr-bbb.sh"
+exit 0
+AAASH
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
+         "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_index_unmapped'; } \
+    && pass "a test whose file vanished before it ran is not a result" \
+    || die "a vanished test was not refused (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails' \
+    && die "…and it was reported as an ordinary failure: $out" \
+    || pass "…and is not reported as an ordinary failing test"
+
+# ── the parent honours an unmappable record ────────────────────────────────
+# The case above covers the worker EMITTING that record. This one covers the
+# parent honouring it, which is a separate claim and needs a separate case: a stub
+# produces the record directly, so the parent's handling is exercised even when no
+# real worker would have produced one.
+OFFSTUB="$TMP/offstub"; rm -rf "$OFFSTUB"; mkdir -p "$OFFSTUB"
+cat > "$OFFSTUB/xargs" <<'OFFSH'
+#!/usr/bin/env bash
+cat >/dev/null
+# IN RANGE. An index outside it is rejected by the range check first, which is
+# correct but is a different case — this one is about an index that is expected
+# and still names nothing.
+printf 'M 1\n'
+exit 0
+OFFSH
+chmod +x "$OFFSTUB/xargs"
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+addtest "$R" test-pr-thing.sh
+out="$(PATH="$OFFSTUB:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_index_unmapped'; } \
+    && pass "an index that names no file is an error, not a pass" \
+    || die "an unmapped index was not refused (rc=$rc out='$out')"
+rm -rf "$OFFSTUB"
 
 # ── a repository that is not this plugin is NOT an error ──────────────────
 # One installed copy drives every project, so the working repo is usually a
