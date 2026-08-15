@@ -267,6 +267,19 @@ driver needs a watch tool and both reviewers run in GitHub's cloud rather than
 from anything installed here. Entries explain the failure that was fixed and how it
 manifested, not just what changed.
 
+**A release accompanies a change to what is installed** — the scripts, `SKILL.md`,
+the manifests, or the reviewer instruction files. A change confined to
+`skills/watch-prs/scripts/test-*.sh` or to authoring documentation produces no
+release, and must not bump the version.
+
+That is the settled practice, not a new allowance: #42, #44 and #47 were
+test-only and #40 was documentation-only, all four merged with no bump and clean
+from both reviewers. It is written down because the rule above, read alone, says
+to bump for a fixture that got faster — and a version identifies what ships, so
+bumping for a change nobody can observe turns the changelog into a commit log.
+An entry is required to explain the failure that was fixed and how it manifested;
+a faster fixture has no failure to explain to a user.
+
 ## One change per pull request
 
 **A PR closes one issue.** Build the smallest thing that closes it: no
