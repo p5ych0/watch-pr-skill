@@ -91,11 +91,14 @@ rediscovering them.
 - **A defence written for a shell means nothing where no shell runs.** `xargs`
   execs its program, so `command env …` asks for a program *called* `command` —
   which exists on some machines and not on CI.
-- **The startup hook runs before the script does.** A `readonly IFS`, a
-  `readonly -f` function or an exported `SHELLOPTS=xtrace` from `BASH_ENV` cannot
-  be undone from inside; re-exec with them removed instead. The `readonly` is the
-  whole trigger — a plain `IFS=` assignment is answered by another assignment, and
-  re-execing for that would be machinery for a state that has a one-line fix. The hook can also erase the
+- **The startup hook runs before the script does**, and only some of what it
+  leaves can be undone from inside. A `readonly IFS` or a `readonly -f` function
+  cannot: re-exec with `BASH_ENV` and `ENV` removed instead, and guard that
+  re-exec with a marker rather than with the evidence, since the hook can `unset
+  BASH_ENV` on its way out. Inherited tracing CAN be undone — `set +x`, after
+  clearing any shadowing function — so it needs no re-exec of its own, and neither
+  does a plain `IFS=`, which another assignment answers. Reaching for the re-exec
+  where a one-line fix exists is the over-building this section is here to stop. The hook can also erase the
   evidence that it ran, so guard that re-exec with a marker rather than with the
   evidence — and clear the marker, or every child inherits it.
 - **Assert the concrete outcome, and keep absence checks as well as — never
