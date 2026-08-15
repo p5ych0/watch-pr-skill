@@ -72,9 +72,16 @@ set -uo pipefail
 #
 # So nothing inherited survives, whatever it is called. Clearing a benign exported
 # function costs this process nothing: it does not use any.
+# `--`, AND GLOBBING OFF, because a function name is not an option and not a
+# pattern. `unset -f -v` reads `-v` as a flag and clears nothing, and an unquoted
+# expansion lets a name containing `*` or `[` match filenames instead of itself —
+# either way a benign function survives and the postcondition below blocks a run
+# that was fine.
+builtin set -f
 for _rb_f in $(compgen -A function 2>/dev/null); do
-    unset -f "$_rb_f" 2>/dev/null || true
+    unset -f -- "$_rb_f" 2>/dev/null || true
 done
+builtin set +f
 # …AND THE CLEARING IS PROVEN, because `unset` is itself among the things that can
 # be shadowed: an exported `unset() { return 0; }` reports success and removes
 # nothing. Its status is not a check; this is. Refusing beats continuing with a
@@ -84,9 +91,20 @@ done
 # is recorded rather than implied. Each level costs an attacker another exported
 # name; none of it reaches a parent shell already running arbitrary code as the
 # developer, which can edit the tests or amend the commit regardless.
+#
+# `[[ ]]`, NOT `[`. The postcondition cannot be written with a command that the
+# thing it is checking for is able to replace: `[` is an ordinary builtin, so an
+# exported `[` that answers false to this one test leaves every forger installed
+# and sends this branch the benign way. `[[` is a RESERVED WORD — the parser
+# handles it, and a function cannot take its place. So is `if`.
 _rb_left="$(compgen -A function 2>/dev/null)"
-if [ -n "$_rb_left" ]; then
+if [[ -n $_rb_left ]]; then
     echo "PR_SELFCHECK status=error reason=inherited_function name=${_rb_left%%$'\n'*}" >&2
+    # `builtin exit`, for the same reason, and a bare `exit` behind it: in THIS
+    # branch functions are known to have survived, so the name may be one of them.
+    # A shell that has replaced both is one this process cannot refuse from, which
+    # is the limitation recorded above rather than a gap here.
+    builtin exit 2
     exit 2
 fi
 unset -v _rb_f _rb_left 2>/dev/null || true

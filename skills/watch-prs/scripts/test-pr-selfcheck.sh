@@ -615,7 +615,11 @@ out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; els
 #
 # The script clears inherited definitions of every name its verdict depends on
 # before it depends on one.
-out="$(builtin() { shift; command printf "P %s\n" "$2"; }
+#
+# NARROW, like the others: it forges the failing-record format and passes every
+# other call through. A blanket forger breaks the script's own `builtin set -f`
+# and the case then fails because it wrecked its surroundings.
+out="$(builtin() { if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
        export -f builtin
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
@@ -682,6 +686,54 @@ out="$(. "$FORGE"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
     && pass "an exported read cannot fabricate the record stream" \
     || die "a forged read was accepted (rc=$rc out='$out')"
+
+# …AND A POSTCONDITION THAT CANNOT BE ANSWERED BY THE THING IT CHECKS FOR. `[` is
+# an ordinary builtin, so an exported one that answers false to the emptiness test
+# sends the refusal branch the benign way while every forger stays installed. The
+# check is written with `[[`, a reserved word the parser handles, which no
+# function can take the place of.
+FORGE2="$TMP/allforge.sh"
+cat > "$FORGE2" <<'FORGESH'
+unset() { return 0; }
+[() { if builtin [ "$1" = -n ]; then return 1; fi; builtin [ "$@"; }
+builtin() { if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
+export -f unset [ builtin
+FORGESH
+#
+# ASSERTED POSITIVELY — rc 2 and the reason — rather than as "did not say clean".
+# With `[` used for the postcondition, this forger does not produce a clean
+# verdict: it produces a HANG, which the watchdog then kills. A case that only
+# required the absence of `status=clean` therefore passed either way, which is the
+# same wrong-reason pass this file has already shipped once and had to correct.
+out="$(. "$FORGE2"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+    && pass "a shadowed [ cannot make the postcondition answer for itself" \
+    || die "the postcondition was answered by the thing it checks for (rc=$rc out='$out')"
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "…and the suite was reported clean: $out" \
+    || pass "…and nothing was reported clean"
+
+# ── a benign function whose name looks like an option ──────────────────────
+# `unset -f -v` reads `-v` as a flag and clears nothing, so the postcondition then
+# refuses a run that was perfectly fine — a mandatory pre-push gate blocked by a
+# harmless function in someone's shell. `--` ends option parsing; globbing is off
+# while the names are expanded, so a name containing `*` or `[` is not matched
+# against filenames either.
+R2="$(mkroot "$OK_SKILL")"
+addscript "$R2" pr-thing.sh 'exit 0'
+addtest "$R2" test-pr-thing.sh
+# `function -v`, not `-v()`. The keyword form is what makes an option-shaped name
+# definable at all — the parenthesis form is rejected — and a fixture that failed
+# to define it would pass while proving nothing, which the first version did.
+ODDFN="$TMP/oddname.sh"
+cat > "$ODDFN" <<'ODDSH'
+function -v { :; }
+export -f -- -v
+ODDSH
+out="$(. "$ODDFN"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a benign function named like an option is cleared, not a refusal" \
+    || die "an option-shaped function name blocked a valid run (rc=$rc out='$out')"
 
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
