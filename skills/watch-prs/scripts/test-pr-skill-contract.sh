@@ -2398,6 +2398,19 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     grep -qi 'replies on .*resolved threads' <<<"$flat" \
         && pass "$name: earlier-round replies are named as context" \
         || die "$name: does not tell the reviewer to read earlier thread replies"
+    # THE FIX-SHAPE RULE REACHES BOTH REVIEWERS OR NEITHER CAN ENFORCE IT. It was
+    # added to `SKILL.md` and `README.md` first and to neither reviewer file, so
+    # for one round the driver was promised behaviour nobody could flag — the
+    # drift this loop exists for, committed by the PR that introduced the rule.
+    grep -qi 'guard where a removal would do' <<<"$flat" \
+        && pass "$name: a guard where a removal would do is named as a finding" \
+        || die "$name: does not tell the reviewer to flag a guard where a removal would do"
+    # …AND THE REASONING IS JUDGED ON THE THREAD, not in the round summary. The
+    # first version of this rule said the summary, which would have blocked a
+    # compliant round: the driver contract puts the explanation on the thread.
+    grep -qi 'which of the two they took and why' <<<"$flat" \
+        && pass "$name: the reviewer is told the choice must be explained" \
+        || die "$name: does not require the fix-shape choice to be explained"
     # The PREDICATE, not the phrase: "changed code is still" alone is satisfied by
     # "…is still correct", which reverses the rule while matching the check.
     grep -qi 'changed code is still[[:space:]]*defective' <<<"$flat" \

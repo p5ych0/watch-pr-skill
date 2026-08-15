@@ -159,8 +159,11 @@ speculative feedback.
 problem by adding a check, and changing the shape would make the problem
 impossible at no greater cost, say so — a check is a name, and names can be
 shadowed, mis-parsed or forgotten, while a removed dependency stays removed. The
-author is required to say on the thread which of the two they took and why, so a
-round summary that does not is itself worth raising.
+author is required to say **on the thread** which of the two they took and why —
+that is where the reasoning belongs and where you will find it, so ask for it
+there when it is missing. Do not judge this by the round summary: a session that
+explained the choice on the thread and did not repeat it in the summary has
+complied.
 
 **Fail-closed is a review criterion.** Every fetch, parse, and probe must either
 propagate a non-zero status or emit a distinguished sentinel that every caller
