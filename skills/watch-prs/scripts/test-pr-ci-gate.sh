@@ -168,7 +168,29 @@ STUBSH
     # second plus the watchdog's escalation — the clamp turning the timeout into a
     # floor. With a one-second bound and a one-second interval, the second poll
     # would land exactly on the deadline: there must not be one.
-    gate_case '3'         1 1 "no probe is started once the deadline has passed" \
+    #
+    # NO FLOOR ON THIS ONE, AND THAT IS THE POINT OF #38. `gate_case`'s minimum
+    # call count is a vacuity guard, not this case's invariant — and here it was
+    # the timing-dependent half. With a one-second bound the FIRST probe races the
+    # same deadline as the second: on a loaded runner the bound expired before any
+    # probe was issued, `calls` came back 0, and the case failed while the
+    # behaviour it exists to test was correct. It failed `macos-shell` on a commit
+    # that had passed the same job forty minutes earlier, and a red job with no
+    # finding to fix stops the loop.
+    #
+    # What proves this case is the CEILING below: the clamp defect makes exactly
+    # two requests, and that is caught whether the first probe raced or not.
+    # Zero probes and one probe are both correct here; two is the defect.
+    #
+    # THE FLOOR IS NOT LOST, it is asserted where it is not a race — every case
+    # above runs with a bound of five seconds or more and requires one, two or
+    # three calls, so a gate that never probes at all fails several of them.
+    #
+    # A LONGER BOUND WOULD ONLY MOVE THE THRESHOLD, and a slower PROBE removes the
+    # invariant altogether: with `GATE_DELAY=2` against this one-second bound the
+    # bottom-of-loop check fires first, the pre-probe check is never what stops
+    # the gate, and the clamp mutant survives. Measured, after trying it.
+    gate_case '3'         1 0 "no probe is started once the deadline has passed" \
         PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
     probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
     # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
