@@ -62,12 +62,18 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
 # that drops it — or reverses it into a preference for guarding — leaves the
 # driver with no instruction at all on the choice that matters most.
 #
-# THE WHOLE POSITIVE INSTRUCTION, INCLUDING THE BOLD MARKER THAT STARTS IT. An
-# unanchored substring is satisfied by its own negation — `**Do not prefer
-# removing the dependency over guarding it.**` contains it — and I checked only
-# the word-swap reversal, which is the easier one to think of and the less likely
-# one to be written. Anchoring on `**Prefer` rejects both.
-grep -qF '**Prefer removing the dependency over guarding it.**' "$SKILL" \
+# ANCHORED TO THE START OF THE LINE, which is the only place a negation cannot be
+# put in front of. This took three attempts and each one was a substring the
+# negation still contained:
+#
+#   `removing the dependency over guarding it`   ← `**Do not prefer …**` contains it
+#   `**Prefer removing …**`                      ← `Do not **Prefer …**` contains it
+#   `^**Prefer removing …**`                     ← nothing can precede it
+#
+# The lesson is not about this pattern. Twice I reasoned about what a reversal
+# would look like instead of writing the one someone would actually write, and
+# twice the reasoning was the thing that produced the hole.
+grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
     && pass "skill states the preference for removing a dependency over guarding it" \
     || die "skill no longer tells the driver to prefer removal over a guard"
 
