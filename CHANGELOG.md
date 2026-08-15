@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.15] — 2026-08-15
+
+- **The driver was told what a round may change, and not how to choose between
+  two fixes that are the same size.** `SKILL.md` already bound the size of a round
+  — fix what the finding names, build the smallest thing that makes it false — and
+  said nothing about shape. Where a finding can be answered either by adding a
+  check or by removing the dependency the check would guard, the driver now
+  prefers removal, and says on the thread which it took.
+
+  That is not a preference for elegance. A check is a name, and a name can be
+  shadowed by a function, mis-parsed by an older shell, locked by a `readonly`, or
+  simply forgotten by whoever writes the next one — each of those ended a review
+  round in this repository, and each time the fix that finally held was
+  subtractive.
+
 ## [2.0.14] — 2026-08-15
 
 - **A startup hook could erase the evidence that it ran, and the pre-push gate

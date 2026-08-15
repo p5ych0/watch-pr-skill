@@ -55,6 +55,19 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
     && pass "skill states the one-time connector prerequisite" \
     || die "skill does not tell the operator to link the Codex connector"
 
+# ── the round rules keep their polarity ────────────────────────────────────
+# `SKILL.md` binds the SIZE of a round elsewhere; this is the one that binds its
+# SHAPE, and it is the rule that ended each long run of rounds in this repository
+# while every added check merely raised the cost of the next attempt. A later edit
+# that drops it — or reverses it into a preference for guarding — leaves the
+# driver with no instruction at all on the choice that matters most.
+#
+# The phrase is asserted whole, so a reversal fails: "guarding the dependency over
+# removing it" does not match.
+grep -q 'removing the dependency over guarding it' "$SKILL" \
+    && pass "skill states the preference for removing a dependency over guarding it" \
+    || die "skill no longer tells the driver to prefer removal over a guard"
+
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
     && pass "skill states the fail-closed rule" \

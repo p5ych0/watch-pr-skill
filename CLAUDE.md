@@ -91,13 +91,19 @@ rediscovering them.
 - **A defence written for a shell means nothing where no shell runs.** `xargs`
   execs its program, so `command env …` asks for a program *called* `command` —
   which exists on some machines and not on CI.
-- **The startup hook runs before the script does.** An `IFS`, a `readonly -f`
-  function or an exported `SHELLOPTS=xtrace` from `BASH_ENV` cannot be undone
-  from inside; re-exec with them removed instead. The hook can also erase the
+- **The startup hook runs before the script does.** A `readonly IFS`, a
+  `readonly -f` function or an exported `SHELLOPTS=xtrace` from `BASH_ENV` cannot
+  be undone from inside; re-exec with them removed instead. The `readonly` is the
+  whole trigger — a plain `IFS=` assignment is answered by another assignment, and
+  re-execing for that would be machinery for a state that has a one-line fix. The hook can also erase the
   evidence that it ran, so guard that re-exec with a marker rather than with the
   evidence — and clear the marker, or every child inherits it.
-- **Assert what must appear, not what must not.** "Not clean" has passed against
-  a hang, a malformed record and a crash.
+- **Assert the concrete outcome, and keep absence checks as well as — never
+  instead of — that.** "Not clean" alone has passed against a hang, a malformed
+  record and a crash. But where forbidden output is part of the contract, its
+  absence still has to be asserted: a run that emits the right error sentinel AND
+  a stray `status=clean` has violated fail-closed, and only the absence check
+  sees it.
 - **A forger in a fixture must be narrow and must otherwise work.** One that
   forges every call breaks the harness; one that produces a malformed result is
   rejected by a different check, and the case then passes either way.
