@@ -578,7 +578,14 @@ out="$(xargs() { printf 'P 1\n'; }
 # look like a test file, and passes everything else through. A blanket
 # `bash() { return 0; }` would also shadow the syntax check in section 2 and the
 # case would then pass for a reason that has nothing to do with the worker.
-out="$(bash() { case "$1" in */test-*.sh) return 0 ;; *) command bash "$@" ;; esac; }
+#
+# NO `case` INSIDE THE COMMAND SUBSTITUTION. A `case` pattern ends with `)`, and
+# bash 3.2 miscounts that against the closing `)` of `$( … )` — the substitution
+# terminates early, the rest of the body is run as a command, and the case fails
+# with the tail of its own function as an error message. It passed here and the
+# `macos-shell` job rejected it, which is that job working: a parsing difference
+# no feature list contains. A `#` substring test needs no parentheses.
+out="$(bash() { if [ "${1#*/test-}" != "$1" ]; then return 0; fi; command bash "$@"; }
        export -f bash
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
