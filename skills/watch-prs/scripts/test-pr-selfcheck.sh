@@ -637,6 +637,61 @@ out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a test that renames itself does not make another one vanish" \
     || die "the renamed test displaced the failing one (rc=$rc out='$out')"
 
+# ── a checkout deep enough to exceed a replacement string ──────────────────
+# BSD `xargs` caps a replacement string at 255 bytes (`-S replsize`), so passing
+# the path through `-I` would fail this gate on stock macOS for a checkout nested
+# deeply enough — while GNU CI, which has no such cap and no `-S` option to
+# emulate one, stayed green. That is the shape of defect the `macos-shell` job
+# exists for, and it is why the record is APPENDED as an argument rather than
+# substituted.
+#
+# The case is portable: it asserts a deep checkout works, which is true on both
+# platforms with `-n 1` and false on one of them with `-I`.
+DEEP="$TMP/deep"
+rm -rf "$DEEP"
+seg="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+DEEPROOT="$DEEP/$seg/$seg/$seg/$seg/$seg/$seg/$seg"
+mkdir -p "$DEEPROOT/skills/watch-prs/scripts" \
+    && printf '%s\n' "$OK_SKILL" > "$DEEPROOT/skills/watch-prs/SKILL.md"
+addscript "$DEEPROOT" pr-thing.sh 'exit 0'
+addtest "$DEEPROOT" test-pr-thing.sh
+deep_len="$(printf '%s' "$DEEPROOT/skills/watch-prs/scripts/test-pr-thing.sh" | wc -c | tr -d ' ')"
+[ "$deep_len" -gt 255 ] \
+    && pass "the deep-checkout fixture really is past the 255-byte limit ($deep_len)" \
+    || die "the deep-checkout fixture is only $deep_len bytes; it proves nothing"
+out="$(run_limited 60 "$SCRIPT" "$DEEPROOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "…and a checkout that deep still runs its suite" \
+    || die "a deeply nested checkout could not run (rc=$rc out='$out')"
+rm -rf "$DEEP"
+
+# ── a captured path that is gone before its worker reaches it ──────────────
+# THE WORKER'S OWN BRANCH, not the parent's parser. The stub below fabricates an
+# `M` record and so proves only that the parent honours one; delete the worker's
+# existence check and that case still passes, while a missing script is reported
+# as an ordinary failing test — a real answer about a test that never ran.
+#
+# One at a time, so the ordering is not a race: the first test deletes the second,
+# whose path the parent captured before anything started.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-aaa.sh 'exit 0'
+addscript "$R" pr-bbb.sh 'exit 0'
+cat > "$R/skills/watch-prs/scripts/test-pr-aaa.sh" <<AAASH
+#!/usr/bin/env bash
+rm -f "\$(dirname "\$0")/test-pr-bbb.sh"
+exit 0
+AAASH
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
+         "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_index_unmapped'; } \
+    && pass "a test whose file vanished before it ran is not a result" \
+    || die "a vanished test was not refused (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails' \
+    && die "…and it was reported as an ordinary failure: $out" \
+    || pass "…and is not reported as an ordinary failing test"
+
 # ── an index that names no file ────────────────────────────────────────────
 # The worker finds its own file by walking the same glob the parent walked, so if
 # the directory changes in between an index can name nothing. That is neither a

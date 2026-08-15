@@ -424,9 +424,17 @@ done
 # it outright, make it private, check the parent's sticky bit — and the next
 # finding was a `TMPDIR` owned by another user, for which the sticky bit does
 # nothing. Every one of those was real, and all of them were about a shared
-# directory that this work never needed. THE WORKER FINDS ITS OWN FILE by walking
-# the same glob the parent walked and stopping at its index, so the only thing
-# crossing the boundary is a number.
+# directory that this work never needed. The list is a shell array here, so it
+# never leaves the process at all.
+#
+# THE PATH TRAVELS OUTWARD AND ONLY THE INDEX COMES BACK. Each worker is handed
+# the exact path the parent captured, paired with its index; it runs that path and
+# answers with the index. Nothing is resolved twice — an intermediate version had
+# the worker re-glob to find its own file, and a test that renamed itself then
+# made one index name a different file, so one test ran twice and another never
+# ran while every record still came back a pass. Outward the path is safe because
+# the records are NUL-delimited; inward an index is safe because it cannot carry
+# a delimiter at all.
 suite_fail=0
 suite_jobs="${RB_SUITE_JOBS:-4}"
 # THE SAME VALIDATION SHAPE THE CI GATE USES, and for the same reason: a bad value
@@ -473,11 +481,18 @@ if [ "$suite_files" -gt 0 ]; then
     # whatever it contains, and split on the FIRST colon so a path may contain one.
     # The index is what comes back, because an index cannot carry a delimiter; the
     # path only ever travels outward.
+    #
+    # `-n 1` RATHER THAN `-I`, and that is a portability rule, not a style. BSD
+    # `xargs` caps a replacement string at 255 bytes (`-S replsize`), so with `-I`
+    # a checkout nested deeply enough to push a path past that would fail this
+    # gate on stock macOS while GNU CI stayed green — the exact class of defect
+    # that is invisible on the machine that writes it. Appending the record as an
+    # argument has no such limit.
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             printf '%s:%s\0' "$n" "${suite_names[$n]}"
-        done | xargs -0 -P "$suite_jobs" -I{} bash -c '
+        done | xargs -0 -P "$suite_jobs" -n 1 bash -c '
             rec="$1"
             i="${rec%%:*}"
             p="${rec#*:}"
@@ -488,7 +503,7 @@ if [ "$suite_files" -gt 0 ]; then
             if bash "$p" >/dev/null 2>&1; then printf "P %s\n" "$i"
             else printf "F %s\n" "$i"; fi
             exit 0
-        ' _ {})"; suite_rc=$?
+        ' _)"; suite_rc=$?
     # The runner's status is still taken. It is no longer the only thing taken,
     # but a runner that fails outright should say so with its own reason rather
     # than arriving at the count check as a mystery.
