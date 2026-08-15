@@ -638,12 +638,19 @@ if [ "$suite_files" -gt 0 ]; then
     # gate on stock macOS while GNU CI stayed green — the exact class of defect
     # that is invisible on the machine that writes it. Appending the record as an
     # argument has no such limit.
+    # NO `command` PREFIX ON WHAT `xargs` RUNS, and the reason is not style. `xargs`
+    # execs its program itself — there is no shell in between — so `command env …`
+    # asks it to run a program CALLED `command`. That is a shell builtin, not a
+    # file, on nearly every system: this machine happens to have a 35-byte
+    # `/usr/bin/command`, so it worked here and every fixture failed on CI with
+    # `suite_runner_failed`. Function shadowing cannot reach an `execvp` anyway,
+    # so the prefix bought nothing even where it resolved.
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             builtin printf '%s:%s\0' "$n" "${suite_names[$n]}"
         done | command xargs -0 -P "$suite_jobs" -n 1 \
-            command env -u BASH_ENV -u ENV bash -c '
+            env -u BASH_ENV -u ENV bash -c '
             rec="$1"
             i="${rec%%:*}"
             p="${rec#*:}"
