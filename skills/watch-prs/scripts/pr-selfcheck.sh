@@ -436,10 +436,19 @@ suite_jobs="${RB_SUITE_JOBS:-4}"
 # this degree exists to be. Six digits or more is refused for the same reason a
 # bound is refused anywhere here: it is not a degree, it is a typo.
 case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
+# THE NAMES ARE CAPTURED BEFORE ANYTHING RUNS, in this process, in an array. The
+# first version globbed a second time to turn a failing index back into a name,
+# and a test that deletes itself — `rm "$0"; exit 1` — made that second walk one
+# entry shorter: the failing index matched nothing, no finding was recorded, and
+# the gate printed `status=clean` over a test it had just watched fail. An array
+# also means a path never has to survive a delimiter, since it never leaves the
+# shell.
 suite_files=0
+suite_names=()
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
     suite_files=$((suite_files + 1))
+    suite_names[$suite_files]="$t"
 done
 if [ "$suite_files" -gt 0 ]; then
     # EVERY WORKER REPORTS, PASS OR FAIL, and the parent requires one record per
@@ -485,45 +494,60 @@ if [ "$suite_files" -gt 0 ]; then
         echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
         exit 2
     }
+    # EVERY INDEX EXACTLY ONCE, WHICH A TOTAL DOES NOT ESTABLISH. Counting records
+    # and comparing the total was not the rule this comment claimed: a runner that
+    # printed `P 1` twice satisfied it with two files, so neither test needed to
+    # run and the gate reported clean. The records arrive sorted by index, so the
+    # nth of them must BE index n — one comparison that rejects a duplicate, a
+    # gap, and an index outside the range alike.
     suite_seen=0
     suite_failed=""
     while IFS= read -r rec; do
         [ -n "$rec" ] || continue
         suite_seen=$((suite_seen + 1))
         case "$rec" in
-            "P "*) ;;
-            "F "*) suite_failed="$suite_failed${rec#F } " ;;
-            "M "*) echo "PR_SELFCHECK status=error reason=suite_index_unmapped index=${rec#M }" >&2
-                   exit 2 ;;
-            *)     echo "PR_SELFCHECK status=error reason=suite_record_malformed" >&2
+            "P "*|"F "*|"M "*) ;;
+            *) echo "PR_SELFCHECK status=error reason=suite_record_malformed" >&2
+               exit 2 ;;
+        esac
+        idx="${rec#? }"
+        case "$idx" in
+            ""|*[!0-9]*) echo "PR_SELFCHECK status=error reason=suite_record_malformed" >&2
+                         exit 2 ;;
+        esac
+        [ "$idx" = "$suite_seen" ] || {
+            echo "PR_SELFCHECK status=error reason=suite_record_unexpected index=$idx want=$suite_seen" >&2
+            exit 2
+        }
+        case "$rec" in
+            "F "*) suite_failed="$suite_failed$idx " ;;
+            "M "*) echo "PR_SELFCHECK status=error reason=suite_index_unmapped index=$idx" >&2
                    exit 2 ;;
         esac
     done <<EOF
 $suite_sorted
 EOF
-    # THE COUNT IS THE CHECK. One record per file, no more and no fewer: fewer
-    # means something did not run or its answer was lost, more means an answer was
-    # duplicated, and either way this gate cannot say what it is here to say.
+    # …and the last index seen must be the last file. The check above catches a
+    # gap or a duplicate anywhere before the end; this catches the tail simply
+    # being absent.
     [ "$suite_seen" -eq "$suite_files" ] || {
         echo "PR_SELFCHECK status=error reason=suite_incomplete ran=$suite_seen of=$suite_files" >&2
         exit 2
     }
-    # The names come from the parent's own glob, so a path never has to survive a
-    # delimiter on the way back.
+    # The names come from the list captured before the run, so a failing index
+    # ALWAYS resolves to the file that failed.
     for idx in $suite_failed; do
-        n=0
-        for t in "$SCRIPTS"/test-*.sh; do
-            [ -e "$t" ] || continue
-            n=$((n + 1))
-            [ "$n" = "$idx" ] || continue
-            b="$(basename "$t")"
-            # ONE LINE PER FINDING, whatever the name contains. A newline inside a
-            # filename would otherwise print as two findings to anything reading
-            # this output.
-            b="$(printf '%s' "$b" | tr '\n' ' ')"
-            note failing_test "$b fails"; suite_fail=1
-            break
-        done
+        t="${suite_names[$idx]-}"
+        [ -n "$t" ] || {
+            echo "PR_SELFCHECK status=error reason=suite_failure_unnamed index=$idx" >&2
+            exit 2
+        }
+        b="$(basename "$t")"
+        # ONE LINE PER FINDING, whatever the name contains. A newline inside a
+        # filename would otherwise print as two findings to anything reading this
+        # output.
+        b="$(printf '%s' "$b" | tr '\n' ' ')"
+        note failing_test "$b fails"; suite_fail=1
     done
 fi
 [ "$suite_fail" -eq 0 ] && ok "the whole suite passes"

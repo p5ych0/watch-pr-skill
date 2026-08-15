@@ -566,6 +566,51 @@ noop_case() {   # noop_case <tool> <label>
 noop_case xargs "a runner that succeeds without running anything is not a clean suite"
 noop_case sort  "…and neither is a sorter that discards the records"
 
+# ── a runner that answers for the same file twice ──────────────────────────
+# A TOTAL IS NOT A SET. Counting records and comparing the total to the file count
+# accepted `P 1` twice with two files — neither test needed to run, and the gate
+# reported clean. The records arrive sorted, so the nth must BE index n, which
+# rejects a duplicate, a gap, and an out-of-range index with one comparison.
+DUPSTUB="$TMP/dupstub"; rm -rf "$DUPSTUB"; mkdir -p "$DUPSTUB"
+cat > "$DUPSTUB/xargs" <<'DUPSH'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'P 1\nP 1\n'
+exit 0
+DUPSH
+chmod +x "$DUPSTUB/xargs"
+R="$(mkroot "$OK_SKILL")"
+for n in alpha omega; do
+    addscript "$R" "pr-$n.sh" 'exit 0'
+    addtest "$R" "test-pr-$n.sh"
+done
+out="$(PATH="$DUPSTUB:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_record_unexpected'; } \
+    && pass "two answers for one file are not two files having run" \
+    || die "a duplicated index satisfied the count (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'the whole suite passes' \
+    && die "…and it reported the suite as passing: $out" \
+    || pass "…and does not claim the suite passed"
+rm -rf "$DUPSTUB"
+
+# ── a failing test that removes itself ─────────────────────────────────────
+# The names used to come from a SECOND walk of the directory, taken after the run.
+# A test that deletes itself and then fails — `rm "$0"; exit 1` — made that walk
+# one entry shorter, so the failing index matched nothing, no finding was
+# recorded, and the gate printed clean over a test it had just watched fail.
+# Capturing the names before anything runs is what makes the index always
+# resolvable.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-alpha.sh 'exit 0'
+addtest "$R" test-pr-alpha.sh
+addscript "$R" pr-zulu.sh 'exit 0'
+printf '#!/usr/bin/env bash\nrm "$0"\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
+out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-zulu.sh fails'; } \
+    && pass "a failing test that deleted itself is still reported, by name" \
+    || die "a self-deleting failure went unreported (rc=$rc out='$out')"
+
 # ── an index that names no file ────────────────────────────────────────────
 # The worker finds its own file by walking the same glob the parent walked, so if
 # the directory changes in between an index can name nothing. That is neither a
@@ -575,7 +620,10 @@ OFFSTUB="$TMP/offstub"; rm -rf "$OFFSTUB"; mkdir -p "$OFFSTUB"
 cat > "$OFFSTUB/xargs" <<'OFFSH'
 #!/usr/bin/env bash
 cat >/dev/null
-printf 'M 99\n'
+# IN RANGE. An index outside it is rejected by the range check first, which is
+# correct but is a different case — this one is about an index that is expected
+# and still names nothing.
+printf 'M 1\n'
 exit 0
 OFFSH
 chmod +x "$OFFSTUB/xargs"
