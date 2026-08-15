@@ -316,67 +316,60 @@ printf '%s' "$out" | grep -q 'test-pr-thing.sh' \
     && pass "…and the finding names which one" \
     || die "the finding did not name test-pr-thing.sh: $out"
 
-# ── two failing tests, finishing in the WRONG order on purpose ─────────────
+# ── two failing tests, both reported ───────────────────────────────────────
 # The runner writes each failure as one whole record, which is what makes
-# concurrent output safe to read back. One failing file cannot show that at all.
-#
-# AND THEY ARE MADE TO FINISH BACKWARDS. Left to themselves both exit immediately,
-# `xargs` starts `alpha` first and its output arrives first — so the sort could be
-# deleted and this would still pass, which is a green tick over a property that is
-# not being tested. `alpha` therefore blocks until `omega` has reported, so the
-# unsorted order is always omega-then-alpha and the assertion below is always
-# about the sort rather than about the scheduler.
+# concurrent output safe to read back. One failing file cannot show that.
 R="$(mkroot "$OK_SKILL")"
-addscript "$R" pr-alpha.sh 'exit 0'
-addscript "$R" pr-omega.sh 'exit 0'
-MARKER="$TMP/omega-reported"; rm -f "$MARKER"
-SAW="$TMP/alpha-saw-omega"; rm -f "$SAW"
-cat > "$R/skills/watch-prs/scripts/test-pr-omega.sh" <<OMEGASH
-#!/usr/bin/env bash
-: > "$MARKER"
-exit 1
-OMEGASH
-# BOUNDED. A wait that cannot end turns one broken assumption into a hung suite,
-# and this one runs inside the fixture watchdog's budget rather than instead of
-# it. If the marker never appears the case still completes and fails on the order,
-# which is the honest outcome: it means the two never ran concurrently.
-cat > "$R/skills/watch-prs/scripts/test-pr-alpha.sh" <<ALPHASH
-#!/usr/bin/env bash
-n=0
-while [ ! -e "$MARKER" ] && [ "\$n" -lt 100 ]; do
-    n=\$((n + 1))
-    sleep 0.1
+for n in alpha omega; do
+    addscript "$R" "pr-$n.sh" 'exit 0'
+    printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+    chmod +x "$R/skills/watch-prs/scripts/test-pr-$n.sh"
 done
-# WHETHER IT ACTUALLY SAW THE MARKER, recorded here rather than inferred from the
-# marker existing afterwards. Run serially, alpha waits out its whole budget, gives
-# up, and omega creates the marker after it — so the marker is there at the end of
-# a run in which nothing overlapped at all.
-[ -e "$MARKER" ] && : > "$SAW"
-exit 1
-ALPHASH
-chmod +x "$R/skills/watch-prs/scripts/test-pr-alpha.sh" \
-         "$R/skills/watch-prs/scripts/test-pr-omega.sh"
-# THE DEGREE IS PINNED, because this case is the one that depends on it. The file
-# runs inside a suite the operator may have started with `RB_SUITE_JOBS=1`, and
-# serially there is no overlap to observe: alpha waits out its budget and exits
-# BEFORE omega starts, so the completion order is alpha-then-omega and the sort
-# could be deleted with this still passing — the exact defect this fixture exists
-# to catch, reintroduced through an environment variable.
-out="$(RB_SUITE_JOBS=2 run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
     && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
     && pass "two failing tests are both reported" \
     || die "not both failures were reported (rc=$rc out='$out')"
-[ -e "$SAW" ] \
-    && pass "…and alpha waited for omega, so the order below means something" \
-    || die "alpha never saw omega's marker: the two did not overlap (out='$out')"
-# REPORTED IN A STABLE ORDER — the glob's, not the machine's. `alpha` finished
-# second by construction, so an implementation that reports in completion order
-# puts `omega` first and fails here.
+
+# ── …and reported in the glob's order, not the runner's ────────────────────
+# THE RUNNER IS MADE TO REPORT BACKWARDS, rather than the tests being made to
+# finish backwards. Two earlier versions tried the latter and neither was sound:
+# with both tests exiting immediately the scheduler produced the sorted order by
+# itself, and making `alpha` wait on a marker `omega` writes only proves omega's
+# SCRIPT got that far — its worker still has to return from `bash` and reach the
+# `printf` that emits the record, so alpha's worker can still emit first.
+#
+# Every one of those attempts was trying to control a race. This does not have
+# one: a stub `xargs` consumes the index stream and reports every index as failed
+# in DESCENDING order, so the only thing that can put `alpha` before `omega` in
+# the output is the gate's own `sort -n`.
+REVSTUB="$TMP/revstub"; rm -rf "$REVSTUB"; mkdir -p "$REVSTUB"
+cat > "$REVSTUB/xargs" <<'REVSH'
+#!/usr/bin/env bash
+# The input is read and discarded: what this stub asserts is the PARENT's
+# ordering, so what the workers would have done is not part of the question.
+cat >/dev/null
+n="$RB_REV_COUNT"
+while [ "$n" -ge 1 ]; do printf '%s\n' "$n"; n=$((n - 1)); done
+exit 0
+REVSH
+chmod +x "$REVSTUB/xargs"
+# The environment goes INSIDE the watchdog, via `env`, rather than being
+# prefixed onto it. Where GNU `timeout` is missing — the portable fallback
+# this suite exists to support — the watchdog polls with its own `sleep`, so
+# a stub directory prefixed onto the caller lands on the watchdog's search
+# path as well as the subject's. `test-testlib.sh` enforces that, and
+# enforced it against this very line while it was written the other way.
+out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
+    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+    && pass "a runner reporting backwards still names both files" \
+    || die "the reversed runner lost a failure (rc=$rc out='$out')"
 { printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
     | sed -n '1p' | grep -q 'alpha'; } \
-    && pass "…in a stable order rather than the order they finished in" \
+    && pass "…in the glob's order rather than the order they were reported in" \
     || die "the failures were not ordered: $out"
+rm -rf "$REVSTUB"
 
 # ── the runner failing is not an empty suite ───────────────────────────────
 # THE FAIL-OPEN THIS SECTION IS MOST EXPOSED TO. `xargs` writes the failures to
