@@ -330,6 +330,7 @@ R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-alpha.sh 'exit 0'
 addscript "$R" pr-omega.sh 'exit 0'
 MARKER="$TMP/omega-reported"; rm -f "$MARKER"
+SAW="$TMP/alpha-saw-omega"; rm -f "$SAW"
 cat > "$R/skills/watch-prs/scripts/test-pr-omega.sh" <<OMEGASH
 #!/usr/bin/env bash
 : > "$MARKER"
@@ -346,18 +347,29 @@ while [ ! -e "$MARKER" ] && [ "\$n" -lt 100 ]; do
     n=\$((n + 1))
     sleep 0.1
 done
+# WHETHER IT ACTUALLY SAW THE MARKER, recorded here rather than inferred from the
+# marker existing afterwards. Run serially, alpha waits out its whole budget, gives
+# up, and omega creates the marker after it — so the marker is there at the end of
+# a run in which nothing overlapped at all.
+[ -e "$MARKER" ] && : > "$SAW"
 exit 1
 ALPHASH
 chmod +x "$R/skills/watch-prs/scripts/test-pr-alpha.sh" \
          "$R/skills/watch-prs/scripts/test-pr-omega.sh"
-out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+# THE DEGREE IS PINNED, because this case is the one that depends on it. The file
+# runs inside a suite the operator may have started with `RB_SUITE_JOBS=1`, and
+# serially there is no overlap to observe: alpha waits out its budget and exits
+# BEFORE omega starts, so the completion order is alpha-then-omega and the sort
+# could be deleted with this still passing — the exact defect this fixture exists
+# to catch, reintroduced through an environment variable.
+out="$(RB_SUITE_JOBS=2 run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
     && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
     && pass "two failing tests are both reported" \
     || die "not both failures were reported (rc=$rc out='$out')"
-[ -e "$MARKER" ] \
-    && pass "…and the fixture did run them concurrently, so the order below means something" \
-    || die "omega never reported: the two did not overlap (out='$out')"
+[ -e "$SAW" ] \
+    && pass "…and alpha waited for omega, so the order below means something" \
+    || die "alpha never saw omega's marker: the two did not overlap (out='$out')"
 # REPORTED IN A STABLE ORDER — the glob's, not the machine's. `alpha` finished
 # second by construction, so an implementation that reports in completion order
 # puts `omega` first and fails here.
@@ -488,7 +500,11 @@ jobs_case() {   # jobs_case <RB_SUITE_JOBS or "" for unset> <expected -P> <label
     if [ -n "$1" ]; then
         out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" RB_SUITE_JOBS="$1" "$SCRIPT" "$R" 2>&1)"; rc=$?
     else
-        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" "$SCRIPT" "$R" 2>&1)"; rc=$?
+        # `env -u`, NOT merely "do not set it". This file runs inside a suite the
+        # operator may have started with a degree of their own, and an inherited
+        # value would make this case assert THEIR number while claiming to prove
+        # the default.
+        out="$(PATH="$JOBSTUB:$PATH" RB_JOBS_LOG="$log" env -u RB_SUITE_JOBS "$SCRIPT" "$R" 2>&1)"; rc=$?
     fi
     got="$(grep -o -- '-P [0-9]*' "$log" | head -1)"
     { [ "$rc" -eq 0 ] && [ "$got" = "-P $want" ]; } \
