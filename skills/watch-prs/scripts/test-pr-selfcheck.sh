@@ -316,24 +316,51 @@ printf '%s' "$out" | grep -q 'test-pr-thing.sh' \
     && pass "…and the finding names which one" \
     || die "the finding did not name test-pr-thing.sh: $out"
 
-# ── two failing tests, because one cannot show interleaving ────────────────
-# The runner writes each failure as one whole line from one `printf`, which is
-# what makes concurrent output safe to read back. With a single failing file that
-# property is untested: any implementation reports one name correctly.
+# ── two failing tests, finishing in the WRONG order on purpose ─────────────
+# The runner writes each failure as one whole record, which is what makes
+# concurrent output safe to read back. One failing file cannot show that at all.
+#
+# AND THEY ARE MADE TO FINISH BACKWARDS. Left to themselves both exit immediately,
+# `xargs` starts `alpha` first and its output arrives first — so the sort could be
+# deleted and this would still pass, which is a green tick over a property that is
+# not being tested. `alpha` therefore blocks until `omega` has reported, so the
+# unsorted order is always omega-then-alpha and the assertion below is always
+# about the sort rather than about the scheduler.
 R="$(mkroot "$OK_SKILL")"
-for n in alpha omega; do
-    addscript "$R" "pr-$n.sh" 'exit 0'
-    printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-$n.sh"
-    chmod +x "$R/skills/watch-prs/scripts/test-pr-$n.sh"
+addscript "$R" pr-alpha.sh 'exit 0'
+addscript "$R" pr-omega.sh 'exit 0'
+MARKER="$TMP/omega-reported"; rm -f "$MARKER"
+cat > "$R/skills/watch-prs/scripts/test-pr-omega.sh" <<OMEGASH
+#!/usr/bin/env bash
+: > "$MARKER"
+exit 1
+OMEGASH
+# BOUNDED. A wait that cannot end turns one broken assumption into a hung suite,
+# and this one runs inside the fixture watchdog's budget rather than instead of
+# it. If the marker never appears the case still completes and fails on the order,
+# which is the honest outcome: it means the two never ran concurrently.
+cat > "$R/skills/watch-prs/scripts/test-pr-alpha.sh" <<ALPHASH
+#!/usr/bin/env bash
+n=0
+while [ ! -e "$MARKER" ] && [ "\$n" -lt 100 ]; do
+    n=\$((n + 1))
+    sleep 0.1
 done
-out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+exit 1
+ALPHASH
+chmod +x "$R/skills/watch-prs/scripts/test-pr-alpha.sh" \
+         "$R/skills/watch-prs/scripts/test-pr-omega.sh"
+out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
     && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
     && pass "two failing tests are both reported" \
     || die "not both failures were reported (rc=$rc out='$out')"
-# REPORTED IN A STABLE ORDER. Files finish in whatever order the machine gives
-# them, so without the sort the same two failures print in a different order from
-# run to run — and a gate whose output reshuffles is one people stop reading.
+[ -e "$MARKER" ] \
+    && pass "…and the fixture did run them concurrently, so the order below means something" \
+    || die "omega never reported: the two did not overlap (out='$out')"
+# REPORTED IN A STABLE ORDER — the glob's, not the machine's. `alpha` finished
+# second by construction, so an implementation that reports in completion order
+# puts `omega` first and fails here.
 { printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
     | sed -n '1p' | grep -q 'alpha'; } \
     && pass "…in a stable order rather than the order they finished in" \
@@ -527,6 +554,35 @@ done
 [ -f "$TMP/canary-populated/keep" ] \
     && pass "…and what was already in it is untouched" \
     || die "the gate removed a file it did not create"
+
+# ── the scratch directory is private, whatever the caller's umask ──────────
+# It holds the list of scripts the workers EXECUTE. A directory another local user
+# can write is therefore a directory in which they choose what `bash` runs as the
+# developer — and pointing an entry at a passing script makes a failing suite
+# report clean. `mktemp -d` gave this for free; creating the directory by hand is
+# what took it away, so it is asserted rather than assumed.
+#
+# OBSERVED FROM INSIDE THE RUN, because the directory is gone by the time the gate
+# returns. One of the fixture's own tests reads the mode while it exists — `ls -ld`
+# rather than `stat`, whose flags differ between GNU and BSD.
+UMROOT="$TMP/umask-probe"; rm -rf "$UMROOT"; mkdir -p "$UMROOT"
+MODELOG="$TMP/mode.log"; : > "$MODELOG"
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+cat > "$R/skills/watch-prs/scripts/test-pr-thing.sh" <<'PROBESH'
+#!/usr/bin/env bash
+for d in "$TMPDIR"/pr-selfcheck.*; do
+    [ -d "$d" ] || continue
+    ls -ld "$d" | cut -c1-10 >> "$RB_MODE_LOG"
+done
+exit 0
+PROBESH
+chmod +x "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(umask 000; TMPDIR="$UMROOT" RB_MODE_LOG="$MODELOG" "$SCRIPT" "$R" 2>&1)"; rc=$?
+mode="$(head -1 "$MODELOG" 2>/dev/null)"
+{ [ "$rc" -eq 0 ] && [ "$mode" = "drwx------" ]; } \
+    && pass "the scratch directory is private under a umask of 000" \
+    || die "the scratch directory was mode '$mode' under umask 000 (rc=$rc out='$out')"
 
 # ── a TMPDIR that cannot hold a scratch directory ──────────────────────────
 # The gate cannot run its suite without somewhere to write, and "cannot" must not

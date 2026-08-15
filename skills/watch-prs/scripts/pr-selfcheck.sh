@@ -455,13 +455,28 @@ case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
 # it should cost this run a retry rather than the round. Exhausting them fails
 # closed, which is the right direction: the alternative is a gate that reports
 # clean without having run the suite.
+#
+# CREATED PRIVATE, AND PRIVATE FROM THE FIRST INSTANT. `mkdir` takes the caller's
+# umask, so under a permissive one — `000`, or group-writable on a shared host —
+# this directory is writable by other local users. What is in it is the list of
+# scripts the workers then EXECUTE, so someone who can rewrite an entry between
+# the write and the read chooses what `bash` runs as the developer; pointing it at
+# a passing script also makes a failing suite report clean. That is what `mktemp
+# -d` was giving for free, and dropping it is what took it away.
+#
+# The umask is narrowed around the creation rather than the mode being fixed
+# afterwards: `mkdir` then `chmod` leaves the directory readable for as long as it
+# takes to run the second command, and a window is all the above needs.
 suite_dir=""
 _sd_try=0
+_sd_umask="$(umask)"
+umask 077
 while [ "$_sd_try" -lt 8 ]; do
     _sd_try=$((_sd_try + 1))
     _sd_cand="${TMPDIR:-/tmp}/pr-selfcheck.$$.$_sd_try.${RANDOM:-0}"
     if mkdir "$_sd_cand" 2>/dev/null; then suite_dir="$_sd_cand"; break; fi
 done
+umask "$_sd_umask"
 [ -n "$suite_dir" ] || {
     echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
     exit 2
