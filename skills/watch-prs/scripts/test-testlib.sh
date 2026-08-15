@@ -417,11 +417,10 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
         # why lives beside the code — and it was a false positive in a MANDATORY
         # pre-push gate, so it cost a round to discover and could not be ignored.
         #
-        # WHOLE-LINE COMMENTS ONLY, which is the rule `pr-selfcheck.sh` already
-        # applies to its own scan. Stripping from a `#` anywhere would break on a
-        # `#` inside a quoted string — the over-correction `CLAUDE.md` records
-        # twice from the deleted structural checker — and a violation carrying one
-        # would then go unreported, turning a false positive into a false negative.
+        # STRIPPING WHOLE-LINE COMMENTS IS THE OBVIOUS FIX, AND IT IS REJECTED —
+        # it is what `pr-selfcheck.sh` does for its own scan, so it was tried here
+        # first. It does not survive, for the reason below, and neither does any
+        # narrower version of it. Nothing is stripped.
         #
         # NO COMMENT IS SKIPPED, AND THAT IS THE ANSWER TO #54 RATHER THAN A
         # FAILURE TO FIX IT. The ask was to stop reporting a comment that explains
