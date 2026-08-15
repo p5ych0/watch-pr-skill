@@ -658,6 +658,31 @@ builtin printf '%s' "$out" | command grep -q 'status=clean' \
     && die "…and it reported clean anyway: $out" \
     || pass "…and nothing was reported clean"
 
+# …AND A NAME THE FIRST VERSION OF THE LIST FORGOT. `read` parses the records, so
+# an exported one can ignore the here-doc entirely and hand back `P 1 … P n` until
+# the count is satisfied: a genuinely failing test becomes a complete all-pass set
+# and the gate returns clean. `[` is the same — it decides every comparison in the
+# count check — and so are `test`, `exit`, `declare`, `local`, `shift` and `eval`.
+#
+# That is why the script clears EVERY inherited function rather than a list of
+# names. A list is wrong by omission, and this case is the omission that proved it.
+FORGE="$TMP/readforge.sh"
+cat > "$FORGE" <<'FORGESH'
+read() {
+    if [ "$1" = -r ]; then
+        if [ "${suite_seen:-0}" -ge "${suite_files:-0}" ]; then return 1; fi
+        eval "$2=\"P \$((suite_seen + 1))\""
+        return 0
+    fi
+    builtin read "$@"
+}
+export -f read
+FORGESH
+out="$(. "$FORGE"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported read cannot fabricate the record stream" \
+    || die "a forged read was accepted (rc=$rc out='$out')"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to

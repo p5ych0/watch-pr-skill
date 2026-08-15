@@ -63,23 +63,33 @@ set -uo pipefail
 # commit — so a gate defending its own arithmetic against it is defending the
 # wrong thing. That is a limitation rather than a hole, and it is written here
 # rather than left for a reader to rediscover.
-unset -f builtin command printf sort xargs basename tr bash 2>/dev/null || true
-# …AND THE CLEARING IS PROVEN, because `unset` is one of the names that can be
-# shadowed, and an exported `unset() { return 0; }` reports success while removing
-# nothing. Taking its status is therefore not a check — the postcondition is.
-# `unset` is on the list being verified for exactly that reason.
+# EVERY INHERITED FUNCTION, NOT A LIST OF NAMES. The first version named the
+# commands the verdict depends on, and a list like that is wrong by omission: it
+# had `printf` and `sort` and not `read`, which parses the records, nor `[`, which
+# decides every comparison in the count check. Both are builtins and both are
+# shadowable, as are `test`, `exit`, `declare`, `local`, `shift` and `eval` —
+# checked, not assumed. Enumerating names is a ladder with no top.
 #
-# This does not terminate the regress either: `declare` can be shadowed in turn.
-# What it does is cost an attacker another exported name for each level, and it
-# refuses outright rather than continuing with a prefix that no longer means what
-# the rest of this file assumes.
-for _rb_n in builtin command printf sort xargs basename tr bash unset; do
-    if declare -F "$_rb_n" >/dev/null 2>&1; then
-        echo "PR_SELFCHECK status=error reason=inherited_function name=$_rb_n" >&2
-        exit 2
-    fi
+# So nothing inherited survives, whatever it is called. Clearing a benign exported
+# function costs this process nothing: it does not use any.
+for _rb_f in $(compgen -A function 2>/dev/null); do
+    unset -f "$_rb_f" 2>/dev/null || true
 done
-unset -v _rb_n 2>/dev/null || true
+# …AND THE CLEARING IS PROVEN, because `unset` is itself among the things that can
+# be shadowed: an exported `unset() { return 0; }` reports success and removes
+# nothing. Its status is not a check; this is. Refusing beats continuing with a
+# name that no longer means what the rest of this file assumes.
+#
+# It does not terminate the regress — `compgen` can be shadowed in turn — and that
+# is recorded rather than implied. Each level costs an attacker another exported
+# name; none of it reaches a parent shell already running arbitrary code as the
+# developer, which can edit the tests or amend the commit regardless.
+_rb_left="$(compgen -A function 2>/dev/null)"
+if [ -n "$_rb_left" ]; then
+    echo "PR_SELFCHECK status=error reason=inherited_function name=${_rb_left%%$'\n'*}" >&2
+    exit 2
+fi
+unset -v _rb_f _rb_left 2>/dev/null || true
 
 # The root lookup takes its STATUS, like every other probe in this plugin.
 # `git rev-parse --show-toplevel` can print a plausible directory and then exit
