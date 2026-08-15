@@ -396,20 +396,62 @@ scan_watchdog_path_misuse() {   # <dir> ; prints offenders; 2 if the scan failed
     # The same pass joins continued lines, since the assignment and the call are
     # routinely split across them, and that used to be a second unguarded scan.
     out="$(awk '
+        # ONE definition of what an offender is, reached from both the end of a
+        # command and the comment that closes one. Written out twice, the comment
+        # boundary would be the copy that drifts.
+        function emit() {
+            if (buf ~ /PATH=/ && buf ~ /run_limited/ && buf !~ /run_limited [0-9]+ env /)
+                print FILENAME ":" start ": " buf
+            buf = ""; start = 0
+        }
         FNR == 1 { buf = ""; start = 0 }
         # EXACT basename, not a suffix — the same rule as the recordlib guard:
         # a suffix match also exempts a file merely NAMED like the exempt one.
         { _base = FILENAME; sub(/^.*\//, "", _base) }
         _base == "test-testlib.sh" { next }
+        # A COMMENT IS NOT CODE — #54. This guard rejected the DOCUMENTATION of
+        # its own rule: a comment explaining `run_limited N env …` rather than
+        # `PATH=… run_limited` names both tokens by necessity, and was reported as
+        # a violation. The workaround is to reword the prose until it no longer
+        # says what it means, in a repository whose whole convention is that the
+        # why lives beside the code — and it was a false positive in a MANDATORY
+        # pre-push gate, so it cost a round to discover and could not be ignored.
+        #
+        # STRIPPING WHOLE-LINE COMMENTS IS THE OBVIOUS FIX, AND IT IS REJECTED —
+        # it is what `pr-selfcheck.sh` does for its own scan, so it was tried here
+        # first. It does not survive, for the reason below, and neither does any
+        # narrower version of it. Nothing is stripped.
+        #
+        # NO COMMENT IS SKIPPED, AND THAT IS THE ANSWER TO #54 RATHER THAN A
+        # FAILURE TO FIX IT. The ask was to stop reporting a comment that explains
+        # this rule. Every way of doing that was tried in #63 and each one made a
+        # REAL violation invisible, because the two are the same text:
+        #
+        #   # `run_limited N env …`, not `PATH=… run_limited`   <- prose
+        #   # PATH=quoted" run_limited 5 cmd                    <- quoted DATA,
+        #                                                          after `PATH="/x`
+        #
+        # Nothing local separates them. What separates them is whether a quote was
+        # left open on an earlier line, and answering that means lexing the file —
+        # which cannot be approximated here, because these fixtures are full of
+        # heredocs whose bodies contain arbitrary quotes and hashes.
+        #
+        # So this guard reports every hash line that carries both tokens. It is a
+        # mandatory pre-push gate: one that misses a real violation is worse than
+        # one that questions a comment, and the cost is a comment somewhere having
+        # to be reworded. #64 carries the redesign, which has to stop inferring
+        # structure from text rather than infer it better.
+        #
+        # THE FIXTURES BELOW PIN ALL OF IT — four shapes that must stay reported,
+        # and the false positive that is the price. A future attempt to strip
+        # comments fails them, and their messages say where to read first.
         {
             if (start == 0) start = FNR
             line = $0
             sub(/\\$/, " ", line)
             buf = buf line
             if ($0 ~ /\\$/) next
-            if (buf ~ /PATH=/ && buf ~ /run_limited/ && buf !~ /run_limited [0-9]+ env /)
-                print FILENAME ":" start ": " buf
-            buf = ""; start = 0
+            emit()
         }
     ' "$dir"/test-*.sh 2>"$errf")"; rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
@@ -455,6 +497,30 @@ esac
 SEENTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-oneline.sh"
 printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" FOO=1 \\\n       run_limited 5 "$SCRIPT" a b)"\n' > "$SEENTMP/test-split.sh"
+# …and the two halves of #54: prose describing the rule is not a violation of it,
+# while a violation carrying a `#` inside a string still is. The second is what
+# stops the fix from being "strip everything after a hash".
+printf '#!/usr/bin/env bash\n# `run_limited N env …`, not `PATH=… run_limited`, so the subject sees it\n: \n' > "$SEENTMP/test-comment.sh"
+# The `#` sits BEFORE `run_limited`, which is what makes this case load-bearing:
+# with it after, stripping from the hash still leaves both tokens and the
+# violation is reported anyway — the fixture passes against the over-correction
+# and proves nothing. Here the strip removes the call itself, so the offender
+# goes unreported and the case fails.
+printf '#!/usr/bin/env bash\nout="$(PATH="/x:$PATH" MSG="a # b" run_limited 5 "$SCRIPT" a)"\n' > "$SEENTMP/test-hashstring.sh"
+# A CONTINUATION FOLLOWED BY THE SAME PROSE. Bash ends the command at that
+# comment; a scanner that keeps the buffer open appends it and reports the
+# violation the comment is describing.
+printf '#!/usr/bin/env bash\n: \\\n# `run_limited N env …`, not `PATH=… run_limited`, so the subject sees it\n' > "$SEENTMP/test-contcomment.sh"
+# …and the two shapes that pay for that choice: a `#` that is quoted DATA because
+# the continuation left a quote open, and an assignment that persists into the
+# command after the comment. Both are real violations, and both go unreported the
+# moment a pending continuation is closed at a comment.
+printf '#!/usr/bin/env bash\nout="$(PATH=/x MSG="a \\\n# b" run_limited 5 cmd)"\n' > "$SEENTMP/test-quotehash.sh"
+printf '#!/usr/bin/env bash\nPATH="/x:$PATH" \\\n# `run_limited N env …`, not `PATH=… run_limited`\nrun_limited 5 cmd\n' > "$SEENTMP/test-pathassign.sh"
+# The one with no backslash at all: the quote itself spans the lines, and the
+# hash line carries BOTH tokens. Every comment skip hid this; the parent scanner
+# reports it.
+printf '#!/usr/bin/env bash\nPATH="/x\n# PATH=quoted" run_limited 5 cmd\n' > "$SEENTMP/test-openquote.sh"
 # The whole reporting path, not just the scan: this is the branch that aborted.
 report_watchdog_path_misuse "$SEENTMP" > "$TMP/seen.out"; rep_rc=$?
 [ "$rep_rc" -eq 1 ] \
@@ -471,6 +537,28 @@ printf '%s' "$seen" | grep -q 'test-oneline.sh' \
 printf '%s' "$seen" | grep -q 'test-split.sh' \
     && pass "…and one split across a continuation" \
     || die "a continued-line PATH-on-watchdog call was not caught: '$seen'"
+# THE ACCEPTED COST, PINNED — both shapes of it. A hash line is reported whether
+# it is prose or quoted data, because nothing local tells them apart. Reword the
+# comment; #64 carries the redesign. A change that makes either of these stop
+# being reported has re-opened the fail-open hole #63 measured four times.
+printf '%s' "$seen" | grep -q 'test-comment.sh' \
+    && pass "a comment naming both tokens is questioned, which is the price — #64" \
+    || die "comments stopped being reported; #64's four shapes go fail-open first: '$seen'"
+printf '%s' "$seen" | grep -q 'test-contcomment.sh' \
+    && pass "…and so is one after a continuation" \
+    || die "a continued comment stopped being reported; read #64 before changing this: '$seen'"
+printf '%s' "$seen" | grep -q 'test-quotehash.sh' \
+    && pass "…and a hash that is quoted data across a continuation is not a comment" \
+    || die "a quoted '#' across a continuation hid a real violation: '$seen'"
+printf '%s' "$seen" | grep -q 'test-pathassign.sh' \
+    && pass "…and an assignment persisting past a comment is still a violation" \
+    || die "a PATH assignment before a comment hid the run_limited after it: '$seen'"
+printf '%s' "$seen" | grep -q 'test-openquote.sh' \
+    && pass "…and a hash line inside a quote opened on an earlier line" \
+    || die "an open multiline quote hid a real violation: '$seen'"
+printf '%s' "$seen" | grep -q 'test-hashstring.sh' \
+    && pass "…and a violation carrying a '#' inside a string is still caught" \
+    || die "stripping went past a whole-line comment and lost a real violation: '$seen'"
 rm -rf "$SEENTMP"
 
 # …and the scan's own failure path, exercised against a fixture it cannot read.
