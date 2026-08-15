@@ -2398,19 +2398,6 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     grep -qi 'replies on .*resolved threads' <<<"$flat" \
         && pass "$name: earlier-round replies are named as context" \
         || die "$name: does not tell the reviewer to read earlier thread replies"
-    # THE FIX-SHAPE RULE REACHES BOTH REVIEWERS OR NEITHER CAN ENFORCE IT. It was
-    # added to `SKILL.md` and `README.md` first and to neither reviewer file, so
-    # for one round the driver was promised behaviour nobody could flag — the
-    # drift this loop exists for, committed by the PR that introduced the rule.
-    grep -qi 'guard where a removal would do' <<<"$flat" \
-        && pass "$name: a guard where a removal would do is named as a finding" \
-        || die "$name: does not tell the reviewer to flag a guard where a removal would do"
-    # …AND THE REASONING IS JUDGED ON THE THREAD, not in the round summary. The
-    # first version of this rule said the summary, which would have blocked a
-    # compliant round: the driver contract puts the explanation on the thread.
-    grep -qi 'which of the two they took and why' <<<"$flat" \
-        && pass "$name: the reviewer is told the choice must be explained" \
-        || die "$name: does not require the fix-shape choice to be explained"
     # The PREDICATE, not the phrase: "changed code is still" alone is satisfied by
     # "…is still correct", which reverses the rule while matching the check.
     grep -qi 'changed code is still[[:space:]]*defective' <<<"$flat" \
@@ -2430,6 +2417,14 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     # alteration fail — negated, reworded, or weakened — and the cost is precisely
     # the property wanted for contract text: changing it is a deliberate act that
     # updates this list, not a quiet edit that still satisfies a pattern.
+    #
+    # THE FIX-SHAPE RULE IS IN THIS LIST FOR BOTH OF THOSE REASONS AT ONCE. It
+    # arrived as two substring greps, and each fell to the wall above: `guard where
+    # a removal would do` survives "…is **not** a finding", and `which of the two
+    # they took and why` survives moving the explanation back to the round summary
+    # — which is the regression this round fixed, passing its own check. The two
+    # clauses below carry the polarity and the location inside the matched text,
+    # so neither edit can be made without failing here.
     case "$name" in
         AGENTS.md)
             req_clauses=(
@@ -2437,6 +2432,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 '**the consequence** — what ends up wrong, in terms of what this tool does'
                 'The author is expected to assert the consequence in a test, and can only do that if you state it'
                 'if the same defect exists in a second copy **that this PR also changes**, say so'
+                '**A guard where a removal would do is a finding.**'
+                'The author is required to say **on the thread** which of the two they took and why'
             ) ;;
         copilot-instructions.md)
             req_clauses=(
@@ -2444,6 +2441,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'the **consequence** in terms of what this tool does'
                 'the author is expected to assert that consequence in a test'
                 'naming any second copy of the same defect **that this PR also changes**'
+                '**A guard where a removal would do is a finding.**'
+                'The author is required to say **on the thread** which of the two they took and why'
             ) ;;
         *) req_clauses=() ;;
     esac
