@@ -91,7 +91,7 @@ grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
     || die "skill no longer tells the driver to prefer removal over a guard"
 # …AND THE HALF THAT MAKES THE CHOICE REVIEWABLE. Deleting the sentence that
 # requires the reason, while leaving the preference heading in place, leaves a
-# driver that still chooses correctly and never says why — and a round summary
+# driver that still chooses correctly and never says why — and a finding thread
 # without the reason is one nobody can check the choice against. `README.md`
 # promises this behaviour too, so it is a separate assertion rather than an
 # extension of the one above.
