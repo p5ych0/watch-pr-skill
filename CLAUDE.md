@@ -268,9 +268,16 @@ from anything installed here. Entries explain the failure that was fixed and how
 manifested, not just what changed.
 
 **A release accompanies a change to what is installed** — the scripts, `SKILL.md`,
-the manifests, or the reviewer instruction files. A change confined to
-`skills/watch-prs/scripts/test-*.sh` or to authoring documentation produces no
+or the manifests. A change confined to `skills/watch-prs/scripts/test-*.sh`, to
+authoring documentation, or to the reviewer instruction files produces no
 release, and must not bump the version.
+
+The reviewer files are on the no-release side despite being contract rather than
+prose: `AGENTS.md` and `.github/copilot-instructions.md` are read by Codex and
+Copilot **from the pull request's base ref**, which is why a PR cannot rewrite
+the rules it is judged by — and it is also why nothing installs them. A user who
+updates the plugin receives no part of them, so a release for a change to one
+would be exactly the unobservable release this boundary exists to prevent.
 
 That is the settled practice, not a new allowance: #42, #44 and #47 were
 test-only and #40 was documentation-only, all four merged with no bump and clean
