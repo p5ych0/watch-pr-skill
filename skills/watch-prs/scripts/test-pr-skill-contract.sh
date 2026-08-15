@@ -132,9 +132,18 @@ _ft_same="$(sed -n '/if \[ "\$COPILOT_SHA" = "\$CODEX_SHA" \]; then/,/^else$/p' 
 grep -qi 'fault.tolerance pass to run' <<<"$_ft_same" \
     && pass "the equal-sha branch says why there is no pass to run" \
     || die "the equal-sha branch does not explain the absent fault-tolerance pass"
-grep -qi 'another Codex pass' <<<"$_ft_same" \
-    && die "the equal-sha branch still offers a Codex pass over commits that do not exist" \
-    || pass "the equal-sha branch does not offer a pass over commits that do not exist"
+# …AND ITS MENU IS A WHITELIST, not one forbidden phrase. The first version of
+# this rejected the wording `another Codex pass`, which rephrasing option (b) to
+# `run the fault-tolerance pass first` walks straight past — the driver reoffers
+# the pass over commits that do not exist while its only executable coverage
+# stays green. This repository has been here before: assert what must appear.
+# Every option line in the branch is matched against the exact allowed set, so a
+# reworded (b) and an added (c) both fail.
+_ft_opts="$(grep '^    ([a-z]) ' <<<"$_ft_same")"
+[ "$_ft_opts" = "    (a) merge — run the gate below
+    (b) stop and leave the PR open" ] \
+    && pass "the equal-sha branch offers merge or stop, and nothing else" \
+    || die "the equal-sha branch's options are not merge-or-stop (got: $_ft_opts)"
 
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
@@ -2469,6 +2478,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 '**the consequence** — what ends up wrong, in terms of what this tool does'
                 'The author is expected to assert the consequence in a test, and can only do that if you state it'
                 'if the same defect exists in a second copy **that this PR also changes**, say so'
+                '**The fault-tolerance pass needs commits to review.**'
+                'A change that offers the pass on an equal-sha head, or that removes the'
                 '**A guard where a removal would do is a finding.**'
                 'The author is required to say **on the thread** which of the two they took and why'
             ) ;;
@@ -2478,6 +2489,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
                 'the **consequence** in terms of what this tool does'
                 'the author is expected to assert that consequence in a test'
                 'naming any second copy of the same defect **that this PR also changes**'
+                '**The fault-tolerance pass needs commits to review.**'
+                'A change that offers the pass on an equal-sha head, or that removes the'
                 '**A guard where a removal would do is a finding.**'
                 'The author is required to say **on the thread** which of the two they took and why'
             ) ;;

@@ -96,6 +96,15 @@ there when it is missing. Do not judge this by the round summary: a session that
 explained the choice on the thread and did not repeat it in the summary has
 complied.
 
+**The fault-tolerance pass needs commits to review.** After Copilot signs off,
+`SKILL.md` offers the operator one more Codex pass over what the Copilot phase
+changed. Where that phase produced NOTHING, both signoffs name the same commit,
+Codex has already reviewed the head being merged, and the pass costs a
+revocation, a round and a reopened phase for a verdict that cannot differ — a
+session resuming into the reopened phase reads it as a Copilot phase to run
+again. A change that offers the pass on an equal-sha head, or that removes the
+condition distinguishing the two, is a blocking finding.
+
 **Fail-closed is a review criterion.** Every fetch, parse, and probe must either
 propagate a non-zero status or emit a distinguished sentinel that every caller
 rejects. An unguarded failure is indistinguishable from a good answer: an errored
