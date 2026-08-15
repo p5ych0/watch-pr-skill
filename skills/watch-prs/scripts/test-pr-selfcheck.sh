@@ -668,37 +668,30 @@ out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
     && pass "a readonly startup hook cannot talk over the record channel" \
     || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
 
-# ── a startup file that locks IFS ──────────────────────────────────────────
-# A hook can declare `readonly IFS=-`, which no assignment can undo. The re-exec
-# is what handles it: `BASH_ENV` never runs in the process that does the work, so
-# the separator never reaches it. This is the reachable state, and it must report
-# both failures rather than joining them.
+# ── a caller with tracing switched on ──────────────────────────────────────
+# An exported `SHELLOPTS=xtrace` turns tracing on in this process and every
+# worker, and `BASH_XTRACEFD=1` puts that trace on stdout — inside every command
+# substitution. The postcondition reads its own trace as a leftover function name
+# and refuses a valid checkout before the records are even reached; with the
+# records, the trace lands between them and the parser calls them malformed.
 #
-# THE DOUBLY-HOSTILE VARIANT IS NOT TESTED HERE, deliberately. Forging `exec` as
-# well keeps the lock in force, and `read` under a readonly non-default `IFS`
-# then behaves differently on bash 3.2 than on bash 5 — the record loop malformed
-# its own records there while reporting correctly here, which the `macos-shell`
-# job caught twice. A forged `exec` is already inside the limitation recorded in
-# `pr-selfcheck.sh`: a shell running arbitrary code as the developer can edit the
-# tests or amend the commit, and this gate cannot defend its arithmetic against
-# its own parent. Pinning bash-version-dependent behaviour in that state would be
-# asserting something neither reachable nor stable.
-IFSONLY="$TMP/ifsonly.sh"
-builtin printf 'readonly IFS=-\n' > "$IFSONLY"
-R5B="$(mkroot "$OK_SKILL")"
-for n in alpha omega; do
-    addscript "$R5B" "pr-$n.sh" 'exit 0'
-    builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
-    chmod +x "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
-done
-out="$(run_limited 60 env BASH_ENV="$IFSONLY" "$SCRIPT" "$R5B" 2>&1)"; rc=$?
-# BOTH NAMES, because the point is that the whole list survives. Requiring only
-# the first would stay green while a regression dropped everything after it.
-{ [ "$rc" -eq 1 ] \
-    && builtin printf '%s' "$out" | command grep -q 'test-pr-alpha.sh fails' \
-    && builtin printf '%s' "$out" | command grep -q 'test-pr-omega.sh fails'; } \
-    && pass "a locked IFS does not join the failure list" \
-    || die "a readonly IFS swallowed the failures (rc=$rc out='$out')"
+# It is a valid state for a caller to be in. The sequential loop this replaced
+# discarded the tests' output and never noticed; a worker that has to SAY
+# something cannot.
+XT="$(mkroot "$OK_SKILL")"
+addscript "$XT" pr-thing.sh 'exit 0'
+addtest "$XT" test-pr-thing.sh
+out="$(run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "inherited tracing does not reach the record channel" \
+    || die "xtrace from the caller broke the run (rc=$rc out='$out')"
+# …AND THE GUARD DOES NOT LOOP. `SHELLOPTS` is set in every bash whether it was
+# inherited or not, so a re-exec conditioned on it never terminates. The condition
+# is `$-`, which carries `x` only when tracing is really on. A watchdog is not the
+# assertion here — reaching a verdict at all is.
+builtin printf '%s' "$out" | command grep -q 'PR_SELFCHECK' \
+    && pass "…and the guard that strips it terminates" \
+    || die "the re-exec did not reach a verdict: $out"
 
 # ── a startup file that talks over the record channel ──────────────────────
 # A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and

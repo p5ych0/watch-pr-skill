@@ -76,8 +76,21 @@ set -uo pipefail
 # function it defined would intercept the guard and skip the very re-exec that
 # exists to escape it. `[[` is a reserved word: the parser handles it and no
 # function can take its place.
-if [[ -n ${BASH_ENV-} || -n ${ENV-} ]]; then
-    exec env -u BASH_ENV -u ENV bash "$0" "$@"
+# `SHELLOPTS` AND `BASH_XTRACEFD` TRAVEL WITH THEM, for the same reason. An
+# exported `SHELLOPTS=xtrace` turns tracing on in this process and every worker,
+# and `BASH_XTRACEFD=1` puts that trace on stdout — inside every command
+# substitution. The postcondition below then reads its own trace as a leftover
+# function name and refuses a valid checkout before the records are even reached.
+# `SHELLOPTS` is readonly in a shell, so it cannot be unset from in here either;
+# `env -u` removes it from the child's environment regardless.
+#
+# THE TEST IS `$-`, NOT `SHELLOPTS`. Bash sets `SHELLOPTS` in every shell whether
+# it was inherited or not, so a condition on it is always true and the re-exec
+# loops forever — which is what the first version of this line did. `$-` carries
+# `x` only when tracing is actually on, and after `env -u SHELLOPTS` it is not, so
+# the second instance does not qualify.
+if [[ -n ${BASH_ENV-} || -n ${ENV-} || $- == *x* || -n ${BASH_XTRACEFD-} ]]; then
+    exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
 fi
 
 # ── INHERITED FUNCTIONS ARE CLEARED BEFORE ANYTHING DEPENDS ON A NAME ──────
@@ -169,7 +182,8 @@ if [[ -n $_rb_left ]]; then
     exit 2
 fi
 unset -v _rb_f _rb_left 2>/dev/null || true
-# `BASH_ENV` GOES TOO, because a non-interactive `bash -c` SOURCES it and the
+# `BASH_ENV` GOES TOO — and the tracing variables with it — because a
+# non-interactive `bash -c` SOURCES it and the
 # workers report their verdict on stdout: a startup file that prints anything
 # lands in the record stream and the parser refuses a run in which every test
 # passed. Cleared in the parent so the tests the workers run are clean as well,
@@ -179,7 +193,7 @@ unset -v _rb_f _rb_left 2>/dev/null || true
 # hook containing `readonly BASH_ENV` makes the variable unsettable here; the
 # workers are launched through `env -u` instead, which removes it from their
 # environment whatever this shell's attributes say.
-unset -v BASH_ENV ENV 2>/dev/null || true
+unset -v BASH_ENV ENV BASH_XTRACEFD 2>/dev/null || true
 # …AND STRICT MODE IS APPLIED AGAIN, because the `set -uo pipefail` at the top of
 # this file ran BEFORE the clearing and an exported `set() { return 0; }` would
 # have swallowed it. The options were then off for the whole run: `pipefail` off
@@ -687,7 +701,7 @@ if [ "$suite_files" -gt 0 ]; then
             n=$((n + 1))
             builtin printf '%s:%s\0' "$n" "${suite_names[$n]}"
         done | command xargs -0 -P "$suite_jobs" -n 1 \
-            env -u BASH_ENV -u ENV bash -c '
+            env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash -c '
             rec="$1"
             i="${rec%%:*}"
             p="${rec#*:}"
