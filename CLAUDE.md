@@ -74,6 +74,42 @@ category; do not "fix" a script into a stricter mode.
   substitution keeps it, so a call that emitted a plausible SHA and then errored
   reads as success unless the status is checked and the shape validated.
 
+### Already paid for
+
+Each of these was found, fixed, and then made again in a later round of the same
+pull request. Read it before writing a defence or a fixture; it is cheaper than
+rediscovering them.
+
+- **A shell function shadows any name** — external, builtin, or the `command` and
+  `builtin` prefixes used to bypass one. Prefer a **reserved word** (`[[`, `if`)
+  or an **assignment**: the parser handles those and no function can take their
+  place. A postcondition cannot be written with the thing it checks for, and two
+  checks behind one prefix are one check.
+- **A list of names is wrong by omission.** Clearing "the names the verdict
+  depends on" missed `read` and `[`. Enumerate everything, or change the shape so
+  no list is needed.
+- **A defence written for a shell means nothing where no shell runs.** `xargs`
+  execs its program, so `command env …` asks for a program *called* `command` —
+  which exists on some machines and not on CI.
+- **The startup hook runs before the script does.** An `IFS`, a `readonly -f`
+  function or an exported `SHELLOPTS=xtrace` from `BASH_ENV` cannot be undone
+  from inside; re-exec with them removed instead. The hook can also erase the
+  evidence that it ran, so guard that re-exec with a marker rather than with the
+  evidence — and clear the marker, or every child inherits it.
+- **Assert what must appear, not what must not.** "Not clean" has passed against
+  a hang, a malformed record and a crash.
+- **A forger in a fixture must be narrow and must otherwise work.** One that
+  forges every call breaks the harness; one that produces a malformed result is
+  rejected by a different check, and the case then passes either way.
+- **Combine states.** A readonly helper is harmless; a shadowed `[` is harmless;
+  together they skip a re-exec. Separate cases cannot see it.
+- **"Bash rejects this spelling" is a fact about a parser; "this cannot be
+  inherited" is a claim about every route into the process.** `function 'a*b'` is
+  rejected and `env 'BASH_FUNC_a*b%%=…'` is imported. Never remove a guard on the
+  strength of one route.
+- **A comment that argues against the code beside it is an instruction**, and it
+  will be followed.
+
 ## Repo-agnostic invariant
 
 - No hard-coded owner, repo, or branch name in the scripts or in `SKILL.md`. The

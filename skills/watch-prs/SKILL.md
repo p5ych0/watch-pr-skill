@@ -83,6 +83,16 @@ the summary rides with the `@codex review` mention and a design proposal there i
 a work order. Open an issue for it, reference the number, and raise it with the
 operator outside the review request.
 
+**Prefer removing the dependency over guarding it.** When a finding names
+something that can go wrong, there are usually two answers: add a check that
+catches it, or change the shape so it cannot arise. Take the second whenever it
+is not larger. A check is a name, and a name can be shadowed, mis-parsed,
+locked, or simply forgotten by the next person — each of those has ended a round
+in this repository, and each time the fix that finally held was subtractive:
+reading data instead of expanding it, leaving an environment instead of
+sanitising it, holding a list in an array instead of a string. Say on the thread
+which of the two you took and why, so the reviewer is not left inferring it.
+
 **Every change you make must be reviewable as a fix.** Bundling an unrelated
 change into a review-fix commit hides it: the reviewer reads the round summary,
 sees a list of findings, and has no reason to look for anything else. That is how
