@@ -611,6 +611,32 @@ out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a failing test that deleted itself is still reported, by name" \
     || die "a self-deleting failure went unreported (rc=$rc out='$out')"
 
+# ── a test that renames itself while the suite is running ──────────────────
+# THE WORKER USED TO RESOLVE AN INDEX AGAINST A FRESH GLOB, which is a second walk
+# of the directory and carries the same failure the naming walk did. Run one at a
+# time, if the first test renames itself so it sorts after the second and then
+# passes, worker 2 re-globs and runs the RENAMED FIRST TEST again: it reports a
+# pass, the second test never runs, and a complete set of passes reports clean
+# over the failing test nobody executed.
+#
+# The second test therefore FAILS. A version that skips it reports clean; a
+# version that runs the path it was handed reports the failure.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-aaa.sh 'exit 0'
+addscript "$R" pr-bbb.sh 'exit 0'
+cat > "$R/skills/watch-prs/scripts/test-pr-aaa.sh" <<AAASH
+#!/usr/bin/env bash
+mv "\$0" "\$(dirname "\$0")/test-pr-zzz.sh"
+exit 0
+AAASH
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
+         "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
+out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails'; } \
+    && pass "a test that renames itself does not make another one vanish" \
+    || die "the renamed test displaced the failing one (rc=$rc out='$out')"
+
 # ── an index that names no file ────────────────────────────────────────────
 # The worker finds its own file by walking the same glob the parent walked, so if
 # the directory changes in between an index can name nothing. That is neither a

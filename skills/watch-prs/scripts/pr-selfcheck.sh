@@ -462,21 +462,31 @@ if [ "$suite_files" -gt 0 ]; then
     # directory changed under the run. It is not a failing test and not a passing
     # one, and it is the only honest thing to say about a result that cannot be
     # attributed.
+    # THE WORKER RUNS THE PATH IT WAS GIVEN. It used to receive an index and
+    # resolve it against a fresh glob, which is a second walk of the directory
+    # with the same failure as the first one had: a test that renames itself so it
+    # sorts elsewhere makes index n name a DIFFERENT file, so one test runs twice
+    # and another never runs at all — and a complete set of passes then reports
+    # clean over a test nobody executed.
+    #
+    # Each record is `<index>:<path>`, NUL-delimited so the path survives `xargs`
+    # whatever it contains, and split on the FIRST colon so a path may contain one.
+    # The index is what comes back, because an index cannot carry a delimiter; the
+    # path only ever travels outward.
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
-            printf '%s\0' "$n"
-        done | RB_SUITE_SCRIPTS="$SCRIPTS" xargs -0 -P "$suite_jobs" -I{} bash -c '
-            i="$1"; n=0
-            for f in "$RB_SUITE_SCRIPTS"/test-*.sh; do
-                [ -e "$f" ] || continue
-                n=$((n + 1))
-                [ "$n" = "$i" ] || continue
-                if bash "$f" >/dev/null 2>&1; then printf "P %s\n" "$i"
-                else printf "F %s\n" "$i"; fi
-                exit 0
-            done
-            printf "M %s\n" "$i"
+            printf '%s:%s\0' "$n" "${suite_names[$n]}"
+        done | xargs -0 -P "$suite_jobs" -I{} bash -c '
+            rec="$1"
+            i="${rec%%:*}"
+            p="${rec#*:}"
+            # The file going missing between the parent listing it and this worker
+            # reaching it is the one thing left that the parent cannot see. It is
+            # neither a pass nor a failure.
+            [ -e "$p" ] || { printf "M %s\n" "$i"; exit 0; }
+            if bash "$p" >/dev/null 2>&1; then printf "P %s\n" "$i"
+            else printf "F %s\n" "$i"; fi
             exit 0
         ' _ {})"; suite_rc=$?
     # The runner's status is still taken. It is no longer the only thing taken,
