@@ -252,7 +252,7 @@ STUBSH
     # nothing: `PR_CI_INTERVAL=soon` leaves the sleep unclamped and polls
     # ONCE, and `PR_CI_TIMEOUT=soon` dies on `set -u` before its FIRST poll. Both
     # were comfortably under the ceiling, and both passed for the opposite of the
-    # reason they name. The two assertions in `gate_spin` above are what actually
+    # reason they name. The two assertions in `gate_spin` below are what actually
     # separates a paced gate from a dead one; this ceiling remains the one that
     # catches the spin.
     #
