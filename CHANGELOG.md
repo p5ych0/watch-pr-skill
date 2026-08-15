@@ -2,7 +2,7 @@
 
 ## [2.0.13] — 2026-08-14
 
-- **The pre-push gate ran twelve independent test files one after another.** The
+- **The pre-push gate ran its eighteen independent test files one after another.** The
   suite is what a person waits at before every round, and at ~208s it was long
   enough to be worth skipping — which is the failure, because it is the check that
   keeps the same handful of mistakes from reaching a reviewer. The files share no
@@ -43,8 +43,9 @@
   refused rather than only the literal one. And a path cannot travel through the
   runner: `xargs` eats backslashes unless its input is NUL-delimited, and a newline
   in a directory name splits one failure into two on the way back — inventing a
-  test name and inflating the count. The runner is handed indices instead, and the
-  parent maps them back through the glob it wrote them from.
+  test name and inflating the count. So the path travels outward inside a
+  NUL-delimited record and only its index comes back, an index being the one thing
+  that cannot carry a delimiter.
 
 ## [2.0.12] — 2026-08-13
 

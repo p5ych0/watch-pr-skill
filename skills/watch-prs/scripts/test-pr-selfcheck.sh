@@ -692,11 +692,11 @@ printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails' \
     && die "…and it was reported as an ordinary failure: $out" \
     || pass "…and is not reported as an ordinary failing test"
 
-# ── an index that names no file ────────────────────────────────────────────
-# The worker finds its own file by walking the same glob the parent walked, so if
-# the directory changes in between an index can name nothing. That is neither a
-# pass nor a failure, and the only honest answer is that the result cannot be
-# attributed. A stub reports the record the worker would emit.
+# ── the parent honours an unmappable record ────────────────────────────────
+# The case above covers the worker EMITTING that record. This one covers the
+# parent honouring it, which is a separate claim and needs a separate case: a stub
+# produces the record directly, so the parent's handling is exercised even when no
+# real worker would have produced one.
 OFFSTUB="$TMP/offstub"; rm -rf "$OFFSTUB"; mkdir -p "$OFFSTUB"
 cat > "$OFFSTUB/xargs" <<'OFFSH'
 #!/usr/bin/env bash
