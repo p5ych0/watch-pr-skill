@@ -54,17 +54,16 @@ set -uo pipefail
 # names, so there is no allowlist to leave something out of — and an allowlist is
 # a shape that has already been wrong twice in this file.
 #
-# THE CONDITION IS THE GUARD, so there is no sentinel. Re-exec only when one of
-# the hook variables is actually set; after `env -u` neither is, so the second
-# instance does not qualify and there is no loop to prevent.
+# THE GUARD IS A MARKER, AND CONDITIONING ON THE HOOK VARIABLES WAS WRONG. That
+# asks a question the hook has already had the chance to answer — it can `unset
+# BASH_ENV` on its way out, leaving a `readonly -f` function nothing can clear and
+# no evidence anything ran. A marker set by the exec cannot be erased that way,
+# because the hook has finished by the time it exists.
 #
-# A sentinel was tried and is worse in two ways. It is inherited: the gate exports
-# it, so the workers, the tests they run and the nested copies of this script that
-# `test-pr-selfcheck.sh` invokes would each skip their own re-exec and stand in
-# the hook they were meant to step out of — the suite caught exactly that, a case
-# passing standalone and failing inside the gate. And it is settable from outside:
-# anyone who exports it disables the protection, which is a guard that can be
-# switched off by the environment it exists to defend against.
+# Its two costs are real and are handled below rather than denied: it is inherited
+# by children unless cleared, which the suite caught when it was not; and a caller
+# who exports it skips the re-exec, which is the boundary this file already
+# concedes.
 #
 # If `exec` or `env` is itself shadowed the re-exec silently does not happen, and
 # the clearing and postcondition below are still there; this is the cheap layer,
@@ -84,14 +83,39 @@ set -uo pipefail
 # `SHELLOPTS` is readonly in a shell, so it cannot be unset from in here either;
 # `env -u` removes it from the child's environment regardless.
 #
-# THE TEST IS `$-`, NOT `SHELLOPTS`. Bash sets `SHELLOPTS` in every shell whether
-# it was inherited or not, so a condition on it is always true and the re-exec
-# loops forever — which is what the first version of this line did. `$-` carries
-# `x` only when tracing is actually on, and after `env -u SHELLOPTS` it is not, so
-# the second instance does not qualify.
-if [[ -n ${BASH_ENV-} || -n ${ENV-} || $- == *x* || -n ${BASH_XTRACEFD-} ]]; then
-    exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
+# UNCONDITIONALLY, AND GUARDED BY A MARKER RATHER THAN BY THE EVIDENCE. Asking
+# whether a hook variable is set asks the wrong question: the hook has already run
+# by the time the question is put, and it can answer it itself —
+#
+#     helper() { :; }; readonly -f helper; unset BASH_ENV
+#
+# leaves a function `unset` REFUSES to remove and no sign that anything ran, so
+# the re-exec was skipped and the postcondition refused a valid checkout. Nothing
+# hostile is needed for that; a hook that tidies up after itself is a reasonable
+# thing to write.
+#
+# A marker cannot be erased that way, because the exec sets it after the hook has
+# had its turn. The cost is one extra `exec` per invocation — milliseconds against
+# a gate that takes eighty-five seconds.
+#
+# THE `unset` ON THE NEXT LINE IS NOT OPTIONAL. Without it the marker is in the
+# environment of every child: the workers, the tests they run, and the nested
+# copies of this script the fixtures invoke would each skip their own re-exec and
+# stand in the hook they were meant to step out of. An earlier version did exactly
+# that and the suite caught it — a case passing standalone and failing inside the
+# gate.
+#
+# A caller who exports the marker skips the re-exec. That is the boundary already
+# recorded above rather than a new hole: a shell running arbitrary code as the
+# developer can edit the tests or amend the commit instead.
+# `[[`, NOT `[` — the hook runs first and can define a `[` function, which would
+# intercept this guard and skip the re-exec that exists to escape it. That is the
+# same slip made when this guard was a condition on `BASH_ENV`, and the suite
+# caught it both times.
+if [[ -z ${RB_SELFCHECK_CLEAN-} ]]; then
+    RB_SELFCHECK_CLEAN=1 exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
 fi
+unset -v RB_SELFCHECK_CLEAN 2>/dev/null || true
 
 # ── INHERITED FUNCTIONS ARE CLEARED BEFORE ANYTHING DEPENDS ON A NAME ──────
 #

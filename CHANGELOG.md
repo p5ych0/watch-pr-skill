@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.14] — 2026-08-15
+
+- **A startup hook could erase the evidence that it ran, and the pre-push gate
+  then refused a valid checkout.** `pr-selfcheck.sh` re-execs itself with
+  `BASH_ENV` and friends removed, so a startup file never runs in the process that
+  does the work. It decided whether to do that by asking whether a hook variable
+  was set — a question the hook has already had its turn to answer. A hook ending
+  in `unset BASH_ENV`, having left a `readonly -f` function behind, was invisible:
+  the re-exec was skipped, `unset` refused to remove the function, and the gate
+  reported `reason=inherited_function` over a checkout with nothing wrong with it.
+
+  Nothing hostile is needed to reach that; a startup file that tidies up after
+  itself is a reasonable thing to write. The re-exec is unconditional now, guarded
+  by a marker the exec sets after the hook has finished, and cleared immediately
+  so no child inherits it.
+
 ## [2.0.13] — 2026-08-14
 
 - **The pre-push gate ran its eighteen independent test files one after another.** The

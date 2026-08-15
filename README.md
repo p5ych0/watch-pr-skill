@@ -411,6 +411,13 @@ helper it drives is shipped, every script has a test, and the suite passes.
 The suite is the slow part, so it runs four files at a time — they share no
 state, and four at a time is ~85s where one after another is ~208s.
 
+It re-runs itself once with `BASH_ENV`, `ENV` and the tracing variables removed,
+so a startup file in your shell cannot end up talking over the channel the tests
+report through, and cannot leave behind a `readonly -f` function that the check
+would then refuse to run past. Exporting `RB_SELFCHECK_CLEAN` skips that step —
+a shell that can do so can already edit the tests, so it is a boundary rather
+than a guard.
+
 It writes nothing outside itself to do this, and every test reports back whether
 it passed, failed, or had vanished before it could run — so a runner that quietly
 ran nothing is an error rather than a clean suite, and a test that disappeared

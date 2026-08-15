@@ -617,6 +617,37 @@ builtin printf '%s' "$out" | command grep -q 'status=clean' \
     && die "one forged prefix answered for both checks and the suite reported clean: $out" \
     || pass "one forged prefix cannot answer for both halves of the postcondition"
 
+# ── a startup hook that erases the evidence it ran ─────────────────────────
+# The hook runs BEFORE this script's first line, so asking whether a hook variable
+# is set asks a question the hook has already had the chance to answer:
+#
+#     helper() { :; }; readonly -f helper; unset BASH_ENV
+#
+# leaves a function `unset` refuses to remove and no sign that anything ran. A
+# re-exec conditioned on the evidence is skipped, the clearing cannot clear it,
+# and the postcondition refuses a valid checkout. Nothing hostile is required —
+# a hook that tidies up after itself is a reasonable thing to write.
+#
+# The re-exec is unconditional now, guarded by a marker the exec sets after the
+# hook has had its turn.
+ERASE="$TMP/selferase.sh"
+{ builtin printf 'helper() { :; }\n'
+  builtin printf 'readonly -f helper\n'
+  builtin printf 'unset BASH_ENV\n'
+} > "$ERASE"
+R11="$(mkroot "$OK_SKILL")"
+addscript "$R11" pr-thing.sh 'exit 0'
+addtest "$R11" test-pr-thing.sh
+# `BASH_ENV` IS THE ONLY EVIDENCE AVAILABLE, deliberately. A contributor or a CI
+# runner that exports `ENV`, `SHELLOPTS` or `BASH_XTRACEFD` would keep the old
+# evidence-based guard firing on one of those, and this case would stay green
+# while proving nothing about the hook erasing its own trace.
+out="$(run_limited 60 env -u ENV -u SHELLOPTS -u BASH_XTRACEFD \
+        BASH_ENV="$ERASE" "$SCRIPT" "$R11" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a hook that unsets itself does not block a valid run" \
+    || die "the re-exec was skipped by a self-erasing hook (rc=$rc out='$out')"
+
 # ── a startup hook leaving something that cannot be unset ──────────────────
 # `readonly -f` makes a function `unset` REFUSES to remove, so a hook defining one
 # leaves it installed however thorough the clearing is — and the postcondition
