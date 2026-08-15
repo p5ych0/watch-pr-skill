@@ -15,6 +15,23 @@
   round in this repository, and each time the fix that finally held was
   subtractive.
 
+- **The fault-tolerance pass was offered over commits that did not exist.** After
+  Copilot signs off, the driver asks the operator whether to merge or to run one
+  more Codex pass over what the Copilot phase changed. It asked that even when the
+  phase changed nothing — both signoffs naming a single commit, which Codex had
+  already reviewed. Taking it cost a revocation, a full round and a reopened
+  phase for a verdict that could not differ, and a session resuming into the
+  reopened phase read it as a Copilot phase to run again. The option now exists
+  only where the two signoffs name different commits.
+
+- **The authoring rules bound the pull request and not the round**, which is where
+  the cost accumulates: #53's change never had a finding against it, and all
+  twenty-seven of its rounds were surface its own fixes exposed. `CLAUDE.md` gains
+  a round-scope section — fix what the finding names and nothing else, prefer
+  removing the dependency over guarding it, read the thread and the previous
+  round's diff first, and run the fault-tolerance pass only over commits that
+  exist.
+
 ## [2.0.14] — 2026-08-15
 
 - **A startup hook could erase the evidence that it ran, and the pre-push gate

@@ -502,8 +502,11 @@ asks:
 
 - **When Codex is clean** — merge on that signoff alone, or open the Copilot
   phase on the same head. One reviewer's clean pass is a legitimate place to stop.
-- **When Copilot is clean** — merge, or ask Codex again as fault tolerance over
-  what the Copilot phase changed.
+- **When Copilot is clean** — merge, or, *if the Copilot phase produced
+  commits*, ask Codex again as fault tolerance over what it changed. Where the
+  phase produced none, both signoffs name the same commit and that option is not
+  offered: Codex has already reviewed the head being merged, so the pass would
+  cost a revocation and a round for a verdict that cannot differ.
 
 Both stops are **resumable**. Each signoff is recorded on the pull request as a
 `**Review-Signoff:**` comment naming the reviewer and the exact head, so a

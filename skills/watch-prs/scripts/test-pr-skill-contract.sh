@@ -108,6 +108,34 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
     && pass "skill requires the choice to be explained, on the thread" \
     || die "skill no longer requires the driver to say on the thread which fix shape it took, and why"
 
+# ── the fault-tolerance pass needs something to review ─────────────────────
+#
+# #55 was raised because it ran when the Copilot phase had produced no commits:
+# both signoffs name one sha, the pass re-reviews what Codex already signed off,
+# and it costs a revocation and a reopened phase for a verdict that cannot
+# differ — a session resuming into that reopened phase reads it as a Copilot
+# phase to run again.
+#
+# The GUARD is asserted, not the prose, because prose is what failed: the option
+# was described as conditional in the operator's ear while the branch offering it
+# ran unconditionally. This is one of the narrow lifts #26 allows — an anchored
+# match on a condition, no grammar — and it is worth one here because `SKILL.md`'s
+# bash has no other coverage at all.
+grep -qF 'if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then' <<<"$skill_flat" \
+    && pass "the post-Copilot decision branches on whether the phase produced commits" \
+    || die "SKILL.md offers the same post-Copilot options whether or not Copilot committed"
+# …AND THE OPTION IS ABSENT FROM THE EQUAL-SHA BRANCH, which is the half that
+# matters. A branch that exists and offers the pass anyway satisfies the check
+# above while changing nothing.
+_ft_same="$(sed -n '/if \[ "\$COPILOT_SHA" = "\$CODEX_SHA" \]; then/,/^else$/p' "$SKILL")" \
+    || die "could not read the equal-sha branch"
+grep -qi 'fault.tolerance pass to run' <<<"$_ft_same" \
+    && pass "the equal-sha branch says why there is no pass to run" \
+    || die "the equal-sha branch does not explain the absent fault-tolerance pass"
+grep -qi 'another Codex pass' <<<"$_ft_same" \
+    && die "the equal-sha branch still offers a Codex pass over commits that do not exist" \
+    || pass "the equal-sha branch does not offer a pass over commits that do not exist"
+
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
     && pass "skill states the fail-closed rule" \

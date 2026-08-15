@@ -296,6 +296,36 @@ converging. Four commits were dropped from the PR and re-filed as #37 and #39.
 defects in the fixes usually mean the change is too large, and splitting the PR
 is the faster route.
 
+## One change per review round
+
+The rule above bounds what a **pull request** may contain. This one bounds what a
+**round** may contain, and that is where the cost actually accumulates: #53's
+change — running the suite four files at a time — never had a finding against it.
+Every one of its twenty-seven rounds was surface the fixes exposed.
+
+- **Fix what the finding names, and nothing else.** The PR-scope rule already
+  forbids the second concern because the file is open; at round scope nothing did,
+  and a round that answers a finding with more than the finding named is how a
+  review starts converging on the fixes instead of on the change. A broader change
+  is an issue and a line in the round summary, exactly as at PR scope.
+- **Prefer removing the dependency over guarding it.** A guard is a name, and
+  names can be shadowed, mis-parsed or forgotten; a removed dependency stays
+  removed. This is the single rule that ended each class in #53, and reaching for
+  another check is what extended them. `SKILL.md` carries the driver-facing copy,
+  including the requirement to say on the finding thread which of the two was
+  taken and why.
+- **Read the thread and the previous round's diff before writing.** A finding
+  answered without reading what the last round did is how the same defect is
+  fixed, re-broken and re-found — three rounds of #58 were a check that passed
+  against the edit it existed to stop, each one written without re-reading the
+  one before it.
+- **The fault-tolerance pass runs only if the Copilot phase produced commits**,
+  and is bound by every rule above. It reviews those commits; it is not an
+  opening to revisit the design. Where the phase produced none, both signoffs
+  name the same commit and the pass would re-review something Codex has already
+  signed off — which costs a revocation, a round, and a reopened phase, for a
+  verdict that cannot differ.
+
 ## Stating the task
 
 The reviewers judge relevance against what the PR says it set out to do, so the
