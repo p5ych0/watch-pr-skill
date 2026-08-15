@@ -520,7 +520,67 @@ jobs_case 1    1 "…and a valid override reaches the runner"
 jobs_case 00   4 "…while every spelling of zero falls back to the bound"
 jobs_case 01   4 "…and so does a leading-zero one, which the documented grammar refuses"
 jobs_case soon 4 "…and a value that is not a number at all"
+# THE LENGTH BOUND HAS EDGES, and only the edges are worth pinning: five digits is
+# the largest accepted and six the smallest refused. Without the `??????*` arm a
+# degree of 999999 reaches `xargs`, which starts every one of the eighteen files
+# at once — and the timing-sensitive ones are exactly what the bound protects.
+jobs_case 99999  99999 "…while five digits is a degree, being the largest accepted"
+jobs_case 999999 4     "…and six is a typo, being the smallest refused"
 rm -rf "$JOBSTUB"
+
+# ── a function name that is a glob, arriving the only way it can ───────────
+# `function 'a*b'` is rejected as "not a valid identifier", and I removed the
+# globbing guard once on exactly that evidence. It was the wrong conclusion from a
+# true observation: bash refuses to DEFINE such a name and imports one from the
+# environment without complaint.
+#
+#   env 'BASH_FUNC_a*b%%=() { :; }' bash -c …
+#
+# Unquoted, that name expands against the working directory. This case runs the
+# gate from a directory holding `aXb` and `aYb`, so without `set -f` those two are
+# unset instead and `a*b` survives to fail the postcondition — a valid run blocked.
+#
+# Whitespace needs no such guard and gets no case: bash rejects `two words` on
+# IMPORT as well as on definition, with "error importing function definition".
+GLOBDIR="$TMP/globcwd"; rm -rf "$GLOBDIR"; mkdir -p "$GLOBDIR"
+: > "$GLOBDIR/aXb"; : > "$GLOBDIR/aYb"
+R6="$(mkroot "$OK_SKILL")"
+addscript "$R6" pr-thing.sh 'exit 0'
+addtest "$R6" test-pr-thing.sh
+out="$(cd "$GLOBDIR" && run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a glob-shaped inherited name is cleared, not expanded" \
+    || die "a glob-shaped name blocked a valid run (rc=$rc out='$out')"
+
+# ── an enumerator that reports nothing ─────────────────────────────────────
+# The thing doing the enumerating is itself a name. An exported
+# `compgen() { return 0; }` reports nothing, so nothing is cleared — and a
+# postcondition that asks the same question agrees that nothing is left, while
+# every forger stays installed and the verdict becomes theirs.
+#
+# The bootstrap clears that name first and then calls through `builtin`, and the
+# postcondition asks twice through two different builtins.
+FORGE5="$TMP/compgenforge.sh"
+cat > "$FORGE5" <<'FORGESH'
+compgen() { return 0; }
+command() {
+    if builtin [ "$1" = sort ]; then builtin printf 'P 1
+'; else builtin command "$@"; fi
+}
+export -f compgen command
+FORGESH
+# ITS OWN ROOT, WITH A FAILING TEST. `mkroot` recreates one shared path, so a
+# `$R` captured earlier in this file names whatever the most recent call put
+# there — and a case asserting "not clean" against a root that legitimately
+# passes is a case that cannot fail.
+R7="$(mkroot "$OK_SKILL")"
+addscript "$R7" pr-thing.sh 'exit 0'
+builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(. "$FORGE5"; run_limited 60 "$SCRIPT" "$R7" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an enumerator that reports nothing cannot hide the functions it lists" \
+    || die "a forged compgen changed the verdict (rc=$rc out='$out')"
 
 # ── a startup file that changes how this script reads its own data ─────────
 # `BASH_ENV` is sourced BEFORE the script body, so an `IFS` set there is already
@@ -676,8 +736,17 @@ out="$(command() { if [ "$1" = sort ]; then cat >/dev/null; builtin printf 'P 1\
 # tick for the wrong reason. This one forges only the failing-record format and
 # passes every other call through, and it reaches `status=clean` when the
 # postcondition is removed. Checked both ways.
+#
+# IT HAS TO DEFEAT `builtin unset` TOO. The bootstrap routes its clearing through
+# `builtin`, so a forged `unset` alone is simply bypassed and the clearing works —
+# which is the right outcome, and not the one this case is about. Forging both is
+# what leaves the functions installed and makes the postcondition the only thing
+# standing between them and the verdict.
 out="$(unset() { return 0; }
-       builtin() { shift; if [ "$1" = 'F %s\n' ]; then command printf 'P %s\n' "$2"; else command printf "$@"; fi; }
+       builtin() {
+           if [ "${1-}" = unset ]; then return 0; fi
+           if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+       }
        export -f unset builtin
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
@@ -720,8 +789,11 @@ out="$(. "$FORGE"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
 FORGE2="$TMP/allforge.sh"
 cat > "$FORGE2" <<'FORGESH'
 unset() { return 0; }
-[() { if builtin [ "$1" = -n ]; then return 1; fi; builtin [ "$@"; }
-builtin() { if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
+[() { if command [ "$1" = -n ]; then return 1; fi; command [ "$@"; }
+builtin() {
+    if command [ "${1-}" = unset ]; then return 0; fi
+    if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+}
 export -f unset [ builtin
 FORGESH
 #
@@ -771,7 +843,11 @@ out="$(. "$ODDFN"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
 FORGE3="$TMP/exitforge.sh"
 cat > "$FORGE3" <<'FORGESH'
 unset() { return 0; }
-builtin() { if command [ "$1" = exit ]; then return 0; fi; command builtin "$@"; }
+builtin() {
+    if command [ "$1" = exit ]; then return 0; fi
+    if command [ "$1" = unset ]; then return 0; fi
+    command builtin "$@"
+}
 export -f unset builtin
 FORGESH
 out="$(. "$FORGE3"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?

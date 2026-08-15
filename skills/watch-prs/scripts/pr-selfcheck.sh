@@ -97,9 +97,37 @@ set -uo pipefail
 # An assignment is also the one construct in this neighbourhood that cannot be
 # shadowed — there is no function to intercept it.
 IFS=$' \t\n'
-for _rb_f in $(compgen -A function 2>/dev/null); do
-    unset -f -- "$_rb_f" 2>/dev/null || true
+# …AND GLOBBING OFF, because a name CAN contain `*`, `?` or `[` — I removed this
+# guard once on the evidence that `function 'a*b'` is rejected as "not a valid
+# identifier", and that was the wrong conclusion from a true observation. Bash
+# refuses to DEFINE such a name; it imports one from the environment happily:
+#
+#   $ env 'BASH_FUNC_a*b%%=() { :; }' bash -c '…'
+#
+# arrives with `a*b` defined. Unquoted, that expands against the working directory
+# — a directory holding `aXb` and `aYb` had those two unset instead, and `a*b`
+# survived to fail the postcondition. Whitespace needs no such guard: bash rejects
+# `two words` on IMPORT as well as on definition, which is why `IFS` alone is
+# enough for the splitting half.
+set -f
+# THE ENUMERATOR IS ITSELF A NAME. An exported `compgen() { return 0; }` reports
+# nothing, so nothing is cleared and the postcondition below — which asks the same
+# question — agrees that nothing is left. Every forger stays installed and the
+# verdict is theirs.
+#
+# `unset -f` first on the names this bootstrap uses, then `builtin` on each call,
+# so intercepting it costs an attacker `unset` AND `builtin` AND the enumerator.
+# And the postcondition asks TWICE, through two different builtins: `compgen -A
+# function` and `declare -F` are separate implementations of the same question, so
+# one forged answer is no longer the whole answer.
+#
+# It is another rung, not a termination — the regress is recorded above — but each
+# rung is one more name that has to be replaced consistently.
+unset -f unset builtin compgen declare 2>/dev/null || true
+for _rb_f in $(builtin compgen -A function 2>/dev/null); do
+    builtin unset -f -- "$_rb_f" 2>/dev/null || true
 done
+set +f
 # `BASH_ENV` GOES WITH THEM, because a non-interactive `bash -c` SOURCES it before
 # running its command — and the workers report their verdict on stdout. A startup
 # file that prints anything therefore lands in the record stream beside the `P`,
@@ -129,7 +157,7 @@ unset -v BASH_ENV ENV 2>/dev/null || true
 # exported `[` that answers false to this one test leaves every forger installed
 # and sends this branch the benign way. `[[` is a RESERVED WORD — the parser
 # handles it, and a function cannot take its place. So is `if`.
-_rb_left="$(compgen -A function 2>/dev/null)"
+_rb_left="$(builtin compgen -A function 2>/dev/null)$(builtin declare -F 2>/dev/null)"
 if [[ -n $_rb_left ]]; then
     echo "PR_SELFCHECK status=error reason=inherited_function name=${_rb_left%%$'\n'*}" >&2
     # `builtin exit`, for the same reason, and a bare `exit` behind it: in THIS
