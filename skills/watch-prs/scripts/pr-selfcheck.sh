@@ -117,19 +117,11 @@ fi
 # flag and clears nothing, so the function survives and the postcondition below
 # refuses a run that was fine. `function -v { …; }` is a name bash accepts.
 #
-# `IFS` FIRST, because this shell did not necessarily choose it — and after the
-# re-exec above it usually has. Bash never inherits an exported `IFS`; it resets
-# it at startup, so the only way a strange one reaches this line is a startup hook
-# setting it in a process that did NOT re-exec, which is what happens when `exec`
-# or `env` is itself shadowed. That is the layer this normalisation belongs to.
-#
-# `for idx in $suite_failed` further down splits on it too, so an inherited value
-# would get to decide how the verdict is read. Normalised rather than saved and
-# restored, for that reason.
-#
-# An assignment is also the one construct in this neighbourhood that cannot be
-# shadowed: there is no `IFS` function to write.
-IFS=$' \t\n'
+# NOTHING HERE READS `IFS` ANY MORE, and that is deliberate. The names are read
+# from a quoted here-string and the failure list is an array, so the two places an
+# inherited separator once reached are gone. A normalising assignment stood here
+# until a hook declared `readonly IFS=-`, which no assignment can undo — a guard
+# that can be locked out is worse than no dependency at all.
 # THE NAMES ARE READ, NOT EXPANDED. An unquoted `$(compgen …)` needs protecting
 # from two separate things — word splitting, which `IFS` covers, and globbing,
 # which needs `set -f`, which is itself a shadowable name someone can neutralise.
@@ -724,7 +716,7 @@ if [ "$suite_files" -gt 0 ]; then
     # nth of them must BE index n — one comparison that rejects a duplicate, a
     # gap, and an index outside the range alike.
     suite_seen=0
-    suite_failed=""
+    suite_failed=()
     while IFS= read -r rec; do
         [ -n "$rec" ] || continue
         suite_seen=$((suite_seen + 1))
@@ -743,7 +735,7 @@ if [ "$suite_files" -gt 0 ]; then
             exit 2
         }
         case "$rec" in
-            "F "*) suite_failed="$suite_failed$idx " ;;
+            "F "*) suite_failed[${#suite_failed[@]}]="$idx" ;;
             "M "*) echo "PR_SELFCHECK status=error reason=suite_index_unmapped index=$idx" >&2
                    exit 2 ;;
         esac
@@ -759,7 +751,16 @@ EOF
     }
     # The names come from the list captured before the run, so a failing index
     # ALWAYS resolves to the file that failed.
-    for idx in $suite_failed; do
+    # AN ARRAY, SO NOTHING SPLITS IT. This was a space-separated string, and the
+    # only unquoted expansion left in the verdict path: `IFS=-` from a startup
+    # hook turned the whole list into one subscript, and two failing tests went
+    # unreported. Normalising `IFS` fixed that until a hook declared it `readonly`,
+    # which no assignment can undo — so the dependency is gone rather than guarded.
+    #
+    # Subscripted by count rather than `+=`, and guarded by the count rather than
+    # expanded blind: bash 3.2 treats `"${arr[@]}"` on an empty array as an unbound
+    # variable under `set -u`, and CI runs 3.2.
+    for idx in ${suite_failed[@]+"${suite_failed[@]}"}; do
         t="${suite_names[$idx]-}"
         [ -n "$t" ] || {
             echo "PR_SELFCHECK status=error reason=suite_failure_unnamed index=$idx" >&2

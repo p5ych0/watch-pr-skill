@@ -670,10 +670,11 @@ out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
 
 # ── a startup file changing how this script reads its own data ─────────────
 # `IFS` cannot reach the CLEARING: those names are read with `while IFS= read -r`
-# and quoted, so they survive any separator. What it does reach is the failure
-# list — `for idx in $suite_failed` splits on it. With `IFS=-` the whole list
-# becomes ONE token, no index resolves, and two failing tests are reported as
+# and quoted, so they survive any separator. It used to reach the failure list,
+# which was a space-separated string — with `IFS=-` the whole list became ONE
+# subscript, no index resolved, and two failing tests were reported as
 # `status=clean`: the forged-clean direction rather than the blocked-run one.
+# The list is an array now, so nothing splits it.
 #
 # `exec` is forged so the re-exec cannot rescue it. Bash never inherits an
 # exported `IFS` — it resets it at startup — so a hook in a process that did not
@@ -687,8 +688,11 @@ for n in alpha omega; do
     builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
     chmod +x "$R5B/skills/watch-prs/scripts/test-pr-$n.sh"
 done
+# `readonly`, because a writable one is the weaker state. A normalising assignment
+# handled that; nothing handles a variable the hook has locked, which is why the
+# failure list stopped depending on `IFS` instead of being protected from it.
 IFSONLY="$TMP/ifsonly.sh"
-builtin printf 'IFS=-\n' > "$IFSONLY"
+builtin printf 'readonly IFS=-\n' > "$IFSONLY"
 out="$(. "$NOEXEC"; run_limited 60 env BASH_ENV="$IFSONLY" "$SCRIPT" "$R5B" 2>&1)"; rc=$?
 # BOTH NAMES, because the point is that the whole list survives. Requiring only
 # the first would stay green while a regression dropped everything after it.
@@ -1003,7 +1007,16 @@ out="$(. "$FORGE4"; run_limited 60 env PATH="$STRICT:$PATH" "$SCRIPT" "$BARE" 2>
 noop_case() {   # noop_case <tool> <label>
     local tool="$1" label="$2" only out rc
     only="$TMP/noop-$tool"; rm -rf "$only"; mkdir -p "$only"
-    printf '#!/usr/bin/env bash\nexit 0\n' > "$only/$tool"
+    # IT CONSUMES ITS INPUT before exiting. A stub that exits immediately leaves
+    # whatever is upstream writing into a closed pipe, so section 1's own
+    # `grep | sed | sort -u` takes SIGPIPE and the run dies at `extraction_failed
+    # rc=141` — sometimes. That is a race, and it is the intermittent failure
+    # recorded on #38: the case asserts `suite_incomplete` and got a different
+    # error whenever the timing went the other way.
+    { printf '#!/usr/bin/env bash\n'
+      printf 'cat >/dev/null\n'
+      printf 'exit 0\n'
+    } > "$only/$tool"
     chmod +x "$only/$tool"
     R="$(mkroot "$OK_SKILL")"
     addscript "$R" pr-thing.sh 'exit 0'
