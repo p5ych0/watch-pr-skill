@@ -17,14 +17,21 @@
   you set. CI keeps its sequential loop: it groups and
   annotates each file, and that is worth more on a machine nobody is waiting at.
 
-  The runner needs a scratch directory, and that is where most of the review went.
-  It is created rather than named — `mkdir` fails on a name anything else holds,
-  which is the only way to establish that a recursive cleanup is safe; inspecting
-  a path cannot, and two attempts to do so each deleted a directory the script had
-  not created. It is created private in one step, under a narrowed umask taken
-  through `builtin` so an inherited `umask` function cannot quietly do nothing.
-  And its parent is checked: a `TMPDIR` others can write without the sticky bit is
-  refused, because 0700 protects a directory's contents and not its name.
+  Nothing is written outside the process. The first version kept the list of files
+  in a scratch directory under `TMPDIR` and spent five review rounds defending it —
+  trust `mktemp`, validate its answer, take a subdirectory, create it outright,
+  make it private, check the parent's sticky bit — and the next finding was a
+  `TMPDIR` owned by another user, which the sticky bit does nothing about. Every
+  one of those was real, and all of them were about a shared directory the work
+  never needed: a worker finds its own file by walking the same list the parent
+  walked and stopping at its index, so the only thing crossing the boundary is a
+  number.
+
+  Every worker reports back, pass or fail, and the parent requires one record per
+  file. Checking only for failures cannot tell "nothing failed" from "nothing
+  ran": an inherited `xargs() { return 0; }` consumes no input, exits 0 and prints
+  nothing, which is exactly what a clean suite looks like — and a status check
+  does not see it either, because it succeeded.
 
   Three things a concurrent runner gets wrong that a loop cannot. Its status is an
   answer: `xargs` writes failures to stdout, so a runner that cannot start writes

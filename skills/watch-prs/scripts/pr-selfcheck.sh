@@ -417,6 +417,16 @@ done
 #
 # `xargs -P` rather than background jobs and `wait`, because `wait -n` is bash
 # 4.3 and this suite runs on 3.2.57 in CI. `xargs` is on the mac-shaped PATH.
+#
+# NOTHING IS WRITTEN OUTSIDE THIS PROCESS. An earlier version put the list of
+# files into a scratch directory under `TMPDIR` and spent five review rounds
+# defending it: trust `mktemp`, validate its answer, take a subdirectory, create
+# it outright, make it private, check the parent's sticky bit — and the next
+# finding was a `TMPDIR` owned by another user, for which the sticky bit does
+# nothing. Every one of those was real, and all of them were about a shared
+# directory that this work never needed. THE WORKER FINDS ITS OWN FILE by walking
+# the same glob the parent walked and stopping at its index, so the only thing
+# crossing the boundary is a number.
 suite_fail=0
 suite_jobs="${RB_SUITE_JOBS:-4}"
 # THE SAME VALIDATION SHAPE THE CI GATE USES, and for the same reason: a bad value
@@ -426,178 +436,95 @@ suite_jobs="${RB_SUITE_JOBS:-4}"
 # this degree exists to be. Six digits or more is refused for the same reason a
 # bound is refused anywhere here: it is not a degree, it is a typo.
 case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
-# THE PATH NEVER TRAVELS THROUGH THE RUNNER; AN INDEX DOES.
-#
-# Every delimiter a path can contain is a path some checkout has. `xargs`' default
-# parsing eats backslashes and quotes, so the input is NUL-delimited — but the
-# failure channel is the worker's stdout, and a newline in a directory name would
-# split one path into two records there, inventing test names and inflating the
-# count. There is no `-0` for the way back: sorting NUL-delimited records needs
-# GNU `sort -z`, which stock macOS does not have.
-#
-# So the runner is handed the numbers 1..N and nothing else. Digits survive every
-# parser on both sides, `sort -n` orders them, and the parent already knows which
-# path each one means, because it wrote them itself in the same glob order.
-# THE DIRECTORY IS CREATED HERE, NOT NAMED BY SOMETHING ELSE, and that is the
-# whole of the argument. A recursive delete is armed on it, so the property that
-# has to hold is "this did not exist a moment ago" — and NO INSPECTION OF A PATH
-# CAN ESTABLISH THAT. Two rounds of review were spent discovering it: validating
-# `mktemp`'s answer rejects `/` but not an existing directory, which is absolute,
-# is not `/`, and is there; taking a subdirectory of it and releasing the parent
-# with `rmdir` then removed a pre-existing parent that happened to be EMPTY.
-#
-# `mkdir` settles it in one syscall. It fails when the name is taken — by a
-# directory, a file, or a symlink — so a name it accepts is a name nothing else
-# held, and the trap can only ever reach what this run made. Nothing above it is
-# touched: `${TMPDIR:-/tmp}` is somebody else's directory whatever it contains.
-#
-# A few candidates, because the name is predictable and someone who pre-creates
-# it should cost this run a retry rather than the round. Exhausting them fails
-# closed, which is the right direction: the alternative is a gate that reports
-# clean without having run the suite.
-#
-# CREATED PRIVATE, AND PRIVATE FROM THE FIRST INSTANT. `mkdir` takes the caller's
-# umask, so under a permissive one — `000`, or group-writable on a shared host —
-# this directory is writable by other local users. What is in it is the list of
-# scripts the workers then EXECUTE, so someone who can rewrite an entry between
-# the write and the read chooses what `bash` runs as the developer; pointing it at
-# a passing script also makes a failing suite report clean. That is what `mktemp
-# -d` was giving for free, and dropping it is what took it away.
-#
-# The umask is narrowed around the creation rather than the mode being fixed
-# afterwards: `mkdir` then `chmod` leaves the directory readable for as long as it
-# takes to run the second command, and a window is all the above needs.
-#
-# …AND THE PARENT HAS TO BE SAFE TOO, because 0700 protects the CONTENTS and not
-# the name. In a directory that is group- or world-writable without the sticky
-# bit, another local user can rename this one out of the way and put their own
-# there — after which they own every index the workers read, and pointing all of
-# them at a passing script makes a failing suite report clean. `/tmp` is sticky
-# everywhere this runs; a `TMPDIR` that is not is refused rather than worked
-# around, because there is nothing this script can do inside a directory anyone
-# may replace.
-suite_parent="${TMPDIR:-/tmp}"
-# `ls -ld`, not `stat`: the flags for a mode differ between GNU and BSD, and this
-# suite is proven on a mac-shaped PATH. Columns 6 and 9 are the group and other
-# write bits; column 10 carries the sticky bit as `t` or `T`.
-_sd_mode="$(ls -ld "$suite_parent" 2>/dev/null | cut -c1-10)" || _sd_mode=""
-case "$_sd_mode" in
-    d?????????) ;;
-    *)  echo "PR_SELFCHECK status=error reason=suite_parent_unreadable parent=$suite_parent" >&2
-        exit 2 ;;
-esac
-_sd_gw="$(printf '%s' "$_sd_mode" | cut -c6)"
-_sd_ow="$(printf '%s' "$_sd_mode" | cut -c9)"
-_sd_st="$(printf '%s' "$_sd_mode" | cut -c10)"
-if { [ "$_sd_gw" = w ] || [ "$_sd_ow" = w ]; } \
-   && [ "$_sd_st" != t ] && [ "$_sd_st" != T ]; then
-    echo "PR_SELFCHECK status=error reason=suite_parent_replaceable parent=$suite_parent mode=$_sd_mode" >&2
-    exit 2
-fi
-suite_dir=""
-_sd_try=0
-# `builtin umask`, ALL THREE TIMES. `umask` is a builtin but a shell function can
-# shadow it, and an exported one is inherited by this process — so a driving shell
-# carrying `umask() { return 0; }` with a real mask of 000 would have this narrow
-# nothing, restore nothing, and report success at each step. Their statuses are
-# taken for the same reason: a narrowing that silently did not happen is the one
-# failure that leaves the directory writable while everything below looks correct.
-_sd_umask="$(builtin umask)" || {
-    echo "PR_SELFCHECK status=error reason=umask_unreadable" >&2
-    exit 2
-}
-builtin umask 077 || {
-    echo "PR_SELFCHECK status=error reason=umask_unsettable" >&2
-    exit 2
-}
-while [ "$_sd_try" -lt 8 ]; do
-    _sd_try=$((_sd_try + 1))
-    _sd_cand="$suite_parent/pr-selfcheck.$$.$_sd_try.${RANDOM:-0}"
-    if mkdir "$_sd_cand" 2>/dev/null; then suite_dir="$_sd_cand"; break; fi
-done
-builtin umask "$_sd_umask" || {
-    echo "PR_SELFCHECK status=error reason=umask_unrestorable" >&2
-    exit 2
-}
-[ -n "$suite_dir" ] || {
-    echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
-    exit 2
-}
-trap 'rm -rf "$suite_dir" 2>/dev/null; true' EXIT
 suite_files=0
 for t in "$SCRIPTS"/test-*.sh; do
     [ -e "$t" ] || continue
     suite_files=$((suite_files + 1))
-    printf '%s' "$t" > "$suite_dir/$suite_files" || {
-        echo "PR_SELFCHECK status=error reason=suite_list_unwritable" >&2
-        exit 2
-    }
 done
 if [ "$suite_files" -gt 0 ]; then
-    # A FAILING FILE PRINTS ITS INDEX AND NOTHING ELSE PRINTS ANYTHING, so
-    # interleaving cannot corrupt the result: each line is one whole number written
-    # by one `printf`.
+    # EVERY WORKER REPORTS, PASS OR FAIL, and the parent requires one record per
+    # index. Checking only for failures cannot tell "nothing failed" from "nothing
+    # ran": an inherited `xargs() { return 0; }` consumes no input, exits 0 and
+    # prints nothing, and so does a no-op `sort` handed the failure list — both
+    # produce exactly what a clean suite produces. A status check does not see it
+    # either, because they SUCCEED. Only counting the answers does.
     #
-    # THE SCRATCH PATH TRAVELS IN THE ENVIRONMENT, NOT IN THE ARGUMENT LIST. `-I{}`
-    # rewrites its token in EVERY initial argument, not only the one meant for it —
-    # so a `TMPDIR` of `/tmp/cache{}` had each worker handed a directory that does
-    # not exist, and the mandatory pre-push gate refused with `suite_runner_failed`
-    # over tests that were fine. The environment is inherited rather than
-    # substituted, so there is nothing there for `-I` to rewrite.
+    # `M` is the third answer: the index no longer names a file, which means the
+    # directory changed under the run. It is not a failing test and not a passing
+    # one, and it is the only honest thing to say about a result that cannot be
+    # attributed.
     suite_out="$(n=0
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             printf '%s\0' "$n"
-        done | RB_SUITE_DIR="$suite_dir" xargs -0 -P "$suite_jobs" -I{} sh -c '
-            p="$(cat "$RB_SUITE_DIR/$1")" || exit 3
-            bash "$p" >/dev/null 2>&1 || printf "%s\n" "$1"
+        done | RB_SUITE_SCRIPTS="$SCRIPTS" xargs -0 -P "$suite_jobs" -I{} bash -c '
+            i="$1"; n=0
+            for f in "$RB_SUITE_SCRIPTS"/test-*.sh; do
+                [ -e "$f" ] || continue
+                n=$((n + 1))
+                [ "$n" = "$i" ] || continue
+                if bash "$f" >/dev/null 2>&1; then printf "P %s\n" "$i"
+                else printf "F %s\n" "$i"; fi
+                exit 0
+            done
+            printf "M %s\n" "$i"
+            exit 0
         ' _ {})"; suite_rc=$?
-    # THE RUNNER'S STATUS IS AN ANSWER, AND IT IS NOT "A TEST FAILED". A failing
-    # test makes the worker print a number and exit 0; the worker exits non-zero
-    # only when it cannot read its own entry, and `xargs` does when it cannot run
-    # at all — a `-P` outside its range, or no `xargs` on PATH. Either way stdout
-    # is empty, and empty is what a clean suite looks like: ignoring this status is
-    # precisely the fail-open the rest of this script exists to prevent, since the
-    # gate would report CLEAN having run nothing. Its stderr is deliberately not
-    # discarded, because that diagnostic is the only account of why.
+    # The runner's status is still taken. It is no longer the only thing taken,
+    # but a runner that fails outright should say so with its own reason rather
+    # than arriving at the count check as a mystery.
     [ "$suite_rc" -eq 0 ] || {
         echo "PR_SELFCHECK status=error reason=suite_runner_failed rc=$suite_rc jobs=$suite_jobs" >&2
         exit 2
     }
-    if [ -n "$suite_out" ]; then
-        # Sorted, because the order files finish in is not the order they are
-        # listed in and a gate that reports its findings in a different order on
-        # every run is a gate people stop reading. Numerically, because these are
-        # numbers and a lexical sort would put 10 before 2.
-        #
-        # THE SORT HAS A STATUS TOO, and it fails the same way: a `sort` that dies
-        # having written nothing would erase the failure list inside the here-doc
-        # that consumed it, and the gate would pass on a suite it had just watched
-        # fail.
-        suite_sorted="$(printf '%s\n' "$suite_out" | sort -n)" || {
-            echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
-            exit 2
-        }
-        while IFS= read -r n; do
-            [ -n "$n" ] || continue
-            t="$(cat "$suite_dir/$n")" || {
-                echo "PR_SELFCHECK status=error reason=suite_list_unreadable index=$n" >&2
-                exit 2
-            }
-            # ONE LINE PER FINDING, whatever the name contains. A newline inside a
-            # filename would otherwise print as two findings to anything reading
-            # this output, which is the same defect the index avoids upstream.
-            b="$(basename "$t")"
-            # Substituted on the CAPTURED name, not in the pipeline that produces
-            # it: `basename` ends its output with a newline, so translating inside
-            # the substitution turns that terminator into a trailing space and the
-            # finding reads `… .sh  fails`.
-            b="$(printf '%s' "$b" | tr '\n' ' ')"
-            note failing_test "$b fails"; suite_fail=1
-        done <<EOF
+    # Sorted numerically — these are numbers, and a lexical sort puts 10 before 2 —
+    # so the findings come out in the glob's order rather than the order the
+    # machine happened to finish in. A gate whose output reshuffles between runs is
+    # a gate people stop reading.
+    suite_sorted="$(printf '%s\n' "$suite_out" | sort -k2 -n)" || {
+        echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
+        exit 2
+    }
+    suite_seen=0
+    suite_failed=""
+    while IFS= read -r rec; do
+        [ -n "$rec" ] || continue
+        suite_seen=$((suite_seen + 1))
+        case "$rec" in
+            "P "*) ;;
+            "F "*) suite_failed="$suite_failed${rec#F } " ;;
+            "M "*) echo "PR_SELFCHECK status=error reason=suite_index_unmapped index=${rec#M }" >&2
+                   exit 2 ;;
+            *)     echo "PR_SELFCHECK status=error reason=suite_record_malformed" >&2
+                   exit 2 ;;
+        esac
+    done <<EOF
 $suite_sorted
 EOF
-    fi
+    # THE COUNT IS THE CHECK. One record per file, no more and no fewer: fewer
+    # means something did not run or its answer was lost, more means an answer was
+    # duplicated, and either way this gate cannot say what it is here to say.
+    [ "$suite_seen" -eq "$suite_files" ] || {
+        echo "PR_SELFCHECK status=error reason=suite_incomplete ran=$suite_seen of=$suite_files" >&2
+        exit 2
+    }
+    # The names come from the parent's own glob, so a path never has to survive a
+    # delimiter on the way back.
+    for idx in $suite_failed; do
+        n=0
+        for t in "$SCRIPTS"/test-*.sh; do
+            [ -e "$t" ] || continue
+            n=$((n + 1))
+            [ "$n" = "$idx" ] || continue
+            b="$(basename "$t")"
+            # ONE LINE PER FINDING, whatever the name contains. A newline inside a
+            # filename would otherwise print as two findings to anything reading
+            # this output.
+            b="$(printf '%s' "$b" | tr '\n' ' ')"
+            note failing_test "$b fails"; suite_fail=1
+            break
+        done
+    done
 fi
 [ "$suite_fail" -eq 0 ] && ok "the whole suite passes"
 
