@@ -167,6 +167,35 @@ seq_set none
 out="$(run 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
     && pass "the timeout exits 1 with a timeout line" || die "timeout gave rc=$rc out='$out'"
+# …AND NO PROBE STARTS AFTER THE DEADLINE HAS PASSED — #46. The case above is
+# satisfied by the wrong mechanism: `pr-watch.sh` reports a timeout from THREE
+# places, and the two at the bottom of the loop catch that one. The third is the
+# `[ "$r" -lt 1 ] && return 2` in `remaining_s`, which refuses to hand a probe a
+# budget once the deadline is gone; widening it so it never fires produced ZERO
+# failures across this file.
+#
+# It is not redundant with the other two. They run BEFORE the sleep, on a
+# remainder that is still positive; the sleep is then clamped to land exactly on
+# the deadline, and the next iteration begins with nothing left. Only this check
+# stands between that and a probe — and a probe that answers `reviewed` there
+# produces PR_REVIEW_READY, a verdict from after the watch should have given up.
+#
+# THE SEQUENCE IS WHAT MAKES IT VISIBLE, and why the case above cannot see it: it
+# queues only `none`, so a probe running past the deadline answers `none` and
+# looks like the timeout it is not. Here the next answer is `reviewed`, so the
+# unguarded run reports a verdict and the guarded one reports a timeout.
+#
+# The arithmetic is exact and owned by the fixture: the first poll is at t=0 with
+# 2 seconds left, the nap is clamped from 5 to 2, and the loop resumes at t=2 with
+# a remainder of zero. No wall clock is involved, so this is not a race.
+seq_set none reviewed
+out="$(run 7 "$BOT" --interval 5 --timeout 2 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
+    && pass "an exhausted deadline is the timeout, not one more probe" \
+    || die "a spent deadline gave rc=$rc out='$out'"
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && die "a probe ran after the deadline and reported a verdict: $out" \
+    || pass "…and no verdict was produced from after the deadline"
 
 # ── argument validation ────────────────────────────────────────────────────
 run 2>&1 >/dev/null; [ "$?" -eq 2 ] && pass "no arguments => 2" || die "missing args did not exit 2"
