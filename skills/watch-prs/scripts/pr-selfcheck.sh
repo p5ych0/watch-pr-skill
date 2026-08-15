@@ -76,13 +76,6 @@ set -uo pipefail
 # flag and clears nothing, so the function survives and the postcondition below
 # refuses a run that was fine. `function -v { …; }` is a name bash accepts.
 #
-# GLOBBING IS NOT SUPPRESSED HERE, and that is deliberate rather than an
-# oversight. The expansion is unquoted, so a name containing `*`, `?` or `[` would
-# match filenames instead of itself — but bash does not permit such a name:
-# `function '*'`, `function 'a*b'` and `function 'x[1]'` are each rejected with
-# "not a valid identifier". A `set -f` here would guard a case the shell makes
-# unreachable, and it could not be given a fixture, which is how unexercised
-# guards accumulate.
 # `IFS` FIRST, because this shell did not necessarily choose it. `BASH_ENV` is
 # sourced before the script body runs, so a startup file setting `IFS=-` is
 # already in effect here — and `for idx in $suite_failed` further down splits on
@@ -542,8 +535,9 @@ done
 # it outright, make it private, check the parent's sticky bit — and the next
 # finding was a `TMPDIR` owned by another user, for which the sticky bit does
 # nothing. Every one of those was real, and all of them were about a shared
-# directory that this work never needed. The list is a shell array here, so it
-# never leaves the process at all.
+# directory that this work never needed. The list is a shell array here: nothing
+# is written to a filesystem, and each path reaches its worker as an argument
+# rather than through a file anyone else can reach.
 #
 # THE PATH TRAVELS OUTWARD AND ONLY THE INDEX COMES BACK. Each worker is handed
 # the exact path the parent captured, paired with its index; it runs that path and
@@ -567,8 +561,9 @@ case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
 # and a test that deletes itself — `rm "$0"; exit 1` — made that second walk one
 # entry shorter: the failing index matched nothing, no finding was recorded, and
 # the gate printed `status=clean` over a test it had just watched fail. An array
-# also means a path never has to survive a delimiter, since it never leaves the
-# shell.
+# also means the parent's copy is authoritative: what travels to a worker is a
+# NUL-delimited record, which carries any path, but what NAMES a failure here is
+# the array entry captured before anything ran.
 suite_files=0
 suite_names=()
 for t in "$SCRIPTS"/test-*.sh; do

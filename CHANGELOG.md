@@ -23,8 +23,9 @@
   make it private, check the parent's sticky bit — and the next finding was a
   `TMPDIR` owned by another user, which the sticky bit does nothing about. Every
   one of those was real, and all of them were about a shared directory the work
-  never needed: the list is a shell array, so it never leaves the process. Each
-  worker is handed the exact path the parent captured, paired with its index, and
+  never needed: the list is a shell array, so nothing is written to a filesystem
+  and no path reaches a worker through a file anyone else can reach. Each worker
+  is handed the exact path the parent captured, paired with its index, and
   answers with the index alone — the path travels outward, where NUL-delimited
   records carry anything, and only a number comes back, which cannot carry a
   delimiter at all.
