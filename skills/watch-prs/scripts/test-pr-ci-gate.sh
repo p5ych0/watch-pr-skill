@@ -306,16 +306,24 @@ STUBSH
             && pass "…and it was still waiting when the window closed" \
             || die "$label — exited rc=$rc inside ${win}s; it stopped rather than pacing"
         # …AND THE ABSENCE CHECK AS WELL AS, NEVER INSTEAD OF, THAT. An unvalidated
-        # bound reaches the shell as an operand, and the shell says so on stderr —
-        # `[: soon: integer expected`, then `soon: unbound variable` where `set -u`
-        # sees it in an arithmetic expansion. Neither moves the poll count, and the
-        # second kills the gate outright, which is the failure the rc check catches
-        # from the other side.
-        case "$out" in
-            *'integer expected'*|*'unbound variable'*)
-                die "$label — an unvalidated bound reached the shell: $out" ;;
-            *)  pass "…and no unvalidated bound reached the shell" ;;
-        esac
+        # bound reaches the shell as an operand and the shell complains on stderr,
+        # which moves no counter — so the poll ceiling and the status above can
+        # both pass while the guard is gone.
+        #
+        # THE WORDING IS NOT MATCHED, AND THAT IS THE POINT. The first version of
+        # this looked for `integer expected`, which is what bash 5.3 prints here;
+        # `integer expression expected` is also in the wild, the message is
+        # LOCALISED, and `set -u` produces a different one again. Enumerating them
+        # is a list wrong by omission, and a missed spelling makes this check
+        # report clean over the defect it exists to catch.
+        #
+        # What does not vary is that a gate pacing correctly says NOTHING here: it
+        # is mid-wait when the watchdog ends it. Any diagnostic at all, in any
+        # wording, fails — and if some future change makes a silent run legitimate,
+        # it fails loudly rather than quietly accepting one.
+        [ -z "$out" ] \
+            && pass "…and it printed nothing, so no bound reached the shell raw" \
+            || die "$label — the gate wrote to stderr, so a bound was not validated: $out"
     }
     gate_spin 1 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
     gate_spin 1 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
