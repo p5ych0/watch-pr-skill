@@ -551,6 +551,15 @@ out="$(cd "$GLOBDIR" && run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT"
 { [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
     && pass "a glob-shaped inherited name is cleared, not expanded" \
     || die "a glob-shaped name blocked a valid run (rc=$rc out='$out')"
+# …AND WITH `set` NEUTRALISED, which is the interaction the separate cases miss.
+# A guard spelled `set -f` is a name someone can swallow; reading the names
+# instead of expanding them needs no guard, so there is nothing left to swallow.
+out="$(cd "$GLOBDIR" && set() { return 0; }
+       export -f set
+       run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…even when the guard a lesser fix would have used is itself shadowed" \
+    || die "a forged set defeated the glob handling (rc=$rc out='$out')"
 
 # ── an enumerator that reports nothing ─────────────────────────────────────
 # The thing doing the enumerating is itself a name. An exported
@@ -581,6 +590,48 @@ out="$(. "$FORGE5"; run_limited 60 "$SCRIPT" "$R7" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
     && pass "an enumerator that reports nothing cannot hide the functions it lists" \
     || die "a forged compgen changed the verdict (rc=$rc out='$out')"
+
+# ── one forged prefix answering for both checks ────────────────────────────
+# Asking twice through the same prefix is asking once. A `builtin()` that reports
+# nothing for `compgen` AND for `declare` makes both halves of the postcondition
+# agree that nothing is left, while the same function rewrites the failing record
+# — so one name buys the whole verdict. One call goes through the prefix and one
+# goes direct now, so a forgery has to cover `builtin` and `declare` consistently.
+FORGE6="$TMP/prefixforge.sh"
+cat > "$FORGE6" <<'FORGESH'
+unset() { return 0; }
+builtin() {
+    if command [ "${1-}" = compgen ]; then return 0; fi
+    if command [ "${1-}" = declare ]; then return 0; fi
+    if command [ "${1-}" = unset ]; then return 0; fi
+    if command [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi
+}
+export -f unset builtin
+FORGESH
+R8="$(mkroot "$OK_SKILL")"
+addscript "$R8" pr-thing.sh 'exit 0'
+builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(. "$FORGE6"; run_limited 60 "$SCRIPT" "$R8" 2>&1)"; rc=$?
+builtin printf '%s' "$out" | command grep -q 'status=clean' \
+    && die "one forged prefix answered for both checks and the suite reported clean: $out" \
+    || pass "one forged prefix cannot answer for both halves of the postcondition"
+
+# ── a startup hook that cannot be unset ────────────────────────────────────
+# `readonly BASH_ENV` in the hook makes the parent's `unset -v` fail, and that
+# failure is deliberately ignored — so the workers would go on sourcing it and
+# mixing its output into the record stream. They are launched through `env -u`
+# instead, which removes the variable from their environment whatever this
+# shell's attributes say.
+ROENV="$TMP/roenv.sh"
+{ builtin printf 'readonly BASH_ENV\n'; builtin printf 'echo POLLUTION\n'; } > "$ROENV"
+R9="$(mkroot "$OK_SKILL")"
+addscript "$R9" pr-thing.sh 'exit 0'
+addtest "$R9" test-pr-thing.sh
+out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "a readonly startup hook cannot talk over the record channel" \
+    || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
 
 # ── a startup file that changes how this script reads its own data ─────────
 # `BASH_ENV` is sourced BEFORE the script body, so an `IFS` set there is already
@@ -815,10 +866,10 @@ builtin printf '%s' "$out" | command grep -q 'status=clean' \
 # refuses a run that was perfectly fine — a mandatory pre-push gate blocked by a
 # harmless function in someone's shell. `--` ends option parsing.
 #
-# ONLY THE OPTION HALF IS COVERED, because only the option half exists. A name
-# containing `*` or `[` would be a globbing hazard, but bash rejects
-# `function '*'`, `function 'a*b'` and `function 'x[1]'` as "not a valid
-# identifier", so no such name can be inherited and there is nothing to guard.
+# THE GLOB HALF HAS ITS OWN CASE ABOVE, by the import route. `function 'a*b'` is
+# rejected as "not a valid identifier", which is what once persuaded me the case
+# was unreachable — but a crafted environment entry is imported, and the names are
+# read rather than expanded now, so neither splitting nor globbing can touch them.
 R2="$(mkroot "$OK_SKILL")"
 addscript "$R2" pr-thing.sh 'exit 0'
 addtest "$R2" test-pr-thing.sh

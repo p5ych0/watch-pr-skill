@@ -83,91 +83,68 @@ set -uo pipefail
 # "not a valid identifier". A `set -f` here would guard a case the shell makes
 # unreachable, and it could not be given a fixture, which is how unexercised
 # guards accumulate.
-# `IFS` FIRST, because every unquoted expansion below splits on it and this shell
-# did not necessarily choose it. `BASH_ENV` is sourced before this script's body
-# runs, so a startup file setting `IFS=-` is already in effect here: the name `-v`
-# then splits into an empty field and `v`, nothing clears `-v`, and the
-# postcondition refuses a run that was fine. Unsetting `BASH_ENV` afterwards
-# cannot undo an assignment that has already happened.
-#
-# It is normalised rather than saved and restored, and it stays normalised for the
-# rest of the file: `for idx in $suite_failed` splits on it too, and an inherited
-# `IFS` has no business deciding how this script reads its own data.
+# `IFS` FIRST, because this shell did not necessarily choose it. `BASH_ENV` is
+# sourced before the script body runs, so a startup file setting `IFS=-` is
+# already in effect here — and `for idx in $suite_failed` further down splits on
+# it too, so an inherited value would get to decide how the verdict is read.
+# Normalised rather than saved and restored, for that reason.
 #
 # An assignment is also the one construct in this neighbourhood that cannot be
-# shadowed — there is no function to intercept it.
+# shadowed: there is no `IFS` function to write.
 IFS=$' \t\n'
-# …AND GLOBBING OFF, because a name CAN contain `*`, `?` or `[` — I removed this
-# guard once on the evidence that `function 'a*b'` is rejected as "not a valid
-# identifier", and that was the wrong conclusion from a true observation. Bash
-# refuses to DEFINE such a name; it imports one from the environment happily:
+# THE NAMES ARE READ, NOT EXPANDED. An unquoted `$(compgen …)` needs protecting
+# from two separate things — word splitting, which `IFS` covers, and globbing,
+# which needs `set -f`, which is itself a shadowable name someone can neutralise.
+# A quoted here-string does neither: `a*b` arrives as `a*b` whatever the working
+# directory holds, and there is no `set` to swallow.
 #
-#   $ env 'BASH_FUNC_a*b%%=() { :; }' bash -c '…'
+# That matters because a glob-shaped name IS reachable. Bash rejects
+# `function 'a*b'` as "not a valid identifier", but imports one from the
+# environment without complaint — `env 'BASH_FUNC_a*b%%=() { :; }' bash …` arrives
+# with it defined, and unquoted it expanded against the working directory. A name
+# containing whitespace is NOT reachable: bash refuses that on import too.
 #
-# arrives with `a*b` defined. Unquoted, that expands against the working directory
-# — a directory holding `aXb` and `aYb` had those two unset instead, and `a*b`
-# survived to fail the postcondition. Whitespace needs no such guard: bash rejects
-# `two words` on IMPORT as well as on definition, which is why `IFS` alone is
-# enough for the splitting half.
-set -f
-# THE ENUMERATOR IS ITSELF A NAME. An exported `compgen() { return 0; }` reports
-# nothing, so nothing is cleared and the postcondition below — which asks the same
-# question — agrees that nothing is left. Every forger stays installed and the
-# verdict is theirs.
-#
-# `unset -f` first on the names this bootstrap uses, then `builtin` on each call,
-# so intercepting it costs an attacker `unset` AND `builtin` AND the enumerator.
-# And the postcondition asks TWICE, through two different builtins: `compgen -A
-# function` and `declare -F` are separate implementations of the same question, so
-# one forged answer is no longer the whole answer.
-#
-# It is another rung, not a termination — the regress is recorded above — but each
-# rung is one more name that has to be replaced consistently.
-unset -f unset builtin compgen declare 2>/dev/null || true
-for _rb_f in $(builtin compgen -A function 2>/dev/null); do
+# `read` and the enumerators are cleared before anything depends on them, without
+# a prefix, because a prefix is one more name to trust.
+unset -f unset builtin command compgen declare read 2>/dev/null || true
+while IFS= read -r _rb_f; do
+    [ -n "$_rb_f" ] || continue
     builtin unset -f -- "$_rb_f" 2>/dev/null || true
-done
-set +f
-# `BASH_ENV` GOES WITH THEM, because a non-interactive `bash -c` SOURCES it before
-# running its command — and the workers report their verdict on stdout. A startup
-# file that prints anything therefore lands in the record stream beside the `P`,
-# `F` and `M` lines, and the parser refuses a run in which every test passed.
+done <<< "$(builtin compgen -A function 2>/dev/null)"
+# …AND THE POSTCONDITION DOES NOT SHARE A PREFIX WITH ITSELF. Asking twice through
+# `builtin compgen` and `builtin declare` is one question, not two: a single
+# forged `builtin` answers both. One call goes through the prefix and one goes
+# direct, so a forgery has to cover `builtin` AND `declare` consistently to keep
+# them agreeing.
 #
-# It is unset here rather than suppressed at the worker, so the tests the workers
-# run are clean too: a fixture that captures output would otherwise get the same
-# text mixed into whatever it was asserting. `ENV` for the same reason, since a
-# shell invoked as `sh` reads that one.
+# It still does not terminate the regress, and nothing here pretends otherwise.
+# Each layer costs an attacker another name that must be replaced consistently;
+# what remains needs a parent shell already executing arbitrary code as the
+# developer, which can edit the tests or amend the commit instead.
 #
-# This is a regression this change introduced. The sequential loop it replaced ran
-# `bash "$t" >/dev/null 2>&1`, which discarded startup output along with
-# everything else; a worker that has to SAY something cannot.
-unset -v BASH_ENV ENV 2>/dev/null || true
-# …AND THE CLEARING IS PROVEN, because `unset` is itself among the things that can
-# be shadowed: an exported `unset() { return 0; }` reports success and removes
-# nothing. Its status is not a check; this is. Refusing beats continuing with a
-# name that no longer means what the rest of this file assumes.
-#
-# It does not terminate the regress — `compgen` can be shadowed in turn — and that
-# is recorded rather than implied. Each level costs an attacker another exported
-# name; none of it reaches a parent shell already running arbitrary code as the
-# developer, which can edit the tests or amend the commit regardless.
-#
-# `[[ ]]`, NOT `[`. The postcondition cannot be written with a command that the
-# thing it is checking for is able to replace: `[` is an ordinary builtin, so an
-# exported `[` that answers false to this one test leaves every forger installed
-# and sends this branch the benign way. `[[` is a RESERVED WORD — the parser
-# handles it, and a function cannot take its place. So is `if`.
-_rb_left="$(builtin compgen -A function 2>/dev/null)$(builtin declare -F 2>/dev/null)"
+# `[[` and `if` are reserved words: the parser handles them and no function can
+# take their place, which is why the refusal is written with them rather than
+# with `[`.
+_rb_left="$(builtin compgen -A function 2>/dev/null)$(declare -F 2>/dev/null)"
 if [[ -n $_rb_left ]]; then
     echo "PR_SELFCHECK status=error reason=inherited_function name=${_rb_left%%$'\n'*}" >&2
-    # `builtin exit`, for the same reason, and a bare `exit` behind it: in THIS
-    # branch functions are known to have survived, so the name may be one of them.
-    # A shell that has replaced both is one this process cannot refuse from, which
-    # is the limitation recorded above rather than a gap here.
+    # `builtin exit` with a bare `exit` behind it: in THIS branch functions are
+    # known to have survived, so the name doing the refusing may be one of them.
     builtin exit 2
     exit 2
 fi
 unset -v _rb_f _rb_left 2>/dev/null || true
+# `BASH_ENV` GOES TOO, because a non-interactive `bash -c` SOURCES it and the
+# workers report their verdict on stdout: a startup file that prints anything
+# lands in the record stream and the parser refuses a run in which every test
+# passed. Cleared in the parent so the tests the workers run are clean as well,
+# and `ENV` with it for a shell invoked as `sh`.
+#
+# THIS CAN FAIL, and the workers do not depend on its having succeeded. A startup
+# hook containing `readonly BASH_ENV` makes the variable unsettable here; the
+# workers are launched through `env -u` instead, which removes it from their
+# environment whatever this shell's attributes say.
+unset -v BASH_ENV ENV 2>/dev/null || true
 # …AND STRICT MODE IS APPLIED AGAIN, because the `set -uo pipefail` at the top of
 # this file ran BEFORE the clearing and an exported `set() { return 0; }` would
 # have swallowed it. The options were then off for the whole run: `pipefail` off
@@ -665,7 +642,8 @@ if [ "$suite_files" -gt 0 ]; then
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             builtin printf '%s:%s\0' "$n" "${suite_names[$n]}"
-        done | command xargs -0 -P "$suite_jobs" -n 1 bash -c '
+        done | command xargs -0 -P "$suite_jobs" -n 1 \
+            command env -u BASH_ENV -u ENV bash -c '
             rec="$1"
             i="${rec%%:*}"
             p="${rec#*:}"
