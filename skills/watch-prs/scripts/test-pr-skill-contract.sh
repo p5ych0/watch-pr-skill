@@ -73,6 +73,17 @@ grep -qi 'connect' "$SKILL" && grep -q 'connectors' "$SKILL" \
 # The lesson is not about this pattern. Twice I reasoned about what a reversal
 # would look like instead of writing the one someone would actually write, and
 # twice the reasoning was the thing that produced the hole.
+#
+# WHAT THIS CANNOT DO, so nobody mistakes it for more. It catches the instruction
+# being DELETED or INVERTED IN PLACE, which is what a maintainer edit looks like.
+# It cannot catch a negation added elsewhere — `… guarding it.** Do not follow
+# this rule.` later in the same paragraph, or a contradiction in the next one.
+# There is no anchor for that: every heading in this file is inline with its
+# prose, so an end anchor would have to match the sentence that follows, which
+# will legitimately be reworded; and the mutation simply moves to the next line.
+# Establishing that prose does not contradict itself is reading, not grepping,
+# and this repository has already built and deleted a 2,200-line scanner over
+# exactly that boundary.
 grep -q '^\*\*Prefer removing the dependency over guarding it\.\*\*' "$SKILL" \
     && pass "skill states the preference for removing a dependency over guarding it" \
     || die "skill no longer tells the driver to prefer removal over a guard"
