@@ -159,6 +159,18 @@ while read -r _rb_f; do
     [ -n "$_rb_f" ] || continue
     builtin unset -f -- "$_rb_f" 2>/dev/null || true
 done <<< "$(builtin compgen -A function 2>/dev/null)"
+# …AND TRACING IS TURNED OFF HERE TOO, because the re-exec above can be swallowed
+# by an `exec` function — even a benign one — and then `SHELLOPTS=xtrace` is still
+# in force. Every `$( )` below writes its trace to stdout when `BASH_XTRACEFD=1`,
+# including the two that feed the postcondition, which then reads its own trace as
+# a leftover function name and refuses a valid checkout.
+#
+# AFTER the clearing, so `set` is the builtin rather than whatever the caller
+# exported. `SHELLOPTS` is readonly in the child and cannot be unset, but `set +x`
+# turns the option off regardless — checked, because "readonly" suggested
+# otherwise.
+set +x
+
 # …AND THE POSTCONDITION DOES NOT SHARE A PREFIX WITH ITSELF. Asking twice through
 # `builtin compgen` and `builtin declare` is one question, not two: a single
 # forged `builtin` answers both. One call goes through the prefix and one goes
@@ -193,7 +205,13 @@ unset -v _rb_f _rb_left 2>/dev/null || true
 # hook containing `readonly BASH_ENV` makes the variable unsettable here; the
 # workers are launched through `env -u` instead, which removes it from their
 # environment whatever this shell's attributes say.
-unset -v BASH_ENV ENV BASH_XTRACEFD 2>/dev/null || true
+# `BASH_XTRACEFD` IS NOT UNSET HERE, and that is not an omission. When it names
+# fd 1, unsetting it makes bash CLOSE that descriptor — stdout — and every write
+# after it fails with EBADF, which is a far worse outcome than the trace it was
+# meant to stop. `set +x` above already turned tracing off, and the workers are
+# launched with `env -u BASH_XTRACEFD`, so nothing downstream needs it gone from
+# this shell.
+unset -v BASH_ENV ENV 2>/dev/null || true
 # …AND STRICT MODE IS APPLIED AGAIN, because the `set -uo pipefail` at the top of
 # this file ran BEFORE the clearing and an exported `set() { return 0; }` would
 # have swallowed it. The options were then off for the whole run: `pipefail` off

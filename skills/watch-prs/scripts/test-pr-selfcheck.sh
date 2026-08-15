@@ -678,6 +678,8 @@ out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
 # It is a valid state for a caller to be in. The sequential loop this replaced
 # discarded the tests' output and never noticed; a worker that has to SAY
 # something cannot.
+NOEXEC2="$TMP/noexec2.sh"
+{ builtin printf 'exec() { return 0; }\n'; builtin printf 'export -f exec\n'; } > "$NOEXEC2"
 XT="$(mkroot "$OK_SKILL")"
 addscript "$XT" pr-thing.sh 'exit 0'
 addtest "$XT" test-pr-thing.sh
@@ -692,6 +694,18 @@ out="$(run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/de
 builtin printf '%s' "$out" | command grep -q 'PR_SELFCHECK' \
     && pass "…and the guard that strips it terminates" \
     || die "the re-exec did not reach a verdict: $out"
+# …AND WITH `exec` SWALLOWED, so the re-exec cannot strip anything. `SHELLOPTS` is
+# readonly in the child and cannot be unset, but `set +x` turns the option off —
+# after the clearing, so `set` is the builtin rather than whatever was exported.
+#
+# A BENIGN `exec` FUNCTION IS ENOUGH. This is not the hostile combination I
+# declined to pin last round: nothing here forges a verdict, the outcome is a
+# valid checkout refused, and the fix is one line rather than an assertion about
+# bash versions.
+out="$(. "$NOEXEC2"; run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
+{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+    && pass "…and tracing is stripped even when the re-exec is swallowed" \
+    || die "a swallowed re-exec left tracing on the record channel (rc=$rc out='$out')"
 
 # ── a startup file that talks over the record channel ──────────────────────
 # A non-interactive `bash -c` SOURCES `$BASH_ENV` before running its command, and
