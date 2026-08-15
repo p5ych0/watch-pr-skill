@@ -459,6 +459,22 @@ for t in "$SCRIPTS"/test-*.sh; do
     suite_names[$suite_files]="$t"
 done
 if [ "$suite_files" -gt 0 ]; then
+    # `command` ON EVERY EXTERNAL HERE, because an exported shell function is
+    # inherited by this process and shadows the name. That is not hypothetical in
+    # this file: an exported `umask` function defeated the scratch directory's
+    # narrowing two rounds before the directory itself was removed. Here the stakes
+    # are the verdict — `sort() { sed 's/^F /P /'; }` turns a failing record into a
+    # passing one and the validator sees a complete, correctly ordered set, and an
+    # `xargs` function can print a whole passing set without running anything.
+    #
+    # `command` bypasses functions and keeps ordinary PATH resolution, which is
+    # exactly the distinction wanted: a stub earlier on PATH is how this suite
+    # TESTS the gate, so those must still work.
+    #
+    # `bash` inside the worker is on this list too. `xargs` execs it directly, so
+    # that one is resolved by PATH — but the `bash "$p"` inside the worker's own
+    # script is not, and a function there chooses what runs instead of the test.
+    #
     # EVERY WORKER REPORTS, PASS OR FAIL, and the parent requires one record per
     # index. Checking only for failures cannot tell "nothing failed" from "nothing
     # ran": an inherited `xargs() { return 0; }` consumes no input, exits 0 and
@@ -492,7 +508,7 @@ if [ "$suite_files" -gt 0 ]; then
         while [ "$n" -lt "$suite_files" ]; do
             n=$((n + 1))
             printf '%s:%s\0' "$n" "${suite_names[$n]}"
-        done | xargs -0 -P "$suite_jobs" -n 1 bash -c '
+        done | command xargs -0 -P "$suite_jobs" -n 1 bash -c '
             rec="$1"
             i="${rec%%:*}"
             p="${rec#*:}"
@@ -500,7 +516,7 @@ if [ "$suite_files" -gt 0 ]; then
             # reaching it is the one thing left that the parent cannot see. It is
             # neither a pass nor a failure.
             [ -e "$p" ] || { printf "M %s\n" "$i"; exit 0; }
-            if bash "$p" >/dev/null 2>&1; then printf "P %s\n" "$i"
+            if command bash "$p" >/dev/null 2>&1; then printf "P %s\n" "$i"
             else printf "F %s\n" "$i"; fi
             exit 0
         ' _)"; suite_rc=$?
@@ -515,7 +531,7 @@ if [ "$suite_files" -gt 0 ]; then
     # so the findings come out in the glob's order rather than the order the
     # machine happened to finish in. A gate whose output reshuffles between runs is
     # a gate people stop reading.
-    suite_sorted="$(printf '%s\n' "$suite_out" | sort -k2 -n)" || {
+    suite_sorted="$(printf '%s\n' "$suite_out" | command sort -k2 -n)" || {
         echo "PR_SELFCHECK status=error reason=suite_sort_failed" >&2
         exit 2
     }
@@ -567,11 +583,11 @@ EOF
             echo "PR_SELFCHECK status=error reason=suite_failure_unnamed index=$idx" >&2
             exit 2
         }
-        b="$(basename "$t")"
+        b="$(command basename "$t")"
         # ONE LINE PER FINDING, whatever the name contains. A newline inside a
         # filename would otherwise print as two findings to anything reading this
         # output.
-        b="$(printf '%s' "$b" | tr '\n' ' ')"
+        b="$(printf '%s' "$b" | command tr '\n' ' ')"
         note failing_test "$b fails"; suite_fail=1
     done
 fi

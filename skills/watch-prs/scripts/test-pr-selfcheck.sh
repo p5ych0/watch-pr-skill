@@ -537,6 +537,54 @@ out="$(TMPDIR="$BRACEDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
     && pass "a TMPDIR containing {} does not break the runner" \
     || die "the replacement token in TMPDIR reached the workers (rc=$rc out='$out')"
 
+# ── an exported function forging a clean result ────────────────────────────
+# A SHELL FUNCTION SHADOWS A COMMAND NAME, and an exported one is inherited by
+# this process. That is not hypothetical here: an exported `umask` function
+# defeated the scratch directory's narrowing before that directory was removed.
+# What is at stake now is the verdict itself.
+#
+# `sort` is handed the records, so a function that rewrites `F ` to `P ` produces
+# a complete, correctly ordered, all-passing set — every check the parent makes is
+# satisfied and a failing test reports clean. `xargs` can forge the whole set
+# without running anything at all.
+#
+# `command` bypasses functions and keeps PATH resolution, which is the distinction
+# needed: the stubs the rest of this file installs on PATH must still work, and
+# they do — every other case here depends on it.
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+chmod +x "$R/skills/watch-prs/scripts/test-pr-thing.sh"
+out="$(sort() { command sed 's/^F /P /'; }
+       export -f sort
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "an exported sort cannot turn a failing record into a passing one" \
+    || die "a forged pass was accepted (rc=$rc out='$out')"
+# …AND THE SAME FOR THE RUNNER, which can forge the whole set rather than edit it.
+out="$(xargs() { printf 'P 1\n'; }
+       export -f xargs
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported xargs cannot answer for tests it never ran" \
+    || die "a forged result set was accepted (rc=$rc out='$out')"
+
+# …AND THE INTERPRETER THE WORKER RUNS THE TEST WITH. `xargs` execs the worker
+# directly, so THAT `bash` is resolved by PATH and cannot be shadowed — but the
+# `bash "$p"` inside the worker's own script can be, and a function there chooses
+# what runs instead of the test.
+#
+# The fixture's function is narrow on purpose: it forges only invocations that
+# look like a test file, and passes everything else through. A blanket
+# `bash() { return 0; }` would also shadow the syntax check in section 2 and the
+# case would then pass for a reason that has nothing to do with the worker.
+out="$(bash() { case "$1" in */test-*.sh) return 0 ;; *) command bash "$@" ;; esac; }
+       export -f bash
+       run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+    && pass "…and an exported bash cannot stand in for the test itself" \
+    || die "the test run was forged by a function (rc=$rc out='$out')"
+
 # ── a runner or sorter that succeeds and says nothing ──────────────────────
 # THE SHAPE A STATUS CHECK CANNOT SEE. An inherited `xargs() { return 0; }`
 # consumes no input, exits 0 and prints nothing; a no-op `sort` does the same to
