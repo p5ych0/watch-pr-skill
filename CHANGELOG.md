@@ -17,6 +17,15 @@
   you set. CI keeps its sequential loop: it groups and
   annotates each file, and that is worth more on a machine nobody is waiting at.
 
+  The runner needs a scratch directory, and that is where most of the review went.
+  It is created rather than named — `mkdir` fails on a name anything else holds,
+  which is the only way to establish that a recursive cleanup is safe; inspecting
+  a path cannot, and two attempts to do so each deleted a directory the script had
+  not created. It is created private in one step, under a narrowed umask taken
+  through `builtin` so an inherited `umask` function cannot quietly do nothing.
+  And its parent is checked: a `TMPDIR` others can write without the sticky bit is
+  refused, because 0700 protects a directory's contents and not its name.
+
   Three things a concurrent runner gets wrong that a loop cannot. Its status is an
   answer: `xargs` writes failures to stdout, so a runner that cannot start writes
   nothing — and nothing is what a clean suite looks like, so an unchecked status

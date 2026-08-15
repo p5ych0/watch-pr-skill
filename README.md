@@ -411,6 +411,13 @@ helper it drives is shipped, every script has a test, and the suite passes.
 The suite is the slow part, so it runs four files at a time — they share no
 state, and four at a time is ~85s where one after another is ~208s.
 
+The scratch directory it needs is created under `TMPDIR` (or `/tmp`), private to
+you, and removed afterwards. A `TMPDIR` that others can write without the sticky
+bit is **refused** rather than used — anyone who can rename a directory there can
+substitute their own, and what the gate keeps in it is the list of scripts it is
+about to run. `/tmp` is sticky on every system this supports, so only an unusual
+`TMPDIR` reaches that refusal.
+
 `RB_SUITE_JOBS` changes the degree. It takes **one to five digits, no leading
 zero**: `1` and `12` are degrees, while `0`, `00`, `01` and `soon` are not, and
 neither is a six-digit number. Anything outside that falls back to four rather

@@ -564,6 +564,37 @@ done
     && pass "…and what was already in it is untouched" \
     || die "the gate removed a file it did not create"
 
+# ── a scratch parent anyone could replace ──────────────────────────────────
+# A mode of 0700 protects the CONTENTS of the directory, not its NAME. Where the
+# parent is group- or world-writable without the sticky bit, another local user
+# renames it out of the way and puts their own there — after which they own every
+# index the workers read, and pointing all of them at a passing script makes a
+# failing suite report clean. There is nothing this script can do inside a
+# directory anyone may replace, so it refuses instead.
+#
+# `/tmp` is sticky everywhere this runs, which is why the default is fine and only
+# an explicit `TMPDIR` can reach this.
+OPENDIR="$TMP/open-parent"; rm -rf "$OPENDIR"; mkdir -p "$OPENDIR"; chmod 777 "$OPENDIR"
+R="$(mkroot "$OK_SKILL")"
+addscript "$R" pr-thing.sh 'exit 0'
+addtest "$R" test-pr-thing.sh
+out="$(TMPDIR="$OPENDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_parent_replaceable'; } \
+    && pass "a world-writable TMPDIR without the sticky bit is refused" \
+    || die "a replaceable scratch parent was accepted (rc=$rc out='$out')"
+printf '%s' "$out" | grep -q 'the whole suite passes' \
+    && die "…and it ran the suite there anyway: $out" \
+    || pass "…before running anything in it"
+# …AND THE STICKY BIT IS WHAT MAKES IT ACCEPTABLE, not the permissions being
+# narrow. Without this the check could be "refuse anything group-writable", which
+# would refuse `/tmp` itself on most systems and be discovered only by a user
+# whose gate stopped working.
+chmod 1777 "$OPENDIR"
+out="$(TMPDIR="$OPENDIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+    && pass "…while the same directory WITH the sticky bit is fine" \
+    || die "a sticky world-writable TMPDIR was refused (rc=$rc out='$out')"
+
 # ── the scratch directory is private, whatever the caller's umask ──────────
 # It holds the list of scripts the workers EXECUTE. A directory another local user
 # can write is therefore a directory in which they choose what `bash` runs as the
@@ -592,6 +623,19 @@ mode="$(head -1 "$MODELOG" 2>/dev/null)"
 { [ "$rc" -eq 0 ] && [ "$mode" = "drwx------" ]; } \
     && pass "the scratch directory is private under a umask of 000" \
     || die "the scratch directory was mode '$mode' under umask 000 (rc=$rc out='$out')"
+# …AND UNDER AN EXPORTED `umask` FUNCTION, which is the version that defeats the
+# narrowing while looking like it worked. `umask` is a builtin, but a function
+# shadows it and an exported one is inherited: a no-op that returns 0 makes the
+# query, the narrowing and the restore all report success and change nothing.
+: > "$MODELOG"
+out="$(umask 000
+       umask() { return 0; }
+       export -f umask
+       TMPDIR="$UMROOT" RB_MODE_LOG="$MODELOG" "$SCRIPT" "$R" 2>&1)"; rc=$?
+mode="$(head -1 "$MODELOG" 2>/dev/null)"
+{ [ "$rc" -eq 0 ] && [ "$mode" = "drwx------" ]; } \
+    && pass "…and under an exported no-op umask function with a real mask of 000" \
+    || die "an exported umask function defeated the narrowing: mode '$mode' (rc=$rc out='$out')"
 
 # ── a TMPDIR that cannot hold a scratch directory ──────────────────────────
 # The gate cannot run its suite without somewhere to write, and "cannot" must not
@@ -602,7 +646,7 @@ R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-thing.sh 'exit 0'
 addtest "$R" test-pr-thing.sh
 out="$(TMPDIR="$NOTADIR" "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'no_suite_scratch'; } \
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_parent_unreadable'; } \
     && pass "a TMPDIR that cannot hold a scratch directory fails closed" \
     || die "an unusable TMPDIR did not fail closed (rc=$rc out='$out')"
 printf '%s' "$out" | grep -q 'the whole suite passes' \

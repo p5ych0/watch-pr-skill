@@ -467,16 +467,58 @@ case "$suite_jobs" in ""|0*|*[!0-9]*|??????*) suite_jobs=4 ;; esac
 # The umask is narrowed around the creation rather than the mode being fixed
 # afterwards: `mkdir` then `chmod` leaves the directory readable for as long as it
 # takes to run the second command, and a window is all the above needs.
+#
+# …AND THE PARENT HAS TO BE SAFE TOO, because 0700 protects the CONTENTS and not
+# the name. In a directory that is group- or world-writable without the sticky
+# bit, another local user can rename this one out of the way and put their own
+# there — after which they own every index the workers read, and pointing all of
+# them at a passing script makes a failing suite report clean. `/tmp` is sticky
+# everywhere this runs; a `TMPDIR` that is not is refused rather than worked
+# around, because there is nothing this script can do inside a directory anyone
+# may replace.
+suite_parent="${TMPDIR:-/tmp}"
+# `ls -ld`, not `stat`: the flags for a mode differ between GNU and BSD, and this
+# suite is proven on a mac-shaped PATH. Columns 6 and 9 are the group and other
+# write bits; column 10 carries the sticky bit as `t` or `T`.
+_sd_mode="$(ls -ld "$suite_parent" 2>/dev/null | cut -c1-10)" || _sd_mode=""
+case "$_sd_mode" in
+    d?????????) ;;
+    *)  echo "PR_SELFCHECK status=error reason=suite_parent_unreadable parent=$suite_parent" >&2
+        exit 2 ;;
+esac
+_sd_gw="$(printf '%s' "$_sd_mode" | cut -c6)"
+_sd_ow="$(printf '%s' "$_sd_mode" | cut -c9)"
+_sd_st="$(printf '%s' "$_sd_mode" | cut -c10)"
+if { [ "$_sd_gw" = w ] || [ "$_sd_ow" = w ]; } \
+   && [ "$_sd_st" != t ] && [ "$_sd_st" != T ]; then
+    echo "PR_SELFCHECK status=error reason=suite_parent_replaceable parent=$suite_parent mode=$_sd_mode" >&2
+    exit 2
+fi
 suite_dir=""
 _sd_try=0
-_sd_umask="$(umask)"
-umask 077
+# `builtin umask`, ALL THREE TIMES. `umask` is a builtin but a shell function can
+# shadow it, and an exported one is inherited by this process — so a driving shell
+# carrying `umask() { return 0; }` with a real mask of 000 would have this narrow
+# nothing, restore nothing, and report success at each step. Their statuses are
+# taken for the same reason: a narrowing that silently did not happen is the one
+# failure that leaves the directory writable while everything below looks correct.
+_sd_umask="$(builtin umask)" || {
+    echo "PR_SELFCHECK status=error reason=umask_unreadable" >&2
+    exit 2
+}
+builtin umask 077 || {
+    echo "PR_SELFCHECK status=error reason=umask_unsettable" >&2
+    exit 2
+}
 while [ "$_sd_try" -lt 8 ]; do
     _sd_try=$((_sd_try + 1))
-    _sd_cand="${TMPDIR:-/tmp}/pr-selfcheck.$$.$_sd_try.${RANDOM:-0}"
+    _sd_cand="$suite_parent/pr-selfcheck.$$.$_sd_try.${RANDOM:-0}"
     if mkdir "$_sd_cand" 2>/dev/null; then suite_dir="$_sd_cand"; break; fi
 done
-umask "$_sd_umask"
+builtin umask "$_sd_umask" || {
+    echo "PR_SELFCHECK status=error reason=umask_unrestorable" >&2
+    exit 2
+}
 [ -n "$suite_dir" ] || {
     echo "PR_SELFCHECK status=error reason=no_suite_scratch" >&2
     exit 2
