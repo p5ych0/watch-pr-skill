@@ -54,17 +54,16 @@ set -uo pipefail
 # names, so there is no allowlist to leave something out of — and an allowlist is
 # a shape that has already been wrong twice in this file.
 #
-# THE CONDITION IS THE GUARD, so there is no sentinel. Re-exec only when one of
-# the hook variables is actually set; after `env -u` neither is, so the second
-# instance does not qualify and there is no loop to prevent.
+# THE GUARD IS A MARKER, AND CONDITIONING ON THE HOOK VARIABLES WAS WRONG. That
+# asks a question the hook has already had the chance to answer — it can `unset
+# BASH_ENV` on its way out, leaving a `readonly -f` function nothing can clear and
+# no evidence anything ran. A marker set by the exec cannot be erased that way,
+# because the hook has finished by the time it exists.
 #
-# A sentinel was tried and is worse in two ways. It is inherited: the gate exports
-# it, so the workers, the tests they run and the nested copies of this script that
-# `test-pr-selfcheck.sh` invokes would each skip their own re-exec and stand in
-# the hook they were meant to step out of — the suite caught exactly that, a case
-# passing standalone and failing inside the gate. And it is settable from outside:
-# anyone who exports it disables the protection, which is a guard that can be
-# switched off by the environment it exists to defend against.
+# Its two costs are real and are handled below rather than denied: it is inherited
+# by children unless cleared, which the suite caught when it was not; and a caller
+# who exports it skips the re-exec, which is the boundary this file already
+# concedes.
 #
 # If `exec` or `env` is itself shadowed the re-exec silently does not happen, and
 # the clearing and postcondition below are still there; this is the cheap layer,

@@ -638,7 +638,12 @@ ERASE="$TMP/selferase.sh"
 R11="$(mkroot "$OK_SKILL")"
 addscript "$R11" pr-thing.sh 'exit 0'
 addtest "$R11" test-pr-thing.sh
-out="$(run_limited 60 env BASH_ENV="$ERASE" "$SCRIPT" "$R11" 2>&1)"; rc=$?
+# `BASH_ENV` IS THE ONLY EVIDENCE AVAILABLE, deliberately. A contributor or a CI
+# runner that exports `ENV`, `SHELLOPTS` or `BASH_XTRACEFD` would keep the old
+# evidence-based guard firing on one of those, and this case would stay green
+# while proving nothing about the hook erasing its own trace.
+out="$(run_limited 60 env -u ENV -u SHELLOPTS -u BASH_XTRACEFD \
+        BASH_ENV="$ERASE" "$SCRIPT" "$R11" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
     && pass "a hook that unsets itself does not block a valid run" \
     || die "the re-exec was skipped by a self-erasing hook (rc=$rc out='$out')"
