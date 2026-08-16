@@ -576,23 +576,32 @@ SPY
     # ordinary timeout. The library refuses before writing, and what that has to
     # look like from outside is each caller's documented failure, not merely
     # "non-zero".
+    # TWO HOOKS: the plain one, and the one that also FORGES the inspection. A
+    # first fix asked `declare` whether these names were plain, and a hook that
+    # defines `declare` answers yes for everything — after which the assignment is
+    # fatal exactly as before. The forged case is the discriminating one, so it is
+    # here rather than left as a shape nobody runs.
     printf 'readonly RB_ELAPSED=0\n' > "$CLKTMP/hook.sh"
+    printf 'declare() { printf "declare -- %%s\\n" "$2"; }\nreadonly RB_ELAPSED=0\n' \
+        > "$CLKTMP/hook-forged.sh"
     # The real library AND the real loader: the spy above replaced both, and this
     # case is about the clock refusing rather than about who loaded it.
     ln -sf "$ROOT/clocklib.sh" "$CLKTMP/run/clocklib.sh"
     ln -sf "$ROOT/loadlib.sh" "$CLKTMP/run/loadlib.sh"
-    for sc in pr-watch.sh:2:clock_unreadable pr-ci-gate.sh:1:"could not read the clock"; do
-        _n="${sc%%:*}"; _rest="${sc#*:}"; _want="${_rest%%:*}"; _say="${_rest#*:}"
-        [ -f "$ROOT/$_n" ] || continue
-        rc=0
-        out="$(run_limited 20 env BASH_ENV="$CLKTMP/hook.sh" \
-                 REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
-                 "$CLKTMP/run/$_n" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
-        if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q "$_say"; then
-            echo "ok   - $_n reports a hook-owned clock as rc=$_want, not as a timeout to re-arm"
-        else
-            echo "FAIL - $_n gave rc=$rc for a readonly RB_ELAPSED (wanted $_want / '$_say') out='$out'"; idfail=1
-        fi
+    for _hook in hook hook-forged; do
+        for sc in pr-watch.sh:2:clock_unreadable pr-ci-gate.sh:1:"could not read the clock"; do
+            _n="${sc%%:*}"; _rest="${sc#*:}"; _want="${_rest%%:*}"; _say="${_rest#*:}"
+            [ -f "$ROOT/$_n" ] || continue
+            rc=0
+            out="$(run_limited 20 env BASH_ENV="$CLKTMP/$_hook.sh" \
+                     REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
+                     "$CLKTMP/run/$_n" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
+            if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q "$_say"; then
+                echo "ok   - $_n reports a hook-owned clock as rc=$_want ($_hook), not a timeout to re-arm"
+            else
+                echo "FAIL - $_n gave rc=$rc under $_hook (wanted $_want / '$_say') out='$out'"; idfail=1
+            fi
+        done
     done
     rm -rf "$CLKTMP"
 fi

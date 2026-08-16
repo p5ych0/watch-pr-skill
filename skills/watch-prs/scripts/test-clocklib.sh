@@ -175,5 +175,27 @@ ro="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" 
     && die "the readonly case never loaded the library, so it proved nothing" \
     || pass "…and that case really did load the library it is about"
 
+# ── A NAMEREF AIMS THESE NAMES AT SOMEONE ELSE'S VARIABLE ──────────────────
+# Worse than `readonly`, because nothing FAILS: the assignment succeeds against
+# the target, so a writability probe passes and every later guard reports a good
+# reading of a clock that is not ours. Only reading the values BACK shows that
+# what was stored is not what is there.
+#
+# `declare -n` is Bash 4.3+, and this suite runs on 3.2 in CI, so the case is
+# skipped there rather than asserted as a pass — `BASH_VERSINFO` is a variable, so
+# no function can answer for it.
+if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+    nr="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" bash -c '
+        . "$RB_LIB" || exit 9
+        declare -n RB_CLOCK_T0=RB_ELAPSED
+        rb_elapsed start
+        echo "RC=$?"' 2>/dev/null)"
+    [ "$nr" = "RC=1" ] \
+        && pass "a nameref over the clock state is refused, though nothing failed to write" \
+        || die "a nameref was accepted as a good reading ($nr)"
+else
+    pass "…(nameref case skipped: Bash ${BASH_VERSINFO[0]:-?}.${BASH_VERSINFO[1]:-?} has no declare -n)"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -74,30 +74,35 @@ rb_elapsed() {   # rb_elapsed [start] ; sets RB_ELAPSED, non-zero if untrustwort
         ""|*[!0-9]*|0?*|????????????*) return 1 ;;
     esac
     if [ "${1-}" = start ]; then
-        # THE STATE IS CHECKED BEFORE IT IS WRITTEN, because writing is not
-        # recoverable. An assignment to a variable a startup hook left `readonly`
-        # is FATAL in a non-interactive shell: the process dies at that line, so
-        # neither `|| return 1` here nor the caller's handler runs, and
-        # `pr-watch.sh` exits 1 without its sentinel — a status the driver treats
-        # as an ordinary timeout and RE-ARMS, which is the endless watch this file
-        # exists to prevent. Noticing after the fact is not available; the only
-        # place to notice is before.
+        # THE STATE IS PROVED WRITABLE, THEN PROVED WRITTEN, and neither step uses
+        # a command a startup hook can replace.
         #
-        # ANY ATTRIBUTE, NOT A LIST OF THEM. `readonly` is one way to own these
-        # names and `declare -n` is another — a nameref makes the assignment
-        # SUCCEED against someone else's variable, so every guard below reports a
-        # good reading of a clock that is not ours. Rather than enumerate the
-        # attributes that are hostile, anything other than a plain variable is
-        # refused, which cannot be wrong by omission.
-        for _rb_v in RB_CLOCK_T0 RB_CLOCK_LAST RB_ELAPSED; do
-            case "$(declare -p "$_rb_v" 2>/dev/null)" in
-                ''|'declare -- '*) ;;
-                *) return 1 ;;
-            esac
-        done
-        RB_CLOCK_T0="$t"   || return 1
-        RB_CLOCK_LAST="$t" || return 1
-        RB_ELAPSED=0       || return 1
+        # WRITING BLIND IS NOT AN OPTION: an assignment to a variable a hook left
+        # `readonly` is FATAL in a non-interactive shell, so the process dies at
+        # that line — no `|| return 1`, no caller handler, and `pr-watch.sh` exits
+        # 1 with no sentinel, which the driver reads as an ordinary timeout and
+        # RE-ARMS.
+        #
+        # AND ASKING `declare` IS NOT EITHER. That was the first fix, and a hook
+        # that defines `declare() { printf 'declare -- %s\n' "$2"; }` makes every
+        # name look like a plain variable, after which the assignment is fatal
+        # exactly as before. `CLAUDE.md` records the rule this breaks: a function
+        # shadows any name, builtin or not, and the prefixes that would bypass one
+        # can be shadowed too — prefer a RESERVED WORD or an ASSIGNMENT, which the
+        # parser handles and no function can take the place of.
+        #
+        # So: a throwaway subshell does the writing that might be fatal, where its
+        # death costs nothing and its status is readable. Then the values are read
+        # BACK, which is what catches a `declare -n` aiming these names at someone
+        # else's variable — that assignment succeeds, so only the read-back shows
+        # the value is not the one we stored.
+        ( RB_CLOCK_T0=probe; RB_CLOCK_LAST=probe; RB_ELAPSED=probe ) 2>/dev/null \
+            || return 1
+        RB_CLOCK_T0="$t"
+        RB_CLOCK_LAST="$t"
+        RB_ELAPSED=0
+        [[ $RB_CLOCK_T0 = "$t" && $RB_CLOCK_LAST = "$t" && $RB_ELAPSED = 0 ]] \
+            || return 1
         return 0
     fi
     # A clock that steps BACKWARD is unreadable, not a longer deadline: without
