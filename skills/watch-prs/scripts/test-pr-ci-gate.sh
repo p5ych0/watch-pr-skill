@@ -107,18 +107,58 @@ STUBSH
     chmod +x "$GATETMP/s/pr-ci-state.sh"
     gate_case() {   # gate_case <queue> <want rc> <want calls> <label> [env…]
         local out rc=0 calls q="$1" want="$2" mincalls="$3" label="$4"
+        local tmo=5 arg t0 took
         shift 4
+        # THE CASE'S OWN BOUND, for the stall check below. Read from the overrides
+        # rather than assumed, so it cannot drift from the value actually passed.
+        for arg in "$@"; do
+            case "$arg" in PR_CI_TIMEOUT=*) tmo="${arg#PR_CI_TIMEOUT=}" ;; esac
+        done
         printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
         : > "$GATETMP/last"
         : > "$GATETMP/probe"
+        t0=$SECONDS
         out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
             GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" \
             PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
             "$GATETMP/s/pr-ci-gate.sh" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
+        took=$((SECONDS - t0))
         calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
-        { [ "$rc" = "$want" ] && [ "${calls:-0}" -ge "$mincalls" ]; } \
-            && pass "$label" \
-            || die "$label — rc=$rc calls=$calls out='$out' (wanted $want / >=$mincalls calls)"
+        # A STALLED RUNNER IS NOT A FAILING GATE, AND IT IS DISTINGUISHABLE — #38.
+        # The call floor is a vacuity guard, and every bound here is real time, so
+        # a runner descheduled for the whole bound reaches the first deadline check
+        # with nothing left: the gate correctly refuses, makes NO probe, and the
+        # floor reports a defect that did not happen. That is the red `macos-shell`
+        # #38 reports, and no amount of extra slack removes it — `SECONDS` is a
+        # bash builtin, so this fixture cannot own the gate's clock the way
+        # `test-pr-watch.sh` owns `date`.
+        #
+        # What separates the two is how long the run TOOK. Reaching that state
+        # costs the whole bound in wall clock; a gate that simply never probes
+        # returns at once. So a refusal with no probe at all is accepted only when
+        # the run really did spend the bound, and it says so rather than passing
+        # silently — an inconclusive case must not read as a proven one.
+        #
+        # THE STATUS IS NOT COMPARED IN THAT ARM, and it cannot be: a stalled
+        # runner refuses (rc=1) in cases that expect a CLOSE (rc=0), so requiring
+        # `rc = want` there would have left exactly those cases red — the same
+        # false red one line further on. What is required instead is the refusal
+        # itself, which is the only thing a gate with no time left may do.
+        #
+        # WHAT THIS DELIBERATELY DOES NOT COVER: a runner that loses seconds
+        # part-way through a multi-poll case, where the gate probes several times
+        # and then runs out. Measured — a six-second stall still reds three cases
+        # that way. Accepting those would mean accepting `rc=1` where a close was
+        # expected AFTER real probing, which is exactly the defect signature of a
+        # gate that refuses when it should close. That trade is not worth a flake
+        # nobody has reported: #38 is a one-second race on a one-second bound.
+        if [ "$rc" = "$want" ] && [ "${calls:-0}" -ge "$mincalls" ]; then
+            pass "$label"
+        elif [ "$rc" = 1 ] && [ "${calls:-0}" -eq 0 ] && [ "$took" -ge "$tmo" ]; then
+            pass "$label — INCONCLUSIVE: the runner spent the whole ${tmo}s bound before the first probe"
+        else
+            die "$label — rc=$rc calls=$calls took=${took}s out='$out' (wanted $want / >=$mincalls calls)"
+        fi
     }
     # GREEN MUST HOLD, TOO. A push that triggers two workflows can have the fast
     # one registered and passing before the second is registered at all, so the
