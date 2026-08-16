@@ -263,7 +263,12 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
                    # the case in `test-pr-merge-gate.sh` where a head with no
                    # Copilot record and a stale clean verdict merges. Only the
                    # wording was false. #36.
-                   echo "merge blocked: a $who pass is open on this PR — its signoff was revoked and has not been recorded again"
+                   #
+                   # SAY THE OPEN PASS AND NOTHING ELSE. The first attempt kept a
+                   # second clause naming the revocation, which is the very event
+                   # that did not happen on a first entry — a true opening clause
+                   # does not make the sentence true.
+                   echo "merge blocked: a $who pass is open on this PR and no signoff for it has been recorded"
                    return 1 ;;
                *) return 0 ;;   # nothing recorded; the caller's sha is not contradicted
            esac ;;

@@ -5,8 +5,9 @@
 - **The merge gate said a phase had been reopened that had never been entered.**
   `pr-copilot-phase.sh open` posts its revocation on every entry, including the
   first, where there is no Copilot signoff to revoke — so the block message
-  described history that had not happened. It now says a pass is open and its
-  signoff has not been recorded again, which is true on a first entry and on a
+  described history that had not happened. It now says only that a pass is open
+  and that no signoff for it has been recorded — no clause about a revocation,
+  which is the event that did not happen. That is true on a first entry and on a
   re-entry alike.
 
   Only the wording changed. Removing the revocation itself was tried and reverted:

@@ -134,6 +134,18 @@ case_is() {   # case_is <want rc> <needle> <label>
         && pass "$3" \
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
+case_line() {   # case_line <want rc> <the WHOLE diagnostic line> <label>
+    # `grep -xF`, not the substring match above. The defect this answers was a
+    # message whose opening clause was true and whose remainder named an event
+    # that had not happened, and a substring assertion on the true clause matched
+    # it exactly as it matches the corrected one. Asserting the line ENTIRE is
+    # what makes a false remainder visible.
+    local got rc body
+    got="$(run_gate "${4:-7}" "${5:-$HEAD40}" "${6:-no}")"; rc="${got%%|*}"; body="${got#*|}"
+    { [ "$rc" = "$1" ] && printf '%s\n' "$body" | grep -qxF "$2"; } \
+        && pass "$3" \
+        || die "$3 — rc=$rc (wanted $1) out='$body'"
+}
 
 # ── EVERY FIXTURE IS DEFINED HERE, ABOVE EVERY CASE ────────────────────────
 #
@@ -411,7 +423,8 @@ case_is 0 "merged" "with no Copilot record, a stale clean verdict is enough to m
 # different. Removing the unconditional revocation removes this refusal.
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
     > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
-case_is 1 "pass is open on this PR" "…and the revocation is the only thing that refuses it"
+case_line 1 "merge blocked: a $COPILOTBOT pass is open on this PR and no signoff for it has been recorded" \
+    "…and the revocation is the only thing that refuses it"
 
 # …AND THE RECORD HAS TO NAME THIS HEAD.
 world; replies_only "$COPILOTBOT"
@@ -554,7 +567,8 @@ case_is 1 "could not establish the round count" "…while an unreadable count bl
 # verdict check and merge the phase that was deliberately reopened.
 world; printf '1' > "$STUB_DIR/pr-signoff.rc"
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$STUB_DIR/pr-signoff.out"
-case_is 1 "pass is open on this PR" "a revoked Codex signoff blocks the merge"
+case_line 1 "merge blocked: a $CODEXBOT pass is open on this PR and no signoff for it has been recorded" \
+    "a revoked Codex signoff blocks the merge"
 # …AND A RECORD NAMING ANOTHER COMMIT IS A CONTRADICTION TOO. The caller's sha and
 # the PR's record disagreeing means one of them is stale, and merging is the wrong
 # way to find out which.
@@ -575,7 +589,8 @@ case_is 1 "could not read the" "…and an unreadable record blocks"
 world; printf '1' > "$STUB_DIR/pr-signoff.$COPILOTBOT.rc"
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
     > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
-case_is 1 "pass is open on this PR" "a revoked Copilot signoff blocks the merge too"
+case_line 1 "merge blocked: a $COPILOTBOT pass is open on this PR and no signoff for it has been recorded" \
+    "a revoked Copilot signoff blocks the merge too"
 # …and it is NOT consulted in codex-only, where there is no Copilot phase to
 # reopen — a stale Copilot revocation must not block a merge it has nothing to do
 # with.
