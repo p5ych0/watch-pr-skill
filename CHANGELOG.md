@@ -11,6 +11,13 @@
   checks the shape, which is the rule the resume parser in the same file has
   always applied. One rule, two copies, one of them wrong.
 
+  The parse is a single `awk` process whose status is taken, because a shape check
+  alone reads a printed-then-failed value as a good parse: a stage that emits a
+  plausible forty hex and exits non-zero was accepted before and is refused now.
+  One process rather than a pipeline under `pipefail`, because `set` is a builtin
+  a function can shadow — which would leave the option unset and the last stage's
+  status speaking for the whole pipeline again.
+
 - **And the file that enforces "no silent pass" had two.** Two lookups in
   `test-pr-skill-contract.sh` ran unguarded under `set -Eeuo pipefail`, so
   deleting either line they search for killed the file before its `die` and

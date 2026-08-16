@@ -1016,15 +1016,26 @@ esac
 # same rule written twice with one copy right is what `CLAUDE.md` says belongs in
 # one place; this is the copy that was wrong. Issue #39.
 #
-# THE PARSER'S OWN STATUS IS TAKEN, in a subshell that sets `pipefail` so a stage
-# that fails MID-pipeline is not hidden by the exit status of the last one. A
-# `sed` or `tail` that prints a plausible forty hex and then fails leaves that
-# value in the substitution, and a shape check alone reads it as a good parse —
-# the rule `CLAUDE.md` states for `gh`, and the same for any command here.
-CODEX_SHA="$(set -o pipefail
-    printf '%s\n' "$PHASE_OUT" \
-    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]\{40\}\)[[:space:]]*$/\1/p' \
-    | tail -1)" \
+# ONE PROCESS, SO THERE IS NO PIPELINE STATUS TO LOSE. A `sed` or `tail` that
+# prints a plausible forty hex and then fails leaves that value in the
+# substitution, where a shape check alone reads it as a good parse — the rule
+# `CLAUDE.md` states for `gh`, and the same for any command here.
+#
+# `set -o pipefail` in a subshell was the first answer and is not one: `set` is a
+# builtin, and a function can shadow it, so the option silently is not set and the
+# last stage's status is the pipeline's again. `CLAUDE.md` records that exact
+# defeat. Removing the pipeline needs no such trust — `awk` reads the records,
+# keeps the LAST match, and its own status is the whole answer.
+#
+# THE LENGTH IS CHECKED IN `awk`, not with an interval `{40}`: interval
+# expressions are not dependable in every `awk` this suite must run under, and a
+# length test is exact everywhere.
+CODEX_SHA="$(awk '
+    /^PR_PHASE_RECORDED .*[[:space:]]codex-sha=[0-9a-f]+[[:space:]]*$/ {
+        n = $0; sub(/^.*codex-sha=/, "", n); sub(/[[:space:]]*$/, "", n)
+        if (length(n) == 40) v = n
+    }
+    END { if (v != "") print v }' <<<"$PHASE_OUT")" \
     || { echo "ABORT: the phase record could not be parsed; step 8 would gate on an unread value."; exit 1; }
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then

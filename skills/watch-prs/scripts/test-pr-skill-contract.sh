@@ -200,24 +200,25 @@ grep -qi 'precede the push' "$SKILL" \
 # was gated on something that is not a commit. The resume parser at the bottom of
 # the same file has always required `\{40\}` — one rule, two copies, one of them
 # wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
-grep -qF 'codex-sha=\([0-9a-f]\{40\}\)' "$SKILL" \
-    && pass "…through a capture that accepts exactly a full sha" \
-    || die "CODEX_SHA is captured with a pattern looser than 40 hex"
+grep -qF 'codex-sha=[0-9a-f]+[[:space:]]*$' "$SKILL" \
+    && pass "…through a capture anchored to the whole record" \
+    || die "CODEX_SHA is captured with a pattern that is not anchored to the record"
 # …AND THE RESULT IS SHAPE-CHECKED, not merely non-empty. A record that arrives
 # twice puts two lines in the variable, and each is 40 hex on its own.
 grep -qF 'RX_PHASE_SHA40' "$SKILL" \
     && pass "…and the captured head is matched against a 40-hex anchor" \
     || die "the phase head is used without a shape check"
-grep -qF "| tail -1)" "$SKILL" \
-    && pass "…and the LAST record wins, as it does for every other marker here" \
-    || die "the phase head is not taken from the last matching record"
-# …AND THE PARSE ITSELF IS CHECKED, not only its result. A `sed` or `tail` that
-# prints a plausible forty hex and then FAILS leaves that value in the
-# substitution, where a shape check reads it as a good parse. `pipefail` inside
-# the subshell is what makes a mid-pipeline failure the substitution's status.
-grep -qF 'CODEX_SHA="$(set -o pipefail' "$SKILL" \
-    && pass "…and the parse runs under pipefail, so a stage that fails is not hidden" \
-    || die "the phase parser can fail mid-pipeline without the driver noticing"
+# …AND THE PARSE IS ONE PROCESS, so there is no pipeline status to lose. A `sed`
+# or `tail` that prints a plausible forty hex and then FAILS leaves that value in
+# the substitution, where a shape check reads it as a good parse. `set -o
+# pipefail` was the first answer and is not one — `set` is a builtin a function
+# can shadow, which `CLAUDE.md` records as a defeat already paid for.
+grep -qF 'CODEX_SHA="$(awk' "$SKILL" \
+    && pass "…and the parse is a single process, with no pipeline status to lose" \
+    || die "the phase parser is a pipeline again, and a failing stage can be hidden"
+grep -qF 'if (length(n) == 40) v = n' "$SKILL" \
+    && pass "…taking the LAST record, and exactly forty hex by length" \
+    || die "the phase parser does not check the head's length where it reads it"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
