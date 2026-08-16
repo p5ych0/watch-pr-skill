@@ -1053,8 +1053,14 @@ while [[ -n $_rb_rest ]]; do
     # DELIMITED BY WHITESPACE, so `xcodex-sha=` is not the field.
     if [[ $_rb_line == PR_PHASE_RECORDED\ * ]]; then
         _rb_v=""
+        # THE DELIMITER IS IN THE REMOVAL PATTERN TOO, not only in the test above
+        # it. `##*codex-sha=` is greedy, so on
+        # `codex-sha=a xcodex-sha=<40 hex>` it took the value after the LATER
+        # substring: the condition saw the real field, the extraction read a
+        # different one, and the shape check accepted a sha that was never the
+        # `codex-sha` field at all.
         if [[ $_rb_line == *[[:space:]]codex-sha=* ]]; then
-            _rb_v="${_rb_line##*codex-sha=}"
+            _rb_v="${_rb_line##*[[:space:]]codex-sha=}"
             _rb_v="${_rb_v%%[[:space:]]*}"
         fi
         CODEX_SHA="$_rb_v"

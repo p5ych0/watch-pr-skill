@@ -259,6 +259,8 @@ PR_PHASE_RECORDED pr=7 reviewer=chatgpt-codex-connector[bot]" refused \
     "…and so does a final record with NO field, which says nothing about the head"
 phase_case "PR_PHASE_RECORDED pr=7 xcodex-sha=$_V" refused \
     "…and a field name that merely ends in codex-sha= is not the field"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
+    "…and a later lookalike field cannot supply the head the real one lacks"
 # NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
 # time: `set` and `awk` are both shadowable, and a function returning a stale sha
 # and exiting 0 is accepted by any status check written around it.
