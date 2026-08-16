@@ -546,31 +546,55 @@ for sc in "$ROOT"/pr-*.sh; do
 done
 
 # ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
-# A library that sources cleanly and defines NOTHING is what `rb_load` exists to
-# catch, and it is what a hand-written load misses however the load is spelled.
-# Each clock caller is run from a copy whose `clocklib.sh` is empty, with a stale
-# `rb_elapsed` exported in, so the only thing that changed is the library.
+# Two things have to hold, and neither is a pattern.
+#
+# THAT `rb_load` DID THE LOAD. A COMPLETE copy of the loading rule — clear,
+# source, verify, report — refuses an empty library exactly as `rb_load` does, so
+# an outcome-only check calls it compliant while the caller has reimplemented the
+# loader and is free to drift from it. `loadlib.sh` is replaced by one that
+# records each library it is asked for and then delegates, so what is asserted is
+# that the shared loader was USED, not that something behaved like it.
+#
+# AND THAT AN EMPTY LIBRARY IS REFUSED, with the status each caller's consumer
+# actually branches on: `pr-watch.sh` exits 2 for an unreadable state, because 1
+# means an ordinary timeout and the driver RE-ARMS it — a clock that cannot be
+# read would become an indefinite watch loop — and the gate exits 1, which is its
+# contract for refusing a round.
 CLKTMP="$(mktemp_d)" || { echo "FAIL - could not create a scratch directory"; idfail=1; CLKTMP=""; }
 if [ -n "$CLKTMP" ]; then
     mkdir -p "$CLKTMP/run"
     for g in "$ROOT"/*.sh; do ln -sf "$g" "$CLKTMP/run/$(basename "$g")"; done
     rm -f "$CLKTMP/run/clocklib.sh"; : > "$CLKTMP/run/clocklib.sh"
-    for sc in pr-watch.sh pr-ci-gate.sh; do
-        [ -f "$ROOT/$sc" ] || continue
+    rm -f "$CLKTMP/run/loadlib.sh"
+    cat > "$CLKTMP/run/loadlib.sh" <<'SPY'
+. "$RB_REAL_LOADLIB" || return 1
+eval "rb_real_load() $(declare -f rb_load | sed '1d')"
+rb_load() { printf '%s\n' "$2" >> "$RB_LOAD_SPY"; rb_real_load "$@"; }
+SPY
+    for sc in pr-watch.sh:2 pr-ci-gate.sh:1; do
+        _n="${sc%%:*}"; _want="${sc##*:}"
+        [ -f "$ROOT/$_n" ] || continue
+        : > "$CLKTMP/spy"
         # `|| rc=$?`, NOT `; rc=$?`. Under `set -e` a failing command substitution
         # inside an assignment aborts the fixture before the status can be read —
-        # and a caller REFUSING is exactly what this case expects, so the abort
-        # happened on every correct run and the block printed nothing at all.
+        # and refusing is what a correct run does here, so the whole block printed
+        # nothing at all until this was found by running it.
         rc=0
-        out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
+        out="$(run_limited 20 env RB_REAL_LOADLIB="$ROOT/loadlib.sh" RB_LOAD_SPY="$CLKTMP/spy" \
+                 REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
                  bash -c 'rb_elapsed() { RB_ELAPSED=0; }
                           export -f rb_elapsed
                           exec "$1" 7 0123456789abcdef0123456789abcdef01234567' \
-                 _ "$CLKTMP/run/$sc" 2>&1)" || rc=$?
-        if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'clocklib_empty'; then
-            echo "ok   - $sc refuses an empty clocklib even with rb_elapsed already defined"
+                 _ "$CLKTMP/run/$_n" 2>&1)" || rc=$?
+        if grep -qx clocklib "$CLKTMP/spy" 2>/dev/null; then
+            echo "ok   - $_n loads the clock through rb_load itself, not through a copy of it"
         else
-            echo "FAIL - $sc accepted an inherited clock (rc=$rc out='$out')"; idfail=1
+            echo "FAIL - $_n never asked rb_load for clocklib (spy: $(tr '\n' ' ' < "$CLKTMP/spy"))"; idfail=1
+        fi
+        if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q 'clocklib_empty'; then
+            echo "ok   - …and refuses an empty clocklib with rc=$_want, even with rb_elapsed defined"
+        else
+            echo "FAIL - $_n gave rc=$rc for an empty clocklib (wanted $_want) out='$out'"; idfail=1
         fi
     done
     rm -rf "$CLKTMP"
