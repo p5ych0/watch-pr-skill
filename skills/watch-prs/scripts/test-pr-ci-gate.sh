@@ -329,6 +329,59 @@ STUBSH
     gate_spin 1 "a zero interval falls back rather than spinning against the API" PR_CI_INTERVAL=0
     gate_spin 1 "…and so does a non-numeric interval" PR_CI_INTERVAL=soon
     gate_spin 1 "…and a non-numeric timeout does not remove the pacing" PR_CI_TIMEOUT=soon
+    # ── A CLOCK THAT FAILS MID-GATE STOPS THE ROUND ────────────────────────
+    # `pr-ci-gate.sh` measures elapsed time through `clocklib.sh` rather than
+    # `$SECONDS` (#66), so it has a runtime failure it never had: the clock can
+    # refuse. `test-clocklib.sh` proves the library returns non-zero and
+    # `test-pr-identity.sh` proves an EMPTY library is refused; neither would fail
+    # if the gate stopped honouring that status mid-poll and carried on with a
+    # stale elapsed count — which is the unbounded loop the bound exists to stop.
+    #
+    # The stub answers once and then breaks, so the failure lands AFTER a
+    # successful start: `date` prints a plausible epoch and exits non-zero, which
+    # command substitution keeps, and a backward step is the other shape.
+    # BOTH PLACES THE GATE READS THE CLOCK, because they are separate branches:
+    # `good=1` breaks the reading at the top of the loop, before any probe, and
+    # `good=2` breaks the one AFTER a probe has been made — where a gate that
+    # ignored the status would accept that probe's verdict on a stale elapsed
+    # count, which is the bound not binding.
+    clock_case() {   # clock_case <mode> <good-readings> <want-calls> <label>
+        local mode="$1" good="$2" wantcalls="$3" label="$4" out rc=0 calls
+        printf '3\n' > "$GATETMP/q"; : > "$GATETMP/calls"; : > "$GATETMP/last"
+        : > "$GATETMP/probe"; printf '0\n' > "$GATETMP/clockn"
+        mkdir -p "$GATETMP/bin"
+        cat > "$GATETMP/bin/date" <<DATESH
+#!/usr/bin/env bash
+case "\${1:-}" in
+    +%s) ;;
+    *)   exec /usr/bin/env -u PATH /bin/date "\$@" ;;
+esac
+n=\$(cat "$GATETMP/clockn" 2>/dev/null || echo 0)
+printf '%s\\n' "\$((n + 1))" > "$GATETMP/clockn"
+if [ "\$n" -lt $good ]; then printf '%s\\n' "\$((1754000000 + \$n))"; exit 0; fi
+case "$mode" in
+    fails)    printf '1754000001\\n'; exit 3 ;;
+    backward) printf '1753999000\\n'; exit 0 ;;
+esac
+DATESH
+        chmod +x "$GATETMP/bin/date"
+        out="$(run_limited 20 env PATH="$GATETMP/bin:$PATH" \
+            GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" GATE_LAST="$GATETMP/last" \
+            GATE_PROBE="$GATETMP/probe" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 \
+            "$GATETMP/s/pr-ci-gate.sh" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
+        calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
+        { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'clock'; } \
+            && pass "$label" \
+            || die "$label — rc=$rc out='$out' (wanted 1 and a clock refusal)"
+        [ "${calls:-0}" -eq "$wantcalls" ] \
+            && pass "…and it made no request after the clock failed ($calls)" \
+            || die "$label — made $calls requests on a broken clock (wanted $wantcalls)"
+        rm -rf "$GATETMP/bin"
+    }
+    clock_case fails    1 0 "a clock that prints and then fails stops the round"
+    clock_case fails    2 1 "…and one that fails after a probe, before its verdict is used"
+    clock_case backward 1 0 "…and one that steps backward"
+    clock_case backward 2 1 "…and one that steps backward after a probe"
     # THE TIMEOUT IS A DURATION, NOT A SUM OF SLEEPS. Counting only the sleeps
     # excluded the probe time, so two slow `gh` calls per iteration turned a
     # documented thirty-minute bound into ninety. With a 3s probe and a 1s

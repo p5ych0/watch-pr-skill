@@ -236,9 +236,11 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
-# THE CLAUSE IS A FUNCTION, because it is asked twice: once per script in the
-# identity loop below, and once over EVERY runtime script after it. Written out
-# twice, the second copy is the one that would drift.
+# THE CLAUSE IS A FUNCTION so the loop below reads as the rule it applies. It once
+# ran over every runtime script as well — that is #67's hand-load half, and it was
+# removed from this change as scope that belongs to the follow-up. What #66 needs
+# is that its two CLOCK callers obey the rule, and the behavioural fixture at the
+# end of this file proves that far more strongly than any pattern can.
 #
 # THE REDIRECTION TOKEN IS REMOVED, NOT EVERYTHING AFTER IT. The first version cut
 # from `2>` to the `||`, so `unset -f rb_load 2>/dev/null rb_elapsed || …` — a
@@ -515,36 +517,6 @@ set -e
 
 rm -rf "$IDTMP"
 set -e
-# …AND TO EVERY RUNTIME SCRIPT, not only the five the identity loop names. That
-# list exists because those scripts load the identity parser; the rule about
-# NOT writing the loading sequence out by hand belongs to anything that loads a
-# library at all, and `pr-ci-gate.sh` — which gained a `clocklib.sh` load in #66
-# and has loaded `recordlib.sh` for far longer — was inspected by nothing. Issue
-# #67 was filed for the wider gap; this is the half of it that this change made
-# reachable, so it lands here rather than being deferred.
-#
-# DERIVED FROM THE TREE. A second hand-written list would be the same omission
-# again, one file along.
-# NO PREFILTER. The first version skipped a script with no `rb_load` call, so a
-# script that replaced EVERY load with a hand-written sequence was not scanned at
-# all — the guard disappearing along with the thing it requires. Every runtime
-# script is scanned, whether or not it currently loads anything.
-for sc in "$ROOT"/pr-*.sh; do
-    [ -f "$sc" ] || continue
-    _n="$(basename "$sc")"
-    # ONE EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every inherited
-    # function on purpose — it re-execs into a clean shell and then removes what a
-    # startup hook may have left, which is the opposite of copying a loading rule.
-    # `test-pr-selfcheck.sh` covers that block, including the case where the clear
-    # itself fails.
-    [ "$_n" = pr-selfcheck.sh ] && continue
-    if rb_copies_the_loading_rule "$sc"; then
-        echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1
-    else
-        echo "ok   - $_n loads its libraries through the shared loader alone"
-    fi
-done
-
 # ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
 # Two things have to hold, and neither is a pattern.
 #
