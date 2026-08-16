@@ -11,12 +11,12 @@
   checks the shape, which is the rule the resume parser in the same file has
   always applied. One rule, two copies, one of them wrong.
 
-  The parse is a single `awk` process whose status is taken, because a shape check
-  alone reads a printed-then-failed value as a good parse: a stage that emits a
-  plausible forty hex and exits non-zero was accepted before and is refused now.
-  One process rather than a pipeline under `pipefail`, because `set` is a builtin
-  a function can shadow — which would leave the option unset and the last stage's
-  status speaking for the whole pipeline again.
+  The parse now uses no command at all. A stage that prints a plausible forty hex
+  and then fails leaves that value where a shape check reads it as a good parse,
+  so the status has to be taken — and every way of taking it trusted a name a
+  function can shadow: `set -o pipefail` trusts `set`, and a single `awk` trusts
+  `awk`. A loop of reserved words and parameter expansions has no status to lose
+  and nothing to shadow, so the head can only come from the record.
 
   Every phase record overwrites the answer, so the newest one decides even when
   it is the unreadable one. Keeping only sha-shaped records meant a valid record

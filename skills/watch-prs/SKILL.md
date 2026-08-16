@@ -1016,29 +1016,39 @@ esac
 # same rule written twice with one copy right is what `CLAUDE.md` says belongs in
 # one place; this is the copy that was wrong. Issue #39.
 #
-# ONE PROCESS, SO THERE IS NO PIPELINE STATUS TO LOSE. A `sed` or `tail` that
-# prints a plausible forty hex and then fails leaves that value in the
-# substitution, where a shape check alone reads it as a good parse — the rule
-# `CLAUDE.md` states for `gh`, and the same for any command here.
+# NO COMMAND AT ALL, WHICH IS THE ONLY WAY TO STOP LOSING THIS ARGUMENT. A `sed`
+# or `tail` that prints a plausible forty hex and then fails leaves that value in
+# a substitution, where a shape check reads it as a good parse — so the status has
+# to be taken. `set -o pipefail` took it, and `set` is a builtin a function can
+# shadow. `awk` took it in one process, and `awk` is a command a function can
+# shadow: one returning a stale sha and exiting 0 is accepted whatever the record
+# says.
 #
-# `set -o pipefail` in a subshell was the first answer and is not one: `set` is a
-# builtin, and a function can shadow it, so the option silently is not set and the
-# last stage's status is the pipeline's again. `CLAUDE.md` records that exact
-# defeat. Removing the pipeline needs no such trust — `awk` reads the records,
-# keeps the LAST match, and its own status is the whole answer.
+# `CLAUDE.md` states the way out rather than the next name to distrust: prefer a
+# RESERVED WORD or an ASSIGNMENT, which the parser handles and no function can
+# take the place of. `while`, `if` and `[[` are reserved; `${…}` is expansion.
+# This loop uses nothing else, so there is no status to lose and nothing to
+# shadow — the value can only come from `$PHASE_OUT`.
 #
-# EVERY PHASE RECORD OVERWRITES THE ANSWER, and the shape check below is the only
-# thing that judges it. `awk` used to keep a record only if it looked like a sha,
-# so a valid record followed by a MALFORMED one left the earlier value standing —
-# and the parser returned a stale head while the newest record was the one nobody
-# could read. The latest record decides, whatever it says; if it says nothing
-# usable, the check refuses rather than reaching back for an older one.
-CODEX_SHA="$(awk '
-    /^PR_PHASE_RECORDED .*[[:space:]]codex-sha=/ {
-        n = $0; sub(/^.*codex-sha=/, "", n); sub(/[[:space:]]*$/, "", n); v = n
-    }
-    END { if (v != "") print v }' <<<"$PHASE_OUT")" \
-    || { echo "ABORT: the phase record could not be parsed; step 8 would gate on an unread value."; exit 1; }
+# PEELED WITH EXPANSIONS RATHER THAN SPLIT ON IFS: `for x in $PHASE_OUT` would
+# also glob, so a record containing `*` would expand against the filesystem, and
+# suppressing that needs `set -f` — the builtin this paragraph exists to avoid.
+#
+# EVERY RECORD OVERWRITES THE ANSWER, so the newest one decides even when it is
+# the unreadable one. Keeping only sha-shaped records left a valid record followed
+# by a malformed one returning the earlier head: a stale answer, offered exactly
+# when the latest record could not be read.
+CODEX_SHA=""
+_rb_rest="$PHASE_OUT"
+while [[ -n $_rb_rest ]]; do
+    _rb_line="${_rb_rest%%$'\n'*}"
+    if [[ $_rb_rest == *$'\n'* ]]; then _rb_rest="${_rb_rest#*$'\n'}"; else _rb_rest=""; fi
+    if [[ $_rb_line == PR_PHASE_RECORDED\ *codex-sha=* ]]; then
+        _rb_v="${_rb_line##*codex-sha=}"
+        _rb_v="${_rb_v%%[[:space:]]*}"
+        CODEX_SHA="$_rb_v"
+    fi
+done
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
     echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"; exit 1

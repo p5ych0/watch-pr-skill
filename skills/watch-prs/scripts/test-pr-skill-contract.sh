@@ -200,29 +200,66 @@ grep -qi 'precede the push' "$SKILL" \
 # was gated on something that is not a commit. The resume parser at the bottom of
 # the same file has always required `\{40\}` — one rule, two copies, one of them
 # wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
-grep -qF 'sub(/^.*codex-sha=/, "", n)' "$SKILL" \
-    && pass "…through a capture taken from the record's own field" \
-    || die "CODEX_SHA is not read out of the codex-sha field"
-# …AND THE RESULT IS SHAPE-CHECKED, not merely non-empty. A record that arrives
-# twice puts two lines in the variable, and each is 40 hex on its own.
-grep -qF 'RX_PHASE_SHA40' "$SKILL" \
-    && pass "…and the captured head is matched against a 40-hex anchor" \
-    || die "the phase head is used without a shape check"
-# …AND THE PARSE IS ONE PROCESS, so there is no pipeline status to lose. A `sed`
-# or `tail` that prints a plausible forty hex and then FAILS leaves that value in
-# the substitution, where a shape check reads it as a good parse. `set -o
-# pipefail` was the first answer and is not one — `set` is a builtin a function
-# can shadow, which `CLAUDE.md` records as a defeat already paid for.
-grep -qF 'CODEX_SHA="$(awk' "$SKILL" \
-    && pass "…and the parse is a single process, with no pipeline status to lose" \
-    || die "the phase parser is a pipeline again, and a failing stage can be hidden"
-# EVERY matching record assigns, so the LAST one decides even when it is
-# malformed. Keeping only sha-shaped records let a valid line followed by a
-# broken one return the earlier head — a stale answer where the newest record was
-# unreadable, which is the fail-open direction.
-grep -qF 'sub(/[[:space:]]*$/, "", n); v = n' "$SKILL" \
-    && pass "…and every phase record overwrites it, so the last one decides" \
-    || die "a malformed final record can leave an earlier head standing"
+# ── THE PARSER IS EXTRACTED AND RUN, NOT DESCRIBED ─────────────────────────
+# Greps agreed with every version of this parser that has been wrong. Restoring a
+# restrictive match while leaving the unconditional assignment satisfies any
+# pattern written about the assignment, and a valid record followed by a
+# malformed one is skipped again — the stale head accepted, with the check green.
+#
+# So the block is lifted from `SKILL.md` and executed on inputs. This is the
+# narrow lift #26 allows: anchored, no grammar, and it covers the one piece of
+# that file whose behaviour a merge is gated on.
+_phase_block="$(awk '/^CODEX_SHA=""$/, /^fi$/' "$SKILL")"
+[ -n "$_phase_block" ] \
+    && pass "the phase parser can be lifted out of SKILL.md and run" \
+    || die "the phase parser block could not be located to test"
+_V=0123456789abcdef0123456789abcdef01234567
+_W=fedcba9876543210fedcba9876543210fedcba98
+phase_case() {   # phase_case <records> <want: sha|refused> <label>
+    local out rc=0
+    out="$(PHASE_OUT="$1" bash -c '
+        PHASE_OUT="$PHASE_OUT"
+        '"$_phase_block"'
+        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1)" || rc=$?
+    case "$2" in
+        refused) case "$out" in
+                     *ACCEPTED:*) die "$3 — the parser accepted '"'"'$out'"'"'" ;;
+                     *) pass "$3" ;;
+                 esac ;;
+        *)       case "$out" in
+                     *"ACCEPTED:$2"*) pass "$3" ;;
+                     *) die "$3 — wanted $2, got '"'"'$out'"'"'" ;;
+                 esac ;;
+    esac
+}
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
+    "a single well-formed phase record yields its head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=a" refused \
+    "…and a malformed record AFTER it refuses, rather than returning the older head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a
+PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
+    "…while a malformed record BEFORE it is simply superseded"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=$_W" "$_W" \
+    "…and the last of two well-formed records wins"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=" refused \
+    "…and an empty final field refuses, having overwritten the head"
+# NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
+# time: `set` and `awk` are both shadowable, and a function returning a stale sha
+# and exiting 0 is accepted by any status check written around it.
+_phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" bash -c '
+    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    set() { return 0; }
+    PHASE_OUT="$PHASE_OUT"
+    '"$_phase_block"'
+    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1)" || true
+case "$_phase_shadowed" in
+    *"ACCEPTED:$_V"*) pass "…and shadowed awk, sed and set cannot supply the head" ;;
+    *) die "a shadowed command reached the phase parser: '$_phase_shadowed'" ;;
+esac
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
