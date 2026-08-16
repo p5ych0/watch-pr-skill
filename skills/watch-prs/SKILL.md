@@ -945,13 +945,15 @@ A malformed `in_reply_to_id` is a stop, not a reply.
 Ask Copilot:
 
 ```bash
-# THE TRANSITION IS A SCRIPT, IN TWO STAGES with the operator's decision between
-# them. It was 176 lines here that nothing executed. Issue #26.
+# THE PHASE IS A SCRIPT, IN THREE STAGES with the operator's decision at each
+# boundary. It was 176 lines here that nothing executed, and `close` a further 93.
+# Issues #26, #78.
 #
 #   pr-copilot-phase.sh record N "$SUMMARY_FILE"   # prove, record, then ask
 #   pr-copilot-phase.sh open   N "$CODEX_SHA"      # only on the answer (b)
+#   pr-copilot-phase.sh close  N "$CODEX_SHA" "$REVIEWERS"   # step 8: Copilot clean
 #
-#     0  recorded / opened
+#     0  recorded / opened / closed
 #     1  stopped — the reason is on stdout; the phase did NOT advance
 #     3  paused  — a round boundary. Decide with the operator
 #
@@ -1202,7 +1204,13 @@ end of the Codex phase, for the same reason.
 # are EQUAL decides which question the stop asks: the fault-tolerance pass is
 # offered only where the Copilot phase produced commits.
 REVIEWERS=both   # or `codex-only`
-"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"; CLOSE_RC=$?
+# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, like the merge gate below. The
+# stage derives its own identity from the current directory, so a `cd` into
+# another checkout between setup and here would read whatever PR of THAT
+# repository shares this number and post the Copilot signoff onto it. `$REPO_DIR`
+# was captured in the setup block.
+(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")
+CLOSE_RC=$?
 [ "$CLOSE_RC" -eq 0 ] || {
     echo "The Copilot phase did not close and no signoff was recorded. The reason is above; do not retry it blind."
     exit "$CLOSE_RC"; }
@@ -1214,10 +1222,16 @@ It prints the record it made and then the stop:
 PR_COPILOT_PHASE_CLOSED pr=N reviewer=<copilot> copilot-sha=<sha> codex-sha=<sha>
 ```
 
-**Then STOP. MERGING IS THE OPERATOR'S DECISION.** The stage stops and asks;
-do not run the merge gate until the operator has answered. Merging is the largest
-irreversible action this tool takes, and "every gate passed" is an input to that
-decision rather than the decision itself.
+**On the two-reviewer path, STOP. MERGING IS THE OPERATOR'S DECISION.** The
+stage prints a menu and asks; do not run the merge gate until the operator has
+answered. Merging is the largest irreversible action this tool takes, and "every
+gate passed" is an input to that decision rather than the decision itself.
+
+**In `codex-only` there is no second question.** No Copilot review was ever
+requested, so the stage records nothing and prints no menu — and the decision this
+stop exists to collect was already taken at the Codex stop, where "merge now on
+Codex's signoff alone" is what selected the mode. Go straight to the merge gate.
+Waiting here would be waiting for an answer to a question nobody was asked.
 
 **Read the two shas rather than assuming them.** Where they are the same commit,
 Codex has already reviewed exactly what is being merged and no fault-tolerance

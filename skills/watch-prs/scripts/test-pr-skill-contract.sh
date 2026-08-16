@@ -130,6 +130,15 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"' <<<"$skill_flat" \
     && pass "the post-Copilot close is delegated to the phase script" \
     || die "SKILL.md no longer calls pr-copilot-phase.sh close; the block may have grown back"
+# …FROM THE REPOSITORY THIS SESSION STARTED IN. The stage derives its own identity
+# from the current directory, so a `cd` into another checkout between setup and
+# step 8 would read whatever PR of THAT repository shares this number and post the
+# Copilot signoff onto it. The inline block this replaced could not drift, because
+# it used the `$HOST/$OWNER/$REPO` already derived in setup; a child script can,
+# and the merge gate below is already wrapped for exactly this.
+grep -qF '(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close' <<<"$skill_flat" \
+    && pass "…from the repository this session started in" \
+    || die "the close stage is run from the current directory; a cd between setup and step 8 signs off the wrong repository"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
@@ -1581,6 +1590,18 @@ grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
 grep -qF 'do not run the merge gate until the operator has answered' <<<"$skill_flat" \
     && pass "…and the driver is told not to run the gate until it is answered" \
     || die "SKILL.md does not tell the driver to wait for the operator after the close"
+# …ON THE TWO-REVIEWER PATH ONLY. In `codex-only` no Copilot review was ever
+# requested, so `close` records nothing and prints NO menu — and the decision this
+# stop collects was already taken at the Codex stop, where "merge now on Codex's
+# signoff alone" is what selected the mode. An unconditional stop leaves that flow
+# waiting for an answer to a question nobody was asked, which is the same
+# dead-letter shape as the codex-only merge option that could not be taken.
+grep -qF 'In `codex-only` there is no second question' <<<"$skill_flat" \
+    && pass "…and codex-only is exempted from it by name" \
+    || die "the post-close stop is unconditional; codex-only waits for a menu that was never printed"
+grep -qF 'Go straight to the merge gate' <<<"$skill_flat" \
+    && pass "…and is sent to the gate instead" \
+    || die "codex-only is exempted from the stop without being told where to go"
 # BOTH OPTIONS ARE NAMED AT EACH STOP. "Decide with the operator" without naming
 # the choices is a notification: the operator has to reconstruct what the
 # alternatives even were.
