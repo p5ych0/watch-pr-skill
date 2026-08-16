@@ -204,6 +204,13 @@ grep -qF 'RX_PHASE_SHA40' "$SKILL" \
 grep -qF "| tail -1)" "$SKILL" \
     && pass "…and the LAST record wins, as it does for every other marker here" \
     || die "the phase head is not taken from the last matching record"
+# …AND THE PARSE ITSELF IS CHECKED, not only its result. A `sed` or `tail` that
+# prints a plausible forty hex and then FAILS leaves that value in the
+# substitution, where a shape check reads it as a good parse. `pipefail` inside
+# the subshell is what makes a mid-pipeline failure the substitution's status.
+grep -qF 'CODEX_SHA="$(set -o pipefail' "$SKILL" \
+    && pass "…and the parse runs under pipefail, so a stage that fails is not hidden" \
+    || die "the phase parser can fail mid-pipeline without the driver noticing"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -618,14 +625,26 @@ grep -q 'SELF_RC' "$SKILL" \
 # ── the first request respects the review mode too ─────────────────────────
 # With auto-review on, opening or pushing the PR has already queued a pass, so an
 # unconditional mention queues a SECOND review of the same head.
-# `|| true`, LIKE EVERY OTHER LOOKUP IN THIS FILE. Under `set -Eeuo pipefail` a
-# `grep` that matches nothing aborts the assignment and takes the whole file with
-# it — before the `die` below, and before `RESULT:` is printed at all. Deleting
-# either line these look for produced a run with no verdict, so a caller reading
-# the output rather than the status saw nothing wrong: the silent pass this file
+# ONE PROCESS, AND ITS STATUS IS THE ANSWER. Under `set -Eeuo pipefail` a `grep`
+# that matches nothing aborts the assignment and takes the whole file with it —
+# before the `die` below, and before `RESULT:` is printed at all. Deleting either
+# line these look for produced a run with no verdict, so a caller reading the
+# output rather than the status saw nothing wrong: the silent pass this file
 # exists to make impossible, in the file that enforces it. Issue #39.
-sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)" || true
-req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)" || true
+#
+# `|| true` FIXES THAT AND CREATES ANOTHER, which is why these are not written
+# that way. It discards the difference between "no match" — an ordinary answer
+# the emptiness test below handles — and a pipeline that PRINTED a plausible line
+# number and then failed, which command substitution keeps. `CLAUDE.md` records
+# that shape: output emitted before a failure is not data.
+#
+# `awk` collapses the `grep | head | cut` to a single process, so there is no
+# pipeline whose middle can fail unseen: it exits 0 with empty output when the
+# text is absent, and non-zero only when it could not do the work.
+sel="$(awk '/AUTO_REVIEW=no/ { print NR; exit }' "$SKILL")" \
+    || die "the review-mode lookup could not be run"
+req="$(awk '/Request the review — Codex first/ { print NR; exit }' "$SKILL")" \
+    || die "the request-step lookup could not be run"
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"

@@ -1015,9 +1015,17 @@ esac
 # two lines in one variable, which no gate downstream can mean anything by. The
 # same rule written twice with one copy right is what `CLAUDE.md` says belongs in
 # one place; this is the copy that was wrong. Issue #39.
-CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
+#
+# THE PARSER'S OWN STATUS IS TAKEN, in a subshell that sets `pipefail` so a stage
+# that fails MID-pipeline is not hidden by the exit status of the last one. A
+# `sed` or `tail` that prints a plausible forty hex and then fails leaves that
+# value in the substitution, and a shape check alone reads it as a good parse —
+# the rule `CLAUDE.md` states for `gh`, and the same for any command here.
+CODEX_SHA="$(set -o pipefail
+    printf '%s\n' "$PHASE_OUT" \
     | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]\{40\}\)[[:space:]]*$/\1/p' \
-    | tail -1)"
+    | tail -1)" \
+    || { echo "ABORT: the phase record could not be parsed; step 8 would gate on an unread value."; exit 1; }
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
     echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"; exit 1
