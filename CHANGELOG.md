@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.19] — 2026-08-16
+
+- **The merge gate said a phase had been reopened that had never been entered.**
+  `pr-copilot-phase.sh open` posts its revocation on every entry, including the
+  first, where there is no Copilot signoff to revoke — so the block message
+  described history that had not happened. It now says only that a pass is open
+  and that no signoff for it has been recorded — no clause about a revocation,
+  which is the event that did not happen. That is true on a first entry and on a
+  re-entry alike.
+
+  Only the wording changed. Removing the revocation itself was tried and reverted:
+  with no Copilot record at all, a head whose only clean Copilot verdict is an
+  older review **merges**, because "nothing recorded" is not a disagreement. That
+  comment is the one durable mark that a new pass is pending, and the two cases
+  proving it now live beside the gate that reads it.
+
 ## [2.0.18] — 2026-08-16
 
 - **The phase head was captured with a pattern that accepts almost anything.**

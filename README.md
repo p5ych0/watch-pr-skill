@@ -327,7 +327,11 @@ Then:
      request still to come. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
-     Then it revokes any earlier Copilot signoff and requests the pass.
+     Then it revokes any earlier Copilot signoff and requests the pass. The
+     revocation is posted on **every** entry, including the first, where there is
+     no signoff to revoke: with no Copilot record at all, a head whose only clean
+     Copilot verdict is an older review merges, so that comment is the one durable
+     mark that a new pass is pending.
 
    The body you supply is prose and is posted under your identity, so a line that
    reproduces one of the record markers a reader trusts from *you* —
