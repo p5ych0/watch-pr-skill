@@ -18,6 +18,11 @@
   a function can shadow — which would leave the option unset and the last stage's
   status speaking for the whole pipeline again.
 
+  Every phase record overwrites the answer, so the newest one decides even when
+  it is the unreadable one. Keeping only sha-shaped records meant a valid record
+  followed by a malformed one returned the earlier head: a stale answer, offered
+  precisely when the latest record could not be read.
+
 - **And the file that enforces "no silent pass" had two.** Two lookups in
   `test-pr-skill-contract.sh` ran unguarded under `set -Eeuo pipefail`, so
   deleting either line they search for killed the file before its `die` and

@@ -200,9 +200,9 @@ grep -qi 'precede the push' "$SKILL" \
 # was gated on something that is not a commit. The resume parser at the bottom of
 # the same file has always required `\{40\}` — one rule, two copies, one of them
 # wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
-grep -qF 'codex-sha=[0-9a-f]+[[:space:]]*$' "$SKILL" \
-    && pass "…through a capture anchored to the whole record" \
-    || die "CODEX_SHA is captured with a pattern that is not anchored to the record"
+grep -qF 'sub(/^.*codex-sha=/, "", n)' "$SKILL" \
+    && pass "…through a capture taken from the record's own field" \
+    || die "CODEX_SHA is not read out of the codex-sha field"
 # …AND THE RESULT IS SHAPE-CHECKED, not merely non-empty. A record that arrives
 # twice puts two lines in the variable, and each is 40 hex on its own.
 grep -qF 'RX_PHASE_SHA40' "$SKILL" \
@@ -216,9 +216,13 @@ grep -qF 'RX_PHASE_SHA40' "$SKILL" \
 grep -qF 'CODEX_SHA="$(awk' "$SKILL" \
     && pass "…and the parse is a single process, with no pipeline status to lose" \
     || die "the phase parser is a pipeline again, and a failing stage can be hidden"
-grep -qF 'if (length(n) == 40) v = n' "$SKILL" \
-    && pass "…taking the LAST record, and exactly forty hex by length" \
-    || die "the phase parser does not check the head's length where it reads it"
+# EVERY matching record assigns, so the LAST one decides even when it is
+# malformed. Keeping only sha-shaped records let a valid line followed by a
+# broken one return the earlier head — a stale answer where the newest record was
+# unreadable, which is the fail-open direction.
+grep -qF 'sub(/[[:space:]]*$/, "", n); v = n' "$SKILL" \
+    && pass "…and every phase record overwrites it, so the last one decides" \
+    || die "a malformed final record can leave an earlier head standing"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was

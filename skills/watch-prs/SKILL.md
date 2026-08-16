@@ -1027,13 +1027,15 @@ esac
 # defeat. Removing the pipeline needs no such trust — `awk` reads the records,
 # keeps the LAST match, and its own status is the whole answer.
 #
-# THE LENGTH IS CHECKED IN `awk`, not with an interval `{40}`: interval
-# expressions are not dependable in every `awk` this suite must run under, and a
-# length test is exact everywhere.
+# EVERY PHASE RECORD OVERWRITES THE ANSWER, and the shape check below is the only
+# thing that judges it. `awk` used to keep a record only if it looked like a sha,
+# so a valid record followed by a MALFORMED one left the earlier value standing —
+# and the parser returned a stale head while the newest record was the one nobody
+# could read. The latest record decides, whatever it says; if it says nothing
+# usable, the check refuses rather than reaching back for an older one.
 CODEX_SHA="$(awk '
-    /^PR_PHASE_RECORDED .*[[:space:]]codex-sha=[0-9a-f]+[[:space:]]*$/ {
-        n = $0; sub(/^.*codex-sha=/, "", n); sub(/[[:space:]]*$/, "", n)
-        if (length(n) == 40) v = n
+    /^PR_PHASE_RECORDED .*[[:space:]]codex-sha=/ {
+        n = $0; sub(/^.*codex-sha=/, "", n); sub(/[[:space:]]*$/, "", n); v = n
     }
     END { if (v != "") print v }' <<<"$PHASE_OUT")" \
     || { echo "ABORT: the phase record could not be parsed; step 8 would gate on an unread value."; exit 1; }
