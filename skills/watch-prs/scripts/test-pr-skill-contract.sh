@@ -178,9 +178,16 @@ grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
     && pass "…and falls back to the recorded signoff when it has not" \
     || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
 # CODEX_SHA has to be captured before the head moves; nothing else records it.
-grep -q 'CODEX_SHA="$(printf' "$SKILL" \
+#
+# THE PHASE RECORD SPECIFICALLY, not any assignment to that name. This matched
+# `CODEX_SHA="$(printf`, and there are two producers of that variable — the phase
+# record here and the recorded signoff the resume path reads. When the phase one
+# was rewritten to run under `pipefail`, this kept passing on the OTHER one: an
+# assertion whose message names the phase record, satisfied by a line about
+# something else, which is a check that has stopped checking without saying so.
+grep -q 'codex-sha=' "$SKILL" \
     && pass "the Codex-signed-off head is read back out of the phase record" \
-    || die "CODEX_SHA is required by the gate but never assigned"
+    || die "CODEX_SHA is required by the gate but never read from the phase record"
 # With auto-review on, the PUSH requests the next review — so the boundary check
 # has to precede it, not merely precede the explicit re-request.
 # A fragment that fits on ONE line — the file is wrapped and `grep` is line
