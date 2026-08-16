@@ -287,7 +287,15 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # expand — and `\$_RB_SELF_DIR` then reached `grep` as `$_RB_SELF_DIR`, where
     # `$` is an end-of-line anchor. The pattern matched NOTHING, both fixtures
     # below passed, and the guard reported an invariant it no longer had.
-    if grep -E '^[[:space:]]*unset -f ' "$ROOT/$sc" | grep -qv 'unset -f rb_load' \
+    # THE EXEMPTION IS THE WHOLE COMMAND, NOT A SUBSTRING OF IT. `grep -v` drops a
+    # LINE that contains the pattern, so `unset -f rb_load rb_elapsed` was exempted
+    # by the `rb_load` in it while clearing a library symbol beside it — the copied
+    # loading rule walking back in through the allowance written for the bootstrap.
+    # The trailing noise is stripped and the remainder must be exactly the
+    # bootstrap clear.
+    if grep -E '^[[:space:]]*unset -f ' "$ROOT/$sc" \
+         | sed 's/[[:space:]]*2>[^|&]*//; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
+         | grep -qvE '^[[:space:]]*unset -f rb_load$' \
        || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else

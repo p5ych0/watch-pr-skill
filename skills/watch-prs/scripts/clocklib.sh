@@ -29,6 +29,16 @@
 #
 # One copy, because these are the rules a second copy is always found missing —
 # the reason `recordlib.sh` and `identitylib.sh` exist.
+#
+# WHAT THIS DOES NOT DEFEND AGAINST, and cannot: a startup hook that installs a
+# readonly `date`, or a nameref over the state variables, owns the clock before
+# this file is read. `date` being shadowable IS the feature — a builtin is what
+# `pr-ci-gate.sh` had, and no fixture could reach it — so the usual answer of
+# removing the dependency would put the untestable clock back. `command date`
+# is not an answer either: `CLAUDE.md` records that a function shadows the
+# `command` prefix too. The recorded answer is a guarded re-exec with `BASH_ENV`
+# and `ENV` removed, which `pr-selfcheck.sh` does and no other helper does; that
+# is issue #69, and it belongs to the callers rather than here.
 
 # ONE FUNCTION, BECAUSE `rb_load` CAN ONLY CLEAR ONE NAME. This was three —
 # `rb_now_s`, `rb_clock_start`, `rb_elapsed` — and the loader clears and verifies

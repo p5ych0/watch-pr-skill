@@ -16,17 +16,34 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
 [ "$(type -t rb_elapsed 2>/dev/null)" = function ] \
     || { die "clocklib.sh does not define rb_elapsed"; echo "RESULT: FAIL"; exit 1; }
-# ONE SYMBOL IS THE CONTRACT, not a convenience: `rb_load` clears and verifies the
-# single name it is given, so a second entry point is one a startup hook can make
-# readonly and keep. A definition beside it would pass every case below while the
-# caller measured the hook's clock.
-_extra="$(type -t rb_now_s 2>/dev/null || true)$(type -t rb_clock_start 2>/dev/null || true)"
-[ -z "$_extra" ] \
-    && pass "the library exposes one loadable symbol, which is all rb_load can clear" \
-    || die "clocklib.sh defines a second entry point rb_load will not clear ('$_extra')"
-
 TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
+
+# ONE SYMBOL IS THE CONTRACT, not a convenience: `rb_load` clears and verifies the
+# single name it is given, so a second entry point is one a startup hook can make
+# readonly and keep, and every caller then measures the hook's clock.
+#
+# COUNTED, NOT NAMED. The first version listed the two retired names, so any
+# differently spelled helper — `rb_read`, anything — walked straight past it. What
+# the library ADDS is compared before against after, so no name appears here and
+# no future one can be forgotten.
+#
+# THROUGH A SCRIPT FILE, not `bash -c`: a shell whose inherited `SHELLOPTS` carries
+# `onecmd` executes one command and stops, which silently truncates every `-c`
+# probe — three measurements in this PR contradicted each other before that was
+# spotted. `SHELLOPTS` is cleared here for the same reason.
+cat > "$TMP/symbols.sh" <<'SYMS'
+#!/usr/bin/env bash
+before="$(declare -F | awk '{print $3}')"
+. "$RB_LIB" || exit 9
+declare -F | awk '{print $3}' | while read -r f; do
+    printf '%s\n' "$before" | grep -qxF "$f" || printf '%s\n' "$f"
+done
+SYMS
+_added="$(env -u SHELLOPTS RB_LIB="$SELF_DIR/clocklib.sh" bash "$TMP/symbols.sh" 2>/dev/null | sort -u | tr '\n' ' ')"
+[ "$_added" = "rb_elapsed " ] \
+    && pass "the library adds exactly one symbol, which is all rb_load can clear" \
+    || die "clocklib.sh does not add exactly rb_elapsed (added: '$_added')"
 
 # THE CLOCK IS A COMMAND, WHICH IS THE WHOLE POINT — a stub proves the property
 # `$SECONDS` cannot have. `+%s` alone is faked, so a caller that formats a date
