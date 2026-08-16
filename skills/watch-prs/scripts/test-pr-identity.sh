@@ -236,11 +236,12 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
-# THE CLAUSE IS A FUNCTION so the loop below reads as the rule it applies. It once
-# ran over every runtime script as well — that is #67's hand-load half, and it was
-# removed from this change as scope that belongs to the follow-up. What #66 needs
-# is that its two CLOCK callers obey the rule, and the behavioural fixture at the
-# end of this file proves that far more strongly than any pattern can.
+# THE CLAUSE IS A FUNCTION because two loops ask it. The one below also asserts
+# WHICH loader call each script makes, which is an identity question and belongs
+# to those five; the rule about not writing the loading sequence out by hand
+# belongs to anything that loads a library at all, and runs over every runtime
+# script further down. Separating them is #67: widening the identity loop instead
+# would have failed every script that loads neither identitylib nor recordlib.
 #
 # THE REDIRECTION TOKEN IS REMOVED, NOT EVERYTHING AFTER IT. The first version cut
 # from `2>` to the `||`, so `unset -f rb_load 2>/dev/null rb_elapsed || …` — a
@@ -517,6 +518,33 @@ set -e
 
 rm -rf "$IDTMP"
 set -e
+# ── AND NO RUNTIME SCRIPT WRITES THE LOADING SEQUENCE OUT BY HAND ──────────
+# The loop above names five scripts because it asks an identity question. This
+# one asks the universal one, so it runs over every runtime script — ten of them,
+# where the five were chosen when only five loaded a library. `pr-ci-gate.sh` has
+# loaded `recordlib.sh` for far longer than that and was inspected by nothing,
+# and `pr-merge-gate.sh`, `pr-close-round.sh`, `pr-copilot-phase.sh` and
+# `pr-signoff.sh` likewise. Issue #67.
+#
+# DERIVED FROM THE TREE, and with no prefilter: a script that replaced EVERY
+# `rb_load` with a hand-written sequence would otherwise be skipped for having no
+# loader call, the guard disappearing along with the thing it requires.
+for sc in "$ROOT"/pr-*.sh; do
+    [ -f "$sc" ] || continue
+    _n="$(basename "$sc")"
+    # ONE EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every inherited
+    # function on purpose — it re-execs into a clean shell and then removes what a
+    # startup hook may have left, which is the opposite of copying a loading rule.
+    # `test-pr-selfcheck.sh` covers that block, including the case where the clear
+    # itself fails.
+    [ "$_n" = pr-selfcheck.sh ] && continue
+    if rb_copies_the_loading_rule "$sc"; then
+        echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1
+    else
+        echo "ok   - $_n loads its libraries through the shared loader alone"
+    fi
+done
+
 # ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
 # Two things have to hold, and neither is a pattern.
 #
