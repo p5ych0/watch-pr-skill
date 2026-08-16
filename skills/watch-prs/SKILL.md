@@ -1007,18 +1007,97 @@ esac
 # and that path needs this sha: exiting without it made the operator re-run a
 # phase that had already been proved clean, just to recover a value that was
 # printed and thrown away.
-CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
-    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
-[ -n "$CODEX_SHA" ] \
-    || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
-# AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
-# status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the ordinary
-# path, which left a phase that recorded and parsed perfectly exiting 1. A driver
-# reads that as a failed step and stops or retries instead of reaching the
-# operator decision, on the one path where nothing went wrong.
-if [ "$PHASE_RC" -eq 3 ]; then
-    echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
-    exit 3
+#
+# EXACTLY FORTY HEX, AND THE LAST RECORD, which is the rule the resume parser at
+# the bottom of this file already applies to `PR_SIGNOFF`. Here it was
+# `[0-9a-f]*`: `codex-sha=a` is non-empty, so the emptiness test below passed and
+# step 8 was handed something that is not a commit — and two matching records put
+# two lines in one variable, which no gate downstream can mean anything by. The
+# same rule written twice with one copy right is what `CLAUDE.md` says belongs in
+# one place; this is the copy that was wrong. Issue #39.
+#
+# NO COMMAND AT ALL, WHICH IS THE ONLY WAY TO STOP LOSING THIS ARGUMENT. A `sed`
+# or `tail` that prints a plausible forty hex and then fails leaves that value in
+# a substitution, where a shape check reads it as a good parse — so the status has
+# to be taken. `set -o pipefail` took it, and `set` is a builtin a function can
+# shadow. `awk` took it in one process, and `awk` is a command a function can
+# shadow: one returning a stale sha and exiting 0 is accepted whatever the record
+# says.
+#
+# `CLAUDE.md` states the way out rather than the next name to distrust: prefer a
+# RESERVED WORD or an ASSIGNMENT, which the parser handles and no function can
+# take the place of. `while`, `if` and `[[` are reserved; `${…}` is expansion.
+# This loop uses nothing else, so there is no status to lose and nothing to
+# shadow — the value can only come from `$PHASE_OUT`.
+#
+# PEELED WITH EXPANSIONS RATHER THAN SPLIT ON IFS: `for x in $PHASE_OUT` would
+# also glob, so a record containing `*` would expand against the filesystem, and
+# suppressing that needs `set -f` — the builtin this paragraph exists to avoid.
+#
+# EVERY RECORD OVERWRITES THE ANSWER, so the newest one decides even when it is
+# the unreadable one. Keeping only sha-shaped records left a valid record followed
+# by a malformed one returning the earlier head: a stale answer, offered exactly
+# when the latest record could not be read.
+CODEX_SHA=""
+_rb_rest="$PHASE_OUT"
+while [[ -n $_rb_rest ]]; do
+    _rb_line="${_rb_rest%%$'\n'*}"
+    if [[ $_rb_rest == *$'\n'* ]]; then _rb_rest="${_rb_rest#*$'\n'}"; else _rb_rest=""; fi
+    # EVERY PHASE RECORD OVERWRITES, INCLUDING ONE WITH NO FIELD AT ALL. Matching
+    # only records that carry `codex-sha=` left a truncated record — a line that
+    # is a phase record and says nothing about the head — unable to overwrite
+    # anything, so the previous record's head stood. That is the stale answer
+    # again, by the one route the earlier fix did not close: the field missing
+    # rather than malformed.
+    #
+    # DELIMITED BY WHITESPACE, so `xcodex-sha=` is not the field.
+    # THE BARE MARKER IS A PHASE RECORD TOO. A line truncated to exactly
+    # `PR_PHASE_RECORDED`, with no trailing space, did not match — so it could not
+    # reset the candidate, and the previous record's head stood. Same staleness,
+    # one character further along than the last one.
+    if [[ $_rb_line == PR_PHASE_RECORDED || $_rb_line == PR_PHASE_RECORDED\ * ]]; then
+        _rb_v=""
+        # THE DELIMITER IS IN THE REMOVAL PATTERN TOO, not only in the test above
+        # it. `##*codex-sha=` is greedy, so on
+        # `codex-sha=a xcodex-sha=<40 hex>` it took the value after the LATER
+        # substring: the condition saw the real field, the extraction read a
+        # different one, and the shape check accepted a sha that was never the
+        # `codex-sha` field at all.
+        if [[ $_rb_line == *[[:space:]]codex-sha=* ]]; then
+            _rb_v="${_rb_line##*[[:space:]]codex-sha=}"
+            _rb_v="${_rb_v%%[[:space:]]*}"
+        fi
+        CODEX_SHA="$_rb_v"
+    fi
+done
+# WHAT USES THE HEAD SITS INSIDE THE SUCCESSFUL BRANCH, rather than after a guard
+# that aborts. The guard aborted with `exit`, and `exit` is a builtin a function
+# can shadow: `exit() { return 0; }` turns the refusal into a `return`, execution
+# carries on, and the malformed head this check exists to stop is used by
+# everything after it. Reachability is structural and cannot be shadowed;
+# `if`, `else` and `[[` are reserved words.
+RX_PHASE_SHA40='^[0-9a-f]{40}$'
+if [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
+    # AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
+    # status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the
+    # ordinary path, which left a phase that recorded and parsed perfectly exiting
+    # 1. A driver reads that as a failed step and stops or retries instead of
+    # reaching the operator decision, on the one path where nothing went wrong.
+    if [ "$PHASE_RC" -eq 3 ]; then
+        echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
+        exit 3
+    fi
+else
+    echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"
+    exit 1
+    # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken
+    # away. `echo` and `exit` are builtins a function can shadow, and with both
+    # shadowed this branch says nothing and returns 0 — a failed parse
+    # indistinguishable from an ordinary phase, which is the reading that lets the
+    # driver carry on. `[[ … ]]` is a reserved word, so this branch ends non-zero
+    # whatever has been done to the builtins, and the block's status is the last
+    # signal left.
+    [[ -n "" ]]
 fi
 ```
 

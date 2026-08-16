@@ -178,9 +178,16 @@ grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
     && pass "…and falls back to the recorded signoff when it has not" \
     || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
 # CODEX_SHA has to be captured before the head moves; nothing else records it.
-grep -q 'CODEX_SHA="$(printf' "$SKILL" \
+#
+# THE PHASE RECORD SPECIFICALLY, not any assignment to that name. This matched
+# `CODEX_SHA="$(printf`, and there are two producers of that variable — the phase
+# record here and the recorded signoff the resume path reads. When the phase one
+# was rewritten to run under `pipefail`, this kept passing on the OTHER one: an
+# assertion whose message names the phase record, satisfied by a line about
+# something else, which is a check that has stopped checking without saying so.
+grep -q 'codex-sha=' "$SKILL" \
     && pass "the Codex-signed-off head is read back out of the phase record" \
-    || die "CODEX_SHA is required by the gate but never assigned"
+    || die "CODEX_SHA is required by the gate but never read from the phase record"
 # With auto-review on, the PUSH requests the next review — so the boundary check
 # has to precede it, not merely precede the explicit re-request.
 # A fragment that fits on ONE line — the file is wrapped and `grep` is line
@@ -188,12 +195,183 @@ grep -q 'CODEX_SHA="$(printf' "$SKILL" \
 grep -qi 'precede the push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
-# The capture accepts only hex, so a mangled record cannot populate the merge
-# gate with something that is not a sha. `pr-copilot-phase.sh` validates the shape
-# where it is produced, and `test-pr-copilot-phase.sh` runs that.
-grep -qF 'codex-sha=\([0-9a-f]*\)' "$SKILL" \
-    && pass "…through a capture that accepts only hex" \
-    || die "CODEX_SHA is used without validating its shape"
+# EXACTLY FORTY HEX, not "only hex". `[0-9a-f]*` matches the empty string and it
+# matches `a`, so `codex-sha=a` survived the emptiness test below it and step 8
+# was gated on something that is not a commit. The resume parser at the bottom of
+# the same file has always required `\{40\}` — one rule, two copies, one of them
+# wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
+# ── THE PARSER IS EXTRACTED AND RUN, NOT DESCRIBED ─────────────────────────
+# Greps agreed with every version of this parser that has been wrong. Restoring a
+# restrictive match while leaving the unconditional assignment satisfies any
+# pattern written about the assignment, and a valid record followed by a
+# malformed one is skipped again — the stale head accepted, with the check green.
+#
+# So the block is lifted from `SKILL.md` and executed on inputs. This is the
+# narrow lift #26 allows: anchored, no grammar, and it covers the one piece of
+# that file whose behaviour a merge is gated on.
+_phase_block="$(awk '/^CODEX_SHA=""$/, /^fi$/' "$SKILL")"
+# COMPLETE, NOT MERELY NON-EMPTY. The range ends at the first `fi` in column one,
+# which is the shape check; every `fi` inside the loop is indented or trails its
+# line. If one were ever unindented the lift would truncate, and a truncated block
+# is a syntax error — the cases would fail rather than pass, but they would fail
+# for a reason nobody could read. Both ends are asserted so the failure names
+# itself.
+{ [ -n "$_phase_block" ] \
+  && case "$_phase_block" in *"done"*) true ;; *) false ;; esac \
+  && case "$_phase_block" in *RX_PHASE_SHA40*) true ;; *) false ;; esac \
+  && case "$_phase_block" in *PHASE_RC*) true ;; *) false ;; esac; } \
+    && pass "the phase parser lifts out of SKILL.md whole, guard and what follows it" \
+    || die "the lifted phase parser is truncated or missing: '$_phase_block'"
+_V=0123456789abcdef0123456789abcdef01234567
+_W=fedcba9876543210fedcba9876543210fedcba98
+phase_case() {   # phase_case <records> <want: sha|refused> <label>
+    local out rc=0
+    # `PHASE_RC=0`, BECAUSE THE LIFTED BLOCK BRANCHES ON IT. Without it the child
+    # reached `[ "$PHASE_RC" -eq 3 ]` unset, bash printed `integer expression
+    # expected`, and the trailing `printf` still produced `ACCEPTED:…` — so a case
+    # asserting a clean parse was passing on an errored run. The diagnostic went
+    # into `$out` and the substring test ignored it.
+    # STDERR IS THE TEST, NOT THE WORDING. An error on the ordinary path is not a
+    # clean parse, and matching the message is not available: bash says `integer
+    # expected` where the first version of this looked for `integer expression
+    # expected`, and the text differs by version and locale. Nor is counting
+    # lines — the abort echoes `$PHASE_OUT`, which is deliberately multi-line in
+    # half these cases. What separates them is the STREAM: the block's own output
+    # is stdout, and a diagnostic is stderr.
+    out="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
+        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+        '"$_phase_block"'
+        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || rc=$?
+    # THE SAME RUN AGAIN, KEEPING ONLY STDERR. No scratch file: this file asserts
+    # its own `mktemp` behaviour and counts what it leaves behind, so a temporary
+    # of mine breaks three of its cases. The block is a pure parse over a string,
+    # so running it twice costs nothing and changes nothing.
+    local err
+    err="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
+        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+        '"$_phase_block"'
+        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
+    # `|| true` HERE AND NOWHERE ELSE. A refusing block exits non-zero, which is
+    # what half these cases WANT, and under `set -e` that would abort the file at
+    # the assignment. The status is already taken from the first run; this one is
+    # only for the text.
+    if [ -n "$err" ]; then
+        die "$3 — the parser wrote to stderr: '$err'"; return 0
+    fi
+    case "$2" in
+        # REFUSED IS "THE ABORT WAS REACHED", not "nothing was printed". The
+        # guard's own `exit` is a builtin a function can shadow, so a caller that
+        # neuters it runs on with the bad value in `$CODEX_SHA` — what has to hold
+        # is that the refusal branch ran and no VALID head was produced from a
+        # record that has none.
+        refused) case "$out" in
+                     *ABORT:*[!0-9a-f]"ACCEPTED:$_V"*|*"ACCEPTED:$_V") die "$3 — a valid head came out of a record without one: '"'"'$out'"'"'" ;;
+                     *ABORT:*) pass "$3" ;;
+                     *) die "$3 — the parser accepted '"'"'$out'"'"'" ;;
+                 esac ;;
+        *)       case "$out" in
+                     *"ACCEPTED:$2"*) pass "$3" ;;
+                     *) die "$3 — wanted $2, got '"'"'$out'"'"'" ;;
+                 esac ;;
+    esac
+}
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
+    "a single well-formed phase record yields its head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=a" refused \
+    "…and a malformed record AFTER it refuses, rather than returning the older head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a
+PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
+    "…while a malformed record BEFORE it is simply superseded"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=$_W" "$_W" \
+    "…and the last of two well-formed records wins"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 codex-sha=" refused \
+    "…and an empty final field refuses, having overwritten the head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 reviewer=chatgpt-codex-connector[bot]" refused \
+    "…and so does a final record with NO field, which says nothing about the head"
+phase_case "PR_PHASE_RECORDED pr=7 xcodex-sha=$_V" refused \
+    "…and a field name that merely ends in codex-sha= is not the field"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
+    "…and a later lookalike field cannot supply the head the real one lacks"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED" refused \
+    "…and a bare marker with no trailing space still resets the candidate"
+# EXACTLY forty, which needs a value that is too LONG as well as too short: the
+# short cases pass with the closing anchor dropped, and only this one fails.
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=${_V}f" refused \
+    "…and forty-one hex is refused, so the bound is exact at both ends"
+# NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
+# time: `set` and `awk` are both shadowable, and a function returning a stale sha
+# and exiting 0 is accepted by any status check written around it.
+# …AND A SHADOWED `exit` CANNOT CARRY A BAD HEAD PAST THE GUARD. The refusal used
+# `exit`, which a function can neuter into a `return`; what uses the head sits
+# inside the successful branch now, so reachability does the work instead.
+# `PHASE_RC=3` IS WHAT MAKES THE DIFFERENCE VISIBLE. The block's downstream is the
+# round-boundary branch, which announces the head; without that variable set,
+# nothing downstream runs and the guarded and unguarded shapes look identical.
+# The first version of this case omitted it and passed against both.
+_phase_exit="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
+    exit() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "END\n"' 2>&1)" || true
+case "$_phase_exit" in
+    *ABORT:*) pass "…and a shadowed exit still takes the refusal branch" ;;
+    *) die "a shadowed exit skipped the refusal: '$_phase_exit'" ;;
+esac
+case "$_phase_exit" in
+    *"signed off on"*) die "a shadowed exit carried a malformed head into the step that uses it: '$_phase_exit'" ;;
+    *) pass "…and nothing downstream of the guard runs on a head it refused" ;;
+esac
+# …AND WITH `echo` SHADOWED AS WELL, where the branch can say nothing at all. The
+# only signal left is the block's STATUS, which is why the refusal ends on a
+# reserved word: with both builtins neutered a failed parse otherwise returns 0
+# and reads as an ordinary phase.
+_phase_mute="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
+    echo() { return 0; }
+    exit() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "STATUS:%s\n" "$?"' 2>&1)" || true
+case "$_phase_mute" in
+    *STATUS:0*) die "a muted refusal returned success: '$_phase_mute'" ;;
+    *STATUS:*) pass "…and with echo shadowed too, the refusal still ends non-zero" ;;
+    *) die "the muted-refusal probe produced no status: '$_phase_mute'" ;;
+esac
+case "$_phase_mute" in
+    *"signed off on"*) die "a muted refusal still reached the step that uses the head: '$_phase_mute'" ;;
+    *) pass "…and still reaches nothing downstream of the guard" ;;
+esac
+# `PHASE_RC=0` AND STDERR CHECKED HERE TOO. This probe was written before
+# `phase_case` learned both, and kept the defect that thread was about: with
+# `PHASE_RC` unset the guard's downstream branch failed with a diagnostic, the
+# trailing `printf` still produced `ACCEPTED:…`, and a substring test called that
+# a clean parse. A case about shadowed commands must not itself pass on an
+# errored run.
+_phase_shadowed_err="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
+    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    set() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
+_phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
+    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    set() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || true
+[ -z "$_phase_shadowed_err" ] \
+    && pass "…and the shadowing case runs the block without a diagnostic" \
+    || die "the shadowing case ran with errors: '$_phase_shadowed_err'"
+case "$_phase_shadowed" in
+    *"ACCEPTED:$_V"*) pass "…and shadowed awk, sed and set cannot supply the head" ;;
+    *) die "a shadowed command reached the phase parser: '$_phase_shadowed'" ;;
+esac
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -608,8 +786,84 @@ grep -q 'SELF_RC' "$SKILL" \
 # ── the first request respects the review mode too ─────────────────────────
 # With auto-review on, opening or pushing the PR has already queued a pass, so an
 # unconditional mention queues a SECOND review of the same head.
-sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)"
-req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)"
+# NO COMMAND, FOR THE SAME REASON THE PARSER IT CHECKS HAS NONE. Under
+# `set -Eeuo pipefail` a `grep` that matches nothing aborts the assignment and
+# takes the whole file with it — before the `die` below and before `RESULT:` is
+# printed at all, which is the silent pass this file exists to make impossible.
+# Issue #39.
+#
+# `|| true` fixes that and creates another: it discards the difference between
+# "no match" and a lookup that PRINTED a plausible line number and then failed,
+# which command substitution keeps. `awk` in one process fixed that in turn, and
+# `awk` is a command a function can shadow — an exported one returning forged
+# line numbers makes the ordering below agree about lines that are not there.
+#
+# `$(<file)` is a redirection and `${…}` is expansion; `while`, `if` and `[[` are
+# reserved words. Nothing here can be replaced by a function, so the answer can
+# only come from the file. Empty means absent, which the emptiness test handles.
+# THE RESULT IS AN ASSIGNMENT, NOT SOMETHING PRINTED. Returning the number
+# through `printf` inside `$( )` put one last shadowable builtin in the path: a
+# `printf()` that delegates ordinary output and forges these numeric calls hands
+# back line numbers the file does not have, and the ordering below agrees. An
+# assignment is one of the two things `CLAUDE.md` says cannot be taken over.
+RB_SKILL_BODY="$(<"$SKILL")"
+RB_LINE=""
+rb_line_of() {   # rb_line_of <needle> ; sets RB_LINE, empty when absent
+    local _rest="$RB_SKILL_BODY" _line _n=0
+    RB_LINE=""
+    while [[ -n $_rest ]]; do
+        _line="${_rest%%$'\n'*}"
+        if [[ $_rest == *$'\n'* ]]; then _rest="${_rest#*$'\n'}"; else _rest=""; fi
+        _n=$((_n + 1))
+        if [[ $_line == *"$1"* ]]; then RB_LINE="$_n"; return 0; fi
+    done
+    return 0
+}
+rb_line_of 'AUTO_REVIEW=no';                    sel="$RB_LINE"
+rb_line_of 'Request the review — Codex first';  req="$RB_LINE"
+# …AND A FORGED `awk` CANNOT ANSWER FOR THE FILE. An exported function returning
+# plausible line numbers made this ordering agree about lines that had been
+# deleted; the lookup uses no command now, so the case asserts that directly.
+# THE LOOKUPS THEMSELVES GO THROUGH IT, which the probe below cannot show: that
+# probe exercises `rb_line_of`, so reverting the two assignments to `awk` leaves
+# it passing while the lookups trust a command again. Both halves are needed —
+# one says the helper is command-free, the other says the lookups use the helper.
+# COUNTED, BECAUSE A CHECK THAT GREPS ITS OWN FILE FINDS ITSELF. The first
+# version searched this file for the lookup's text — which this very line
+# contains, so reverting the lookup to `awk` left the check matching its own
+# source and passing. Each needle must appear TWICE: once here and once as the
+# lookup, so losing the lookup drops the count.
+_rb_self="$(<"$0")"
+rb_occurrences() {   # sets RB_N to how many times $1 appears in this file
+    local _rest="$_rb_self"
+    RB_N=0
+    while [[ $_rest == *"$1"* ]]; do
+        RB_N=$((RB_N + 1))
+        _rest="${_rest#*"$1"}"
+    done
+}
+rb_occurrences "rb_line_of 'AUTO_REVIEW=no'";                   _rb_sel_n="$RB_N"
+rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB_N"
+{ [ "$_rb_sel_n" -ge 2 ] && [ "$_rb_req_n" -ge 2 ]; } \
+    && pass "the contract lookups read the file through the command-free helper" \
+    || die "a contract lookup went back to a command a function can shadow ($_rb_sel_n/$_rb_req_n)"
+# In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
+# inherited `onecmd` would stop a `-c` script after one command and the probe
+# would measure the truncation instead of the lookup.
+_rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
+    printf() { builtin printf "%s\n" 999; }
+    awk() { builtin printf "%s\n" 999; }
+    grep() { builtin printf "%s\n" 999; }
+    sed() { builtin printf "%s\n" 999; }
+    '"$(declare -f rb_line_of)"'
+    rb_line_of "AUTO_REVIEW=no"
+    # Restored only to REPORT the answer: the lookup itself has already run, and
+    # what is being asserted is that none of the above could reach it.
+    unset -f printf
+    printf "%s\n" "$RB_LINE"' 2>/dev/null)"
+[ "$_rb_forged" = "$sel" ] \
+    && pass "shadowed printf, awk, grep and sed cannot supply a line number" \
+    || die "a forged builtin changed a lookup: got '$_rb_forged', wanted '$sel'"
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
