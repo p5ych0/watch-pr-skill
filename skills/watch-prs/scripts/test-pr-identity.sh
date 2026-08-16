@@ -236,11 +236,12 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
-# THE CLAUSE IS A FUNCTION so the loop below reads as the rule it applies. It once
-# ran over every runtime script as well — that is #67's hand-load half, and it was
-# removed from this change as scope that belongs to the follow-up. What #66 needs
-# is that its two CLOCK callers obey the rule, and the behavioural fixture at the
-# end of this file proves that far more strongly than any pattern can.
+# THE CLAUSE IS A FUNCTION because two loops ask it. The one below also asserts
+# WHICH loader call each script makes, which is an identity question and belongs
+# to those five; the rule about not writing the loading sequence out by hand
+# belongs to anything that loads a library at all, and runs over every runtime
+# script further down. Separating them is #67: widening the identity loop instead
+# would have failed every script that loads neither identitylib nor recordlib.
 #
 # THE REDIRECTION TOKEN IS REMOVED, NOT EVERYTHING AFTER IT. The first version cut
 # from `2>` to the `||`, so `unset -f rb_load 2>/dev/null rb_elapsed || …` — a
@@ -257,11 +258,23 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # clock caller is run against an EMPTY `clocklib.sh` and must refuse. A
 # hand-written load cannot pass that however it is spelled, because what fails
 # there is the missing verification rather than the missing pattern.
-rb_copies_the_loading_rule() {   # <file> ; 0 when it does
-    grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$1" \
+rb_hand_loads() {   # <file> [sources-only] ; 0 copies the rule, 1 clean, 2 unreadable
+    # THE FILE IS READ ONCE, WITH ITS STATUS TAKEN. `grep` answers 1 for "no
+    # match" and 2 for "could not read", and both used to fall into the clean
+    # branch — so a script this scan could not open was reported as using the
+    # shared loader. A guard that cannot read a file must say so, not approve it.
+    local body
+    body="$(cat "$1" 2>/dev/null)" || return 2
+    grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' <<<"$body" \
+        && return 0
+    # SOURCES ONLY, for the one script that clears inherited functions on purpose.
+    # Exempting that file entirely also exempted it from the line above, so it
+    # could have started hand-sourcing a library with this guard still green.
+    [ -n "${2-}" ] && return 1
+    grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' <<<"$body" \
       | sed 's/[[:space:]]*[0-9]*>&\{0,1\}[^[:space:]]*//g; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
-      | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' && return 0
-    grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$1" && return 0
+      | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' \
+        && return 0
     return 1
 }
 
@@ -327,11 +340,15 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # emitted no line at all, the inverted grep received empty input, and the guard
     # reported that no copied loading rule existed. A check that finds nothing and
     # a check that finds nothing wrong are the same output.
-    if rb_copies_the_loading_rule "$ROOT/$sc"; then
-        echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
-    else
-        echo "ok   - …and carries no second copy of the loading rule"
-    fi
+    # `&& _hl=0 || _hl=$?`, NOT `; _hl=$?`. Under `set -e` a bare call that returns
+    # non-zero aborts the file before the status can be read — and returning 1 is
+    # what a CLEAN script does here, so the whole loop died on the first one.
+    rb_hand_loads "$ROOT/$sc" && _hl=0 || _hl=$?
+    case "$_hl" in
+        0) echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1 ;;
+        1) echo "ok   - …and carries no second copy of the loading rule" ;;
+        *) echo "FAIL - $sc could not be read by the loading-rule scan"; idfail=1 ;;
+    esac
     # THE BOOTSTRAP OBEYS THE RULE TOO. The loader cannot load itself, so those
     # lines are written out — and that is not a licence to load it carelessly. An
     # exported `rb_load` plus an empty `loadlib.sh` leaves a STALE LOADER doing
@@ -517,6 +534,73 @@ set -e
 
 rm -rf "$IDTMP"
 set -e
+# ── AND NO RUNTIME SCRIPT WRITES THE LOADING SEQUENCE OUT BY HAND ──────────
+# The loop above names five scripts because it asks an identity question. This
+# one asks the universal one, so it runs over every runtime script — ten of them,
+# where the five were chosen when only five loaded a library. `pr-ci-gate.sh` has
+# loaded `recordlib.sh` for far longer than that and was inspected by nothing,
+# and `pr-merge-gate.sh`, `pr-close-round.sh`, `pr-copilot-phase.sh` and
+# `pr-signoff.sh` likewise. Issue #67.
+#
+# DERIVED FROM THE TREE, and with no prefilter: a script that replaced EVERY
+# `rb_load` with a hand-written sequence would otherwise be skipped for having no
+# loader call, the guard disappearing along with the thing it requires.
+for sc in "$ROOT"/pr-*.sh; do
+    [ -f "$sc" ] || continue
+    _n="$(basename "$sc")"
+    # ONE NARROWED EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every
+    # inherited function on purpose — it re-execs into a clean shell and then
+    # removes what a startup hook may have left, which is the opposite of copying
+    # a loading rule, and `test-pr-selfcheck.sh` covers that block. Only the
+    # CLEARS are excused: skipping the file entirely excused its hand-SOURCING
+    # too, so it could have begun loading a library by hand with this guard still
+    # reporting that every runtime script goes through the loader.
+    _only=""
+    [ "$_n" = pr-selfcheck.sh ] && _only=sources-only
+    rb_hand_loads "$sc" "$_only" && _hl=0 || _hl=$?
+    case "$_hl" in
+        0) echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1 ;;
+        1) echo "ok   - $_n loads its libraries through the shared loader alone" ;;
+        *) echo "FAIL - $_n could not be read by the loading-rule scan"; idfail=1 ;;
+    esac
+done
+
+# ── THE SCAN ITSELF, ON THE TWO CASES THE LOOP CANNOT STAGE ────────────────
+# A file the scan cannot open must be reported, not approved: `grep` answers 1
+# for "no match" and 2 for "could not read", and both fell into the clean branch.
+# This cannot be staged through the loop above, which walks the real tree.
+HLTMP="$(mktemp_d)" || { echo "FAIL - could not create a scratch directory"; idfail=1; HLTMP=""; }
+if [ -n "$HLTMP" ]; then
+    printf '#!/usr/bin/env bash\n: \n' > "$HLTMP/unreadable.sh"
+    chmod 000 "$HLTMP/unreadable.sh"
+    if cat "$HLTMP/unreadable.sh" >/dev/null 2>&1; then
+        # Running as root, or on a filesystem that ignores the mode: the case
+        # would assert nothing, so it says so rather than passing.
+        echo "ok   - …(unreadable-file case skipped: this user can read mode 000)"
+    else
+        rb_hand_loads "$HLTMP/unreadable.sh" && _hl=0 || _hl=$?
+        [ "$_hl" -eq 2 ] \
+            && echo "ok   - a file the scan cannot read is refused, not called clean" \
+            || { echo "FAIL - an unreadable file scanned as $_hl, not 2"; idfail=1; }
+    fi
+    # …AND THE NARROWED EXEMPTION IS NARROW. `pr-selfcheck.sh` is excused its
+    # deliberate function clears and nothing else, so a hand-SOURCE there is still
+    # a violation — excusing the whole file excused this too.
+    printf '#!/usr/bin/env bash\nunset -f something 2>/dev/null\n. "$_RB_SELF_DIR/recordlib.sh"\n' \
+        > "$HLTMP/both.sh"
+    rb_hand_loads "$HLTMP/both.sh" sources-only && _hl=0 || _hl=$?
+    [ "$_hl" -eq 0 ] \
+        && echo "ok   - the clears-only exemption still reports a hand-sourced library" \
+        || { echo "FAIL - a hand-source was excused along with the clears ($_hl)"; idfail=1; }
+    # …while the clears alone are excused, which is what the exemption is for.
+    printf '#!/usr/bin/env bash\nunset -f something 2>/dev/null\n' > "$HLTMP/clears.sh"
+    rb_hand_loads "$HLTMP/clears.sh" sources-only && _hl=0 || _hl=$?
+    [ "$_hl" -eq 1 ] \
+        && echo "ok   - …and excuses the deliberate clears it exists for" \
+        || { echo "FAIL - the exemption did not excuse a bare function clear ($_hl)"; idfail=1; }
+    rm -rf "$HLTMP"
+fi
+
 # ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
 # Two things have to hold, and neither is a pattern.
 #
