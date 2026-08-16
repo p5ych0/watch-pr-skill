@@ -75,11 +75,12 @@ if [ -d "$GATETMP/s" ]; then
     # `pr-ci-state.sh` next to ITSELF rather than through `RB_SCRIPTS`. That is the
     # point of the move: a script locates its siblings, where a function pasted into
     # someone else's shell had to be told where they were.
-    # …AND ITS LIBRARIES WITH IT. The gate loads `recordlib.sh` through `rb_load`
+    # …AND ITS LIBRARIES WITH IT. The gate loads `recordlib.sh` and `clocklib.sh`
+    # through `rb_load`
     # for the one definition of "a full commit SHA", and both are found beside the
     # script — so a probe directory holding only the subject makes every case fail
     # on a missing library rather than on the behaviour it is asserting.
-    cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$GATETMP/s/" \
+    cp "$SCRIPT" "$SELF_DIR/loadlib.sh" "$SELF_DIR/recordlib.sh" "$SELF_DIR/clocklib.sh" "$GATETMP/s/" \
         || die "the gate could not be copied into the probe directory"
     # Answers come from a queue, one per call, so a gate that polls is
     # distinguishable from one that decides on the first answer.

@@ -35,12 +35,30 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/identitylib.sh
         "$ROOT"/loadlib.sh
         "$ROOT"/recordlib.sh
+        "$ROOT"/clocklib.sh
         "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it
 # is always there, so it is always linted.
 SKILL="$ROOT/../SKILL.md"
 [ -f "$SKILL" ] && FILES+=( "$SKILL" )
+
+# THE LIBRARIES, AND WHAT THEY DEFINE, read off the tree rather than listed. Both
+# alternations below were hand-written lists and `clocklib.sh` landed missing from
+# each, which is the omission this derivation removes for every future one.
+# `loadlib.sh` is excluded: it is the bootstrap, and every caller loads it by hand
+# because a helper cannot load the file that defines it.
+_LIB_NAMES="$(ls "$ROOT" 2>/dev/null | sed -n 's/^\([a-z][a-z]*lib\)\.sh$/\1/p' \
+    | grep -v '^loadlib$' | tr '\n' '|' | sed 's/|$//')"
+[ -n "$_LIB_NAMES" ] || { echo "FAIL - no shared libraries found; the hand-load guard would assert nothing"; exit 1; }
+# FROM THE NAMED FILES, NOT A GLOB. `*lib.sh` also matches `test-recordlib.sh`,
+# which dragged in every fixture helper — and `loadlib.sh`, whose `rb_load` every
+# caller clears BY DESIGN in the four-line bootstrap, so the guard reported all
+# nine runtime scripts as carrying their own copy of the loading rule.
+_LIB_SYMS="$(for _l in $(printf '%s' "$_LIB_NAMES" | tr '|' ' '); do
+        sed -n 's/^\([a-zA-Z_][a-zA-Z0-9_]*\)() *{.*$/\1/p' "$ROOT/$_l.sh" 2>/dev/null
+    done | sort -u | tr '\n' '|' | sed 's/|$//')"
+[ -n "$_LIB_SYMS" ] || { echo "FAIL - no library symbols found; the hand-load guard would assert nothing"; exit 1; }
 
 # The list above must not go stale: a new runtime script that talks to GitHub is
 # exactly where a hard-coded owner/repo would appear, and a guard that silently
@@ -255,8 +273,22 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # with the check still green. Leading whitespace is allowed, and `source` is
     # matched as well as `.`: the rule is about loading a library by hand, not
     # about which of the two spellings was used.
-    if grep -qE 'unset -f (rb_identity|is_full_sha|sha_reason|run_limited)' "$ROOT/$sc" \
-       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh' "$ROOT/$sc"; then
+    #
+    # THE TWO ALTERNATIONS ARE DERIVED, NOT WRITTEN OUT. They were lists — of
+    # library basenames and of the symbols a hand-load clears — and `clocklib.sh`
+    # arrived missing from both, so a script could source it by hand and this
+    # check stayed green. That is the shape `CLAUDE.md` names: a list of names is
+    # wrong by omission, so change the shape until no list is needed. The
+    # libraries ARE the `*lib.sh` files beside this test, and their symbols are
+    # the functions they define; `loadlib.sh` is excluded because it is the
+    # bootstrap every caller must load by hand.
+    # THE PATTERN STAYS IN SINGLE QUOTES, with the derived names spliced in. The
+    # first version put the whole thing in double quotes so the variables would
+    # expand — and `\$_RB_SELF_DIR` then reached `grep` as `$_RB_SELF_DIR`, where
+    # `$` is an end-of-line anchor. The pattern matched NOTHING, both fixtures
+    # below passed, and the guard reported an invariant it no longer had.
+    if grep -qE 'unset -f ('"$_LIB_SYMS"')' "$ROOT/$sc" \
+       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - …and carries no second copy of the loading rule"

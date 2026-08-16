@@ -68,6 +68,7 @@ unset -f rb_load 2>/dev/null || {
 # the loader, so a caller capturing stdout got an empty result and an exit status
 # for the one failure that happens before anything else can.
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "ABORT: the CI gate" 2>&1 || exit 1
 
 pr="${1:-}"; oid="${2:-}"
 # BOTH ARGUMENTS, VALIDATED. The function took them positionally from a call site
@@ -98,9 +99,15 @@ case "$probe" in ""|0|0*|*[!0-9]*|??????*) probe=60 ;; esac
 rc=0 elapsed=0 budget=0 nap=0 stable_rc="" stable_since=0
 # ELAPSED WALL TIME, not the sum of the sleeps. Counting only the sleeps excludes
 # however long each probe took, so two slow `gh` calls per iteration silently
-# turned a documented thirty-minute bound into ninety. `$SECONDS` is wall time and
-# needs no external command.
-t0=$SECONDS
+# turned a documented thirty-minute bound into ninety.
+#
+# THROUGH `clocklib.sh`, NOT `$SECONDS` — issue #66. A builtin is unreachable
+# from `PATH`, so `test-pr-ci-gate.sh` could only wait out real seconds and every
+# deadline case there raced however loaded the runner was. `date` is a command,
+# so the fixture owns time the way `test-pr-watch.sh` already does. The library
+# also brings the guards a bare read has not got: a `date` that prints then
+# fails, an epoch past Bash's integer range, and a clock that steps backward.
+rb_clock_start || { echo "ABORT: the CI gate could not read the clock; refusing to poll unbounded."; exit 1; }
 while :; do
     # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
     # number, and the API can still be serving the PREVIOUS head for a moment
@@ -114,7 +121,8 @@ while :; do
     # `PR_CI_TIMEOUT=1` a hung request ran for a minute before this loop could look
     # at the clock at all. A bound the callee does not know about is not a bound;
     # the remaining budget is passed down.
-    elapsed=$((SECONDS - t0))
+    rb_elapsed || { echo "ABORT: the CI gate lost the clock; refusing to poll unbounded."; exit 1; }
+    elapsed="$RB_ELAPSED"
     # AN EXPIRED DEADLINE IS NOT A SHORT DEADLINE. Clamping an exhausted budget up
     # to one second started another probe past the bound — and each of those can
     # take its second plus the watchdog's five-second escalation, so the clamp
@@ -128,7 +136,8 @@ while :; do
     budget=$((tmo - elapsed))
     [ "$budget" -gt "$probe" ] && budget="$probe"
     PR_CI_PROBE_TIMEOUT="$budget" "$_RB_SELF_DIR"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
-    elapsed=$((SECONDS - t0))
+    rb_elapsed || { echo "ABORT: the CI gate lost the clock; refusing to poll unbounded."; exit 1; }
+    elapsed="$RB_ELAPSED"
     # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With the
     # check at the bottom of the loop, a `PR_CI_TIMEOUT` shorter than
     # `PR_CI_GRACE` — or simply a probe that returned green after the deadline —

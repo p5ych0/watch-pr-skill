@@ -50,6 +50,7 @@ unset -f rb_load 2>/dev/null || {
 # `state=` rather than `status=`, which is this script's own sentinel shape — the
 # loader takes the prefix precisely so each caller keeps its own.
 rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || exit 2
+rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
@@ -123,32 +124,10 @@ q() { printf '%q' "$1"; }
 # state and verdict probes — so a run of slow GitHub reads made a one-hour watch
 # run far past an hour, and a probe that hung meant the timeout check was never
 # reached at all. `--timeout` has to mean elapsed time or it means nothing.
-# The clock is READ with its status and its shape checked, like every other
-# probe here. `date` can print a plausible epoch and then fail, and command
-# substitution keeps it — an elapsed time stuck at a small number means the
-# deadline is never reached and the watch runs forever, which is the failure this
-# deadline exists to prevent.
-now_s() {
-    local t
-    t="$(date +%s 2>/dev/null)" || return 1
-    # BOUNDED, not merely all-digit. A value past Bash's integer range wraps
-    # inside `t - started`: a constant oversized epoch keeps elapsed time at zero
-    # forever, so the watch never reaches its deadline, and one appearing later
-    # produces an immediate ordinary timeout — which the driver re-arms as though
-    # the review were merely slow. Both are the clock failing silently, which is
-    # what this function exists to refuse.
-    #
-    # TWELVE `?`, not eleven: `N` question marks followed by `*` matches every
-    # string of length N OR MORE, so the obvious eleven REJECTED eleven-digit
-    # epochs — the ones it was written to allow — and would have made every watch
-    # exit `clock_unreadable` from 2286 onward. A bound stated as a ceiling that
-    # behaved as a floor one digit lower. Eleven digits runs to the year 5138.
-    case "$t" in
-        ""|*[!0-9]*|????????????*) return 1 ;;
-    esac
-    printf '%s' "$t"
-}
-started="$(now_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+# The clock, its shape checks and its monotonicity guard live in `clocklib.sh` —
+# they were written here first and `pr-ci-gate.sh` needed every one of them, and
+# a rule that applies to more than one helper does not get a second copy. #66.
+rb_clock_start || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
 # Returns non-zero when the clock cannot be read, so callers branch rather than
 # silently treating a failed read as "no time has passed". `echo $(( … ))` hid
 # exactly that behind its own success.
@@ -158,19 +137,16 @@ started="$(now_s)" || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadabl
 # by the size of the correction, or extended without bound by repeated ones. Time
 # that runs backwards is not a clock this watch can measure a deadline with.
 # THE RESULT IS A VARIABLE, not stdout, because the monotonic state has to
-# SURVIVE the call. Every caller used `e="$(elapsed_s)"`, so the function ran in
-# a subshell and the `last_s` update was discarded the moment it returned: the
-# comparison was always against `$started`, so a clock going 100 → 110 → 105 was
-# accepted and the budget grew. Only a retreat past the start was caught, which
-# is the one case the first fixture happened to test.
-last_s="$started"
+# SURVIVE the call — and that is why `rb_elapsed` sets one too. Every caller here
+# used `e="$(elapsed_s)"`, so the function ran in a subshell and the previous
+# reading was discarded the moment it returned: the comparison was always against
+# the start, so a clock going 100 → 110 → 105 was accepted and the budget grew.
+# Only a retreat past the start was caught, which is the one case the first
+# fixture happened to test.
 ELAPSED=0
 elapsed_s() {   # sets $ELAPSED; non-zero when the clock cannot be trusted
-    local t
-    t="$(now_s)" || return 1
-    [ "$t" -ge "$last_s" ] || return 1
-    last_s="$t"
-    ELAPSED=$(( t - started ))
+    rb_elapsed || return 1
+    ELAPSED="$RB_ELAPSED"
     return 0
 }
 
