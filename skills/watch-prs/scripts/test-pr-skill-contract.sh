@@ -738,26 +738,55 @@ grep -q 'SELF_RC' "$SKILL" \
 # ── the first request respects the review mode too ─────────────────────────
 # With auto-review on, opening or pushing the PR has already queued a pass, so an
 # unconditional mention queues a SECOND review of the same head.
-# ONE PROCESS, AND ITS STATUS IS THE ANSWER. Under `set -Eeuo pipefail` a `grep`
-# that matches nothing aborts the assignment and takes the whole file with it —
-# before the `die` below, and before `RESULT:` is printed at all. Deleting either
-# line these look for produced a run with no verdict, so a caller reading the
-# output rather than the status saw nothing wrong: the silent pass this file
-# exists to make impossible, in the file that enforces it. Issue #39.
+# NO COMMAND, FOR THE SAME REASON THE PARSER IT CHECKS HAS NONE. Under
+# `set -Eeuo pipefail` a `grep` that matches nothing aborts the assignment and
+# takes the whole file with it — before the `die` below and before `RESULT:` is
+# printed at all, which is the silent pass this file exists to make impossible.
+# Issue #39.
 #
-# `|| true` FIXES THAT AND CREATES ANOTHER, which is why these are not written
-# that way. It discards the difference between "no match" — an ordinary answer
-# the emptiness test below handles — and a pipeline that PRINTED a plausible line
-# number and then failed, which command substitution keeps. `CLAUDE.md` records
-# that shape: output emitted before a failure is not data.
+# `|| true` fixes that and creates another: it discards the difference between
+# "no match" and a lookup that PRINTED a plausible line number and then failed,
+# which command substitution keeps. `awk` in one process fixed that in turn, and
+# `awk` is a command a function can shadow — an exported one returning forged
+# line numbers makes the ordering below agree about lines that are not there.
 #
-# `awk` collapses the `grep | head | cut` to a single process, so there is no
-# pipeline whose middle can fail unseen: it exits 0 with empty output when the
-# text is absent, and non-zero only when it could not do the work.
-sel="$(awk '/AUTO_REVIEW=no/ { print NR; exit }' "$SKILL")" \
-    || die "the review-mode lookup could not be run"
-req="$(awk '/Request the review — Codex first/ { print NR; exit }' "$SKILL")" \
-    || die "the request-step lookup could not be run"
+# `$(<file)` is a redirection and `${…}` is expansion; `while`, `if` and `[[` are
+# reserved words. Nothing here can be replaced by a function, so the answer can
+# only come from the file. Empty means absent, which the emptiness test handles.
+RB_SKILL_BODY="$(<"$SKILL")"
+rb_line_of() {   # rb_line_of <needle> ; prints the first matching line number
+    local _rest="$RB_SKILL_BODY" _line _n=0
+    while [[ -n $_rest ]]; do
+        _line="${_rest%%$'\n'*}"
+        if [[ $_rest == *$'\n'* ]]; then _rest="${_rest#*$'\n'}"; else _rest=""; fi
+        _n=$((_n + 1))
+        if [[ $_line == *"$1"* ]]; then printf '%s' "$_n"; return 0; fi
+    done
+    return 0
+}
+sel="$(rb_line_of 'AUTO_REVIEW=no')"
+req="$(rb_line_of 'Request the review — Codex first')"
+# …AND A FORGED `awk` CANNOT ANSWER FOR THE FILE. An exported function returning
+# plausible line numbers made this ordering agree about lines that had been
+# deleted; the lookup uses no command now, so the case asserts that directly.
+# THE LOOKUPS THEMSELVES GO THROUGH IT, which the probe below cannot show: that
+# probe exercises `rb_line_of`, so reverting the two assignments to `awk` leaves
+# it passing while the lookups trust a command again. Both halves are needed —
+# one says the helper is command-free, the other says the lookups use the helper.
+{ grep -qF "sel=\"\$(rb_line_of " "$0" && grep -qF "req=\"\$(rb_line_of " "$0"; } \
+    && pass "the contract lookups read the file through the command-free helper" \
+    || die "a contract lookup went back to a command that a function can shadow"
+# In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
+# inherited `onecmd` would stop a `-c` script after one command and the probe
+# would measure the truncation instead of the lookup.
+_rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
+    awk() { printf "%s\n" 2; }
+    grep() { printf "%s\n" 2; }
+    '"$(declare -f rb_line_of)"'
+    rb_line_of "AUTO_REVIEW=no"' 2>/dev/null)"
+[ "$_rb_forged" = "$sel" ] \
+    && pass "a shadowed awk cannot supply the contract lookups' line numbers" \
+    || die "a forged awk changed a lookup: got '$_rb_forged', wanted '$sel'"
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
