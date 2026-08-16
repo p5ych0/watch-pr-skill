@@ -345,13 +345,29 @@ case "$_phase_mute" in
     *"signed off on"*) die "a muted refusal still reached the step that uses the head: '$_phase_mute'" ;;
     *) pass "…and still reaches nothing downstream of the guard" ;;
 esac
-_phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" bash -c '
+# `PHASE_RC=0` AND STDERR CHECKED HERE TOO. This probe was written before
+# `phase_case` learned both, and kept the defect that thread was about: with
+# `PHASE_RC` unset the guard's downstream branch failed with a diagnostic, the
+# trailing `printf` still produced `ACCEPTED:…`, and a substring test called that
+# a clean parse. A case about shadowed commands must not itself pass on an
+# errored run.
+_phase_shadowed_err="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
     awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
     sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
     set() { return 0; }
-    PHASE_OUT="$PHASE_OUT"
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
     '"$_phase_block"'
-    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1)" || true
+    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
+_phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
+    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
+    set() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || true
+[ -z "$_phase_shadowed_err" ] \
+    && pass "…and the shadowing case runs the block without a diagnostic" \
+    || die "the shadowing case ran with errors: '$_phase_shadowed_err'"
 case "$_phase_shadowed" in
     *"ACCEPTED:$_V"*) pass "…and shadowed awk, sed and set cannot supply the head" ;;
     *) die "a shadowed command reached the phase parser: '$_phase_shadowed'" ;;
