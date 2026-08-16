@@ -188,12 +188,22 @@ grep -q 'CODEX_SHA="$(printf' "$SKILL" \
 grep -qi 'precede the push' "$SKILL" \
     && pass "the round boundary is checked before the push" \
     || die "the boundary check runs after the push, which auto-review has already acted on"
-# The capture accepts only hex, so a mangled record cannot populate the merge
-# gate with something that is not a sha. `pr-copilot-phase.sh` validates the shape
-# where it is produced, and `test-pr-copilot-phase.sh` runs that.
-grep -qF 'codex-sha=\([0-9a-f]*\)' "$SKILL" \
-    && pass "…through a capture that accepts only hex" \
-    || die "CODEX_SHA is used without validating its shape"
+# EXACTLY FORTY HEX, not "only hex". `[0-9a-f]*` matches the empty string and it
+# matches `a`, so `codex-sha=a` survived the emptiness test below it and step 8
+# was gated on something that is not a commit. The resume parser at the bottom of
+# the same file has always required `\{40\}` — one rule, two copies, one of them
+# wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
+grep -qF 'codex-sha=\([0-9a-f]\{40\}\)' "$SKILL" \
+    && pass "…through a capture that accepts exactly a full sha" \
+    || die "CODEX_SHA is captured with a pattern looser than 40 hex"
+# …AND THE RESULT IS SHAPE-CHECKED, not merely non-empty. A record that arrives
+# twice puts two lines in the variable, and each is 40 hex on its own.
+grep -qF 'RX_PHASE_SHA40' "$SKILL" \
+    && pass "…and the captured head is matched against a 40-hex anchor" \
+    || die "the phase head is used without a shape check"
+grep -qF "| tail -1)" "$SKILL" \
+    && pass "…and the LAST record wins, as it does for every other marker here" \
+    || die "the phase head is not taken from the last matching record"
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -608,8 +618,14 @@ grep -q 'SELF_RC' "$SKILL" \
 # ── the first request respects the review mode too ─────────────────────────
 # With auto-review on, opening or pushing the PR has already queued a pass, so an
 # unconditional mention queues a SECOND review of the same head.
-sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)"
-req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)"
+# `|| true`, LIKE EVERY OTHER LOOKUP IN THIS FILE. Under `set -Eeuo pipefail` a
+# `grep` that matches nothing aborts the assignment and takes the whole file with
+# it — before the `die` below, and before `RESULT:` is printed at all. Deleting
+# either line these look for produced a run with no verdict, so a caller reading
+# the output rather than the status saw nothing wrong: the silent pass this file
+# exists to make impossible, in the file that enforces it. Issue #39.
+sel="$(grep -n 'AUTO_REVIEW=no' "$SKILL" | head -1 | cut -d: -f1)" || true
+req="$(grep -n 'Request the review — Codex first' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"

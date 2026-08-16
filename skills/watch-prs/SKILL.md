@@ -1007,10 +1007,21 @@ esac
 # and that path needs this sha: exiting without it made the operator re-run a
 # phase that had already been proved clean, just to recover a value that was
 # printed and thrown away.
+#
+# EXACTLY FORTY HEX, AND THE LAST RECORD, which is the rule the resume parser at
+# the bottom of this file already applies to `PR_SIGNOFF`. Here it was
+# `[0-9a-f]*`: `codex-sha=a` is non-empty, so the emptiness test below passed and
+# step 8 was handed something that is not a commit — and two matching records put
+# two lines in one variable, which no gate downstream can mean anything by. The
+# same rule written twice with one copy right is what `CLAUDE.md` says belongs in
+# one place; this is the copy that was wrong. Issue #39.
 CODEX_SHA="$(printf '%s\n' "$PHASE_OUT" \
-    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]*\).*$/\1/p')"
-[ -n "$CODEX_SHA" ] \
-    || { echo "ABORT: the phase recorded no head; step 8 would have nothing to gate on."; exit 1; }
+    | sed -n 's/^PR_PHASE_RECORDED .*[[:space:]]codex-sha=\([0-9a-f]\{40\}\)[[:space:]]*$/\1/p' \
+    | tail -1)"
+RX_PHASE_SHA40='^[0-9a-f]{40}$'
+if ! [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
+    echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"; exit 1
+fi
 # AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
 # status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the ordinary
 # path, which left a phase that recorded and parsed perfectly exiting 1. A driver

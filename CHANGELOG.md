@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.18] — 2026-08-16
+
+- **The phase head was captured with a pattern that accepts almost anything.**
+  `SKILL.md` read the Codex head out of the phase record with `[0-9a-f]*`, so
+  `codex-sha=a` produced a non-empty value, satisfied the emptiness test beside
+  it, and handed the merge step something that is not a commit — and two matching
+  records put two lines in one variable, which no gate downstream can mean
+  anything by. It now takes exactly forty hex from the LAST matching record and
+  checks the shape, which is the rule the resume parser in the same file has
+  always applied. One rule, two copies, one of them wrong.
+
+- **And the file that enforces "no silent pass" had two.** Two lookups in
+  `test-pr-skill-contract.sh` ran unguarded under `set -Eeuo pipefail`, so
+  deleting either line they search for killed the file before its `die` and
+  before `RESULT:` was printed at all: one FAIL, no verdict, and a caller reading
+  the output rather than the exit status saw nothing wrong. Guarded, they report
+  three and two failures with `RESULT: FAIL`.
+
 ## [2.0.17] — 2026-08-16
 
 - **The round check-in printed an acknowledgement it then ignored.** Its own
