@@ -226,10 +226,38 @@ _V=0123456789abcdef0123456789abcdef01234567
 _W=fedcba9876543210fedcba9876543210fedcba98
 phase_case() {   # phase_case <records> <want: sha|refused> <label>
     local out rc=0
-    out="$(PHASE_OUT="$1" bash -c '
-        PHASE_OUT="$PHASE_OUT"
+    # `PHASE_RC=0`, BECAUSE THE LIFTED BLOCK BRANCHES ON IT. Without it the child
+    # reached `[ "$PHASE_RC" -eq 3 ]` unset, bash printed `integer expression
+    # expected`, and the trailing `printf` still produced `ACCEPTED:…` — so a case
+    # asserting a clean parse was passing on an errored run. The diagnostic went
+    # into `$out` and the substring test ignored it.
+    # STDERR IS THE TEST, NOT THE WORDING. An error on the ordinary path is not a
+    # clean parse, and matching the message is not available: bash says `integer
+    # expected` where the first version of this looked for `integer expression
+    # expected`, and the text differs by version and locale. Nor is counting
+    # lines — the abort echoes `$PHASE_OUT`, which is deliberately multi-line in
+    # half these cases. What separates them is the STREAM: the block's own output
+    # is stdout, and a diagnostic is stderr.
+    out="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
+        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
         '"$_phase_block"'
-        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1)" || rc=$?
+        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || rc=$?
+    # THE SAME RUN AGAIN, KEEPING ONLY STDERR. No scratch file: this file asserts
+    # its own `mktemp` behaviour and counts what it leaves behind, so a temporary
+    # of mine breaks three of its cases. The block is a pure parse over a string,
+    # so running it twice costs nothing and changes nothing.
+    local err
+    err="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
+        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+        '"$_phase_block"'
+        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
+    # `|| true` HERE AND NOWHERE ELSE. A refusing block exits non-zero, which is
+    # what half these cases WANT, and under `set -e` that would abort the file at
+    # the assignment. The status is already taken from the first run; this one is
+    # only for the text.
+    if [ -n "$err" ]; then
+        die "$3 — the parser wrote to stderr: '$err'"; return 0
+    fi
     case "$2" in
         # REFUSED IS "THE ABORT WAS REACHED", not "nothing was printed". The
         # guard's own `exit` is a builtin a function can shadow, so a caller that
@@ -271,6 +299,10 @@ phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
 phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
 PR_PHASE_RECORDED" refused \
     "…and a bare marker with no trailing space still resets the candidate"
+# EXACTLY forty, which needs a value that is too LONG as well as too short: the
+# short cases pass with the closing anchor dropped, and only this one fails.
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=${_V}f" refused \
+    "…and forty-one hex is refused, so the bound is exact at both ends"
 # NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
 # time: `set` and `awk` are both shadowable, and a function returning a stale sha
 # and exiting 0 is accepted by any status check written around it.
