@@ -30,38 +30,50 @@
 # One copy, because these are the rules a second copy is always found missing —
 # the reason `recordlib.sh` and `identitylib.sh` exist.
 
-# The current epoch second, or non-zero if the clock cannot be trusted.
-rb_now_s() {
+# ONE FUNCTION, BECAUSE `rb_load` CAN ONLY CLEAR ONE NAME. This was three —
+# `rb_now_s`, `rb_clock_start`, `rb_elapsed` — and the loader clears and verifies
+# the single symbol it is given. A startup hook that installed a READONLY
+# `rb_now_s` returning a constant epoch was therefore untouched by the clear,
+# survived the source, and left every caller measuring zero elapsed seconds
+# forever: a deadline that never arrives, which is the one failure this file
+# exists to prevent. Clearing all three would have been a list, and a list is
+# wrong by omission the moment a fourth is added. One name cannot be.
+#
+#   rb_elapsed start   begins a bounded stretch of time
+#   rb_elapsed         seconds since it began, in RB_ELAPSED
+#
+# EVERY ASSIGNMENT TAKES ITS STATUS. The same hook can make `RB_ELAPSED` readonly,
+# and a trailing `return 0` then reported success over an assignment that never
+# happened — the caller reading a stale zero and polling forever. `readonly` is
+# one of the few things a script cannot undo from inside, so the answer is to
+# notice rather than to defend.
+rb_elapsed() {   # rb_elapsed [start] ; sets RB_ELAPSED, non-zero if untrustworthy
     local t
     t="$(date +%s 2>/dev/null)" || return 1
-    # BOUNDED, not merely all-digit. TWELVE `?`, not eleven: `N` question marks
+    # BOUNDED, and NOT ZERO-PADDED. TWELVE `?`, not eleven: `N` question marks
     # followed by `*` matches every string of length N OR MORE, so eleven would
-    # reject the eleven-digit epochs it was written to allow, and every caller
-    # would report an unreadable clock from 2286 onward. Eleven digits runs to
-    # the year 5138.
+    # reject the eleven-digit epochs it was written to allow — every caller
+    # unreadable from 2286 onward. Eleven digits runs to the year 5138.
+    #
+    # `0?*` because a padded reading is arithmetic in OCTAL: `01754000008` passes
+    # every all-digit test and then dies on the invalid digit inside `$(( ))`.
+    # In `pr-watch.sh` that surfaced as an ordinary status 1 rather than the clock
+    # sentinel, so the driver re-armed the watch as though the review were merely
+    # slow — a broken clock reported as patience.
     case "$t" in
-        ""|*[!0-9]*|????????????*) return 1 ;;
+        ""|*[!0-9]*|0?*|????????????*) return 1 ;;
     esac
-    printf '%s' "$t"
-}
-
-# Start a bounded stretch of time. Sets RB_CLOCK_T0 and RB_CLOCK_LAST.
-rb_clock_start() {
-    local t
-    t="$(rb_now_s)" || return 1
-    RB_CLOCK_T0="$t"
-    RB_CLOCK_LAST="$t"
-    return 0
-}
-
-# Seconds since `rb_clock_start`, in RB_ELAPSED. Non-zero when the clock cannot
-# be trusted — which callers must treat as an error and never as "no time has
-# passed", the reading that turns a bounded loop into an unbounded one.
-rb_elapsed() {
-    local t
-    t="$(rb_now_s)" || return 1
+    if [ "${1-}" = start ]; then
+        RB_CLOCK_T0="$t"   || return 1
+        RB_CLOCK_LAST="$t" || return 1
+        RB_ELAPSED=0       || return 1
+        return 0
+    fi
+    # A clock that steps BACKWARD is unreadable, not a longer deadline: without
+    # this a backward step extends the bound by however far it went, and repeated
+    # ones extend it without limit.
     [ "$t" -ge "$RB_CLOCK_LAST" ] || return 1
-    RB_CLOCK_LAST="$t"
-    RB_ELAPSED=$(( t - RB_CLOCK_T0 ))
+    RB_CLOCK_LAST="$t" || return 1
+    RB_ELAPSED=$(( t - RB_CLOCK_T0 )) || return 1
     return 0
 }

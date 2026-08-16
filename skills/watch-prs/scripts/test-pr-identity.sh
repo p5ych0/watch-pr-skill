@@ -51,14 +51,6 @@ SKILL="$ROOT/../SKILL.md"
 _LIB_NAMES="$(ls "$ROOT" 2>/dev/null | sed -n 's/^\([a-z][a-z]*lib\)\.sh$/\1/p' \
     | grep -v '^loadlib$' | tr '\n' '|' | sed 's/|$//')"
 [ -n "$_LIB_NAMES" ] || { echo "FAIL - no shared libraries found; the hand-load guard would assert nothing"; exit 1; }
-# FROM THE NAMED FILES, NOT A GLOB. `*lib.sh` also matches `test-recordlib.sh`,
-# which dragged in every fixture helper — and `loadlib.sh`, whose `rb_load` every
-# caller clears BY DESIGN in the four-line bootstrap, so the guard reported all
-# nine runtime scripts as carrying their own copy of the loading rule.
-_LIB_SYMS="$(for _l in $(printf '%s' "$_LIB_NAMES" | tr '|' ' '); do
-        sed -n 's/^\([a-zA-Z_][a-zA-Z0-9_]*\)() *{.*$/\1/p' "$ROOT/$_l.sh" 2>/dev/null
-    done | sort -u | tr '\n' '|' | sed 's/|$//')"
-[ -n "$_LIB_SYMS" ] || { echo "FAIL - no library symbols found; the hand-load guard would assert nothing"; exit 1; }
 
 # The list above must not go stale: a new runtime script that talks to GitHub is
 # exactly where a hard-coded owner/repo would appear, and a guard that silently
@@ -282,12 +274,20 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # libraries ARE the `*lib.sh` files beside this test, and their symbols are
     # the functions they define; `loadlib.sh` is excluded because it is the
     # bootstrap every caller must load by hand.
+    # NO SYMBOL LIST AT ALL, and no parsing of the libraries to build one. That
+    # was a `sed` over their function declarations, and it would silently omit
+    # `rb_new () {` or a brace on the next line — both legal — while the other
+    # libraries kept the alternation non-empty, so a caller could hand-clear the
+    # omitted name with the guard still green. The rule does not need to know the
+    # names: a runtime script clears exactly ONE function by hand, `rb_load`, and
+    # any other `unset -f` is the copied loading rule.
+    #
     # THE PATTERN STAYS IN SINGLE QUOTES, with the derived names spliced in. The
     # first version put the whole thing in double quotes so the variables would
     # expand — and `\$_RB_SELF_DIR` then reached `grep` as `$_RB_SELF_DIR`, where
     # `$` is an end-of-line anchor. The pattern matched NOTHING, both fixtures
     # below passed, and the guard reported an invariant it no longer had.
-    if grep -qE 'unset -f ('"$_LIB_SYMS"')' "$ROOT/$sc" \
+    if grep -E '^[[:space:]]*unset -f ' "$ROOT/$sc" | grep -qv 'unset -f rb_load' \
        || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else

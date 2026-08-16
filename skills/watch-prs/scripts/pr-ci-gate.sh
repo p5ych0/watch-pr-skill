@@ -107,7 +107,7 @@ rc=0 elapsed=0 budget=0 nap=0 stable_rc="" stable_since=0
 # so the fixture owns time the way `test-pr-watch.sh` already does. The library
 # also brings the guards a bare read has not got: a `date` that prints then
 # fails, an epoch past Bash's integer range, and a clock that steps backward.
-rb_clock_start || { echo "ABORT: the CI gate could not read the clock; refusing to poll unbounded."; exit 1; }
+rb_elapsed start || { echo "ABORT: the CI gate could not read the clock; refusing to poll unbounded."; exit 1; }
 while :; do
     # PINNED TO THE OID THIS ROUND PUSHED. `gh pr checks` is addressed by PR
     # number, and the API can still be serving the PREVIOUS head for a moment

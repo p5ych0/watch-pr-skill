@@ -127,7 +127,7 @@ q() { printf '%q' "$1"; }
 # The clock, its shape checks and its monotonicity guard live in `clocklib.sh` —
 # they were written here first and `pr-ci-gate.sh` needed every one of them, and
 # a rule that applies to more than one helper does not get a second copy. #66.
-rb_clock_start || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
+rb_elapsed start || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
 # Returns non-zero when the clock cannot be read, so callers branch rather than
 # silently treating a failed read as "no time has passed". `echo $(( … ))` hid
 # exactly that behind its own success.
