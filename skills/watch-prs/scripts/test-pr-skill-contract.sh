@@ -218,8 +218,9 @@ _phase_block="$(awk '/^CODEX_SHA=""$/, /^fi$/' "$SKILL")"
 # itself.
 { [ -n "$_phase_block" ] \
   && case "$_phase_block" in *"done"*) true ;; *) false ;; esac \
-  && case "$_phase_block" in *RX_PHASE_SHA40*) true ;; *) false ;; esac; } \
-    && pass "the phase parser lifts out of SKILL.md whole, loop and shape check" \
+  && case "$_phase_block" in *RX_PHASE_SHA40*) true ;; *) false ;; esac \
+  && case "$_phase_block" in *PHASE_RC*) true ;; *) false ;; esac; } \
+    && pass "the phase parser lifts out of SKILL.md whole, guard and what follows it" \
     || die "the lifted phase parser is truncated or missing: '$_phase_block'"
 _V=0123456789abcdef0123456789abcdef01234567
 _W=fedcba9876543210fedcba9876543210fedcba98
@@ -230,9 +231,15 @@ phase_case() {   # phase_case <records> <want: sha|refused> <label>
         '"$_phase_block"'
         printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1)" || rc=$?
     case "$2" in
+        # REFUSED IS "THE ABORT WAS REACHED", not "nothing was printed". The
+        # guard's own `exit` is a builtin a function can shadow, so a caller that
+        # neuters it runs on with the bad value in `$CODEX_SHA` — what has to hold
+        # is that the refusal branch ran and no VALID head was produced from a
+        # record that has none.
         refused) case "$out" in
-                     *ACCEPTED:*) die "$3 — the parser accepted '"'"'$out'"'"'" ;;
-                     *) pass "$3" ;;
+                     *ABORT:*[!0-9a-f]"ACCEPTED:$_V"*|*"ACCEPTED:$_V") die "$3 — a valid head came out of a record without one: '"'"'$out'"'"'" ;;
+                     *ABORT:*) pass "$3" ;;
+                     *) die "$3 — the parser accepted '"'"'$out'"'"'" ;;
                  esac ;;
         *)       case "$out" in
                      *"ACCEPTED:$2"*) pass "$3" ;;
@@ -264,6 +271,26 @@ phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
 # NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
 # time: `set` and `awk` are both shadowable, and a function returning a stale sha
 # and exiting 0 is accepted by any status check written around it.
+# …AND A SHADOWED `exit` CANNOT CARRY A BAD HEAD PAST THE GUARD. The refusal used
+# `exit`, which a function can neuter into a `return`; what uses the head sits
+# inside the successful branch now, so reachability does the work instead.
+# `PHASE_RC=3` IS WHAT MAKES THE DIFFERENCE VISIBLE. The block's downstream is the
+# round-boundary branch, which announces the head; without that variable set,
+# nothing downstream runs and the guarded and unguarded shapes look identical.
+# The first version of this case omitted it and passed against both.
+_phase_exit="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
+    exit() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "END\n"' 2>&1)" || true
+case "$_phase_exit" in
+    *ABORT:*) pass "…and a shadowed exit still takes the refusal branch" ;;
+    *) die "a shadowed exit skipped the refusal: '$_phase_exit'" ;;
+esac
+case "$_phase_exit" in
+    *"signed off on"*) die "a shadowed exit carried a malformed head into the step that uses it: '$_phase_exit'" ;;
+    *) pass "…and nothing downstream of the guard runs on a head it refused" ;;
+esac
 _phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" bash -c '
     awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
     sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }

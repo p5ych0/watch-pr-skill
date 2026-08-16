@@ -1066,18 +1066,26 @@ while [[ -n $_rb_rest ]]; do
         CODEX_SHA="$_rb_v"
     fi
 done
+# WHAT USES THE HEAD SITS INSIDE THE SUCCESSFUL BRANCH, rather than after a guard
+# that aborts. The guard aborted with `exit`, and `exit` is a builtin a function
+# can shadow: `exit() { return 0; }` turns the refusal into a `return`, execution
+# carries on, and the malformed head this check exists to stop is used by
+# everything after it. Reachability is structural and cannot be shadowed;
+# `if`, `else` and `[[` are reserved words.
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
-if ! [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
-    echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"; exit 1
-fi
-# AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
-# status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the ordinary
-# path, which left a phase that recorded and parsed perfectly exiting 1. A driver
-# reads that as a failed step and stops or retries instead of reaching the
-# operator decision, on the one path where nothing went wrong.
-if [ "$PHASE_RC" -eq 3 ]; then
-    echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
-    exit 3
+if [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
+    # AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
+    # status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the
+    # ordinary path, which left a phase that recorded and parsed perfectly exiting
+    # 1. A driver reads that as a failed step and stops or retries instead of
+    # reaching the operator decision, on the one path where nothing went wrong.
+    if [ "$PHASE_RC" -eq 3 ]; then
+        echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
+        exit 3
+    fi
+else
+    echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"
+    exit 1
 fi
 ```
 
