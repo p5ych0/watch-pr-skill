@@ -529,7 +529,15 @@ value falls back to `10` rather than silently disabling a safety pause.
 
 **Saying "continue" is recorded on the PR.** The driver posts a comment carrying
 a `**Review-Pause-Acknowledged:** \`<reviewer>\` \`<count>\`` line, and the next
-check-in is a further `REVIEW_ROUND_THRESHOLD` heads past that number. It names
+check-in is a further `REVIEW_ROUND_THRESHOLD` heads past that number. One comment
+may carry a line per reviewer, which is the form the pause message itself prints;
+every such line is read, not just the last one in the body.
+
+The count must be that reviewer's own, which is what the pause prints beside each
+login. A number ahead of a reviewer's count is refused rather than obeyed — it is
+the disable-forever shape, reachable by a typo — and because the highest
+acknowledgement wins, a wrong one cannot be lowered by posting another. Edit or
+delete the comment instead; the count is derived from the bodies. It names
 the reviewer because the count does: the Codex and Copilot phases are separate
 loops with separate counts, and an unscoped marker acknowledging 41 Codex rounds
 is read by a Copilot phase with 5 as ahead of its count and refused permanently. Without it the gate would

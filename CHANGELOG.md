@@ -1,5 +1,38 @@
 # Changelog
 
+## [2.0.17] — 2026-08-16
+
+- **The round check-in printed an acknowledgement it then ignored.** Its own
+  message says to post *"a comment containing, for each reviewer counted here"*
+  and prints one line per login — but the scan took only the LAST such line in a
+  body, so following it literally left the first reviewer unacknowledged. The
+  next call for that reviewer paused again, with the operator having done exactly
+  what the tool asked, and no amount of repeating it helped.
+
+  Every anchored acknowledgement line is read now. The anchor is what stops a
+  field-shaped line quoted in prose from acknowledging anything; `last` never did
+  that — it did not reject a pasted line, it picked one of them, and the one it
+  rejected was the form this script itself prints.
+
+  And the check-in is decided per reviewer now, even when the count it displays
+  is combined. `rounds` is the UNION of the heads the named reviewers saw, while
+  an acknowledgement is one number each — so the default invocation compared two
+  things that do not measure the same set, and with 41 Codex heads and 15
+  disjoint Copilot heads it paused again the instant it was answered. No correct
+  answer existed for it, because the instruction prints the per-reviewer numbers
+  the scoped calls need.
+
+  The lines it prints are also no longer indented. They carried the two spaces
+  that read nicely under the sentence above them, and the scan anchors at column
+  1 — so copying exactly what the tool printed acknowledged nothing. The anchor
+  stayed and the cosmetics went, because the anchor is the whole of what stops a
+  field-shaped line quoted inside prose from acknowledging something nobody
+  meant.
+
+  A wrong acknowledgement still cannot be lowered, because the highest wins:
+  edit or delete the comment, since the count is derived from the bodies.
+  `README.md` says so now.
+
 ## [2.0.16] — 2026-08-16
 
 - **The CI gate read a clock its own tests could not reach.** `pr-ci-gate.sh`

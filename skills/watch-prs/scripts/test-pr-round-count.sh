@@ -283,6 +283,87 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
 { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'ack_ahead_of_count'; } \
     && pass "an acknowledgement ahead of the count is refused, not obeyed" \
     || die "a future acknowledgement disabled the pause (rc=$rc out='$out')"
+# ── ONE COMMENT, A LINE PER REVIEWER, WHICH IS WHAT THE PAUSE ASKS FOR ─────
+# The instruction reads "post a comment containing, for each reviewer counted
+# here:" and then prints one line per login. Following it literally used to leave
+# the FIRST login unacknowledged: the scan took the last match in the body, so a
+# later call for that reviewer saw nothing and paused again — with the operator
+# having done exactly what the tool asked. Issue #59.
+#
+# The Codex line is first here on purpose: it is the one that was discarded.
+mkreviews 11
+jq -n --arg c "$CODEX" --arg p "$COPILOT" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:903,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `11`\n**Review-Pause-Acknowledged:** `" + $p + "` `0`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=11'; } \
+    && pass "one comment acknowledges the reviewer named FIRST in it" \
+    || die "the first login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
+# …and the one named last, which is what used to work by accident.
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+    && pass "…and the one named last, from the same comment" \
+    || die "the last login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
+
+# ── AND THE COMBINED INVOCATION CLEARS ON THAT SAME COMMENT ────────────────
+# The union of the heads is not comparable to the largest acknowledgement. With
+# 41 Codex heads and 15 DISJOINT Copilot heads the union is 56 while the largest
+# acknowledgement is 41, so the default call paused again the instant it was
+# answered — and no correct answer existed, because the instruction prints the
+# per-reviewer numbers each scoped call needs. Disjoint on purpose: overlapping
+# heads hide it by making the union smaller.
+specs=(); for ((i=1; i<=41; i++)); do specs+=("$CODEX|k$i|\"t$i\""); done
+for ((i=1; i<=15; i++)); do specs+=("$COPILOT|w$i|\"u$i\""); done
+mk "${specs[@]}"
+jq -n --arg c "$CODEX" --arg p "$COPILOT" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:904,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `41`\n**Review-Pause-Acknowledged:** `" + $p + "` `15`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "the combined call clears on the comment its own instruction asks for" \
+    || die "the default invocation paused again after being answered (rc=$rc out='$out')"
+# …and it still pauses when only ONE of them is answered, which is the whole
+# point of judging them separately.
+jq -n --arg c "$CODEX" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:905,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `41`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] \
+    && pass "…and still pauses while the other reviewer is unanswered" \
+    || die "answering one reviewer cleared the check-in for both (rc=$rc out='$out')"
+mkreviews 11
+
+# ── THE EMITTED LINES, FED BACK VERBATIM ───────────────────────────────────
+# Not lines this fixture composes to look like the instruction — the actual
+# bytes the pause printed. Composed ones agreed with the scan while the emitted
+# ones did not: they carried the two spaces that read nicely under the sentence
+# above, and the scan anchors at column 1, so an operator copying exactly what
+# the tool printed acknowledged nothing and the check-in paused again.
+#
+# Feeding the output back is the only form of this case that cannot drift from
+# the message, which is the whole failure: the two were written apart.
+specs=(); for ((i=1; i<=41; i++)); do specs+=("$CODEX|v$i|\"t$i\""); done
+for ((i=1; i<=15; i++)); do specs+=("$COPILOT|z$i|\"u$i\""); done
+mk "${specs[@]}"
+paused="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] || die "expected a pause to harvest the instruction from (rc=$rc)"
+emitted="$(printf '%s\n' "$paused" | grep -F '**Review-Pause-Acknowledged:**')" \
+    || die "the pause printed no acknowledgement lines to copy"
+[ "$(printf '%s\n' "$emitted" | grep -c .)" -eq 2 ] \
+    && pass "the pause prints one acknowledgement line per reviewer" \
+    || die "expected two emitted lines, got: '$emitted'"
+jq -n --arg b "$(printf 'Continuing.\n\n%s\n' "$emitted")" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:906,created_at:"2026-01-01T00:00:00Z",
+      body:$b}]' > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…and posting exactly what it printed clears it" \
+    || die "the emitted instruction did not clear the pause it came from (rc=$rc out='$out')"
+mkreviews 11
+
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.
