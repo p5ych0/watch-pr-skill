@@ -262,17 +262,28 @@ ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" "$RECORDLIB_JQ"'
                | select((.author_association | type) == "string")
                | select(.author_association | IN("OWNER","MEMBER","COLLABORATOR"))
                | select((.body | type) == "string")
-               # Anchored and taken LAST, exactly as the reviewed-commit footer
-               # is: a field-shaped line quoted inside prose — this script'"'"'s own
-               # documentation, pasted into a comment — must not be read as an
-               # acknowledgement nobody made.
-               | (.body | [scan("(?m)^\\*\\*Review-Pause-Acknowledged:\\*\\* `([^`\n]{1,200})` `([0-9]{1,9})`")]
-                        | last // ["",""])
+               # ANCHORED, which is what stops a field-shaped line quoted inside
+               # prose — the documentation this script itself prints, pasted into
+               # a comment — from being read as an acknowledgement nobody made.
+               # The `(?m)^` is the whole of that protection.
+               #
+               # EVERY MATCHING LINE, not the last one in the body. This took
+               # `last`, while the instruction below asks for ONE comment carrying
+               # a line per reviewer — so the first login had its line discarded,
+               # and a later call for that reviewer saw no acknowledgement at all
+               # while the operator had followed the documented form exactly. #59.
+               #
+               # `last` was never the prose protection either: it does not reject a
+               # pasted line, it picks one of them. What it did reject was the form
+               # this script itself prints.
+               | (.body | [scan("(?m)^\\*\\*Review-Pause-Acknowledged:\\*\\* `([^`\n]{1,200})` `([0-9]{1,9})`")])
+               | .[]
                # The login is COMPARED, never interpolated into a pattern: these
                # are `…[bot]` logins, where `[` and `]` are regex metacharacters
                # that would silently match something else entirely.
                | select(.[0] | IN($who[]))
-             ] | map(.[1]) | map(select(. != "")) | map(tonumber) | max // 0
+               | .[1]
+             ] | map(select(. != "")) | map(tonumber) | max // 0
         end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_unreadable"
     exit 2

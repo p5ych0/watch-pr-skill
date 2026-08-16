@@ -283,6 +283,29 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
 { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'ack_ahead_of_count'; } \
     && pass "an acknowledgement ahead of the count is refused, not obeyed" \
     || die "a future acknowledgement disabled the pause (rc=$rc out='$out')"
+# ── ONE COMMENT, A LINE PER REVIEWER, WHICH IS WHAT THE PAUSE ASKS FOR ─────
+# The instruction reads "post a comment containing, for each reviewer counted
+# here:" and then prints one line per login. Following it literally used to leave
+# the FIRST login unacknowledged: the scan took the last match in the body, so a
+# later call for that reviewer saw nothing and paused again — with the operator
+# having done exactly what the tool asked. Issue #59.
+#
+# The Codex line is first here on purpose: it is the one that was discarded.
+mkreviews 11
+jq -n --arg c "$CODEX" --arg p "$COPILOT" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:903,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `11`\n**Review-Pause-Acknowledged:** `" + $p + "` `0`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=11'; } \
+    && pass "one comment acknowledges the reviewer named FIRST in it" \
+    || die "the first login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
+# …and the one named last, which is what used to work by accident.
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+    && pass "…and the one named last, from the same comment" \
+    || die "the last login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
+
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.

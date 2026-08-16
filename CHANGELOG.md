@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.17] — 2026-08-16
+
+- **The round check-in printed an acknowledgement it then ignored.** Its own
+  message says to post *"a comment containing, for each reviewer counted here"*
+  and prints one line per login — but the scan took only the LAST such line in a
+  body, so following it literally left the first reviewer unacknowledged. The
+  next call for that reviewer paused again, with the operator having done exactly
+  what the tool asked, and no amount of repeating it helped.
+
+  Every anchored acknowledgement line is read now. The anchor is what stops a
+  field-shaped line quoted in prose from acknowledging anything; `last` never did
+  that — it did not reject a pasted line, it picked one of them, and the one it
+  rejected was the form this script itself prints.
+
+  A wrong acknowledgement still cannot be lowered, because the highest wins:
+  edit or delete the comment, since the count is derived from the bodies.
+  `README.md` says so now.
+
 ## [2.0.16] — 2026-08-16
 
 - **The CI gate read a clock its own tests could not reach.** `pr-ci-gate.sh`
