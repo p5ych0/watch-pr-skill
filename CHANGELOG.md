@@ -22,6 +22,13 @@
   answer existed for it, because the instruction prints the per-reviewer numbers
   the scoped calls need.
 
+  The lines it prints are also no longer indented. They carried the two spaces
+  that read nicely under the sentence above them, and the scan anchors at column
+  1 — so copying exactly what the tool printed acknowledged nothing. The anchor
+  stayed and the cosmetics went, because the anchor is the whole of what stops a
+  field-shaped line quoted inside prose from acknowledging something nobody
+  meant.
+
   A wrong acknowledgement still cannot be lowered, because the highest wins:
   edit or delete the comment, since the count is derived from the bodies.
   `README.md` says so now.

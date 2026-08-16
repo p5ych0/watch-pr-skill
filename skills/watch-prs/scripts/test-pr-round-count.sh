@@ -336,6 +336,34 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
     || die "answering one reviewer cleared the check-in for both (rc=$rc out='$out')"
 mkreviews 11
 
+# ── THE EMITTED LINES, FED BACK VERBATIM ───────────────────────────────────
+# Not lines this fixture composes to look like the instruction — the actual
+# bytes the pause printed. Composed ones agreed with the scan while the emitted
+# ones did not: they carried the two spaces that read nicely under the sentence
+# above, and the scan anchors at column 1, so an operator copying exactly what
+# the tool printed acknowledged nothing and the check-in paused again.
+#
+# Feeding the output back is the only form of this case that cannot drift from
+# the message, which is the whole failure: the two were written apart.
+specs=(); for ((i=1; i<=41; i++)); do specs+=("$CODEX|v$i|\"t$i\""); done
+for ((i=1; i<=15; i++)); do specs+=("$COPILOT|z$i|\"u$i\""); done
+mk "${specs[@]}"
+paused="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] || die "expected a pause to harvest the instruction from (rc=$rc)"
+emitted="$(printf '%s\n' "$paused" | grep -F '**Review-Pause-Acknowledged:**')" \
+    || die "the pause printed no acknowledgement lines to copy"
+[ "$(printf '%s\n' "$emitted" | grep -c .)" -eq 2 ] \
+    && pass "the pause prints one acknowledgement line per reviewer" \
+    || die "expected two emitted lines, got: '$emitted'"
+jq -n --arg b "$(printf 'Continuing.\n\n%s\n' "$emitted")" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:906,created_at:"2026-01-01T00:00:00Z",
+      body:$b}]' > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "…and posting exactly what it printed clears it" \
+    || die "the emitted instruction did not clear the pause it came from (rc=$rc out='$out')"
+mkreviews 11
+
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.

@@ -349,7 +349,14 @@ if [ "$pause" = 1 ]; then
         # announced, so the operator sees which reviewer could not be counted
         # rather than an instruction that would wedge that phase.
         _wr="$(count_for "$_wj")" || exit 2
-        echo "  **Review-Pause-Acknowledged:** \`$_w\` \`$_wr\`" >&2
+        # NOT INDENTED, because the scan anchors these at column 1 — and it must:
+        # the anchor is the whole of what stops a field-shaped line quoted inside
+        # prose from acknowledging something nobody meant. Printed with the two
+        # spaces that read nicely under the sentence above, the lines an operator
+        # copies VERBATIM matched nothing, and the check-in paused again after
+        # being answered exactly as instructed. Loosening the anchor to accept
+        # indentation would have traded that protection for the cosmetics.
+        echo "**Review-Pause-Acknowledged:** \`$_w\` \`$_wr\`" >&2
     done
     exit 3
 fi
