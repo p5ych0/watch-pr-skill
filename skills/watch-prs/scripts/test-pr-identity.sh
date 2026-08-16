@@ -245,6 +245,16 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # legal simple command — was trimmed down to exactly the exempt bootstrap clear
 # and the copied clear passed. Only the redirection is dropped; operands after it
 # survive to be judged.
+# WHAT THIS CANNOT DO, so nobody mistakes it for the guarantee. It reads text, and
+# a prefix redirection — `2>/dev/null unset -f rb_elapsed`, or the same before a
+# `.` — moves the command word off the anchor and past both patterns. Anchoring
+# is not optional either: these scripts DISCUSS `unset -f` in prose, so an
+# unanchored match reports comments, which is the defect that closed #54.
+#
+# So this is a lint, and the guarantee is the behavioural fixture below it: each
+# clock caller is run against an EMPTY `clocklib.sh` and must refuse. A
+# hand-written load cannot pass that however it is spelled, because what fails
+# there is the missing verification rather than the missing pattern.
 rb_copies_the_loading_rule() {   # <file> ; 0 when it does
     grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$1" \
       | sed 's/[[:space:]]*[0-9]*>&\{0,1\}[^[:space:]]*//g; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
@@ -515,16 +525,56 @@ set -e
 #
 # DERIVED FROM THE TREE. A second hand-written list would be the same omission
 # again, one file along.
+# NO PREFILTER. The first version skipped a script with no `rb_load` call, so a
+# script that replaced EVERY load with a hand-written sequence was not scanned at
+# all — the guard disappearing along with the thing it requires. Every runtime
+# script is scanned, whether or not it currently loads anything.
 for sc in "$ROOT"/pr-*.sh; do
     [ -f "$sc" ] || continue
-    grep -q 'rb_load "\$_RB_SELF_DIR"' "$sc" || continue
     _n="$(basename "$sc")"
+    # ONE EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every inherited
+    # function on purpose — it re-execs into a clean shell and then removes what a
+    # startup hook may have left, which is the opposite of copying a loading rule.
+    # `test-pr-selfcheck.sh` covers that block, including the case where the clear
+    # itself fails.
+    [ "$_n" = pr-selfcheck.sh ] && continue
     if rb_copies_the_loading_rule "$sc"; then
         echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - $_n loads its libraries through the shared loader alone"
     fi
 done
+
+# ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
+# A library that sources cleanly and defines NOTHING is what `rb_load` exists to
+# catch, and it is what a hand-written load misses however the load is spelled.
+# Each clock caller is run from a copy whose `clocklib.sh` is empty, with a stale
+# `rb_elapsed` exported in, so the only thing that changed is the library.
+CLKTMP="$(mktemp_d)" || { echo "FAIL - could not create a scratch directory"; idfail=1; CLKTMP=""; }
+if [ -n "$CLKTMP" ]; then
+    mkdir -p "$CLKTMP/run"
+    for g in "$ROOT"/*.sh; do ln -sf "$g" "$CLKTMP/run/$(basename "$g")"; done
+    rm -f "$CLKTMP/run/clocklib.sh"; : > "$CLKTMP/run/clocklib.sh"
+    for sc in pr-watch.sh pr-ci-gate.sh; do
+        [ -f "$ROOT/$sc" ] || continue
+        # `|| rc=$?`, NOT `; rc=$?`. Under `set -e` a failing command substitution
+        # inside an assignment aborts the fixture before the status can be read —
+        # and a caller REFUSING is exactly what this case expects, so the abort
+        # happened on every correct run and the block printed nothing at all.
+        rc=0
+        out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
+                 bash -c 'rb_elapsed() { RB_ELAPSED=0; }
+                          export -f rb_elapsed
+                          exec "$1" 7 0123456789abcdef0123456789abcdef01234567' \
+                 _ "$CLKTMP/run/$sc" 2>&1)" || rc=$?
+        if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'clocklib_empty'; then
+            echo "ok   - $sc refuses an empty clocklib even with rb_elapsed already defined"
+        else
+            echo "FAIL - $sc accepted an inherited clock (rc=$rc out='$out')"; idfail=1
+        fi
+    done
+    rm -rf "$CLKTMP"
+fi
 
 if [ "$idfail" -ne 0 ]; then
     echo "RESULT: FAIL"
