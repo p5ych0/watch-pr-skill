@@ -35,12 +35,22 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/identitylib.sh
         "$ROOT"/loadlib.sh
         "$ROOT"/recordlib.sh
+        "$ROOT"/clocklib.sh
         "$ROOT"/testlib.sh )
 # Every RUNTIME script sits beside this test, and SKILL.md is one level up. Guard
 # the skill only when present (robust if a consumer strips it); in the plugin it
 # is always there, so it is always linted.
 SKILL="$ROOT/../SKILL.md"
 [ -f "$SKILL" ] && FILES+=( "$SKILL" )
+
+# THE LIBRARIES, AND WHAT THEY DEFINE, read off the tree rather than listed. Both
+# alternations below were hand-written lists and `clocklib.sh` landed missing from
+# each, which is the omission this derivation removes for every future one.
+# `loadlib.sh` is excluded: it is the bootstrap, and every caller loads it by hand
+# because a helper cannot load the file that defines it.
+_LIB_NAMES="$(ls "$ROOT" 2>/dev/null | sed -n 's/^\([a-z][a-z]*lib\)\.sh$/\1/p' \
+    | grep -v '^loadlib$' | tr '\n' '|' | sed 's/|$//')"
+[ -n "$_LIB_NAMES" ] || { echo "FAIL - no shared libraries found; the hand-load guard would assert nothing"; exit 1; }
 
 # The list above must not go stale: a new runtime script that talks to GitHub is
 # exactly where a hard-coded owner/repo would appear, and a guard that silently
@@ -226,6 +236,35 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
+# THE CLAUSE IS A FUNCTION so the loop below reads as the rule it applies. It once
+# ran over every runtime script as well — that is #67's hand-load half, and it was
+# removed from this change as scope that belongs to the follow-up. What #66 needs
+# is that its two CLOCK callers obey the rule, and the behavioural fixture at the
+# end of this file proves that far more strongly than any pattern can.
+#
+# THE REDIRECTION TOKEN IS REMOVED, NOT EVERYTHING AFTER IT. The first version cut
+# from `2>` to the `||`, so `unset -f rb_load 2>/dev/null rb_elapsed || …` — a
+# legal simple command — was trimmed down to exactly the exempt bootstrap clear
+# and the copied clear passed. Only the redirection is dropped; operands after it
+# survive to be judged.
+# WHAT THIS CANNOT DO, so nobody mistakes it for the guarantee. It reads text, and
+# a prefix redirection — `2>/dev/null unset -f rb_elapsed`, or the same before a
+# `.` — moves the command word off the anchor and past both patterns. Anchoring
+# is not optional either: these scripts DISCUSS `unset -f` in prose, so an
+# unanchored match reports comments, which is the defect that closed #54.
+#
+# So this is a lint, and the guarantee is the behavioural fixture below it: each
+# clock caller is run against an EMPTY `clocklib.sh` and must refuse. A
+# hand-written load cannot pass that however it is spelled, because what fails
+# there is the missing verification rather than the missing pattern.
+rb_copies_the_loading_rule() {   # <file> ; 0 when it does
+    grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$1" \
+      | sed 's/[[:space:]]*[0-9]*>&\{0,1\}[^[:space:]]*//g; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
+      | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' && return 0
+    grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$1" && return 0
+    return 1
+}
+
 # `pr-watch.sh` is in this list too. It loads `recordlib.sh` rather than the
 # identity parser, so the identity clause skips it — but the BOOTSTRAP rule is
 # about loading anything at all, and `pr-watch.sh` is the caller the invariant was
@@ -255,8 +294,40 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # with the check still green. Leading whitespace is allowed, and `source` is
     # matched as well as `.`: the rule is about loading a library by hand, not
     # about which of the two spellings was used.
-    if grep -qE 'unset -f (rb_identity|is_full_sha|sha_reason|run_limited)' "$ROOT/$sc" \
-       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/(recordlib|identitylib|testlib)\.sh' "$ROOT/$sc"; then
+    #
+    # THE TWO ALTERNATIONS ARE DERIVED, NOT WRITTEN OUT. They were lists — of
+    # library basenames and of the symbols a hand-load clears — and `clocklib.sh`
+    # arrived missing from both, so a script could source it by hand and this
+    # check stayed green. That is the shape `CLAUDE.md` names: a list of names is
+    # wrong by omission, so change the shape until no list is needed. The
+    # libraries ARE the `*lib.sh` files beside this test, and their symbols are
+    # the functions they define; `loadlib.sh` is excluded because it is the
+    # bootstrap every caller must load by hand.
+    # NO SYMBOL LIST AT ALL, and no parsing of the libraries to build one. That
+    # was a `sed` over their function declarations, and it would silently omit
+    # `rb_new () {` or a brace on the next line — both legal — while the other
+    # libraries kept the alternation non-empty, so a caller could hand-clear the
+    # omitted name with the guard still green. The rule does not need to know the
+    # names: a runtime script clears exactly ONE function by hand, `rb_load`, and
+    # any other `unset -f` is the copied loading rule.
+    #
+    # THE PATTERN STAYS IN SINGLE QUOTES, with the derived names spliced in. The
+    # first version put the whole thing in double quotes so the variables would
+    # expand — and `\$_RB_SELF_DIR` then reached `grep` as `$_RB_SELF_DIR`, where
+    # `$` is an end-of-line anchor. The pattern matched NOTHING, both fixtures
+    # below passed, and the guard reported an invariant it no longer had.
+    # THE EXEMPTION IS THE WHOLE COMMAND, NOT A SUBSTRING OF IT. `grep -v` drops a
+    # LINE that contains the pattern, so `unset -f rb_load rb_elapsed` was exempted
+    # by the `rb_load` in it while clearing a library symbol beside it — the copied
+    # loading rule walking back in through the allowance written for the bootstrap.
+    # The trailing noise is stripped and the remainder must be exactly the
+    # bootstrap clear.
+    # WHITESPACE IS `[[:space:]]+`, NOT A SINGLE SPACE. `unset  -f rb_elapsed` and a
+    # tab after `-f` are both legal, and the detector matched neither — so it
+    # emitted no line at all, the inverted grep received empty input, and the guard
+    # reported that no copied loading rule existed. A check that finds nothing and
+    # a check that finds nothing wrong are the same output.
+    if rb_copies_the_loading_rule "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - …and carries no second copy of the loading rule"
@@ -446,6 +517,109 @@ set -e
 
 rm -rf "$IDTMP"
 set -e
+# ── THE INVARIANT ITSELF, RUN RATHER THAN READ ─────────────────────────────
+# Two things have to hold, and neither is a pattern.
+#
+# THAT `rb_load` DID THE LOAD. A COMPLETE copy of the loading rule — clear,
+# source, verify, report — refuses an empty library exactly as `rb_load` does, so
+# an outcome-only check calls it compliant while the caller has reimplemented the
+# loader and is free to drift from it. `loadlib.sh` is replaced by one that
+# records each library it is asked for and then delegates, so what is asserted is
+# that the shared loader was USED, not that something behaved like it.
+#
+# AND THAT AN EMPTY LIBRARY IS REFUSED, with the status each caller's consumer
+# actually branches on: `pr-watch.sh` exits 2 for an unreadable state, because 1
+# means an ordinary timeout and the driver RE-ARMS it — a clock that cannot be
+# read would become an indefinite watch loop — and the gate exits 1, which is its
+# contract for refusing a round.
+CLKTMP="$(mktemp_d)" || { echo "FAIL - could not create a scratch directory"; idfail=1; CLKTMP=""; }
+if [ -n "$CLKTMP" ]; then
+    mkdir -p "$CLKTMP/run"
+    for g in "$ROOT"/*.sh; do ln -sf "$g" "$CLKTMP/run/$(basename "$g")"; done
+    rm -f "$CLKTMP/run/clocklib.sh"; : > "$CLKTMP/run/clocklib.sh"
+    rm -f "$CLKTMP/run/loadlib.sh"
+    cat > "$CLKTMP/run/loadlib.sh" <<'SPY'
+. "$RB_REAL_LOADLIB" || return 1
+eval "rb_real_load() $(declare -f rb_load | sed '1d')"
+rb_load() { printf '%s\n' "$2" >> "$RB_LOAD_SPY"; rb_real_load "$@"; }
+SPY
+    for sc in pr-watch.sh:2 pr-ci-gate.sh:1; do
+        _n="${sc%%:*}"; _want="${sc##*:}"
+        [ -f "$ROOT/$_n" ] || continue
+        : > "$CLKTMP/spy"
+        # `|| rc=$?`, NOT `; rc=$?`. Under `set -e` a failing command substitution
+        # inside an assignment aborts the fixture before the status can be read —
+        # and refusing is what a correct run does here, so the whole block printed
+        # nothing at all until this was found by running it.
+        rc=0
+        out="$(run_limited 20 env RB_REAL_LOADLIB="$ROOT/loadlib.sh" RB_LOAD_SPY="$CLKTMP/spy" \
+                 REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
+                 bash -c 'rb_elapsed() { RB_ELAPSED=0; }
+                          export -f rb_elapsed
+                          exec "$1" 7 0123456789abcdef0123456789abcdef01234567' \
+                 _ "$CLKTMP/run/$_n" 2>&1)" || rc=$?
+        if grep -qx clocklib "$CLKTMP/spy" 2>/dev/null; then
+            echo "ok   - $_n loads the clock through rb_load itself, not through a copy of it"
+        else
+            echo "FAIL - $_n never asked rb_load for clocklib (spy: $(tr '\n' ' ' < "$CLKTMP/spy"))"; idfail=1
+        fi
+        if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q 'clocklib_empty'; then
+            echo "ok   - …and refuses an empty clocklib with rc=$_want, even with rb_elapsed defined"
+        else
+            echo "FAIL - $_n gave rc=$rc for an empty clocklib (wanted $_want) out='$out'"; idfail=1
+        fi
+    done
+    # …AND THE SAME REFUSAL FROM A HOSTILE STARTUP HOOK, at the callers, with a
+    # REAL library. `BASH_ENV` runs before the script and can leave `RB_ELAPSED`
+    # readonly; assigning to it would be fatal, so the process would die with no
+    # sentinel and — for the watch — status 1, which the driver re-arms as an
+    # ordinary timeout. The library refuses before writing, and what that has to
+    # look like from outside is each caller's documented failure, not merely
+    # "non-zero".
+    # TWO HOOKS: the plain one, and the one that also FORGES the inspection. A
+    # first fix asked `declare` whether these names were plain, and a hook that
+    # defines `declare` answers yes for everything — after which the assignment is
+    # fatal exactly as before. The forged case is the discriminating one, so it is
+    # here rather than left as a shape nobody runs.
+    printf 'readonly RB_ELAPSED=0\n' > "$CLKTMP/hook.sh"
+    printf 'declare() { printf "declare -- %%s\\n" "$2"; }\nreadonly RB_ELAPSED=0\n' \
+        > "$CLKTMP/hook-forged.sh"
+    # …and the alias BETWEEN two state variables, which no same-value check sees.
+    #
+    # ONLY WHERE THE SHELL HAS NAMEREFS. `declare -n` is Bash 4.3+, and the macOS
+    # job runs this suite on 3.2, where the hook itself fails with `invalid
+    # option` — so nothing is aliased, the caller proceeds, and the case fails on
+    # whatever it does next. That is the shape this job exists to catch, and it
+    # caught it: the unit case was guarded by version and this one was not.
+    _hooks="hook hook-forged"
+    if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
+        printf 'declare -n RB_CLOCK_T0=RB_CLOCK_LAST\n' > "$CLKTMP/hook-alias.sh"
+        _hooks="$_hooks hook-alias"
+    else
+        echo "ok   - …(alias hook skipped: Bash ${BASH_VERSINFO[0]:-?}.${BASH_VERSINFO[1]:-?} has no declare -n)"
+    fi
+    # The real library AND the real loader: the spy above replaced both, and this
+    # case is about the clock refusing rather than about who loaded it.
+    ln -sf "$ROOT/clocklib.sh" "$CLKTMP/run/clocklib.sh"
+    ln -sf "$ROOT/loadlib.sh" "$CLKTMP/run/loadlib.sh"
+    for _hook in $_hooks; do
+        for sc in pr-watch.sh:2:clock_unreadable pr-ci-gate.sh:1:"could not read the clock"; do
+            _n="${sc%%:*}"; _rest="${sc#*:}"; _want="${_rest%%:*}"; _say="${_rest#*:}"
+            [ -f "$ROOT/$_n" ] || continue
+            rc=0
+            out="$(run_limited 20 env BASH_ENV="$CLKTMP/$_hook.sh" \
+                     REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
+                     "$CLKTMP/run/$_n" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
+            if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q "$_say"; then
+                echo "ok   - $_n reports a hook-owned clock as rc=$_want ($_hook), not a timeout to re-arm"
+            else
+                echo "FAIL - $_n gave rc=$rc under $_hook (wanted $_want / '$_say') out='$out'"; idfail=1
+            fi
+        done
+    done
+    rm -rf "$CLKTMP"
+fi
+
 if [ "$idfail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

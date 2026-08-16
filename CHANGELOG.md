@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.16] — 2026-08-16
+
+- **The CI gate read a clock its own tests could not reach.** `pr-ci-gate.sh`
+  measured elapsed time with `$SECONDS`, a Bash builtin, while `pr-watch.sh` used
+  `date +%s` — and that difference decides whether a fixture can own time.
+  `test-pr-watch.sh` stubs `date` and `sleep`, so its poll counts are exact;
+  `test-pr-ci-gate.sh` could only wait out real seconds, and every deadline case
+  there raced however loaded the runner was. One of them failed a CI job on a
+  commit that had passed the same job forty minutes earlier.
+
+  Both scripts now read the clock through `clocklib.sh`. The gate gains the
+  guards it never had with a bare builtin: a `date` that prints a plausible epoch
+  and then fails, an epoch past Bash's integer range — which wraps inside the
+  subtraction and pins elapsed time at zero — and a clock that steps backward,
+  which otherwise extends the bound by however far it went.
+
+  Nothing about the gate's behaviour changes when the clock is well-behaved. What
+  changes is that it now refuses rather than polling unbounded when the clock is
+  not, and that its deadline cases can be made deterministic — which is what
+  issue #38 needs and could not have inside the fixture.
+
 ## [2.0.15] — 2026-08-15
 
 - **The driver was told what a round may change, and not how to choose between
