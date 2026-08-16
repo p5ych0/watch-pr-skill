@@ -293,9 +293,14 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # loading rule walking back in through the allowance written for the bootstrap.
     # The trailing noise is stripped and the remainder must be exactly the
     # bootstrap clear.
-    if grep -E '^[[:space:]]*unset -f ' "$ROOT/$sc" \
+    # WHITESPACE IS `[[:space:]]+`, NOT A SINGLE SPACE. `unset  -f rb_elapsed` and a
+    # tab after `-f` are both legal, and the detector matched neither — so it
+    # emitted no line at all, the inverted grep received empty input, and the guard
+    # reported that no copied loading rule existed. A check that finds nothing and
+    # a check that finds nothing wrong are the same output.
+    if grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$ROOT/$sc" \
          | sed 's/[[:space:]]*2>[^|&]*//; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
-         | grep -qvE '^[[:space:]]*unset -f rb_load$' \
+         | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' \
        || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
