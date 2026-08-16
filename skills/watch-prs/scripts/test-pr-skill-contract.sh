@@ -127,16 +127,28 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 # that quietly grew the block back — or that dropped the call and left the phase
 # closing by hand — would pass every check in the other file, because that file
 # only ever sees the script.
-grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"' <<<"$skill_flat" \
+#
+# THE WHOLE LINE, UNFLATTENED, and that is not a style choice. Four assertions
+# across this file depend on this call's arguments, and every one of them was
+# satisfied by a USAGE COMMENT nine hundred lines earlier: `$skill_flat` is built
+# with `tr -s ' '`, which squeezes that comment's aligned double space into
+# exactly the substring they searched for. The driver could have passed the
+# current head, or hard-coded `both`, with all four green. Matching the complete
+# line in the raw file removes the dependency on the flattening AND on the
+# substring, rather than guarding either — see CLAUDE.md § One change per review
+# round.
+RB_CLOSE_CALL='(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")'
+rb_close_call_present() { grep -qxF "$RB_CLOSE_CALL" "$SKILL"; }
+rb_close_call_present \
     && pass "the post-Copilot close is delegated to the phase script" \
-    || die "SKILL.md no longer calls pr-copilot-phase.sh close; the block may have grown back"
+    || die "SKILL.md does not call the close stage as: $RB_CLOSE_CALL"
 # …FROM THE REPOSITORY THIS SESSION STARTED IN. The stage derives its own identity
 # from the current directory, so a `cd` into another checkout between setup and
 # step 8 would read whatever PR of THAT repository shares this number and post the
 # Copilot signoff onto it. The inline block this replaced could not drift, because
 # it used the `$HOST/$OWNER/$REPO` already derived in setup; a child script can,
 # and the merge gate below is already wrapped for exactly this.
-grep -qF '(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close' <<<"$skill_flat" \
+rb_close_call_present \
     && pass "…from the repository this session started in" \
     || die "the close stage is run from the current directory; a cd between setup and step 8 signs off the wrong repository"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
@@ -1564,7 +1576,7 @@ awk '/--add-reviewer @copilot/ {print NR": "$0}' "$SKILL" | head -1 >/dev/null
 # through — a call that hard-coded `both`, or dropped the argument, would take the
 # script's default and reach the recheck that cannot pass, with the fixture none
 # the wiser because it calls the script directly.
-grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"' <<<"$skill_flat" \
+rb_close_call_present \
     && pass "the reviewers mode is passed to the close stage" \
     || die "codex-only is not passed through; the driver would take the two-reviewer path"
 
@@ -1629,7 +1641,7 @@ awk '/STOP — the next phase is the operator/ {c=1} c {print} c && /^```bash$/ 
 # it reads against the Codex sha it is GIVEN. A driver passing the current head
 # instead would make every phase look unchanged, the fault-tolerance pass would
 # never be offered, and the fixture would still be green.
-grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA"' <<<"$skill_flat" \
+rb_close_call_present \
     && pass "…and the close is given the Codex-signed head to compare against" \
     || die "the close stage is not given \$CODEX_SHA; it cannot tell a moved head from an unchanged one"
 # THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
