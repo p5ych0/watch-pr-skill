@@ -216,16 +216,16 @@ DATESH
     gate_case '3'         1 1 "no probe is started once the deadline has passed" \
         PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
     probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
-    # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
-    # deadline, probe again, and only then notice — so `-le 2` accepted the defect
-    # it was written to catch. The bound is checked before the second probe, so
-    # there is no second probe.
-    # EXACTLY ONE, not at most one. Two is what the clamp produced — probe, sleep
-    # onto the deadline, probe again, and only then notice — and ZERO is a gate
-    # that never probed at all, which `-le` accepted as success. Both are now
-    # excluded, and the count is a fact rather than a bound because the fixture
-    # owns the clock: time moves only when the gate sleeps, so nothing the runner
-    # is doing can change it.
+    # EXACTLY ONE, and the history of this line is why it is a count rather than a
+    # bound. TWO is what the clamp produced — probe, sleep onto the deadline, probe
+    # again, and only then notice — and an early `-le 2` accepted the very defect
+    # it was written to catch. Tightening it to `-le 1` fixed that and left the
+    # other end open: ZERO is a gate that never probed at all, which passed the
+    # case written to prove it stops probing.
+    #
+    # Both ends are excluded now because the count is a FACT: the fixture owns the
+    # clock, so time moves only when the gate sleeps and nothing the runner is
+    # doing can change it. Before that it could not have been exact.
     [ "${probes_after:-0}" -eq 1 ] \
         && pass "…so an expired gate makes exactly the one request it had time for" \
         || die "the gate made $probes_after requests around its deadline (wanted 1)"
