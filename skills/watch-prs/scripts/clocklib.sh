@@ -58,7 +58,7 @@
 # one of the few things a script cannot undo from inside, so the answer is to
 # notice rather than to defend.
 rb_elapsed() {   # rb_elapsed [start] ; sets RB_ELAPSED, non-zero if untrustworthy
-    local t
+    local t _rb_v
     t="$(date +%s 2>/dev/null)" || return 1
     # BOUNDED, and NOT ZERO-PADDED. TWELVE `?`, not eleven: `N` question marks
     # followed by `*` matches every string of length N OR MORE, so eleven would
@@ -74,6 +74,27 @@ rb_elapsed() {   # rb_elapsed [start] ; sets RB_ELAPSED, non-zero if untrustwort
         ""|*[!0-9]*|0?*|????????????*) return 1 ;;
     esac
     if [ "${1-}" = start ]; then
+        # THE STATE IS CHECKED BEFORE IT IS WRITTEN, because writing is not
+        # recoverable. An assignment to a variable a startup hook left `readonly`
+        # is FATAL in a non-interactive shell: the process dies at that line, so
+        # neither `|| return 1` here nor the caller's handler runs, and
+        # `pr-watch.sh` exits 1 without its sentinel — a status the driver treats
+        # as an ordinary timeout and RE-ARMS, which is the endless watch this file
+        # exists to prevent. Noticing after the fact is not available; the only
+        # place to notice is before.
+        #
+        # ANY ATTRIBUTE, NOT A LIST OF THEM. `readonly` is one way to own these
+        # names and `declare -n` is another — a nameref makes the assignment
+        # SUCCEED against someone else's variable, so every guard below reports a
+        # good reading of a clock that is not ours. Rather than enumerate the
+        # attributes that are hostile, anything other than a plain variable is
+        # refused, which cannot be wrong by omission.
+        for _rb_v in RB_CLOCK_T0 RB_CLOCK_LAST RB_ELAPSED; do
+            case "$(declare -p "$_rb_v" 2>/dev/null)" in
+                ''|'declare -- '*) ;;
+                *) return 1 ;;
+            esac
+        done
         RB_CLOCK_T0="$t"   || return 1
         RB_CLOCK_LAST="$t" || return 1
         RB_ELAPSED=0       || return 1

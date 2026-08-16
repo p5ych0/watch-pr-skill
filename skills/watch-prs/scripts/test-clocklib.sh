@@ -141,14 +141,23 @@ done
 # over an assignment that never happened — the caller polling forever against a
 # stale zero. Every assignment in the library takes its status for that reason.
 #
-# WHAT THIS CASE PINS IS THE OUTCOME, NOT THE MECHANISM, and it says so because
-# the two are not the same here: on the Bash this was written against, the failed
-# assignment already returns non-zero without reaching the `return 0`, so removing
-# the guard does not change the answer. It may on another — the guard is what
-# makes the outcome independent of that — and the assertion is written against
-# what a caller can observe: a readonly state variable never yields a SUCCESSFUL
-# reading. The load is checked separately so a case that never sourced the library
-# cannot report this as proven.
+# IT MUST RETURN, NOT DIE. Assigning to a readonly variable is FATAL in a
+# non-interactive shell, so the earlier version of this — assign, then take the
+# status — killed the process at that line: no `|| return 1`, no caller handler,
+# and `pr-watch.sh` exiting 1 without its sentinel, which the driver treats as an
+# ordinary timeout and re-arms. `RC=1` is therefore the whole assertion: the
+# status was produced, which means the library refused BEFORE writing.
+#
+# An earlier version accepted empty output as a refusal and so reported that fatal
+# exit as a pass. The load is checked separately too, so a case that never sourced
+# the library cannot report this as proven.
+#
+# WHETHER IT IS FATAL DEPENDS ON THE CONTEXT, measured both ways: in this probe
+# the shell prints and carries on, so `|| return 1` produces RC=1 with or without
+# the guard above it, and this case does NOT distinguish them. The cases that do
+# are at CALLER level in `test-pr-identity.sh`, where the same state kills
+# `pr-watch.sh` outright and it exits 1 with no sentinel. Said here so the next
+# reader does not take this one for the proof.
 #
 # THE LIBRARY PATH GOES THROUGH THE ENVIRONMENT, not through nested quoting. The
 # first version spliced it into the single-quoted script, the `.` silently failed,
@@ -159,9 +168,9 @@ ro="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" 
     readonly RB_ELAPSED=0
     rb_elapsed start
     echo "RC=$?"' 2>/dev/null)"
-[ "$ro" = "RC=0" ] \
-    && die "a failed state assignment was reported as a good reading ($ro)" \
-    || pass "a readonly state variable is refused, not reported as zero elapsed"
+[ "$ro" = "RC=1" ] \
+    && pass "a readonly state variable is refused, and the caller lives to see the status" \
+    || die "a readonly state variable did not produce a clean refusal ($ro)"
 [ "$ro" = "RC=9" ] \
     && die "the readonly case never loaded the library, so it proved nothing" \
     || pass "…and that case really did load the library it is about"
