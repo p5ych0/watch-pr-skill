@@ -185,11 +185,14 @@ ro="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" 
 # skipped there rather than asserted as a pass — `BASH_VERSINFO` is a variable, so
 # no function can answer for it.
 if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
-    # BOTH DIRECTIONS: at a variable outside the trio, which the read-back catches,
-    # and at another MEMBER of it, which the read-back cannot — `RB_CLOCK_T0` and
-    # `RB_CLOCK_LAST` are deliberately given the same time, so an alias between
-    # them survives every same-value check and then makes elapsed `t - t`, zero
-    # forever. Distinct probe values inside the subshell are what see it.
+    # BOTH TARGETS ARE INSIDE THE TRIO, which is what these checks can see. An
+    # earlier comment here called one of them "outside" it; `RB_ELAPSED` is not,
+    # and the claim was wrong. An alias to a variable outside the three passes
+    # both the probe and the read-back, because nothing about the stored value is
+    # wrong — `declare -n RB_CLOCK_T0=SECONDS` then ticks along with `date` and
+    # the subtraction stays near zero. That case is #69, and it is deliberately
+    # absent here rather than asserted, since a fixture for it would pin the hole
+    # instead of a contract.
     for _alias in RB_ELAPSED RB_CLOCK_LAST; do
         nr="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" \
               RB_ALIAS="$_alias" bash -c '
