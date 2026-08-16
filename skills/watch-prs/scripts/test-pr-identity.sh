@@ -236,6 +236,23 @@ mech2="$(bash -c 'rb_identity() { :; }; readonly -f rb_identity
 # that they call it — and that `rb_load` is the thing that takes the status.
 # Checking the scripts for an `unset` they no longer contain would pass by
 # vacuity, which is the failure mode this file exists to avoid.
+# THE CLAUSE IS A FUNCTION, because it is asked twice: once per script in the
+# identity loop below, and once over EVERY runtime script after it. Written out
+# twice, the second copy is the one that would drift.
+#
+# THE REDIRECTION TOKEN IS REMOVED, NOT EVERYTHING AFTER IT. The first version cut
+# from `2>` to the `||`, so `unset -f rb_load 2>/dev/null rb_elapsed || …` — a
+# legal simple command — was trimmed down to exactly the exempt bootstrap clear
+# and the copied clear passed. Only the redirection is dropped; operands after it
+# survive to be judged.
+rb_copies_the_loading_rule() {   # <file> ; 0 when it does
+    grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$1" \
+      | sed 's/[[:space:]]*[0-9]*>&\{0,1\}[^[:space:]]*//g; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
+      | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' && return 0
+    grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$1" && return 0
+    return 1
+}
+
 # `pr-watch.sh` is in this list too. It loads `recordlib.sh` rather than the
 # identity parser, so the identity clause skips it — but the BOOTSTRAP rule is
 # about loading anything at all, and `pr-watch.sh` is the caller the invariant was
@@ -298,10 +315,7 @@ for sc in pr-review-state.sh pr-findings.sh pr-round-count.sh pr-ci-state.sh pr-
     # emitted no line at all, the inverted grep received empty input, and the guard
     # reported that no copied loading rule existed. A check that finds nothing and
     # a check that finds nothing wrong are the same output.
-    if grep -E '^[[:space:]]*unset[[:space:]]+-f[[:space:]]' "$ROOT/$sc" \
-         | sed 's/[[:space:]]*2>[^|&]*//; s/[[:space:]]*[|&][|&].*//; s/[[:space:]]*$//' \
-         | grep -qvE '^[[:space:]]*unset[[:space:]]+-f[[:space:]]+rb_load$' \
-       || grep -qE '^[[:space:]]*(\.|source)[[:space:]]+"?\$_RB_SELF_DIR/('"$_LIB_NAMES"')\.sh' "$ROOT/$sc"; then
+    if rb_copies_the_loading_rule "$ROOT/$sc"; then
         echo "FAIL - $sc has its own copy of the loading rule again"; idfail=1
     else
         echo "ok   - …and carries no second copy of the loading rule"
@@ -491,6 +505,27 @@ set -e
 
 rm -rf "$IDTMP"
 set -e
+# …AND TO EVERY RUNTIME SCRIPT, not only the five the identity loop names. That
+# list exists because those scripts load the identity parser; the rule about
+# NOT writing the loading sequence out by hand belongs to anything that loads a
+# library at all, and `pr-ci-gate.sh` — which gained a `clocklib.sh` load in #66
+# and has loaded `recordlib.sh` for far longer — was inspected by nothing. Issue
+# #67 was filed for the wider gap; this is the half of it that this change made
+# reachable, so it lands here rather than being deferred.
+#
+# DERIVED FROM THE TREE. A second hand-written list would be the same omission
+# again, one file along.
+for sc in "$ROOT"/pr-*.sh; do
+    [ -f "$sc" ] || continue
+    grep -q 'rb_load "\$_RB_SELF_DIR"' "$sc" || continue
+    _n="$(basename "$sc")"
+    if rb_copies_the_loading_rule "$sc"; then
+        echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1
+    else
+        echo "ok   - $_n loads its libraries through the shared loader alone"
+    fi
+done
+
 if [ "$idfail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
