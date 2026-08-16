@@ -116,34 +116,26 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 # differ — a session resuming into that reopened phase reads it as a Copilot
 # phase to run again.
 #
-# The GUARD is asserted, not the prose, because prose is what failed: the option
-# was described as conditional in the operator's ear while the branch offering it
-# ran unconditionally. This is one of the narrow lifts #26 allows — an anchored
-# match on a condition, no grammar — and it is worth one here because `SKILL.md`'s
-# bash has no other coverage at all.
-grep -qF 'if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then' <<<"$skill_flat" \
-    && pass "the post-Copilot decision branches on whether the phase produced commits" \
-    || die "SKILL.md offers the same post-Copilot options whether or not Copilot committed"
-# …AND THE OPTION IS ABSENT FROM THE EQUAL-SHA BRANCH, which is the half that
-# matters. A branch that exists and offers the pass anyway satisfies the check
-# above while changing nothing.
-_ft_same="$(sed -n '/if \[ "\$COPILOT_SHA" = "\$CODEX_SHA" \]; then/,/^else$/p' "$SKILL")" \
-    || die "could not read the equal-sha branch"
-grep -qi 'fault.tolerance pass to run' <<<"$_ft_same" \
-    && pass "the equal-sha branch says why there is no pass to run" \
-    || die "the equal-sha branch does not explain the absent fault-tolerance pass"
-# …AND ITS MENU IS A WHITELIST, not one forbidden phrase. The first version of
-# this rejected the wording `another Codex pass`, which rephrasing option (b) to
-# `run the fault-tolerance pass first` walks straight past — the driver reoffers
-# the pass over commits that do not exist while its only executable coverage
-# stays green. This repository has been here before: assert what must appear.
-# Every option line in the branch is matched against the exact allowed set, so a
-# reworded (b) and an added (c) both fail.
-_ft_opts="$(grep '^    ([a-z]) ' <<<"$_ft_same")"
-[ "$_ft_opts" = "    (a) merge — run the gate below
-    (b) stop and leave the PR open" ] \
-    && pass "the equal-sha branch offers merge or stop, and nothing else" \
-    || die "the equal-sha branch's options are not merge-or-stop (got: $_ft_opts)"
+# THE BRANCH IS NO LONGER HERE, and that is the fix rather than a gap. It moved
+# into `pr-copilot-phase.sh close` in #78, where `test-pr-copilot-phase.sh` RUNS
+# both halves and reads what each one offers — including the whitelist of option
+# lines this file used to carry, which came with it. What was an anchored match on
+# the spelling of a condition, allowed only because `SKILL.md`'s bash had no other
+# coverage at all, is now an executed assertion. See CLAUDE.md § Tests.
+#
+# WHAT IS ASSERTED HERE INSTEAD is that the driver still DELEGATES. A `SKILL.md`
+# that quietly grew the block back — or that dropped the call and left the phase
+# closing by hand — would pass every check in the other file, because that file
+# only ever sees the script.
+grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"' <<<"$skill_flat" \
+    && pass "the post-Copilot close is delegated to the phase script" \
+    || die "SKILL.md no longer calls pr-copilot-phase.sh close; the block may have grown back"
+# …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
+# says so to nobody, and the next step reads the missing signoff as absent rather
+# than as failed.
+grep -qF 'CLOSE_RC=$?' <<<"$skill_flat" \
+    && pass "…and its status is taken" \
+    || die "SKILL.md runs the close stage without reading its status"
 
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \
@@ -1556,9 +1548,16 @@ awk '/--add-reviewer @copilot/ {print NR": "$0}' "$SKILL" | head -1 >/dev/null
 # with a Copilot recheck that runs unconditionally, and in codex-only there is no
 # Copilot review for it to find — so the driver exited before the gate it had just
 # been taught to call.
-grep -q 'if \[ "\$REVIEWERS" != codex-only \]; then' "$SKILL" \
-    && pass "the Copilot signoff block is skipped when there was no Copilot phase" \
-    || die "codex-only still runs a Copilot recheck it cannot pass"
+#
+# THE SKIP IS THE SCRIPT'S NOW (#78), and `test-pr-copilot-phase.sh` runs it: the
+# `codex-only` case there asserts nothing is posted and no Copilot verdict is
+# re-checked. What has to hold HERE is that the driver still passes the mode
+# through — a call that hard-coded `both`, or dropped the argument, would take the
+# script's default and reach the recheck that cannot pass, with the fixture none
+# the wiser because it calls the script directly.
+grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"' <<<"$skill_flat" \
+    && pass "the reviewers mode is passed to the close stage" \
+    || die "codex-only is not passed through; the driver would take the two-reviewer path"
 
 # ── THE PHASE TRANSITIONS ARE THE OPERATOR'S, NOT THE LOOP'S ───────────────
 #
@@ -1574,6 +1573,14 @@ grep -q 'STOP — the next phase is the operator' "$SKILL" \
 grep -q 'MERGING IS THE OPERATOR' "$SKILL" \
     && pass "…and a clean Copilot verdict stops before the merge gate" \
     || die "the driver walks a clean Copilot verdict straight into a merge"
+# THE OTHER HALF OF THAT STOP MOVED (#78). `pr-copilot-phase.sh close` prints the
+# menu and `test-pr-copilot-phase.sh` reads it — both branches, and the whitelist
+# of option lines. What stays the driver's is the instruction not to run the gate
+# on its own: the script stopping means nothing if the prose around the call sends
+# the driver straight on to the gate anyway.
+grep -qF 'do not run the merge gate until the operator has answered' <<<"$skill_flat" \
+    && pass "…and the driver is told not to run the gate until it is answered" \
+    || die "SKILL.md does not tell the driver to wait for the operator after the close"
 # BOTH OPTIONS ARE NAMED AT EACH STOP. "Decide with the operator" without naming
 # the choices is a notification: the operator has to reconstruct what the
 # alternatives even were.
@@ -1589,23 +1596,21 @@ awk '/STOP — the next phase is the operator/ {c=1} c {print} c && /^```bash$/ 
     | grep -q 'codex-only' \
     && pass "…and names the mode that makes it reachable" \
     || die "the Codex-only offer does not say how to take it"
-awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
-    | grep -qi 'fault tolerance' \
-    && pass "…and another Codex pass as an alternative to merging" \
-    || die "the Copilot-clean stop does not offer a further Codex pass"
-# …AND IT DOES NOT CLAIM BOTH REVIEWERS READ THE HEAD. Once Copilot's fixes have
-# moved it, only Copilot signed the current commit; Codex signed an older one and
-# the trailer range that carries it forward has not been validated yet. Saying
-# "both signed off on <head>" at the merge-versus-another-pass decision is a false
-# two-reviews-on-this-commit assurance at precisely the moment it matters.
-awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
-    | grep -q 'CODEX_SHA' \
-    && pass "…reporting the two signed heads separately rather than as one" \
-    || die "the stop implies both reviewers signed the same commit"
-awk '/MERGING IS THE OPERATOR/ {c=1} c {print} c && /^exit 0$/ {exit}' "$SKILL" \
-    | grep -qi 'has not run yet' \
-    && pass "…and saying the delta check has not run yet" \
-    || die "the stop presents an unvalidated delta as though it were checked"
+# THE MENU ITSELF IS `pr-copilot-phase.sh close`'s, and asserting it here as well
+# would be the second copy CLAUDE.md § Tests forbids — one that drifts, because
+# only one of the two is executed. `test-pr-copilot-phase.sh` covers what it
+# offers on an unchanged head and on a moved one, that the moved-head menu names
+# the revocation, that it reports the two signed heads separately rather than as
+# one, and that it says the delta check has not run yet.
+#
+# WHAT THIS FILE KEEPS is the sha the driver hands over, because the script cannot
+# check it: `close` decides which of the two menus to print by comparing the head
+# it reads against the Codex sha it is GIVEN. A driver passing the current head
+# instead would make every phase look unchanged, the fault-tolerance pass would
+# never be offered, and the fixture would still be green.
+grep -qF 'pr-copilot-phase.sh close N "$CODEX_SHA"' <<<"$skill_flat" \
+    && pass "…and the close is given the Codex-signed head to compare against" \
+    || die "the close stage is not given \$CODEX_SHA; it cannot tell a moved head from an unchanged one"
 # THE SIGNOFF IS RECORDED BEFORE EITHER STOP, which is what makes the stop
 # resumable rather than a dead end. A decision that arrives tomorrow must not cost
 # the phase that was already finished.

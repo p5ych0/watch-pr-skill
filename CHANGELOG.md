@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.20] — 2026-08-16
+
+- **The Copilot signoff was recorded by 93 lines of Markdown, and every one of
+  its failures reported success.** `SKILL.md` carried the step that re-checks
+  Copilot's verdict, writes the second signoff and asks what to do with two
+  closed phases. Nothing covered it — not the suite, not `pr-selfcheck.sh`, not
+  the bash 3.2 job — because checking shell that lives inside a fenced block
+  means parsing Markdown, which this repository tried and removed.
+
+  Worse than uncovered: its aborts exited **0**. That block ran in the driving
+  session's own shell, where a non-zero status would have killed the session, so
+  an unreadable head, a malformed sha and a head that moved between the clean
+  verdict and the lookup all returned success to anything reading the status.
+
+  It is now `pr-copilot-phase.sh close`, a stage on the script that already owns
+  this phase's other end. Every one of those paths is a stop that records
+  nothing, and the fixture pins them — along with which menu each case gets: no
+  fault-tolerance pass is offered where both signoffs name the same commit, and
+  the revocation is required where they do not.
+
 ## [2.0.19] — 2026-08-16
 
 - **The merge gate said a phase had been reopened that had never been entered.**

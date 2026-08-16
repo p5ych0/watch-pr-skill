@@ -1193,98 +1193,39 @@ end of the Codex phase, for the same reason.
 ```bash
 # ── ONLY WHEN THERE WAS A COPILOT PHASE ────────────────────────────────────
 #
-# `codex-only` means no Copilot review was ever requested, so there is no verdict
-# to re-check and no second signoff to record. Running this block anyway is how
-# the previous round's fix stayed unreachable: the gate learned the mode while the
-# documented path to it still exited on a Copilot recheck that could not pass.
+# Set REVIEWERS to what was decided at the Codex stop, before running any of
+# step 8. `codex-only` means no Copilot review was ever requested, so there is no
+# verdict to re-check and no second signoff to record — the stage says so and
+# does nothing, which is not the same as skipping it.
 #
-# Set this to what was decided at the Codex stop, before running any of step 8.
+# `$CODEX_SHA` is passed as well as the head being read, because whether the two
+# are EQUAL decides which question the stop asks: the fault-tolerance pass is
+# offered only where the Copilot phase produced commits.
 REVIEWERS=both   # or `codex-only`
-if [ "$REVIEWERS" != codex-only ]; then
-
-# THE SECOND SIGNOFF IS WRITTEN DOWN TOO, so a later session can see that both
-# phases closed and on which head. Same marker, same anchored read.
-COPILOT_SHA=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not read the head to record the Copilot signoff"; exit 0; }
-RX_SHA40='^[0-9a-f]{40}$'
-if ! [[ "$COPILOT_SHA" =~ $RX_SHA40 ]]; then
-    echo "ABORT: the head is not a full 40-hex sha; do not record a signoff for it"; exit 0
-fi
-# THE VERDICT IS RE-CHECKED AGAINST EXACTLY THIS SHA before it is written down.
-# Only the SHAPE of the head was checked here, so a push landing between the clean
-# verdict and this lookup — or while the operator had the stop parked — recorded
-# the NEW, unreviewed head as Copilot-signed. The durable record would then say
-# both phases closed on a commit neither reviewer saw, and every later session
-# would believe it.
-COPILOT_RECHECK=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
-if [ "$COPILOT_RECHECK_RC" -ne 0 ]; then
-    echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"
-    exit 0
-fi
-gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Codex signed off on `%s`; if those differ, the older Codex result carries only if the merge gate validates that every commit between them is a Review-Phase: copilot fix.\n' "$COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA" "$CODEX_SHA")" \
-    || { echo "ABORT: could not record the Copilot signoff"; exit 0; }
-
-# ── STOP. MERGING IS THE OPERATOR'S DECISION ───────────────────────────────
-#
-# Both reviewers are clean and both signoffs are on the PR. Merging is the
-# largest irreversible action this tool takes, and "every gate passed" is an
-# input to that decision rather than the decision itself.
-#
-#   MERGE — run the gate below. It re-checks everything against the head it
-#     merges, because an earlier check answered about an earlier commit.
-#
-#   ANOTHER CODEX PASS — as fault tolerance, and ONLY IF THE COPILOT PHASE
-#     PRODUCED COMMITS. Where it did, the head moved after Codex last looked at
-#     it and the merge gate accepts that on the strength of `Review-Phase:
-#     copilot` trailers rather than a fresh review; if those rounds were
-#     substantial, ask Codex again by going back to step 2 with `$WHO` set to
-#     Codex, and the gate is then evaluated against the newer signoff.
-#
-#     WHERE IT PRODUCED NONE, the two signoffs name the same commit and this
-#     option is not offered, because Codex has already reviewed exactly what is
-#     being merged. Taking it costs a revocation, a round and a reopened phase
-#     for a verdict that cannot differ — and a session that resumes into the
-#     reopened phase reads it as a Copilot phase to run again. That is not
-#     hypothetical: it is what #55 was raised for.
-#
-# ASK, THEN STOP.
-if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then
-cat <<EOF
-
-Copilot signed off on $COPILOT_SHA, and so did Codex — one commit, both
-reviewers, and it is the head being merged. Nothing has changed since either
-looked, so there is no fault-tolerance pass to run over it.
-
-  Decide, and say which:
-    (a) merge — run the gate below
-    (b) stop and leave the PR open
-
-Nothing further happens until you say.
-EOF
-else
-cat <<EOF
-
-Copilot signed off on $COPILOT_SHA. Codex signed off on $CODEX_SHA.
-
-Those differ, so Copilot's fixes moved the head after Codex looked at it — the
-older Codex result is carried forward ONLY if the merge gate validates that every
-commit between them is a Review-Phase: copilot fix, and it refuses if any is not.
-That check has not run yet.
-
-  Decide, and say which:
-    (a) merge — run the gate below
-    (b) another Codex pass first, as fault tolerance over the Copilot changes.
-        POST A REVOCATION BEFORE REQUESTING IT — a comment whose only content is
-        the line **Review-Signoff-Revoked:** followed by the Codex login in
-        backticks. Without it the old signoff still stands, and a session resumed
-        while the new pass is running reads the reopened phase as closed.
-
-Nothing further happens until you say.
-EOF
-fi
-exit 0
-fi   # end of the two-reviewer path
+"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"; CLOSE_RC=$?
+[ "$CLOSE_RC" -eq 0 ] || {
+    echo "The Copilot phase did not close and no signoff was recorded. The reason is above; do not retry it blind."
+    exit "$CLOSE_RC"; }
 ```
+
+It prints the record it made and then the stop:
+
+```
+PR_COPILOT_PHASE_CLOSED pr=N reviewer=<copilot> copilot-sha=<sha> codex-sha=<sha>
+```
+
+**Then STOP. MERGING IS THE OPERATOR'S DECISION.** The stage stops and asks;
+do not run the merge gate until the operator has answered. Merging is the largest
+irreversible action this tool takes, and "every gate passed" is an input to that
+decision rather than the decision itself.
+
+**Read the two shas rather than assuming them.** Where they are the same commit,
+Codex has already reviewed exactly what is being merged and no fault-tolerance
+pass is offered — taking one there costs a revocation, a round and a reopened
+phase for a verdict that cannot differ, and a session resuming into the reopened
+phase reads it as a Copilot phase to run again. That is what #55 was raised for.
+Where they differ, the older Codex result is carried forward only if the merge
+gate validates that every commit between them is a `Review-Phase: copilot` fix.
 
 ### Resuming after a stop
 
