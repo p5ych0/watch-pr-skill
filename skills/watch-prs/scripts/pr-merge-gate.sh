@@ -255,7 +255,15 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
            return 0 ;;
         1) case "$line" in
                *reason=revoked*)
-                   echo "merge blocked: the $who signoff has been revoked — that phase was reopened and has not closed again"
+                   # "OPEN", NOT "REOPENED". `pr-copilot-phase.sh open` posts this
+                   # revocation on every entry, including the first, where there
+                   # was no signoff to revoke — so on a first entry the record
+                   # said a phase had been reopened that had never been entered.
+                   # The BEHAVIOUR is right either way and is load-bearing: see
+                   # the case in `test-pr-merge-gate.sh` where a head with no
+                   # Copilot record and a stale clean verdict merges. Only the
+                   # wording was false. #36.
+                   echo "merge blocked: a $who pass is open on this PR — its signoff was revoked and has not been recorded again"
                    return 1 ;;
                *) return 0 ;;   # nothing recorded; the caller's sha is not contradicted
            esac ;;

@@ -387,6 +387,32 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 : > "$STUB_DIR/pr-review-state.review-at.out"
 case_is 1 "nothing for a signoff to answer" "…and a head with no review cannot be vouched for"
 
+# ── WHY THE COPILOT REVOCATION IS POSTED UNCONDITIONALLY ───────────────────
+# `pr-copilot-phase.sh open` revokes on EVERY entry, including the first, where
+# there is no signoff to revoke. That looks like a comment recording something
+# that never happened, and #36 proposed skipping it. These two cases are why it
+# is not skipped, and they are here rather than there because the reason lives in
+# this gate.
+#
+# With no Copilot record at all, a head whose only clean Copilot verdict is an
+# OLD review merges: `signoff_contradicts` treats "nothing recorded" as "no
+# disagreement", which is right where a signoff is a cross-check, and the verdict
+# probe answers with the review that is already there. So on a first entry the
+# revocation is the only durable mark that a NEW pass is pending, and without it a
+# concurrent or resumed gate merges on the review the new pass was requested to
+# replace.
+world
+printf '0' > "$STUB_DIR/pr-signoff.$CODEXBOT.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.$CODEXBOT.out"
+printf '1' > "$STUB_DIR/pr-signoff.$COPILOTBOT.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$COPILOTBOT" > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
+case_is 0 "merged" "with no Copilot record, a stale clean verdict is enough to merge"
+# …AND THE REVOCATION IS WHAT STOPS IT. Same world, same verdict, one comment
+# different. Removing the unconditional revocation removes this refusal.
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
+    > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
+case_is 1 "pass is open on this PR" "…and the revocation is the only thing that refuses it"
+
 # …AND THE RECORD HAS TO NAME THIS HEAD.
 world; replies_only "$COPILOTBOT"
 printf '0' > "$STUB_DIR/pr-signoff.rc"
@@ -528,7 +554,7 @@ case_is 1 "could not establish the round count" "…while an unreadable count bl
 # verdict check and merge the phase that was deliberately reopened.
 world; printf '1' > "$STUB_DIR/pr-signoff.rc"
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$STUB_DIR/pr-signoff.out"
-case_is 1 "has been revoked" "a revoked Codex signoff blocks the merge"
+case_is 1 "pass is open on this PR" "a revoked Codex signoff blocks the merge"
 # …AND A RECORD NAMING ANOTHER COMMIT IS A CONTRADICTION TOO. The caller's sha and
 # the PR's record disagreeing means one of them is stale, and merging is the wrong
 # way to find out which.
@@ -549,7 +575,7 @@ case_is 1 "could not read the" "…and an unreadable record blocks"
 world; printf '1' > "$STUB_DIR/pr-signoff.$COPILOTBOT.rc"
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" \
     > "$STUB_DIR/pr-signoff.$COPILOTBOT.out"
-case_is 1 "has been revoked" "a revoked Copilot signoff blocks the merge too"
+case_is 1 "pass is open on this PR" "a revoked Copilot signoff blocks the merge too"
 # …and it is NOT consulted in codex-only, where there is no Copilot phase to
 # reopen — a stale Copilot revocation must not block a merge it has nothing to do
 # with.
