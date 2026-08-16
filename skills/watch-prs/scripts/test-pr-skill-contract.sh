@@ -753,19 +753,26 @@ grep -q 'SELF_RC' "$SKILL" \
 # `$(<file)` is a redirection and `${…}` is expansion; `while`, `if` and `[[` are
 # reserved words. Nothing here can be replaced by a function, so the answer can
 # only come from the file. Empty means absent, which the emptiness test handles.
+# THE RESULT IS AN ASSIGNMENT, NOT SOMETHING PRINTED. Returning the number
+# through `printf` inside `$( )` put one last shadowable builtin in the path: a
+# `printf()` that delegates ordinary output and forges these numeric calls hands
+# back line numbers the file does not have, and the ordering below agrees. An
+# assignment is one of the two things `CLAUDE.md` says cannot be taken over.
 RB_SKILL_BODY="$(<"$SKILL")"
-rb_line_of() {   # rb_line_of <needle> ; prints the first matching line number
+RB_LINE=""
+rb_line_of() {   # rb_line_of <needle> ; sets RB_LINE, empty when absent
     local _rest="$RB_SKILL_BODY" _line _n=0
+    RB_LINE=""
     while [[ -n $_rest ]]; do
         _line="${_rest%%$'\n'*}"
         if [[ $_rest == *$'\n'* ]]; then _rest="${_rest#*$'\n'}"; else _rest=""; fi
         _n=$((_n + 1))
-        if [[ $_line == *"$1"* ]]; then printf '%s' "$_n"; return 0; fi
+        if [[ $_line == *"$1"* ]]; then RB_LINE="$_n"; return 0; fi
     done
     return 0
 }
-sel="$(rb_line_of 'AUTO_REVIEW=no')"
-req="$(rb_line_of 'Request the review — Codex first')"
+rb_line_of 'AUTO_REVIEW=no';                    sel="$RB_LINE"
+rb_line_of 'Request the review — Codex first';  req="$RB_LINE"
 # …AND A FORGED `awk` CANNOT ANSWER FOR THE FILE. An exported function returning
 # plausible line numbers made this ordering agree about lines that had been
 # deleted; the lookup uses no command now, so the case asserts that directly.
@@ -773,20 +780,42 @@ req="$(rb_line_of 'Request the review — Codex first')"
 # probe exercises `rb_line_of`, so reverting the two assignments to `awk` leaves
 # it passing while the lookups trust a command again. Both halves are needed —
 # one says the helper is command-free, the other says the lookups use the helper.
-{ grep -qF "sel=\"\$(rb_line_of " "$0" && grep -qF "req=\"\$(rb_line_of " "$0"; } \
+# COUNTED, BECAUSE A CHECK THAT GREPS ITS OWN FILE FINDS ITSELF. The first
+# version searched this file for the lookup's text — which this very line
+# contains, so reverting the lookup to `awk` left the check matching its own
+# source and passing. Each needle must appear TWICE: once here and once as the
+# lookup, so losing the lookup drops the count.
+_rb_self="$(<"$0")"
+rb_occurrences() {   # sets RB_N to how many times $1 appears in this file
+    local _rest="$_rb_self"
+    RB_N=0
+    while [[ $_rest == *"$1"* ]]; do
+        RB_N=$((RB_N + 1))
+        _rest="${_rest#*"$1"}"
+    done
+}
+rb_occurrences "rb_line_of 'AUTO_REVIEW=no'";                   _rb_sel_n="$RB_N"
+rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB_N"
+{ [ "$_rb_sel_n" -ge 2 ] && [ "$_rb_req_n" -ge 2 ]; } \
     && pass "the contract lookups read the file through the command-free helper" \
-    || die "a contract lookup went back to a command that a function can shadow"
+    || die "a contract lookup went back to a command a function can shadow ($_rb_sel_n/$_rb_req_n)"
 # In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
 # inherited `onecmd` would stop a `-c` script after one command and the probe
 # would measure the truncation instead of the lookup.
 _rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
-    awk() { printf "%s\n" 2; }
-    grep() { printf "%s\n" 2; }
+    printf() { builtin printf "%s\n" 999; }
+    awk() { builtin printf "%s\n" 999; }
+    grep() { builtin printf "%s\n" 999; }
+    sed() { builtin printf "%s\n" 999; }
     '"$(declare -f rb_line_of)"'
-    rb_line_of "AUTO_REVIEW=no"' 2>/dev/null)"
+    rb_line_of "AUTO_REVIEW=no"
+    # Restored only to REPORT the answer: the lookup itself has already run, and
+    # what is being asserted is that none of the above could reach it.
+    unset -f printf
+    printf "%s\n" "$RB_LINE"' 2>/dev/null)"
 [ "$_rb_forged" = "$sel" ] \
-    && pass "a shadowed awk cannot supply the contract lookups' line numbers" \
-    || die "a forged awk changed a lookup: got '$_rb_forged', wanted '$sel'"
+    && pass "shadowed printf, awk, grep and sed cannot supply a line number" \
+    || die "a forged builtin changed a lookup: got '$_rb_forged', wanted '$sel'"
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
