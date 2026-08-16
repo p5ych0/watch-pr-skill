@@ -1043,9 +1043,20 @@ _rb_rest="$PHASE_OUT"
 while [[ -n $_rb_rest ]]; do
     _rb_line="${_rb_rest%%$'\n'*}"
     if [[ $_rb_rest == *$'\n'* ]]; then _rb_rest="${_rb_rest#*$'\n'}"; else _rb_rest=""; fi
-    if [[ $_rb_line == PR_PHASE_RECORDED\ *codex-sha=* ]]; then
-        _rb_v="${_rb_line##*codex-sha=}"
-        _rb_v="${_rb_v%%[[:space:]]*}"
+    # EVERY PHASE RECORD OVERWRITES, INCLUDING ONE WITH NO FIELD AT ALL. Matching
+    # only records that carry `codex-sha=` left a truncated record — a line that
+    # is a phase record and says nothing about the head — unable to overwrite
+    # anything, so the previous record's head stood. That is the stale answer
+    # again, by the one route the earlier fix did not close: the field missing
+    # rather than malformed.
+    #
+    # DELIMITED BY WHITESPACE, so `xcodex-sha=` is not the field.
+    if [[ $_rb_line == PR_PHASE_RECORDED\ * ]]; then
+        _rb_v=""
+        if [[ $_rb_line == *[[:space:]]codex-sha=* ]]; then
+            _rb_v="${_rb_line##*codex-sha=}"
+            _rb_v="${_rb_v%%[[:space:]]*}"
+        fi
         CODEX_SHA="$_rb_v"
     fi
 done

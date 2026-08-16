@@ -210,9 +210,17 @@ grep -qi 'precede the push' "$SKILL" \
 # narrow lift #26 allows: anchored, no grammar, and it covers the one piece of
 # that file whose behaviour a merge is gated on.
 _phase_block="$(awk '/^CODEX_SHA=""$/, /^fi$/' "$SKILL")"
-[ -n "$_phase_block" ] \
-    && pass "the phase parser can be lifted out of SKILL.md and run" \
-    || die "the phase parser block could not be located to test"
+# COMPLETE, NOT MERELY NON-EMPTY. The range ends at the first `fi` in column one,
+# which is the shape check; every `fi` inside the loop is indented or trails its
+# line. If one were ever unindented the lift would truncate, and a truncated block
+# is a syntax error — the cases would fail rather than pass, but they would fail
+# for a reason nobody could read. Both ends are asserted so the failure names
+# itself.
+{ [ -n "$_phase_block" ] \
+  && case "$_phase_block" in *"done"*) true ;; *) false ;; esac \
+  && case "$_phase_block" in *RX_PHASE_SHA40*) true ;; *) false ;; esac; } \
+    && pass "the phase parser lifts out of SKILL.md whole, loop and shape check" \
+    || die "the lifted phase parser is truncated or missing: '$_phase_block'"
 _V=0123456789abcdef0123456789abcdef01234567
 _W=fedcba9876543210fedcba9876543210fedcba98
 phase_case() {   # phase_case <records> <want: sha|refused> <label>
@@ -246,6 +254,11 @@ PR_PHASE_RECORDED pr=7 codex-sha=$_W" "$_W" \
 phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
 PR_PHASE_RECORDED pr=7 codex-sha=" refused \
     "…and an empty final field refuses, having overwritten the head"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED pr=7 reviewer=chatgpt-codex-connector[bot]" refused \
+    "…and so does a final record with NO field, which says nothing about the head"
+phase_case "PR_PHASE_RECORDED pr=7 xcodex-sha=$_V" refused \
+    "…and a field name that merely ends in codex-sha= is not the field"
 # NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
 # time: `set` and `awk` are both shadowable, and a function returning a stale sha
 # and exiting 0 is accepted by any status check written around it.
