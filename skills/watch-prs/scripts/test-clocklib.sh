@@ -185,14 +185,22 @@ ro="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" 
 # skipped there rather than asserted as a pass — `BASH_VERSINFO` is a variable, so
 # no function can answer for it.
 if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
-    nr="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" bash -c '
-        . "$RB_LIB" || exit 9
-        declare -n RB_CLOCK_T0=RB_ELAPSED
-        rb_elapsed start
-        echo "RC=$?"' 2>/dev/null)"
-    [ "$nr" = "RC=1" ] \
-        && pass "a nameref over the clock state is refused, though nothing failed to write" \
-        || die "a nameref was accepted as a good reading ($nr)"
+    # BOTH DIRECTIONS: at a variable outside the trio, which the read-back catches,
+    # and at another MEMBER of it, which the read-back cannot — `RB_CLOCK_T0` and
+    # `RB_CLOCK_LAST` are deliberately given the same time, so an alias between
+    # them survives every same-value check and then makes elapsed `t - t`, zero
+    # forever. Distinct probe values inside the subshell are what see it.
+    for _alias in RB_ELAPSED RB_CLOCK_LAST; do
+        nr="$(PATH="$TMP/bin:$PATH" FAKE_NOW="$FAKE_NOW" RB_LIB="$SELF_DIR/clocklib.sh" \
+              RB_ALIAS="$_alias" bash -c '
+            . "$RB_LIB" || exit 9
+            declare -n RB_CLOCK_T0="$RB_ALIAS"
+            rb_elapsed start
+            echo "RC=$?"' 2>/dev/null)"
+        [ "$nr" = "RC=1" ] \
+            && pass "a nameref onto $_alias is refused, though nothing failed to write" \
+            || die "a nameref onto $_alias was accepted as a good reading ($nr)"
+    done
 else
     pass "…(nameref case skipped: Bash ${BASH_VERSINFO[0]:-?}.${BASH_VERSINFO[1]:-?} has no declare -n)"
 fi

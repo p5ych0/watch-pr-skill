@@ -584,11 +584,13 @@ SPY
     printf 'readonly RB_ELAPSED=0\n' > "$CLKTMP/hook.sh"
     printf 'declare() { printf "declare -- %%s\\n" "$2"; }\nreadonly RB_ELAPSED=0\n' \
         > "$CLKTMP/hook-forged.sh"
+    # …and the alias BETWEEN two state variables, which no same-value check sees.
+    printf 'declare -n RB_CLOCK_T0=RB_CLOCK_LAST\n' > "$CLKTMP/hook-alias.sh"
     # The real library AND the real loader: the spy above replaced both, and this
     # case is about the clock refusing rather than about who loaded it.
     ln -sf "$ROOT/clocklib.sh" "$CLKTMP/run/clocklib.sh"
     ln -sf "$ROOT/loadlib.sh" "$CLKTMP/run/loadlib.sh"
-    for _hook in hook hook-forged; do
+    for _hook in hook hook-forged hook-alias; do
         for sc in pr-watch.sh:2:clock_unreadable pr-ci-gate.sh:1:"could not read the clock"; do
             _n="${sc%%:*}"; _rest="${sc#*:}"; _want="${_rest%%:*}"; _say="${_rest#*:}"
             [ -f "$ROOT/$_n" ] || continue

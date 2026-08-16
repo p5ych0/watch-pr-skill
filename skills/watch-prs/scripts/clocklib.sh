@@ -96,7 +96,16 @@ rb_elapsed() {   # rb_elapsed [start] ; sets RB_ELAPSED, non-zero if untrustwort
         # BACK, which is what catches a `declare -n` aiming these names at someone
         # else's variable — that assignment succeeds, so only the read-back shows
         # the value is not the one we stored.
-        ( RB_CLOCK_T0=probe; RB_CLOCK_LAST=probe; RB_ELAPSED=probe ) 2>/dev/null \
+        # DISTINCT PROBE VALUES, VERIFIED INSIDE THE SUBSHELL. Writing the same
+        # value to all three said nothing about whether they are the same
+        # variable: `declare -n RB_CLOCK_T0=RB_CLOCK_LAST` passes a same-value
+        # probe and the read-back below too, because the two are deliberately
+        # assigned the same time — and then every elapsed count is `t - t`, zero
+        # forever, which is the deadline that never arrives. Distinct values make
+        # an alias between them visible; the subshell is where a fatal assignment
+        # is safe to attempt at all.
+        ( RB_CLOCK_T0=1; RB_CLOCK_LAST=2; RB_ELAPSED=3
+          [[ $RB_CLOCK_T0 = 1 && $RB_CLOCK_LAST = 2 && $RB_ELAPSED = 3 ]] ) 2>/dev/null \
             || return 1
         RB_CLOCK_T0="$t"
         RB_CLOCK_LAST="$t"
