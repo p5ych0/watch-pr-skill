@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.19] — 2026-08-16
+
+- **Opening the Copilot phase for the first time made the PR unmergeable.** The
+  revocation was posted unconditionally, on the reasoning that revoking a signoff
+  that does not exist costs one comment. It costs more than that: with no Copilot
+  signoff to revoke, the comment invents one, `pr-signoff.sh` reports
+  `sha=none reason=revoked`, and the merge gate reads that as a phase reopened and
+  never closed — refusing the merge until a Copilot signoff happens to arrive, and
+  leaving a claim about the PR's history that never happened in the record the
+  loop trusts.
+
+  It now reads the record first and revokes only what exists. A phase already
+  reopened is revoked again, because saying so keeps the record honest about which
+  entry is running; an unreadable answer stops, because skipping the revocation is
+  the one direction that leaves a stale signoff describing a head the pass is
+  about to change.
+
 ## [2.0.18] — 2026-08-16
 
 - **The phase head was captured with a pattern that accepts almost anything.**

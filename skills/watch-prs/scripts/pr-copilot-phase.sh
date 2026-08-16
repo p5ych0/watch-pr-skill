@@ -167,11 +167,37 @@ if [ "$STAGE" = open ]; then
     # concurrent session takes the post-Copilot path and merges the phase that was
     # just reopened. The revocation is the only record that it WAS reopened.
     #
-    # Unconditional: revoking a signoff that does not exist costs one comment, and
-    # the branch that decides whether to bother is a branch that can be wrong.
-    gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" \
-        --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$RB_COPILOT_BOT")" \
-        || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 1; }
+    # ONLY WHAT EXISTS IS REVOKED. This was unconditional, on the reasoning that a
+    # branch deciding whether to bother is a branch that can be wrong — true of a
+    # branch that GUESSES, and this one does not have to: `pr-signoff.sh` answers
+    # with the same authority and pagination rules the revocation itself relies on.
+    #
+    # Revoking nothing is not free. On a FIRST entry there is no Copilot signoff,
+    # so the comment invents one to revoke: `pr-signoff.sh` then reports
+    # `sha=none reason=revoked`, and the merge gate reads that as a phase that was
+    # reopened and never closed — blocking the merge until a Copilot signoff
+    # happens to arrive. It self-heals in the ordinary flow, which is why it
+    # survived, but until then the record the loop trusts says something about
+    # this PR's history that never happened.
+    #
+    # THREE ANSWERS, NOT TWO. 0 is a signoff to revoke; 1 with `reason=revoked` is
+    # a phase already reopened, where re-revoking is harmless and keeps the record
+    # honest about this entry; 1 without it is nothing to revoke; anything else is
+    # unreadable and stops, because skipping a revocation on a signoff that might
+    # exist is the one direction that leaves a stale signoff standing.
+    _rb_prev="$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_COPILOT_BOT")"; _rb_prev_rc=$?
+    case "$_rb_prev_rc" in
+        0|1) ;;
+        *)   echo "ABORT: could not read the Copilot signoff ($_rb_prev); do not open the phase blind"; exit 1 ;;
+    esac
+    _rb_revoke=no
+    [ "$_rb_prev_rc" -eq 0 ] && _rb_revoke=yes
+    case "$_rb_prev" in *reason=revoked*) _rb_revoke=yes ;; esac
+    if [ "$_rb_revoke" = yes ]; then
+        gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" \
+            --body "$(printf '**Review-Signoff-Revoked:** `%s`\n\nOpening a Copilot pass on this head; any earlier Copilot signoff no longer describes it.\n' "$RB_COPILOT_BOT")" \
+            || { echo "ABORT: could not revoke the previous Copilot signoff — do not request the pass without it"; exit 1; }
+    fi
 
     # AND ONCE MORE, AFTER THE REVOCATION. The check above sits before a mutation
     # and two network calls, so it is not "immediately before the request" — the

@@ -58,6 +58,17 @@ chmod +x "$DIR/pr-review-state.sh"
 cat > "$DIR/pr-signoff.sh" <<'SIGNSH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+# THE COPILOT READ IS A DIFFERENT QUESTION, answered from its own files and
+# counted separately. `open` asks whether a Copilot signoff exists before deciding
+# to revoke one; the sequencing below belongs to the CODEX proofs, and letting
+# this share their counter would have moved `.2` and `.3` to different moments
+# than the cases naming them describe. Default: none recorded, which is the state
+# a first entry into the phase is in.
+case "$2" in
+    *copilot*)
+        [ -f "$W/copilot-signoff.out" ] && cat "$W/copilot-signoff.out"
+        exit "$(cat "$W/copilot-signoff.rc" 2>/dev/null || echo 1)" ;;
+esac
 # A SECOND ANSWER, FOR THE SECOND ASK. The phase is proved twice — once up front
 # and once immediately before the mutations — and the whole question is what
 # happens when another session changes something in between. `.2` is that change.
@@ -113,6 +124,12 @@ world() {   # world ; the state in which the phase advances cleanly
     printf 'PR_REVIEW_STATE verdict=clean findings=0\n' > "$W/verdict.out"
     printf '42\n' > "$W/review-id.out"
     printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
+    # A RE-ENTRY BY DEFAULT: a Copilot signoff exists, so `open` has something to
+    # revoke and every ordering case below has a revocation to order against. The
+    # FIRST entry — where there is nothing to revoke and the comment must not be
+    # posted — is set up explicitly by the cases that are about it.
+    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$COPILOTBOT" "$HEAD40" > "$W/copilot-signoff.out"
+    printf '0' > "$W/copilot-signoff.rc"
     printf 'the paragraph about what changed\n' > "$TMP/body.md"
 }
 run() {   # run <stage> [args…] ; prints "<rc>|<output>"
@@ -351,6 +368,9 @@ got="$(run record 7 "$TMP/body.md")"
     || die "an indented marker was refused: '${got}'"
 
 # ── open: THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF ──────────────────
+# A RE-ENTRY, which is what the revocation below is for: a Copilot signoff exists
+# and stops describing this head the moment the pass is requested. The first-entry
+# case is separate, because there the revocation must NOT be posted.
 world; got="$(run open 7 "$HEAD40")"
 { [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_COPILOT_PHASE_OPENED pr=7 head=$HEAD40 prior-review=42"; } \
     && pass "the operator's answer opens the Copilot phase" \
@@ -364,6 +384,51 @@ posted | grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`" \
 before 'gh pr comment' 'gh pr edit' \
     && pass "…before the request, so no window exists where a stale signoff describes a reopened phase" \
     || die "the request preceded the revocation: $(cat "$TMP/calls")"
+
+# ── open: A FIRST ENTRY REVOKES NOTHING, BECAUSE THERE IS NOTHING ──────────
+# The revocation used to be unconditional, on the reasoning that revoking a
+# signoff that does not exist costs one comment. It does not: `pr-signoff.sh`
+# then reports `sha=none reason=revoked`, and the merge gate reads that as a
+# phase reopened and never closed — the PR unmergeable until a Copilot signoff
+# happens to arrive, and a claim about this PR's history that never happened
+# sitting in the record the loop trusts. Issue #36.
+world
+rm -f "$W/copilot-signoff.out"; printf '1' > "$W/copilot-signoff.rc"
+got="$(run open 7 "$HEAD40")"
+[ "${got%%|*}" = 0 ] \
+    && pass "a first entry opens the phase" \
+    || die "the first entry did not open: '${got}'"
+posted | grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`" \
+    && die "a first entry revoked a Copilot signoff that was never recorded: $(posted)" \
+    || pass "…and revokes nothing, because nothing is recorded"
+grep -q -- '--add-reviewer @copilot' "$TMP/calls" \
+    && pass "…and still requests the pass" \
+    || die "the first entry did not request Copilot: $(cat "$TMP/calls")"
+
+# …AND A PHASE ALREADY REOPENED IS REVOKED AGAIN. `sha=none reason=revoked` is
+# not "nothing to revoke": it says another entry reopened this phase, and this
+# entry saying so too keeps the record honest about which one is running.
+world
+printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$COPILOTBOT" > "$W/copilot-signoff.out"
+printf '1' > "$W/copilot-signoff.rc"
+got="$(run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && posted | grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`"; } \
+    && pass "a phase already reopened is revoked again, not skipped" \
+    || die "a reopened phase was left unrevoked: '${got}' $(posted)"
+
+# …AND AN UNREADABLE ANSWER STOPS. Skipping the revocation because the read
+# failed is the one direction that leaves a stale signoff describing a head the
+# pass is about to change.
+world
+printf 'PR_SIGNOFF pr=7 status=error reason=unreadable\n' > "$W/copilot-signoff.out"
+printf '2' > "$W/copilot-signoff.rc"
+got="$(run open 7 "$HEAD40")"
+[ "${got%%|*}" = 1 ] \
+    && pass "an unreadable Copilot signoff stops the phase from opening" \
+    || die "an unreadable signoff did not stop open: '${got}'"
+grep -q -- '--add-reviewer @copilot' "$TMP/calls" \
+    && die "Copilot was requested after an unreadable signoff read: $(cat "$TMP/calls")" \
+    || pass "…and requests nothing"
 
 # THE HEAD IS RE-PROVEN, because the operator's answer can arrive in a later
 # session. Opening the phase against a moved head spends it on one commit and the

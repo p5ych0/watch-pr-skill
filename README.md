@@ -327,7 +327,9 @@ Then:
      request still to come. The order is revoke → prove → baseline → request: the
      proof as late as it can be while the Copilot baseline stays last, which it
      must be or a pass landing in between answers a request made after it.
-     Then it revokes any earlier Copilot signoff and requests the pass.
+     Then it revokes any earlier Copilot signoff — and only a signoff that is
+     actually recorded, since a revocation of nothing reads back as a phase
+     reopened and never closed, which blocks the merge — and requests the pass.
 
    The body you supply is prose and is posted under your identity, so a line that
    reproduces one of the record markers a reader trusts from *you* —
