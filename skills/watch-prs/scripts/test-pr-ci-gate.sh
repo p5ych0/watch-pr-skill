@@ -161,37 +161,48 @@ STUBSH
     # interval took thirty seconds to say it had run out of one. The watchdog here
     # is shorter than that interval, so an uncapped sleep is killed rather than
     # reporting anything.
+    # A FIVE-SECOND BOUND, NOT ONE, AND FOR THE SAME REASON AS THE CASE BELOW.
+    # `PR_CI_INTERVAL` only sizes the later sleep; it cannot stop the FIRST probe
+    # racing the bound, so with a one-second timeout a runner that lost a second
+    # between `t0=$SECONDS` and the first check aborted before calling the stub and
+    # this case failed on `calls=0` too. The sleep is capped to what REMAINS, so
+    # five seconds proves the cap exactly as one did — an uncapped thirty-second
+    # nap is still killed by the twenty-second watchdog and reports rc=124.
     gate_case '3'         1 1 "an interval longer than the timeout does not outrun it" \
-        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=30
+        PR_CI_TIMEOUT=5 PR_CI_INTERVAL=30
     # NO PROBE STARTS AFTER THE DEADLINE. Clamping an exhausted budget up to one
     # second bought another request past the bound, and each of those can take its
     # second plus the watchdog's escalation — the clamp turning the timeout into a
     # floor. With a one-second bound and a one-second interval, the second poll
     # would land exactly on the deadline: there must not be one.
     #
-    # NO FLOOR ON THIS ONE, AND THAT IS THE POINT OF #38. `gate_case`'s minimum
-    # call count is a vacuity guard, not this case's invariant — and here it was
-    # the timing-dependent half. With a one-second bound the FIRST probe races the
-    # same deadline as the second: on a loaded runner the bound expired before any
-    # probe was issued, `calls` came back 0, and the case failed while the
-    # behaviour it exists to test was correct. It failed `macos-shell` on a commit
-    # that had passed the same job forty minutes earlier, and a red job with no
-    # finding to fix stops the loop.
+    # THE FIRST PROBE MUST NOT RACE THE BOUND EITHER — #38. With a one-second
+    # timeout the first probe raced the same deadline as the second: a loaded
+    # runner that lost a second before the first check aborted with `calls=0`, and
+    # the case failed while the behaviour it tests was correct. It failed
+    # `macos-shell` on a commit that had passed the same job forty minutes
+    # earlier, and a red job with no finding to fix stops the loop.
     #
-    # What proves this case is the CEILING below: the clamp defect makes exactly
-    # two requests, and that is caught whether the first probe raced or not.
-    # Zero probes and one probe are both correct here; two is the defect.
+    # DROPPING THE MINIMUM WAS THE WRONG FIX, and it was tried here. Under exactly
+    # the timing it tolerated, the clamp defect makes only ONE request — the
+    # bypassed pre-probe check, a budget clamped to one, and the post-probe check
+    # exiting — so the defect passed both a zero floor and the ceiling. Tolerating
+    # the race made the case vacuous in the case it tolerated.
     #
-    # THE FLOOR IS NOT LOST, it is asserted where it is not a race — every case
-    # above runs with a bound of five seconds or more and requires one, two or
-    # three calls, so a gate that never probes at all fails several of them.
+    # FIVE SECONDS AND AN INTERVAL THAT OUTRUNS IT is what actually removes the
+    # race, because the nap is capped to what REMAINS: the sleep lands exactly on
+    # the deadline whatever the interval, so the transition this case needs —
+    # probe, then expiry, then no second probe — happens on the same schedule as
+    # before while the first probe has the five seconds of slack every other case
+    # in this file already relies on. `SECONDS` is a bash builtin, so the fixture
+    # cannot own this clock the way `test-pr-watch.sh` owns `date`.
     #
-    # A LONGER BOUND WOULD ONLY MOVE THE THRESHOLD, and a slower PROBE removes the
-    # invariant altogether: with `GATE_DELAY=2` against this one-second bound the
-    # bottom-of-loop check fires first, the pre-probe check is never what stops
-    # the gate, and the clamp mutant survives. Measured, after trying it.
-    gate_case '3'         1 0 "no probe is started once the deadline has passed" \
-        PR_CI_TIMEOUT=1 PR_CI_INTERVAL=1
+    # A SLOWER PROBE WAS ALSO TRIED AND IS WORSE. With `GATE_DELAY=2` against a
+    # one-second bound the bottom-of-loop check fires first, the pre-probe check
+    # is never what stops the gate, and the clamp mutant survives — deterministic
+    # and vacuous.
+    gate_case '3'         1 1 "no probe is started once the deadline has passed" \
+        PR_CI_TIMEOUT=5 PR_CI_INTERVAL=30
     probes_after="$(grep -c . "$GATETMP/calls" 2>/dev/null)" || probes_after=0
     # EXACTLY ONE. Two is what the clamp produced — probe, sleep onto the
     # deadline, probe again, and only then notice — so `-le 2` accepted the defect
