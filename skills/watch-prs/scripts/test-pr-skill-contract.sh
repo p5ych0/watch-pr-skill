@@ -268,6 +268,9 @@ phase_case "PR_PHASE_RECORDED pr=7 xcodex-sha=$_V" refused \
     "…and a field name that merely ends in codex-sha= is not the field"
 phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
     "…and a later lookalike field cannot supply the head the real one lacks"
+phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
+PR_PHASE_RECORDED" refused \
+    "…and a bare marker with no trailing space still resets the candidate"
 # NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
 # time: `set` and `awk` are both shadowable, and a function returning a stale sha
 # and exiting 0 is accepted by any status check written around it.
@@ -290,6 +293,25 @@ esac
 case "$_phase_exit" in
     *"signed off on"*) die "a shadowed exit carried a malformed head into the step that uses it: '$_phase_exit'" ;;
     *) pass "…and nothing downstream of the guard runs on a head it refused" ;;
+esac
+# …AND WITH `echo` SHADOWED AS WELL, where the branch can say nothing at all. The
+# only signal left is the block's STATUS, which is why the refusal ends on a
+# reserved word: with both builtins neutered a failed parse otherwise returns 0
+# and reads as an ordinary phase.
+_phase_mute="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
+    echo() { return 0; }
+    exit() { return 0; }
+    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
+    '"$_phase_block"'
+    printf "STATUS:%s\n" "$?"' 2>&1)" || true
+case "$_phase_mute" in
+    *STATUS:0*) die "a muted refusal returned success: '$_phase_mute'" ;;
+    *STATUS:*) pass "…and with echo shadowed too, the refusal still ends non-zero" ;;
+    *) die "the muted-refusal probe produced no status: '$_phase_mute'" ;;
+esac
+case "$_phase_mute" in
+    *"signed off on"*) die "a muted refusal still reached the step that uses the head: '$_phase_mute'" ;;
+    *) pass "…and still reaches nothing downstream of the guard" ;;
 esac
 _phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" bash -c '
     awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }

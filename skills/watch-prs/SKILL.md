@@ -1051,7 +1051,11 @@ while [[ -n $_rb_rest ]]; do
     # rather than malformed.
     #
     # DELIMITED BY WHITESPACE, so `xcodex-sha=` is not the field.
-    if [[ $_rb_line == PR_PHASE_RECORDED\ * ]]; then
+    # THE BARE MARKER IS A PHASE RECORD TOO. A line truncated to exactly
+    # `PR_PHASE_RECORDED`, with no trailing space, did not match — so it could not
+    # reset the candidate, and the previous record's head stood. Same staleness,
+    # one character further along than the last one.
+    if [[ $_rb_line == PR_PHASE_RECORDED || $_rb_line == PR_PHASE_RECORDED\ * ]]; then
         _rb_v=""
         # THE DELIMITER IS IN THE REMOVAL PATTERN TOO, not only in the test above
         # it. `##*codex-sha=` is greedy, so on
@@ -1086,6 +1090,14 @@ if [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
 else
     echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"
     exit 1
+    # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken
+    # away. `echo` and `exit` are builtins a function can shadow, and with both
+    # shadowed this branch says nothing and returns 0 — a failed parse
+    # indistinguishable from an ordinary phase, which is the reading that lets the
+    # driver carry on. `[[ … ]]` is a reserved word, so this branch ends non-zero
+    # whatever has been done to the builtins, and the block's status is the last
+    # signal left.
+    [[ -n "" ]]
 fi
 ```
 
