@@ -106,13 +106,57 @@ if [ -n "$rc" ]; then printf '%s\n' "$rc" > "$GATE_LAST"; else rc="$(cat "$GATE_
 exit "${rc:-3}"
 STUBSH
     chmod +x "$GATETMP/s/pr-ci-state.sh"
+    # ── TIME THE GATE BELIEVES IN, WITHOUT WAITING FOR IT ──────────────────
+    # `pr-ci-gate.sh` reads the clock through `clocklib.sh`, which runs `date +%s`,
+    # and paces itself with `sleep` — both external commands since #66, so the
+    # fixture owns them without the subject changing at all. `sleep N` ADVANCES the
+    # clock by N and returns at once; `date` reports it. Time then passes exactly
+    # when the gate decides to wait, which is what makes the deadline cases below
+    # exact rather than a race against however loaded the runner is (#38).
+    #
+    # A FRACTIONAL SLEEP IS NOT PACING and really sleeps. `pr-ci-state.sh` and the
+    # watchdog tick in fractions to yield to real children; treating those as a
+    # no-op let a tick loop spend its whole budget in microseconds and kill a
+    # healthy helper — the load-dependent failure this is meant to REMOVE.
+    #
+    # Resolved BEFORE the stub directory is on any PATH, and asserted: a stub that
+    # cannot find the real thing would silently become the no-op this avoids.
+    GATECLOCK="$GATETMP/fastclock"; mkdir -p "$GATECLOCK"
+    GATE_NOW="$GATETMP/now"
+    REAL_SLEEP="$(command -v sleep)" \
+        || { printf 'FAIL - no sleep on PATH\n'; echo "RESULT: FAIL"; exit 1; }
+    cat > "$GATECLOCK/sleep" <<SLEEPSH
+#!/usr/bin/env bash
+case "\${1:-}" in
+    [0-9]*.[0-9]*) exec "$REAL_SLEEP" 0.05 ;;
+    ''|*[!0-9]*)   exec "$REAL_SLEEP" "\$@" ;;
+esac
+_c="\$(cat "\$FAKE_NOW" 2>/dev/null || echo 0)"
+printf '%s\n' "\$((_c + \$1))" > "\$FAKE_NOW"
+exit 0
+SLEEPSH
+    cat > "$GATECLOCK/date" <<'DATESH'
+#!/usr/bin/env bash
+# Only `+%s` is faked, so anything formatting a date for a human still gets a
+# real one.
+case "${1:-}" in
+    +%s) cat "$FAKE_NOW" 2>/dev/null || exit 1 ;;
+    *)   exec /usr/bin/env -u PATH /bin/date "$@" ;;
+esac
+DATESH
+    chmod +x "$GATECLOCK/sleep" "$GATECLOCK/date"
+
     gate_case() {   # gate_case <queue> <want rc> <want calls> <label> [env…]
         local out rc=0 calls q="$1" want="$2" mincalls="$3" label="$4"
         shift 4
         printf '%s\n' "$q" > "$GATETMP/q"; : > "$GATETMP/calls"
         : > "$GATETMP/last"
         : > "$GATETMP/probe"
-        out="$(run_limited 20 env GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
+        # THE CLOCK STARTS AT THE SAME PLACE EVERY CASE, or a case inherits the
+        # time the one before it spent and its deadline arrives early.
+        printf '1754000000\n' > "$GATE_NOW"
+        out="$(run_limited 20 env PATH="$GATECLOCK:$PATH" FAKE_NOW="$GATE_NOW" \
+            GATE_Q="$GATETMP/q" GATE_CALLS="$GATETMP/calls" \
             GATE_LAST="$GATETMP/last" GATE_PROBE="$GATETMP/probe" \
             PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 "$@" \
             "$GATETMP/s/pr-ci-gate.sh" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
@@ -176,9 +220,15 @@ STUBSH
     # deadline, probe again, and only then notice — so `-le 2` accepted the defect
     # it was written to catch. The bound is checked before the second probe, so
     # there is no second probe.
-    [ "${probes_after:-0}" -le 1 ] \
-        && pass "…so an expired gate makes no further requests ($probes_after)" \
-        || die "the gate kept probing past its deadline ($probes_after requests)"
+    # EXACTLY ONE, not at most one. Two is what the clamp produced — probe, sleep
+    # onto the deadline, probe again, and only then notice — and ZERO is a gate
+    # that never probed at all, which `-le` accepted as success. Both are now
+    # excluded, and the count is a fact rather than a bound because the fixture
+    # owns the clock: time moves only when the gate sleeps, so nothing the runner
+    # is doing can change it.
+    [ "${probes_after:-0}" -eq 1 ] \
+        && pass "…so an expired gate makes exactly the one request it had time for" \
+        || die "the gate made $probes_after requests around its deadline (wanted 1)"
     # …AND NEITHER DOES A PROBE. The helper bounds its own `gh` calls, but at its
     # own default — so with a one-second gate timeout a hung request ran for a
     # minute before this loop could look at the clock. A bound the callee does not
