@@ -14,6 +14,14 @@
   that — it did not reject a pasted line, it picked one of them, and the one it
   rejected was the form this script itself prints.
 
+  And the check-in is decided per reviewer now, even when the count it displays
+  is combined. `rounds` is the UNION of the heads the named reviewers saw, while
+  an acknowledgement is one number each — so the default invocation compared two
+  things that do not measure the same set, and with 41 Codex heads and 15
+  disjoint Copilot heads it paused again the instant it was answered. No correct
+  answer existed for it, because the instruction prints the per-reviewer numbers
+  the scoped calls need.
+
   A wrong acknowledgement still cannot be lowered, because the highest wins:
   edit or delete the comment, since the count is derived from the bodies.
   `README.md` says so now.

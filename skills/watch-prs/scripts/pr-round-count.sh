@@ -243,7 +243,8 @@ fi
 # operator pause permanently by naming a large number. Only OWNER, MEMBER and
 # COLLABORATOR comments are read, which is the same "a finding is waived only by
 # an authority, never by the PR" line the review contract already draws.
-ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" "$RECORDLIB_JQ"'
+ack_for() {
+ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$1" "$RECORDLIB_JQ"'
     pages_or_error
     | [ .[][] ] as $all
       # Deliberately NOT `valid_comment_record` here. An unread acknowledgement
@@ -286,20 +287,49 @@ ack=$(printf '%s' "$icraw" | jq -s -r --argjson who "$WHO_JSON" "$RECORDLIB_JQ"'
              ] | map(select(. != "")) | map(tonumber) | max // 0
         end' 2>/dev/null) || {
     echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_unreadable"
-    exit 2
+    return 2
 }
 case "$ack" in
-    ""|*[!0-9]*) echo "PR_ROUND_COUNT pr=$PR status=error reason=bad_ack ack=$ack"; exit 2 ;;
+    ""|*[!0-9]*) echo "PR_ROUND_COUNT pr=$PR status=error reason=bad_ack ack=$ack"; return 2 ;;
 esac
-# An acknowledgement of a round that has not happened yet is not an
-# acknowledgement — it is the disable-forever shape, reachable by a typo as
-# easily as by an attacker. Unreadable, not permissive.
-if [ "$ack" -gt "$rounds" ]; then
-    echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_ahead_of_count ack=$ack rounds=$rounds"
-    exit 2
-fi
+printf '%s' "$ack"
+}
 
-if [ "$rounds" -ge $((ack + THRESHOLD)) ]; then
+ack="$(ack_for "$WHO_JSON")" || exit 2
+
+# ── THE DECISION IS PER REVIEWER, EVEN WHEN THE COUNT SHOWN IS COMBINED ────
+#
+# `rounds` is the UNION of the heads the named reviewers saw, and an
+# acknowledgement is one number per reviewer — so comparing the union against the
+# largest acknowledgement compares two things that do not measure the same set.
+# With 41 Codex heads and 15 disjoint Copilot heads the union is 56 and the
+# largest acknowledgement is 41, so the check-in paused again the instant it was
+# answered, and no correct answer existed: the instruction prints 41 and 15
+# because those are the numbers each reviewer-scoped call needs. Issue #59.
+#
+# Each reviewer is therefore judged against its OWN count and its OWN
+# acknowledgement, which is what the printed instruction has always described.
+# With one reviewer named this is exactly the previous behaviour.
+pause=0
+for _w in "${REVIEWERS[@]}"; do
+    _wj="$(printf '%s' "$_w" | jq -R . | jq -s -c .)" || {
+        echo "PR_ROUND_COUNT pr=$PR status=error reason=reviewer_list_unreadable"
+        exit 2
+    }
+    _wc="$(count_for "$_wj")" || exit 2
+    _wa="$(ack_for "$_wj")" || exit 2
+    # An acknowledgement of a round that has not happened yet is not an
+    # acknowledgement — it is the disable-forever shape, reachable by a typo as
+    # easily as by an attacker. Unreadable, not permissive. Checked per reviewer,
+    # because a number that is honest for one phase is ahead of the other.
+    if [ "$_wa" -gt "$_wc" ]; then
+        echo "PR_ROUND_COUNT pr=$PR status=error reason=ack_ahead_of_count reviewer=$_w ack=$_wa rounds=$_wc"
+        exit 2
+    fi
+    [ "$_wc" -ge $((_wa + THRESHOLD)) ] && pause=1
+done
+
+if [ "$pause" = 1 ]; then
     echo "PR_ROUND_PAUSE pr=$PR rounds=$rounds threshold=$THRESHOLD acknowledged=$ack"
     echo "Decide with the operator: continue / stop & merge / stop & leave open / abandon." >&2
     # EACH REVIEWER'S OWN COUNT, never the combined one. This loop used to print

@@ -306,6 +306,36 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPIL
     && pass "…and the one named last, from the same comment" \
     || die "the last login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
 
+# ── AND THE COMBINED INVOCATION CLEARS ON THAT SAME COMMENT ────────────────
+# The union of the heads is not comparable to the largest acknowledgement. With
+# 41 Codex heads and 15 DISJOINT Copilot heads the union is 56 while the largest
+# acknowledgement is 41, so the default call paused again the instant it was
+# answered — and no correct answer existed, because the instruction prints the
+# per-reviewer numbers each scoped call needs. Disjoint on purpose: overlapping
+# heads hide it by making the union smaller.
+specs=(); for ((i=1; i<=41; i++)); do specs+=("$CODEX|k$i|\"t$i\""); done
+for ((i=1; i<=15; i++)); do specs+=("$COPILOT|w$i|\"u$i\""); done
+mk "${specs[@]}"
+jq -n --arg c "$CODEX" --arg p "$COPILOT" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:904,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `41`\n**Review-Pause-Acknowledged:** `" + $p + "` `15`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] \
+    && pass "the combined call clears on the comment its own instruction asks for" \
+    || die "the default invocation paused again after being answered (rc=$rc out='$out')"
+# …and it still pauses when only ONE of them is answered, which is the whole
+# point of judging them separately.
+jq -n --arg c "$CODEX" \
+   '[{user:{login:"operator"},author_association:"OWNER",id:905,created_at:"2026-01-01T00:00:00Z",
+      body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `41`\n")}]' \
+   > "$TMP/ack.json"
+out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
+[ "$rc" -eq 3 ] \
+    && pass "…and still pauses while the other reviewer is unanswered" \
+    || die "answering one reviewer cleared the check-in for both (rc=$rc out='$out')"
+mkreviews 11
+
 # A field-shaped line quoted in prose — this script's own documentation, pasted
 # into a comment — is not an acknowledgement. Same anchoring rule as the
 # reviewed-commit footer.
