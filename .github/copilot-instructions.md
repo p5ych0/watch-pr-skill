@@ -141,6 +141,31 @@ function can take, and a rule applied per call site is a list the next stage wil
 not be in. `$REPO_DIR` remains correct for the merge gate alone, which hands
 `pr-merge-range.sh` a tree to inspect rather than an identity.
 
+**A shadowable command name is a finding in a runtime script and NOT in a
+fixture.** This boundary is decided (#76), and it is drawn by `pr-selfcheck.sh`
+rather than by any individual file.
+
+`SKILL.md` and the `pr-*.sh` helpers run in the operator's own shell, which
+nothing controls, so a name they depend on is load-bearing: a function shadows
+any name, including the `command` and `builtin` prefixes meant to bypass one, and
+the answer is a reserved word (`[[`, `if`), an assignment or an expansion. The
+`test-*.sh` fixtures run under `pr-selfcheck.sh`, which re-execs into a clean
+shell with `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` removed, clears
+every inherited function, and refuses to continue if one cannot be cleared. That
+guarantee is made once, with its own test. Requiring it again inside eighteen
+fixture files — `local`, `awk`, `[`, `read`, `cat`, `mktemp`, `grep`, `sort`,
+`jq`, `timeout` all appear there — is the unbounded list this file warns about
+elsewhere, and a second, worse copy of a guarantee that already holds. **Do not
+raise it against a fixture.**
+
+Two limits are worth knowing, because both have produced real defects. The gate
+clears inherited functions and the hook variables; it does **not** clear
+arbitrary exported values, and `SKILL.md` exports `REVIEW_BUS_REMOTE` before the
+suite runs — so a fixture whose subject is an env-driven override must clear that
+override itself, and a fixture that forges identity while inheriting the pin
+tests nothing. That clearing must **not** be moved into `testlib.sh`, which ships
+at runtime inside `pr-ci-state.sh`, where an `unset` would wipe the driver's pin.
+
 ## Bash strict-mode conventions
 
 Strict mode is chosen per script category. Match the category; do not "fix" a

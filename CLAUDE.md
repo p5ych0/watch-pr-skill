@@ -193,6 +193,43 @@ rediscovering them.
   `test-pr-skill-contract.sh` requires that block and executes it against a
   readonly definition and an empty library. Do not "fix" it into a `rb_load`
   call.
+- **The shadowed-command boundary runs between the runtime scripts and the
+  fixtures, and `pr-selfcheck.sh` is what draws it.** This is the settled answer
+  to #76, and it exists so that a reviewer flagging a shadowable name inside a
+  fixture has one to point at.
+
+  **Runtime is hardened; the fixtures are not.** `SKILL.md` and the `pr-*.sh`
+  helpers run in the operator's own shell, which nothing controls — a startup
+  file, an exported function, whatever the environment carries — so a name they
+  depend on is load-bearing, and reserved words (`[[`, `if`), assignments and
+  expansions are the answer there. The fixtures run under `pr-selfcheck.sh`,
+  which re-execs into a clean shell with `BASH_ENV`, `ENV`, `SHELLOPTS` and
+  `BASH_XTRACEFD` removed, clears every inherited function, and refuses to
+  continue if one cannot be cleared. That guarantee is made once, in one file,
+  with its own test.
+
+  Hardening the fixtures too was considered and refused: `local`, `awk`, `[`,
+  `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and `timeout` appear across
+  eighteen files, every one of them a name, and doing it a finding at a time is
+  the unbounded list this file already warns about — a second, worse copy of a
+  guarantee the gate makes properly. **So a shadowable name in a `test-*.sh` is
+  not a finding.** In a runtime script it is.
+
+  **Three limits, because the guarantee is the gate's and not the file's:**
+
+  - a fixture run **directly** — `bash test-pr-watch.sh` — has no clean shell.
+    The gate is what makes the guarantee;
+  - the gate clears inherited **functions** and the hook variables. It does not
+    clear arbitrary exported values, and it must not: `SKILL.md` pins the
+    session's repository by exporting `REVIEW_BUS_REMOTE`, and the suite runs at
+    step 5a with that pin in the environment. A fixture whose subject is an
+    env-driven override therefore clears it **itself** — `test-pr-identity.sh`
+    and `test-pr-skill-contract.sh` do, and both were red without it;
+  - that clearing cannot live in a shared library. `testlib.sh` looks like the
+    right place and is not: it **ships at runtime** inside `pr-ci-state.sh`,
+    where an `unset` would wipe the pin the driver just set. It was written there
+    first, and `test-pr-ci-state.sh` caught it.
+
 - Self-contained: throwaway git repos under `mktemp -d`, `gh` stubbed, no
   network. CI has no credentials, so a test that reaches GitHub is a broken test.
 - **Portable, and proven by running rather than by reading.** The `macos-shell` CI
