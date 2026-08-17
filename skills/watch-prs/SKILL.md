@@ -217,7 +217,34 @@ unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
-rb_identity \
+# THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
+#
+# `rb_identity` reads `git remote get-url origin` from the CURRENT DIRECTORY, and
+# every helper calls it in its own process. A `cd` into a second checkout — an
+# ordinary thing for a driving session to do — therefore pointed the phase stages
+# at whatever PR of THAT repository shares this number, and each of them posts: a
+# signoff, a revocation, a review request.
+#
+# `REVIEW_BUS_REMOTE` is the caller stating the identity rather than the library
+# deriving it, so exporting it removes the dependency instead of guarding it.
+# Wrapping each call in `(cd "$REPO_DIR" && …)` was the guard, and it was itself
+# defeatable: `cd` is a name, and a function named `cd` that returns 0 without
+# moving leaves the subshell reporting success from the wrong tree. This has no
+# name in it to shadow — the value is read once, here, and travels in the
+# environment.
+#
+# `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
+# inspects HISTORY, which is a tree rather than an identity, so the merge gate
+# keeps its own `cd`.
+RB_REMOTE="$(git remote get-url origin)" \
+    || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+[ -n "$RB_REMOTE" ] \
+    || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+# A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
+# the same value the children will be pinned to, without depending on the export
+# having succeeded — so the two cannot disagree. The export itself is the last
+# thing this block does; see the end of it for why.
+REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
@@ -281,7 +308,59 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
     || { echo "ABORT: could not create the round-summary file"; exit 1; }
 [ -f "$SUMMARY_FILE" ] && [ ! -s "$SUMMARY_FILE" ] \
     || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
-echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+# ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
+#
+# `REVIEW_BUS_REMOTE` is what every helper inherits, and every post is addressed
+# by it — `record`'s signoff, `open`'s revocation and review request, and the
+# second signoff `close` writes on the two-reviewer path. (`close … codex-only`
+# records nothing: there was no Copilot review to re-check.) So its failure
+# has to end setup, and "ends setup" cannot rest on another name.
+#
+# A `readonly REVIEW_BUS_REMOTE` already in this long-lived shell makes the export
+# fail; a function named `exit` makes the abort return instead of exiting. Either
+# alone is caught below. TOGETHER they are not, if there is anything after them to
+# run: the guard's last line ends the `if` non-zero, but with no `set -e` the next
+# statement simply executes. That is why nothing comes after this — the position
+# is the guard. Do not add a step below it; put it above.
+#
+# THE SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH for the same reason. It is how
+# the driver knows setup completed, so the failure path does not REACH it, whatever
+# `exit` has been replaced with.
+#
+# "NOT REACHED" IS THE CLAIM, and it is deliberately weaker than "cannot be
+# emitted". `echo` is a name too: a function replacing it can print `OWNER=…` from
+# the ABORT below, or from anywhere else, and no arrangement of statements inside
+# this shell prevents that — the alternative is a failure path that says nothing
+# at all, which trades a real diagnostic for a guard against a shell that is
+# already lying about its output. What survives a forged `echo` is the STATUS: the
+# branch still ends non-zero. Removing the dependency means not composing this
+# message here, which is #84 along with `git` and `bash`.
+export REVIEW_BUS_REMOTE="$RB_REMOTE" \
+    || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
+# THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading
+# the variable back here answers a different question: an `export` that assigns
+# without setting the export attribute leaves this shell holding the right value
+# and every helper holding none, so the parent-side check passes and the stages
+# still derive from wherever the session later stands. What has to be true is that
+# a new process sees it, so that is what is asked — and asking it also subsumes the
+# parent-side check, since a wrong value here is a wrong value there.
+#
+# `bash` AND `git` ARE STILL NAMES, and that is a known, filed limit rather than an
+# oversight: see #84. A function named `bash` runs in a shell copy that inherits
+# non-exported variables, so it can agree with a forged `export` while the real
+# stages — which exec through `#!/usr/bin/env bash` and resolve on `PATH` — inherit
+# nothing; a function named `git` forges the read above. Both are removed by
+# reading origin through a helper at an absolute path, which is that issue. Neither
+# is reachable without a shell that is already lying to itself, whereas what this
+# pin fixes needed no hostility at all: an ordinary `cd`.
+RB_PIN_SEEN="$(bash -c 'printf %s "${REVIEW_BUS_REMOTE-}"')" || RB_PIN_SEEN=''
+if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+else
+    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+    exit 1
+    [[ -n "" ]]
+fi
 ```
 
 ## 1. State the task on the PR
@@ -994,6 +1073,11 @@ Ask Copilot:
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
+# WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here. The
+# session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
+# stage and everything it drives inherit — so this call has no cwd dependency and
+# needs no wrapper. Do not add one: a `(cd … && …)` guard here is what the pin
+# replaced, and `cd` is a name a function can take.
 PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
@@ -1147,6 +1231,10 @@ way — the signoff is on the PR, so a later session reads it back with
 # each other: the proof wants to be last, and the Copilot BASELINE must be last or
 # a pass landing in between is accepted as the answer to a request made after it.
 # This is the proof as late as the baseline rule allows.
+# THE SESSION PIN COVERS THIS STAGE TOO, and it is the one where getting the
+# repository wrong costs most: `open` posts a signoff revocation and requests a
+# review. Both are inherited from the setup export rather than decided by the
+# current directory, so there is nothing to wrap here either.
 OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
@@ -1204,12 +1292,10 @@ end of the Codex phase, for the same reason.
 # are EQUAL decides which question the stop asks: the fault-tolerance pass is
 # offered only where the Copilot phase produced commits.
 REVIEWERS=both   # or `codex-only`
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, like the merge gate below. The
-# stage derives its own identity from the current directory, so a `cd` into
-# another checkout between setup and here would read whatever PR of THAT
-# repository shares this number and post the Copilot signoff onto it. `$REPO_DIR`
-# was captured in the setup block.
-(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")
+# THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL. The merge gate below still
+# runs from `$REPO_DIR`, and that is a different question: it hands
+# `pr-merge-range.sh` a tree to inspect, which the pin says nothing about.
+"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
 # `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
 # which is long-lived and where a function named `[` can already exist — it

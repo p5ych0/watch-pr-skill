@@ -14,6 +14,15 @@ ROOT="$SCRIPT_DIR/../../.."
 # sourced them, and it was the one still holding a bare `mktemp -d`.
 . "$SCRIPT_DIR/testlib.sh"
 
+# THE IDENTITY OVERRIDES ARE CLEARED. `SKILL.md`'s setup exports
+# `REVIEW_BUS_REMOTE`, and step 5a runs this suite, so the documented flow reaches
+# here with the session pin already set — and the pin cases below forge an
+# `export` whose assignment to an ALREADY-EXPORTED name keeps the export
+# attribute, inverting the case that exists to catch assign-without-export. Not in
+# `testlib.sh`: that library ships at runtime inside `pr-ci-state.sh`, where an
+# unset would wipe the driver's pin. See `test-pr-identity.sh` for the long form.
+unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
+
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
@@ -137,20 +146,204 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 # line in the raw file removes the dependency on the flattening AND on the
 # substring, rather than guarding either — see CLAUDE.md § One change per review
 # round.
-RB_CLOSE_CALL='(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")'
+RB_CLOSE_CALL='"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"'
 rb_close_call_present() { grep -qxF "$RB_CLOSE_CALL" "$SKILL"; }
 rb_close_call_present \
     && pass "the post-Copilot close is delegated to the phase script" \
     || die "SKILL.md does not call the close stage as: $RB_CLOSE_CALL"
-# …FROM THE REPOSITORY THIS SESSION STARTED IN. The stage derives its own identity
-# from the current directory, so a `cd` into another checkout between setup and
-# step 8 would read whatever PR of THAT repository shares this number and post the
-# Copilot signoff onto it. The inline block this replaced could not drift, because
-# it used the `$HOST/$OWNER/$REPO` already derived in setup; a child script can,
-# and the merge gate below is already wrapped for exactly this.
-rb_close_call_present \
-    && pass "…from the repository this session started in" \
-    || die "the close stage is run from the current directory; a cd between setup and step 8 signs off the wrong repository"
+# …AND EVERY STAGE ACTS ON THE REPOSITORY THIS SESSION STARTED IN, which is now a
+# property of the SETUP rather than of each call site.
+#
+# `pr-copilot-phase.sh` and every helper it drives derive their identity by
+# running `git remote get-url origin` in their own process, from the current
+# directory. A `cd` into a second checkout — an ordinary thing for a driving
+# session to do — therefore pointed the stages at whatever PR of THAT repository
+# shares this number, and each of them POSTS: `record` a signoff, `open` a
+# revocation and a review request, and `close` the second signoff on the
+# two-reviewer path — `codex-only` records nothing, having no Copilot review to
+# re-check.
+#
+# THE DEPENDENCY IS REMOVED, NOT GUARDED. The guard was `(cd "$REPO_DIR" && …)`
+# around each call, and it had two defects that are the same defect: `cd` is a
+# NAME, so a function named `cd` returning 0 without moving leaves the subshell
+# reporting success from the wrong tree; and a rule applied per-call-site is a
+# list, so a fourth stage would be added unwrapped and this file would have said
+# every stage was covered. Exporting `REVIEW_BUS_REMOTE` once, from a value read
+# once, has neither property — `rb_identity` documents it as the caller STATING
+# the identity rather than deriving it, no name in the chain can be shadowed, and
+# a stage added tomorrow inherits it without anyone remembering to.
+#
+# `$REPO_DIR` REMAINS, for a different question: `pr-merge-range.sh` inspects
+# HISTORY, which is a tree and not an identity, so the merge gate keeps its `cd`.
+grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
+    && pass "the session's repository is pinned into the environment every helper reads" \
+    || die "SKILL.md does not export REVIEW_BUS_REMOTE; a cd mid-session retargets every stage"
+# …FROM A READ WHOSE STATUS WAS TAKEN. `git remote get-url origin` can print a
+# plausible URL and then fail, and command substitution keeps what it wrote — so
+# an unchecked read pins the session to whatever a failing call happened to emit.
+grep -qF 'RB_REMOTE="$(git remote get-url origin)" \' <<<"$skill_flat" \
+    && pass "…from a remote read whose status is taken" \
+    || die "the pinned remote is captured without checking the read"
+# …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
+# leave the driver's OWN `$HOST/$OWNER/$REPO` derived from the current directory
+# while every child used the pin — two identities in one session, agreeing
+# whenever this defect is absent and disagreeing exactly when it is not.
+# …AND THE DRIVER'S OWN IDENTITY COMES FROM THE SAME VALUE, through a command
+# prefix rather than through the export. Deriving it separately would leave the
+# driver's `$HOST/$OWNER/$REPO` from the current directory while the children used
+# the pin — two identities agreeing whenever this defect is absent and disagreeing
+# exactly when it is not — and taking it from the export would make it depend on
+# the export having succeeded, which is the failure the guard exists for.
+grep -qF 'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \' <<<"$skill_flat" \
+    && pass "…and the driver derives its own identity from that same pinned value" \
+    || die "rb_identity does not take the pinned remote; the driver and its children can disagree"
+# …AND THE PIN IS THE LAST THING SETUP DOES. Either hostile state alone is caught:
+# a readonly makes the export return 1, and a shadowed `export` leaves the value
+# wrong for the postcondition. TOGETHER with a shadowed `exit` they are not, if
+# anything follows — the guard ends the `if` non-zero and, with no `set -e`, the
+# next statement runs anyway. Position is what makes the stop structural, so the
+# position is asserted.
+# EXACT, NOT A FILTER. The first version of this listed the shapes it would allow
+# after the pin — and `echo` was on that list, because the guard itself contains
+# two. An added `echo "one more setup step"` was therefore invisible to the check
+# written to forbid exactly that, and the mutation passed. What is asked here is
+# not "does anything unusual follow" but "does ANYTHING follow": the next
+# meaningful line after the guard's `fi` must be the closing fence.
+_pin_ln=""; _pin_ln="$(grep -n '^export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
+_pin_fi=""
+_pin_fi="$(awk -v n="${_pin_ln:-0}" 'NR>n && /^fi$/ {print NR; exit}' "$SKILL")" || _pin_fi=""
+_next=""
+_next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL")" || _next=""
+{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ "$_next" = '```' ]; } \
+    && pass "…and nothing in setup runs after the pin, so a neutralised abort cannot be stepped over" \
+    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi next='$_next')"
+# …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
+# would run whatever the pin did, once `exit` is shadowed — the driver would be
+# told setup completed with no pin in place, which is the whole failure.
+_pin_then=""
+_pin_then="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '/^else$/,$p')" || _pin_then=""
+_pin_ok=""
+_pin_ok="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '1,/^else$/p')" || _pin_ok=""
+case "$_pin_ok" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the pin took" ;;
+    *)               die "setup's success line is not inside the successful branch: '$_pin_ok'" ;;
+esac
+# …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
+# REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
+# while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
+# to `git remote get-url origin`, derives the intended checkout, and setup looks
+# entirely successful — while every child inherits no usable pin and routes by
+# whichever checkout the session later enters. That is the original
+# wrong-repository defect surviving its own fix.
+#
+# LIFTED AND RUN, in a child that already holds the readonly. Describing this was
+# what let it through: the export reads correctly at a glance, and its failure is
+# visible only in what the variable holds afterwards.
+_pin_block=""
+_pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
+{ [ -n "$_pin_block" ] \
+  && case "$_pin_block" in *'[[ $RB_PIN_SEEN = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
+  && case "$_pin_block" in *'exit 1'*) true ;; *) false ;; esac; } \
+    && pass "the pin's export and its proof lift out of SKILL.md together" \
+    || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
+_ro_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _ro_rc=$?
+[ "$_ro_rc" -ne 0 ] \
+    && pass "…and a readonly REVIEW_BUS_REMOTE aborts setup rather than pinning nothing" \
+    || die "setup continued with an empty readonly pin; every stage would route by the current directory"
+# …AND A SHADOWED `export` IS THE SAME FAILURE, caught by the same line. One that
+# returns 0 without assigning leaves the variable untouched, which the status
+# cannot see and the postcondition can — the reason the proof is a reserved word
+# rather than another builtin.
+_sh_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV 'BASH_FUNC_export%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _sh_rc=$?
+[ "$_sh_rc" -ne 0 ] \
+    && pass "…and a shadowed export is caught by the postcondition" \
+    || die "a shadowed export left the pin unset and setup carried on"
+# …AND AN `export` THAT ASSIGNS WITHOUT EXPORTING IS THE CASE THE PARENT-SIDE
+# CHECK CANNOT SEE. A narrow forger that performs the assignment and returns
+# leaves this shell holding exactly the right value while no child inherits
+# anything — so reading the variable back agrees, and every stage still derives
+# from wherever the session later stands. Only asking a child separates them.
+_noexp_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV \
+    'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _noexp_rc=$?
+[ "$_noexp_rc" -ne 0 ] \
+    && pass "…and an export that assigns without exporting is caught by asking a child" \
+    || die "the pin passed while no child could see it; every stage would route by the current directory"
+# …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
+# would satisfy both cases above while stopping every session.
+_ok_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _ok_rc=$?
+[ "$_ok_rc" -eq 0 ] \
+    && pass "…while an ordinary shell pins and continues" \
+    || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
+# ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
+#
+# `readonly REVIEW_BUS_REMOTE=''` makes the export return 1 and a function named
+# `exit` makes the abort return instead of exiting, so neither guard ends the
+# shell — the `if` merely closes non-zero, and with no `set -e` whatever follows
+# runs. CLAUDE.md § Already paid for: combine the states, because separate cases
+# cannot see this.
+#
+# WHAT IS ASSERTED IS THE SIGNAL, NOT THE STATUS. A trailing marker stands in for
+# a step someone adds after the pin later; it runs here, and that is the point —
+# the protection is that setup's SUCCESS LINE is unreachable, so the driver is
+# never told setup completed with no pin in place. The static check above is the
+# other half: in `SKILL.md` there is nothing after the pin for a neutralised abort
+# to step over.
+_both_out=""
+_both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        OWNER=acme; REPO=widget; RB_SCRIPTS=/nonexistent; SUMMARY_FILE=/nonexistent
+        '"$_pin_block"'
+        printf "CONTINUED\n"' 2>/dev/null)" || true
+case "$_both_out" in
+    *OWNER=*) die "setup announced success with no pin in place: '$_both_out'" ;;
+    *)        pass "…and a readonly pin with `exit` shadowed never announces setup as complete" ;;
+esac
+# …AND SAYS WHY, so an operator reading the terminal is not left with silence.
+case "$_both_out" in
+    *ABORT*) pass "…and says the pin did not take" ;;
+    *)       die "the doubly-neutralised failure is silent: '$_both_out'" ;;
+esac
+# ── AND WITH `echo` FORGED TOO, WHICH IS WHERE THE OUTPUT STOPS MEANING ────
+#
+# A function replacing `echo` can print `OWNER=…` from the ABORT branch, so the
+# success MARKER is not a property this shell can defend — that is why the comment
+# beside the guard claims the failure path is not REACHED rather than that the line
+# cannot be emitted, and why composing the message elsewhere is #84.
+#
+# WHAT SURVIVES IS THE STATUS, and that is what is asserted: with the pin readonly
+# and `exit` and `echo` all replaced, the block still ends non-zero. A driver that
+# takes the status — which the `CLOSE_RC` guard below and every helper caller do —
+# still stops.
+_forged_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE \
+    'BASH_FUNC_exit%%=() { return 0; }' \
+    'BASH_FUNC_echo%%=() { builtin printf "OWNER=acme REPO=widget\n"; }' bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _forged_rc=$?
+[ "$_forged_rc" -ne 0 ] \
+    && pass "…and a forged echo cannot make the pin's failure exit zero" \
+    || die "with echo, exit and the pin all forged, setup reported success"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
@@ -1120,7 +1313,7 @@ fi
 # out there; the parser is `identitylib.sh` now, and a text check left pointing at
 # SKILL.md would have gone on passing against a driver that derived nothing at
 # all. So: the driver must DELEGATE, and the parser must derive.
-grep -q '^rb_identity \\$' "$SKILL" \
+grep -q '^REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \\$' "$SKILL" \
     && pass "the driver derives its identity through the shared parser" \
     || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
 grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \
