@@ -132,9 +132,14 @@ commands in `README.md`, which legitimately name this repository.
 reads origin ONCE in its setup block — through `pr-origin.sh read`, not by running
 `git` itself — checks that read's status, and exports it as `REVIEW_BUS_REMOTE`;
 `rb_identity` prefers that over deriving. The helper is invoked as
-`"$RB_SCRIPTS"/pr-origin.sh`, a PATH rather than a name, and re-execs out of
-`BASH_ENV`/`ENV`/`SHELLOPTS`/`BASH_XTRACEFD` and clears every inherited function
-before it calls anything: a shell function called `git` that answers only
+`{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2` — a PATH
+rather than a name, and privileged mode is what stops `BASH_ENV` and
+`ENV` being sourced at all, stops shell functions being imported from the
+environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and
+nothing inherited to clear. It has to be the FIRST interpreter: entering
+privileged mode from inside a shell that has already run the hook is too late,
+and a hook needs to shadow nothing to use that gap — `printf '…' >&9; exit 0` is
+enough, because fd 9 is already the caller's capture.: a shell function called `git` that answers only
 `remote get-url origin` otherwise forges the identity every stage is addressed by.
 The pin is proved the same way — `pr-origin.sh pin` is a real child, where
 `bash -c` is a name whose shell copy inherits NON-exported variables and so agrees

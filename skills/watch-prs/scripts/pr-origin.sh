@@ -97,7 +97,7 @@ fi
 # fd 9. The caller opens it, and does so on a GROUP so the redirections are in
 # place before bash traces anything:
 #
-#     RB_REMOTE="$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"
+#     RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"
 #
 # The braces matter on bash 5, which traces a simple command before applying its
 # redirections — inside a command substitution fd 1 is already the capture, so the

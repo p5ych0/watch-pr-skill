@@ -21,7 +21,8 @@
   exporting is caught by a child reporting it inherited nothing.
 
   The value comes back on **fd 9**, and the driver opens it as part of the call:
-  `"$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"` — the braces included,
+  `"$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"` — the
+  braces included,
   because bash traces a simple command *before* applying its redirections and
   inside a command substitution fd 1 is already the capture, so a traced driving
   shell would put that line in the value ahead of the URL. The redirections are applied before
@@ -46,9 +47,9 @@
   caller's capture by then. The helper hops to `-p` itself as well, for a caller
   that forgets, which is the difference between a defence and a default.
 
-  The hop is to `bash -p`, which does not source `BASH_ENV` or `ENV`, does not
-  import functions from the environment, and ignores `SHELLOPTS` — measured, all
-  three. That replaced a re-exec whose marker the hook could set for itself, a
+  Privileged mode does not source `BASH_ENV` or `ENV`, does not import functions
+  from the environment, and ignores `SHELLOPTS` — measured, all three. That
+  replaced a re-exec whose marker the hook could set for itself, a
   function sweep made of `unset`, `builtin`, `compgen` and `read` (each shadowable,
   and each markable `readonly -f` so the clearing failed and the loop then *called*
   it), and a `:` probe that ran before any of it. Every one was a name used to

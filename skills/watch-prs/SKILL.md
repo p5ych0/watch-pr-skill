@@ -254,8 +254,8 @@ unset -f rb_identity 2>/dev/null \
 # `git remote get-url origin` here, and a function answering only
 # `remote get-url origin` forged the identity every stage is then addressed by —
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
-# no function can stand in front of it, and it re-execs out of the startup hooks
-# and clears every inherited function before it calls anything. #84.
+# no function can stand in front of it, and `bash -p` means no startup hook is
+# sourced and no inherited function is imported in the first place. #84.
 RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [[ -n $RB_REMOTE ]] \
