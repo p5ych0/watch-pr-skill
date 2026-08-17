@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.22] — 2026-08-17
+
+- **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted
+  `pr-copilot-phase.sh`'s stage dispatch to the reserved `[[` after a `close`
+  invocation was found running `open`; every other guard in the script still used
+  `[`, which a function shadows along with the `command` and `builtin` prefixes,
+  in a script that does not re-exec.
+
+  Two of them decide whether a signoff is recorded at all. The proofs that the
+  phase is still open compare the current head with the one Codex signed off, so a
+  `[` agreeing to that equality opens the phase — posting a revocation and
+  requesting a Copilot pass — on a commit Codex never reviewed; and the live
+  verdict check is a status comparison, so one agreeing to that accepts a
+  dismissed review as clean. Either way the durable record then names a commit no
+  reviewer saw, and every later gate trusts it.
+
+  All ten guards are reserved-word tests now, converted together rather than as
+  the ones somebody noticed, and the fixture exercises five narrow forgers — a `[`
+  that lies about the stage, about two shas being equal, about a non-zero status
+  being zero, about a `-ne` comparison so the operator round boundary can be
+  tested, and about the empty string being non-empty so the empty phase account
+  can be. Each is proved to lie in a child before anything relies on it, and
+  proved narrow enough to leave the rest of the script working. Two earlier
+  attempts were not, and they failed differently: one that lied about everything
+  broke `identitylib.sh`'s remote parse, so the run died with `reason=no_origin`
+  before the guard was reached and the case tested nothing; one that answered
+  every `-n ""` hung the run at the watchdog, because "the empty string is
+  non-empty" is a loop that never terminates wherever one ends on it.
+
+  Every converted guard whose behaviour a caller can observe fails under mutation,
+  including `record`'s own re-validation, which posts the signoff.
+
 ## [2.0.21] — 2026-08-17
 
 - **A `cd` mid-session could point every phase stage at another repository's pull
