@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# The Codex→Copilot phase transition: record what Codex signed off, and — if the
-# operator asks for it — open the Copilot pass on that same head.
+# The Copilot phase, end to end: record what Codex signed off, and — if the
+# operator asks for it — open the Copilot pass on that same head, then close it on
+# Copilot's own clean verdict.
 #
 #   pr-copilot-phase.sh record <pr> <body-file>
 #   pr-copilot-phase.sh open   <pr> <codex-sha>
+#   pr-copilot-phase.sh close  <pr> <codex-sha> [both|codex-only]
 #
-#   0  recorded / opened
+#   0  recorded / opened / closed
 #   1  stopped  — the reason is on stdout; the phase did NOT advance
 #   3  paused   — a round boundary. NOT a refusal: the operator decides
 #
-# WHY TWO STAGES
+# WHY SEPARATE STAGES
 #
-# Between them is a decision that is not the loop's to make. `record` proves Codex
+# Each boundary between them is a decision that is not the loop's to make. `record` proves Codex
 # clean on an exact head, proves that head's checks, posts the account of the
 # phase and writes the signoff onto the PR; then it STOPS and asks. Merging on one
 # reviewer's signoff is a legitimate answer, and every Copilot pass costs a round
@@ -22,6 +24,14 @@
 # invocation because the operator's answer can arrive in a different session:
 # `record` puts the signoff on the PR precisely so a later session can read it
 # back with `pr-signoff.sh` and pass the sha here.
+#
+# `close` is the same shape at the other end: Copilot's verdict came back clean,
+# so the second signoff is written down and the operator is asked what to do with
+# two closed phases. It takes the Codex head as well as reading the current one,
+# because whether those two shas are EQUAL is what decides which question gets
+# asked — the fault-tolerance pass is offered only where the phase produced
+# commits. It also takes the reviewers mode, since `codex-only` means no Copilot
+# review was ever requested and there is nothing here to record.
 #
 # WHAT THE CALLER WRITES AND WHAT THIS WRITES
 #
@@ -62,9 +72,9 @@ rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
 # skipped the decision or re-asked a question already answered.
 STAGE="${1:-}"
 case "$STAGE" in
-    record|open) ;;
-    "") echo "ABORT: a stage is required: 'record' (prove and record the Codex signoff, then ask) or 'open' (start the Copilot pass the operator asked for)"; exit 1 ;;
-    *) echo "ABORT: '$STAGE' is not a stage; expected 'record' or 'open'"; exit 1 ;;
+    record|open|close) ;;
+    "") echo "ABORT: a stage is required: 'record' (prove and record the Codex signoff, then ask), 'open' (start the Copilot pass the operator asked for) or 'close' (record Copilot's signoff and ask)"; exit 1 ;;
+    *) echo "ABORT: '$STAGE' is not a stage; expected 'record', 'open' or 'close'"; exit 1 ;;
 esac
 shift
 
@@ -73,7 +83,14 @@ case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
 
-if [ "$STAGE" = open ]; then
+# `[[`, A RESERVED WORD, NOT `[`. The stage dispatch decides which of three
+# mutations this invocation performs, and a function named `[` — inheritable
+# through `export -f`, and this script does not re-exec — shadows the builtin and
+# the `command`/`builtin` prefixes alike. One that returns success sends a `close`
+# invocation down the `open` path, revoking the Copilot signoff and requesting
+# another pass instead of closing the phase. The parser handles `[[`, so no
+# function can take its place. See CLAUDE.md § Already paid for.
+if [[ $STAGE = open ]]; then
     # ── THE OPERATOR ASKED FOR THE COPILOT PHASE ───────────────────────────
     CODEX_SHA="${2:-}"
     [ -n "$CODEX_SHA" ] \
@@ -201,6 +218,117 @@ if [ "$STAGE" = open ]; then
         exit 1; }
 
     echo "PR_COPILOT_PHASE_OPENED pr=$PR head=$CODEX_SHA prior-review=$PRIOR_REVIEW"
+    exit 0
+fi
+
+if [[ $STAGE = close ]]; then
+    # ── THE OTHER END OF THE PHASE `open` STARTED ──────────────────────────
+    #
+    # Copilot's verdict came back clean, so the second signoff is written down
+    # too and the operator is asked what to do with two clean phases. This was 93
+    # lines of `SKILL.md`, where nothing covered it — see #78. The move is what
+    # buys it the suite, `pr-selfcheck.sh` and the bash 3.2 job.
+    #
+    # ITS ABORTS EXIT NON-ZERO. In `SKILL.md` they exited 0, because that block
+    # ran in the driver's own shell where a non-zero status would have killed the
+    # session — so a failed head read, a malformed sha and a moved head all
+    # returned success to anything reading the status. Here the caller branches on
+    # it, and every one of them is a stop.
+    CODEX_SHA="${2:-}"
+    [ -n "$CODEX_SHA" ] \
+        || { echo "ABORT: 'close' needs the head Codex signed off, so the record can say whether the two phases closed on the same commit."; exit 1; }
+    _why="$(sha_reason "$CODEX_SHA")" \
+        || { echo "ABORT: the Codex-signed-off head is not a full OID ($_why: '$CODEX_SHA')."; exit 1; }
+
+    # `codex-only` MEANS THERE IS NOTHING HERE TO DO, and saying so is not the
+    # same as doing it. No Copilot review was ever requested, so there is no
+    # verdict to re-check and no second signoff to record — and running the rest
+    # anyway is how a previous round's fix stayed unreachable: the merge gate had
+    # learned the mode while the documented path to it still exited on a Copilot
+    # recheck that could not pass.
+    REVIEWERS="${3:-both}"
+    case "$REVIEWERS" in
+        both) ;;
+        codex-only)
+            echo "PR_COPILOT_PHASE_CLOSED pr=$PR mode=codex-only copilot-sha=none codex-sha=$CODEX_SHA"
+            exit 0 ;;
+        *) echo "ABORT: '$REVIEWERS' is not a reviewers mode; expected 'both' or 'codex-only'"; exit 1 ;;
+    esac
+
+    COPILOT_SHA=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+        || { echo "ABORT: could not read the head to record the Copilot signoff"; exit 1; }
+    _why="$(sha_reason "$COPILOT_SHA")" \
+        || { echo "ABORT: the head is not a full OID ($_why: '$COPILOT_SHA'); do not record a signoff for it"; exit 1; }
+
+    # THE VERDICT IS RE-CHECKED AGAINST EXACTLY THIS SHA before it is written
+    # down. Only the SHAPE of the head was checked above, so a push landing
+    # between the clean verdict and this lookup — or while the operator had the
+    # stop parked — recorded the NEW, unreviewed head as Copilot-signed. The
+    # durable record would then say both phases closed on a commit neither
+    # reviewer saw, and every later session would believe it.
+    COPILOT_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
+    [[ $COPILOT_RECHECK_RC -eq 0 ]] \
+        || { echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"; exit 1; }
+
+    # COMPOSED HERE, for the reason `record`'s marker is: the caller writes no
+    # part of this. Both shas are validated OIDs and the logins are library
+    # constants, so there is no caller text to insert and nothing to quote out of.
+    CLOSE_BODY="$(printf '**Review-Signoff:** `%s` `%s`\n\nCopilot signed off on `%s`. Codex signed off on `%s`; if those differ, the older Codex result carries only if the merge gate validates that every commit between them is a Review-Phase: copilot fix.\n' \
+        "$RB_COPILOT_BOT" "$COPILOT_SHA" "$COPILOT_SHA" "$CODEX_SHA")" \
+        || { echo "ABORT: could not compose the Copilot signoff."; exit 1; }
+    gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$CLOSE_BODY" \
+        || { echo "ABORT: could not record the Copilot signoff"; exit 1; }
+
+    echo "PR_COPILOT_PHASE_CLOSED pr=$PR reviewer=$RB_COPILOT_BOT copilot-sha=$COPILOT_SHA codex-sha=$CODEX_SHA"
+
+    # ── STOP. MERGING IS THE OPERATOR'S DECISION ───────────────────────────
+    #
+    # Both reviewers are clean and both signoffs are on the PR. Merging is the
+    # largest irreversible action this tool takes, and "every gate passed" is an
+    # input to that decision rather than the decision itself.
+    #
+    # WHICH QUESTION IS ASKED DEPENDS ON WHETHER THE PHASE PRODUCED COMMITS, and
+    # the two shas are how that is known. Where they differ, Copilot's fixes moved
+    # the head after Codex looked at it, and a fault-tolerance pass over those
+    # commits is a real option. Where they are the SAME, Codex has already
+    # reviewed exactly what is being merged: offering the pass there costs a
+    # revocation, a round and a reopened phase for a verdict that cannot differ —
+    # and a session resuming into the reopened phase reads it as a Copilot phase
+    # to run again. That is not hypothetical; it is what #55 was raised for.
+    if [[ $COPILOT_SHA = "$CODEX_SHA" ]]; then
+        cat <<EOF
+
+Copilot signed off on $COPILOT_SHA, and so did Codex — one commit, both
+reviewers, and it is the head being merged. Nothing has changed since either
+looked, so there is no fault-tolerance pass to run over it.
+
+  Decide, and say which:
+    (a) merge — run pr-merge-gate.sh
+    (b) stop and leave the PR open
+
+Nothing further happens until you say.
+EOF
+    else
+        cat <<EOF
+
+Copilot signed off on $COPILOT_SHA. Codex signed off on $CODEX_SHA.
+
+Those differ, so Copilot's fixes moved the head after Codex looked at it — the
+older Codex result is carried forward ONLY if the merge gate validates that every
+commit between them is a Review-Phase: copilot fix, and it refuses if any is not.
+That check has not run yet.
+
+  Decide, and say which:
+    (a) merge — run pr-merge-gate.sh
+    (b) another Codex pass first, as fault tolerance over the Copilot changes.
+        POST A REVOCATION BEFORE REQUESTING IT — a comment whose only content is
+        the line **Review-Signoff-Revoked:** followed by the Codex login in
+        backticks. Without it the old signoff still stands, and a session resumed
+        while the new pass is running reads the reopened phase as closed.
+
+Nothing further happens until you say.
+EOF
+    fi
     exit 0
 fi
 

@@ -304,8 +304,8 @@ Then:
    round that has already started. The summary says what was addressed and what
    was intentionally skipped: a resolved thread is not a record of a fix.
 5. **Codex clean → the Copilot phase**, through
-   **`pr-copilot-phase.sh`**, which runs in **two stages with your decision
-   between them**:
+   **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
+   at each boundary**:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
      against *that exact sha*, proves its checks are green, and writes the
@@ -331,7 +331,22 @@ Then:
      revocation is posted on **every** entry, including the first, where there is
      no signoff to revoke: with no Copilot record at all, a head whose only clean
      Copilot verdict is an older review merges, so that comment is the one durable
-     mark that a new pass is pending.
+     mark that a new pass is pending;
+   - `close <PR> <codex-sha> [both|codex-only]` is the other end of the same
+     phase. Copilot's verdict came back clean, so it re-reads the head, re-checks
+     Copilot against *that exact sha* — a push landing while the stop was parked
+     would otherwise be recorded as reviewed by someone who never saw it — writes
+     the second signoff, and stops to ask what to do with two closed phases.
+
+     **Which question it asks depends on the two shas**, which is why it needs the
+     Codex one. Where they differ, Copilot's fixes moved the head after Codex
+     looked at it, and a fault-tolerance pass over those commits is offered — with
+     the revocation that has to precede it. Where they are the **same commit**,
+     Codex has already reviewed exactly what is being merged and no pass is
+     offered: taking one there costs a revocation, a round and a reopened phase
+     for a verdict that cannot differ, and a session resuming into that reopened
+     phase reads it as a Copilot phase to run again. In `codex-only` there was no
+     Copilot review at all, so the stage records nothing and says so.
 
    The body you supply is prose and is posted under your identity, so a line that
    reproduces one of the record markers a reader trusts from *you* —

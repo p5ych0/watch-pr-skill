@@ -588,5 +588,180 @@ world; got="$(run record x "$TMP/body.md")"
     && pass "a PR number that is not a number is refused" \
     || die "a non-numeric PR gave '${got}'"
 
+# ── `close`: the other end of the phase ────────────────────────────────────
+#
+# This was 93 lines of `SKILL.md`, covered by nothing — see #78. Every case below
+# is one the Markdown copy could not have had.
+
+# WHICH QUESTION THE STOP ASKS IS THE POINT OF THE STAGE. Where the two shas are
+# the same commit, Codex has already reviewed exactly what is being merged and the
+# fault-tolerance pass must NOT be offered: taking it costs a revocation, a round
+# and a reopened phase for a verdict that cannot differ (#55).
+world; got="$(run close 7 "$HEAD40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_COPILOT_PHASE_CLOSED pr=7 reviewer=$COPILOTBOT copilot-sha=$HEAD40 codex-sha=$HEAD40"; } \
+    && pass "a clean Copilot verdict closes the phase and names both shas" \
+    || die "close on a matching head gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'stop and leave the PR open' \
+    && pass "…and the stop offers merge or stop" \
+    || die "the matching-head stop did not offer to leave it open: ${got#*|}"
+# THE ABSENCE AS WELL AS THE PRESENCE. "Offers merge" is true of both stops, so
+# only asserting what must NOT be there tells them apart.
+printf '%s' "${got#*|}" | grep -qF 'another Codex pass' \
+    && die "a fault-tolerance pass was offered over a head Codex already reviewed: ${got#*|}" \
+    || pass "…and offers no fault-tolerance pass over an unchanged head"
+# …AND THE MENU IS A WHITELIST, not one forbidden phrase. Carried over from the
+# contract test, which asserted this while the block lived in `SKILL.md`. The
+# first version of it rejected the wording `another Codex pass`, which rephrasing
+# option (b) to `run the fault-tolerance pass first` walks straight past — the
+# pass is reoffered over commits that do not exist and the check stays green.
+# Every option line is matched against the exact allowed set, so a reworded (b)
+# and an added (c) both fail.
+_ft_opts="$(printf '%s' "${got#*|}" | grep '^    ([a-z]) ')"
+[ "$_ft_opts" = "    (a) merge — run pr-merge-gate.sh
+    (b) stop and leave the PR open" ] \
+    && pass "…and the unchanged-head menu is merge or stop, and nothing else" \
+    || die "the unchanged-head options are not merge-or-stop (got: $_ft_opts)"
+
+# THE MARKER IS THE RECORD, in the shape `pr-signoff.sh` scans for: the login and
+# the sha in backticks on a line of their own. A stage that posted a paragraph
+# saying the same thing in prose would satisfy every assertion above and leave
+# nothing a later session can read back.
+posted | grep -qF "**Review-Signoff:** \`$COPILOTBOT\` \`$HEAD40\`" \
+    && pass "…and the posted body carries the signoff marker for Copilot" \
+    || die "no Copilot signoff marker in the posted body: $(posted)"
+
+# WHERE THE PHASE PRODUCED COMMITS the head has moved past the Codex signoff, and
+# the pass IS offered — with the revocation that has to precede it.
+world; got="$(run close 7 "$OTHER40")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "copilot-sha=$HEAD40 codex-sha=$OTHER40"; } \
+    && pass "a moved head closes the phase naming both commits" \
+    || die "close on a moved head gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'another Codex pass' \
+    && pass "…and the stop offers the fault-tolerance pass" \
+    || die "no fault-tolerance option after a phase that moved the head: ${got#*|}"
+printf '%s' "${got#*|}" | grep -qF 'Review-Signoff-Revoked' \
+    && pass "…and requires the revocation before it" \
+    || die "the fault-tolerance option omitted the revocation: ${got#*|}"
+# …AND IT DOES NOT CLAIM BOTH REVIEWERS READ THE HEAD. Once Copilot's fixes have
+# moved it, only Copilot signed the current commit; Codex signed an older one and
+# the trailer range carrying it forward has not been validated yet. Saying "both
+# signed off on <head>" at the merge-versus-another-pass decision is a false
+# two-reviews-on-this-commit assurance at precisely the moment it matters. Carried
+# over from the contract test with the block.
+printf '%s' "${got#*|}" | grep -qi 'has not run yet' \
+    && pass "…and says the delta check has not run yet" \
+    || die "the stop presents an unvalidated delta as though it were checked: ${got#*|}"
+
+# `codex-only` HAS NOTHING TO RECORD, and saying so is not the same as doing it.
+# Running the rest in that mode is how a previous round's fix stayed unreachable.
+world; got="$(run close 7 "$HEAD40" codex-only)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'mode=codex-only copilot-sha=none'; } \
+    && pass "codex-only closes with nothing recorded" \
+    || die "codex-only gave '${got}'"
+grep -q 'pr comment' "$TMP/calls" \
+    && die "codex-only posted a Copilot signoff: $(cat "$TMP/calls")" \
+    || pass "…and posted no comment"
+grep -q 'pr-review-state.sh verdict' "$TMP/calls" \
+    && die "codex-only re-checked a Copilot verdict that cannot exist" \
+    || pass "…and re-checked no Copilot verdict"
+
+world; got="$(run close 7 "$HEAD40" neither)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'neither' is not a reviewers mode"; } \
+    && pass "an unknown reviewers mode is refused by name" \
+    || die "an unknown mode gave '${got}'"
+
+# ── every failure is a stop, and leaves nothing behind ─────────────────────
+#
+# In `SKILL.md` each of these exited 0, because that block ran in the driver's own
+# shell where a non-zero status would have killed the session. A caller branching
+# on the status was told the phase had closed.
+close_stops() {   # close_stops <label> ; the world is already broken by the caller
+    local got="$1" label="$2"
+    { [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+        && pass "$label" \
+        || die "$label — rc=${got%%|*} posted='$(posted)' out='${got#*|}'"
+}
+world; close_stops "$(run close 7)" "close without the Codex head is a stop"
+world; close_stops "$(run close 7 not-a-sha)" "…and a malformed Codex head is a stop"
+world; close_stops "$(run close 7 "${HEAD40:0:7}")" "…and an abbreviated one is too"
+world; printf '1\n' > "$W/head.rc"
+close_stops "$(run close 7 "$HEAD40")" "…and an unreadable head records nothing"
+world; printf 'not-a-sha\n' > "$W/head.out"
+close_stops "$(run close 7 "$HEAD40")" "…and a head that is not an OID records nothing"
+world; printf '1\n' > "$W/verdict.rc"
+close_stops "$(run close 7 "$HEAD40")" "…and a Copilot verdict that is not clean records nothing"
+
+# A FAILED POST IS A STOP TOO, and the record line must not be printed for it: a
+# caller that scraped `PR_COPILOT_PHASE_CLOSED` out of the output would carry a
+# signoff that is not on the PR.
+world; printf '1\n' > "$W/comment.rc"
+got="$(run close 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && ! printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_CLOSED'; } \
+    && pass "a failed post is a stop and announces no closed phase" \
+    || die "a failed post gave '${got}'"
+
+# THE VERDICT IS RE-CHECKED BEFORE THE POST, not after. Reversed, a head that
+# moved between the clean verdict and the lookup is recorded as Copilot-signed and
+# the re-check then reports on a commit already written down.
+world; run close 7 "$HEAD40" >/dev/null
+before 'pr-review-state.sh verdict' 'pr comment' \
+    && pass "the verdict is re-checked before the signoff is posted" \
+    || die "the post preceded the re-check: $(cat "$TMP/calls")"
+
+# ── AN INHERITED `[` MUST NOT PICK THE STAGE ───────────────────────────────
+#
+# A function named `[` shadows the builtin and the `command`/`builtin` prefixes
+# alike, this script does not re-exec, and it arrives through the environment
+# rather than through this fixture's own shell. One that returns success sent a
+# `close` invocation down the `open` path — revoking the Copilot signoff and
+# requesting another pass instead of closing the phase, on an invocation that
+# asked for the opposite.
+#
+# IMPORTED, NOT DEFINED. `BASH_FUNC_[%%=` is how the environment carries it, and
+# it is the route that matters: a definition in this shell would not survive the
+# `env` below.
+#
+# NARROW, AND OTHERWISE WORKING. The first version returned 0 for everything and
+# the case failed with `reason=no_origin` — `identitylib.sh` parses the remote
+# with `[`, so a `[` that lied about all of it broke the harness before the stage
+# dispatch was reached, and a broad forger would have been rejected by a different
+# check while the case passed either way. This one lies about exactly the
+# comparison the finding names and delegates everything else to the builtin.
+_RB_SHADOW_BRACKET='BASH_FUNC_[%%=() { if [[ "$1 $2 $3" == "close = open" ]]; then return 0; fi; builtin [ "$@"; }'
+shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
+    local out rc=0
+    out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$_RB_SHADOW_BRACKET" \
+        "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
+    printf '%s|%s' "$rc" "$out"
+}
+# THE FIXTURE'S OWN REACH IS ASSERTED FIRST, in both directions. An import that
+# silently failed would make the cases below pass while testing nothing; a forger
+# that broke the identity parse would fail them for a reason that is not the
+# defect. So: the lie lands, and the rest of the run still works.
+world; got="$(shadow_run notastage 7)"
+printf '%s' "${got#*|}" | grep -qF "'notastage' is not a stage" \
+    && pass "the inherited [ reaches the script at all" \
+    || die "the [ import did not take effect: '${got}'"
+world; got="$(shadow_run record 7 "$TMP/body.md")"
+printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+    && pass "…and is narrow enough that the rest of the script still runs" \
+    || die "the shadowed [ broke the harness rather than the dispatch: '${got}'"
+
+world; got="$(shadow_run close 7 "$HEAD40")"
+printf '%s' "${got#*|}" | grep -qF 'PR_COPILOT_PHASE_CLOSED' \
+    && pass "an inherited [ does not divert close into another stage" \
+    || die "close with a shadowed [ gave '${got}'"
+# THE CONSEQUENCE, NOT JUST THE STATUS. `open`'s mutations are a revocation and a
+# review request; either landing on a `close` invocation is the failure, and a
+# status assertion alone does not see them.
+grep -q 'pr edit' "$TMP/calls" \
+    && die "close with a shadowed [ requested a Copilot pass: $(cat "$TMP/calls")" \
+    || pass "…and requests no Copilot pass"
+posted | grep -qF 'Review-Signoff-Revoked' \
+    && die "close with a shadowed [ revoked a signoff: $(posted)" \
+    || pass "…and revokes nothing"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
