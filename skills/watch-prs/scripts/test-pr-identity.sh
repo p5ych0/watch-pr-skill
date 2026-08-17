@@ -568,13 +568,16 @@ set -e
 for sc in "$ROOT"/pr-*.sh; do
     [ -f "$sc" ] || continue
     _n="$(basename "$sc")"
-    # TWO NARROWED EXEMPTIONS, NAMED AND EXPLAINED. `pr-selfcheck.sh` and
-    # `pr-origin.sh` clear every inherited function on purpose — each re-execs into
-    # a clean shell and then removes what a startup hook may have left, which is
-    # the opposite of copying a loading rule, and each has its own fixture over
-    # that block. `pr-origin.sh` loads no library at all, by design: it is the one
-    # helper the driving shell reaches before anything else is trusted, so it
-    # depends on nothing it would have to verify.
+    # TWO NARROWED EXEMPTIONS, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every
+    # inherited function on purpose — it re-execs into a clean shell and then
+    # removes what a startup hook may have left, which is the opposite of copying a
+    # loading rule, and `test-pr-selfcheck.sh` covers that block.
+    #
+    # `pr-origin.sh` is exempt for a different reason and does no clearing at all:
+    # the caller starts it with `/usr/bin/env bash -p`, so no function is imported
+    # from the environment in the first place. It also loads no library, by design
+    # — it is the one helper the driving shell reaches before anything else is
+    # trusted, so it depends on nothing it would have to verify.
     #
     # Only the CLEARS are excused. Skipping either file entirely would excuse its
     # hand-SOURCING too, so it could begin loading a library by hand with this

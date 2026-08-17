@@ -34,11 +34,12 @@
 # variables, so it agrees the pin arrived while the real helpers — which exec
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherit nothing.
 #
-# Neither is reachable here, and the reason is the whole design: this file is
-# invoked as `"$RB_SCRIPTS"/pr-origin.sh`, a PATH rather than a name, so no
-# function can stand in front of it; and it re-execs into a shell with the startup
-# hooks removed and every inherited function cleared before it calls anything. See
-# issues #84 and #83.
+# Neither is reachable here, and the reason is the whole design: the caller starts
+# this file with `/usr/bin/env bash -p` — a PATH rather than a name, so no function
+# can stand in front of it, and PRIVILEGED, so `BASH_ENV` and `ENV` are never
+# sourced, shell functions are never imported from the environment, and
+# `SHELLOPTS` is ignored. There is no hook to escape and nothing inherited to
+# clear. See issues #84 and #83.
 #
 # `pin` IS NOT A CONVENIENCE MODE. It exists because "a child sees the pin" is the
 # property the export has to have, and asking it from inside the driving shell
@@ -74,6 +75,16 @@
 # intercepted. If `exec` or `env` is shadowed the hop silently does not happen and
 # this file runs on unprotected — the regress recorded at the bottom, unchanged
 # and unclosable from inside a process.
+# STRICT MODE IS SET HERE, AFTER THE HOP, AND THAT POSITION IS FORCED. `bash -p`
+# ignores an inherited `SHELLOPTS`, which is most of why it is used — so a strict
+# calling shell cannot supply these, and setting them before the hop would not
+# survive it either. `CLAUDE.md` classifies this file in the `set -uo pipefail`
+# row; an earlier draft deleted the line along with the block it lived in and the
+# script ran with none of it.
+#
+# `-e` IS EXCLUDED, as in every other helper here: the probes below report their
+# answers as exit statuses. See CLAUDE.md § Bash conventions.
+#
 # AND THE HOP IS BOUNDED, because a guard on shell state loops forever if the hop
 # does not change that state — a `bash` that ignores `-p`, or an `env` that never
 # reaches one. Removing `-p` from the line below hangs this script rather than
@@ -90,6 +101,7 @@ if [[ $- != *p* ]]; then
     fi
     RB_ORIGIN_HOP=1 exec /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash -p "$0" "$@"
 fi
+set -uo pipefail
 
 # ── THE CAPTURE DESCRIPTOR IS THE CALLER'S TO ESTABLISH ────────────────────
 #

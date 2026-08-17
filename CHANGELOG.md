@@ -10,11 +10,13 @@
   attribute it agreed the pin had arrived while every real helper — which execs
   through `#!/usr/bin/env bash` and resolves on `PATH` — inherited nothing.
 
-  Both are now asked of `pr-origin.sh`, reached as `"$RB_SCRIPTS"/pr-origin.sh`.
-  A path is not a name, so no function can stand in front of it; it re-execs out
-  of `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` and clears every inherited
-  function before it calls anything; and `pin` is a real child, so what it sees is
-  what the stages will see.
+  Both are now asked of `pr-origin.sh`, started by the caller as
+  `{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2`. A path is
+  not a name, so no function can stand in front of it; privileged mode means
+  `BASH_ENV` and `ENV` are never sourced, shell functions are never imported from
+  the environment, and `SHELLOPTS` is ignored, so there is no hook to escape and
+  nothing inherited to clear; and `pin` is a real child, so what it sees is what
+  the stages will see.
 
   Measured against the driver before and after: a forged `git` used to decide the
   session's repository and now cannot, and an `export` that assigns without
