@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   pr-origin.sh read   # print origin's URL, from THIS directory
-#   pr-origin.sh pin    # print REVIEW_BUS_REMOTE as a child process sees it
+#   RB_REMOTE="$({ pr-origin.sh read; } 9>&1 1>&2)"   # origin's URL, from HERE
+#   RB_PIN_SEEN="$({ pr-origin.sh pin;  } 9>&1 1>&2)"   # REVIEW_BUS_REMOTE, as a
+#                                                       # child process sees it
+#
+# THE BRACES AND THE DESCRIPTORS ARE THE INVOCATION, not decoration around it —
+# see the block on fd 9 below. A usage line teaching the simple form is a usage
+# line teaching a session that refuses itself under an inherited xtrace, so both
+# copies of it say the same thing.
 #
 #   0  the value is on stdout
 #   1  refused — the reason is on stdout, and no value was printed
@@ -31,142 +37,77 @@
 # none. This process is a real child, reached without a name, so its answer is the
 # one that matters.
 #
+# ── THE STARTUP HOOK IS NOT ESCAPED; IT IS NEVER RUN ───────────────────────
+#
+# `bash -p` does three things this file used to spend fifty lines failing to do
+# from inside an ordinary shell — measured, all three at once:
+#
+#   · `BASH_ENV` and `ENV` are not sourced, so a startup hook never executes;
+#   · shell functions are NOT imported from the environment, so `BASH_FUNC_…`
+#     entries arrive and are ignored;
+#   · `SHELLOPTS` is ignored, so an exported `xtrace` never turns on.
+#
+# WHAT THAT REPLACED, and why every one of them was a defect waiting to be found:
+# a re-exec whose guard the hook could set for itself; a function sweep made of
+# `unset`, `builtin`, `compgen` and `read`, each of which the hook could shadow or
+# mark `readonly -f` so the clearing failed and the loop then CALLED it; a `:`
+# probe that ran before any of it. Each was a name used to escape names, and each
+# round of review found the next one. `-p` removes the question instead of
+# answering it again.
+#
+# THE GUARD IS `$-`, WHICH IS SHELL STATE. A hook can set any variable, replace
+# the positional parameters with `set --`, and define any function — it cannot
+# make `$-` claim a `p` that is not there. Both were the previous two guards, and
+# both were forged.
+#
+# `[[` and `!=` are reserved-word syntax, so the guard itself cannot be
+# intercepted. If `exec` or `env` is shadowed the hop silently does not happen and
+# this file runs on unprotected — the regress recorded at the bottom, unchanged
+# and unclosable from inside a process.
+# AND THE HOP IS BOUNDED, because a guard on shell state loops forever if the hop
+# does not change that state — a `bash` that ignores `-p`, or an `env` that never
+# reaches one. Removing `-p` from the line below hangs this script rather than
+# failing it, which is how the bound was found.
+#
+# FORGING THE BOUND COSTS A REFUSAL, NOT A VALUE. A hook can set this variable, and
+# then this script aborts instead of hopping — no read happens, nothing is
+# captured, and the driver stops. That is the difference between the bound and the
+# guard: the bound may be forged into a stop, the guard may not be forged at all.
+if [[ $- != *p* ]]; then
+    if [[ -n ${RB_ORIGIN_HOP-} ]]; then
+        echo "ABORT: this shell did not honour 'bash -p'; refusing to read origin unprotected" >&2
+        exit 1
+    fi
+    RB_ORIGIN_HOP=1 exec /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash -p "$0" "$@"
+fi
+
 # ── THE CAPTURE DESCRIPTOR IS THE CALLER'S TO ESTABLISH ────────────────────
 #
 # This script writes its value, and its reasons for refusing to produce one, to
-# fd 9. The caller opens it:
+# fd 9. The caller opens it, and does so on a GROUP so the redirections are in
+# place before bash traces anything:
 #
-#     RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2)"
+#     RB_REMOTE="$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"
 #
-# WHY NOT PARK IT IN HERE, which is what two earlier versions did. The caller
-# assigns this stdout to the variable every `gh` call is addressed by, so anything
-# else on that stream is data corruption rather than noise — and an operator with
-# `SHELLOPTS=xtrace` and `BASH_XTRACEFD=1` exported traces this process from its
-# FIRST command. A redirection inside the file cannot come before the trace of the
-# line that performs it, so one trace line always survived, and the driver had to
-# refuse an otherwise fine session to stay safe. Applied at the invocation, the
-# redirection is in place before bash begins executing this file at all, and there
-# is no first line to leak.
+# The braces matter on bash 5, which traces a simple command before applying its
+# redirections — inside a command substitution fd 1 is already the capture, so the
+# trace would land in the value. bash 3.2.57 applies them first and does not.
 #
-# AND OWNERSHIP IS NOT GUESSED. The version before this asked whether fd 9 was
-# already open and parked only if it was not — which cannot tell this script's
-# descriptor from an unrelated one the caller happened to have open, an xtrace or
-# an application log. It would have written the URL into that log and handed the
-# caller nothing. The invocation form settles it: `9>&1` at the call site points
-# fd 9 at the capture whatever the caller had there before.
+# WHY THE CALLER AND NOT THIS FILE: a redirection here cannot come before the
+# trace of the line that performs it, so one line always survived and the driver
+# had to refuse an otherwise fine session. And a version that asked whether fd 9
+# was already open could not tell this script's descriptor from a log the caller
+# had there — it would have written the URL into that log. `9>&1` at the call site
+# settles both.
 #
-# A CLOSED fd 9 IS A USAGE ERROR, and it is said plainly rather than failing with
-# `Bad file descriptor` nine lines later. This is the one thing the script can
-# tell for certain about that descriptor.
-if ! { : >&9; } 2>/dev/null; then
-    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as \"\$RB_SCRIPTS\"/pr-origin.sh $* 9>&1 1>&2" >&2
+# A CLOSED fd 9 IS A USAGE ERROR, said plainly rather than failing with `Bad file
+# descriptor` further down. It is the one thing this script can tell for certain
+# about that descriptor, and the test is a redirection rather than a command, so
+# there is no name in it.
+if ! : >&9 2>/dev/null; then
+    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
     exit 1
 fi
-
-# `set -uo pipefail`, NOT `-e`: the probes below report their answers as exit
-# statuses. See CLAUDE.md § Bash conventions.
-set -uo pipefail
-
-
-# ── EVERY INHERITED FUNCTION IS CLEARED FIRST, BEFORE ANY NAME IS USED ─────
-#
-# BEFORE THE RE-EXEC, SO THE HOP IS MADE BY THE BUILTIN. `exec` is a name, and a
-# hook defining `exec() { return 0; }` turns the hop below into a no-op: the guard
-# falls through as though the marker had been set.
-#
-# THE ORDER IS DEFENCE IN DEPTH, NOT A FIX, and measuring said so. With `exec`
-# shadowed and the clearing AFTER the hop, the read is still correct — the hook's
-# `git` is removed by the sweep either way. What a skipped hop actually costs is
-# the hook VARIABLES, and `SHELLOPTS` is readonly in a shell, so `set +x` below
-# answers the one that matters. This order is kept because a builtin-made hop is
-# strictly better and costs nothing, not because it changes an outcome.
-#
-# An exported function is inherited through the environment and survives a
-# re-exec, which only drops the hook variables. It shadows the name it is
-# called by, builtin or external alike — and `command` and `builtin`, the prefixes
-# used to reach past one, are themselves ordinary builtins and shadowable in
-# exactly the same way. Clearing those first is what makes the rest mean anything.
-#
-# EVERY FUNCTION, NOT A LIST. `CLAUDE.md` records that a list of names is wrong by
-# omission; this process defines none of its own, so clearing all of them costs
-# nothing.
-#
-# THE NAMES ARE READ, NOT EXPANDED. `a*b` is rejected as a definition and imported
-# from the environment without complaint, and unquoted it would glob against the
-# working directory. A quoted here-string neither splits nor globs.
-unset -f unset builtin command compgen declare read 2>/dev/null || true
-while read -r _rb_f; do
-    [ -n "$_rb_f" ] || continue
-    builtin unset -f -- "$_rb_f" 2>/dev/null || true
-done <<< "$(builtin compgen -A function 2>/dev/null)"
-# AFTER the clearing, so `set` is the builtin. `SHELLOPTS` is readonly in a shell
-# and cannot be unset from inside, but `set +x` turns tracing off regardless.
-set +x
-
-# ── THE STARTUP HOOK RUNS BEFORE THIS FILE DOES ────────────────────────────
-#
-# A non-interactive bash sources `$BASH_ENV` before the script body, so anything
-# it defines is already in place by the time the first line here runs. The re-exec
-# steps out of that, and `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` travel with it for
-# the same reason — an exported `SHELLOPTS=xtrace` traces this process and writes
-# to stdout when `BASH_XTRACEFD=1`, which is the stream the caller reads a value
-# from.
-#
-# GUARDED BY AN ARGUMENT, WHICH THE HOOK CANNOT WRITE. Not by the evidence — a
-# hook can `unset BASH_ENV` on its way out, so testing for it skips the re-exec
-# exactly when it is most needed. And not by an environment marker either, which
-# was the version before this one: the hook runs first, so it can simply SET that
-# marker and the guard believes the escape has already happened. Reproduced —
-# a hook doing nothing but `RB_ORIGIN_CLEAN=1` plus a `readonly -f command`
-# returning a forged URL took the whole read, with no shadowed primitives and no
-# shadowed `exec` involved.
-#
-# Arguments come from the exec, and a startup file cannot add one. So the hop
-# announces itself by passing a flag that only the hop passes.
-#
-# AND `readonly -f` IS WHY THE HOP MATTERS HERE rather than the clearing: a
-# readonly function cannot be unset from inside the shell that has it, but the
-# attribute does NOT survive an exec — measured. Once the hop happens, the sweep
-# above removes it like any other.
-#
-# `[[`, NOT `[`: the hook can define a `[` function, which would intercept this
-# guard and skip the re-exec that exists to escape it.
-#
-# IF `exec` ITSELF IS SHADOWED this falls through without shifting, and the script
-# runs on unprotected — the unterminated regress recorded below, not a new hole.
-if [[ ${1-} = --rb-origin-clean ]]; then
-    shift
-else
-    exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" --rb-origin-clean "$@"
-fi
-
-# THIS DOES NOT CLOSE THE CLASS, and saying so is the point. The clearing above is
-# itself made of names — `unset`, `builtin`, `compgen` — and so is the hop, which
-# needs `exec`. A hook defining no-ops for `unset`, `builtin` and `exec`, plus a
-# `command` that answers with a forged URL, walks through all of it: the clear is
-# a no-op, the enumeration returns nothing, the hop does not happen, and the read
-# takes the forged value. Reproduced, not theorised.
-#
-# There is no terminator inside a process. `set -o posix` would make special
-# builtins outrank functions, and it is reached through `set`. `pr-selfcheck.sh`
-# records the identical limit for the identical reason, and this file inherits it
-# rather than pretending otherwise.
-#
-# What the regress needs is a parent already executing arbitrary code as the
-# operator — and such a shell can edit this file, or the commit, instead of
-# out-arguing its bootstrap. That is the boundary #76 settled: hardening buys the
-# versions of the attack that do NOT own the shell outright, and this file buys
-# every one of them that a single forged name reaches.
-#
-# AND A POISONED `PATH` IS NOT CLOSED HERE EITHER, which is a different exposure
-# from the ones above and worth separating. A hook that prepends a directory
-# holding a forged `git` — and makes `PATH` readonly so its own shell cannot undo
-# it — is not answered by clearing functions or by the re-exec: the value survives
-# as an ordinary inherited variable, and this process has no way to know which
-# `PATH` was the honest one. It is also not specific to this helper. Every `gh`
-# call in every script resolves the same way, so a `PATH` the operator does not
-# control compromises the whole loop rather than this read. Filed as its own
-# issue; see the header for what this file DOES answer.
 
 MODE="${1-}"
 case "$MODE" in

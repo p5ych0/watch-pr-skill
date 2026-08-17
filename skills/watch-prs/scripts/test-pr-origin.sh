@@ -347,5 +347,53 @@ case "$tprobe" in
     *)       die "the xtrace never took effect, so the case above proves nothing: '$tprobe'" ;;
 esac
 
+# ── EVERY HOOK SHAPE THIS FILE HAS BEEN BEATEN BY, IN ONE PLACE ────────────
+#
+# Each of these defeated a previous version of the subject, and each is defeated
+# now by the same single change: `bash -p` does not source `BASH_ENV`, does not
+# import functions from the environment, and ignores `SHELLOPTS`. They are kept
+# together because the lesson is that they are ONE case, not five — every earlier
+# version answered them one at a time and the next round found the next name.
+for hook_case in \
+    'exec:exec() { return 0; }; git() { printf "%s\\n" "FORGED"; }' \
+    'marker:RB_ORIGIN_CLEAN=1; command() { printf "%s\\n" "FORGED"; }; readonly -f command' \
+    'readonly-read:read() { printf "%s\\n" "FORGED" >&9; exit 0; }; readonly -f read' \
+    'readonly-set:set() { return 0; }; readonly -f set; git() { printf "%s\\n" "FORGED"; }' \
+    'clearing:unset() { return 0; }; builtin() { return 0; }; command() { printf "%s\\n" "FORGED"; }' \
+; do
+    _hn="${hook_case%%:*}"; _hb="${hook_case#*:}"
+    printf '%s\n' "${_hb//FORGED/$FORGED}" > "$TMP/hook-$_hn.sh"
+    got="$(run read BASH_ENV="$TMP/hook-$_hn.sh")"
+    { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+        && pass "a startup hook ($_hn) never runs, so it cannot forge the origin" \
+        || die "hook '$_hn' reached the read: '${got}'"
+done
+
+# …AND AN EXPORTED FUNCTION IS NOT IMPORTED AT ALL, which is the other half of
+# what `-p` buys. `:` is here because a previous version used it as a probe before
+# any clearing could run, so an exported `:` answered first.
+for fn_case in git :; do
+    got="$(run read "BASH_FUNC_${fn_case}%%=() { printf '$FORGED\n' >&9; exit 0; }")"
+    { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+        && pass "an exported '$fn_case' function is not imported under -p" \
+        || die "an exported '$fn_case' reached the read: '${got}'"
+done
+
+# ── AND THE GUARD IS SHELL STATE, WHICH A HOOK CANNOT WRITE ────────────────
+#
+# The two guards before this one were an environment marker and a positional
+# flag, and a hook forged both — it can set any variable and can replace the
+# positional parameters with `set --`. It cannot make `$-` claim a `p`.
+#
+# A hook that forges the old flag now produces a REFUSAL rather than a value,
+# because the flag is not what the guard reads and the forged word arrives where
+# the mode is expected. Fail closed, and visibly.
+printf 'set -- --rb-origin-clean read\ncommand() { printf "%%s\\n" "%s"; }\nreadonly -f command\n' "$FORGED" \
+    > "$TMP/hook-setargs.sh"
+got="$(run read BASH_ENV="$TMP/hook-setargs.sh")"
+{ [ "${got%%|*}" = 1 ] && [ "${got#*|}" != "$FORGED" ]; } \
+    && pass "a hook replacing the positional parameters is refused, not obeyed" \
+    || die "a set-- hook gave '${got}'"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

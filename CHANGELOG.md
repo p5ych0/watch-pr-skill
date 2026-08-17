@@ -32,20 +32,24 @@
   It also settles which fd 9 is which: a caller with its own log open on that
   descriptor is overridden by the call rather than written into.
 
-  The hop announces itself with an **argument**, not an environment marker. A
-  startup file runs before the script's first line and can simply set a marker, and
-  a hook doing nothing but that plus a `readonly -f` function returning a forged
-  URL took the whole read — no shadowed primitives, no shadowed `exec`. Arguments
-  come from the exec and a startup file cannot add one. The `readonly` attribute
-  does not survive an exec either, so once the hop happens the sweep removes that
-  function like any other.
+  The hop is to `bash -p`, which does not source `BASH_ENV` or `ENV`, does not
+  import functions from the environment, and ignores `SHELLOPTS` — measured, all
+  three. That replaced a re-exec whose marker the hook could set for itself, a
+  function sweep made of `unset`, `builtin`, `compgen` and `read` (each shadowable,
+  and each markable `readonly -f` so the clearing failed and the loop then *called*
+  it), and a `:` probe that ran before any of it. Every one was a name used to
+  escape names, and each round of review found the next; `-p` removes the question
+  rather than answering it again. The guard is `$-`, which is shell state a hook
+  cannot write — where the two guards before it, an environment marker and a
+  positional flag, were both forged.
 
-  This does not close the class — `unset`, `builtin` and `exec` are names the
-  clearing and the hop are made of, and a hook that shadows all three walks
-  through it — and the script says so where a reader will find it, as
-  `pr-selfcheck.sh` already does for the same reason. What is left needs a shell
-  already executing arbitrary code as the operator, which can edit the helper
-  instead.
+  What remains is stated in the script rather than left to be rediscovered: `exec`
+  and `env` are names the hop itself is made of, so a shell that shadows them keeps
+  the process where it is; an inherited `BASH_XTRACEFD=9` collides with the capture
+  descriptor and the session refuses itself rather than pinning to trace text; and
+  a poisoned `PATH` forges every external command, which is not this helper's to
+  answer and is filed as its own issue. All three need a shell already executing
+  arbitrary code as the operator — which can edit the helper instead.
 
 ## [2.0.22] — 2026-08-17
 
