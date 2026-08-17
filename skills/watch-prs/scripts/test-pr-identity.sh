@@ -9,6 +9,25 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # mandatory pre-push gate.
 . "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/testlib.sh"
 
+# ── THE IDENTITY OVERRIDES ARE CLEARED, AND THIS FILE IS WHY THEY MUST BE ──
+#
+# `SKILL.md`'s setup exports `REVIEW_BUS_REMOTE` to pin the session's repository,
+# and step 5a then runs this whole suite through `pr-selfcheck.sh` — so an
+# operator following the documented flow reaches this file with the pin already in
+# the environment. `rb_identity` prefers it over `git remote get-url origin`, so
+# every case here that forges a failing or malformed `git` would find its forgery
+# never consulted, and the file went RED for a defect that was not there.
+#
+# NOT IN `testlib.sh`, which would have covered every fixture in one place. That
+# library SHIPS AT RUNTIME — `pr-ci-state.sh` loads it to bound its `gh` calls —
+# so an `unset` there executes inside the production script and wipes the pin the
+# driver just set. It was written there first and `test-pr-ci-state.sh` caught it.
+#
+# All three names, not just the one that bit: `REVIEW_BUS_OWNER` and
+# `REVIEW_BUS_REPO` override the parsed halves and would shift a forged origin's
+# fields exactly as silently.
+unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
+
 # Concrete-identity patterns that must never be hard-coded: a repo slug
 # (p5ych0/pulse), a unit slug (p5ych0-pulse), or any concrete /tmp path keyed on
 # the repo name (…/pulse-review-bus, …/pulse-claude-worktrees, …).

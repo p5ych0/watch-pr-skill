@@ -14,6 +14,15 @@ ROOT="$SCRIPT_DIR/../../.."
 # sourced them, and it was the one still holding a bare `mktemp -d`.
 . "$SCRIPT_DIR/testlib.sh"
 
+# THE IDENTITY OVERRIDES ARE CLEARED. `SKILL.md`'s setup exports
+# `REVIEW_BUS_REMOTE`, and step 5a runs this suite, so the documented flow reaches
+# here with the session pin already set — and the pin cases below forge an
+# `export` whose assignment to an ALREADY-EXPORTED name keeps the export
+# attribute, inverting the case that exists to catch assign-without-export. Not in
+# `testlib.sh`: that library ships at runtime inside `pr-ci-state.sh`, where an
+# unset would wipe the driver's pin. See `test-pr-identity.sh` for the long form.
+unset REVIEW_BUS_REMOTE REVIEW_BUS_OWNER REVIEW_BUS_REPO
+
 fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
