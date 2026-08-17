@@ -38,6 +38,12 @@
   and setup's success line sits inside the branch where the pin took. A driver
   whose abort was neutralised is never told setup completed.
 
+  The proof is taken from a child, because a child is what the pin is for. An
+  `export` that performs the assignment without setting the export attribute
+  leaves the driving shell holding exactly the right value while no helper
+  inherits anything, so reading the variable back agrees and every stage still
+  routes by the current directory. Setup now asks a new process what it sees.
+
 ## [2.0.20] — 2026-08-16
 
 - **The Copilot signoff was recorded by 93 lines of Markdown, and every one of

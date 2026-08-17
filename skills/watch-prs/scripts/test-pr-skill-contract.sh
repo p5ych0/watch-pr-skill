@@ -231,7 +231,7 @@ esac
 _pin_block=""
 _pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
 { [ -n "$_pin_block" ] \
-  && case "$_pin_block" in *'[[ $REVIEW_BUS_REMOTE = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
+  && case "$_pin_block" in *'[[ $RB_PIN_SEEN = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
   && case "$_pin_block" in *'exit 1'*) true ;; *) false ;; esac; } \
     && pass "the pin's export and its proof lift out of SKILL.md together" \
     || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
@@ -256,6 +256,20 @@ env -u SHELLOPTS -u BASH_ENV -u ENV 'BASH_FUNC_export%%=() { return 0; }' bash -
 [ "$_sh_rc" -ne 0 ] \
     && pass "…and a shadowed export is caught by the postcondition" \
     || die "a shadowed export left the pin unset and setup carried on"
+# …AND AN `export` THAT ASSIGNS WITHOUT EXPORTING IS THE CASE THE PARENT-SIDE
+# CHECK CANNOT SEE. A narrow forger that performs the assignment and returns
+# leaves this shell holding exactly the right value while no child inherits
+# anything — so reading the variable back agrees, and every stage still derives
+# from wherever the session later stands. Only asking a child separates them.
+_noexp_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV \
+    'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _noexp_rc=$?
+[ "$_noexp_rc" -ne 0 ] \
+    && pass "…and an export that assigns without exporting is caught by asking a child" \
+    || die "the pin passed while no child could see it; every stage would route by the current directory"
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0

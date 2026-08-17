@@ -128,6 +128,19 @@ finding wherever it appears in `skills/watch-prs/`; it does **not** apply to the
 plugin's own metadata (`.claude-plugin/`) or to the install
 commands in `README.md`, which legitimately name this repository.
 
+**And identity is pinned once per session, not re-derived per child.** `SKILL.md`
+reads `git remote get-url origin` in its setup block, checks that read's status,
+and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.
+Every helper runs `rb_identity` in its own process against its own current
+directory, so without the pin a `cd` into a second checkout retargets every stage
+that POSTS — a signoff, a revocation, a review request — at whatever pull request
+of that repository shares the number. Treat a change that drops the pin, or that
+re-derives identity per call, as a blocking finding. Wrapping each call in
+`(cd "$REPO_DIR" && …)` is **not** an acceptable substitute: `cd` is a name a
+function can take, and a rule applied per call site is a list the next stage will
+not be in. `$REPO_DIR` remains correct for the merge gate alone, which hands
+`pr-merge-range.sh` a tree to inspect rather than an identity.
+
 ## Bash strict-mode conventions
 
 Strict mode is chosen per script category. Match the category; do not "fix" a

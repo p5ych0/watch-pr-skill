@@ -326,7 +326,15 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # in place, whatever `exit` has been replaced with.
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-if [[ $REVIEW_BUS_REMOTE = "$RB_REMOTE" ]]; then
+# THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading
+# the variable back here answers a different question: an `export` that assigns
+# without setting the export attribute leaves this shell holding the right value
+# and every helper holding none, so the parent-side check passes and the stages
+# still derive from wherever the session later stands. What has to be true is that
+# a new process sees it, so that is what is asked — and asking it also subsumes the
+# parent-side check, since a wrong value here is a wrong value there.
+RB_PIN_SEEN="$(bash -c 'printf %s "${REVIEW_BUS_REMOTE-}"')" || RB_PIN_SEEN=''
+if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
     echo "ABORT: the repository pin did not take; every stage would route by the current directory"
