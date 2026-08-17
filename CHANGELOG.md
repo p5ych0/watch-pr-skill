@@ -17,14 +17,17 @@
   reviewer saw, and every later gate trusts it.
 
   All ten guards are reserved-word tests now, converted together rather than as
-  the ones somebody noticed, and the fixture exercises three narrow forgers: a
-  `[` that lies about the stage, one that lies about two shas being equal, and one
-  that lies about a non-zero status being zero, and one that lies about a `-ne`
-  comparison so the operator round boundary can be tested. Each is asserted to
-  land and to leave the rest of the script working — a `[` that lied about
-  everything broke the identity parse and made the cases pass for the wrong
-  reason. Every converted guard whose behaviour a caller can observe fails under
-  mutation, including `record`'s own re-validation, which posts the signoff.
+  the ones somebody noticed, and the fixture exercises five narrow forgers — a `[`
+  that lies about the stage, about two shas being equal, about a non-zero status
+  being zero, about a `-ne` comparison so the operator round boundary can be
+  tested, and about the empty string being non-empty so the empty phase account
+  can be. Each is proved to lie in a child before anything relies on it, and
+  proved narrow enough to leave the rest of the script working: one that lied
+  about everything broke the identity parse, and one that answered every `-n ""`
+  hung the run, both making cases pass for the wrong reason.
+
+  Every converted guard whose behaviour a caller can observe fails under mutation,
+  including `record`'s own re-validation, which posts the signoff.
 
 ## [2.0.21] — 2026-08-17
 
