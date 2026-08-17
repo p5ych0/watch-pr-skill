@@ -184,12 +184,18 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
-grep -qF 'RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2)" \' <<<"$skill_flat" \
+grep -qF 'RB_REMOTE="$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
 # …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`
 # is a name, and a function called `bash` inherits NON-exported variables, so it
 # agrees the pin arrived while the real stages inherit nothing.
+#
+# THE BRACES ARE ASSERTED TOO, and they are not style. Written as a simple
+# command, bash traces the invocation BEFORE applying its redirections — and
+# inside a command substitution fd 1 is already the capture, so a traced driving
+# shell puts that line in the value ahead of the URL. The group takes the
+# redirections first. Measured both ways in `test-pr-origin.sh`.
 #
 # `9>&1 1>&2` IS PART OF BOTH CALLS AND IS ASSERTED WITH THEM. The helper writes
 # its value to fd 9, and these redirections are applied by the driving shell
@@ -197,7 +203,7 @@ grep -qF 'RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2)" \' <<<"$skill
 # `SHELLOPTS=xtrace` off the captured value. Dropping them does not degrade the
 # read, it breaks it, and it is exactly the kind of detail a later edit tidies
 # away.
-grep -qF 'RB_PIN_SEEN="$("$RB_SCRIPTS"/pr-origin.sh pin 9>&1 1>&2)"' <<<"$skill_flat" \
+grep -qF 'RB_PIN_SEEN="$({ "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)"' <<<"$skill_flat" \
     && pass "…and the pin is proved by a real child, not by a shell copy" \
     || die "the pin proof does not go through pr-origin.sh"
 # …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would

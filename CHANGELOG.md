@@ -21,13 +21,24 @@
   exporting is caught by a child reporting it inherited nothing.
 
   The value comes back on **fd 9**, and the driver opens it as part of the call:
-  `"$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2`. The redirections are applied before
+  `"$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"` — the braces included,
+  because bash traces a simple command *before* applying its redirections and
+  inside a command substitution fd 1 is already the capture, so a traced driving
+  shell would put that line in the value ahead of the URL. The redirections are applied before
   bash begins executing the helper, so an operator with `SHELLOPTS=xtrace` and
   `BASH_XTRACEFD=1` exported gets a clean value — a redirection inside the helper
   could not manage that, since no line can come before the trace of the line that
   performs it, and the one that survived had to be turned into a refused session.
   It also settles which fd 9 is which: a caller with its own log open on that
   descriptor is overridden by the call rather than written into.
+
+  The hop announces itself with an **argument**, not an environment marker. A
+  startup file runs before the script's first line and can simply set a marker, and
+  a hook doing nothing but that plus a `readonly -f` function returning a forged
+  URL took the whole read — no shadowed primitives, no shadowed `exec`. Arguments
+  come from the exec and a startup file cannot add one. The `readonly` attribute
+  does not survive an exec either, so once the hop happens the sweep removes that
+  function like any other.
 
   This does not close the class — `unset`, `builtin` and `exec` are names the
   clearing and the hop are made of, and a hook that shadows all three walks

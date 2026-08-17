@@ -112,22 +112,33 @@ set +x
 # to stdout when `BASH_XTRACEFD=1`, which is the stream the caller reads a value
 # from.
 #
-# GUARDED BY A MARKER, NOT BY THE EVIDENCE. The hook can `unset BASH_ENV` on its
-# way out, so a guard that tests for it skips the re-exec exactly when it is most
-# needed.
+# GUARDED BY AN ARGUMENT, WHICH THE HOOK CANNOT WRITE. Not by the evidence — a
+# hook can `unset BASH_ENV` on its way out, so testing for it skips the re-exec
+# exactly when it is most needed. And not by an environment marker either, which
+# was the version before this one: the hook runs first, so it can simply SET that
+# marker and the guard believes the escape has already happened. Reproduced —
+# a hook doing nothing but `RB_ORIGIN_CLEAN=1` plus a `readonly -f command`
+# returning a forged URL took the whole read, with no shadowed primitives and no
+# shadowed `exec` involved.
 #
-# AND THE MARKER IS CLEARED, or every child of this process inherits it and stands
-# in the hook it was meant to step out of.
+# Arguments come from the exec, and a startup file cannot add one. So the hop
+# announces itself by passing a flag that only the hop passes.
 #
-# `[[`, NOT `[`: the hook runs first and can define a `[` function, which would
-# intercept this guard and skip the re-exec that exists to escape it.
+# AND `readonly -f` IS WHY THE HOP MATTERS HERE rather than the clearing: a
+# readonly function cannot be unset from inside the shell that has it, but the
+# attribute does NOT survive an exec — measured. Once the hop happens, the sweep
+# above removes it like any other.
 #
-# EVERY NAME ON THIS LINE IS A BUILTIN OR CLEARED BY NOW — `exec`, `env` and
-# `unset` above it — because the clearing runs first. See the block above.
-if [[ -z ${RB_ORIGIN_CLEAN-} ]]; then
-    RB_ORIGIN_CLEAN=1 exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
+# `[[`, NOT `[`: the hook can define a `[` function, which would intercept this
+# guard and skip the re-exec that exists to escape it.
+#
+# IF `exec` ITSELF IS SHADOWED this falls through without shifting, and the script
+# runs on unprotected — the unterminated regress recorded below, not a new hole.
+if [[ ${1-} = --rb-origin-clean ]]; then
+    shift
+else
+    exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" --rb-origin-clean "$@"
 fi
-unset -v RB_ORIGIN_CLEAN 2>/dev/null || true
 
 # THIS DOES NOT CLOSE THE CLASS, and saying so is the point. The clearing above is
 # itself made of names — `unset`, `builtin`, `compgen` — and so is the hop, which

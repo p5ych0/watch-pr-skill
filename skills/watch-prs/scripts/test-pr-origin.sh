@@ -270,18 +270,24 @@ naive="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" bash -c 'git remote
 # capture whatever the caller had there before, so the question never has to be
 # asked. This case holds that: a caller with its own fd 9 open still gets the URL,
 # and its log stays empty.
+# THE LOG IS OPEN ON fd 9 IN THE SHELL THAT CALLS THE SUBJECT, which the first
+# version of this case got wrong: it redirected fd 9 only in a separate probe
+# afterwards, so the invocation never had an inherited descriptor at all and "the
+# log stayed empty" was true of a scenario that never happened.
 FD9LOG="$TMP/unrelated.log"
 : > "$FD9LOG"
-fd9_out="$(cd "$REPO" && run_limited 20 "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || fd9_out="FAILED"
-{ [ "$fd9_out" = "$REAL" ] && [ ! -s "$FD9LOG" ]; } \
+fd9_out="$(cd "$REPO" && exec 9>>"$FD9LOG"
+    # THE CALLER OWNS fd 9 HERE. It is proved writable through that same descriptor
+    # before the subject runs, so an empty log afterwards means the call-site
+    # `9>&1` overrode it rather than the file being unreachable.
+    printf 'PROBE\n' >&9
+    run_limited 20 "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || fd9_out="FAILED"
+[ "$fd9_out" = "$REAL" ] \
     && pass "a caller with its own fd 9 open still receives the value" \
     || die "an unrelated fd 9 changed the outcome: out='$fd9_out' log='$(cat "$FD9LOG")'"
-# …AND THE LOG IS PROVED TO BE REACHABLE, so "the log stayed empty" is not just a
-# file nothing could have written to.
-( cd "$REPO" && run_limited 20 bash -c 'printf PROBE >&9' 9>>"$FD9LOG" ) 2>/dev/null || true
-[ -s "$FD9LOG" ] \
-    && pass "…and that descriptor was writable, so the empty log means something" \
-    || die "the unrelated fd 9 was never writable; the case above proves nothing"
+[ "$(cat "$FD9LOG")" = PROBE ] \
+    && pass "…and the call-site 9>&1 overrode it, leaving the log as the caller left it" \
+    || die "the subject wrote into the caller's descriptor: log='$(cat "$FD9LOG")'"
 
 # ── A TRACED SESSION STARTS NORMALLY ───────────────────────────────────────
 #
@@ -295,6 +301,35 @@ traced="$(cd "$REPO" && run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 \
 [ "$traced" = "$REAL" ] \
     && pass "an exported xtrace does not reach the captured value" \
     || die "tracing leaked into the capture: '$traced'"
+# ── AND THE CALLING SHELL ITSELF IS TRACED, WHICH IS A DIFFERENT LINE ──────
+#
+# The case above traces only the subject, through `env`. It cannot see the trace
+# of the INVOCATION, which the calling shell writes — and inside a command
+# substitution fd 1 is already the capture, so a simple command is traced into the
+# value before its own redirections apply. That is the same ordering that made an
+# in-helper redirection too late, one level up, and the answer is the same: put
+# the redirections on an enclosing group so they are in place first.
+#
+# A REAL SCRIPT RUN BY A TRACED SHELL, because `set -x` here would trace this
+# fixture, and `env SHELLOPTS=xtrace bash -c` is what a driving session looks like.
+cat > "$TMP/caller.sh" <<CALLERSH
+cd "$REPO" || exit 1
+SIMPLE="\$("$SCRIPT" read 9>&1 1>&2)"
+GROUP="\$({ "$SCRIPT" read; } 9>&1 1>&2)"
+printf 'SIMPLE=%s\n' "\$SIMPLE" >&2
+printf 'GROUP=%s\n' "\$GROUP" >&2
+CALLERSH
+caller_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 bash "$TMP/caller.sh" 2>&1 >/dev/null)" || true
+case "$caller_out" in
+    *"GROUP=$REAL"*) pass "…and a traced calling shell still captures the value alone" ;;
+    *)               die "the group form leaked the invocation trace: '$caller_out'" ;;
+esac
+# …AND THE SIMPLE FORM IS SHOWN TO LEAK, so the braces are demonstrably doing the
+# work rather than being a style the next edit removes.
+case "$caller_out" in
+    *"SIMPLE=$REAL"*) die "the simple form did not leak; this case no longer distinguishes the two" ;;
+    *)                pass "…where the same call without the braces does not" ;;
+esac
 # …AND THE TRACING IS PROVED TO BE ON, or the case above passes on a run that was
 # never traced at all.
 tprobe="$(cd "$REPO" && run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 \
