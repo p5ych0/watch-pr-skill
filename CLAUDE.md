@@ -258,6 +258,14 @@ rediscovering them.
   narrow lift, by anchored `grep` and with no grammar, covers the merge-gate
   condition that made the gap visible.
 
+  **Behavioural differences count too, not only parsing.** bash 5 traces a simple
+  command BEFORE applying its redirections; bash 3.2.57 applies them first. A
+  fixture written from the newer behaviour alone — asserting that the unbraced form
+  leaks a trace into a command substitution — passed locally and failed on
+  `macos-shell`, where the leak does not happen. Where two versions differ like
+  that, assert the property that holds on both and REPORT the difference; requiring
+  one version's behaviour makes the job red for a change that is correct.
+
   **Do not build a text scanner for this.** One was, and it is why this bullet is
   short: 2,200 lines and fifty-two review rounds, every round answering one finding
   and producing the next, with several of its own defects rejecting portable code.

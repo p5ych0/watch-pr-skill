@@ -324,11 +324,19 @@ case "$caller_out" in
     *"GROUP=$REAL"*) pass "…and a traced calling shell still captures the value alone" ;;
     *)               die "the group form leaked the invocation trace: '$caller_out'" ;;
 esac
-# …AND THE SIMPLE FORM IS SHOWN TO LEAK, so the braces are demonstrably doing the
-# work rather than being a style the next edit removes.
+# WHETHER THE SIMPLE FORM LEAKS IS VERSION-DEPENDENT, so it is REPORTED and not
+# required. bash 5 traces the invocation before applying its redirections and the
+# line lands in the capture; bash 3.2.57 applies them first and the simple form is
+# clean — which the `macos-shell` job found by failing an assertion written from
+# the newer behaviour alone.
+#
+# The load-bearing claim is the one above: the group form captures the value alone,
+# everywhere. The braces are kept because they are correct on both and necessary on
+# one, and the contract test pins them so they are not tidied away by someone
+# testing on the bash where they happen not to matter.
 case "$caller_out" in
-    *"SIMPLE=$REAL"*) die "the simple form did not leak; this case no longer distinguishes the two" ;;
-    *)                pass "…where the same call without the braces does not" ;;
+    *"SIMPLE=$REAL"*) pass "…and this bash redirects before tracing, so the braces cost nothing here" ;;
+    *)                pass "…where the same call without the braces leaks the invocation trace" ;;
 esac
 # …AND THE TRACING IS PROVED TO BE ON, or the case above passes on a run that was
 # never traced at all.
