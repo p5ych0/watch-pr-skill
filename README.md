@@ -305,8 +305,9 @@ Then:
    was intentionally skipped: a resolved thread is not a record of a fix.
 5. **Codex clean → the Copilot phase**, through
    **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
-   at each boundary**. All three post to the pull request, and all three act on
-   the repository **the session started in** — the origin URL is read once during
+   at each boundary**. Every post they make — and `close` makes none in
+   `codex-only`, where there was no Copilot review — goes to the repository **the
+   session started in** — the origin URL is read once during
    setup and pinned, so changing directory partway through no longer decides which
    project a signoff or a revocation lands on:
 

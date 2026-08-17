@@ -310,8 +310,10 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
     || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
 # ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
 #
-# `REVIEW_BUS_REMOTE` is what every helper inherits, and every stage that posts —
-# a signoff, a revocation, a review request — is addressed by it. So its failure
+# `REVIEW_BUS_REMOTE` is what every helper inherits, and every post is addressed
+# by it — `record`'s signoff, `open`'s revocation and review request, and the
+# second signoff `close` writes on the two-reviewer path. (`close … codex-only`
+# records nothing: there was no Copilot review to re-check.) So its failure
 # has to end setup, and "ends setup" cannot rest on another name.
 #
 # A `readonly REVIEW_BUS_REMOTE` already in this long-lived shell makes the export
@@ -322,8 +324,17 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # is the guard. Do not add a step below it; put it above.
 #
 # THE SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH for the same reason. It is how
-# the driver knows setup completed, so it must be unreachable when the pin is not
-# in place, whatever `exit` has been replaced with.
+# the driver knows setup completed, so the failure path does not REACH it, whatever
+# `exit` has been replaced with.
+#
+# "NOT REACHED" IS THE CLAIM, and it is deliberately weaker than "cannot be
+# emitted". `echo` is a name too: a function replacing it can print `OWNER=…` from
+# the ABORT below, or from anywhere else, and no arrangement of statements inside
+# this shell prevents that — the alternative is a failure path that says nothing
+# at all, which trades a real diagnostic for a guard against a shell that is
+# already lying about its output. What survives a forged `echo` is the STATUS: the
+# branch still ends non-zero. Removing the dependency means not composing this
+# message here, which is #84 along with `git` and `bash`.
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
 # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading

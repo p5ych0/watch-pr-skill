@@ -7,8 +7,10 @@
   identity by running `git remote get-url origin` in its own process, from the
   current directory. A driving session that changed into a second checkout
   therefore aimed `record`, `open` and `close` at whatever PR of *that* repository
-  shared this number, and all three post: a Codex signoff, a signoff revocation
-  and a review request, then the second signoff. The local phase was left
+  shared this number, and every post they make went with them: a Codex signoff,
+  a signoff revocation and a review request, then the second signoff on the
+  two-reviewer path — `close … codex-only` records nothing, having no Copilot
+  review to re-check. The local phase was left
   unopened while a revocation landed on a pull request nobody was working on.
 
   The session's origin is now read once during setup, with its status checked, and

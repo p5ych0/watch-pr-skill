@@ -159,7 +159,9 @@ rb_close_call_present \
 # directory. A `cd` into a second checkout — an ordinary thing for a driving
 # session to do — therefore pointed the stages at whatever PR of THAT repository
 # shares this number, and each of them POSTS: `record` a signoff, `open` a
-# revocation and a review request, `close` the second signoff.
+# revocation and a review request, and `close` the second signoff on the
+# two-reviewer path — `codex-only` records nothing, having no Copilot review to
+# re-check.
 #
 # THE DEPENDENCY IS REMOVED, NOT GUARDED. The guard was `(cd "$REPO_DIR" && …)`
 # around each call, and it had two defects that are the same defect: `cd` is a
@@ -320,6 +322,28 @@ case "$_both_out" in
     *ABORT*) pass "…and says the pin did not take" ;;
     *)       die "the doubly-neutralised failure is silent: '$_both_out'" ;;
 esac
+# ── AND WITH `echo` FORGED TOO, WHICH IS WHERE THE OUTPUT STOPS MEANING ────
+#
+# A function replacing `echo` can print `OWNER=…` from the ABORT branch, so the
+# success MARKER is not a property this shell can defend — that is why the comment
+# beside the guard claims the failure path is not REACHED rather than that the line
+# cannot be emitted, and why composing the message elsewhere is #84.
+#
+# WHAT SURVIVES IS THE STATUS, and that is what is asserted: with the pin readonly
+# and `exit` and `echo` all replaced, the block still ends non-zero. A driver that
+# takes the status — which the `CLOSE_RC` guard below and every helper caller do —
+# still stops.
+_forged_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE \
+    'BASH_FUNC_exit%%=() { return 0; }' \
+    'BASH_FUNC_echo%%=() { builtin printf "OWNER=acme REPO=widget\n"; }' bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _forged_rc=$?
+[ "$_forged_rc" -ne 0 ] \
+    && pass "…and a forged echo cannot make the pin's failure exit zero" \
+    || die "with echo, exit and the pin all forged, setup reported success"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
