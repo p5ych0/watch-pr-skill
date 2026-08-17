@@ -22,9 +22,12 @@
   being zero, about a `-ne` comparison so the operator round boundary can be
   tested, and about the empty string being non-empty so the empty phase account
   can be. Each is proved to lie in a child before anything relies on it, and
-  proved narrow enough to leave the rest of the script working: one that lied
-  about everything broke the identity parse, and one that answered every `-n ""`
-  hung the run, both making cases pass for the wrong reason.
+  proved narrow enough to leave the rest of the script working. Two earlier
+  attempts were not, and they failed differently: one that lied about everything
+  broke `identitylib.sh`'s remote parse, so the run died with `reason=no_origin`
+  before the guard was reached and the case tested nothing; one that answered
+  every `-n ""` hung the run at the watchdog, because "the empty string is
+  non-empty" is a loop that never terminates wherever one ends on it.
 
   Every converted guard whose behaviour a caller can observe fails under mutation,
   including `record`'s own re-validation, which posts the signoff.
