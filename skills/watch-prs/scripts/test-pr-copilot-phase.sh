@@ -748,6 +748,17 @@ _RB_SHADOW_EQ='BASH_FUNC_[%%=() { if [[ $2 = "=" && $1 =~ ^[0-9a-f]{40}$ && $3 =
 # Narrower still: only `<non-zero> -eq 0` is answered, so every other numeric test
 # in the run — and there are several — behaves.
 _RB_SHADOW_RC='BASH_FUNC_[%%=() { if [[ $2 = "-eq" && $3 = "0" && $1 != "0" ]]; then return 0; fi; builtin [ "$@"; }'
+# THE FOURTH: a `[` that succeeds for `3 -ne 3`. `record` pauses at an operator
+# round boundary with `[[ $ROUNDS_RC -ne 3 ]] || { PAUSE; exit 3; }`, so a `[`
+# agreeing to that short-circuits the `||` — the pause never happens and the
+# stage exits 0. Narrow to that one comparison, since `-ne` appears elsewhere.
+_RB_SHADOW_NE='BASH_FUNC_[%%=() { if [[ $2 = "-ne" && $1 = "$3" ]]; then return 0; fi; builtin [ "$@"; }'
+# AND THE FIFTH, WHICH LIES ONCE AND THE FIRST ATTEMPT IS WHY. A `[` that answered
+# every `-n ""` with success hung the run at the watchdog: "the empty string is
+# non-empty" is a loop that never terminates wherever one ends on it. So this lies
+# exactly once and delegates afterwards — narrow enough to leave the harness
+# working, which is the property every forger here has to have.
+_RB_SHADOW_N='BASH_FUNC_[%%=() { if [[ $1 = "-n" && -z $2 && ! -f $W/n.fired ]]; then : > "$W/n.fired"; return 0; fi; builtin [ "$@"; }'
 shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
     local out rc=0
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
@@ -756,6 +767,41 @@ shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[
         "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
+# ── EVERY FORGER IS PROVED TO LIE, BEFORE ANYTHING RELIES ON IT ────────────
+#
+# The narrowness checks below run `record`, which never performs a two-sha
+# equality through `[` — so they prove an ordinary run works and nothing more. And
+# the moved-head cases refuse through the converted `[[` guards whether or not the
+# forger was imported at all. Between them, an import that silently stopped
+# working would leave every case in this section green while exercising no
+# defence: "the attack was repelled" and "the attack never happened" look
+# identical from the outside.
+#
+# So each entry is handed to a child that performs exactly the comparison it lies
+# about, with operands the REAL `[` answers false. Seeing the lie is what makes
+# the cases downstream mean anything.
+forger_lies() {   # forger_lies <label> <BASH_FUNC entry> <operands…>
+    local label="$1" entry="$2"; shift 2
+    local out=""
+    out="$(run_limited 10 env -u SHELLOPTS "$entry" W="$W" \
+        bash -c 'if [ "$@" ]; then printf LIED; fi' _ "$@" 2>/dev/null)" || true
+    [ "$out" = LIED ] \
+        && pass "$label" \
+        || die "$label — the forger did not lie, so every case using it proves nothing"
+}
+world
+forger_lies "the stage forger lies about 'close = open'" \
+    "$_RB_SHADOW_BRACKET" close = open
+forger_lies "…the equality forger lies about two different shas" \
+    "$_RB_SHADOW_EQ" "$HEAD40" = "$OTHER40"
+forger_lies "…the status forger lies about 1 -eq 0" \
+    "$_RB_SHADOW_RC" 1 -eq 0
+forger_lies "…the boundary forger lies about 3 -ne 3" \
+    "$_RB_SHADOW_NE" 3 -ne 3
+world
+forger_lies "…and the empty-string forger lies about -n ''" \
+    "$_RB_SHADOW_N" -n ""
+
 # THE FIXTURE'S OWN REACH IS ASSERTED FIRST, in both directions. An import that
 # silently failed would make the cases below pass while testing nothing; a forger
 # that broke the identity parse would fail them for a reason that is not the
@@ -802,17 +848,6 @@ grep -q 'pr edit' "$TMP/calls" \
     && die "a Copilot pass was requested against a head Codex never signed off" \
     || pass "…and requests no Copilot pass for it"
 
-# …AND THE SAME FOR `close`, which records the second signoff. Here the forged
-# equality would also make the two shas look identical to the branch that decides
-# which stop is printed, so a moved head would be reported as one commit both
-# reviewers read.
-world; printf '%s\n' "$OTHER40" > "$W/head.out"
-printf '1\n' > "$W/verdict.rc"
-_RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run close 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
-    && pass "…and cannot record a Copilot signoff on an unreviewed head" \
-    || die "close with a forged equality gave '${got}' posted='$(posted)'"
-
 # …AND A DISMISSED VERDICT ON AN UNMOVED HEAD IS REFUSED TOO. The head is right
 # here; what has changed is the verdict, which is the case the second proof exists
 # for. With the status forger, `[ "$rc" -eq 0 ]` accepts a dismissal.
@@ -846,8 +881,8 @@ _RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run record 7 "$TMP/body.md")"
 # the stage exits 0: the operator check-in the count exists to force is silently
 # skipped, and a caller branching on the status is told to carry straight on.
 #
-# Narrow to that one comparison, since `-ne` appears elsewhere in the run.
-_RB_SHADOW_NE='BASH_FUNC_[%%=() { if [[ $2 = "-ne" && $1 = "$3" ]]; then return 0; fi; builtin [ "$@"; }'
+# Narrow to that one comparison, since `-ne` appears elsewhere in the run —
+# defined with the other forgers above.
 world; printf '3\n' > "$W/pr-round-count.rc"
 _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 3 ] \
@@ -901,12 +936,6 @@ grep -q 'pr edit' "$TMP/calls" \
 # the phase missing — the one thing the reviewer contract says is read before the
 # diff. The existing empty-body case runs with no forger, and every forger above
 # delegates `-n`, so this conversion had no coverage.
-# ONCE, NOT ALWAYS, and the first attempt is why. A `[` that answered every
-# `-n ""` with success hung the run at the watchdog: "the empty string is
-# non-empty" is a loop that never terminates wherever one ends on it. So this
-# lies exactly once and delegates afterwards — narrow enough to leave the harness
-# working, which is the property every forger here has to have.
-_RB_SHADOW_N='BASH_FUNC_[%%=() { if [[ $1 = "-n" && -z $2 && ! -f $W/n.fired ]]; then : > "$W/n.fired"; return 0; fi; builtin [ "$@"; }'
 world; : > "$TMP/empty.md"
 _RB_SHADOW="$_RB_SHADOW_N" got="$(shadow_run record 7 "$TMP/empty.md")"
 { [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
