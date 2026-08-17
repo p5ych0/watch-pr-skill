@@ -83,7 +83,14 @@ case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
 
-if [ "$STAGE" = open ]; then
+# `[[`, A RESERVED WORD, NOT `[`. The stage dispatch decides which of three
+# mutations this invocation performs, and a function named `[` — inheritable
+# through `export -f`, and this script does not re-exec — shadows the builtin and
+# the `command`/`builtin` prefixes alike. One that returns success sends a `close`
+# invocation down the `open` path, revoking the Copilot signoff and requesting
+# another pass instead of closing the phase. The parser handles `[[`, so no
+# function can take its place. See CLAUDE.md § Already paid for.
+if [[ $STAGE = open ]]; then
     # ── THE OPERATOR ASKED FOR THE COPILOT PHASE ───────────────────────────
     CODEX_SHA="${2:-}"
     [ -n "$CODEX_SHA" ] \
@@ -214,7 +221,7 @@ if [ "$STAGE" = open ]; then
     exit 0
 fi
 
-if [ "$STAGE" = close ]; then
+if [[ $STAGE = close ]]; then
     # ── THE OTHER END OF THE PHASE `open` STARTED ──────────────────────────
     #
     # Copilot's verdict came back clean, so the second signoff is written down
@@ -260,7 +267,7 @@ if [ "$STAGE" = close ]; then
     # durable record would then say both phases closed on a commit neither
     # reviewer saw, and every later session would believe it.
     COPILOT_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
-    [ "$COPILOT_RECHECK_RC" -eq 0 ] \
+    [[ $COPILOT_RECHECK_RC -eq 0 ]] \
         || { echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"; exit 1; }
 
     # COMPOSED HERE, for the reason `record`'s marker is: the caller writes no
@@ -288,7 +295,7 @@ if [ "$STAGE" = close ]; then
     # revocation, a round and a reopened phase for a verdict that cannot differ —
     # and a session resuming into the reopened phase reads it as a Copilot phase
     # to run again. That is not hypothetical; it is what #55 was raised for.
-    if [ "$COPILOT_SHA" = "$CODEX_SHA" ]; then
+    if [[ $COPILOT_SHA = "$CODEX_SHA" ]]; then
         cat <<EOF
 
 Copilot signed off on $COPILOT_SHA, and so did Codex — one commit, both

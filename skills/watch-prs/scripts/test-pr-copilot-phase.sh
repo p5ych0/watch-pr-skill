@@ -708,5 +708,60 @@ before 'pr-review-state.sh verdict' 'pr comment' \
     && pass "the verdict is re-checked before the signoff is posted" \
     || die "the post preceded the re-check: $(cat "$TMP/calls")"
 
+# ── AN INHERITED `[` MUST NOT PICK THE STAGE ───────────────────────────────
+#
+# A function named `[` shadows the builtin and the `command`/`builtin` prefixes
+# alike, this script does not re-exec, and it arrives through the environment
+# rather than through this fixture's own shell. One that returns success sent a
+# `close` invocation down the `open` path — revoking the Copilot signoff and
+# requesting another pass instead of closing the phase, on an invocation that
+# asked for the opposite.
+#
+# IMPORTED, NOT DEFINED. `BASH_FUNC_[%%=` is how the environment carries it, and
+# it is the route that matters: a definition in this shell would not survive the
+# `env` below.
+#
+# NARROW, AND OTHERWISE WORKING. The first version returned 0 for everything and
+# the case failed with `reason=no_origin` — `identitylib.sh` parses the remote
+# with `[`, so a `[` that lied about all of it broke the harness before the stage
+# dispatch was reached, and a broad forger would have been rejected by a different
+# check while the case passed either way. This one lies about exactly the
+# comparison the finding names and delegates everything else to the builtin.
+_RB_SHADOW_BRACKET='BASH_FUNC_[%%=() { if [[ "$1 $2 $3" == "close = open" ]]; then return 0; fi; builtin [ "$@"; }'
+shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
+    local out rc=0
+    out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$_RB_SHADOW_BRACKET" \
+        "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
+    printf '%s|%s' "$rc" "$out"
+}
+# THE FIXTURE'S OWN REACH IS ASSERTED FIRST, in both directions. An import that
+# silently failed would make the cases below pass while testing nothing; a forger
+# that broke the identity parse would fail them for a reason that is not the
+# defect. So: the lie lands, and the rest of the run still works.
+world; got="$(shadow_run notastage 7)"
+printf '%s' "${got#*|}" | grep -qF "'notastage' is not a stage" \
+    && pass "the inherited [ reaches the script at all" \
+    || die "the [ import did not take effect: '${got}'"
+world; got="$(shadow_run record 7 "$TMP/body.md")"
+printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+    && pass "…and is narrow enough that the rest of the script still runs" \
+    || die "the shadowed [ broke the harness rather than the dispatch: '${got}'"
+
+world; got="$(shadow_run close 7 "$HEAD40")"
+printf '%s' "${got#*|}" | grep -qF 'PR_COPILOT_PHASE_CLOSED' \
+    && pass "an inherited [ does not divert close into another stage" \
+    || die "close with a shadowed [ gave '${got}'"
+# THE CONSEQUENCE, NOT JUST THE STATUS. `open`'s mutations are a revocation and a
+# review request; either landing on a `close` invocation is the failure, and a
+# status assertion alone does not see them.
+grep -q 'pr edit' "$TMP/calls" \
+    && die "close with a shadowed [ requested a Copilot pass: $(cat "$TMP/calls")" \
+    || pass "…and requests no Copilot pass"
+posted | grep -qF 'Review-Signoff-Revoked' \
+    && die "close with a shadowed [ revoked a signoff: $(posted)" \
+    || pass "…and revokes nothing"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

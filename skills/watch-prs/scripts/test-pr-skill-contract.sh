@@ -157,6 +157,43 @@ rb_close_call_present \
 grep -qF 'CLOSE_RC=$?' <<<"$skill_flat" \
     && pass "…and its status is taken" \
     || die "SKILL.md runs the close stage without reading its status"
+# …AND THE GUARD OVER IT SURVIVES A SHADOWED BUILTIN. This block runs in the
+# driving session's own shell, which is long-lived and where a function named `[`
+# can already exist — it shadows the builtin and the `command`/`builtin` prefixes
+# alike. One returning success turned a failed close into a successful one and the
+# driver carried on with no signoff recorded and no operator stop; a shadowed
+# `exit` neutralised the abort the same way.
+#
+# LIFTED AND RUN, not described. Greps agreed with every wrong version of the
+# phase parser above, and they would agree here: the question is what the block
+# DOES when both names lie, and only running it answers that.
+_close_guard="$(awk '/^if \[\[ \$CLOSE_RC -ne 0 \]\]; then$/, /^fi$/' "$SKILL")"
+[ -n "$_close_guard" ] \
+    && pass "the close-status guard lifts out of SKILL.md" \
+    || die "the close-status guard is missing or no longer starts with a reserved conditional"
+# `2>/dev/null` because a shadowed `exit` leaves bash complaining on the way out;
+# the STATUS is the assertion. `CLOSE_RC=1` is a close that stopped.
+_cg_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV CLOSE_RC=1 \
+    'BASH_FUNC_[%%=() { return 0; }' \
+    'BASH_FUNC_exit%%=() { return 0; }' \
+    bash -c '
+        RB_SCRIPTS=/nonexistent; REPO_DIR=/nonexistent
+        '"$_close_guard"'
+    ' >/dev/null 2>&1 || _cg_rc=$?
+[ "$_cg_rc" -ne 0 ] \
+    && pass "…and a failed close still ends non-zero with [ and exit both shadowed" \
+    || die "a shadowed [ and exit turned a failed close into a successful one"
+# …AND IT DOES NOT REFUSE A CLOSE THAT WORKED. A guard that ends non-zero
+# unconditionally passes the case above while stopping every successful phase.
+_cg_ok=0
+env -u SHELLOPTS -u BASH_ENV -u ENV CLOSE_RC=0 bash -c '
+        RB_SCRIPTS=/nonexistent; REPO_DIR=/nonexistent
+        '"$_close_guard"'
+    ' >/dev/null 2>&1 || _cg_ok=$?
+[ "$_cg_ok" -eq 0 ] \
+    && pass "…while a close that succeeded passes through it" \
+    || die "the close-status guard refuses a successful close (rc=$_cg_ok)"
 
 # ── every 'cannot tell' is a stop ──────────────────────────────────────────
 grep -qi 'fail closed' "$SKILL" \

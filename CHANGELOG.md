@@ -20,6 +20,16 @@
   fault-tolerance pass is offered where both signoffs name the same commit, and
   the revocation is required where they do not.
 
+- **A stage dispatched with `[` could run the wrong stage.** `pr-copilot-phase.sh`
+  chose its stage with `[ "$STAGE" = open ]`, and a function named `[` — which
+  shadows the builtin and the `command`/`builtin` prefixes alike, and which this
+  script does not re-exec away — sent a `close` invocation down the `open` path:
+  it revoked the Copilot signoff and requested another pass instead of closing the
+  phase. The dispatch and the two comparisons that decide what `close` records now
+  use the reserved `[[`, which no function can take the place of. The same
+  substitution covers the driver's own status guard in `SKILL.md`, which runs in
+  the long-lived session shell where such a function is likeliest to exist.
+
 ## [2.0.19] — 2026-08-16
 
 - **The merge gate said a phase had been reopened that had never been entered.**

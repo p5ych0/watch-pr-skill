@@ -1211,9 +1211,18 @@ REVIEWERS=both   # or `codex-only`
 # was captured in the setup block.
 (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")
 CLOSE_RC=$?
-[ "$CLOSE_RC" -eq 0 ] || {
+# `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
+# which is long-lived and where a function named `[` can already exist — it
+# shadows the builtin and the `command`/`builtin` prefixes alike. One returning
+# success turns a failed close into a successful one, and the driver carries on
+# with no signoff recorded and no operator stop. A shadowed `exit` neutralises the
+# abort the same way, so the branch ends with a structural sentinel that is
+# non-zero whatever `echo` and `exit` have been replaced with.
+if [[ $CLOSE_RC -ne 0 ]]; then
     echo "The Copilot phase did not close and no signoff was recorded. The reason is above; do not retry it blind."
-    exit "$CLOSE_RC"; }
+    exit "$CLOSE_RC"
+    [[ -n "" ]]
+fi
 ```
 
 It prints the record it made and then the stop:
