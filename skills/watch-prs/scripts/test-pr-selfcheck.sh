@@ -522,7 +522,8 @@ jobs_case 01   4 "…and so does a leading-zero one, which the documented gramma
 jobs_case soon 4 "…and a value that is not a number at all"
 # THE LENGTH BOUND HAS EDGES, and only the edges are worth pinning: five digits is
 # the largest accepted and six the smallest refused. Without the `??????*` arm a
-# degree of 999999 reaches `xargs`, which starts every file in the suite at once — and the timing-sensitive ones are exactly what the bound protects.
+# degree of 999999 reaches `xargs`, which starts every file in the suite at once —
+# and the timing-sensitive ones are exactly what the bound protects.
 jobs_case 99999  99999 "…while five digits is a degree, being the largest accepted"
 jobs_case 999999 4     "…and six is a typo, being the smallest refused"
 rm -rf "$JOBSTUB"
