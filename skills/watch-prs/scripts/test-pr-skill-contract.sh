@@ -177,11 +177,46 @@ grep -qF 'RB_REMOTE="$(git remote get-url origin)" \' <<<"$skill_flat" \
 # leave the driver's OWN `$HOST/$OWNER/$REPO` derived from the current directory
 # while every child used the pin — two identities in one session, agreeing
 # whenever this defect is absent and disagreeing exactly when it is not.
-_pin_ln=""; _pin_ln="$(grep -n 'export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
-_ident_ln=""; _ident_ln="$(grep -n '^rb_identity \\$' "$SKILL" | head -1 | cut -d: -f1)" || _ident_ln=""
-{ [ -n "$_pin_ln" ] && [ -n "$_ident_ln" ] && [ "$_pin_ln" -lt "$_ident_ln" ]; } \
-    && pass "…and the pin is in place before the driver derives its own identity" \
-    || die "REVIEW_BUS_REMOTE is exported after rb_identity (pin=$_pin_ln rb_identity=$_ident_ln)"
+# …AND THE DRIVER'S OWN IDENTITY COMES FROM THE SAME VALUE, through a command
+# prefix rather than through the export. Deriving it separately would leave the
+# driver's `$HOST/$OWNER/$REPO` from the current directory while the children used
+# the pin — two identities agreeing whenever this defect is absent and disagreeing
+# exactly when it is not — and taking it from the export would make it depend on
+# the export having succeeded, which is the failure the guard exists for.
+grep -qF 'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \' <<<"$skill_flat" \
+    && pass "…and the driver derives its own identity from that same pinned value" \
+    || die "rb_identity does not take the pinned remote; the driver and its children can disagree"
+# …AND THE PIN IS THE LAST THING SETUP DOES. Either hostile state alone is caught:
+# a readonly makes the export return 1, and a shadowed `export` leaves the value
+# wrong for the postcondition. TOGETHER with a shadowed `exit` they are not, if
+# anything follows — the guard ends the `if` non-zero and, with no `set -e`, the
+# next statement runs anyway. Position is what makes the stop structural, so the
+# position is asserted.
+# EXACT, NOT A FILTER. The first version of this listed the shapes it would allow
+# after the pin — and `echo` was on that list, because the guard itself contains
+# two. An added `echo "one more setup step"` was therefore invisible to the check
+# written to forbid exactly that, and the mutation passed. What is asked here is
+# not "does anything unusual follow" but "does ANYTHING follow": the next
+# meaningful line after the guard's `fi` must be the closing fence.
+_pin_ln=""; _pin_ln="$(grep -n '^export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
+_pin_fi=""
+_pin_fi="$(awk -v n="${_pin_ln:-0}" 'NR>n && /^fi$/ {print NR; exit}' "$SKILL")" || _pin_fi=""
+_next=""
+_next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL")" || _next=""
+{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ "$_next" = '```' ]; } \
+    && pass "…and nothing in setup runs after the pin, so a neutralised abort cannot be stepped over" \
+    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi next='$_next')"
+# …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
+# would run whatever the pin did, once `exit` is shadowed — the driver would be
+# told setup completed with no pin in place, which is the whole failure.
+_pin_then=""
+_pin_then="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '/^else$/,$p')" || _pin_then=""
+_pin_ok=""
+_pin_ok="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '1,/^else$/p')" || _pin_ok=""
+case "$_pin_ok" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the pin took" ;;
+    *)               die "setup's success line is not inside the successful branch: '$_pin_ok'" ;;
+esac
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
 # while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
@@ -196,7 +231,8 @@ _ident_ln=""; _ident_ln="$(grep -n '^rb_identity \\$' "$SKILL" | head -1 | cut -
 _pin_block=""
 _pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
 { [ -n "$_pin_block" ] \
-  && case "$_pin_block" in *'[[ $REVIEW_BUS_REMOTE != "$RB_REMOTE" ]]'*) true ;; *) false ;; esac; } \
+  && case "$_pin_block" in *'[[ $REVIEW_BUS_REMOTE = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
+  && case "$_pin_block" in *'exit 1'*) true ;; *) false ;; esac; } \
     && pass "the pin's export and its proof lift out of SKILL.md together" \
     || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
 _ro_rc=0
@@ -230,6 +266,37 @@ env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
 [ "$_ok_rc" -eq 0 ] \
     && pass "…while an ordinary shell pins and continues" \
     || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
+# ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
+#
+# `readonly REVIEW_BUS_REMOTE=''` makes the export return 1 and a function named
+# `exit` makes the abort return instead of exiting, so neither guard ends the
+# shell — the `if` merely closes non-zero, and with no `set -e` whatever follows
+# runs. CLAUDE.md § Already paid for: combine the states, because separate cases
+# cannot see this.
+#
+# WHAT IS ASSERTED IS THE SIGNAL, NOT THE STATUS. A trailing marker stands in for
+# a step someone adds after the pin later; it runs here, and that is the point —
+# the protection is that setup's SUCCESS LINE is unreachable, so the driver is
+# never told setup completed with no pin in place. The static check above is the
+# other half: in `SKILL.md` there is nothing after the pin for a neutralised abort
+# to step over.
+_both_out=""
+_both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        OWNER=acme; REPO=widget; RB_SCRIPTS=/nonexistent; SUMMARY_FILE=/nonexistent
+        '"$_pin_block"'
+        printf "CONTINUED\n"' 2>/dev/null)" || true
+case "$_both_out" in
+    *OWNER=*) die "setup announced success with no pin in place: '$_both_out'" ;;
+    *)        pass "…and a readonly pin with `exit` shadowed never announces setup as complete" ;;
+esac
+# …AND SAYS WHY, so an operator reading the terminal is not left with silence.
+case "$_both_out" in
+    *ABORT*) pass "…and says the pin did not take" ;;
+    *)       die "the doubly-neutralised failure is silent: '$_both_out'" ;;
+esac
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
@@ -1199,7 +1266,7 @@ fi
 # out there; the parser is `identitylib.sh` now, and a text check left pointing at
 # SKILL.md would have gone on passing against a driver that derived nothing at
 # all. So: the driver must DELEGATE, and the parser must derive.
-grep -q '^rb_identity \\$' "$SKILL" \
+grep -q '^REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \\$' "$SKILL" \
     && pass "the driver derives its identity through the shared parser" \
     || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
 grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \

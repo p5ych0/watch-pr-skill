@@ -240,26 +240,11 @@ RB_REMOTE="$(git remote get-url origin)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [ -n "$RB_REMOTE" ] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
-# THE EXPORT'S STATUS IS TAKEN, AND THE RESULT IS PROVEN. A `readonly
-# REVIEW_BUS_REMOTE` already in this long-lived shell makes the export fail while
-# setup carries on — and if that readonly value is EMPTY, `rb_identity` here falls
-# back to `git remote get-url origin`, derives the intended checkout, and setup
-# looks entirely successful. The children then inherit no usable pin and derive
-# whichever checkout the session later enters, which is the original defect
-# surviving the fix.
-#
-# THE POSTCONDITION IS NOT WRITTEN WITH THE THING IT CHECKS FOR. `export` is a
-# builtin and therefore a name; the proof is a `[[ … ]]`, a reserved word the
-# parser handles, so a shadowed `export` that returns 0 without assigning is
-# caught by the same line as a readonly that returns 1.
-export REVIEW_BUS_REMOTE="$RB_REMOTE" \
-    || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-if [[ $REVIEW_BUS_REMOTE != "$RB_REMOTE" ]]; then
-    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
-    exit 1
-    [[ -n "" ]]
-fi
-rb_identity \
+# A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
+# the same value the children will be pinned to, without depending on the export
+# having succeeded — so the two cannot disagree. The export itself is the last
+# thing this block does; see the end of it for why.
+REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
@@ -323,7 +308,31 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
     || { echo "ABORT: could not create the round-summary file"; exit 1; }
 [ -f "$SUMMARY_FILE" ] && [ ! -s "$SUMMARY_FILE" ] \
     || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
-echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+# ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
+#
+# `REVIEW_BUS_REMOTE` is what every helper inherits, and every stage that posts —
+# a signoff, a revocation, a review request — is addressed by it. So its failure
+# has to end setup, and "ends setup" cannot rest on another name.
+#
+# A `readonly REVIEW_BUS_REMOTE` already in this long-lived shell makes the export
+# fail; a function named `exit` makes the abort return instead of exiting. Either
+# alone is caught below. TOGETHER they are not, if there is anything after them to
+# run: the guard's last line ends the `if` non-zero, but with no `set -e` the next
+# statement simply executes. That is why nothing comes after this — the position
+# is the guard. Do not add a step below it; put it above.
+#
+# THE SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH for the same reason. It is how
+# the driver knows setup completed, so it must be unreachable when the pin is not
+# in place, whatever `exit` has been replaced with.
+export REVIEW_BUS_REMOTE="$RB_REMOTE" \
+    || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
+if [[ $REVIEW_BUS_REMOTE = "$RB_REMOTE" ]]; then
+    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+else
+    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+    exit 1
+    [[ -n "" ]]
+fi
 ```
 
 ## 1. State the task on the PR

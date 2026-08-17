@@ -32,6 +32,12 @@
   assigning is caught by the same line: the status alone reports success with the
   pin unset.
 
+  Neither guard is a name, and neither has anything after it. Combine the two
+  hostile states — a readonly pin and a function called `exit` — and both aborts
+  return instead of ending the shell, so the pin is the **last** thing setup does
+  and setup's success line sits inside the branch where the pin took. A driver
+  whose abort was neutralised is never told setup completed.
+
 ## [2.0.20] — 2026-08-16
 
 - **The Copilot signoff was recorded by 93 lines of Markdown, and every one of
