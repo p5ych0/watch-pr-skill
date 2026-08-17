@@ -4,10 +4,29 @@ name: tests
 # push to a PR branch — the whole workflow twice, for the same commit, telling us
 # the same thing. Pushes to the default branch are covered directly; everything
 # else is covered as a pull request.
+# ── AUTOMATIC RUNS ARE OFF, DELIBERATELY AND TEMPORARILY ───────────────────
+#
+# Turned off by the operator while the open issue backlog is worked through: the
+# suite is the largest fixed cost in each review round, paid locally and then
+# again here, and it was blocking rounds on portability assertions that were
+# themselves wrong. See #93, which owns turning this back on.
+#
+# `workflow_dispatch` keeps the workflow runnable by hand — `gh workflow run
+# tests.yml --ref <branch>` — so nothing is deleted and a branch can still be
+# checked deliberately.
+#
+# WHAT THIS MEANS FOR THE LOOP, so nobody mistakes a clean gate for a tested head:
+# with no checks configured, `pr-ci-state.sh` reports `none`, and both
+# `pr-ci-gate.sh` and `pr-merge-gate.sh` treat that as "nothing to assert" and
+# carry on. That is a supported state rather than a bypass — but while this is
+# off, a green round means the reviewers were happy, NOT that the suite ran.
+#
+# RESTORE by deleting `workflow_dispatch:` and uncommenting the two triggers.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
 
 permissions:
   contents: read
