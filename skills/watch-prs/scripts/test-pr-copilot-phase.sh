@@ -866,6 +866,57 @@ world; _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
     && pass "…and the -ne forger is narrow enough that the script still runs" \
     || die "the -ne forger broke the harness rather than the boundary: '${got}'"
 
+# ── THE HEAD IS PROVED TWICE, SO BOTH COPIES NEED THE FORGER ───────────────
+#
+# The equality cases above start with an already-moved head, so they stop at the
+# FIRST proof and never reach the re-proof immediately before the mutations. That
+# second copy exists for the window where the head moves WHILE the probes run —
+# `move-head-on-probe` is the fixture's way of opening it — and reverting it alone
+# left the suite green.
+#
+# Both together is the case: the first read agrees, the head moves mid-probe, and
+# a `[` forging the equality would accept the moved head and go on to revoke the
+# signoff and request Copilot on a commit Codex never reviewed.
+#
+# WHAT THIS CASE PINS IS THE PAIR, and that is a fact about the code rather than a
+# limit of the fixture. `phase_still_open` runs immediately after the `HEAD_STILL`
+# guard and asks the same equality again, so reverting either copy alone changes
+# nothing observable — measured, not assumed. Reverting BOTH fails this case and
+# the already-moved one above, which is the reachable regression; a fixture that
+# claimed to catch one copy in isolation would be asserting something untrue.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
+_RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "a lying [ cannot accept a head that moved while the phase was being proved" \
+    || die "open with a mid-probe move and an equality-forging [ gave '${got}' posted='$(posted)'"
+grep -q 'pr edit' "$TMP/calls" \
+    && die "a Copilot pass was requested after a mid-probe move" \
+    || pass "…and requests no Copilot pass after it"
+
+# ── AND AN EMPTY PHASE ACCOUNT IS STILL REFUSED ────────────────────────────
+#
+# `[[ -n $BODY ]]` is the only `-n` guard here with nothing behind it: an empty
+# `$CODEX_SHA` is caught by `sha_reason` and an empty `$BODY_FILE` by the read
+# that follows, but an empty BODY posts the durable signoff with the account of
+# the phase missing — the one thing the reviewer contract says is read before the
+# diff. The existing empty-body case runs with no forger, and every forger above
+# delegates `-n`, so this conversion had no coverage.
+# ONCE, NOT ALWAYS, and the first attempt is why. A `[` that answered every
+# `-n ""` with success hung the run at the watchdog: "the empty string is
+# non-empty" is a loop that never terminates wherever one ends on it. So this
+# lies exactly once and delegates afterwards — narrow enough to leave the harness
+# working, which is the property every forger here has to have.
+_RB_SHADOW_N='BASH_FUNC_[%%=() { if [[ $1 = "-n" && -z $2 && ! -f $W/n.fired ]]; then : > "$W/n.fired"; return 0; fi; builtin [ "$@"; }'
+world; : > "$TMP/empty.md"
+_RB_SHADOW="$_RB_SHADOW_N" got="$(shadow_run record 7 "$TMP/empty.md")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "a lying [ cannot record a signoff with no account of the phase" \
+    || die "record with an empty body and an -n-forging [ gave '${got}' posted='$(posted)'"
+world; _RB_SHADOW="$_RB_SHADOW_N" got="$(shadow_run record 7 "$TMP/body.md")"
+printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+    && pass "…and the -n forger is narrow enough that the script still runs" \
+    || die "the -n forger broke the harness rather than the guard: '${got}'"
+
 # THE FIXTURE'S OWN REACH, in both directions again: the equality forger has to
 # LAND, and it has to leave the rest of the script working. Without this, both
 # cases above would pass against a forger that never took effect.
