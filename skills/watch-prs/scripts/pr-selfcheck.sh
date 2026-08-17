@@ -300,8 +300,15 @@ ok()   { printf 'ok   - %s\n' "$1"; }
 # This is the check that would have caught the P1. Variables the driver is
 # expected to supply from outside a block are listed explicitly rather than
 # inferred, so adding a new one is a deliberate act.
+#
+# `TMPDIR` AND `RANDOM` ARE THE SHELL'S OWN, in the same class as `HOME`, `PWD`
+# and `SECONDS`: nothing in `SKILL.md` assigns them and nothing should. `TMPDIR`
+# arrived with the transport file and was a standing finding from the round that
+# added it — the gate was red on a name it had no way to be right about. Listing
+# them keeps the finding meaning what it says: a variable the driver reads and
+# nothing supplies.
 if [ -f "$SKILL" ]; then
-    KNOWN='HOME|PATH|PWD|SECONDS|BASH_SOURCE|CLAUDE_PLUGIN_ROOT|REVIEW_BUS_REMOTE|REVIEW_BUS_OWNER|REVIEW_BUS_REPO|REVIEW_ROUND_THRESHOLD|REVIEW_MERGE_STRICT|PR_WATCH_INTERVAL|PR_WATCH_TIMEOUT|PR_CI_INTERVAL|PR_CI_TIMEOUT|PR_CI_GRACE|PR_CI_PROBE_TIMEOUT|1|2|3|4|5|6|7|8|9|0|@|\*|\?|#|!|_'
+    KNOWN='HOME|PATH|PWD|SECONDS|TMPDIR|RANDOM|BASH_SOURCE|CLAUDE_PLUGIN_ROOT|REVIEW_BUS_REMOTE|REVIEW_BUS_OWNER|REVIEW_BUS_REPO|REVIEW_ROUND_THRESHOLD|REVIEW_MERGE_STRICT|PR_WATCH_INTERVAL|PR_WATCH_TIMEOUT|PR_CI_INTERVAL|PR_CI_TIMEOUT|PR_CI_GRACE|PR_CI_PROBE_TIMEOUT|1|2|3|4|5|6|7|8|9|0|@|\*|\?|#|!|_'
 
     # Every extraction below has its STATUS taken. `set -uo pipefail` does not
     # stop an unchecked assignment, so a failed pipeline left the variable empty

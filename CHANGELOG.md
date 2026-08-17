@@ -64,6 +64,27 @@
   need a shell already executing arbitrary code as the operator — which can edit
   the helper instead.
 
+  **Both transport files live in a directory the setup creates**, rather than at
+  `${TMPDIR:-/tmp}/watch-pr-origin.$$`. A name derived from the pid is predictable
+  from another account on the same machine, so it could be pre-created as a
+  world-writable file or as a symlink; the helper truncates and writes through
+  whatever it is given, so the URL read back — the one every later signoff,
+  revocation and review request is addressed by — would have been that account's
+  choice. Reasoning that a remote URL is public answered disclosure and left the
+  substitution untouched. `mkdir` is the exclusion and is what fails closed: an
+  account that guesses the name stops the session instead of supplying it a
+  repository, and three `$RANDOM` draws make guessing it unlikely enough that
+  nobody can hold a session open by squatting it. The directory is removed on
+  every exit from setup, including the two that refuse.
+
+  **A pin helper that cannot start is no longer read back.** The status of the
+  `pin` call was ignored on the grounds that the helper truncates the file before
+  writing — true, and silent about a helper that never reached the truncation
+  because it was missing or unreadable. What was read then was whatever stood at
+  that path, and since the path was reused for the life of the driving shell, a
+  value left by an interrupted earlier setup only had to match to report that a
+  child had inherited a pin no child had been asked for.
+
 ## [2.0.22] — 2026-08-17
 
 - **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted

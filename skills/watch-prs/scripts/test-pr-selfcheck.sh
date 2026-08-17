@@ -69,6 +69,23 @@ printf '%s' "$out" | grep -q 'SUMMARY_FILE' \
     && pass "…and the finding names it" \
     || die "the finding does not name the variable: $out"
 
+# …AND A VARIABLE THE SHELL ITSELF SUPPLIES IS NOT ONE. `TMPDIR` and `RANDOM` are
+# read by the setup block and assigned by nobody, which is correct — and until the
+# list said so, the gate reported a finding on every session for a name `SKILL.md`
+# must not assign. A check that is wrong about the ordinary case is a check whose
+# output gets skipped.
+R="$(mkroot '# skill
+```bash
+OWNER=acme
+D="${TMPDIR:-/tmp}/probe.$$.$RANDOM"
+echo "$OWNER $D"
+```
+')"
+out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+    && pass "…while a shell-supplied variable is not a finding" \
+    || die "TMPDIR or RANDOM was reported as unassigned (rc=$rc out='$out')"
+
 # An assignment mentioned INSIDE a quoted string is not an assignment. The first
 # version of this check accepted `NAME=` after any whitespace, so the identity
 # block's own `echo "… SUMMARY_FILE=$SUMMARY_FILE"` made every name in it look

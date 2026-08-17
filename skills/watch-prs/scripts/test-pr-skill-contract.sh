@@ -187,6 +187,74 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
+# …AND THAT IS ASSERTED BY RUNNING IT, because the line above finds the call and
+# not the handler after it. Deleting the `||` arm leaves this grep matching and
+# leaves the claim "with its status taken" false, and what gets through is the
+# case the whole helper exists for: a read that writes a plausible URL and then
+# fails is accepted, and the session is pinned to it.
+_read_block=""
+_read_block="$(awk '/^RB_TMPDIR=/, /there is no repository to pin this session to/' "$SKILL")" \
+    || _read_block=""
+{ [ -n "$_read_block" ] \
+  && case "$_read_block" in *'/pr-origin.sh read "$RB_ORIGIN_OUT"'*) true ;; *) false ;; esac \
+  && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac; } \
+    && pass "…and the read lifts out of SKILL.md with its transport directory" \
+    || die "the read block is truncated or has lost its directory: '$_read_block'"
+# THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
+# the only shape that separates the two behaviours: one that failed to write would
+# be refused by the emptiness check further down, and the block would look correct
+# with no handler at all.
+_forge_dir=""
+_forge_dir="$(mktemp_d)" || die "no scratch directory for the read-status probe"
+# EVERY TRANSPORT DIRECTORY THESE CASES MAKE LANDS UNDER IT. The lifted blocks
+# create their own, as setup does, and the cleanup probe near the end of this file
+# runs the whole fixture with `TMPDIR` pointed at a scratch tree and fails if
+# anything is left in it — so a `mktemp -d` taking the ambient `TMPDIR` here is
+# reported as the leak it is.
+[ -n "$_forge_dir" ] && export RB_TMPBASE="$_forge_dir"
+if [ -n "$_forge_dir" ]; then
+    cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
+#!/usr/bin/env bash
+printf '%s\n' "git@github.com:acme/widget.git" > "$2"
+exit "${FORGE_RC:-0}"
+FORGE
+    _rs_rc=0
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rs_rc=$?
+    { [ "$_rs_rc" -ne 0 ] \
+      && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…so a helper that writes a URL and then fails does not pin the session" \
+        || die "setup pinned the session from a failed read (rc=$_rs_rc out='$_rs_out')"
+    # THE ORDINARY CASE STILL PASSES THROUGH, or a block that aborted on every
+    # read would satisfy the case above while starting no session at all.
+    _rs_rc=0
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rs_rc=$?
+    { [ "$_rs_rc" -eq 0 ] \
+      && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
+        && pass "…while a helper that succeeds pins the value it wrote" \
+        || die "the read block refused a good read (rc=$_rs_rc out='$_rs_out')"
+    # …AND THE TRANSPORT DIRECTORY IS EXCLUSIVE. `mkdir` is what makes the name
+    # being guessable a nuisance rather than a substitution: an account that
+    # pre-creates it stops this session instead of supplying it a repository.
+    _sq_rc=0
+    _sq_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" bash -c '
+            RANDOM=1
+            mkdir -p "$TMPDIR/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+            RANDOM=1
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _sq_rc=$?
+    { [ "$_sq_rc" -ne 0 ] \
+      && case "$_sq_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and a pre-created transport directory stops setup rather than being reused" \
+        || die "setup reused a directory it did not create (rc=$_sq_rc out='$_sq_out')"
+fi
 # …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`
 # is a name, and a function called `bash` inherits NON-exported variables, so it
 # agrees the pin arrived while the real stages inherit nothing.
@@ -290,6 +358,7 @@ _ro_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _ro_rc=$?
 [ "$_ro_rc" -ne 0 ] \
@@ -302,6 +371,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
 _sh_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" 'BASH_FUNC_export%%=() { return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _sh_rc=$?
 [ "$_sh_rc" -ne 0 ] \
@@ -316,6 +386,7 @@ _noexp_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _noexp_rc=$?
 [ "$_noexp_rc" -ne 0 ] \
@@ -326,11 +397,36 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 _ok_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _ok_rc=$?
 [ "$_ok_rc" -eq 0 ] \
     && pass "…while an ordinary shell pins and continues" \
     || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
+# …AND A PIN HELPER THAT FAILS IS NOT READ BACK, which is the other half of the
+# same status. The block used to run the helper and read the file whatever
+# happened, on the grounds that the helper truncates before it writes — true, and
+# it says nothing about a helper that never reached the truncation because it
+# could not start. What was read then was whatever stood at that path, and it only
+# had to equal `$RB_REMOTE` to report that a child inherited a pin no child had
+# been asked for.
+#
+# THE FORGED HELPER WRITES THE MATCHING VALUE AND THEN FAILS, since a file left
+# holding anything else would be refused by the equality check with no branch at
+# all — the same reason the read probe above chooses its status separately from
+# its output.
+if [ -n "$_forge_dir" ]; then
+    _pf_rc=0
+    _pf_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+            '"$_pin_block"'
+        ' 2>&1)" || _pf_rc=$?
+    { [ "$_pf_rc" -ne 0 ] \
+      && case "$_pf_out" in *OWNER=*) false ;; *) true ;; esac; } \
+        && pass "…and a pin helper that writes the right value and then fails is not believed" \
+        || die "setup accepted a pin from a helper that failed (rc=$_pf_rc out='$_pf_out')"
+fi
 # ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
 #
 # `readonly REVIEW_BUS_REMOTE=''` makes the export return 1 and a function named
@@ -350,6 +446,7 @@ _both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         # RB_SCRIPTS IS NOT OVERRIDDEN HERE. The pin block calls
         # `"$RB_SCRIPTS"/pr-origin.sh pin` since #84, so pointing it at a
         # nonexistent directory made the helper fail before it could report what
@@ -396,6 +493,7 @@ _forged_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE RB_SCRIP
         printf "PROBE_RAN\n" >&2
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
         '"$_pin_block"'
     ' 2>&1 >/dev/null)" || _forged_rc=$?
 case "$_forged_out" in
@@ -405,6 +503,12 @@ esac
 [ "$_forged_rc" -ne 0 ] \
     && pass "…and a forged echo cannot make the pin's failure exit zero" \
     || die "with echo, exit and the pin all forged, setup reported success"
+# THE FORGED HELPER AND EVERY TRANSPORT DIRECTORY UNDER IT GO HERE, after the last
+# case that uses either. `rm -rf` on a variable is safe only because `mktemp_d`
+# validates what it returns — an absolute path to a directory that exists — and
+# because nothing between here and there reassigns it.
+[ -n "$_forge_dir" ] && rm -rf "$_forge_dir"
+unset RB_TMPBASE
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.

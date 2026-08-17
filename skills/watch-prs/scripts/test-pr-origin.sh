@@ -341,5 +341,39 @@ case "$unprot" in
     *)         die "the unprivileged comparison gave neither the forged value nor nothing: '$unprot'" ;;
 esac
 
+# ── AN OUTPUT THAT OPENS AND THEN REJECTS THE WRITE ────────────────────────
+#
+# Both writes take their status, and until now nothing exercised the state that
+# distinguishes taking it from not. The truncation succeeds — `/dev/full` opens
+# and accepts `: >` — so the script reaches its `printf` believing the target is
+# usable, and only the write fails. Without the status, `pin` leaves an empty file
+# and exits 0, which is byte-for-byte what a legitimately unset pin leaves, and
+# `read` leaves an empty file and exits 0, which the caller reads back as an
+# origin. A refactor that dropped either guard would keep every other case here
+# green.
+#
+# `/dev/full` IS A LINUX DEVICE and stock macOS does not have it, so its absence
+# is announced rather than passed over: a case that quietly does not run is the
+# green tick this repository has paid for twice.
+if [ -c /dev/full ] && [ -w /dev/full ]; then
+    _full_rc=0
+    _full_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read /dev/full 2>&1 )" \
+        || _full_rc=$?
+    { [ "$_full_rc" -ne 0 ] \
+      && case "$_full_diag" in *"could not write the origin"*) true ;; *) false ;; esac; } \
+        && pass "read refuses an output that opens and then rejects the write" \
+        || die "read accepted a rejected write (rc=$_full_rc diag='$_full_diag')"
+
+    _full_rc=0
+    _full_diag="$( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE="$REAL" \
+        /usr/bin/env bash -p "$SCRIPT" pin /dev/full 2>&1 )" || _full_rc=$?
+    { [ "$_full_rc" -ne 0 ] \
+      && case "$_full_diag" in *"could not write the pin"*) true ;; *) false ;; esac; } \
+        && pass "…and pin refuses it too, rather than reporting an unset pin" \
+        || die "pin reported success on a rejected write (rc=$_full_rc diag='$_full_diag')"
+else
+    echo "NOTE: /dev/full is absent; the rejecting-write cases did not run"
+fi
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

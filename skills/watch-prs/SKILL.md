@@ -275,19 +275,47 @@ unset -f rb_identity 2>/dev/null \
 # open it. An expansion runs no command, so there is nothing to trace: `$$` is the
 # shell's own pid and `${TMPDIR:-/tmp}` its own variable.
 #
+# BOTH TRANSPORT FILES LIVE IN A DIRECTORY THIS SETUP CREATES, and that replaces
+# the trade an earlier round wrote down and accepted. `watch-pr-origin.$$` is
+# predictable from another account on the machine, so it could be pre-created as a
+# world-writable file or as a symlink; the helper would then truncate and write
+# through it, and the value read back at the line below — the one every later
+# signoff, revocation and review request is addressed by — would be whatever that
+# account left there. Calling it a public URL answered disclosure and left the
+# substitution and the follow-the-symlink write untouched.
+#
+# `mkdir` IS THE EXCLUSION, and `$RANDOM` only keeps it from being a nuisance.
+# `mkdir` fails if the name exists, so an account that guesses right stops this
+# session rather than supplying it a repository — the fail-closed half, and the
+# half that matters. Three `$RANDOM` draws make guessing right unlikely enough
+# that nobody can hold the session open by squatting the name. `-m 700` is applied
+# by `mkdir` itself, so nothing can be placed in the directory between its creation
+# and its use, and both files below inherit that protection rather than each
+# needing its own.
+#
+# STILL AN EXPANSION, NOT A SUBSTITUTION. `$(mktemp -d)` would name the directory
+# in one line, and a driving shell tracing to fd 1 would put the trace of `mktemp`
+# inside the value. `$RANDOM` and `$$` are the shell's own, so there is nothing to
+# trace. `mkdir` runs through `/usr/bin/env` for the reason every other command in
+# this block does: a function called `mkdir` would otherwise answer, report
+# success, and leave the transport in a directory of its choosing.
+RB_TMPDIR="${TMPDIR:-/tmp}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+/usr/bin/env mkdir -m 700 "$RB_TMPDIR" \
+    || { echo "ABORT: could not create a private directory for this session's transport files"; exit 1; }
 # THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
-# earlier run in the same shell cannot be read back as this one's answer. What a
-# predictable name costs is that another user on the machine could pre-create it —
-# the value is a public remote URL rather than a secret, and the write is the
-# operator's own, but that is the trade and it is written here rather than left
-# for a reader to infer.
-RB_ORIGIN_OUT="${TMPDIR:-/tmp}/watch-pr-origin.$$"
+# earlier run in the same shell cannot be read back as this one's answer.
+RB_ORIGIN_OUT="$RB_TMPDIR/origin"
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
-    || { rm -f "$RB_ORIGIN_OUT"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+    || { rm -f "$RB_ORIGIN_OUT"; rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
 rm -f "$RB_ORIGIN_OUT"
+# THE DIRECTORY GOES WITH THE FILE ON EVERY EXIT FROM HERE, not only on the one
+# that reaches the pin. A refused read used to leave the directory standing, and
+# an operator who runs setup twice against a misconfigured checkout accumulates
+# one per attempt — each private, each empty, none of them removable by anything
+# but them.
 [[ -n $RB_REMOTE ]] \
-    || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+    || { rmdir "$RB_TMPDIR"; echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
 # public information, so this is tidiness rather than secrecy — but the setup block
 # already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
@@ -415,12 +443,34 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # NO FALLBACK ON FAILURE, because `:` is a name. `… || : > "$RB_PIN_OUT"` called
 # whatever the operator's shell had defined as `:`, and one that wrote `$RB_REMOTE`
 # into that file made the equality below pass while the child probe had actually
-# failed. Nothing is needed in its place: the helper truncates the file before it
-# writes, so a failed run leaves it empty and the check below reads empty.
-RB_PIN_OUT="${TMPDIR:-/tmp}/watch-pr-pin.$$"
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT"
-RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
+# failed.
+#
+# WHAT REPLACED IT IS NOT ANOTHER FALLBACK: THE FILE IS READ ONLY IF THE HELPER
+# SUCCEEDED. Relying on the truncation was relying on the helper having reached it,
+# and a helper that cannot start — missing, unreadable, or `env` unable to exec it —
+# never truncates anything. The status was ignored, so what got read was whatever
+# was at that path already, and it only had to equal `$RB_REMOTE` to report that a
+# child had inherited the pin when no child had run. Branching removes the
+# dependency on the file's contents rather than adding a guard over them; an
+# unset `RB_PIN_SEEN` cannot match a non-empty remote, so the failure lands on the
+# postcondition that is already here.
+#
+# WRITTEN AS `&&` RATHER THAN AS `if`, and that is structural, not style: the
+# postcondition below is lifted out of this file and executed by
+# `test-pr-skill-contract.sh`, which takes the block from here to the first `fi`
+# at column 0. An `if … else … fi` around this call ends the lift before the
+# postcondition, and every case built on it then runs against a truncated block —
+# nine assertions passed against nothing on the first attempt at this.
+RB_PIN_OUT="$RB_TMPDIR/pin"
+RB_PIN_SEEN=
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+    && RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
 rm -f "$RB_PIN_OUT"
+# THE DIRECTORY GOES WITH THEM, AND `rmdir` IS THE POINT. Both files have just
+# been removed, so it succeeds — and if it does not, something this setup did not
+# put there is in a directory this setup made private, which is worth the noise on
+# stderr. `rm -rf` on a variable would remove a tree instead of reporting one.
+rmdir "$RB_TMPDIR"
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
