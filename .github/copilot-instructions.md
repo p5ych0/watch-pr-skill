@@ -129,8 +129,18 @@ plugin's own metadata (`.claude-plugin/`) or to the install
 commands in `README.md`, which legitimately name this repository.
 
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
-reads `git remote get-url origin` in its setup block, checks that read's status,
-and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.
+reads origin ONCE in its setup block — through `pr-origin.sh read`, not by running
+`git` itself — checks that read's status, and exports it as `REVIEW_BUS_REMOTE`;
+`rb_identity` prefers that over deriving. The helper is invoked as
+`"$RB_SCRIPTS"/pr-origin.sh`, a PATH rather than a name, and re-execs out of
+`BASH_ENV`/`ENV`/`SHELLOPTS`/`BASH_XTRACEFD` and clears every inherited function
+before it calls anything: a shell function called `git` that answers only
+`remote get-url origin` otherwise forges the identity every stage is addressed by.
+The pin is proved the same way — `pr-origin.sh pin` is a real child, where
+`bash -c` is a name whose shell copy inherits NON-exported variables and so agrees
+the pin arrived while the real helpers inherit nothing. **Treat a change that
+reads origin with `git` in the driving shell, or proves the pin with `bash -c`, as
+a blocking finding.** See #84.
 Every helper runs `rb_identity` in its own process against its own current
 directory, so without the pin a `cd` into a second checkout retargets every stage
 that POSTS — a signoff, a revocation, a review request — at whatever pull request

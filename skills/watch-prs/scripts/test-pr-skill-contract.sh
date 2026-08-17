@@ -342,14 +342,28 @@ esac
 # and `exit` and `echo` all replaced, the block still ends non-zero. A driver that
 # takes the status — which the `CLOSE_RC` guard below and every helper caller do —
 # still stops.
+# EVERY `env` OPTION BEFORE THE FIRST ASSIGNMENT. Option parsing stops at the
+# first operand, so `env -u A B=1 -u C cmd` treats `-u` as the UTILITY — GNU `env`
+# answers 127, BSD the same. This case had `-u REVIEW_BUS_REMOTE` after
+# `RB_SCRIPTS=…` and so never ran the block at all: 127 is non-zero, which is
+# exactly what the assertion wanted, so it passed on its own breakage.
+#
+# AND THE PROBE SAYS IT RAN, which is the half that would have caught it. A status
+# alone cannot tell "the guard refused" from "the command never started", and
+# those are the two things this case sits between.
 _forged_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" -u REVIEW_BUS_REMOTE \
+_forged_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' \
     'BASH_FUNC_echo%%=() { builtin printf "OWNER=acme REPO=widget\n"; }' bash -c '
+        printf "PROBE_RAN\n" >&2
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
         '"$_pin_block"'
-    ' >/dev/null 2>&1 || _forged_rc=$?
+    ' 2>&1 >/dev/null)" || _forged_rc=$?
+case "$_forged_out" in
+    *PROBE_RAN*) pass "the forged-echo probe reaches the pin block at all" ;;
+    *)           die "the forged-echo probe never ran its block: '$_forged_out'" ;;
+esac
 [ "$_forged_rc" -ne 0 ] \
     && pass "…and a forged echo cannot make the pin's failure exit zero" \
     || die "with echo, exit and the pin all forged, setup reported success"

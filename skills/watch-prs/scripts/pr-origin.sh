@@ -35,33 +35,21 @@
 # statuses. See CLAUDE.md § Bash conventions.
 set -uo pipefail
 
-# ── THE STARTUP HOOK RUNS BEFORE THIS FILE DOES ────────────────────────────
+# ── EVERY INHERITED FUNCTION IS CLEARED FIRST, BEFORE ANY NAME IS USED ─────
 #
-# A non-interactive bash sources `$BASH_ENV` before the script body, so anything
-# it defines is already in place by the time the first line here runs. The re-exec
-# steps out of that, and `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` travel with it for
-# the same reason — an exported `SHELLOPTS=xtrace` traces this process and writes
-# to stdout when `BASH_XTRACEFD=1`, which is the stream the caller reads a value
-# from.
+# BEFORE THE RE-EXEC, SO THE HOP IS MADE BY THE BUILTIN. `exec` is a name, and a
+# hook defining `exec() { return 0; }` turns the hop below into a no-op: the guard
+# falls through as though the marker had been set.
 #
-# GUARDED BY A MARKER, NOT BY THE EVIDENCE. The hook can `unset BASH_ENV` on its
-# way out, so a guard that tests for it skips the re-exec exactly when it is most
-# needed.
+# THE ORDER IS DEFENCE IN DEPTH, NOT A FIX, and measuring said so. With `exec`
+# shadowed and the clearing AFTER the hop, the read is still correct — the hook's
+# `git` is removed by the sweep either way. What a skipped hop actually costs is
+# the hook VARIABLES, and `SHELLOPTS` is readonly in a shell, so `set +x` below
+# answers the one that matters. This order is kept because a builtin-made hop is
+# strictly better and costs nothing, not because it changes an outcome.
 #
-# AND THE MARKER IS CLEARED, or every child of this process inherits it and stands
-# in the hook it was meant to step out of.
-#
-# `[[`, NOT `[`: the hook runs first and can define a `[` function, which would
-# intercept this guard and skip the re-exec that exists to escape it.
-if [[ -z ${RB_ORIGIN_CLEAN-} ]]; then
-    RB_ORIGIN_CLEAN=1 exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
-fi
-unset -v RB_ORIGIN_CLEAN 2>/dev/null || true
-
-# ── AND EVERY INHERITED FUNCTION IS CLEARED BEFORE A NAME IS USED ──────────
-#
-# An exported function is inherited through the environment and survives the
-# re-exec above, which only drops the hook variables. It shadows the name it is
+# An exported function is inherited through the environment and survives a
+# re-exec, which only drops the hook variables. It shadows the name it is
 # called by, builtin or external alike — and `command` and `builtin`, the prefixes
 # used to reach past one, are themselves ordinary builtins and shadowable in
 # exactly the same way. Clearing those first is what makes the rest mean anything.
@@ -82,12 +70,48 @@ done <<< "$(builtin compgen -A function 2>/dev/null)"
 # and cannot be unset from inside, but `set +x` turns tracing off regardless.
 set +x
 
+# ── THE STARTUP HOOK RUNS BEFORE THIS FILE DOES ────────────────────────────
+#
+# A non-interactive bash sources `$BASH_ENV` before the script body, so anything
+# it defines is already in place by the time the first line here runs. The re-exec
+# steps out of that, and `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` travel with it for
+# the same reason — an exported `SHELLOPTS=xtrace` traces this process and writes
+# to stdout when `BASH_XTRACEFD=1`, which is the stream the caller reads a value
+# from.
+#
+# GUARDED BY A MARKER, NOT BY THE EVIDENCE. The hook can `unset BASH_ENV` on its
+# way out, so a guard that tests for it skips the re-exec exactly when it is most
+# needed.
+#
+# AND THE MARKER IS CLEARED, or every child of this process inherits it and stands
+# in the hook it was meant to step out of.
+#
+# `[[`, NOT `[`: the hook runs first and can define a `[` function, which would
+# intercept this guard and skip the re-exec that exists to escape it.
+#
+# EVERY NAME ON THIS LINE IS A BUILTIN OR CLEARED BY NOW — `exec`, `env` and
+# `unset` above it — because the clearing runs first. See the block above.
+if [[ -z ${RB_ORIGIN_CLEAN-} ]]; then
+    RB_ORIGIN_CLEAN=1 exec env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash "$0" "$@"
+fi
+unset -v RB_ORIGIN_CLEAN 2>/dev/null || true
+
 # THIS DOES NOT CLOSE THE CLASS, and saying so is the point. `unset` can itself be
 # shadowed, and `set -o posix` — which would make special builtins outrank
 # functions — is reached through `set`, which is shadowable too. What is left
 # needs a parent already executing arbitrary code as the operator, and such a
 # shell can edit this file. That is a limitation, written here rather than left
 # for a reader to rediscover.
+#
+# AND A POISONED `PATH` IS NOT CLOSED HERE EITHER, which is a different exposure
+# from the ones above and worth separating. A hook that prepends a directory
+# holding a forged `git` — and makes `PATH` readonly so its own shell cannot undo
+# it — is not answered by clearing functions or by the re-exec: the value survives
+# as an ordinary inherited variable, and this process has no way to know which
+# `PATH` was the honest one. It is also not specific to this helper. Every `gh`
+# call in every script resolves the same way, so a `PATH` the operator does not
+# control compromises the whole loop rather than this read. Filed as its own
+# issue; see the header for what this file DOES answer.
 
 MODE="${1-}"
 case "$MODE" in

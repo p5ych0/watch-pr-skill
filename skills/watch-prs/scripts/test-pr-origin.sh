@@ -91,6 +91,32 @@ got="$(run read BASH_ENV="$TMP/sneaky.sh")"
     && pass "…and one that unsets BASH_ENV on the way out is stepped out of too" \
     || die "a self-erasing hook reached the read: '${got}'"
 
+# ── A HOOK THAT SHADOWS `exec` CANNOT STOP THE HOP ─────────────────────────
+#
+# `exec` is a name like any other, so a hook defining `exec() { return 0; }` turns
+# the re-exec into a no-op: the guard falls through as though the marker had been
+# set, and the process carries on inside the hook it was trying to leave.
+#
+# WHAT DEFEATS IT IS THE CLEARING, NOT THE HOP, and this case is labelled for what
+# it proves rather than for what it was first written to prove. Moving the clearing
+# back after the re-exec leaves this passing — measured — because the sweep removes
+# the hook's `git` whichever side of the hop it runs on. The case is worth keeping:
+# a hook that neutralises the escape and forges a command is defeated, which is the
+# property. It is not evidence about the ordering, and saying otherwise would make
+# it one of the checks that agrees with every version of the code.
+printf 'exec() { return 0; }\ngit() { printf "%s\\n" "%s"; }\n' "$FORGED" > "$TMP/noexec.sh"
+got="$(run read BASH_ENV="$TMP/noexec.sh")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "…and a hook that shadows exec cannot keep the process inside itself" \
+    || die "a shadowed exec kept the hook in place: '${got}'"
+# …AND THE SHADOWED `exec` IS PROVED TO LAND, so the case cannot pass vacuously on
+# a hook that never took effect.
+probe="$(run_limited 10 env BASH_ENV="$TMP/noexec.sh" bash -c \
+    'exec /bin/echo REEXECED; printf NOT_REEXECED' 2>&1)" || true
+[ "$probe" = NOT_REEXECED ] \
+    && pass "the exec forgery does neutralise a real exec in an ordinary child" \
+    || die "the exec forgery never landed, so the case above proves nothing: '$probe'"
+
 # ── THE MARKER IS CLEARED, or every child stands in the hook again ─────────
 #
 # The re-exec sets `RB_ORIGIN_CLEAN` to stop itself recurring. If it survived into
