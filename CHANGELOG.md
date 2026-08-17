@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.25] — 2026-08-17
+
+- **A shadowed `type` inside `rb_load` is now documented as accepted rather than
+  left open.** The loader verifies the symbol it just loaded with `type -t`, and a
+  `type() { return 1; }` in the operator's shell turns a good library into
+  `reason=<lib>_empty`. There is no name-free way to ask whether a name is a
+  function — `type`, `declare` and `command` are all shadowable, and calling the
+  symbol runs it, which for `rb_identity` means shelling out to `git`. Dropping the
+  check moves the failure to the caller's first use and loses the precise reason; a
+  subshell probe forks per load and still executes the function.
+
+  So the check stays, on the boundary settled in #76, and `loadlib.sh` now says so
+  beside it. No behaviour changed — what changed is that a reviewer raising it gets
+  an answer instead of reopening the question.
+
 ## [2.0.22] — 2026-08-17
 
 - **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted

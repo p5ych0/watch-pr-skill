@@ -237,6 +237,15 @@ fixture — each one contains at least one of `local`, `awk`, `[`, `read`, `cat`
 warns about elsewhere, and a second, worse copy of a guarantee that already
 holds. **Do not raise a shadowable name against a fixture.**
 
+**A shadowed `type` inside `rb_load` is accepted, not a finding.** The loader
+verifies the symbol it just loaded with `type -t`, and there is no name-free way
+to ask whether a name is a function: `type`, `declare` and `command` are all
+shadowable, and calling the symbol runs it — `rb_identity` would shell out to
+`git`. #88 removes the same call from the ten helpers — a separate change, in flight
+alongside this one — because there it has somewhere to go (an undefined `rb_load`
+exits 127); here it has not. Decided on
+#96 and recorded beside the check.
+
 Three limits are worth knowing, and all three have produced real defects.
 
 **The guarantee is the gate's, not the file's.** A fixture run directly — `bash

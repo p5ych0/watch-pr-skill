@@ -73,6 +73,26 @@ rb_load() {
     # shellcheck disable=SC1090
     . "$dir/$lib.sh" || {
         echo "$prefix reason=${lib}_unreadable" >&2; return 2; }
+    # ── `type` IS A NAME, AND THAT IS ACCEPTED HERE RATHER THAN GUESSED AT ──
+    #
+    # A `type() { return 1; }` inherited from the operator's shell turns a
+    # perfectly good library into `reason=${lib}_empty`. Measured; it fails in the
+    # safe direction, but it fails, and the loop stops on nothing being wrong.
+    #
+    # #88 REMOVES THE SAME CALL FROM THE TEN HELPERS that wrap this one — a
+    # separate change, in flight alongside this one — because there the
+    # verification has somewhere to go: calling an undefined `rb_load` exits 127,
+    # which is a check with no name in it. That does not transfer here.
+    # Asking whether a NAME is a function needs `type`, `declare` or `command` —
+    # all shadowable — or calling the symbol, and calling an arbitrary library
+    # function as a probe runs it: `rb_identity` would shell out to `git`.
+    #
+    # The alternatives were weighed on #96 and each costs more than it buys:
+    # dropping the check moves the failure to the caller's first use and loses the
+    # precise `reason=`, and a subshell probe forks per load and still executes
+    # the function. So the check stays, on the boundary #76 settled — this needs
+    # an exported function in the operator's own shell, and a shell that can do
+    # that can edit this library instead.
     if [ "$kind" = func ]; then
         [ "$(type -t "$sym" 2>/dev/null)" = function ] || {
             echo "$prefix reason=${lib}_empty" >&2; return 2; }
