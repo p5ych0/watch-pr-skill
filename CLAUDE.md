@@ -259,12 +259,14 @@ rediscovering them.
   condition that made the gap visible.
 
   **Behavioural differences count too, not only parsing, and this one recurs.**
-  Two examples from a single pull request: bash 5 traces a simple command BEFORE
-  applying its redirections while bash 3.2.57 applies them first, and a hook's
-  `set --` reaches a script's positional parameters on bash 5 but not on 3.2.57.
+  Three examples from a single pull request: bash 5 traces a simple command BEFORE
+  applying its redirections while bash 3.2.57 applies them first; a hook's `set --`
+  reaches a script's positional parameters on bash 5 but not on 3.2.57; and a
+  `BASH_ENV` hook can read those parameters as `$2` on bash 5 and cannot on 3.2.57.
   Both times a fixture written from the newer behaviour alone passed locally and
-  turned `macos-shell` red on a change that was correct — the second time *after*
-  this paragraph existed.
+  turned `macos-shell` red on a change that was correct — the second and third
+  times *after* this paragraph existed. Attack fixtures are the recurring shape:
+  the defence holds on both shells, and only the attack's ROUTE differs.
 
   So: **assert the invariant, not the version's route to it.** "The forged value
   never comes out" holds on both; "the run refuses" holds on one. Where the two

@@ -319,9 +319,22 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 ( cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
     "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
 unprot="$(<"$TMP/unprot.value")"
-[ "$unprot" = "$FORGED" ] \
-    && pass "…where the same hook takes the value from an unprivileged first shell" \
-    || die "the unprivileged comparison did not reproduce the attack: '$unprot'"
+# REPORTED, NOT REQUIRED, because the ROUTE is version-dependent. This hook writes
+# the value file whose path it reads as `$2` — the script's own arguments, since
+# `BASH_ENV` is sourced inside the script's shell. bash 5 gives it those arguments;
+# bash 3.2.57 does not, so on that shell the hook cannot find the file and the
+# attack does not land at all.
+#
+# What is REQUIRED is the case above: under the documented invocation the hook
+# never runs. This one exists to show the caller's `bash -p` is load-bearing where
+# the attack is reachable, and `CLAUDE.md` § Portability records why requiring one
+# version's route turns the job red for a change that is correct — twice already in
+# this pull request.
+case "$unprot" in
+    "$FORGED") pass "…where the same hook takes the value from an unprivileged first shell" ;;
+    "")        pass "…and on this bash the hook cannot reach the script's arguments at all" ;;
+    *)         die "the unprivileged comparison gave neither the forged value nor nothing: '$unprot'" ;;
+esac
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
