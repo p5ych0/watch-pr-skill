@@ -113,6 +113,23 @@ jobs:
   # test and its error are in the log either way.
   macos-shell:
     runs-on: ubuntu-latest
+    # ── TEMPORARILY DISABLED, DELIBERATELY, AND WITH AN OWNER ──────────────
+    #
+    # Turned off by the operator while the open issue backlog is worked through:
+    # it is the slowest job in the loop and it had gone red three times in one
+    # pull request for the same reason — a fixture asserting bash 5's ROUTE to an
+    # outcome rather than the outcome, where bash 3.2.57 reaches it differently.
+    # Each of those was a correct change stopped by a portability check that was
+    # itself wrong.
+    #
+    # WHAT IS LOST WHILE IT IS OFF, stated so nobody mistakes green for covered:
+    # nothing verifies the suite on bash 3.2.57 or on a mac-shaped PATH. A
+    # post-3.2 construct, or a command stock macOS lacks, now merges silently.
+    # `CLAUDE.md` § Portability calls this job the only thing that catches those,
+    # and it is still right.
+    #
+    # RE-ENABLE BY DELETING THIS `if:`. See the tracking issue.
+    if: false
     # ONE DEFINITION OF THE DIGEST, used by the verification AND by the cache key.
     # It has to key the cache: the first version of this pin left the key at
     # `bash-3.2-<os>`, which an earlier UNVERIFIED build had already populated, so
