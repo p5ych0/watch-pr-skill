@@ -246,6 +246,23 @@ alongside this one — because there it has somewhere to go (an undefined `rb_lo
 exits 127); here it has not. Decided on
 #96 and recorded beside the check.
 
+**The test workflow is off, deliberately and temporarily, and that is not a
+finding.** `.github/workflows/tests.yml` runs on `workflow_dispatch` only and
+`macos-shell` carries `if: false`, so a push produces no check and the gates read
+`none` — which `pr-ci-gate.sh` and `pr-merge-gate.sh` both document as "nothing to
+assert". The operator turned it off while the issue backlog is worked through,
+because the suite is the largest fixed cost per round and it had been blocking
+correct changes on portability assertions that were themselves wrong.
+
+**What it costs is real and is not disputed:** while this stands, a green round
+means the reviewers were satisfied, NOT that the suite ran, and a bash 3.2 or
+macOS-userland regression can merge. #93 owns restoring both, and requires the
+fixtures to be audited against *assert the invariant, not the version's route to
+it* first — re-enabling before that simply reproduces the failures that caused it.
+
+Do not raise the disabled workflow as a finding while this paragraph stands. Do
+raise anything that would be caught only by it, on its own merits.
+
 Three limits are worth knowing, and all three have produced real defects.
 
 **The guarantee is the gate's, not the file's.** A fixture run directly — `bash
