@@ -220,6 +220,42 @@ function can take, and a rule applied per call site is a list the next stage wil
 not be in. `$REPO_DIR` remains correct for the merge gate alone, which hands
 `pr-merge-range.sh` a tree to inspect rather than an identity.
 
+**A shadowable command name is a finding in a runtime script and NOT in a
+fixture.** This boundary is decided (#76), and it is drawn by `pr-selfcheck.sh`
+rather than by any individual file.
+
+`SKILL.md` and the `pr-*.sh` helpers run in the operator's own shell, which
+nothing controls, so a name they depend on is load-bearing: a function shadows
+any name, including the `command` and `builtin` prefixes meant to bypass one, and
+the answer is a reserved word (`[[`, `if`), an assignment or an expansion. The
+`test-*.sh` fixtures run under `pr-selfcheck.sh`, which re-execs into a clean
+shell with `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` removed, clears
+every inherited function, and refuses to continue if one cannot be cleared. That
+guarantee is made once, with its own test. Requiring it again inside every
+fixture — each one contains at least one of `local`, `awk`, `[`, `read`, `cat`,
+`mktemp`, `grep`, `sort`, `jq` and `timeout` — is the unbounded list this file
+warns about elsewhere, and a second, worse copy of a guarantee that already
+holds. **Do not raise a shadowable name against a fixture.**
+
+Three limits are worth knowing, and all three have produced real defects.
+
+**The guarantee is the gate's, not the file's.** A fixture run directly — `bash
+test-pr-watch.sh` — has no clean shell, and **CI is that path**: both jobs in
+`.github/workflows/tests.yml` loop over `bash "$t"` rather than going through
+`pr-selfcheck.sh`, so what protects them is the runner's environment being clean
+by construction. The exemption above survives that — a hostile shell is an
+operator's machine, not a fresh container — but never claim the gate is
+protecting an execution that did not enter it.
+
+**The gate clears inherited functions and the hook variables. It does not clear
+arbitrary exported values**, and `SKILL.md` exports `REVIEW_BUS_REMOTE` before
+the suite runs — so a fixture whose subject is an env-driven override must clear
+that override itself, and one that forges identity while inheriting the pin tests
+nothing.
+
+**That clearing must not move into `testlib.sh`**, which ships at runtime inside
+`pr-ci-state.sh`, where an `unset` would wipe the driver's pin.
+
 ### Only a base-ref authority can waive a finding
 
 A dated decision record, or an instruction file **as it exists on the base ref**,
