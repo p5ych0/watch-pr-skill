@@ -333,6 +333,15 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # still derive from wherever the session later stands. What has to be true is that
 # a new process sees it, so that is what is asked — and asking it also subsumes the
 # parent-side check, since a wrong value here is a wrong value there.
+#
+# `bash` AND `git` ARE STILL NAMES, and that is a known, filed limit rather than an
+# oversight: see #84. A function named `bash` runs in a shell copy that inherits
+# non-exported variables, so it can agree with a forged `export` while the real
+# stages — which exec through `#!/usr/bin/env bash` and resolve on `PATH` — inherit
+# nothing; a function named `git` forges the read above. Both are removed by
+# reading origin through a helper at an absolute path, which is that issue. Neither
+# is reachable without a shell that is already lying to itself, whereas what this
+# pin fixes needed no hostility at all: an ordinary `cd`.
 RB_PIN_SEEN="$(bash -c 'printf %s "${REVIEW_BUS_REMOTE-}"')" || RB_PIN_SEEN=''
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
