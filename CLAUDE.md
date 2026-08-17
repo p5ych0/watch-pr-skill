@@ -258,13 +258,18 @@ rediscovering them.
   narrow lift, by anchored `grep` and with no grammar, covers the merge-gate
   condition that made the gap visible.
 
-  **Behavioural differences count too, not only parsing.** bash 5 traces a simple
-  command BEFORE applying its redirections; bash 3.2.57 applies them first. A
-  fixture written from the newer behaviour alone — asserting that the unbraced form
-  leaks a trace into a command substitution — passed locally and failed on
-  `macos-shell`, where the leak does not happen. Where two versions differ like
-  that, assert the property that holds on both and REPORT the difference; requiring
-  one version's behaviour makes the job red for a change that is correct.
+  **Behavioural differences count too, not only parsing, and this one recurs.**
+  Two examples from a single pull request: bash 5 traces a simple command BEFORE
+  applying its redirections while bash 3.2.57 applies them first, and a hook's
+  `set --` reaches a script's positional parameters on bash 5 but not on 3.2.57.
+  Both times a fixture written from the newer behaviour alone passed locally and
+  turned `macos-shell` red on a change that was correct — the second time *after*
+  this paragraph existed.
+
+  So: **assert the invariant, not the version's route to it.** "The forged value
+  never comes out" holds on both; "the run refuses" holds on one. Where the two
+  genuinely differ, accept either outcome by name and say which happened, rather
+  than requiring the one the local shell produces.
 
   **Do not build a text scanner for this.** One was, and it is why this bullet is
   short: 2,200 lines and fifty-two review rounds, every round answering one finding

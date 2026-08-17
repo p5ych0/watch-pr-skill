@@ -385,15 +385,27 @@ done
 # flag, and a hook forged both — it can set any variable and can replace the
 # positional parameters with `set --`. It cannot make `$-` claim a `p`.
 #
-# A hook that forges the old flag now produces a REFUSAL rather than a value,
-# because the flag is not what the guard reads and the forged word arrives where
-# the mode is expected. Fail closed, and visibly.
+# WHAT IS ASSERTED IS THE INVARIANT, NOT THE VERSION'S ROUTE TO IT. The forged URL
+# must not come out — that holds everywhere. HOW it does not differs: bash 5 lets
+# the hook's `set --` reach this script, so the forged word arrives where the mode
+# is expected and the run refuses; bash 3.2.57 does not, so the read simply
+# succeeds and returns the real origin.
+#
+# The first version of this case required the refusal, and `macos-shell` went red
+# on a change that was correct — the SECOND time in this pull request, after
+# `CLAUDE.md` had already gained the note saying not to. Recording it here as well,
+# next to the case that made it.
 printf 'set -- --rb-origin-clean read\ncommand() { printf "%%s\\n" "%s"; }\nreadonly -f command\n' "$FORGED" \
     > "$TMP/hook-setargs.sh"
 got="$(run read BASH_ENV="$TMP/hook-setargs.sh")"
-{ [ "${got%%|*}" = 1 ] && [ "${got#*|}" != "$FORGED" ]; } \
-    && pass "a hook replacing the positional parameters is refused, not obeyed" \
-    || die "a set-- hook gave '${got}'"
+case "${got#*|}" in
+    *"$FORGED"*) die "a set-- hook forged the origin: '${got}'" ;;
+esac
+case "$got" in
+    "1|"*) pass "a hook replacing the positional parameters is refused, not obeyed" ;;
+    "0|$REAL") pass "a hook replacing the positional parameters does not reach this bash" ;;
+    *) die "a set-- hook gave neither a refusal nor the real origin: '${got}'" ;;
+esac
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
