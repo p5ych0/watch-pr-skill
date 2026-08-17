@@ -23,6 +23,15 @@
   `$REPO_DIR` remains for the merge gate, which inspects history rather than
   identity.
 
+  The export takes its status and proves its result. A `readonly
+  REVIEW_BUS_REMOTE` already in the driving shell makes it fail while setup
+  carries on — and if that readonly value is empty, `rb_identity` falls back to
+  the current directory, derives the intended checkout, and setup looks entirely
+  successful while every child inherits no pin at all. The proof is a `[[ … ]]`
+  rather than another builtin, so a shadowed `export` returning 0 without
+  assigning is caught by the same line: the status alone reports success with the
+  pin unset.
+
 ## [2.0.20] — 2026-08-16
 
 - **The Copilot signoff was recorded by 93 lines of Markdown, and every one of

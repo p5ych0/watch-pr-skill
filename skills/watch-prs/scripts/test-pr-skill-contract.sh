@@ -182,6 +182,54 @@ _ident_ln=""; _ident_ln="$(grep -n '^rb_identity \\$' "$SKILL" | head -1 | cut -
 { [ -n "$_pin_ln" ] && [ -n "$_ident_ln" ] && [ "$_pin_ln" -lt "$_ident_ln" ]; } \
     && pass "…and the pin is in place before the driver derives its own identity" \
     || die "REVIEW_BUS_REMOTE is exported after rb_identity (pin=$_pin_ln rb_identity=$_ident_ln)"
+# …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
+# REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
+# while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
+# to `git remote get-url origin`, derives the intended checkout, and setup looks
+# entirely successful — while every child inherits no usable pin and routes by
+# whichever checkout the session later enters. That is the original
+# wrong-repository defect surviving its own fix.
+#
+# LIFTED AND RUN, in a child that already holds the readonly. Describing this was
+# what let it through: the export reads correctly at a glance, and its failure is
+# visible only in what the variable holds afterwards.
+_pin_block=""
+_pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
+{ [ -n "$_pin_block" ] \
+  && case "$_pin_block" in *'[[ $REVIEW_BUS_REMOTE != "$RB_REMOTE" ]]'*) true ;; *) false ;; esac; } \
+    && pass "the pin's export and its proof lift out of SKILL.md together" \
+    || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
+_ro_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+        readonly REVIEW_BUS_REMOTE=""
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _ro_rc=$?
+[ "$_ro_rc" -ne 0 ] \
+    && pass "…and a readonly REVIEW_BUS_REMOTE aborts setup rather than pinning nothing" \
+    || die "setup continued with an empty readonly pin; every stage would route by the current directory"
+# …AND A SHADOWED `export` IS THE SAME FAILURE, caught by the same line. One that
+# returns 0 without assigning leaves the variable untouched, which the status
+# cannot see and the postcondition can — the reason the proof is a reserved word
+# rather than another builtin.
+_sh_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV 'BASH_FUNC_export%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _sh_rc=$?
+[ "$_sh_rc" -ne 0 ] \
+    && pass "…and a shadowed export is caught by the postcondition" \
+    || die "a shadowed export left the pin unset and setup carried on"
+# …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
+# would satisfy both cases above while stopping every session.
+_ok_rc=0
+env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || _ok_rc=$?
+[ "$_ok_rc" -eq 0 ] \
+    && pass "…while an ordinary shell pins and continues" \
+    || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.

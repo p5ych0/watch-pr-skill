@@ -240,7 +240,25 @@ RB_REMOTE="$(git remote get-url origin)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [ -n "$RB_REMOTE" ] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
-export REVIEW_BUS_REMOTE="$RB_REMOTE"
+# THE EXPORT'S STATUS IS TAKEN, AND THE RESULT IS PROVEN. A `readonly
+# REVIEW_BUS_REMOTE` already in this long-lived shell makes the export fail while
+# setup carries on — and if that readonly value is EMPTY, `rb_identity` here falls
+# back to `git remote get-url origin`, derives the intended checkout, and setup
+# looks entirely successful. The children then inherit no usable pin and derive
+# whichever checkout the session later enters, which is the original defect
+# surviving the fix.
+#
+# THE POSTCONDITION IS NOT WRITTEN WITH THE THING IT CHECKS FOR. `export` is a
+# builtin and therefore a name; the proof is a `[[ … ]]`, a reserved word the
+# parser handles, so a shadowed `export` that returns 0 without assigning is
+# caught by the same line as a readonly that returns 1.
+export REVIEW_BUS_REMOTE="$RB_REMOTE" \
+    || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
+if [[ $REVIEW_BUS_REMOTE != "$RB_REMOTE" ]]; then
+    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+    exit 1
+    [[ -n "" ]]
+fi
 rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
@@ -1018,12 +1036,11 @@ Ask Copilot:
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, like every other stage and the
-# merge gate. `pr-copilot-phase.sh` derives its identity from the current
-# directory, so a `cd` into another checkout between setup and here would read
-# whatever PR of THAT repository shares this number and post the Codex signoff
-# onto it. The subshell is inside the capture so the output still reaches
-# `$PHASE_OUT`, and the status is the subshell's.
+# WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here. The
+# session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
+# stage and everything it drives inherit — so this call has no cwd dependency and
+# needs no wrapper. Do not add one: a `(cd … && …)` guard here is what the pin
+# replaced, and `cd` is a name a function can take.
 PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
@@ -1177,10 +1194,10 @@ way — the signoff is on the PR, so a later session reads it back with
 # each other: the proof wants to be last, and the Copilot BASELINE must be last or
 # a pass landing in between is accepted as the answer to a request made after it.
 # This is the proof as late as the baseline rule allows.
-# FROM `$REPO_DIR` TOO, and this is the stage where it matters most: `open` posts
-# a signoff revocation and requests a review. Landing either on a same-numbered PR
-# in another checkout revokes a signoff nobody withdrew and starts a pass nobody
-# asked for, while the local phase is left unopened.
+# THE SESSION PIN COVERS THIS STAGE TOO, and it is the one where getting the
+# repository wrong costs most: `open` posts a signoff revocation and requests a
+# review. Both are inherited from the setup export rather than decided by the
+# current directory, so there is nothing to wrap here either.
 OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
@@ -1238,11 +1255,9 @@ end of the Codex phase, for the same reason.
 # are EQUAL decides which question the stop asks: the fault-tolerance pass is
 # offered only where the Copilot phase produced commits.
 REVIEWERS=both   # or `codex-only`
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, like the merge gate below. The
-# stage derives its own identity from the current directory, so a `cd` into
-# another checkout between setup and here would read whatever PR of THAT
-# repository shares this number and post the Copilot signoff onto it. `$REPO_DIR`
-# was captured in the setup block.
+# THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL. The merge gate below still
+# runs from `$REPO_DIR`, and that is a different question: it hands
+# `pr-merge-range.sh` a tree to inspect, which the pin says nothing about.
 "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
 # `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
