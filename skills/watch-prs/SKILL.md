@@ -242,17 +242,21 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and it re-execs out of the startup hooks
 # and clears every inherited function before it calls anything. #84.
-RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read)" \
+RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
-# ONE LINE, OR IT IS NOT A REMOTE. The helper parks its stdout so nothing but the
-# value reaches this capture, and it validates that the value itself is one line —
-# but neither can retract what the SHELL writes before the script's first command
-# runs. With `SHELLOPTS=xtrace` and `BASH_XTRACEFD=1` exported, the trace of that
-# first line lands on this stream ahead of the URL, and `rb_identity` would then
-# parse a plausible owner and repo out of the wrong text. This is the last place
-# that can see it, so it refuses here rather than pinning the session to it.
+# `9>&1 1>&2` IS PART OF THE CALL, NOT DECORATION. The helper writes its value to
+# fd 9 and everything else to fd 1, and these redirections are applied by THIS
+# shell before bash begins executing it — so with `SHELLOPTS=xtrace` and
+# `BASH_XTRACEFD=1` exported, its traces go to stderr from its very first command
+# and never reach this capture. A redirection inside the helper could not manage
+# that: no line can come before the trace of the line that performs it.
+#
+# ONE LINE, OR IT IS NOT A REMOTE. Kept as the last check on a value the whole
+# session is addressed by. Nothing known still writes to this stream — that is
+# what the invocation form buys — so this now guards the unknown rather than the
+# tracing case it was added for.
 [[ $RB_REMOTE = "${RB_REMOTE%%'
 '*}" ]] \
     || { echo "ABORT: the origin read returned more than one line; something is writing to its stdout ('$RB_REMOTE')"; exit 1; }
@@ -367,7 +371,7 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-RB_PIN_SEEN="$("$RB_SCRIPTS"/pr-origin.sh pin)" || RB_PIN_SEEN=''
+RB_PIN_SEEN="$("$RB_SCRIPTS"/pr-origin.sh pin 9>&1 1>&2)" || RB_PIN_SEEN=''
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else

@@ -20,10 +20,21 @@
   session's repository and now cannot, and an `export` that assigns without
   exporting is caught by a child reporting it inherited nothing.
 
-  This does not close the class — `unset` and `set` are reachable names inside the
-  helper too — and the script says so where a reader will find it. What is left
-  needs a shell already executing arbitrary code as the operator, which can edit
-  the helper instead.
+  The value comes back on **fd 9**, and the driver opens it as part of the call:
+  `"$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2`. The redirections are applied before
+  bash begins executing the helper, so an operator with `SHELLOPTS=xtrace` and
+  `BASH_XTRACEFD=1` exported gets a clean value — a redirection inside the helper
+  could not manage that, since no line can come before the trace of the line that
+  performs it, and the one that survived had to be turned into a refused session.
+  It also settles which fd 9 is which: a caller with its own log open on that
+  descriptor is overridden by the call rather than written into.
+
+  This does not close the class — `unset`, `builtin` and `exec` are names the
+  clearing and the hop are made of, and a hook that shadows all three walks
+  through it — and the script says so where a reader will find it, as
+  `pr-selfcheck.sh` already does for the same reason. What is left needs a shell
+  already executing arbitrary code as the operator, which can edit the helper
+  instead.
 
 ## [2.0.22] — 2026-08-17
 

@@ -25,10 +25,17 @@ REPO="$TMP/repo"; mkdir -p "$REPO"
 ( cd "$REPO" && git init -q . && git remote add origin "$REAL" ) >/dev/null 2>&1 \
     || { die "could not build the scratch checkout"; echo "RESULT: FAIL"; exit 1; }
 
+# `9>&1 1>&2` ON EVERY CALL, because that is the documented invocation and the
+# subject writes its value to fd 9. Applied by THIS shell, before bash begins
+# executing the subject — which is the whole point: a redirection inside the file
+# cannot precede the trace of the line that performs it.
+#
+# `2>&1` AFTER THEM, so the reasons for a refusal — which go to fd 1, now stderr —
+# are still captured for the assertions to read.
 run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     local mode="$1"; shift
     local out rc=0
-    out="$(cd "$REPO" && run_limited 20 env "$@" "$SCRIPT" "$mode" 2>&1)" || rc=$?
+    out="$(cd "$REPO" && run_limited 20 env "$@" "$SCRIPT" "$mode" 9>&1 1>&2 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
 
@@ -146,7 +153,7 @@ got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
 # …AND ABSENCE IS AN ANSWER, NOT A REFUSAL. "The export did not take" is exactly
 # what the caller needs to distinguish, so it is an empty line and status 0 rather
 # than an abort, which would look like every other failure from that side.
-pin_out="$(cd "$REPO" && run_limited 20 env -u REVIEW_BUS_REMOTE "$SCRIPT" pin 2>&1)"; pin_rc=$?
+pin_out="$(cd "$REPO" && run_limited 20 env -u REVIEW_BUS_REMOTE "$SCRIPT" pin 9>&1 1>&2 2>&1)"; pin_rc=$?
 { [ "$pin_rc" = 0 ] && [ -z "$pin_out" ]; } \
     && pass "…and an unset pin is an empty answer, not an error" \
     || die "an unset pin gave rc=$pin_rc out='$pin_out'"
@@ -168,7 +175,7 @@ got="$(run sideways)"
 # and used, so the absence is asserted as well as the status.
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
-out="$(cd "$BARE" && run_limited 20 "$SCRIPT" read 2>&1)"; rc=$?
+out="$(cd "$BARE" && run_limited 20 "$SCRIPT" read 9>&1 1>&2 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
@@ -180,7 +187,7 @@ esac
 # NOT A REPOSITORY AT ALL is the same answer, since `git` fails rather than
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
-out="$(cd "$NOTREPO" && run_limited 20 "$SCRIPT" read 2>&1)"; rc=$?
+out="$(cd "$NOTREPO" && run_limited 20 "$SCRIPT" read 9>&1 1>&2 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
@@ -197,7 +204,7 @@ printf '%s\n' "$FORGED"
 exit 1
 GITSH
 chmod +x "$STUB/git"
-out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 2>&1)"; rc=$?
+out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 9>&1 1>&2 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a remote read that prints and then fails is refused" \
     || die "a printing-then-failing git gave rc=$rc '$out'"
@@ -218,7 +225,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
-out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 2>&1)"; rc=$?
+out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 9>&1 1>&2 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a multi-line remote is refused rather than split" \
     || die "a two-line remote gave rc=$rc '$out'"
@@ -241,7 +248,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
-out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 2>&1)"; rc=$?
+out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 9>&1 1>&2 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
@@ -251,6 +258,51 @@ naive="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" bash -c 'git remote
 [ "$naive" = 'git@github.com:acme/widget.git' ] \
     && pass "…where a bare capture would have taken the truncated value" \
     || die "the comparison case did not reproduce the naive result: '$naive'"
+
+# ── AN UNRELATED fd 9 IN THE CALLER IS OVERRIDDEN, NOT DETECTED ────────────
+#
+# A shell can have fd 9 open for its own reasons — an xtrace log, an application
+# log. A version of this script asked whether fd 9 was already open and parked its
+# stdout only if it was not, which cannot tell that descriptor from one meant for
+# it: the URL went into the caller's log and the caller captured nothing.
+#
+# The invocation form settles it. `9>&1` at the call site points fd 9 at the
+# capture whatever the caller had there before, so the question never has to be
+# asked. This case holds that: a caller with its own fd 9 open still gets the URL,
+# and its log stays empty.
+FD9LOG="$TMP/unrelated.log"
+: > "$FD9LOG"
+fd9_out="$(cd "$REPO" && run_limited 20 "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || fd9_out="FAILED"
+{ [ "$fd9_out" = "$REAL" ] && [ ! -s "$FD9LOG" ]; } \
+    && pass "a caller with its own fd 9 open still receives the value" \
+    || die "an unrelated fd 9 changed the outcome: out='$fd9_out' log='$(cat "$FD9LOG")'"
+# …AND THE LOG IS PROVED TO BE REACHABLE, so "the log stayed empty" is not just a
+# file nothing could have written to.
+( cd "$REPO" && run_limited 20 bash -c 'printf PROBE >&9' 9>>"$FD9LOG" ) 2>/dev/null || true
+[ -s "$FD9LOG" ] \
+    && pass "…and that descriptor was writable, so the empty log means something" \
+    || die "the unrelated fd 9 was never writable; the case above proves nothing"
+
+# ── A TRACED SESSION STARTS NORMALLY ───────────────────────────────────────
+#
+# `SHELLOPTS=xtrace` with `BASH_XTRACEFD=1` exported traces this script from its
+# first command. Because the redirections are applied by the CALLER, fd 1 is
+# already stderr when that trace is written, so the captured value is the URL
+# alone — where a redirection inside the file always left one line in front of it,
+# and the driver had to refuse an otherwise fine session to stay safe.
+traced="$(cd "$REPO" && run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 \
+    "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || traced="FAILED"
+[ "$traced" = "$REAL" ] \
+    && pass "an exported xtrace does not reach the captured value" \
+    || die "tracing leaked into the capture: '$traced'"
+# …AND THE TRACING IS PROVED TO BE ON, or the case above passes on a run that was
+# never traced at all.
+tprobe="$(cd "$REPO" && run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 \
+    bash -c ':' 2>&1)" || true
+case "$tprobe" in
+    *'+ :'*) pass "…and the exported xtrace does trace an ordinary child" ;;
+    *)       die "the xtrace never took effect, so the case above proves nothing: '$tprobe'" ;;
+esac
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

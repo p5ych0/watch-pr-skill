@@ -31,37 +31,37 @@
 # none. This process is a real child, reached without a name, so its answer is the
 # one that matters.
 #
-# ── STDOUT IS NOT OPEN UNTIL THERE IS A VALUE ──────────────────────────────
+# ── THE CAPTURE DESCRIPTOR IS THE CALLER'S TO ESTABLISH ────────────────────
 #
-# The caller assigns this script's stdout to the variable every `gh` call is
-# addressed by, so anything else reaching that stream is data corruption rather
-# than noise. An operator with `SHELLOPTS=xtrace` and `BASH_XTRACEFD=1` exported
-# traces this process from its FIRST command — before any `set +x` can run, and
-# before the re-exec that drops those variables — and every one of those lines
-# lands in the captured value. Measured: the clearing loop alone put fifteen trace
-# lines in front of the URL.
+# This script writes its value, and its reasons for refusing to produce one, to
+# fd 9. The caller opens it:
 #
-# Re-execing cannot retract bytes already written, so the answer is not to write
-# them: the real stdout is parked on fd 9 and fd 1 becomes stderr for the whole
-# body. Traces follow fd 1 and go to stderr with everything else; the value, and
-# the reasons for refusing to produce one, are the only things written to fd 9.
+#     RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read 9>&1 1>&2)"
 #
-# ONCE, NOT ONCE PER PROCESS, AND THE DESCRIPTOR IS ASKED RATHER THAN INFERRED.
-# The re-exec below replaces this process and file descriptors survive it, so a
-# child parking again would point fd 9 at what is by then already stderr — the
-# value written to stderr while the caller captured nothing. That was the first
-# version, and the driver captured `+ exec` and no URL.
+# WHY NOT PARK IT IN HERE, which is what two earlier versions did. The caller
+# assigns this stdout to the variable every `gh` call is addressed by, so anything
+# else on that stream is data corruption rather than noise — and an operator with
+# `SHELLOPTS=xtrace` and `BASH_XTRACEFD=1` exported traces this process from its
+# FIRST command. A redirection inside the file cannot come before the trace of the
+# line that performs it, so one trace line always survived, and the driver had to
+# refuse an otherwise fine session to stay safe. Applied at the invocation, the
+# redirection is in place before bash begins executing this file at all, and there
+# is no first line to leak.
 #
-# The second version keyed it on the re-exec marker, which is wrong in the other
-# direction: a caller that already has that marker in its environment skips the
-# parking, fd 9 is never opened, and every write to it fails with `Bad file
-# descriptor`. The fixture said so immediately. So the question asked is the one
-# that matters — is fd 9 already ours — and it is asked OF the descriptor.
+# AND OWNERSHIP IS NOT GUESSED. The version before this asked whether fd 9 was
+# already open and parked only if it was not — which cannot tell this script's
+# descriptor from an unrelated one the caller happened to have open, an xtrace or
+# an application log. It would have written the URL into that log and handed the
+# caller nothing. The invocation form settles it: `9>&1` at the call site points
+# fd 9 at the capture whatever the caller had there before.
 #
-# `exec` IS A NAME, and a shadowed one makes this a no-op, which leaves the stream
-# exactly as it was without this line. The redirect can fail without making
-# anything worse; that is the whole of what it promises.
-{ : >&9; } 2>/dev/null || exec 9>&1 1>&2
+# A CLOSED fd 9 IS A USAGE ERROR, and it is said plainly rather than failing with
+# `Bad file descriptor` nine lines later. This is the one thing the script can
+# tell for certain about that descriptor.
+if ! { : >&9; } 2>/dev/null; then
+    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as \"\$RB_SCRIPTS\"/pr-origin.sh $* 9>&1 1>&2" >&2
+    exit 1
+fi
 
 # `set -uo pipefail`, NOT `-e`: the probes below report their answers as exit
 # statuses. See CLAUDE.md § Bash conventions.
