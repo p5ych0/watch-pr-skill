@@ -137,48 +137,51 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 # line in the raw file removes the dependency on the flattening AND on the
 # substring, rather than guarding either — see CLAUDE.md § One change per review
 # round.
-RB_CLOSE_CALL='(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")'
+RB_CLOSE_CALL='"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"'
 rb_close_call_present() { grep -qxF "$RB_CLOSE_CALL" "$SKILL"; }
 rb_close_call_present \
     && pass "the post-Copilot close is delegated to the phase script" \
     || die "SKILL.md does not call the close stage as: $RB_CLOSE_CALL"
-# …AND SO IS EVERY OTHER STAGE, FROM THE REPOSITORY THIS SESSION STARTED IN.
-# `pr-copilot-phase.sh` derives its identity from the current directory, so a `cd`
-# into another checkout between setup and any of these would read whatever PR of
-# THAT repository shares this number — and each stage POSTS: `record` a signoff,
-# `open` a revocation and a review request, `close` the second signoff. The inline
-# blocks these replaced could not drift, because they used the `$HOST/$OWNER/$REPO`
-# already derived in setup; a child script can.
+# …AND EVERY STAGE ACTS ON THE REPOSITORY THIS SESSION STARTED IN, which is now a
+# property of the SETUP rather than of each call site.
 #
-# THE RULE, NOT A LIST OF THE THREE. `close` was wrapped in #79 while `record` and
-# `open` were left, which is the by-omission failure CLAUDE.md records — a rule
-# that reached two of three callers and sat missing from the third. Every
-# invocation line is derived from the file and each must be wrapped, so a fourth
-# stage is covered the day it is added rather than the day someone remembers.
+# `pr-copilot-phase.sh` and every helper it drives derive their identity by
+# running `git remote get-url origin` in their own process, from the current
+# directory. A `cd` into a second checkout — an ordinary thing for a driving
+# session to do — therefore pointed the stages at whatever PR of THAT repository
+# shares this number, and each of them POSTS: `record` a signoff, `open` a
+# revocation and a review request, `close` the second signoff.
 #
-# WHOLE-LINE COMMENTS ARE EXCLUDED, and only those: a `#` in column one is a
-# comment to bash, unambiguously. The usage summary earlier in the same section
-# lists all three stages, and #79 was reopened once already by a comment that a
-# grep could not tell from the code it described.
-# `&& … || …` RATHER THAN A BARE ASSIGNMENT. This file is `set -Eeuo pipefail`,
-# and BOTH greps here answer "nothing matched" with status 1 as their ordinary
-# result — the second one does so precisely when every stage IS wrapped, which is
-# the passing case. A bare `x="$(… | grep -v …)"` aborts the file there, silently:
-# the run ends after the previous assertion with status 0 and every case below it
-# simply never happens. That is the `set -e` trap CLAUDE.md records, and it has
-# been paid for four times.
-_stage_calls=""
-_stage_calls="$(grep -n 'pr-copilot-phase\.sh \(record\|open\|close\) N' "$SKILL" | grep -v '^[0-9]*:[[:space:]]*#')" || _stage_calls=""
-_unwrapped=""
-_unwrapped="$(printf '%s\n' "$_stage_calls" | grep -vF '(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh')" || _unwrapped=""
-# THREE, NOT "AT LEAST ONE". A lift that found nothing would report every stage
-# wrapped, which is the same green tick as a lift that found them all.
-[ "$(printf '%s\n' "$_stage_calls" | grep -c 'pr-copilot-phase')" -eq 3 ] \
-    && pass "all three phase stages are invoked from SKILL.md" \
-    || die "expected three stage invocations, found: $_stage_calls"
-[ -z "$_unwrapped" ] \
-    && pass "…each from the repository this session started in" \
-    || die "a phase stage runs from the current directory; a cd between setup and here mutates another repository's PR: $_unwrapped"
+# THE DEPENDENCY IS REMOVED, NOT GUARDED. The guard was `(cd "$REPO_DIR" && …)`
+# around each call, and it had two defects that are the same defect: `cd` is a
+# NAME, so a function named `cd` returning 0 without moving leaves the subshell
+# reporting success from the wrong tree; and a rule applied per-call-site is a
+# list, so a fourth stage would be added unwrapped and this file would have said
+# every stage was covered. Exporting `REVIEW_BUS_REMOTE` once, from a value read
+# once, has neither property — `rb_identity` documents it as the caller STATING
+# the identity rather than deriving it, no name in the chain can be shadowed, and
+# a stage added tomorrow inherits it without anyone remembering to.
+#
+# `$REPO_DIR` REMAINS, for a different question: `pr-merge-range.sh` inspects
+# HISTORY, which is a tree and not an identity, so the merge gate keeps its `cd`.
+grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
+    && pass "the session's repository is pinned into the environment every helper reads" \
+    || die "SKILL.md does not export REVIEW_BUS_REMOTE; a cd mid-session retargets every stage"
+# …FROM A READ WHOSE STATUS WAS TAKEN. `git remote get-url origin` can print a
+# plausible URL and then fail, and command substitution keeps what it wrote — so
+# an unchecked read pins the session to whatever a failing call happened to emit.
+grep -qF 'RB_REMOTE="$(git remote get-url origin)" \' <<<"$skill_flat" \
+    && pass "…from a remote read whose status is taken" \
+    || die "the pinned remote is captured without checking the read"
+# …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
+# leave the driver's OWN `$HOST/$OWNER/$REPO` derived from the current directory
+# while every child used the pin — two identities in one session, agreeing
+# whenever this defect is absent and disagreeing exactly when it is not.
+_pin_ln=""; _pin_ln="$(grep -n 'export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
+_ident_ln=""; _ident_ln="$(grep -n '^rb_identity \\$' "$SKILL" | head -1 | cut -d: -f1)" || _ident_ln=""
+{ [ -n "$_pin_ln" ] && [ -n "$_ident_ln" ] && [ "$_pin_ln" -lt "$_ident_ln" ]; } \
+    && pass "…and the pin is in place before the driver derives its own identity" \
+    || die "REVIEW_BUS_REMOTE is exported after rb_identity (pin=$_pin_ln rb_identity=$_ident_ln)"
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
@@ -833,9 +836,9 @@ grep -q 'if \[ "\$PHASE_RC" -eq 3 \]; then' "$SKILL" \
 # them — `record` proves and posts, the document stops and asks, and only the
 # answer runs `open`. Anchored on the invocations, not on the usage comment that
 # lists both a few lines above them.
-_rec_ln="$(grep -n 'PHASE_OUT="\$( (cd "\$REPO_DIR" && "\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_rec_ln="$(grep -n 'PHASE_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _stop_ln="$(grep -n 'STOP — the next phase is the operator' "$SKILL" | head -1 | cut -d: -f1)" || true
-_open_ln="$(grep -n 'OPEN_OUT="\$( (cd "\$REPO_DIR" && "\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_open_ln="$(grep -n 'OPEN_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_rec_ln" ] && [ -n "$_stop_ln" ] && [ -n "$_open_ln" ] \
     && [ "$_rec_ln" -lt "$_stop_ln" ] && [ "$_stop_ln" -lt "$_open_ln" ]; } \
     && pass "the Copilot phase opens only after the stop the operator answers" \

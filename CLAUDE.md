@@ -134,8 +134,17 @@ rediscovering them.
   values through one string makes any delimiter a value a remote can contain, and
   a remote carrying it shifts the fields, which is the wrong-repository failure
   the parser exists to prevent. `REVIEW_BUS_REMOTE`, `REVIEW_BUS_OWNER`, and
-  `REVIEW_BUS_REPO` override it so tests can supply an identity without a real
-  remote. `test-identitylib.sh` proves the parser's rules; `test-pr-identity.sh`
+  `REVIEW_BUS_REPO` override it — the caller stating the identity rather than the
+  library deriving it. Tests use that to supply an identity without a real remote;
+  `SKILL.md` uses it to **pin the session**, exporting `REVIEW_BUS_REMOTE` once at
+  setup from a status-checked `git remote get-url origin`. Every helper runs
+  `rb_identity` in its own process against the current directory, so without the
+  pin a `cd` into a second checkout retargeted every stage that posts — a signoff,
+  a revocation, a review request — at whatever PR of that repository shared the
+  number. Wrapping each call in `(cd "$REPO_DIR" && …)` was tried and is a guard
+  rather than a removal: `cd` is a name, and a list of call sites is missing the
+  next one. `$REPO_DIR` survives for `pr-merge-range.sh`, which inspects history —
+  a tree, not an identity. `test-identitylib.sh` proves the parser's rules; `test-pr-identity.sh`
   proves every caller is wired to it and scans the scripts, the libraries and
   `SKILL.md` for a hard-coded identity.
 - **A second copy of the parser is a defect, not a convenience.** It lived in

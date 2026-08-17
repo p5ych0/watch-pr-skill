@@ -305,7 +305,10 @@ Then:
    was intentionally skipped: a resolved thread is not a record of a fix.
 5. **Codex clean → the Copilot phase**, through
    **`pr-copilot-phase.sh`**, which runs in **three stages with your decision
-   at each boundary**:
+   at each boundary**. All three post to the pull request, and all three act on
+   the repository **the session started in** — the origin URL is read once during
+   setup and pinned, so changing directory partway through no longer decides which
+   project a signoff or a revocation lands on:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
      against *that exact sha*, proves its checks are green, and writes the
@@ -607,7 +610,13 @@ plugin docs and open an issue.
 - **`--add-reviewer @copilot` fails:** Copilot review is not available to the
   repository. That is not permission to skip the pass — decide explicitly.
 - **Reviews target the wrong repo:** identity derives from
-  `git remote get-url origin` — run from inside the intended checkout.
+  `git remote get-url origin`, read **once at the start of the session** and
+  pinned into `REVIEW_BUS_REMOTE` for every helper. So start the session in the
+  intended checkout; changing directory afterwards no longer retargets anything,
+  which is the point — the phase stages post signoffs, revocations and review
+  requests, and a `cd` into a second checkout used to send those to whatever pull
+  request of *that* repository shared the number. If you genuinely need to switch
+  repositories, start a new session rather than unsetting the pin.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
 - **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge

@@ -217,6 +217,30 @@ unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: could not load the identity parser from $RB_SCRIPTS"; exit 1; }
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
+# THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
+#
+# `rb_identity` reads `git remote get-url origin` from the CURRENT DIRECTORY, and
+# every helper calls it in its own process. A `cd` into a second checkout — an
+# ordinary thing for a driving session to do — therefore pointed the phase stages
+# at whatever PR of THAT repository shares this number, and each of them posts: a
+# signoff, a revocation, a review request.
+#
+# `REVIEW_BUS_REMOTE` is the caller stating the identity rather than the library
+# deriving it, so exporting it removes the dependency instead of guarding it.
+# Wrapping each call in `(cd "$REPO_DIR" && …)` was the guard, and it was itself
+# defeatable: `cd` is a name, and a function named `cd` that returns 0 without
+# moving leaves the subshell reporting success from the wrong tree. This has no
+# name in it to shadow — the value is read once, here, and travels in the
+# environment.
+#
+# `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
+# inspects HISTORY, which is a tree rather than an identity, so the merge gate
+# keeps its own `cd`.
+RB_REMOTE="$(git remote get-url origin)" \
+    || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+[ -n "$RB_REMOTE" ] \
+    || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+export REVIEW_BUS_REMOTE="$RB_REMOTE"
 rb_identity \
     || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
 CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
@@ -1000,7 +1024,7 @@ EOF
 # whatever PR of THAT repository shares this number and post the Codex signoff
 # onto it. The subshell is inside the capture so the output still reaches
 # `$PHASE_OUT`, and the status is the subshell's.
-PHASE_OUT="$( (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE") 2>&1)"; PHASE_RC=$?
+PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
     0|3) ;;   # 3 is a pause, and the signoff is recorded either way
@@ -1157,7 +1181,7 @@ way — the signoff is on the PR, so a later session reads it back with
 # a signoff revocation and requests a review. Landing either on a same-numbered PR
 # in another checkout revokes a signoff nobody withdrew and starts a pass nobody
 # asked for, while the local phase is left unopened.
-OPEN_OUT="$( (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA") 2>&1)"; OPEN_RC=$?
+OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
     || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
@@ -1219,7 +1243,7 @@ REVIEWERS=both   # or `codex-only`
 # another checkout between setup and here would read whatever PR of THAT
 # repository shares this number and post the Copilot signoff onto it. `$REPO_DIR`
 # was captured in the setup block.
-(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS")
+"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
 # `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
 # which is long-lived and where a function named `[` can already exist — it

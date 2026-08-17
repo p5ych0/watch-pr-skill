@@ -2,21 +2,26 @@
 
 ## [2.0.21] — 2026-08-17
 
-- **Two of the three phase stages could mutate another repository's pull
-  request.** `pr-copilot-phase.sh` derives its identity from the current
-  directory, and `SKILL.md` invoked `record` and `open` without returning to the
-  checkout the session started in. A `cd` into a second checkout between setup
-  and either step — an ordinary thing for a driving session to do — pointed them
-  at whatever PR of *that* repository shares this number. Both stages **post**:
-  `record` writes the Codex signoff, `open` posts a signoff revocation and
-  requests a review. The local phase would be left unopened while a revocation
-  landed on a pull request nobody was working on.
+- **A `cd` mid-session could point every phase stage at another repository's pull
+  request.** `pr-copilot-phase.sh` — and every helper it drives — derives its
+  identity by running `git remote get-url origin` in its own process, from the
+  current directory. A driving session that changed into a second checkout
+  therefore aimed `record`, `open` and `close` at whatever PR of *that* repository
+  shared this number, and all three post: a Codex signoff, a signoff revocation
+  and a review request, then the second signoff. The local phase was left
+  unopened while a revocation landed on a pull request nobody was working on.
 
-  The merge gate had been wrapped in `(cd "$REPO_DIR" && …)` for exactly this, and
-  `close` was wrapped when it was extracted — leaving the rule at two of four
-  callers. All three stages are wrapped now, and the contract test derives the
-  invocations from the file rather than listing them, so a fourth stage is covered
-  the day it is added.
+  The session's origin is now read once during setup, with its status checked, and
+  exported as `REVIEW_BUS_REMOTE` — which `rb_identity` already treats as the
+  caller stating the identity rather than deriving it. Every helper inherits it, so
+  the current directory no longer decides which project anything is posted to.
+
+  Wrapping each call in `(cd "$REPO_DIR" && …)` was tried first and is a guard
+  rather than a removal: `cd` is a name, so a function named `cd` that returns 0
+  without moving leaves the subshell reporting success from the wrong tree — and a
+  rule applied per call site is a list, which the next stage would not be in.
+  `$REPO_DIR` remains for the merge gate, which inspects history rather than
+  identity.
 
 ## [2.0.20] — 2026-08-16
 
