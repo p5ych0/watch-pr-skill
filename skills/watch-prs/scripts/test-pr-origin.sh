@@ -5,6 +5,11 @@
 # origin says, and what a child inherits — so most of this file is about what the
 # driving shell can do to it and cannot. Every attack below defeats the equivalent
 # code when it runs inline in `SKILL.md`; that is the whole point of the script.
+#
+# THE CONTRACT UNDER TEST: the caller starts it with `/usr/bin/env bash -p` and
+# names a file; the VALUE goes to that file and every REASON goes to stderr, and
+# nothing is ever written to stdout. `run` below joins the two only so a single
+# assertion can look at both.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"

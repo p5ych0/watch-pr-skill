@@ -269,8 +269,19 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and `bash -p` means no startup hook is
 # sourced and no inherited function is imported in the first place. #84.
-RB_ORIGIN_OUT="$(mktemp -t "watch-pr-origin-XXXXXX")" \
-    || { echo "ABORT: could not create the file the origin read writes to"; exit 1; }
+# THE PATH IS BUILT, NOT CAPTURED. `RB_ORIGIN_OUT="$(mktemp …)"` is a command
+# substitution, and a driving shell tracing to fd 1 writes the trace of `mktemp`
+# into it — so the variable holds trace text and a path, and the helper cannot
+# open it. An expansion runs no command, so there is nothing to trace: `$$` is the
+# shell's own pid and `${TMPDIR:-/tmp}` its own variable.
+#
+# THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
+# earlier run in the same shell cannot be read back as this one's answer. What a
+# predictable name costs is that another user on the machine could pre-create it —
+# the value is a public remote URL rather than a secret, and the write is the
+# operator's own, but that is the trade and it is written here rather than left
+# for a reader to infer.
+RB_ORIGIN_OUT="${TMPDIR:-/tmp}/watch-pr-origin.$$"
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
     || { rm -f "$RB_ORIGIN_OUT"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
@@ -401,9 +412,13 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-RB_PIN_OUT="$(mktemp -t "watch-pr-pin-XXXXXX")" \
-    || { echo "ABORT: could not create the file the pin proof writes to"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" || : > "$RB_PIN_OUT"
+# NO FALLBACK ON FAILURE, because `:` is a name. `… || : > "$RB_PIN_OUT"` called
+# whatever the operator's shell had defined as `:`, and one that wrote `$RB_REMOTE`
+# into that file made the equality below pass while the child probe had actually
+# failed. Nothing is needed in its place: the helper truncates the file before it
+# writes, so a failed run leaves it empty and the check below reads empty.
+RB_PIN_OUT="${TMPDIR:-/tmp}/watch-pr-pin.$$"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT"
 RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
 rm -f "$RB_PIN_OUT"
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then

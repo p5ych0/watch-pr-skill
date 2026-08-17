@@ -33,8 +33,12 @@
 # line teaching a session that refuses itself under an inherited xtrace, so both
 # copies of it say the same thing.
 #
-#   0  the value is on stdout
-#   1  refused — the reason is on stdout, and no value was printed
+#   0  the value is in the file named by the second argument
+#   1  refused — the reason is on STDERR, and the file is left empty
+#
+# NOTHING IS EVER WRITTEN TO STDOUT. The value goes to the file and the reasons go
+# to stderr, so a caller reads one and never sees the other — which is what lets
+# the value be read with `$(<"$path")` whatever the shell happens to be tracing.
 #
 # WHY THIS EXISTS
 #
@@ -139,7 +143,12 @@ if [[ $MODE = pin ]]; then
     # is a real answer it needs — the one that says the export did not take. An
     # empty line and status 0 says exactly that; refusing would make the two
     # failures indistinguishable from this side.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT"
+    # THE WRITE'S STATUS IS TAKEN. An output target can open and then reject data —
+    # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
+    # a failed write leaves exactly what a legitimately unset pin leaves: an empty
+    # file and success. The caller could not tell them apart, so this one says.
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
+        || { echo "ABORT: could not write the pin to '$OUT'" >&2; exit 1; }
     exit 0
 fi
 
@@ -182,7 +191,8 @@ if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     echo "ABORT: origin contains a newline; it cannot be a single value" >&2; exit 1
 fi
-printf '%s\n' "$_rb_origin" > "$OUT"
+printf '%s\n' "$_rb_origin" > "$OUT" \
+    || { echo "ABORT: could not write the origin to '$OUT'" >&2; exit 1; }
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────
