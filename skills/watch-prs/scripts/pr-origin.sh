@@ -188,3 +188,25 @@ if [[ $_rb_origin != "${_rb_origin%%'
 fi
 printf '%s\n' "$_rb_origin" >&9
 exit 0
+
+# ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────
+#
+# Written here rather than left for a reader to rediscover, and referenced from
+# the fallback hop above. Both need a shell that is already executing arbitrary
+# code as the operator — and such a shell can edit this file, or the commit,
+# instead of out-arguing it.
+#
+# `exec` AND `env`, IN THE FALLBACK HOP. When the caller starts this file the
+# documented way — `/usr/bin/env bash -p …` — the hop never runs and neither name
+# is reached. It exists for a caller that forgets, and there it is made of names:
+# a shadowed `exec` leaves the process where it was, unprivileged, with the hook
+# already sourced. That is a default failing to engage rather than a defence
+# failing, and the difference is why the caller's part is asserted by
+# `test-pr-skill-contract.sh` rather than assumed.
+#
+# A POISONED `PATH`, WHICH IS NOT THIS FILE'S TO ANSWER. A directory prepended to
+# `PATH` — readonly, so the hook's own shell cannot undo it — supplies a forged
+# `git` here and a forged `gh` in every other helper. It is not specific to the
+# origin read, and a defence belonging to one helper would be the narrow guard
+# this repository keeps having to delete. Filed as #91, with the three candidate
+# fixes and why each trades a hostile-shell exposure for routine breakage.

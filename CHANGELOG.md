@@ -60,13 +60,17 @@
   cannot write — where the two guards before it, an environment marker and a
   positional flag, were both forged.
 
+  A driving shell already tracing to fd 9 would have had that target pointed at
+  the capture by the call's own `9>&1`. The call sets `BASH_XTRACEFD=2` first, and
+  does it inside the substitution so the change is scoped there rather than
+  altering an operator's tracing for the rest of the session.
+
   What remains is stated in the script rather than left to be rediscovered: `exec`
-  and `env` are names the hop itself is made of, so a shell that shadows them keeps
-  the process where it is; an inherited `BASH_XTRACEFD=9` collides with the capture
-  descriptor and the session refuses itself rather than pinning to trace text; and
-  a poisoned `PATH` forges every external command, which is not this helper's to
-  answer and is filed as its own issue. All three need a shell already executing
-  arbitrary code as the operator — which can edit the helper instead.
+  and `env` are names the helper's own fallback hop is made of, so a shell that
+  shadows them keeps that process where it is; and a poisoned `PATH` forges every
+  external command, which is not this helper's to answer and is filed as #91. Both
+  need a shell already executing arbitrary code as the operator — which can edit
+  the helper instead.
 
 ## [2.0.22] — 2026-08-17
 

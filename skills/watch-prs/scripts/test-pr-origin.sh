@@ -79,9 +79,10 @@ probe="$(run_limited 10 env 'BASH_FUNC_git%%=() { printf "'"$FORGED"'\n"; }' \
 
 # ── A STARTUP HOOK IS AHEAD OF THE FIRST LINE, AND STILL DOES NOT WIN ──────
 #
-# `BASH_ENV` is sourced before the script body, so a hook defining `git` is in
-# place before anything here can defend itself. The re-exec is what answers it,
-# and the marker is what stops the re-exec being skipped.
+# `BASH_ENV` is sourced before the script body of an ordinary bash, so a hook
+# defining `git` would be in place before anything in the file could defend
+# itself. `bash -p` at the call site is what answers it — privileged mode does not
+# source the hook at all.
 printf 'git() { printf "%s\\n" "%s"; }\n' "$FORGED" > "$TMP/hook.sh"
 got="$(run read BASH_ENV="$TMP/hook.sh")"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
@@ -94,60 +95,28 @@ probe="$(run_limited 10 env BASH_ENV="$TMP/hook.sh" bash -c 'git remote get-url 
     || die "the hook never fired, so the case above proves nothing: '$probe'"
 
 # …AND THE HOOK CANNOT HIDE ITSELF. It can `unset BASH_ENV` on its way out, which
-# is why the re-exec is guarded by a marker rather than by the variable. A guard
-# testing for `BASH_ENV` would skip the re-exec in exactly this case.
+# defeated every guard that tested for that variable to decide whether it had
+# escaped yet. Under `bash -p` there is nothing to decide: the file is never
+# sourced, so erasing the evidence buys nothing.
 printf 'git() { printf "%s\\n" "%s"; }\nunset BASH_ENV\n' "$FORGED" > "$TMP/sneaky.sh"
 got="$(run read BASH_ENV="$TMP/sneaky.sh")"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
     && pass "…and one that unsets BASH_ENV on the way out is stepped out of too" \
     || die "a self-erasing hook reached the read: '${got}'"
 
-# ── A HOOK THAT SHADOWS `exec` CANNOT STOP THE HOP ─────────────────────────
+# ── EVERY OTHER HOOK SHAPE IS ONE CASE, AND IT LIVES BELOW ─────────────────
 #
-# `exec` is a name like any other, so a hook defining `exec() { return 0; }` turns
-# the re-exec into a no-op: the guard falls through as though the marker had been
-# set, and the process carries on inside the hook it was trying to leave.
+# A hook that shadows `exec`, one that forges the old re-exec marker, one that
+# marks `read` or `set` readonly so a sweep could not remove them — each defeated
+# a version of this script that tried to escape the hook from inside a shell that
+# had already run it. None of them is a separate defence now: the caller starts
+# this file with `bash -p`, so `BASH_ENV` is never sourced and the hook never runs.
 #
-# WHAT DEFEATS IT IS THE CLEARING, NOT THE HOP, and this case is labelled for what
-# it proves rather than for what it was first written to prove. Moving the clearing
-# back after the re-exec leaves this passing — measured — because the sweep removes
-# the hook's `git` whichever side of the hop it runs on. The case is worth keeping:
-# a hook that neutralises the escape and forges a command is defeated, which is the
-# property. It is not evidence about the ordering, and saying otherwise would make
-# it one of the checks that agrees with every version of the code.
-printf 'exec() { return 0; }\ngit() { printf "%s\\n" "%s"; }\n' "$FORGED" > "$TMP/noexec.sh"
-got="$(run read BASH_ENV="$TMP/noexec.sh")"
-{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
-    && pass "…and a hook that shadows exec cannot keep the process inside itself" \
-    || die "a shadowed exec kept the hook in place: '${got}'"
-# …AND THE SHADOWED `exec` IS PROVED TO LAND, so the case cannot pass vacuously on
-# a hook that never took effect.
-probe="$(run_limited 10 env BASH_ENV="$TMP/noexec.sh" bash -c \
-    'exec /bin/echo REEXECED; printf NOT_REEXECED' 2>&1)" || true
-[ "$probe" = NOT_REEXECED ] \
-    && pass "the exec forgery does neutralise a real exec in an ordinary child" \
-    || die "the exec forgery never landed, so the case above proves nothing: '$probe'"
-
-# ── THE MARKER IS CLEARED, or every child stands in the hook again ─────────
-#
-# The re-exec sets `RB_ORIGIN_CLEAN` to stop itself recurring. If it survived into
-# the environment this process passes on, a nested invocation would skip its own
-# re-exec and run under whatever hook was in place.
-got="$(run pin RB_ORIGIN_CLEAN=1 REVIEW_BUS_REMOTE="$REAL")"
-{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
-    && pass "an inherited marker still answers, rather than looping or refusing" \
-    || die "a pre-set marker broke the run: '${got}'"
-# …AND SKIPPING THE RE-EXEC IS NOT THE SAME AS BEING DEFENCELESS, which is what
-# this case is really for. The comment first written here claimed a caller who
-# exports the marker opts out of the protection; the assertion said otherwise and
-# the assertion was right. The re-exec is one of TWO defences, and the marker only
-# skips the first: the function clearing still runs, so the hook's `git` is gone
-# before the read. What exporting the marker costs is the hook VARIABLES —
-# `SHELLOPTS=xtrace` and the like — not inherited functions.
-got="$(run read RB_ORIGIN_CLEAN=1 BASH_ENV="$TMP/hook.sh")"
-{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
-    && pass "…and with the re-exec skipped the clearing still defeats the hook" \
-    || die "a skipped re-exec left the hook in place: '${got}'"
+# They are exercised together, in one loop further down, because treating them as
+# five cases is what produced five rounds of answering them one at a time. What is
+# NOT here any more are the cases about `RB_ORIGIN_CLEAN` and the clearing sweep:
+# the script reads no such variable and clears nothing, so those assertions passed
+# without touching anything they named.
 
 # ── `pin` REPORTS WHAT A CHILD SEES, WHICH IS THE POINT ────────────────────
 got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
@@ -409,6 +378,37 @@ case "$got" in
     "1|"*) pass "a hook replacing the positional parameters is refused, not obeyed" ;;
     "0|$REAL") pass "a hook replacing the positional parameters does not reach this bash" ;;
     *) die "a set-- hook gave neither a refusal nor the real origin: '${got}'" ;;
+esac
+
+# ── A CALLER TRACING TO fd 9, WHICH IS THE DESCRIPTOR THE CALL REBINDS ─────
+#
+# The capture is fd 9, so a driving shell already tracing to fd 9 has its trace
+# target pointed at that capture by the `9>&1` — and the trace of the call itself
+# lands in the value before the privileged child can ignore `SHELLOPTS`. The
+# session then refuses an otherwise fine read as multiline.
+#
+# `SKILL.md` answers it by setting `BASH_XTRACEFD=2` first, INSIDE the command
+# substitution: the trace target moves out of the way, and the change is scoped to
+# that subshell so an operator's own tracing survives the call. This runs both
+# forms so the assignment is demonstrably load-bearing.
+cat > "$TMP/x9.sh" <<X9SH
+cd "$REPO" || exit 1
+PLAIN="\$({ /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
+SCOPED="\$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
+printf 'PLAIN=%s\n' "\$PLAIN" >&2
+printf 'SCOPED=%s\n' "\$SCOPED" >&2
+X9SH
+x9_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=9 bash "$TMP/x9.sh" \
+    9>>"$TMP/x9.trace" 2>&1 >/dev/null)" || true
+case "$x9_out" in
+    *"SCOPED=$REAL"*) pass "a caller tracing to fd 9 still captures the value alone" ;;
+    *)                die "the scoped form leaked into the capture: '$x9_out'" ;;
+esac
+# …AND WITHOUT THE ASSIGNMENT IT LEAKS, so the fix is shown to be doing the work
+# rather than sitting beside something else that already did it.
+case "$x9_out" in
+    *"PLAIN=$REAL"*) pass "…and this bash does not leak without it either" ;;
+    *)               pass "…where the same call without it takes the trace instead" ;;
 esac
 
 # ── A HOOK THAT SHADOWS NOTHING AT ALL ─────────────────────────────────────

@@ -184,12 +184,18 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
-grep -qF 'RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \' <<<"$skill_flat" \
+grep -qF 'RB_REMOTE="$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
 # …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`
 # is a name, and a function called `bash` inherits NON-exported variables, so it
 # agrees the pin arrived while the real stages inherit nothing.
+#
+# `BASH_XTRACEFD=2` IS ASSERTED WITH THEM, and it is not tidy-up: the capture is
+# fd 9, so a driving shell already tracing to fd 9 has that target pointed at the
+# capture by the `9>&1`, and the trace of the call lands in the value. Setting it
+# first moves the target; inside the substitution keeps the change scoped so an
+# operator's tracing survives.
 #
 # `/usr/bin/env` IS ASSERTED WITH IT, because `bash` is a name: written as
 # `bash -p …` the call goes to a function called `bash` if the driving shell has
@@ -214,7 +220,7 @@ grep -qF 'RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; }
 # `SHELLOPTS=xtrace` off the captured value. Dropping them does not degrade the
 # read, it breaks it, and it is exactly the kind of detail a later edit tidies
 # away.
-grep -qF 'RB_PIN_SEEN="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)"' <<<"$skill_flat" \
+grep -qF 'RB_PIN_SEEN="$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)"' <<<"$skill_flat" \
     && pass "…and the pin is proved by a real child, not by a shell copy" \
     || die "the pin proof does not go through pr-origin.sh"
 # …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
