@@ -728,11 +728,31 @@ before 'pr-review-state.sh verdict' 'pr comment' \
 # check while the case passed either way. This one lies about exactly the
 # comparison the finding names and delegates everything else to the builtin.
 _RB_SHADOW_BRACKET='BASH_FUNC_[%%=() { if [[ "$1 $2 $3" == "close = open" ]]; then return 0; fi; builtin [ "$@"; }'
+# THE OTHER LIE THIS SCRIPT HAS TO SURVIVE (#81): a `[` that says two shas are
+# EQUAL. Every proof that the phase is still open compares the current head with
+# the one Codex signed off, so a `[` agreeing to that makes a MOVED head read as
+# unmoved — and the phase then opens, or records a signoff, on a commit no
+# reviewer saw. That record is what every later gate trusts.
+#
+# Narrow, again, and for the reason recorded in CLAUDE.md: a `[` that lied about
+# everything broke `identitylib.sh`'s remote parse, and the case failed with
+# `reason=no_origin` rather than exercising the comparison. This one answers only
+# a two-sha equality — forty hex either side — and delegates everything else.
+_RB_SHADOW_EQ='BASH_FUNC_[%%=() { if [[ $2 = "=" && $1 =~ ^[0-9a-f]{40}$ && $3 =~ ^[0-9a-f]{40}$ ]]; then return 0; fi; builtin [ "$@"; }'
+# AND THE THIRD LIE: a `[` that says a non-zero status is zero. The head being
+# unmoved does not mean the VERDICT is unmoved — a review dismissed while the head
+# stood still leaves the equality passing — so `open` re-checks Codex's live
+# verdict, and that check is `[ "$rc" -eq 0 ]`. A `[` agreeing to it opens the
+# phase on a signoff that is history rather than a current verdict.
+#
+# Narrower still: only `<non-zero> -eq 0` is answered, so every other numeric test
+# in the run — and there are several — behaves.
+_RB_SHADOW_RC='BASH_FUNC_[%%=() { if [[ $2 = "-eq" && $3 = "0" && $1 != "0" ]]; then return 0; fi; builtin [ "$@"; }'
 shadow_run() {   # shadow_run <stage> [args…] ; run with an inherited lying `[`
     local out rc=0
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-        "$_RB_SHADOW_BRACKET" \
+        "${_RB_SHADOW:-$_RB_SHADOW_BRACKET}" \
         "$DIR/pr-copilot-phase.sh" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
@@ -762,6 +782,63 @@ grep -q 'pr edit' "$TMP/calls" \
 posted | grep -qF 'Review-Signoff-Revoked' \
     && die "close with a shadowed [ revoked a signoff: $(posted)" \
     || pass "…and revokes nothing"
+
+# ── A LYING `[` MUST NOT MAKE A MOVED HEAD READ AS UNMOVED (#81) ───────────
+#
+# The proofs that the phase is still open all compare the current head with the
+# one Codex signed off. With a `[` that agrees to any two-sha equality, a head
+# that has MOVED reads as unmoved — and the phase opens, or records a signoff, on
+# a commit no reviewer saw. Everything downstream trusts that record.
+#
+# The world here is the one where the head has genuinely moved, so a correct run
+# refuses on its own. The forger is what makes the refusal load-bearing: without
+# the reserved-word conversion it accepts, and these cases fail.
+world; printf '%s\n' "$OTHER40" > "$W/head.out"
+_RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "a lying [ cannot open the phase on a head that moved" \
+    || die "open with a moved head and an equality-forging [ gave '${got}' posted='$(posted)'"
+grep -q 'pr edit' "$TMP/calls" \
+    && die "a Copilot pass was requested against a head Codex never signed off" \
+    || pass "…and requests no Copilot pass for it"
+
+# …AND THE SAME FOR `close`, which records the second signoff. Here the forged
+# equality would also make the two shas look identical to the branch that decides
+# which stop is printed, so a moved head would be reported as one commit both
+# reviewers read.
+world; printf '%s\n' "$OTHER40" > "$W/head.out"
+printf '1\n' > "$W/verdict.rc"
+_RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run close 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "…and cannot record a Copilot signoff on an unreviewed head" \
+    || die "close with a forged equality gave '${got}' posted='$(posted)'"
+
+# …AND A DISMISSED VERDICT ON AN UNMOVED HEAD IS REFUSED TOO. The head is right
+# here; what has changed is the verdict, which is the case the second proof exists
+# for. With the status forger, `[ "$rc" -eq 0 ]` accepts a dismissal.
+world; printf '1\n' > "$W/verdict.rc"
+printf 'PR_REVIEW_STATE verdict=none reason=dismissed\n' > "$W/verdict.out"
+_RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run open 7 "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "a lying [ cannot open the phase on a verdict that is no longer clean" \
+    || die "open with a dismissed verdict and a status-forging [ gave '${got}' posted='$(posted)'"
+world; _RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run record 7 "$TMP/body.md")"
+printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+    && pass "…and the status forger is narrow enough that the script still runs" \
+    || die "the status forger broke the harness rather than the check: '${got}'"
+
+# THE FIXTURE'S OWN REACH, in both directions again: the equality forger has to
+# LAND, and it has to leave the rest of the script working. Without this, both
+# cases above would pass against a forger that never took effect.
+world; _RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run record 7 "$TMP/body.md")"
+printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+    && pass "the equality forger is narrow enough that the script still runs" \
+    || die "the equality forger broke the harness rather than the comparison: '${got}'"
+world; printf '%s\n' "$OTHER40" > "$W/head.out"
+got="$(run open 7 "$HEAD40")"
+[ "${got%%|*}" = 1 ] \
+    && pass "…while an unforged run refuses the moved head on its own" \
+    || die "the moved-head world does not refuse without the forger: '${got}'"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

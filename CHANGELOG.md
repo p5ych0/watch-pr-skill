@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.22] — 2026-08-17
+
+- **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted
+  `pr-copilot-phase.sh`'s stage dispatch to the reserved `[[` after a `close`
+  invocation was found running `open`; every other guard in the script still used
+  `[`, which a function shadows along with the `command` and `builtin` prefixes,
+  in a script that does not re-exec.
+
+  Two of them decide whether a signoff is recorded at all. The proofs that the
+  phase is still open compare the current head with the one Codex signed off, so a
+  `[` agreeing to that equality opens the phase — posting a revocation and
+  requesting a Copilot pass — on a commit Codex never reviewed; and the live
+  verdict check is a status comparison, so one agreeing to that accepts a
+  dismissed review as clean. Either way the durable record then names a commit no
+  reviewer saw, and every later gate trusts it.
+
+  All ten guards are reserved-word tests now, converted together rather than as
+  the ones somebody noticed, and the fixture exercises three narrow forgers: a
+  `[` that lies about the stage, one that lies about two shas being equal, and one
+  that lies about a non-zero status being zero. Each is asserted to land and to
+  leave the rest of the script working — a `[` that lied about everything broke
+  the identity parse and made the cases pass for the wrong reason.
+
 ## [2.0.21] — 2026-08-17
 
 - **A `cd` mid-session could point every phase stage at another repository's pull

@@ -50,7 +50,7 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
 . "$_RB_SELF_DIR/loadlib.sh" || { echo "ABORT: reason=loadlib_unreadable"; exit 1; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || { echo "ABORT: reason=loadlib_empty"; exit 1; }
+[[ "$(type -t rb_load 2>/dev/null)" = function ]] || { echo "ABORT: reason=loadlib_empty"; exit 1; }
 # `2>&1` on each: `rb_load` reports on stderr, and everything this script says is
 # documented as stdout — a caller capturing it would otherwise get nothing for the
 # failures that happen before anything else can.
@@ -83,17 +83,30 @@ case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
 
-# `[[`, A RESERVED WORD, NOT `[`. The stage dispatch decides which of three
-# mutations this invocation performs, and a function named `[` — inheritable
-# through `export -f`, and this script does not re-exec — shadows the builtin and
-# the `command`/`builtin` prefixes alike. One that returns success sends a `close`
-# invocation down the `open` path, revoking the Copilot signoff and requesting
-# another pass instead of closing the phase. The parser handles `[[`, so no
-# function can take its place. See CLAUDE.md § Already paid for.
+# `[[`, A RESERVED WORD, NOT `[` — HERE AND IN EVERY GUARD BELOW. A function named
+# `[` is inheritable through `export -f`, this script does not re-exec, and it
+# shadows the builtin and the `command`/`builtin` prefixes alike. The parser
+# handles `[[`, so no function can take its place. See CLAUDE.md § Already paid
+# for, and § Tests for why this matters in a runtime script and not in a fixture.
+#
+# THE DISPATCH WAS THE FIRST ONE CONVERTED and the rest followed as #81, because
+# the argument does not stop at the dispatch and a list of the ones that had been
+# noticed is the shape this repository keeps paying for. What each lying `[` buys:
+#
+#   the dispatch      a `close` invocation runs `open` — revoking the Copilot
+#                     signoff and requesting a pass instead of closing the phase
+#   head = CODEX_SHA  a MOVED head reads as unmoved, so the phase opens on a
+#                     commit Codex never signed off (twice: the up-front proof
+#                     and the re-proof immediately before the mutations)
+#   verdict rc        a dismissed or findings verdict reads as clean
+#   ROUNDS_RC         the operator round boundary never fires
+#
+# The middle two are the ones with a merge behind them: a signoff recorded for a
+# commit no reviewer saw is what every later gate then trusts.
 if [[ $STAGE = open ]]; then
     # ── THE OPERATOR ASKED FOR THE COPILOT PHASE ───────────────────────────
     CODEX_SHA="${2:-}"
-    [ -n "$CODEX_SHA" ] \
+    [[ -n $CODEX_SHA ]] \
         || { echo "ABORT: 'open' needs the head Codex signed off, which 'record' reported and pr-signoff.sh reads back."; exit 1; }
     _why="$(sha_reason "$CODEX_SHA")" \
         || { echo "ABORT: the Codex-signed-off head is not a full OID ($_why: '$CODEX_SHA')."; exit 1; }
@@ -113,7 +126,7 @@ if [[ $STAGE = open ]]; then
             || { echo "ABORT: could not read the current head; do not open the phase blind."; return 1; }
         _why="$(sha_reason "$head")" \
             || { echo "ABORT: the current head is not a full OID ($_why: '$head')."; return 1; }
-        [ "$head" = "$CODEX_SHA" ] \
+        [[ $head = "$CODEX_SHA" ]] \
             || { echo "ABORT: the head is $head, not the $CODEX_SHA Codex signed off; re-run the Codex phase for what is there now."; return 1; }
 
         # THE VERDICT, because an unchanged head does not mean an unchanged
@@ -121,7 +134,7 @@ if [[ $STAGE = open ]]; then
         # equality passing and the recorded signoff describing a phase that is no
         # longer clean.
         recheck=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); rc=$?
-        [ "$rc" -eq 0 ] \
+        [[ $rc -eq 0 ]] \
             || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($recheck) — the signoff is history, not a current verdict; do not open the Copilot phase"; return 1; }
 
         # AND THE RECORDED SIGNOFF, which is the only thing that says the phase was
@@ -168,7 +181,7 @@ if [[ $STAGE = open ]]; then
         || { echo "ABORT: could not re-confirm the head before opening the phase."; exit 1; }
     _why="$(sha_reason "$HEAD_STILL")" \
         || { echo "ABORT: the re-read head is not a full OID ($_why: '$HEAD_STILL')."; exit 1; }
-    [ "$HEAD_STILL" = "$CODEX_SHA" ] \
+    [[ $HEAD_STILL = "$CODEX_SHA" ]] \
         || { echo "ABORT: the head moved to $HEAD_STILL while this phase was being proved; nothing was revoked or requested."; exit 1; }
 
     # …AND SO IS EVERYTHING ELSE THAT CAN CHANGE WITHOUT IT. A dismissal or a Codex
@@ -235,7 +248,7 @@ if [[ $STAGE = close ]]; then
     # returned success to anything reading the status. Here the caller branches on
     # it, and every one of them is a stop.
     CODEX_SHA="${2:-}"
-    [ -n "$CODEX_SHA" ] \
+    [[ -n $CODEX_SHA ]] \
         || { echo "ABORT: 'close' needs the head Codex signed off, so the record can say whether the two phases closed on the same commit."; exit 1; }
     _why="$(sha_reason "$CODEX_SHA")" \
         || { echo "ABORT: the Codex-signed-off head is not a full OID ($_why: '$CODEX_SHA')."; exit 1; }
@@ -334,14 +347,14 @@ fi
 
 # ── RECORD WHAT CODEX SIGNED OFF, THEN ASK ─────────────────────────────────
 BODY_FILE="${2:-}"
-[ -n "$BODY_FILE" ] \
+[[ -n $BODY_FILE ]] \
     || { echo "ABORT: a body file is required: the paragraph saying what the PR does and what the Codex phase changed."; exit 1; }
 # READ WITH ITS STATUS TAKEN, before anything is posted. A partial read still
 # produces a successful `gh pr comment`, and the reviewer contract makes the newest
 # summary the thing read before the diff — so a truncated one is worse than none:
 # it looks complete.
 BODY="$(cat "$BODY_FILE")" || { echo "ABORT: could not read the phase body."; exit 1; }
-[ -n "$BODY" ] || { echo "ABORT: the phase body is empty; say what the Codex phase changed."; exit 1; }
+[[ -n $BODY ]] || { echo "ABORT: the phase body is empty; say what the Codex phase changed."; exit 1; }
 # THE BODY IS PROSE, AND MUST NOT BECOME A RECORD. It is composed from findings,
 # PR descriptions and reviewer comments, and this comment is posted under an
 # identity `pr-signoff.sh` and `pr-round-count.sh` trust — so a line reproducing
@@ -379,7 +392,7 @@ _why="$(sha_reason "$CODEX_SHA")" \
 # RE-VALIDATED ON EXACTLY THAT SHA. If it is not clean, the head moved and the
 # phase must not advance.
 CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
-[ "$CODEX_RECHECK_RC" -eq 0 ] \
+[[ $CODEX_RECHECK_RC -eq 0 ]] \
     || { echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"; exit 1; }
 
 # THE CHECKS ON THAT HEAD, TOO. The CI gate lives at the push sites in step 5, and
@@ -430,7 +443,7 @@ echo "PR_PHASE_RECORDED pr=$PR reviewer=$RB_CODEX_BOT codex-sha=$CODEX_SHA"
 # durable signoff for a later session nor the sha the codex-only merge needs.
 # Nothing in this stage requests a review, so publishing before the pause queues
 # nothing — the boundary still precedes everything that commits to more work.
-[ "$ROUNDS_RC" -ne 3 ] || {
+[[ $ROUNDS_RC -ne 3 ]] || {
     echo "PAUSE: round boundary reached. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"
     exit 3; }
 
