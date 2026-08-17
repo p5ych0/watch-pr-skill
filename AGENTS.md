@@ -211,8 +211,8 @@ install commands in `README.md`, which legitimately name this repository.
 reads origin ONCE in its setup block — through `pr-origin.sh read`, not by running
 `git` itself — checks that read's status, and exports it as `REVIEW_BUS_REMOTE`;
 `rb_identity` prefers that over deriving. The helper is invoked as
-`{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2`, with
-`BASH_XTRACEFD` moved to stderr before the substitution and restored after — a PATH
+`/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the
+value read back from that file — a PATH
 rather than a name, and privileged mode is what stops `BASH_ENV` and
 `ENV` being sourced at all, stops shell functions being imported from the
 environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and

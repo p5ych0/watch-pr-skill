@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   _rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
-#   RB_REMOTE="$({ /usr/bin/env bash -p pr-origin.sh read; } 9>&1 1>&2)"
-#   if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
+#   /usr/bin/env bash -p pr-origin.sh read "$RB_ORIGIN_OUT" || abort
+#   RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
 #
-# …and the same three lines around `pin`. The `BASH_XTRACEFD` dance is part of the
-# invocation: whichever descriptor the caller traces to, one of the redirections
-# below points it at the capture, and bash traces an assignment before it takes
-# effect — so the target has to move BEFORE the substitution begins. Measured, an
-# assignment inside the substitution is clean for fd 9 and leaks for fd 1; inside
-# the group it is the other way round.
+# THE VALUE GOES TO A FILE THE CALLER NAMES, and that is the third mechanism this
+# script has used. The first two put it on a descriptor — stdout, then fd 9 — and
+# both spent rounds of review on the same problem from different angles: whichever
+# descriptor carries the value, a caller tracing to it has its trace written into
+# the value, and the redirections that would move one out of the way move the
+# other into place. Moving the trace target instead closed fd 2 when it was
+# restored, so the second call of a session returned nothing at all.
+#
+# A path has none of those properties. The caller's tracing goes wherever it
+# already went, this script writes where it was told, and there is no descriptor
+# for the two to collide over.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
 # called `bash` if the caller has one, and such a function can write a forged URL
@@ -19,8 +23,9 @@
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
 # line — the hop below reaches it a moment too late, and a hook needs to shadow
-# nothing to use that moment: `printf '…' >&9; exit 0` is enough, since fd 9 is
-# already the caller's capture. The hop stays for a caller that forgets, and it is
+# nothing to use that moment: a hook that writes the value file and exits is
+# enough, and when the value travelled on a descriptor it was shorter still —
+# `printf '…' >&9; exit 0`, because fd 9 was the caller's capture by then. The hop stays for a caller that forgets, and it is
 # the difference between a defence and a default.
 #
 # THE BRACES AND THE DESCRIPTORS ARE THE INVOCATION, not decoration around it —
@@ -111,49 +116,30 @@ if [[ $- != *p* ]]; then
 fi
 set -uo pipefail
 
-# ── THE CAPTURE DESCRIPTOR IS THE CALLER'S TO ESTABLISH ────────────────────
+# ── THE OUTPUT PATH IS REQUIRED, AND IS THE SECOND ARGUMENT ────────────────
 #
-# This script writes its value, and its reasons for refusing to produce one, to
-# fd 9. The caller opens it, and does so on a GROUP so the redirections are in
-# place before bash traces anything:
-#
-#     _rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
-#     RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"
-#     if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
-#
-# The braces matter on bash 5, which traces a simple command before applying its
-# redirections — inside a command substitution fd 1 is already the capture, so the
-# trace would land in the value. bash 3.2.57 applies them first and does not.
-#
-# WHY THE CALLER AND NOT THIS FILE: a redirection here cannot come before the
-# trace of the line that performs it, so one line always survived and the driver
-# had to refuse an otherwise fine session. And a version that asked whether fd 9
-# was already open could not tell this script's descriptor from a log the caller
-# had there — it would have written the URL into that log. `9>&1` at the call site
-# settles both.
-#
-# A CLOSED fd 9 IS A USAGE ERROR, said plainly rather than failing with `Bad file
-# descriptor` further down. It is the one thing this script can tell for certain
-# about that descriptor, and the test is a redirection rather than a command, so
-# there is no name in it.
-if ! : >&9 2>/dev/null; then
-    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { /usr/bin/env bash -p \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
-    exit 1
-fi
-
+# Diagnostics go to stderr; the VALUE goes only to this file. Keeping them on
+# different streams is what lets the caller read the value with `$(<…)` and never
+# see anything else, whatever the shell is tracing.
 MODE="${1-}"
 case "$MODE" in
     read|pin) ;;
-    "") echo "ABORT: a mode is required: 'read' (print origin's URL) or 'pin' (print REVIEW_BUS_REMOTE as a child sees it)" >&9; exit 1 ;;
-    *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&9; exit 1 ;;
+    "") echo "ABORT: a mode is required: 'read' (origin's URL) or 'pin' (REVIEW_BUS_REMOTE as a child sees it)" >&2; exit 1 ;;
+    *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
+OUT="${2-}"
+[[ -n $OUT ]] \
+    || { echo "ABORT: pr-origin.sh writes its value to a file; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <path>" >&2; exit 1; }
+# TRUNCATED BEFORE ANYTHING ELSE, so a refusal cannot leave a previous run's value
+# behind for the caller to read back as this one's.
+: > "$OUT" || { echo "ABORT: could not write to '$OUT'" >&2; exit 1; }
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
     # is a real answer it needs — the one that says the export did not take. An
     # empty line and status 0 says exactly that; refusing would make the two
     # failures indistinguishable from this side.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" >&9
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT"
     exit 0
 fi
 
@@ -172,7 +158,7 @@ fi
 # direction. The `x` is appended inside the substitution and removed after, so
 # every byte `git` wrote survives to be checked.
 _rb_origin="$(command git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
-    echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&9; exit 1; }
+    echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
 # after it is — and the newline in this pattern is written literally for the same
@@ -182,7 +168,7 @@ _rb_origin="${_rb_origin%x}"
 # substitution has been wrong in this file.
 _rb_origin="${_rb_origin%'
 '}"
-[[ -n $_rb_origin ]] || { echo "ABORT: origin is empty; there is no repository to pin this session to" >&9; exit 1; }
+[[ -n $_rb_origin ]] || { echo "ABORT: origin is empty; there is no repository to pin this session to" >&2; exit 1; }
 # ONE LINE, AND NOTHING THAT CAN BECOME TWO. A remote containing a newline would
 # otherwise arrive at the caller as two values, and the second is whatever the
 # first line's tail happened to be. `identitylib.sh` parses the URL itself; what
@@ -194,9 +180,9 @@ _rb_origin="${_rb_origin%'
 # refused every session.
 if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
-    echo "ABORT: origin contains a newline; it cannot be a single value" >&9; exit 1
+    echo "ABORT: origin contains a newline; it cannot be a single value" >&2; exit 1
 fi
-printf '%s\n' "$_rb_origin" >&9
+printf '%s\n' "$_rb_origin" > "$OUT"
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────

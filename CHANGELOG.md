@@ -11,8 +11,8 @@
   through `#!/usr/bin/env bash` and resolves on `PATH` — inherited nothing.
 
   Both are now asked of `pr-origin.sh`, started by the caller as
-  `{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2`, with
-  `BASH_XTRACEFD` moved to stderr before the substitution and restored after. A path is
+  `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the
+  value read back from that file. A path is
   not a name, so no function can stand in front of it; privileged mode means
   `BASH_ENV` and `ENV` are never sourced, shell functions are never imported from
   the environment, and `SHELLOPTS` is ignored, so there is no hook to escape and
@@ -23,18 +23,14 @@
   session's repository and now cannot, and an `export` that assigns without
   exporting is caught by a child reporting it inherited nothing.
 
-  The value comes back on **fd 9**, and the driver opens it as part of the call:
-  `"$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"` — the
-  braces included,
-  because bash traces a simple command *before* applying its redirections and
-  inside a command substitution fd 1 is already the capture, so a traced driving
-  shell would put that line in the value ahead of the URL. The redirections are applied before
-  bash begins executing the helper, so an operator with `SHELLOPTS=xtrace` and
-  `BASH_XTRACEFD=1` exported gets a clean value — a redirection inside the helper
-  could not manage that, since no line can come before the trace of the line that
-  performs it, and the one that survived had to be turned into a refused session.
-  It also settles which fd 9 is which: a caller with its own log open on that
-  descriptor is overridden by the call rather than written into.
+  The value comes back **in a file the caller names**, and the caller reads it with
+  `$(<"$path")`. Two earlier mechanisms put it on a descriptor — stdout, then fd 9
+  — and each put it on a stream some caller traces to; moving `BASH_XTRACEFD` out
+  of the way instead was worse, because bash CLOSES the descriptor that variable
+  referred to when it is unset, so restoring it closed fd 2 and the next call in
+  the session returned nothing at all. A path cannot collide with a descriptor, and
+  a redirection-only substitution executes nothing for an inherited `xtrace` to
+  write into.
 
   **The caller starts it privileged, through a path**: `/usr/bin/env bash -p`.
   Written as `bash -p …` the call is a NAME — a function called `bash` in the
@@ -60,11 +56,6 @@
   rather than answering it again. The guard is `$-`, which is shell state a hook
   cannot write — where the two guards before it, an environment marker and a
   positional flag, were both forged.
-
-  A driving shell already tracing to fd 9 would have had that target pointed at
-  the capture by the call's own `9>&1`. The call sets `BASH_XTRACEFD=2` first, and
-  does it inside the substitution so the change is scoped there rather than
-  altering an operator's tracing for the rest of the session.
 
   What remains is stated in the script rather than left to be rediscovered: `exec`
   and `env` are names the helper's own fallback hop is made of, so a shell that

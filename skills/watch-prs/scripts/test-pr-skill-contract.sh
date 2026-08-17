@@ -184,20 +184,19 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
-grep -qF 'RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \' <<<"$skill_flat" \
+grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
 # …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`
 # is a name, and a function called `bash` inherits NON-exported variables, so it
 # agrees the pin arrived while the real stages inherit nothing.
 #
-# THE TRACE TARGET IS MOVED BEFORE THE SUBSTITUTION, AND ASSERTED SEPARATELY. One
-# of the redirections below points whichever descriptor the caller traces to at
-# the capture, and bash traces an assignment BEFORE it takes effect — so an
-# assignment inside the substitution is clean for `BASH_XTRACEFD=9` and leaks for
-# `=1`, and inside the group it is the other way round. Measured both ways in
-# `test-pr-origin.sh`. Only setting it before either begins is clean for both, and
-# it is restored after because it is the operator's setting.
+# THE VALUE COMES BACK IN A FILE, WHICH IS WHAT THE ASSERTIONS PIN. It travelled
+# on stdout, then on fd 9, then on fd 9 with `BASH_XTRACEFD` moved out of the way —
+# and each mechanism put the value on a stream some caller traces to. The last one
+# was worse than a leak: bash CLOSES the descriptor `BASH_XTRACEFD` referred to
+# when it is unset, so restoring it closed fd 2 and the next call in the session
+# returned nothing at all. A path cannot collide with a descriptor.
 #
 # `/usr/bin/env` IS ASSERTED WITH IT, because `bash` is a name: written as
 # `bash -p …` the call goes to a function called `bash` if the driving shell has
@@ -222,7 +221,7 @@ grep -qF 'RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; }
 # `SHELLOPTS=xtrace` off the captured value. Dropping them does not degrade the
 # read, it breaks it, and it is exactly the kind of detail a later edit tidies
 # away.
-grep -qF 'RB_PIN_SEEN="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)"' <<<"$skill_flat" \
+grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT"' <<<"$skill_flat" \
     && pass "…and the pin is proved by a real child, not by a shell copy" \
     || die "the pin proof does not go through pr-origin.sh"
 # …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
@@ -409,12 +408,12 @@ esac
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
-grep -qF '_rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2' <<<"$skill_flat" \
-    && pass "…and the trace target is moved before the substitution begins" \
-    || die "the origin read does not move BASH_XTRACEFD out of the capture first"
-grep -qF 'if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi' <<<"$skill_flat" \
-    && pass "…and restored afterwards, since it is the operator's setting" \
-    || die "BASH_XTRACEFD is changed for the session and not put back"
+grep -qF 'RB_REMOTE="$(<"$RB_ORIGIN_OUT")"' <<<"$skill_flat" \
+    && pass "…and the value is read back from that file, not from a captured stream" \
+    || die "the origin value is not read back from the file the helper wrote"
+grep -qF 'rm -f "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
+    && pass "…and the file is removed once its value has been read" \
+    || die "the origin file is left behind"
 grep -qF 'CLOSE_RC=$?' <<<"$skill_flat" \
     && pass "…and its status is taken" \
     || die "SKILL.md runs the close stage without reading its status"

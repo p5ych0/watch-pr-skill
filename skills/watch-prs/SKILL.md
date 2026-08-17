@@ -236,24 +236,18 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
-# `BASH_XTRACEFD=2` BEFORE THE SUBSTITUTION, AND RESTORED AFTER. Whichever
-# descriptor the driving shell traces to, the call has to keep that stream out of
-# the capture — and the two obvious placements each fix one case and break the
-# other. Measured, with the driver itself traced:
+# THE VALUE COMES BACK IN A FILE, NOT ON A DESCRIPTOR, and that is the third
+# mechanism this call has used. Stdout was first: a driving shell tracing to fd 1
+# writes its trace into the capture. fd 9 was second, with the redirections on a
+# group: it moved the problem to a caller tracing to fd 9, whose target the `9>&1`
+# then pointed at the capture. Moving the trace target instead was third and
+# worse — bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset,
+# so restoring it closed fd 2 and the next call in the session returned nothing.
 #
-#   inside the substitution, outside the group   fd 9 clean, fd 1 leaks
-#   inside the group                             fd 1 clean, fd 9 leaks
-#   here, before the substitution                both clean
-#
-# The reason is the same ordering in two guises: bash traces an assignment before
-# it takes effect, so wherever the assignment sits, its own trace goes to the OLD
-# target — and both `9>&1` and `1>&2` have already pointed one of those at the
-# capture by the time the substitution or the group begins. Set before either
-# starts, the trace of the assignment goes to the driver's own stream, where it
-# belongs, and everything inside is traced to stderr.
-#
-# RESTORED, because this is the operator's setting and not ours. `unset` when there
-# was none, the previous value when there was.
+# A path has none of those properties. The operator's tracing goes wherever it
+# already went, the helper writes where it was told, and there is no descriptor
+# for the two to collide over. Measured: `$(<file)` and `read` are both clean
+# under an inherited xtrace, because nothing executes inside them to be traced.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. Written as `bash -p …` this
 # calls a function called `bash` if the driving shell has one — and such a function
@@ -275,25 +269,19 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and `bash -p` means no startup hook is
 # sourced and no inherited function is imported in the first place. #84.
-_rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
-RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
-    || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
+RB_ORIGIN_OUT="$(mktemp -t "watch-pr-origin-XXXXXX")" \
+    || { echo "ABORT: could not create the file the origin read writes to"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
+    || { rm -f "$RB_ORIGIN_OUT"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
+rm -f "$RB_ORIGIN_OUT"
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
-# `{ …; } 9>&1 1>&2` IS PART OF THE CALL, NOT DECORATION, AND THE BRACES ARE THE
-# POINT. The helper writes its value to fd 9 and everything else to fd 1, and
-# these redirections are applied before bash begins executing it — so an exported
-# `SHELLOPTS=xtrace` with `BASH_XTRACEFD=1` sends its traces to stderr from its
-# very first command. A redirection inside the helper could not manage that: no
-# line can come before the trace of the line that performs it.
-#
-# THE SAME ORDERING APPLIES TO THIS LINE. Written as a simple command, bash traces
-# it BEFORE applying its redirections — and inside a command substitution fd 1 is
-# already the capture, so the trace lands in `$RB_REMOTE` ahead of the URL.
-# Measured: `SIMPLE=[++ …/pr-origin.sh read` against `GROUP=[git@github.com:…]`.
-# The group takes the redirections first, and the command inside it is traced
-# afterwards, to stderr.
+# THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
+# public information, so this is tidiness rather than secrecy — but the setup block
+# already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
+# leaves behind, so a second one that survives a refusal would be a leak the suite
+# reports and nobody meant.
 #
 # ONE LINE, OR IT IS NOT A REMOTE. Kept as the last check on a value the whole
 # session is addressed by. Nothing known still writes to this stream — that is
@@ -413,9 +401,11 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-_rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
-RB_PIN_SEEN="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
-if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
+RB_PIN_OUT="$(mktemp -t "watch-pr-pin-XXXXXX")" \
+    || { echo "ABORT: could not create the file the pin proof writes to"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" || : > "$RB_PIN_OUT"
+RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
+rm -f "$RB_PIN_OUT"
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
