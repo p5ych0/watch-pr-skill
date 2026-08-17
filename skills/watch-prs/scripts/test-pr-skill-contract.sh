@@ -178,12 +178,21 @@ rb_close_call_present \
 grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
     && pass "the session's repository is pinned into the environment every helper reads" \
     || die "SKILL.md does not export REVIEW_BUS_REMOTE; a cd mid-session retargets every stage"
-# …FROM A READ WHOSE STATUS WAS TAKEN. `git remote get-url origin` can print a
-# plausible URL and then fail, and command substitution keeps what it wrote — so
-# an unchecked read pins the session to whatever a failing call happened to emit.
-grep -qF 'RB_REMOTE="$(git remote get-url origin)" \' <<<"$skill_flat" \
-    && pass "…from a remote read whose status is taken" \
-    || die "the pinned remote is captured without checking the read"
+# …FROM A HELPER REACHED BY PATH, AND WITH ITS STATUS TAKEN. This was
+# `git remote get-url origin` inline, which is a NAME: a function answering only
+# that subcommand forged the identity every stage is then addressed by. The helper
+# cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
+# both attacks against it. The status still matters — a read that prints and then
+# fails would otherwise pin the session to whatever it emitted. #84.
+grep -qF 'RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read)" \' <<<"$skill_flat" \
+    && pass "…from a helper reached by path, with its status taken" \
+    || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
+# …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`
+# is a name, and a function called `bash` inherits NON-exported variables, so it
+# agrees the pin arrived while the real stages inherit nothing.
+grep -qF 'RB_PIN_SEEN="$("$RB_SCRIPTS"/pr-origin.sh pin)"' <<<"$skill_flat" \
+    && pass "…and the pin is proved by a real child, not by a shell copy" \
+    || die "the pin proof does not go through pr-origin.sh"
 # …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
 # leave the driver's OWN `$HOST/$OWNER/$REPO` derived from the current directory
 # while every child used the pin — two identities in one session, agreeing
@@ -247,7 +256,7 @@ _pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_bloc
     && pass "the pin's export and its proof lift out of SKILL.md together" \
     || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
 _ro_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
         '"$_pin_block"'
@@ -260,7 +269,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
 # cannot see and the postcondition can — the reason the proof is a reserved word
 # rather than another builtin.
 _sh_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV 'BASH_FUNC_export%%=() { return 0; }' bash -c '
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" 'BASH_FUNC_export%%=() { return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _sh_rc=$?
@@ -273,7 +282,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV 'BASH_FUNC_export%%=() { return 0; }' bash -
 # anything — so reading the variable back agrees, and every stage still derives
 # from wherever the session later stands. Only asking a child separates them.
 _noexp_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV \
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
         '"$_pin_block"'
@@ -284,7 +293,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV \
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _ok_rc=$?
@@ -306,7 +315,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV bash -c '
 # other half: in `SKILL.md` there is nothing after the pin for a neutralised abort
 # to step over.
 _both_out=""
-_both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV \
+_both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
@@ -334,7 +343,7 @@ esac
 # takes the status — which the `CLOSE_RC` guard below and every helper caller do —
 # still stops.
 _forged_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE \
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" -u REVIEW_BUS_REMOTE \
     'BASH_FUNC_exit%%=() { return 0; }' \
     'BASH_FUNC_echo%%=() { builtin printf "OWNER=acme REPO=widget\n"; }' bash -c '
         readonly REVIEW_BUS_REMOTE=""
@@ -1375,6 +1384,12 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     printf '#!/usr/bin/env bash\nexit 0\n' \
         > "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
     chmod +x "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-review-state.sh"
+    # THE REAL `pr-origin.sh`, not a stub. The setup block reads origin and proves
+    # the pin through it, and both answers are what the rest of the block is then
+    # asserted on — a stub printing a fixed string would make these cases pass
+    # against a setup that never consulted the checkout at all.
+    cp "$SCRIPT_DIR/pr-origin.sh" "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-origin.sh"
+    chmod +x "$SETUPTMP/plugin/skills/watch-prs/scripts/pr-origin.sh"
     ( cd "$SETUPTMP/repo" && git init -q && git remote add origin git@github.com:acme/widget.git ) \
         >/dev/null 2>&1 || die "the setup probe's checkout could not be created"
     # ── THE CI BOUNDS SURVIVE THE PROCESS BOUNDARY ─────────────────────────

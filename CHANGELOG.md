@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.23] — 2026-08-17
+
+- **The setup block read origin with `git` and proved its pin with `bash -c`, and
+  both are names.** A function answering only `remote get-url origin` forged the
+  identity every stage is then addressed by — successfully, with a plausible
+  value. A function called `bash` runs in a shell copy that inherits *non*-exported
+  variables, so combined with an `export` that assigns without setting the export
+  attribute it agreed the pin had arrived while every real helper — which execs
+  through `#!/usr/bin/env bash` and resolves on `PATH` — inherited nothing.
+
+  Both are now asked of `pr-origin.sh`, reached as `"$RB_SCRIPTS"/pr-origin.sh`.
+  A path is not a name, so no function can stand in front of it; it re-execs out
+  of `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` and clears every inherited
+  function before it calls anything; and `pin` is a real child, so what it sees is
+  what the stages will see.
+
+  Measured against the driver before and after: a forged `git` used to decide the
+  session's repository and now cannot, and an `export` that assigns without
+  exporting is caught by a child reporting it inherited nothing.
+
+  This does not close the class — `unset` and `set` are reachable names inside the
+  helper too — and the script says so where a reader will find it. What is left
+  needs a shell already executing arbitrary code as the operator, which can edit
+  the helper instead.
+
 ## [2.0.22] — 2026-08-17
 
 - **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted

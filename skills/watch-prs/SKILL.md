@@ -236,9 +236,15 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
-RB_REMOTE="$(git remote get-url origin)" \
+# READ THROUGH A HELPER, BY PATH, BECAUSE `git` IS A NAME. This was
+# `git remote get-url origin` here, and a function answering only
+# `remote get-url origin` forged the identity every stage is then addressed by —
+# successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
+# no function can stand in front of it, and it re-execs out of the startup hooks
+# and clears every inherited function before it calls anything. #84.
+RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-[ -n "$RB_REMOTE" ] \
+[[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
 # the same value the children will be pinned to, without depending on the export
@@ -345,15 +351,13 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # a new process sees it, so that is what is asked — and asking it also subsumes the
 # parent-side check, since a wrong value here is a wrong value there.
 #
-# `bash` AND `git` ARE STILL NAMES, and that is a known, filed limit rather than an
-# oversight: see #84. A function named `bash` runs in a shell copy that inherits
-# non-exported variables, so it can agree with a forged `export` while the real
-# stages — which exec through `#!/usr/bin/env bash` and resolve on `PATH` — inherit
-# nothing; a function named `git` forges the read above. Both are removed by
-# reading origin through a helper at an absolute path, which is that issue. Neither
-# is reachable without a shell that is already lying to itself, whereas what this
-# pin fixes needed no hostility at all: an ordinary `cd`.
-RB_PIN_SEEN="$(bash -c 'printf %s "${REVIEW_BUS_REMOTE-}"')" || RB_PIN_SEEN=''
+# ASKED THROUGH THE HELPER, NOT WITH `bash -c`. That was the first form and it was
+# a name: a function called `bash` runs in a shell copy which inherits NON-exported
+# variables, so it agreed the pin had arrived while the real stages — which exec
+# through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
+# helper is reached by path and is a real child, so its answer is the one the
+# stages will get. #84.
+RB_PIN_SEEN="$("$RB_SCRIPTS"/pr-origin.sh pin)" || RB_PIN_SEEN=''
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else

@@ -50,6 +50,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-copilot-phase.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
+        "$ROOT"/pr-origin.sh
         "$ROOT"/pr-selfcheck.sh
         "$ROOT"/identitylib.sh
         "$ROOT"/loadlib.sh
@@ -567,15 +568,19 @@ set -e
 for sc in "$ROOT"/pr-*.sh; do
     [ -f "$sc" ] || continue
     _n="$(basename "$sc")"
-    # ONE NARROWED EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every
-    # inherited function on purpose — it re-execs into a clean shell and then
-    # removes what a startup hook may have left, which is the opposite of copying
-    # a loading rule, and `test-pr-selfcheck.sh` covers that block. Only the
-    # CLEARS are excused: skipping the file entirely excused its hand-SOURCING
-    # too, so it could have begun loading a library by hand with this guard still
-    # reporting that every runtime script goes through the loader.
+    # TWO NARROWED EXEMPTIONS, NAMED AND EXPLAINED. `pr-selfcheck.sh` and
+    # `pr-origin.sh` clear every inherited function on purpose — each re-execs into
+    # a clean shell and then removes what a startup hook may have left, which is
+    # the opposite of copying a loading rule, and each has its own fixture over
+    # that block. `pr-origin.sh` loads no library at all, by design: it is the one
+    # helper the driving shell reaches before anything else is trusted, so it
+    # depends on nothing it would have to verify.
+    #
+    # Only the CLEARS are excused. Skipping either file entirely would excuse its
+    # hand-SOURCING too, so it could begin loading a library by hand with this
+    # guard still reporting that every runtime script goes through the loader.
     _only=""
-    [ "$_n" = pr-selfcheck.sh ] && _only=sources-only
+    case "$_n" in pr-selfcheck.sh|pr-origin.sh) _only=sources-only ;; esac
     rb_hand_loads "$sc" "$_only" && _hl=0 || _hl=$?
     case "$_hl" in
         0) echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1 ;;
