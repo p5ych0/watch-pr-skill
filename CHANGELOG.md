@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.21] — 2026-08-17
+
+- **Two of the three phase stages could mutate another repository's pull
+  request.** `pr-copilot-phase.sh` derives its identity from the current
+  directory, and `SKILL.md` invoked `record` and `open` without returning to the
+  checkout the session started in. A `cd` into a second checkout between setup
+  and either step — an ordinary thing for a driving session to do — pointed them
+  at whatever PR of *that* repository shares this number. Both stages **post**:
+  `record` writes the Codex signoff, `open` posts a signoff revocation and
+  requests a review. The local phase would be left unopened while a revocation
+  landed on a pull request nobody was working on.
+
+  The merge gate had been wrapped in `(cd "$REPO_DIR" && …)` for exactly this, and
+  `close` was wrapped when it was extracted — leaving the rule at two of four
+  callers. All three stages are wrapped now, and the contract test derives the
+  invocations from the file rather than listing them, so a fourth stage is covered
+  the day it is added.
+
 ## [2.0.20] — 2026-08-16
 
 - **The Copilot signoff was recorded by 93 lines of Markdown, and every one of

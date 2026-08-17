@@ -994,7 +994,13 @@ Ask Copilot:
 cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the phase body."; exit 1; }
 <what the PR does, and what the Codex phase changed — one paragraph>
 EOF
-PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
+# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, like every other stage and the
+# merge gate. `pr-copilot-phase.sh` derives its identity from the current
+# directory, so a `cd` into another checkout between setup and here would read
+# whatever PR of THAT repository shares this number and post the Codex signoff
+# onto it. The subshell is inside the capture so the output still reaches
+# `$PHASE_OUT`, and the status is the subshell's.
+PHASE_OUT="$( (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE") 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
     0|3) ;;   # 3 is a pause, and the signoff is recorded either way
@@ -1147,7 +1153,11 @@ way — the signoff is on the PR, so a later session reads it back with
 # each other: the proof wants to be last, and the Copilot BASELINE must be last or
 # a pass landing in between is accepted as the answer to a request made after it.
 # This is the proof as late as the baseline rule allows.
-OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
+# FROM `$REPO_DIR` TOO, and this is the stage where it matters most: `open` posts
+# a signoff revocation and requests a review. Landing either on a same-numbered PR
+# in another checkout revokes a signoff nobody withdrew and starts a pass nobody
+# asked for, while the local phase is left unopened.
+OPEN_OUT="$( (cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA") 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
     || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
