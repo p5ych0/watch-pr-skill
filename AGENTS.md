@@ -231,9 +231,9 @@ the answer is a reserved word (`[[`, `if`), an assignment or an expansion. The
 `test-*.sh` fixtures run under `pr-selfcheck.sh`, which re-execs into a clean
 shell with `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` removed, clears
 every inherited function, and refuses to continue if one cannot be cleared. That
-guarantee is made once, with its own test. Requiring it again inside eighteen
-fixture files — `local`, `awk`, `[`, `read`, `cat`, `mktemp`, `grep`, `sort`,
-`jq`, `timeout` all appear there — is the unbounded list this file warns about
+guarantee is made once, with its own test. Requiring it again inside every
+fixture — `local`, `awk`, `[`, `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and
+`timeout` appear in all of them — is the unbounded list this file warns about
 elsewhere, and a second, worse copy of a guarantee that already holds. **Do not
 raise it against a fixture.**
 

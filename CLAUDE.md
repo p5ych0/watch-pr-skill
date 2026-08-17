@@ -209,10 +209,11 @@ rediscovering them.
   with its own test.
 
   Hardening the fixtures too was considered and refused: `local`, `awk`, `[`,
-  `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and `timeout` appear across
-  eighteen files, every one of them a name, and doing it a finding at a time is
+  `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and `timeout` appear in **every**
+  fixture in the tree, each of them a name, and doing it a finding at a time is
   the unbounded list this file already warns about — a second, worse copy of a
-  guarantee the gate makes properly. **So a shadowable name in a `test-*.sh` is
+  guarantee the gate makes properly. No count is given on purpose: one would go
+  stale with the next fixture, which is the same defect at a smaller scale. **So a shadowable name in a `test-*.sh` is
   not a finding.** In a runtime script it is.
 
   **Three limits, because the guarantee is the gate's and not the file's:**
