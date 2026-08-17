@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
+#   _rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
 #   RB_REMOTE="$({ /usr/bin/env bash -p pr-origin.sh read; } 9>&1 1>&2)"
-#   RB_PIN_SEEN="$({ /usr/bin/env bash -p pr-origin.sh pin;  } 9>&1 1>&2)"
+#   if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
+#
+# …and the same three lines around `pin`. The `BASH_XTRACEFD` dance is part of the
+# invocation: whichever descriptor the caller traces to, one of the redirections
+# below points it at the capture, and bash traces an assignment before it takes
+# effect — so the target has to move BEFORE the substitution begins. Measured, an
+# assignment inside the substitution is clean for fd 9 and leaks for fd 1; inside
+# the group it is the other way round.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
 # called `bash` if the caller has one, and such a function can write a forged URL
@@ -109,7 +117,9 @@ set -uo pipefail
 # fd 9. The caller opens it, and does so on a GROUP so the redirections are in
 # place before bash traces anything:
 #
+#     _rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
 #     RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)"
+#     if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
 #
 # The braces matter on bash 5, which traces a simple command before applying its
 # redirections — inside a command substitution fd 1 is already the capture, so the

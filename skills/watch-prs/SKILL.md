@@ -236,14 +236,24 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
-# `BASH_XTRACEFD=2` FIRST, AND INSIDE THE SUBSTITUTION. If the driving shell is
-# tracing to fd 9 — its own trace log — then `9>&1` below points that descriptor at
-# this capture, and the trace of the call itself lands in `$RB_REMOTE` before the
-# privileged child can ignore `SHELLOPTS`. Setting the trace target to stderr
-# first moves it out of the way; doing it inside the `$( )` keeps the change in
-# that subshell, so an operator's tracing is not altered for the rest of the
-# session. Measured: without it the capture is `++ /usr/bin/env bash -p …`, with it
-# the URL alone.
+# `BASH_XTRACEFD=2` BEFORE THE SUBSTITUTION, AND RESTORED AFTER. Whichever
+# descriptor the driving shell traces to, the call has to keep that stream out of
+# the capture — and the two obvious placements each fix one case and break the
+# other. Measured, with the driver itself traced:
+#
+#   inside the substitution, outside the group   fd 9 clean, fd 1 leaks
+#   inside the group                             fd 1 clean, fd 9 leaks
+#   here, before the substitution                both clean
+#
+# The reason is the same ordering in two guises: bash traces an assignment before
+# it takes effect, so wherever the assignment sits, its own trace goes to the OLD
+# target — and both `9>&1` and `1>&2` have already pointed one of those at the
+# capture by the time the substitution or the group begins. Set before either
+# starts, the trace of the assignment goes to the driver's own stream, where it
+# belongs, and everything inside is traced to stderr.
+#
+# RESTORED, because this is the operator's setting and not ours. `unset` when there
+# was none, the previous value when there was.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. Written as `bash -p …` this
 # calls a function called `bash` if the driving shell has one — and such a function
@@ -265,8 +275,10 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and `bash -p` means no startup hook is
 # sourced and no inherited function is imported in the first place. #84.
-RB_REMOTE="$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
+_rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
+RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # `{ …; } 9>&1 1>&2` IS PART OF THE CALL, NOT DECORATION, AND THE BRACES ARE THE
@@ -401,7 +413,9 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-RB_PIN_SEEN="$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
+_rb_xfd=${BASH_XTRACEFD-}; BASH_XTRACEFD=2
+RB_PIN_SEEN="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
+if [[ -n $_rb_xfd ]]; then BASH_XTRACEFD=$_rb_xfd; else unset BASH_XTRACEFD; fi
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else

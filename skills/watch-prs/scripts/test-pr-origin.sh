@@ -391,25 +391,43 @@ esac
 # substitution: the trace target moves out of the way, and the change is scoped to
 # that subshell so an operator's own tracing survives the call. This runs both
 # forms so the assignment is demonstrably load-bearing.
+# THE LIVE INVOCATION, NOT AN APPROXIMATION OF IT. `LIVE` is the three-line form
+# `SKILL.md` uses; the other two are the placements that were tried and each fixes
+# one trace target while breaking the other. Running all three under both targets
+# is what shows the live one is the only placement that works, and it is why the
+# fixture asserts the whole invocation rather than the group alone.
 cat > "$TMP/x9.sh" <<X9SH
 cd "$REPO" || exit 1
-PLAIN="\$({ /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
-SCOPED="\$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
-printf 'PLAIN=%s\n' "\$PLAIN" >&2
-printf 'SCOPED=%s\n' "\$SCOPED" >&2
+INSUB="\$(BASH_XTRACEFD=2; { /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
+INGRP="\$({ BASH_XTRACEFD=2; /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
+_sv=\${BASH_XTRACEFD-}; BASH_XTRACEFD=2
+LIVE="\$({ /usr/bin/env bash -p "$SCRIPT" read; } 9>&1 1>&2)"
+if [ -n "\$_sv" ]; then BASH_XTRACEFD=\$_sv; else unset BASH_XTRACEFD; fi
+printf 'INSUB=%s\n' "\$INSUB" >&2
+printf 'INGRP=%s\n' "\$INGRP" >&2
+printf 'LIVE=%s\n' "\$LIVE" >&2
 X9SH
-x9_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=9 bash "$TMP/x9.sh" \
-    9>>"$TMP/x9.trace" 2>&1 >/dev/null)" || true
-case "$x9_out" in
-    *"SCOPED=$REAL"*) pass "a caller tracing to fd 9 still captures the value alone" ;;
-    *)                die "the scoped form leaked into the capture: '$x9_out'" ;;
-esac
-# …AND WITHOUT THE ASSIGNMENT IT LEAKS, so the fix is shown to be doing the work
-# rather than sitting beside something else that already did it.
-case "$x9_out" in
-    *"PLAIN=$REAL"*) pass "…and this bash does not leak without it either" ;;
-    *)               pass "…where the same call without it takes the trace instead" ;;
-esac
+for _fd in 9 1; do
+    x9_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD="$_fd" bash "$TMP/x9.sh" \
+        9>>"$TMP/x9.trace" 2>&1 >/dev/null)" || true
+    case "$x9_out" in
+        *"LIVE=$REAL"*) pass "a caller tracing to fd $_fd captures the value alone" ;;
+        *)              die "the live form leaked with BASH_XTRACEFD=$_fd: '$x9_out'" ;;
+    esac
+done
+# …AND EACH OF THE OTHER TWO PLACEMENTS LEAKS FOR ONE OF THE TWO TARGETS, which is
+# why the live form is where it is. Reported by target rather than required, since
+# which one leaks is a fact about bash's tracing order and not about this change —
+# what has to hold, and is required above, is that the live form is clean on both.
+for _fd in 9 1; do
+    x9_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD="$_fd" bash "$TMP/x9.sh" \
+        9>>"$TMP/x9.trace" 2>&1 >/dev/null)" || true
+    _leaks=""
+    case "$x9_out" in *"INSUB=$REAL"*) ;; *) _leaks="$_leaks in-substitution" ;; esac
+    case "$x9_out" in *"INGRP=$REAL"*) ;; *) _leaks="$_leaks in-group" ;; esac
+    printf 'ok   - with BASH_XTRACEFD=%s the rejected placements that leak are:%s\n' \
+        "$_fd" "${_leaks:- none}"
+done
 
 # ── A HOOK THAT SHADOWS NOTHING AT ALL ─────────────────────────────────────
 #

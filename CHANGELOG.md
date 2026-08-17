@@ -11,7 +11,8 @@
   through `#!/usr/bin/env bash` and resolves on `PATH` — inherited nothing.
 
   Both are now asked of `pr-origin.sh`, started by the caller as
-  `{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2`. A path is
+  `{ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2`, with
+  `BASH_XTRACEFD` moved to stderr before the substitution and restored after. A path is
   not a name, so no function can stand in front of it; privileged mode means
   `BASH_ENV` and `ENV` are never sourced, shell functions are never imported from
   the environment, and `SHELLOPTS` is ignored, so there is no hook to escape and
