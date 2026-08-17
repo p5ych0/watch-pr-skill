@@ -153,18 +153,29 @@ the answer is a reserved word (`[[`, `if`), an assignment or an expansion. The
 shell with `BASH_ENV`, `ENV`, `SHELLOPTS` and `BASH_XTRACEFD` removed, clears
 every inherited function, and refuses to continue if one cannot be cleared. That
 guarantee is made once, with its own test. Requiring it again inside every
-fixture — `local`, `awk`, `[`, `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and
-`timeout` appear in all of them — is the unbounded list this file warns about
-elsewhere, and a second, worse copy of a guarantee that already holds. **Do not
-raise it against a fixture.**
+fixture — each one contains at least one of `local`, `awk`, `[`, `read`, `cat`,
+`mktemp`, `grep`, `sort`, `jq` and `timeout` — is the unbounded list this file
+warns about elsewhere, and a second, worse copy of a guarantee that already
+holds. **Do not raise a shadowable name against a fixture.**
 
-Two limits are worth knowing, because both have produced real defects. The gate
-clears inherited functions and the hook variables; it does **not** clear
-arbitrary exported values, and `SKILL.md` exports `REVIEW_BUS_REMOTE` before the
-suite runs — so a fixture whose subject is an env-driven override must clear that
-override itself, and a fixture that forges identity while inheriting the pin
-tests nothing. That clearing must **not** be moved into `testlib.sh`, which ships
-at runtime inside `pr-ci-state.sh`, where an `unset` would wipe the driver's pin.
+Three limits are worth knowing, and all three have produced real defects.
+
+**The guarantee is the gate's, not the file's.** A fixture run directly — `bash
+test-pr-watch.sh` — has no clean shell, and **CI is that path**: both jobs in
+`.github/workflows/tests.yml` loop over `bash "$t"` rather than going through
+`pr-selfcheck.sh`, so what protects them is the runner's environment being clean
+by construction. The exemption above survives that — a hostile shell is an
+operator's machine, not a fresh container — but never claim the gate is
+protecting an execution that did not enter it.
+
+**The gate clears inherited functions and the hook variables. It does not clear
+arbitrary exported values**, and `SKILL.md` exports `REVIEW_BUS_REMOTE` before
+the suite runs — so a fixture whose subject is an env-driven override must clear
+that override itself, and one that forges identity while inheriting the pin tests
+nothing.
+
+**That clearing must not move into `testlib.sh`**, which ships at runtime inside
+`pr-ci-state.sh`, where an `unset` would wipe the driver's pin.
 
 ## Bash strict-mode conventions
 

@@ -208,18 +208,26 @@ rediscovering them.
   continue if one cannot be cleared. That guarantee is made once, in one file,
   with its own test.
 
-  Hardening the fixtures too was considered and refused: `local`, `awk`, `[`,
-  `read`, `cat`, `mktemp`, `grep`, `sort`, `jq` and `timeout` appear in **every**
-  fixture in the tree, each of them a name, and doing it a finding at a time is
-  the unbounded list this file already warns about — a second, worse copy of a
-  guarantee the gate makes properly. No count is given on purpose: one would go
-  stale with the next fixture, which is the same defect at a smaller scale. **So a shadowable name in a `test-*.sh` is
+  Hardening the fixtures too was considered and refused: **every fixture in the
+  tree contains at least one** of `local`, `awk`, `[`, `read`, `cat`, `mktemp`,
+  `grep`, `sort`, `jq` and `timeout`, each of them a name, and doing it a finding
+  at a time is the unbounded list this file already warns about — a second, worse
+  copy of a guarantee the gate makes properly. No count is given on purpose: one
+  would go stale with the next fixture, which is the same defect at a smaller
+  scale. Nor is the claim that every name appears everywhere — `timeout` is in
+  twelve of them — because that would be a second overclaim in the same sentence. **So a shadowable name in a `test-*.sh` is
   not a finding.** In a runtime script it is.
 
   **Three limits, because the guarantee is the gate's and not the file's:**
 
   - a fixture run **directly** — `bash test-pr-watch.sh` — has no clean shell.
-    The gate is what makes the guarantee;
+    The gate is what makes the guarantee, and **CI is that path**: both jobs in
+    `.github/workflows/tests.yml` loop over `bash "$t"` rather than going through
+    `pr-selfcheck.sh`, so what protects them is the runner's environment being
+    clean by construction, not the re-exec. The exemption is about where a
+    reviewer should spend a finding, and it survives that — a hostile shell is
+    an operator's machine, not a fresh container — but it is the gate and the
+    runner that carry it, never the fixture;
   - the gate clears inherited **functions** and the hook variables. It does not
     clear arbitrary exported values, and it must not: `SKILL.md` pins the
     session's repository by exporting `REVIEW_BUS_REMOTE`, and the suite runs at
