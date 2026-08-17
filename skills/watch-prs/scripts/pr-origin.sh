@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   RB_REMOTE="$({ pr-origin.sh read; } 9>&1 1>&2)"   # origin's URL, from HERE
-#   RB_PIN_SEEN="$({ pr-origin.sh pin;  } 9>&1 1>&2)"   # REVIEW_BUS_REMOTE, as a
-#                                                       # child process sees it
+#   RB_REMOTE="$({ bash -p pr-origin.sh read; } 9>&1 1>&2)"   # origin, from HERE
+#   RB_PIN_SEEN="$({ bash -p pr-origin.sh pin;  } 9>&1 1>&2)"   # REVIEW_BUS_REMOTE,
+#                                                               # as a child sees it
+#
+# `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
+# stops `BASH_ENV` being sourced, so it has to be in force before this file's first
+# line — the hop below reaches it a moment too late, and a hook needs to shadow
+# nothing to use that moment: `printf '…' >&9; exit 0` is enough, since fd 9 is
+# already the caller's capture. The hop stays for a caller that forgets, and it is
+# the difference between a defence and a default.
 #
 # THE BRACES AND THE DESCRIPTORS ARE THE INVOCATION, not decoration around it —
 # see the block on fd 9 below. A usage line teaching the simple form is a usage
@@ -105,7 +112,7 @@ fi
 # about that descriptor, and the test is a redirection rather than a command, so
 # there is no name in it.
 if ! : >&9 2>/dev/null; then
-    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
+    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { bash -p \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
     exit 1
 fi
 

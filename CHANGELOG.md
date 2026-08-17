@@ -32,6 +32,13 @@
   It also settles which fd 9 is which: a caller with its own log open on that
   descriptor is overridden by the call rather than written into.
 
+  **The caller starts it privileged**, and that part cannot be delegated:
+  privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
+  before the helper's first line. A hook needs to shadow nothing to use the gap —
+  `printf '…' >&9; exit 0` is a complete attack, because fd 9 is already the
+  caller's capture by then. The helper hops to `-p` itself as well, for a caller
+  that forgets, which is the difference between a defence and a default.
+
   The hop is to `bash -p`, which does not source `BASH_ENV` or `ENV`, does not
   import functions from the environment, and ignores `SHELLOPTS` — measured, all
   three. That replaced a re-exec whose marker the hook could set for itself, a

@@ -236,13 +236,20 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
+# `bash -p` STARTS THE FIRST INTERPRETER PROTECTED, and it has to be the first:
+# privileged mode is what stops `BASH_ENV` being sourced at all, so entering it
+# from inside a shell that has already run the hook is too late. A hook needs to
+# shadow nothing to win that race — `printf '…' >&9; exit 0` is enough, because
+# fd 9 is already this capture. The helper hops to `-p` itself as well, for a
+# caller that forgets, but only this gets there before the hook.
+#
 # READ THROUGH A HELPER, BY PATH, BECAUSE `git` IS A NAME. This was
 # `git remote get-url origin` here, and a function answering only
 # `remote get-url origin` forged the identity every stage is then addressed by —
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and it re-execs out of the startup hooks
 # and clears every inherited function before it calls anything. #84.
-RB_REMOTE="$({ "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
+RB_REMOTE="$({ bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
@@ -378,7 +385,7 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-RB_PIN_SEEN="$({ "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
+RB_PIN_SEEN="$({ bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else

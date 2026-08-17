@@ -35,7 +35,11 @@ REPO="$TMP/repo"; mkdir -p "$REPO"
 run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     local mode="$1"; shift
     local out rc=0
-    out="$(cd "$REPO" && run_limited 20 env "$@" "$SCRIPT" "$mode" 9>&1 1>&2 2>&1)" || rc=$?
+    # `bash -p` AS THE CALLER, which is the documented invocation. Privileged mode
+    # has to be in force before the subject's first line: the hop inside it reaches
+    # `-p` a moment too late, and a hook needs to shadow nothing to use that moment
+    # — `printf '…' >&9; exit 0` is enough, since fd 9 is already the capture.
+    out="$(cd "$REPO" && run_limited 20 env "$@" bash -p "$SCRIPT" "$mode" 9>&1 1>&2 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
 
@@ -406,6 +410,27 @@ case "$got" in
     "0|$REAL") pass "a hook replacing the positional parameters does not reach this bash" ;;
     *) die "a set-- hook gave neither a refusal nor the real origin: '${got}'" ;;
 esac
+
+# ── A HOOK THAT SHADOWS NOTHING AT ALL ─────────────────────────────────────
+#
+# It does not have to defeat a guard; it only has to run first. fd 9 is already
+# the caller's capture by the time `BASH_ENV` is sourced, so writing a plausible
+# URL there and exiting is a complete attack against any defence that lives inside
+# this file. `bash -p` at the CALL SITE is the answer, because privileged mode is
+# what stops the hook being sourced — the hop inside the script reaches it one
+# moment too late.
+printf "printf '%s\\n' >&9\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
+got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "a hook that writes to fd 9 and exits never runs" \
+    || die "a hook needing no shadowed name reached the capture: '${got}'"
+# …AND WITHOUT `-p` AT THE CALL SITE IT WOULD HAVE WON, which is what makes the
+# caller's part load-bearing rather than belt-and-braces.
+unprot="$(cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
+    "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || true
+[ "$unprot" = "$FORGED" ] \
+    && pass "…where the same hook takes the capture from an unprivileged first shell" \
+    || die "the unprivileged comparison did not reproduce the attack: '$unprot'"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
