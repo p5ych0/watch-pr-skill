@@ -223,5 +223,34 @@ out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 2>&1)"
     && pass "a multi-line remote is refused rather than split" \
     || die "a two-line remote gave rc=$rc '$out'"
 
+# ── A TRAILING NEWLINE IS DATA, AND THE BOUNDARY IS PRESERVED ──────────────
+#
+# Command substitution strips ALL trailing newlines and cannot tell `git`'s output
+# terminator from a byte that was in the value. The read therefore keeps the
+# boundary with a sentinel — `printf x` inside the substitution, removed after —
+# and drops exactly ONE terminator, so anything beyond it survives to be checked.
+#
+# MEASURED FIRST, because the obvious way to provoke this does not work: a remote
+# configured as `git@…:acme/widget.git` followed by a newline produces output
+# byte-identical to one without it. `git` consumes the configured newline as its
+# terminator, so the case cannot be reached through `git remote get-url` on this
+# version. The sentinel is kept so the read does not DEPEND on that, and the stub
+# below is what holds it there.
+cat > "$STUB/git" <<'GITSH'
+#!/usr/bin/env bash
+printf 'git@github.com:acme/widget.git\n\n'
+GITSH
+chmod +x "$STUB/git"
+out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" "$SCRIPT" read 2>&1)"; rc=$?
+{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
+    && pass "a trailing data newline is refused, not stripped into a valid slug" \
+    || die "a trailing data newline gave rc=$rc '$out'"
+# …AND PLAIN COMMAND SUBSTITUTION WOULD HAVE ACCEPTED IT, which is what makes the
+# sentinel load-bearing rather than decorative.
+naive="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" bash -c 'git remote get-url origin' 2>&1)" || true
+[ "$naive" = 'git@github.com:acme/widget.git' ] \
+    && pass "…where a bare capture would have taken the truncated value" \
+    || die "the comparison case did not reproduce the naive result: '$naive'"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -246,6 +246,16 @@ RB_REMOTE="$("$RB_SCRIPTS"/pr-origin.sh read)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+# ONE LINE, OR IT IS NOT A REMOTE. The helper parks its stdout so nothing but the
+# value reaches this capture, and it validates that the value itself is one line —
+# but neither can retract what the SHELL writes before the script's first command
+# runs. With `SHELLOPTS=xtrace` and `BASH_XTRACEFD=1` exported, the trace of that
+# first line lands on this stream ahead of the URL, and `rb_identity` would then
+# parse a plausible owner and repo out of the wrong text. This is the last place
+# that can see it, so it refuses here rather than pinning the session to it.
+[[ $RB_REMOTE = "${RB_REMOTE%%'
+'*}" ]] \
+    || { echo "ABORT: the origin read returned more than one line; something is writing to its stdout ('$RB_REMOTE')"; exit 1; }
 # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
 # the same value the children will be pinned to, without depending on the export
 # having succeeded — so the two cannot disagree. The export itself is the last

@@ -319,7 +319,14 @@ _both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
-        OWNER=acme; REPO=widget; RB_SCRIPTS=/nonexistent; SUMMARY_FILE=/nonexistent
+        # RB_SCRIPTS IS NOT OVERRIDDEN HERE. The pin block calls
+        # `"$RB_SCRIPTS"/pr-origin.sh pin` since #84, so pointing it at a
+        # nonexistent directory made the helper fail before it could report what
+        # the child inherited — and the resulting mismatch satisfied the
+        # assertion, so the readonly-export guard under test could have been
+        # deleted with this still green. The other two placeholders are values the
+        # block only prints.
+        OWNER=acme; REPO=widget; SUMMARY_FILE=/nonexistent
         '"$_pin_block"'
         printf "CONTINUED\n"' 2>/dev/null)" || true
 case "$_both_out" in
