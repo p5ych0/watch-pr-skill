@@ -19,9 +19,12 @@
   All ten guards are reserved-word tests now, converted together rather than as
   the ones somebody noticed, and the fixture exercises three narrow forgers: a
   `[` that lies about the stage, one that lies about two shas being equal, and one
-  that lies about a non-zero status being zero. Each is asserted to land and to
-  leave the rest of the script working — a `[` that lied about everything broke
-  the identity parse and made the cases pass for the wrong reason.
+  that lies about a non-zero status being zero, and one that lies about a `-ne`
+  comparison so the operator round boundary can be tested. Each is asserted to
+  land and to leave the rest of the script working — a `[` that lied about
+  everything broke the identity parse and made the cases pass for the wrong
+  reason. Every converted guard whose behaviour a caller can observe fails under
+  mutation, including `record`'s own re-validation, which posts the signoff.
 
 ## [2.0.21] — 2026-08-17
 

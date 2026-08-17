@@ -826,6 +826,45 @@ world; _RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run record 7 "$TMP/body.md")"
 printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
     && pass "…and the status forger is narrow enough that the script still runs" \
     || die "the status forger broke the harness rather than the check: '${got}'"
+# …AND `record` HAS ITS OWN COPY OF THAT CHECK, which the case above does not
+# reach: it runs a CLEAN world, so it proves the forger is narrow and nothing
+# else. `record` re-validates Codex on the exact sha before writing the signoff,
+# and that guard is the one with a durable record behind it — a signoff posted for
+# a dismissed or findings-bearing verdict is what every later gate trusts.
+world; printf '1\n' > "$W/verdict.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=2\n' > "$W/verdict.out"
+_RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(posted)" ]; } \
+    && pass "a lying [ cannot record a Codex signoff for a verdict with findings" \
+    || die "record with findings and a status-forging [ gave '${got}' posted='$(posted)'"
+
+# ── AND THE ROUND BOUNDARY STILL FIRES UNDER A LYING `[` ───────────────────
+#
+# `record` publishes the signoff and then pauses when the round count says a
+# boundary is due — `[[ $ROUNDS_RC -ne 3 ]] || { PAUSE; exit 3; }`. A `[` that
+# succeeds for `3 -ne 3` short-circuits the `||`, so the pause never happens and
+# the stage exits 0: the operator check-in the count exists to force is silently
+# skipped, and a caller branching on the status is told to carry straight on.
+#
+# Narrow to that one comparison, since `-ne` appears elsewhere in the run.
+_RB_SHADOW_NE='BASH_FUNC_[%%=() { if [[ $2 = "-ne" && $1 = "$3" ]]; then return 0; fi; builtin [ "$@"; }'
+world; printf '3\n' > "$W/pr-round-count.rc"
+_RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 3 ] \
+    && pass "a lying [ cannot skip the operator round boundary" \
+    || die "record at a boundary with an -ne-forging [ gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'PAUSE' \
+    && pass "…and the pause is still reported" \
+    || die "the boundary pause was not announced: '${got#*|}'"
+# THE SIGNOFF IS STILL PUBLISHED BEFORE THE PAUSE, which is the whole point of
+# that ordering: a later session reads it back rather than re-proving the phase.
+posted | grep -qF 'Review-Signoff' \
+    && pass "…while the signoff was published before pausing" \
+    || die "the pause swallowed the signoff: $(posted)"
+world; _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED'; } \
+    && pass "…and the -ne forger is narrow enough that the script still runs" \
+    || die "the -ne forger broke the harness rather than the boundary: '${got}'"
 
 # THE FIXTURE'S OWN REACH, in both directions again: the equality forger has to
 # LAND, and it has to leave the rest of the script working. Without this, both
