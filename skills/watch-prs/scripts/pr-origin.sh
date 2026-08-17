@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   RB_REMOTE="$({ bash -p pr-origin.sh read; } 9>&1 1>&2)"   # origin, from HERE
-#   RB_PIN_SEEN="$({ bash -p pr-origin.sh pin;  } 9>&1 1>&2)"   # REVIEW_BUS_REMOTE,
-#                                                               # as a child sees it
+#   RB_REMOTE="$({ /usr/bin/env bash -p pr-origin.sh read; } 9>&1 1>&2)"
+#   RB_PIN_SEEN="$({ /usr/bin/env bash -p pr-origin.sh pin;  } 9>&1 1>&2)"
+#
+# `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
+# called `bash` if the caller has one, and such a function can write a forged URL
+# to fd 9 and return — which is the caller's capture. A path cannot be shadowed.
 #
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
@@ -112,7 +115,7 @@ fi
 # about that descriptor, and the test is a redirection rather than a command, so
 # there is no name in it.
 if ! : >&9 2>/dev/null; then
-    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { bash -p \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
+    echo "ABORT: pr-origin.sh writes to fd 9; invoke it as { /usr/bin/env bash -p \"\$RB_SCRIPTS\"/pr-origin.sh $*; } 9>&1 1>&2" >&2
     exit 1
 fi
 

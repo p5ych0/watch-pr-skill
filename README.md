@@ -613,7 +613,8 @@ plugin docs and open an issue.
 - **Reviews target the wrong repo:** identity derives from
   `git remote get-url origin` — read by `pr-origin.sh`, **once at the start of the
   session**, and pinned into `REVIEW_BUS_REMOTE` for every helper. (The read goes
-  through a helper, started as `bash -p`, rather than running `git` in your shell:
+  through a helper, started as `/usr/bin/env bash -p`, rather than running `git` in
+  your shell:
   a shell function called `git` would otherwise decide which project the session
   posts to, and privileged mode is what stops a `BASH_ENV` startup file running
   inside the helper at all.) So start the session in the

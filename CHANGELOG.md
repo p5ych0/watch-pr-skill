@@ -32,7 +32,14 @@
   It also settles which fd 9 is which: a caller with its own log open on that
   descriptor is overridden by the call rather than written into.
 
-  **The caller starts it privileged**, and that part cannot be delegated:
+  **The caller starts it privileged, through a path**: `/usr/bin/env bash -p`.
+  Written as `bash -p …` the call is a NAME — a function called `bash` in the
+  driving shell writes a forged URL to fd 9, which is the capture, and returns
+  without the helper running at all. `/usr/bin/env` is the same path every script
+  here already depends on through its shebang, so it is not a new assumption;
+  which `bash` it finds is a `PATH` question, and that is #91.
+
+  **Starting it privileged cannot be delegated:**
   privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
   before the helper's first line. A hook needs to shadow nothing to use the gap —
   `printf '…' >&9; exit 0` is a complete attack, because fd 9 is already the

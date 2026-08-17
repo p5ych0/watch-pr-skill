@@ -39,7 +39,7 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # has to be in force before the subject's first line: the hop inside it reaches
     # `-p` a moment too late, and a hook needs to shadow nothing to use that moment
     # — `printf '…' >&9; exit 0` is enough, since fd 9 is already the capture.
-    out="$(cd "$REPO" && run_limited 20 env "$@" bash -p "$SCRIPT" "$mode" 9>&1 1>&2 2>&1)" || rc=$?
+    out="$(cd "$REPO" && run_limited 20 env "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" 9>&1 1>&2 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
 
@@ -428,6 +428,23 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 # caller's part load-bearing rather than belt-and-braces.
 unprot="$(cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
     "$SCRIPT" read 9>&1 1>&2 2>/dev/null)" || true
+# …AND A `bash` FUNCTION IN THE CALLER CANNOT STAND IN FOR THE INTERPRETER. The
+# call site says `/usr/bin/env bash -p` because `bash -p` alone is a NAME: a
+# function called `bash` writes a forged URL to fd 9 — the caller's capture — and
+# returns, without the subject running at all.
+fnbash="$(cd "$REPO" && run_limited 20 bash -c '
+    bash() { printf "%s\n" "'"$FORGED"'" >&9; return 0; }
+    { /usr/bin/env bash -p "'"$SCRIPT"'" read; } 9>&1 1>&2' 2>/dev/null)" || fnbash="FAILED"
+[ "$fnbash" = "$REAL" ] \
+    && pass "a bash function in the caller does not stand in for the interpreter" \
+    || die "a shadowed bash reached the capture: '$fnbash'"
+# …AND THE SAME CALL WITHOUT THE PATH IS TAKEN BY IT, so the path is load-bearing.
+fnbash_bad="$(cd "$REPO" && run_limited 20 bash -c '
+    bash() { printf "%s\n" "'"$FORGED"'" >&9; return 0; }
+    { bash -p "'"$SCRIPT"'" read; } 9>&1 1>&2' 2>/dev/null)" || fnbash_bad="FAILED"
+[ "$fnbash_bad" = "$FORGED" ] \
+    && pass "…where the unpathed form calls the function instead" \
+    || die "the comparison did not reproduce the shadowed-bash attack: '$fnbash_bad'"
 [ "$unprot" = "$FORGED" ] \
     && pass "…where the same hook takes the capture from an unprivileged first shell" \
     || die "the unprivileged comparison did not reproduce the attack: '$unprot'"

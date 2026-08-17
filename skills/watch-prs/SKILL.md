@@ -236,6 +236,13 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
+# `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. Written as `bash -p …` this
+# calls a function called `bash` if the driving shell has one — and such a function
+# can print a forged URL to fd 9 and return, which is this capture. A path cannot
+# be shadowed. `/usr/bin/env` is the same one every script here already depends on
+# through its shebang, so it is not a new assumption; which `bash` it then finds is
+# a `PATH` question, and that is #91.
+#
 # `bash -p` STARTS THE FIRST INTERPRETER PROTECTED, and it has to be the first:
 # privileged mode is what stops `BASH_ENV` being sourced at all, so entering it
 # from inside a shell that has already run the hook is too late. A hook needs to
@@ -249,7 +256,7 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and it re-execs out of the startup hooks
 # and clears every inherited function before it calls anything. #84.
-RB_REMOTE="$({ bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
+RB_REMOTE="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; } 9>&1 1>&2)" \
     || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
@@ -385,7 +392,7 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
 # helper is reached by path and is a real child, so its answer is the one the
 # stages will get. #84.
-RB_PIN_SEEN="$({ bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
+RB_PIN_SEEN="$({ /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; } 9>&1 1>&2)" || RB_PIN_SEEN=''
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
