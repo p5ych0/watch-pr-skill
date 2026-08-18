@@ -587,6 +587,27 @@ if command -v setfacl >/dev/null 2>&1; then
     else
         echo "ok   - (setfacl could not set an ACL here; that case did not run)"
     fi
+    # …AND THE `@` MARK IS REFUSED TOO, which is the one that matters on macOS:
+    # there `ls -l` marks extended ATTRIBUTES with `@` and security information
+    # with `+`, and a component carrying BOTH shows `@` ALONE — so an ACL granting
+    # another account `delete_child` reads as clean beside any xattr. This machine
+    # cannot stage that pairing, so the mark is staged directly: what is asserted
+    # is that the refusal keys on either mark, not on `+` alone.
+    XADIR="$TMP/xattrcase"
+    mkdir -p "$XADIR"
+    chmod 700 "$XADIR"
+    XASTUB="$TMP/xastub"
+    mkdir -p "$XASTUB"
+    printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
+    chmod +x "$XASTUB/ls"
+    xa_rc=0
+    xa_diag="$( cd "$REPO" && run_limited 20 env PATH="$XASTUB:$PATH" \
+        /usr/bin/env bash -p "$SCRIPT" read "$XADIR/origin" 2>&1 )" || xa_rc=$?
+    { [ "$xa_rc" -ne 0 ] \
+      && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
+      && [ ! -e "$XADIR/origin" ]; } \
+        && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
+        || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
 else
     echo "ok   - (no setfacl on this machine; the ACL case did not run)"
 fi

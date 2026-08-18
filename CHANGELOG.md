@@ -149,10 +149,13 @@
   `delete_child` through an extended ACL, and Linux POSIX ACLs do the same;
   `find -perm` sees none of it, so every ownership and mode check passed while
   that account could replace the directory. Any component carrying one is refused.
-  What is read is the MARKER — `ls -l` appends `+` to the mode field on both
-  platforms — and not the ACL's contents, which would mean `getfacl` on one
-  platform and `ls -e` on the other, two grammars and two new ways to be wrong.
-  Coarse, and it fails closed.
+  What is read is the MARKER, not the ACL's contents — reading those means
+  `getfacl` on one platform and `ls -e` on the other, two grammars and two new
+  ways to be wrong. Either mark counts: `ls -l` appends `+` for extended security
+  information and, on macOS, `@` for extended attributes — and a component
+  carrying BOTH shows `@` alone, so keying on `+` let an ACL granting another
+  account `delete_child` read as clean beside any xattr. `@` is ambiguous rather
+  than harmless. Coarse, and it fails closed.
 
   The probe's status is taken, because `find` prints nothing when it fails and
   empty output is what the walk reads as safe — so a component renamed during its

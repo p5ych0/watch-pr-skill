@@ -259,8 +259,15 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
             echo "ABORT: could not read the permissions of '$p'; refusing rather than assuming it is safe" >&2
             return 1
         fi
+        # `@` COUNTS AS WELL AS `+`, and on macOS it is the one that hides an ACL.
+        # There, `ls -l` marks extended ATTRIBUTES with `@` and extended security
+        # information with `+` — and a component carrying BOTH shows `@` alone, so
+        # a directory with an ACL granting another account `delete_child` and any
+        # xattr at all read as clean. `@` is ambiguous rather than harmless, and
+        # this cannot tell the two apart without asking a platform-specific tool,
+        # so it refuses on either mark.
         case "${acl%% *}" in
-            *+) echo "ABORT: '$p' carries an access-control list, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
+            *+|*@) echo "ABORT: '$p' is marked as carrying an access-control list or extended attributes, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
                 return 1 ;;
         esac
         [[ $p = / ]] && break

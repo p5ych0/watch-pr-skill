@@ -356,8 +356,12 @@ RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 # the same answer already used for `mkdir` two lines up. Which `rm` it finds is a
 # `PATH` question, and that is #91.
 #
-# THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
-# earlier run in the same shell cannot be read back as this one's answer.
+# THE HELPER CREATES ITS OUTPUT AND DOES NOT TRUNCATE ONE. Under `set -C` the
+# write is O_EXCL, so a path that already exists is REFUSED rather than
+# overwritten. Nothing stale can be read back here for two reasons that do not
+# rely on overwriting: the directory above was created a moment ago and is empty,
+# and the helper's status is checked below — a refusal leaves the path absent, and
+# the open that follows fails rather than returning an older answer.
 #
 # `RB_TMPPARENT` NEEDS NO SEPARATE POSTCONDITION. A readonly one keeps its old
 # value, and the ownership test that follows is exactly the question being asked of
