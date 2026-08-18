@@ -22,9 +22,13 @@
   builtins, and five forged builtins at once do not reach a helper.
 
   **`env -S` is a contributor requirement, not a user one**, and the split is
-  stated in `README.md`. The plugin never depends on the shebang; the suite does,
-  because the fixtures execute helpers directly at hundreds of call sites, so
-  `pr-selfcheck.sh` needs an `env` with `-S`. GNU coreutils has had it since 8.30
+  stated in `README.md`. The plugin never depends on the shebang — the driver
+  supplies `-p`, and so does every helper-to-helper call, of which there are
+  twenty-six across five files plus the watch's five probes. Leaving those bare
+  would have put the requirement back through the side door on the very flows
+  the driver protects. The suite is the exception: the fixtures execute helpers
+  directly at hundreds of call sites, so `pr-selfcheck.sh` needs an `env` with
+  `-S`. GNU coreutils has had it since 8.30
   and BSD `env` supports it.
 
   **The driver supplies it, and the shebang is the fallback.** `SKILL.md` invokes

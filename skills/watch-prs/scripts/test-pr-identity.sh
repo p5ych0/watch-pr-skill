@@ -133,6 +133,8 @@ id_args() {   # id_args <script> ; sets "$@" for that caller
         pr-signoff.sh)      set -- 7 somebody ;;
         pr-close-round.sh) set -- gate 7 somebody /dev/null no ;;
         pr-copilot-phase.sh) set -- record 7 /dev/null ;;
+        pr-ci-gate.sh)      set -- 7 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
+        pr-merge-range.sh)  set -- aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HEAD ;;
         *)                  set -- 7 ;;
     esac
     ID_ARGV=( "$@" )
@@ -142,6 +144,7 @@ id_rc() {   # id_rc <script> ; the status that script uses to refuse
         pr-merge-gate.sh) printf 1 ;;   # 0 merged, 1 blocked, 3 paused
         pr-close-round.sh) printf 1 ;;   # 0 closed, 1 stopped, 3 paused
         pr-copilot-phase.sh) printf 1 ;;   # 0 recorded/opened, 1 stopped, 3 paused
+        pr-ci-gate.sh) printf 1 ;;   # 0 carry on, 1 stopped, 3 paused
         *)                printf 2 ;;   # the helpers' documented error status
     esac
 }
@@ -783,6 +786,32 @@ done
 [ -z "$priv_missing" ] \
     && echo "ok   - every runtime helper asks for a privileged interpreter" \
     || { echo "FAIL - helper(s) without a privileged shebang:$priv_missing"; idfail=1; }
+# …AND NO HELPER CALLS ANOTHER BY PATHNAME ALONE. A nested call that reaches a
+# helper by path leaves the kernel to process its shebang, which needs `env -S` —
+# the requirement the driver's own invocation exists so users do not have. The
+# gate, the round close, the phase, the merge gate and the watch all call one
+# another, so this is not a corner: a bare call would make the plugin depend on
+# `-S` again through the back door.
+nested_bare=""
+for f in "$ROOT"/pr-*.sh; do
+    _b="$(basename "$f")"
+    [ "$_b" = pr-selfcheck.sh ] && continue
+    while IFS= read -r _l; do
+        # An empty line is what a `grep` with no matches leaves in the heredoc,
+        # and taking it as a finding reported every helper as bare.
+        [ -n "$_l" ] || continue
+        case "$_l" in
+            *'/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-'*|*'/usr/bin/env bash -p "$STATE_SCRIPT"'*) ;;
+            *) nested_bare="$nested_bare
+$_b: $_l" ;;
+        esac
+    done <<EOF
+$(grep -E '"\$_RB_SELF_DIR"/pr-[a-z-]+\.sh|probe "\$rem" "\$STATE_SCRIPT"' "$f" | grep -v '^#' || true)
+EOF
+done
+[ -z "$nested_bare" ] \
+    && echo "ok   - …and no helper calls another by pathname alone" \
+    || { echo "FAIL - nested call(s) not started privileged:$nested_bare"; idfail=1; }
 head -n 1 "$ROOT/pr-selfcheck.sh" | grep -qxF '#!/usr/bin/env bash' \
     && echo "ok   - …and pr-selfcheck.sh is the stated exception, which re-execs its own way" \
     || { echo "FAIL - pr-selfcheck.sh's shebang changed; its exemption is no longer what it says"; idfail=1; }
@@ -810,15 +839,21 @@ case "$priv_flags" in
 esac
 # …AND A HELPER RUN THROUGH AN UNPRIVILEGED INTERPRETER REFUSES, which is what
 # stops `bash pr-x.sh` being a silent downgrade past the shebang.
-for sc in $ID_CALLERS pr-watch.sh; do
+# EVERY GUARDED HELPER, not the identity callers. `ID_CALLERS` is a list about
+# something else, and it omits `pr-ci-gate.sh` and `pr-merge-range.sh` — so their
+# refusals had only their shebangs asserted, and removing a guard or giving it the
+# wrong sentinel would have left this green.
+for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh pr-merge-range.sh; do
     [ -f "$ROOT/$sc" ] || continue
     id_args "$sc"; set -- "${ID_ARGV[@]}"
     up_out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         bash "$ROOT/$sc" "$@" 2>&1)"; up_rc=$?
-    if [ "$up_rc" -ne 0 ] && printf '%s' "$up_out" | grep -q 'reason=not_privileged'; then
-        echo "ok   - $sc refuses an unprivileged interpreter by name"
+    # THE DOCUMENTED STATUS AS WELL AS THE REASON: a helper refusing with somebody
+    # else's exit code is a caller branching on the wrong thing.
+    if [ "$up_rc" = "$(id_rc "$sc")" ] && printf '%s' "$up_out" | grep -q 'reason=not_privileged'; then
+        echo "ok   - $sc refuses an unprivileged interpreter by name and status"
     else
-        echo "FAIL - $sc ran unprivileged (rc=$up_rc out='$up_out')"; idfail=1
+        echo "FAIL - $sc ran unprivileged or refused wrongly (rc=$up_rc want=$(id_rc "$sc") out='$up_out')"; idfail=1
     fi
 done
 # …AND THE CLASS IS ACTUALLY DEAD, which is the point of the whole change. Five

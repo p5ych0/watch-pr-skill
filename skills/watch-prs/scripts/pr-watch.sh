@@ -91,6 +91,12 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || e
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# STARTED PRIVILEGED AT EVERY CALL SITE BELOW, not folded into this variable.
+# `pr-review-state.sh` is a helper like any other, and a nested call that reaches
+# it by pathname alone leaves the kernel to process its shebang — which needs
+# `env -S`, the thing the driver's own invocation exists to avoid depending on.
+# The prefix stays at the call sites because `probe` takes a command list and an
+# override may name a stub, which `bash -p` reads just as well.
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
 
 INTERVAL="${PR_WATCH_INTERVAL:-30}"
@@ -327,7 +333,7 @@ while :; do
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
+    head="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; hrc=$?
     [ "$hrc" -eq 124 ] && timed_out
     [ "$hrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$hrc" -ne 0 ] || ! is_full_sha "$head"; then
@@ -340,7 +346,7 @@ while :; do
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    line="$(probe "$rem" "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
+    line="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
     [ "$rc" -eq 124 ] && timed_out
     [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$rc" -ne 0 ]; then
@@ -411,7 +417,7 @@ while :; do
                 remaining_s; rrc=$?; rem="$REMAINING"
                 [ "$rrc" -eq 2 ] && timed_out
                 [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-                cur="$(probe "$rem" "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
+                cur="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
                 [ "$crc2" -eq 124 ] && timed_out
                 [ "$crc2" -ne 0 ] && { echo "PR_REVIEW_WATCH state=error reason=review_id_unreadable" >&2; exit 2; }
                 # The SHAPE of both ids, before they are compared or printed.
@@ -460,7 +466,7 @@ while :; do
             remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            verdict="$(probe "$rem" "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
+            verdict="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
             [ "$vrc" -eq 124 ] && timed_out
             [ "$vrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
@@ -602,7 +608,7 @@ while :; do
             remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
+            head_now="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; nrc=$?
             [ "$nrc" -eq 124 ] && timed_out
             [ "$nrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             if [ "$nrc" -ne 0 ] || ! is_full_sha "$head_now"; then

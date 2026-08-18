@@ -195,8 +195,9 @@ and BSD/macOS `env` supports it; on an older `env` the helper refuses to start
 rather than starting unprotected.
 
 **Contributors need that `env`, users do not.** The plugin never depends on the
-shebang — the skill supplies `-p` on every call — but the test suite executes the
-helpers directly, so `pr-selfcheck.sh`, the mandatory pre-push gate, needs an
+shebang: the skill supplies `-p` on every call, and so does every call a helper
+makes to another helper. The test suite is the exception — it executes the
+helpers directly — so `pr-selfcheck.sh`, the mandatory pre-push gate, needs an
 `env` with `-S`.
 
 `bash skills/watch-prs/scripts/pr-…​.sh` is **not** supported either way: a startup

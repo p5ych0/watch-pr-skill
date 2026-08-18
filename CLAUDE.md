@@ -62,12 +62,13 @@ Privileged mode does none of the three things, so there is nothing to shadow.
   and refused: it is a mechanical rewrite far larger than the change it would
   serve, on a requirement met by GNU coreutils since 8.30 and by BSD `env`.
   `README.md` states which side of the line a reader is on.
-- **The CALLER supplies it.** `SKILL.md` invokes every helper as
-  `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a fresh privileged
-  interpreter whatever the driving shell is and whatever the platform's `env`
-  supports — so the plugin gains no `env -S` requirement. The shebang covers
-  direct execution only, and that one does need `-S`.
-  `test-pr-skill-contract.sh` asserts the invocation.
+- **The CALLER supplies it — including when the caller is another helper.**
+  `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+  and the gate, the round close, the phase, the merge gate and the watch each call
+  other helpers the same way. A nested call reaching one by pathname alone would
+  leave the kernel to process its shebang and put the `env -S` requirement back
+  through the side door — `test-pr-identity.sh` fails if any helper calls another
+  bare, and `test-pr-skill-contract.sh` asserts the driver's eighteen.
 - **It cannot be a re-exec from inside.** A `BASH_ENV` hook runs before the
   script's first line; one that prints a forged `PR_X …` line and exits has
   already answered a caller capturing stdout, and no later re-exec takes that

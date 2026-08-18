@@ -173,7 +173,7 @@ while :; do
     fi
     budget=$((tmo - elapsed))
     [ "$budget" -gt "$probe" ] && budget="$probe"
-    PR_CI_PROBE_TIMEOUT="$budget" "$_RB_SELF_DIR"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
+    PR_CI_PROBE_TIMEOUT="$budget" /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
     rb_elapsed || { echo "ABORT: the CI gate lost the clock; refusing to poll unbounded."; exit 1; }
     elapsed="$RB_ELAPSED"
     # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With the
