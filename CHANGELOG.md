@@ -109,12 +109,24 @@
   write there could replace the whole directory between the helper closing its
   file and the caller opening it. Both of the caller's checks then pass, because
   the planted file belongs to the operator too. The helper refuses a group- or
-  other-writable component ANYWHERE on the path to its output — not just the
+  component ANYWHERE on the path to its output that another account controls —
+  not just the
   directory holding it, which the caller creates mode 700 and which would
   therefore always have passed, while an account with write on the directory
   above it can rename that one after the check and leave a replacement at the
-  same name. Sticky is the exception, and is why `/tmp` still works: anyone may
-  create an entry there and nobody may rename another account's. Tested with
+  same name. What is required of each component is OWNERSHIP by this user or by
+  root, and not merely a mode: a sticky directory stops one account renaming
+  ANOTHER'S entries and does nothing about its owner renaming ours, so an
+  attacker-owned `1777` ancestor passed a permission-only test — and an
+  attacker-owned `0755` one is no better, since its owner can add the write bit
+  after the probe. Root is trusted because root can replace this script, the
+  `git` it runs and the shell interpreting it. Sticky remains the MODE exception,
+  and is why `/tmp` works: root owns it, and `1777` lets anyone create an entry
+  while letting nobody rename another account's.
+
+  The probe's status is taken, because `find` prints nothing when it fails and
+  empty output is what the walk reads as safe — so a component renamed during its
+  own probe would have been let through by that interference. Tested with
   `find -prune -perm`, which is POSIX where `stat`'s flags are not, and run in
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.

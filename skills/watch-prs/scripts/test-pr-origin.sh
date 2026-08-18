@@ -446,7 +446,7 @@ chmod 777 "$OPENDIR"
 open_rc=0
 open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
-  && case "$open_diag" in *"writable by other accounts"*) true ;; *) false ;; esac \
+  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/origin" ]; } \
     && pass "a transport directory other accounts can write is refused" \
     || die "the helper wrote into a world-writable directory (rc=$open_rc diag='$open_diag')"
@@ -455,7 +455,7 @@ chmod 770 "$OPENDIR"
 open_rc=0
 open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
-  && case "$open_diag" in *"writable by other accounts"*) true ;; *) false ;; esac; } \
+  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
     && pass "…and so is a group-writable one" \
     || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND SO IS AN ANCESTOR, which is the case the first version of this check
@@ -472,7 +472,7 @@ chmod 700 "$ANCESTOR/mid/leaf"
 anc_rc=0
 anc_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" 2>&1 )" || anc_rc=$?
 { [ "$anc_rc" -ne 0 ] \
-  && case "$anc_diag" in *"writable by other accounts"*) true ;; *) false ;; esac \
+  && case "$anc_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$ANCESTOR/mid/leaf/origin" ]; } \
     && pass "…and a writable ANCESTOR is refused, not just the directory itself" \
     || die "an ancestor that can rename the transport directory was accepted (rc=$anc_rc diag='$anc_diag')"
@@ -485,6 +485,49 @@ rm -f "$ANCESTOR/mid/leaf/origin"
 [ "$(cat "$ANCESTOR/mid/leaf/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a sticky ancestor is accepted, as /tmp is" \
     || die "a sticky ancestor was refused; this would refuse every ordinary session"
+
+# …AND AN ANCESTOR OWNED BY SOMEBODY ELSE IS REFUSED WHATEVER ITS MODE, which is
+# the case a permission-only test cannot see: a sticky directory stops one account
+# renaming ANOTHER'S entries and does nothing about its OWNER renaming ours, and a
+# mode-0755 one owned by somebody else can have the write bit added after the
+# probe. The fixture cannot create a directory owned by another account without
+# root, so it uses one that already exists and is owned by root — the operator is
+# not root here, and the case says so rather than asserting something it cannot
+# stage.
+if [ ! -O / ] && [ -d /lost+found ] && [ ! -O /lost+found ]; then
+    foreign_rc=0
+    foreign_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read /lost+found/origin 2>&1 )" || foreign_rc=$?
+    { [ "$foreign_rc" -ne 0 ] \
+      && case "$foreign_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
+        && pass "…and a component owned by another account is refused" \
+        || die "a foreign-owned component was accepted (rc=$foreign_rc diag='$foreign_diag')"
+else
+    # NAMED, NOT WAVED THROUGH. Staging this needs a directory owned by a THIRD
+    # account — not the operator, not root — and creating one needs privileges the
+    # suite does not have. What goes untested is the `! -uid $EUID -a ! -uid 0`
+    # clause; the mode clause beside it is covered by the cases above, and the
+    # root-owned components on the way to any real transport exercise the
+    # trusted-owner branch on every run of this file.
+    echo "ok   - (no third-account directory exists here; the foreign-owner clause is untested on this machine)"
+fi
+# …AND A PROBE THAT CANNOT RUN IS A REFUSAL, NOT A PASS. `find` prints nothing
+# when it fails, and empty output is what the walk reads as safe — so an attacker
+# renaming a component mid-probe would have been let through by their own
+# interference. A `find` stub that exits non-zero and prints nothing stands in for
+# that race, which a fixture cannot stage for real.
+FINDSTUB="$TMP/findstub"
+mkdir -p "$FINDSTUB"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$FINDSTUB/find"
+chmod +x "$FINDSTUB/find"
+rm -f "$OPENDIR/origin"
+probe_rc=0
+probe_diag="$( cd "$REPO" && run_limited 20 env PATH="$FINDSTUB:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || probe_rc=$?
+{ [ "$probe_rc" -ne 0 ] \
+  && case "$probe_diag" in *"could not examine"*) true ;; *) false ;; esac \
+  && [ ! -e "$OPENDIR/origin" ]; } \
+    && pass "…and a probe that cannot run refuses rather than reading empty as safe" \
+    || die "a failing probe was treated as a clean result (rc=$probe_rc diag='$probe_diag')"
 
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"

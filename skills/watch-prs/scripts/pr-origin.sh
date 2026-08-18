@@ -193,19 +193,43 @@ set -C
 # the file goes" but "can they rename anything on the way to it", and that is
 # every component.
 #
-# STICKY IS THE EXCEPTION AND IS WHY `/tmp` STILL WORKS. A sticky directory lets
-# anyone create entries and lets nobody rename or remove another account's, which
-# is exactly the property being asked for — so `1777` on `/tmp` is safe while
-# `0777` without the bit is not. `! -perm -1000` is that test, and the whole
-# condition is POSIX `find`.
+# OWNERSHIP AS WELL AS MODE, because a mode is only what the owner has chosen so
+# far. A sticky directory stops one account renaming ANOTHER'S entries and does
+# nothing about its OWNER renaming ours — so an attacker-owned `1777` ancestor
+# passed a permission-only test while its owner could replace the subtree
+# underneath it. An attacker-owned `0755` one is no better: its owner can add the
+# write bit after the probe. What has to be true is not "nobody may write it now"
+# but "nobody hostile decides", and that is ownership.
+#
+# THIS USER OR ROOT, and nothing else. Root is trusted here because root can
+# replace this script, the `git` it runs and the shell interpreting it, so
+# refusing a root-owned `/` or `/home` would buy nothing and reject every machine.
+#
+# STICKY IS STILL THE MODE EXCEPTION, and is why `/tmp` works: root owns it, and
+# `1777` lets anyone create entries while letting nobody rename another account's.
+# `0777` without the bit is refused even when we own it.
+#
+# `$EUID` IS AN EXPANSION, so the identity this compares against costs no command;
+# `-uid` is understood by both GNU and BSD `find`, like the rest of this test.
 [[ $OUT = /* ]] \
     || { echo "ABORT: the output path must be absolute; '$OUT' cannot be checked to the root" >&2; exit 1; }
 _rb_dir="${OUT%/*}"
 [[ -n $_rb_dir ]] || _rb_dir=/
 _rb_p="$_rb_dir"
 while : ; do
-    if [[ -n "$(find "$_rb_p" -prune \( -perm -g+w -o -perm -o+w \) ! -perm -1000 -print 2>/dev/null)" ]]; then
-        echo "ABORT: '$_rb_p' is writable by other accounts and not sticky; the transport could be replaced between this write and the caller's read" >&2
+    # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather than
+    # tidiness. If a component is renamed while its turn is being probed, `find`
+    # fails and prints NOTHING — and empty output is what this loop reads as safe,
+    # so the attacker's own interference would have been the thing that let them
+    # through. An unreadable component is a refusal, not a pass.
+    _rb_bad="$(find "$_rb_p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
+    _rb_frc=$?
+    if [[ $_rb_frc -ne 0 ]]; then
+        echo "ABORT: could not examine '$_rb_p' on the way to the transport; refusing rather than assuming it is safe" >&2
+        exit 1
+    fi
+    if [[ -n $_rb_bad ]]; then
+        echo "ABORT: '$_rb_p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
         exit 1
     fi
     [[ $_rb_p = / ]] && break
