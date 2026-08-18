@@ -15,8 +15,8 @@
 #
 #   - IT WAS UNCHECKED. Everything under this directory is covered by the suite,
 #     by `pr-selfcheck.sh` — which requires a test per script — and by the
-#     `macos-shell` CI job. Shell inside a Markdown file is covered by none of
-#     them, and reaching it means parsing Markdown, which was tried and deleted
+#     `macos-shell` CI job when that job is enabled, which it is not while #93
+#     stands. Shell inside a Markdown file is covered by none of them, and reaching it means parsing Markdown, which was tried and deleted
 #     (issue #26, PR #25). `test-pr-skill-contract.sh` had resorted to `sed`-ing
 #     the function out of the document to execute it.
 #   - IT NEEDED A GUARD DANCE. A function pasted into a session that may already
