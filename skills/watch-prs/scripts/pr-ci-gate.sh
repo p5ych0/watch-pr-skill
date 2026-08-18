@@ -83,8 +83,9 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
-# The library loader, loaded the one way it cannot load itself: clear, source,
-# verify. An exported `rb_load` survives into this shell and an empty `loadlib.sh`
+# The library loader, loaded the one way it cannot load itself: clear, take that
+# clear's status, define a refusing stub, source. An exported `rb_load` survives
+# into this shell and an empty `loadlib.sh`
 # still sources successfully, so without the clear the first load runs the INHERITED
 # function — and a stale loader is what makes every other load look
 # clean. See loadlib.sh and issue #22.
@@ -94,8 +95,9 @@ unset -f rb_load 2>/dev/null || {
 # is a NAME — and while a privileged interpreter means no function by that name
 # can be imported, verifying a thing by asking a second thing about it is the
 # shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
-# the verification instead, because calling an `rb_load` that does not exist
-# fails, and that failure is the same one an empty library would produce.
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
 #
 # THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
 # a function is looked up on `PATH` — privileged mode does not change `PATH` —

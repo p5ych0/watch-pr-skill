@@ -8,8 +8,8 @@
   #104 has since made that particular forgery impossible — a privileged shell
   imports no functions — but verifying a thing by asking a second thing about it
   is only as good as the asker, and the answer was always available for free: the
-  FIRST LOAD is the verification, because calling an `rb_load` that does not exist
-  fails exactly as an empty library would.
+  FIRST LOAD is the verification: an empty `loadlib.sh` leaves the refusing stub
+  the caller defined, and calling it fails.
 
   **A refusing stub is what makes that true.** Without it an undefined `rb_load`
   is looked up on `PATH` — privileged startup keeps functions out and does not

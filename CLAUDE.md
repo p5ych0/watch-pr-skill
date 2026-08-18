@@ -234,9 +234,9 @@ rediscovering them.
   lines that load `loadlib.sh` itself are the one thing that cannot use it, and
   they are **clear, take the clear's status, define a refusing stub, source** —
   no `type -t` verification, because the FIRST LOAD is the verification: calling
-  an `rb_load` that does not exist fails exactly as an empty library would, and
-  the handler on that first call carries `reason=loadlib_empty` so the failure is
-  still named. The stub is what makes it true rather than optional — without it
+  an empty `loadlib.sh` leaves the refusing stub the caller defined, calling it
+  fails, and the handler on that first call carries `reason=loadlib_empty` so the
+  failure is still named. The stub is what makes it true rather than optional — without it
   an undefined `rb_load` is looked up on `PATH`, and an executable by that name
   exiting 0 reports every load successful with nothing cleared and no library
   sourced. The clear is still there because a stale loader is what makes every

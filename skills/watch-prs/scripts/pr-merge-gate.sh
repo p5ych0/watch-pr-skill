@@ -103,8 +103,9 @@ unset -f rb_load 2>/dev/null || {
 # is a NAME — and while a privileged interpreter means no function by that name
 # can be imported, verifying a thing by asking a second thing about it is the
 # shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
-# the verification instead, because calling an `rb_load` that does not exist
-# fails, and that failure is the same one an empty library would produce.
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
 #
 # THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
 # a function is looked up on `PATH` — privileged mode does not change `PATH` —

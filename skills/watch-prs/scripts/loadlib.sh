@@ -32,8 +32,8 @@
 # clear is how it comes to be the step that gets collapsed.
 #
 # THERE IS NO `type -t` VERIFICATION IN IT, and the FIRST LOAD is what replaced
-# one: calling an `rb_load` that does not exist fails exactly as an empty library
-# would, and the handler on that call names it `reason=loadlib_empty`. The stub is
+# one: an empty `loadlib.sh` leaves the refusing stub the caller defined, calling
+# it fails, and the handler on that call names it `reason=loadlib_empty`. The stub is
 # what makes that true rather than optional — an `rb_load` that is not a function
 # is looked up on `PATH`, which privileged startup does not change, and an
 # executable by that name exiting 0 would report every load successful with
