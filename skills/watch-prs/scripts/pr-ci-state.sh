@@ -80,7 +80,7 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # that defines it, so this sequence is written out here; that asymmetry is
 # irreducible, but it is not a licence to load the loader carelessly. An exported
 # `rb_load` survives into this shell and an empty `loadlib.sh` still sources
-# successfully, so without the clear the type check below accepts the inherited
+# successfully, so without the clear the first load runs the INHERITED
 # function — and a stale loader is the one thing that can make every OTHER load
 # look clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {

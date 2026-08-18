@@ -92,9 +92,10 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # the guard a script still fails — just further downstream, against the wrong
 # repository — and an rc-only assertion passes on the unguarded code.
 #
-# The loader, loaded the one way it cannot load itself: clear, source, verify. An
+# The loader, loaded the one way it cannot load itself: clear, take that clear's
+# status, define a refusing stub, source. An
 # exported `rb_load` survives into this shell and an empty `loadlib.sh` still
-# sources successfully, so without the clear the type check accepts the inherited
+# sources successfully, so without the clear the first load runs the INHERITED
 # function — and a stale loader is what makes every other load look clean.
 unset -f rb_load 2>/dev/null || {
     echo "merge blocked: reason=loadlib_stale_definition"; exit 1; }

@@ -31,7 +31,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is, which lines a reader honours as a control record, and what text requests a review — one definition each, sourced by every helper that reads the API or posts a caller-written body. |
 | `skills/watch-prs/scripts/clocklib.sh` | What "how much time has passed" means — one clock reader, with the guards a bare read has not got, sourced by `pr-watch.sh` and `pr-ci-gate.sh`. It exists because the gate used `$SECONDS`, a builtin no fixture can reach, so every deadline case in its suite raced real time; `date` is a command, so a fixture owns it. See #66. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
-| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
+| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, take that clear's status, source, and prove the symbol arrived — in one place. The BOOTSTRAP that loads this file cannot use it, and is clear, take the clear's status, define a refusing stub, source: the first load is what verifies it, and the stub is what stops `PATH` answering in its place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |

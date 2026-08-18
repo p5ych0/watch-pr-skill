@@ -85,8 +85,8 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
 # The library loader, loaded the one way it cannot load itself: clear, source,
 # verify. An exported `rb_load` survives into this shell and an empty `loadlib.sh`
-# still sources successfully, so without the clear the type check accepts the
-# inherited function — and a stale loader is what makes every other load look
+# still sources successfully, so without the clear the first load runs the INHERITED
+# function — and a stale loader is what makes every other load look
 # clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
     echo "ABORT: a pre-existing rb_load could not be cleared"; exit 1; }
