@@ -100,32 +100,23 @@
   `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
   helper cannot see either — it had already done its job.
 
-  **The transport file is checked and read as ONE OPEN OBJECT.** Checking a path
-  and then opening it are two operations on a name, so whoever can write the
-  directory holding it — the owner of a mode-0777 `TMPDIR` this user owns, among
-  others — can leave the helper's own output in place for the checks and swap the
-  pathname before the read. The file is opened once with a redirection, which the
-  shell applies and no function can stand in front of, and both the `-O` proof and
-  the read are of `/dev/fd/9`. `-h` is deliberately absent: on Linux that path is
-  itself a symlink into `/proc`, and a path that was a symlink has already been
-  followed by the open.
+  **The helper creates its output exclusively, and cannot be started
+  unprivileged.** `: > "$OUT"` opened with O_TRUNC and followed symlinks, so an
+  account able to replace the transport directory could leave a symlink there
+  pointing at any file the operator owns — the helper truncated that file and
+  wrote a remote URL into it, and the caller's `-O` check passed precisely BECAUSE
+  the target belonged to the operator. `umask 077` and `set -C` make the create
+  O_EXCL, which refuses a symlink whether or not its target exists and refuses a
+  pre-existing regular file too; the value is appended into the object just
+  created rather than redirected a second time, which keeps `>|` — the spelling
+  that overrides noclobber — out of the file entirely.
 
-  **`GIT_DIR` pointed the read at another checkout.** Privileged mode refuses
-  startup files and inherited functions and keeps ordinary environment variables,
-  so a `GIT_DIR` exported by the driving session made the helper read a second
-  repository's origin while standing in this one — and every signoff, revocation
-  and review request then went to that project. The lookup runs under `env -i`
-  with `PATH` alone, rather than a list of `-u`s that is wrong the first time git
-  adds a variable; `GIT_CONFIG_GLOBAL` is covered by the same change and is
-  asserted separately for that reason.
-
-  **Each transport directory now lives exactly as long as its value.** It used to
-  stand from allocation until the pin at the end of setup, putting eight aborts in
-  between — an empty origin, a multi-line one, an unparseable identity, a
-  summary file that could not be created — each leaving a private `watch-pr.*`
-  nothing else can remove. Adding cleanup to eight sites is a list wrong by
-  omission; the origin's directory goes as soon as its value has been read, and
-  the pin allocates its own.
+  The fallback hop for a caller that forgot `bash -p` is gone, and so is the
+  executable bit. The hop advertised a recovery it could not perform: by the time
+  it ran, the caller's `BASH_ENV` hook had already executed in that process, and a
+  hook that writes a forged value and exits has finished before any line of the
+  helper. `bash` reads the file rather than execing it, so the documented
+  invocation is unaffected.
 
   **The transport file is checked and read as ONE OPEN OBJECT.** Checking a path
   and then opening it are two operations on a name, so whoever can write the
