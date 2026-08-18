@@ -87,11 +87,32 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_SIGNOFF status=error reason=lib_dir_unresolvable" >&2; exit 2; }
 unset -f rb_load 2>/dev/null || {
     echo "PR_SIGNOFF status=error reason=loadlib_stale_definition" >&2; exit 2; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead, because calling an `rb_load` that does not exist
+# fails, and that failure is the same one an empty library would produce.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_SIGNOFF status=error reason=loadlib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "PR_SIGNOFF status=error reason=loadlib_empty" >&2; exit 2; }
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_SIGNOFF status=error" || exit 2
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_SIGNOFF status=error" || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "PR_SIGNOFF status=error reason=loadlib_empty" >&2
+    exit 2; }
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_SIGNOFF status=error" || exit 2
 rb_identity || { echo "PR_SIGNOFF status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 

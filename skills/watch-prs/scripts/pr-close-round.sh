@@ -107,12 +107,34 @@ set -uo pipefail
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead, because calling an `rb_load` that does not exist
+# fails, and that failure is the same one an empty library would produce.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || { echo "ABORT: reason=loadlib_unreadable"; exit 1; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || { echo "ABORT: reason=loadlib_empty"; exit 1; }
 # `2>&1` on each: `rb_load` reports on stderr, and everything this script says is
 # documented as stdout — a caller capturing it would otherwise get nothing for the
 # failures that happen before anything else can.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
+    exit 1; }
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted

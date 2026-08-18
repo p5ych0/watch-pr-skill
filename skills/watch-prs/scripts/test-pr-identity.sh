@@ -888,6 +888,60 @@ class_reach="$(run_limited 20 env 'BASH_FUNC_echo%%=() { :; }' \
     || { echo "FAIL - the forgery does not land anywhere (got '$class_reach'); the case above proves nothing"; idfail=1; }
 set -e
 
+# ── THE LOADER IS VERIFIED BY USING IT, NOT BY ASKING `type` ───────────────
+#
+# #88: the preflight asked `type -t rb_load` and took the answer as proof. The
+# first load is the verification now, and two states have to hold for that to be
+# worth anything — an empty library must still be NAMED, and `PATH` must not be
+# able to answer in the library's place.
+set +e
+LDTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$LDTMP/bin" "$LDTMP/run"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$LDTMP/bin/gh"
+chmod +x "$LDTMP/bin/gh"
+for g in "$ROOT"/*.sh; do ln -sf "$g" "$LDTMP/run/$(basename "$g")"; done
+rm -f "$LDTMP/run/loadlib.sh"; : > "$LDTMP/run/loadlib.sh"
+for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
+    ld_out="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$LDTMP/run/$sc" "$@" 2>&1)"; ld_rc=$?
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_out" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc names an empty loader from the first load, with no preflight"
+    else
+        echo "FAIL - $sc did not name an empty loader (rc=$ld_rc want=$(id_rc "$sc") out='$ld_out')"; idfail=1
+    fi
+done
+# …AND AN `rb_load` ON `PATH` CANNOT ANSWER IN THE LIBRARY'S PLACE. Privileged
+# startup keeps functions out; it does not change `PATH`, so without the refusing
+# stub an undefined `rb_load` would be looked up there — and an executable by that
+# name exiting 0 reports every load successful with nothing cleared and no library
+# sourced. The forger is an executable for exactly that reason.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$LDTMP/bin/rb_load"
+chmod +x "$LDTMP/bin/rb_load"
+ld_probe="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" bash -c 'rb_load && echo REACHED' 2>/dev/null)"
+if [ "$ld_probe" = REACHED ]; then
+    echo "ok   - an rb_load on PATH is reachable at all"
+else
+    echo "FAIL - the PATH forger does not run (probe='$ld_probe'); the cases below prove nothing"
+    idfail=1
+fi
+for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
+    ld_out="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$LDTMP/run/$sc" "$@" 2>&1)"; ld_rc=$?
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_out" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc refuses an empty loader with an rb_load on PATH"
+    else
+        echo "FAIL - $sc took its loader from PATH (rc=$ld_rc out='$ld_out')"; idfail=1
+    fi
+done
+rm -rf "$LDTMP"
+set -e
+
 if [ "$idfail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1
