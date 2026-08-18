@@ -166,6 +166,13 @@ and ignores `SHELLOPTS` — so `echo`, `set`, `exit`, `type`, `return` and every
 other builtin in those files is a builtin, not a name an operator's shell can
 replace. This closed a class the review had been answering one member per round.
 
+The guarantee is the CALLER's: `SKILL.md` invokes each helper as
+`/usr/bin/env bash -p …`. A helper's own `$-` test is a last-resort refusal and
+cannot prove privileged STARTUP — a hook that runs `set -p` before the script's
+first line passes it — so `bash pr-x.sh` is unsupported rather than defended, and
+a finding that the guard can be fooled that way is answered by that, not by a
+better guard.
+
 Two things are still worth raising, and they are the stated exceptions:
 
 - `SKILL.md`'s own bash runs in the operator's long-lived shell, which nothing

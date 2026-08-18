@@ -55,14 +55,22 @@ sentinel; `exit` made a refusal non-terminal, so a helper announced an abort and
 went on to post. Each fix was correct and each introduced the next name.
 Privileged mode does none of the three things, so there is nothing to shadow.
 
-- **The shebang, not a re-exec.** A `BASH_ENV` hook runs before the script's first
-  line; one that prints a forged `PR_X …` line and exits has already answered a
-  caller capturing stdout, and no later re-exec takes that back. The interpreter
-  has to be privileged from the start, which only the shebang or the caller can
-  arrange.
-- **`$-` is the guard, and it is not redundant.** An `env` without `-S` fails
-  loudly, but `bash pr-x.sh` skips the shebang entirely; without the guard that is
-  a silent downgrade to an unprotected shell.
+- **The CALLER supplies it.** `SKILL.md` invokes every helper as
+  `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a fresh privileged
+  interpreter whatever the driving shell is and whatever the platform's `env`
+  supports — so the plugin gains no `env -S` requirement. The shebang covers
+  direct execution only, and that one does need `-S`.
+  `test-pr-skill-contract.sh` asserts the invocation.
+- **It cannot be a re-exec from inside.** A `BASH_ENV` hook runs before the
+  script's first line; one that prints a forged `PR_X …` line and exits has
+  already answered a caller capturing stdout, and no later re-exec takes that
+  back.
+- **`$-` proves less than it looks, and is a last-resort refusal.** It reports the
+  MODE, not how the shell got there: run as `BASH_ENV=hook bash pr-x.sh`, the hook
+  is sourced first and can `set -p` and then define `echo` or `exit`, after which
+  the test passes on a shell that has already run hostile code. Nothing inside a
+  script can detect work done before its first line — so `bash pr-x.sh` is
+  UNSUPPORTED rather than defended. Do not add a check that claims otherwise.
 - **`pr-selfcheck.sh` is exempt, deliberately.** It is run by a person rather than
   by the driver, and it already re-execs into a clean shell and clears every
   inherited function — the guarantee it makes for the whole suite.

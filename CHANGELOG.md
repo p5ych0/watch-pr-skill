@@ -21,15 +21,24 @@
   measured: under a forged `echo` and `set`, a privileged shell reports both as
   builtins, and five forged builtins at once do not reach a helper.
 
-  **It is the shebang and not a re-exec, because the hook cannot be out-run from
-  inside.** A `BASH_ENV` hook runs before a script's first line; one that prints a
-  forged `PR_X …` line and exits has already answered a caller capturing stdout.
-  The interpreter has to be privileged from the start.
+  **The driver supplies it, and the shebang is the fallback.** `SKILL.md` invokes
+  every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a
+  fresh privileged interpreter whatever the driving shell is and whatever that
+  platform's `env` supports — so the plugin gains no `env -S` requirement. The
+  shebang covers the other way in, executing a helper directly, and that one does
+  need `-S`.
 
-  **`$-` is still checked, and is not redundant.** An `env` without `-S` fails
-  loudly, but `bash pr-x.sh` skips the shebang entirely — without the guard that
-  would be a silent downgrade to an unprotected shell. Each helper refuses with
-  its own sentinel and `reason=not_privileged`.
+  It cannot be a re-exec from inside: a `BASH_ENV` hook runs before a script's
+  first line, and one that prints a forged `PR_X …` line and exits has already
+  answered a caller capturing stdout.
+
+  **`$-` is checked as a last-resort refusal, and it proves less than it looks.**
+  It reports the MODE a shell is in, not how it got there — run as
+  `BASH_ENV=hook bash pr-x.sh`, the hook is sourced first and can itself `set -p`
+  and then define `echo` or `exit`, after which the test passes on a shell that
+  has already executed hostile code. Nothing inside a script can detect work done
+  before its first line, so `bash pr-x.sh` is unsupported rather than defended,
+  and it is the CALLER that carries the guarantee.
 
   `pr-selfcheck.sh` is the exception and is asserted to be one: it is run by a
   person, and it already re-execs into a clean shell and clears every inherited

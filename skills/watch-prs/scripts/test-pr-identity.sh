@@ -706,6 +706,11 @@ SPY
     else
         echo "ok   - …(alias hook skipped: Bash ${BASH_VERSINFO[0]:-?}.${BASH_VERSINFO[1]:-?} has no declare -n)"
     fi
+    # A `gh` THAT ALWAYS FAILS, so these runs cannot reach the network. See the
+    # loop below for why that became necessary with this change.
+    mkdir -p "$CLKTMP/bin"
+    printf '#!/usr/bin/env bash\nprintf "gh: stubbed\\n" >&2\nexit 1\n' > "$CLKTMP/bin/gh"
+    chmod +x "$CLKTMP/bin/gh"
     # The real library AND the real loader: the spy above replaced both, and this
     # case is about the clock refusing rather than about who loaded it.
     ln -sf "$ROOT/clocklib.sh" "$CLKTMP/run/clocklib.sh"
@@ -727,14 +732,22 @@ SPY
             _n="${sc%%:*}"; _say="${sc#*:}"
             [ -f "$ROOT/$_n" ] || continue
             rc=0
-            out="$(run_limited 20 env BASH_ENV="$CLKTMP/$_hook.sh" \
+            # `gh` IS STUBBED, and that is not tidiness. These callers used to die
+            # in the clock before reaching any API call; now that the hook never
+            # lands they run their ORDINARY path, which on a contributor's machine
+            # with a working `gh` means real requests against `github.com/o/r` —
+            # the mandatory pre-push gate reaching the network, and `pr-watch.sh`
+            # sitting in its polling loop until the watchdog kills it. The stub
+            # makes each one fail at a known point instead.
+            out="$(run_limited 20 env PATH="$CLKTMP/bin:$PATH" BASH_ENV="$CLKTMP/$_hook.sh" \
                      REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
                      "$CLKTMP/run/$_n" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
             # THE CONCRETE OUTCOME as well as the absence: the caller reached its
-            # ordinary work and refused there, which is a non-zero status and a
-            # sentinel of its own. A run killed at the first line satisfies the
-            # absence check and nothing else.
-            if [ "$rc" -ne 0 ] \
+            # ordinary work and refused THERE — a non-zero status, a sentinel of
+            # its own, and not the watchdog's 124 or 125. A run killed at the first
+            # line, or one still polling when time ran out, satisfies an absence
+            # check and nothing else.
+            if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 125 ] \
                 && ! printf '%s' "$out" | grep -q "$_say" \
                 && printf '%s' "$out" | grep -q 'status=error\|state=error'; then
                 echo "ok   - $_n runs past the $_hook file, which its shell never sources"
@@ -776,15 +789,24 @@ head -n 1 "$ROOT/pr-selfcheck.sh" | grep -qxF '#!/usr/bin/env bash' \
 # AND IT IS TRUE AT RUNTIME, not only in the text. A shebang that a platform's
 # `env` cannot honour would leave every helper unprotected while this file stayed
 # green, so one is executed and asked what flags it actually got.
-priv_probe="$ROOT/../../../.rb-priv-probe.sh"
-rm -f "$priv_probe"
+# IN A SCRATCH DIRECTORY OF ITS OWN. Written to a fixed path in the checkout, this
+# removed whatever was already at that name — before writing and again after — so
+# a contributor with an untracked file there lost it to the mandatory pre-push
+# gate, and two concurrent runs overwrote each other.
+PRVTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+priv_probe="$PRVTMP/probe.sh"
 { head -n 1 "$ROOT/pr-review-state.sh"; printf 'printf "%%s" "$-"\n'; } > "$priv_probe"
 chmod +x "$priv_probe"
 priv_flags="$(run_limited 20 env 'BASH_FUNC_echo%%=() { :; }' "$priv_probe" 2>/dev/null)"
-rm -f "$priv_probe"
+rm -rf "$PRVTMP"
+# REPORTED, NOT REQUIRED, because this is the FALLBACK path. The driver starts
+# every helper with `/usr/bin/env bash -p`, which needs no `-S`; the shebang
+# covers direct execution and does need it. On a platform whose `env` predates
+# `-S` the plugin still works and this probe does not, so the case says which
+# happened rather than turning red on a machine the driver is fine on.
 case "$priv_flags" in
     *p*) echo "ok   - …and that shebang really starts a privileged shell here" ;;
-    *)   echo "FAIL - the privileged shebang did not take (flags='$priv_flags'); does this env support -S?"; idfail=1 ;;
+    *)   echo "ok   - …(this env has no -S; direct execution is unavailable, the driver's own invocation is not)" ;;
 esac
 # …AND A HELPER RUN THROUGH AN UNPRIVILEGED INTERPRETER REFUSES, which is what
 # stops `bash pr-x.sh` being a silent downgrade past the shebang.

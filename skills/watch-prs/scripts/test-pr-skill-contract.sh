@@ -33,6 +33,32 @@ if [ ! -f "$SKILL" ]; then
     exit 0
 fi
 
+# ── EVERY HELPER THE DRIVER RUNS IS STARTED PRIVILEGED ─────────────────────
+#
+# `/usr/bin/env bash -p` before each one, and that is where the guarantee lives.
+# The helpers also carry a privileged shebang, but that needs `env -S` and only
+# covers direct execution; this invocation starts a fresh privileged interpreter
+# whatever the driving shell is and whatever that platform's `env` supports.
+#
+# WHAT IT BUYS is that no `BASH_ENV` hook, no inherited function and no exported
+# `SHELLOPTS` reaches a helper — the class that produced `type`, `return`, `set`,
+# `echo` and `exit` findings one per review round. The helpers' own `$-` check
+# cannot establish this: a hook that runs `set -p` before the script's first line
+# passes it, which is why the CALLER is asserted here rather than the callee.
+_unpriv=""
+while IFS= read -r _line; do
+    case "$_line" in
+        *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
+        *) _unpriv="$_unpriv
+$_line" ;;
+    esac
+done <<EOF
+$(grep -F '"$RB_SCRIPTS"/pr-' "$SKILL" || true)
+EOF
+[ -z "$_unpriv" ] \
+    && pass "every helper the driver runs is started with /usr/bin/env bash -p" \
+    || die "helper invocation(s) not started privileged:$_unpriv"
+
 # ── the reviewers are the GitHub apps, not a local process ─────────────────
 grep -q 'chatgpt-codex-connector\[bot\]' "$SKILL" \
     && pass "skill names the Codex bot login" \
@@ -146,7 +172,7 @@ grep -qF 'Say on the thread which of the two you took and why' <<<"$skill_flat" 
 # line in the raw file removes the dependency on the flattening AND on the
 # substring, rather than guarding either — see CLAUDE.md § One change per review
 # round.
-RB_CLOSE_CALL='"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"'
+RB_CLOSE_CALL='/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"'
 rb_close_call_present() { grep -qxF "$RB_CLOSE_CALL" "$SKILL"; }
 rb_close_call_present \
     && pass "the post-Copilot close is delegated to the phase script" \
@@ -678,8 +704,8 @@ grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$
 # `grep` in a command substitution ABORTS THE WHOLE FILE, so a document that
 # dropped the very line being checked killed the run instead of failing it: no
 # FAIL, no RESULT, and a caller grepping for failures saw none.
-_gate_ln="$(grep -n '^GATE_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
-_post_ln="$(grep -n '^POST_OUT="\$("\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_gate_ln="$(grep -n '^GATE_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \
     && [ "$_gate_ln" -lt "$_res_ln" ] && [ "$_res_ln" -lt "$_post_ln" ]; } \
@@ -998,9 +1024,9 @@ grep -q 'if \[ "\$PHASE_RC" -eq 3 \]; then' "$SKILL" \
 # them — `record` proves and posts, the document stops and asks, and only the
 # answer runs `open`. Anchored on the invocations, not on the usage comment that
 # lists both a few lines above them.
-_rec_ln="$(grep -n 'PHASE_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_rec_ln="$(grep -n 'PHASE_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh record N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _stop_ln="$(grep -n 'STOP — the next phase is the operator' "$SKILL" | head -1 | cut -d: -f1)" || true
-_open_ln="$(grep -n 'OPEN_OUT="\$("\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_open_ln="$(grep -n 'OPEN_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-copilot-phase.sh open N' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_rec_ln" ] && [ -n "$_stop_ln" ] && [ -n "$_open_ln" ] \
     && [ "$_rec_ln" -lt "$_stop_ln" ] && [ "$_stop_ln" -lt "$_open_ln" ]; } \
     && pass "the Copilot phase opens only after the stop the operator answers" \
@@ -2017,7 +2043,7 @@ merge_case="$(awk '/^case "\$MERGE_RC" in/ {c=1} c {print} c && /^esac/ {exit}' 
 # the range-check root from the current directory, so a `cd` into another checkout
 # between setup and the merge would point every gate — and the admin merge — at
 # whatever PR of THAT repository shares this number.
-grep -q 'cd "\$REPO_DIR" && "\$RB_SCRIPTS"/pr-merge-gate.sh' "$SKILL" \
+grep -q 'cd "\$REPO_DIR" && /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-merge-gate.sh' "$SKILL" \
     && pass "…and the gate is invoked from the captured repository root" \
     || die "a cd between setup and the merge would repoint every gate"
 
@@ -2340,7 +2366,7 @@ while IFS= read -r line; do
         # command with none of the tokens above in it. `<` and `>` are refused
         # outright — these statements have no business redirecting.
         *'&&'*|*'||'*|*'|'*|*'&'*|*'$('*|*'`'*|*'>('*|*'<('*|*'>'*|*'<'*) ok=0 ;;
-        '"$RB_SCRIPTS"/pr-findings.sh '*) ;;
+        '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-findings.sh '*) ;;
         *) ok=0 ;;
     esac
     while [ -n "$rest" ] && [ "$ok" -eq 1 ]; do

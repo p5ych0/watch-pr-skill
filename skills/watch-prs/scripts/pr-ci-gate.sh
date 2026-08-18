@@ -58,11 +58,22 @@
 # caller — no later re-exec takes that back. The interpreter has to be privileged
 # from the start, which only the shebang or the caller can arrange.
 #
-# `$-` IS THE GUARD because it is shell state a hook cannot write, and it is not
-# belt-and-braces for the shebang: an `env` without `-S` fails loudly, but a
-# caller that runs this file through its own interpreter — `bash pr-x.sh` —
-# skips the shebang entirely, and this is what stops that being a silent
-# downgrade to an unprotected shell.
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
 if [[ $- != *p* ]]; then
     echo "ABORT: the CI gate reason=not_privileged"
     exit 1

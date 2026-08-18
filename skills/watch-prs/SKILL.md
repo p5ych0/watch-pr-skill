@@ -422,7 +422,7 @@ WHO="$CODEX_BOT"
 if [ "$AUTO_REVIEW" = "yes" ]; then
     PRIOR_REVIEW=""
 else
-    PRIOR_REVIEW=$("$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
+    PRIOR_REVIEW=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
 fi
 
@@ -467,13 +467,13 @@ WHO="$CODEX_BOT"        # or "$COPILOT_BOT" once step 7 has begun
 # head (after a dismissal, or after answering a finding rather than changing
 # code) has nothing else to tell the new pass from the old one, so without it the
 # first poll reports the PREVIOUS review as this round's answer.
-"$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"; WATCH_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"; WATCH_RC=$?
 ```
 
 **Claude Code** — run it as this session's **Monitor** so the verdict surfaces
 into the chat by itself instead of being waited on:
 
-- `command`: `"$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"`
+- `command`: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-watch.sh N "$WHO" --after-review "$PRIOR_REVIEW"`
 - `description`: `Review verdict for PR N` · `timeout_ms`: `3600000`
 - `persistent`: `true`
 
@@ -549,7 +549,7 @@ Inline review comments are the findings. The review **body** is the reviewer's
 non-blocking channel and does not gate the merge — with one exception, below.
 
 ```bash
-"$RB_SCRIPTS"/pr-findings.sh list N; FIND_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-findings.sh list N; FIND_RC=$?
 ```
 
 - `0` — the printed threads are the complete set of unresolved findings.
@@ -571,7 +571,7 @@ inline comment — the merge gate then refuses to pass while `list` shows nothin
 fix, which looks like a stuck loop rather than a request.
 
 ```bash
-"$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"; BODY_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-findings.sh blocked-body N "$WHO"; BODY_RC=$?
 ```
 
 `BODY_RC` carries the same contract as `FIND_RC`: **`2` is a stop.** If the head
@@ -724,7 +724,7 @@ expensive part of this loop: each one costs a review pass, a fix, a summary and 
 wait, so a finding caught here is worth several caught there.
 
 ```bash
-"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
 ```
 
 - `0` — the mechanical checks pass. Continue with the judgement list below.
@@ -817,7 +817,7 @@ hard-coded answer — one recipe here, two orders there:
 # script refuses anything but `yes` or `no`, so the mode this PR is in picks the
 # order INSIDE the script — rather than deciding which of two recipes to copy out
 # of here, which is how the two drifted apart in the first place.
-GATE_OUT="$("$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" 2>&1)"; GATE_RC=$?
+GATE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" 2>&1)"; GATE_RC=$?
 printf '%s\n' "$GATE_OUT"
 case "$GATE_RC" in
     0) ;;
@@ -841,7 +841,7 @@ Then, and only then:
 # `$GATED_HEAD`, locally and on the PR, before it posts anything: the replies take
 # as long as they take, and the gate's green verdict belongs to the commit the
 # gate saw and to no other.
-POST_OUT="$("$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
+POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
 printf '%s\n' "$POST_OUT"
 # THE BASELINE COMES BACK IN THE SUCCESS RECORD. The script reads it immediately
 # before it requests the pass, and step 3's watch needs exactly that value — a
@@ -925,7 +925,7 @@ It is documented separately because the phase transitions in steps 7 and 8 check
 the same boundary for the same reason.
 
 ```bash
-"$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO"; ROUNDS_RC=$?
 ```
 
 Counting **per reviewer** is what makes the number mean something: the Codex
@@ -971,7 +971,7 @@ reached.
   # the acknowledgement below recorded the operator's permission on the strength
   # of a probe that failed. Permission is the one thing that must never be
   # inferred from unreadable output.
-  ROUNDS_OUT="$("$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
+  ROUNDS_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-round-count.sh N "$WHO" 2>/dev/null)"; ROUNDS_RC=$?
   [ "$ROUNDS_RC" -eq 3 ] || { echo "ABORT: the round counter did not report a pause (rc=$ROUNDS_RC)."; exit 0; }
   ROUNDS="$(printf '%s\n' "$ROUNDS_OUT" \
             | sed -n 's/^PR_ROUND_PAUSE .*rounds=\([0-9][0-9]*\).*/\1/p')" \
@@ -1078,7 +1078,7 @@ EOF
 # stage and everything it drives inherit — so this call has no cwd dependency and
 # needs no wrapper. Do not add one: a `(cd … && …)` guard here is what the pin
 # replaced, and `cd` is a name a function can take.
-PHASE_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
+PHASE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh record N "$SUMMARY_FILE" 2>&1)"; PHASE_RC=$?
 printf '%s\n' "$PHASE_OUT"
 case "$PHASE_RC" in
     0|3) ;;   # 3 is a pause, and the signoff is recorded either way
@@ -1235,7 +1235,7 @@ way — the signoff is on the PR, so a later session reads it back with
 # repository wrong costs most: `open` posts a signoff revocation and requests a
 # review. Both are inherited from the setup export rather than decided by the
 # current directory, so there is nothing to wrap here either.
-OPEN_OUT="$("$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
+OPEN_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
 [ "$OPEN_RC" -eq 0 ] \
     || { echo "The Copilot phase did not open. This is not permission to skip the pass: decide with the operator."; exit "$OPEN_RC"; }
@@ -1295,7 +1295,7 @@ REVIEWERS=both   # or `codex-only`
 # THE SESSION PIN SETTLES THE REPOSITORY HERE AS WELL. The merge gate below still
 # runs from `$REPO_DIR`, and that is a different question: it hands
 # `pr-merge-range.sh` a tree to inspect, which the pin says nothing about.
-"$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh close N "$CODEX_SHA" "$REVIEWERS"
 CLOSE_RC=$?
 # `[[`, A RESERVED WORD, NOT `[`. This runs in the driving session's own shell,
 # which is long-lived and where a function named `[` can already exist — it
@@ -1351,7 +1351,7 @@ before continuing into the Copilot phase.
 #   2  could not tell — fail closed. An unreadable answer is not "no signoff",
 #      and treating it as one repeats a phase; treating it as a signoff skips a
 #      review nobody did
-SIGNOFF_OUT="$("$RB_SCRIPTS"/pr-signoff.sh N "$CODEX_BOT" 2>&1)"; SIGNOFF_RC=$?
+SIGNOFF_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh N "$CODEX_BOT" 2>&1)"; SIGNOFF_RC=$?
 case "$SIGNOFF_RC" in
     0) ;;
     1) echo "The Codex phase is not closed on this PR — there is no recorded signoff. Run it before merging or opening the Copilot phase."; exit 0 ;;
@@ -1387,7 +1387,7 @@ RESUMED_HEAD=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '
 #
 # A recorded COPILOT signoff is what tells the two apart, and it is a fact on the
 # PR rather than a guess about the session.
-COPILOT_SIGNOFF_OUT="$("$RB_SCRIPTS"/pr-signoff.sh N "$COPILOT_BOT" 2>&1)"; COPILOT_SIGNOFF_RC=$?
+COPILOT_SIGNOFF_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh N "$COPILOT_BOT" 2>&1)"; COPILOT_SIGNOFF_RC=$?
 case "$COPILOT_SIGNOFF_RC" in
     0|1) ;;
     *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC): $COPILOT_SIGNOFF_OUT"; exit 0 ;;
@@ -1404,7 +1404,7 @@ if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && [ "$COPILOT_SHA" = "$RESUMED_HEAD" ]; then
     # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
     # than the head; the gate is what proves the delta is Copilot-only. What must
     # still hold is the COPILOT signoff, on the head being merged.
-    RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); RESUMED_RC=$?
+    RESUMED_VERDICT=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); RESUMED_RC=$?
     if [ "$RESUMED_RC" -ne 0 ]; then
         echo "Copilot's recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
         echo "Treat the Copilot phase as open: request a review before merging."
@@ -1420,7 +1420,7 @@ else
         echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
         exit 0
     fi
-    RESUMED_VERDICT=$("$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
+    RESUMED_VERDICT=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
     if [ "$RESUMED_RC" -ne 0 ]; then
         echo "The recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
         echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
@@ -1478,7 +1478,7 @@ fi
 # and in exchange requires the head to BE the commit Codex signed, because the
 # `Review-Phase: copilot` trailers that license a moved head do not exist when
 # there was no Copilot phase.
-(cd "$REPO_DIR" && "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
+(cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
 case "$MERGE_RC" in
     0) ;;   # merged; the script printed the head it pinned
