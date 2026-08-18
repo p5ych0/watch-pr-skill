@@ -490,10 +490,14 @@ rm -f "$ANCESTOR/mid/leaf/origin"
 # the case a permission-only test cannot see: a sticky directory stops one account
 # renaming ANOTHER'S entries and does nothing about its OWNER renaming ours, and a
 # mode-0755 one owned by somebody else can have the write bit added after the
-# probe. The fixture cannot create a directory owned by another account without
-# root, so it uses one that already exists and is owned by root — the operator is
-# not root here, and the case says so rather than asserting something it cannot
-# stage.
+# probe.
+#
+# THE CANDIDATE IS SEARCHED FOR, because the fixture cannot create one: a
+# directory owned by a THIRD account — not the operator, not root — needs
+# privileges the suite does not have. Pointing at a root-owned path instead was
+# the first attempt and was invalid, since the helper TRUSTS root and the refusal
+# never came. Where no such directory exists the case says so rather than
+# asserting something it cannot stage.
 # THE CANDIDATE MUST BE OWNED BY NEITHER, and `! -O` is not that test: it is
 # false for a root-owned directory too, and the helper TRUSTS root — so pointing
 # at `/lost+found` selected a path the rule accepts by design, the refusal never
@@ -522,6 +526,36 @@ else
     # trusted-owner branch on every run of this file.
     echo "ok   - (no third-account directory exists here; the foreign-owner clause is untested on this machine)"
 fi
+# …AND A SYMLINK DOES NOT HIDE THE REAL ANCESTRY. A lexical walk checks the path
+# as WRITTEN: `TMPDIR=/home/me/t` pointing at a third account's tree checks
+# `/home/me` and never that tree, so the account owning it can replace the
+# directory after every check has passed. Symlinks cannot be refused outright
+# instead — macOS reaches its own temporary directories through them.
+if [ -n "$FOREIGN" ]; then
+    LINKDIR="$TMP/linkcase"
+    mkdir -p "$LINKDIR"
+    ln -sfn "$FOREIGN" "$LINKDIR/t"
+    link_rc=0
+    link_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/origin" 2>&1 )" || link_rc=$?
+    { [ "$link_rc" -ne 0 ] \
+      && case "$link_diag" in *"could be replaced between this write"*|*"could not examine"*|*"could not resolve"*) true ;; *) false ;; esac; } \
+        && pass "…and a symlink into a third account's tree is refused, not walked lexically" \
+        || die "a symlinked ancestor hid the real tree (rc=$link_rc diag='$link_diag')"
+else
+    echo "ok   - (no third-account directory here; the symlinked-ancestry case did not run)"
+fi
+# …WHILE A SYMLINK TO SOMEWHERE SAFE IS STILL FOLLOWED, which is the case macOS
+# depends on: refusing every symlink would refuse that platform.
+SAFELINK="$TMP/safelink"
+mkdir -p "$SAFELINK"
+ln -sfn "$OPENDIR" "$SAFELINK/t"
+chmod 700 "$OPENDIR"
+rm -f "$OPENDIR/origin"
+( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/origin" ) >/dev/null 2>&1
+[ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
+    && pass "…while a symlink to a directory this user owns is followed as before" \
+    || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
+
 # …AND A PROBE THAT CANNOT RUN IS A REFUSAL, NOT A PASS. `find` prints nothing
 # when it fails, and empty output is what the walk reads as safe — so an attacker
 # renaming a component mid-probe would have been let through by their own

@@ -124,6 +124,17 @@
   and is why `/tmp` works: root owns it, and `1777` lets anyone create an entry
   while letting nobody rename another account's.
 
+  **The path is checked as it is WRITTEN and as it RESOLVES**, because neither
+  covers the other. A lexical walk never sees the real ancestry — a `TMPDIR` of
+  `/home/me/t` pointing at `/srv/other/mine` checks `/home/me` and never
+  `/srv/other`, and the account that owns that one can replace `mine` after every
+  check has passed. Refusing symlinks instead is not available: macOS reaches its
+  own temporary directories through them. So the walk runs twice, over the written
+  path and over `cd -P`/`pwd -P`'s answer, and a path that cannot be resolved is a
+  refusal. The mode clause skips links, whose own mode is `0777` everywhere and
+  means nothing; the ownership clause applies to them exactly as to directories,
+  because whoever owns a link can repoint it.
+
   The probe's status is taken, because `find` prints nothing when it fails and
   empty output is what the walk reads as safe — so a component renamed during its
   own probe would have been let through by that interference. Tested with

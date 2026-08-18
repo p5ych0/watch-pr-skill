@@ -215,29 +215,57 @@ set -C
     || { echo "ABORT: the output path must be absolute; '$OUT' cannot be checked to the root" >&2; exit 1; }
 _rb_dir="${OUT%/*}"
 [[ -n $_rb_dir ]] || _rb_dir=/
-_rb_p="$_rb_dir"
-while : ; do
-    # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather than
-    # tidiness. If a component is renamed while its turn is being probed, `find`
-    # fails and prints NOTHING — and empty output is what this loop reads as safe,
-    # so the attacker's own interference would have been the thing that let them
-    # through. An unreadable component is a refusal, not a pass.
-    _rb_bad="$(find "$_rb_p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
-    _rb_frc=$?
-    if [[ $_rb_frc -ne 0 ]]; then
-        echo "ABORT: could not examine '$_rb_p' on the way to the transport; refusing rather than assuming it is safe" >&2
-        exit 1
-    fi
-    if [[ -n $_rb_bad ]]; then
-        echo "ABORT: '$_rb_p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
-        exit 1
-    fi
-    [[ $_rb_p = / ]] && break
-    _rb_next="${_rb_p%/*}"
-    [[ -n $_rb_next ]] || _rb_next=/
-    [[ $_rb_next = "$_rb_p" ]] && break
-    _rb_p="$_rb_next"
-done
+# THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
+# WRITTEN and as it RESOLVES, and neither covers the other.
+_rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
+    local p="$1" bad frc next
+    while : ; do
+        # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather
+        # than tidiness. If a component is renamed while its turn is being
+        # probed, `find` fails and prints NOTHING — and empty output is what this
+        # loop reads as safe, so the attacker's own interference would have been
+        # the thing that let them through. An unreadable component is a refusal.
+        # `! -type l` ON THE MODE CLAUSE ONLY. A symlink's own mode is `0777` on
+        # every system that has them, so asking whether it is world-writable
+        # refuses every path that goes through one — which is every macOS
+        # temporary directory. What a link's mode means is nothing; what its
+        # OWNER means is everything, because that account can repoint it, so the
+        # ownership clause applies to links exactly as it does to directories.
+        bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
+        frc=$?
+        if [[ $frc -ne 0 ]]; then
+            echo "ABORT: could not examine '$p' on the way to the transport; refusing rather than assuming it is safe" >&2
+            return 1
+        fi
+        if [[ -n $bad ]]; then
+            echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
+            return 1
+        fi
+        [[ $p = / ]] && break
+        next="${p%/*}"
+        [[ -n $next ]] || next=/
+        [[ $next = "$p" ]] && break
+        p="$next"
+    done
+    return 0
+}
+# THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
+# examines the link rather than what it points at, so this pass asks who owns each
+# link on the way — an account that owns one can repoint it.
+_rb_walk "$_rb_dir" || exit 1
+# …AND THE PATH AS IT RESOLVES, which is where the FILE lives. A lexical walk
+# never sees the real ancestry: `TMPDIR=/home/me/t` pointing at `/srv/other/mine`
+# checks `/home/me` and never `/srv/other`, and the account that owns that one can
+# replace `mine` after every check has passed. Symlinks cannot simply be refused
+# instead — macOS reaches its own temporary directories through them, so refusing
+# would refuse that platform.
+#
+# `cd -P` AND `pwd -P` ARE BUILTINS, and this process is privileged, so no
+# function can stand in front of either. In the driving shell they would be names.
+_rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
+[[ -n $_rb_real ]] \
+    || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
+[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || exit 1
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
