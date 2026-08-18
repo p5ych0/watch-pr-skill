@@ -23,10 +23,10 @@
 #
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
-# line — the hop below reaches it a moment too late, and a hook needs to shadow
-# nothing to use that moment: a hook that writes the value file and exits is
-# enough. The hop stays for a caller that forgets, and it is the difference
-# between a defence and a default.
+# line. A hook needs to shadow nothing to use the gap: one that writes the value
+# file and exits is a complete attack, finished before this script's first line.
+# There is no fallback for a caller that forgets — see the block above the guard
+# for why one cannot work — so a missing `-p` is refused, not recovered from.
 #
 # THERE ARE NO BRACES AND NO DESCRIPTORS LEFT TO GET WRONG, which is the point of
 # the file. An earlier version of this header required both, and required them for
@@ -91,23 +91,15 @@
 # both were forged.
 #
 # `[[` and `!=` are reserved-word syntax, so the guard itself cannot be
-# intercepted. If `exec` or `env` is shadowed the hop silently does not happen and
-# this file runs on unprotected — the regress recorded at the bottom, unchanged
-# and unclosable from inside a process.
-# STRICT MODE IS SET HERE, AFTER THE HOP, AND THAT POSITION IS FORCED. `bash -p`
+# intercepted.
+# STRICT MODE IS SET HERE, AFTER THE GUARD, AND THAT POSITION IS FORCED. `bash -p`
 # ignores an inherited `SHELLOPTS`, which is most of why it is used — so a strict
-# calling shell cannot supply these, and setting them before the hop would not
-# survive it either. `CLAUDE.md` classifies this file in the `set -uo pipefail`
+# calling shell cannot supply these. `CLAUDE.md` classifies this file in the `set -uo pipefail`
 # row; an earlier draft deleted the line along with the block it lived in and the
 # script ran with none of it.
 #
 # `-e` IS EXCLUDED, as in every other helper here: the probes below report their
 # answers as exit statuses. See CLAUDE.md § Bash conventions.
-#
-# AND THE HOP IS BOUNDED, because a guard on shell state loops forever if the hop
-# does not change that state — a `bash` that ignores `-p`, or an `env` that never
-# reaches one. Removing `-p` from the line below hangs this script rather than
-# failing it, which is how the bound was found.
 #
 # THERE IS NO HOP, AND THE FILE IS NOT EXECUTABLE. Both were removed together, and
 # for the same reason: neither could work. The hop re-execed into `bash -p` for a
@@ -163,15 +155,20 @@ OUT="${2-}"
 # mode says who may write it once created. The caller's umask is whatever the
 # operator's shell had.
 #
-# THE VALUE IS THEN APPENDED, NOT REDIRECTED AGAIN. Under noclobber a second `>`
-# to the path this line just created fails — correctly — so the write below uses
-# `>>` into the empty object already open to us. That keeps `>|`, the spelling
-# that overrides noclobber, out of the file entirely: it is what a later edit
-# reaches for when one of these refuses something, and there is now nothing here
-# for it to look like it belongs to.
+# THE CREATE AND THE WRITE ARE ONE OPEN, and that is the whole reason there is no
+# separate truncation here any more. Creating the file and then appending to it
+# by NAME is two opens: `set -C` governs the first and not the second, so an
+# account able to replace the directory could wait for the exclusive create to
+# close, put a symlink at the same name, and have the `>>` follow it into a file
+# the operator owns. The value is written by the single redirection that creates
+# the object, below, so there is no interval and no second lookup.
+#
+# NOTHING IS LEFT BEHIND ON A REFUSAL EITHER, which is what the truncation was
+# for: a run that refuses before its write creates no file at all, and the
+# caller — which allocates a fresh directory per run and opens the result once
+# to check and read it — sees the open fail rather than an empty file.
 umask 077
 set -C
-> "$OUT" || { echo "ABORT: could not create '$OUT' exclusively; it already exists, or is a symlink" >&2; exit 1; }
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
@@ -182,8 +179,8 @@ if [[ $MODE = pin ]]; then
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" >> "$OUT" \
-        || { echo "ABORT: could not write the pin to '$OUT'" >&2; exit 1; }
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
+        || { echo "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink" >&2; exit 1; }
     exit 0
 fi
 
@@ -242,24 +239,21 @@ if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     echo "ABORT: origin contains a newline; it cannot be a single value" >&2; exit 1
 fi
-printf '%s\n' "$_rb_origin" >> "$OUT" \
-    || { echo "ABORT: could not write the origin to '$OUT'" >&2; exit 1; }
+printf '%s\n' "$_rb_origin" > "$OUT" \
+    || { echo "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink" >&2; exit 1; }
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────
 #
-# Written here rather than left for a reader to rediscover, and referenced from
-# the fallback hop above. Both need a shell that is already executing arbitrary
-# code as the operator — and such a shell can edit this file, or the commit,
-# instead of out-arguing it.
+# Written here rather than left for a reader to rediscover. What remains needs a
+# shell that is already executing arbitrary code as the operator — and such a
+# shell can edit this file, or the commit, instead of out-arguing it.
 #
-# `exec` AND `env`, IN THE FALLBACK HOP. When the caller starts this file the
-# documented way — `/usr/bin/env bash -p …` — the hop never runs and neither name
-# is reached. It exists for a caller that forgets, and there it is made of names:
-# a shadowed `exec` leaves the process where it was, unprivileged, with the hook
-# already sourced. That is a default failing to engage rather than a defence
-# failing, and the difference is why the caller's part is asserted by
-# `test-pr-skill-contract.sh` rather than assumed.
+# THE CALLER'S HALF, WHICH THIS FILE CANNOT SUPPLY. `bash -p` has to be in force
+# before the first line, so a caller that omits it gets a refusal rather than a
+# recovery: a hook that writes the value file and exits has already answered by
+# then. That is why the invocation is asserted by `test-pr-skill-contract.sh`
+# rather than assumed, and why there is no fallback hop here to be shadowed.
 #
 # A POISONED `PATH`, WHICH IS NOT THIS FILE'S TO ANSWER. A directory prepended to
 # `PATH` — readonly, so the hook's own shell cannot undo it — supplies a forged

@@ -260,8 +260,9 @@ unset -f rb_identity 2>/dev/null \
 # privileged mode is what stops `BASH_ENV` being sourced at all, so entering it
 # from inside a shell that has already run the hook is too late. A hook needs to
 # shadow nothing to win that race: one that writes the transport file and exits is
-# a complete attack. The helper hops to `-p` itself as well, for a caller that
-# forgets, but only this gets there before the hook.
+# a complete attack. There is no fallback inside the helper: it is not executable,
+# it carries no re-exec, and a missing `-p` is refused — by then the hook has
+# already run, so nothing in the file can recover from it.
 #
 # READ THROUGH A HELPER, BY PATH, BECAUSE `git` IS A NAME. This was
 # `git remote get-url origin` here, and a function answering only

@@ -475,7 +475,7 @@ if [ -c /dev/full ] && [ -w /dev/full ]; then
     _full_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read /dev/full 2>&1 )" \
         || _full_rc=$?
     { [ "$_full_rc" -ne 0 ] \
-      && case "$_full_diag" in *"could not write the origin"*) true ;; *) false ;; esac; } \
+      && case "$_full_diag" in *"write the origin"*) true ;; *) false ;; esac; } \
         && pass "read refuses an output that opens and then rejects the write" \
         || die "read accepted a rejected write (rc=$_full_rc diag='$_full_diag')"
 
@@ -483,7 +483,7 @@ if [ -c /dev/full ] && [ -w /dev/full ]; then
     _full_diag="$( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE="$REAL" \
         /usr/bin/env bash -p "$SCRIPT" pin /dev/full 2>&1 )" || _full_rc=$?
     { [ "$_full_rc" -ne 0 ] \
-      && case "$_full_diag" in *"could not write the pin"*) true ;; *) false ;; esac; } \
+      && case "$_full_diag" in *"write the pin"*) true ;; *) false ;; esac; } \
         && pass "…and pin refuses it too, rather than reporting an unset pin" \
         || die "pin reported success on a rejected write (rc=$_full_rc diag='$_full_diag')"
 else

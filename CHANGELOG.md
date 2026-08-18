@@ -42,8 +42,9 @@
   **Starting it privileged cannot be delegated:**
   privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
   before the helper's first line. A hook needs to shadow nothing to use the gap —
-  one that writes the transport file and exits is a complete attack. The helper hops to `-p` itself as well, for a caller
-  that forgets, which is the difference between a defence and a default.
+  one that writes the transport file and exits is a complete attack. There is no
+  fallback inside the helper for a caller that forgets: by then the hook has run,
+  so a missing `-p` is refused rather than recovered from.
 
   Privileged mode does not source `BASH_ENV` or `ENV`, does not import functions
   from the environment, and ignores `SHELLOPTS` — measured, all three. That
@@ -56,10 +57,11 @@
   cannot write — where the two guards before it, an environment marker and a
   positional flag, were both forged.
 
-  What remains is stated in the script rather than left to be rediscovered: `exec`
-  and `env` are names the helper's own fallback hop is made of, so a shell that
-  shadows them keeps that process where it is; and a poisoned `PATH` forges every
-  external command, which is not this helper's to answer and is filed as #91. Both
+  What remains is stated in the script rather than left to be rediscovered: the
+  caller's half cannot be supplied from inside, so a caller that omits `bash -p`
+  is refused rather than recovered — a later entry in this release removed the
+  fallback hop that used to try; and a poisoned `PATH` forges every external
+  command, which is not this helper's to answer and is filed as #91. Both
   need a shell already executing arbitrary code as the operator — which can edit
   the helper instead.
 
