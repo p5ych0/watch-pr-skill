@@ -246,7 +246,9 @@ warns about elsewhere, and a second, worse copy of a guarantee that already
 holds. **Do not raise a shadowable name against a fixture.**
 
 **And do not raise one against a runtime helper either, now that they start
-privileged.** Every `pr-*.sh` except `pr-selfcheck.sh` begins
+privileged.** Every `pr-*.sh` except `pr-selfcheck.sh` and `pr-origin.sh` — the
+latter not executable at all, so only a caller naming an interpreter starts it —
+begins
 `#!/usr/bin/env -S bash -p` and refuses if `$-` lacks `p`. Privileged mode does
 not source `BASH_ENV` or `ENV`, does not import functions from the environment,
 and ignores `SHELLOPTS` — so `echo`, `set`, `exit`, `type`, `return` and every

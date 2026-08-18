@@ -194,6 +194,10 @@ Running a helper **by hand** goes through its shebang instead, which is
 and BSD/macOS `env` supports it; on an older `env` the helper refuses to start
 rather than starting unprotected.
 
+`pr-origin.sh` is the exception, and cannot be run by hand at all: it is not
+executable, because the shell reading it has to be privileged from its first line
+and only the caller can arrange that.
+
 **Contributors need that `env`, users do not.** The plugin never depends on the
 shebang: the skill supplies `-p` on every call, and so does every call a helper
 makes to another helper. The test suite is the exception — it executes the

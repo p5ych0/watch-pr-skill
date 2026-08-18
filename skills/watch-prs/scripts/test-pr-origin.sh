@@ -26,6 +26,7 @@ REAL='git@github.com:acme/widget.git'
 FORGED='git@github.com:WRONG/other.git'
 
 # ── a checkout whose origin is known ───────────────────────────────────────
+mkdir -p "$TMP/nohome"
 REPO="$TMP/repo"; mkdir -p "$REPO"
 ( cd "$REPO" && git init -q . && git remote add origin "$REAL" ) >/dev/null 2>&1 \
     || { die "could not build the scratch checkout"; echo "RESULT: FAIL"; exit 1; }
@@ -50,7 +51,15 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # not hand over a file. Truncating here made every case in this file fail with
     # `cannot overwrite existing file`, which is the contract working.
     rm -f "$vf"
-    diag="$(cd "$REPO" && run_limited 20 env "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vf" 2>&1)" || rc=$?
+    # A CONTROLLED `HOME`, so these cases do not read the contributor's git
+    # config. The helper carries `HOME` through on purpose — global
+    # `url.<base>.insteadOf` rules are part of what `git remote get-url` answers —
+    # and a contributor with a rule matching `git@github.com:` would see every
+    # ordinary case here return the rewritten URL instead of `$REAL`, failing the
+    # suite for a reason that has nothing to do with the subject. The dedicated
+    # `IOHOME` case below tests rewrites deliberately, with its own `HOME`.
+    diag="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vf" 2>&1)" || rc=$?
     # THE VALUE AND THE DIAGNOSTICS ARE SEPARATE STREAMS, which is the point of the
     # file: the caller reads one and never sees the other. They are joined here
     # only so a single assertion can look at both.
@@ -146,7 +155,7 @@ got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
 # what the caller needs to distinguish, so it is an empty line and status 0 rather
 # than an abort, which would look like every other failure from that side.
 rm -f "$TMP/pin.value"
-run_limited 20 env -u REVIEW_BUS_REMOTE /usr/bin/env bash -p "$SCRIPT" pin "$TMP/pin.value" >/dev/null 2>&1; pin_rc=$?
+run_limited 20 env -u REVIEW_BUS_REMOTE HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" pin "$TMP/pin.value" >/dev/null 2>&1; pin_rc=$?
 pin_out="$(<"$TMP/pin.value")"
 { [ "$pin_rc" = 0 ] && [ -z "$pin_out" ]; } \
     && pass "…and an unset pin is an empty answer, not an error" \
@@ -169,7 +178,7 @@ got="$(run sideways)"
 # and used, so the absence is asserted as well as the status.
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
-rm -f "$TMP/v"; out="$(cd "$BARE" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
@@ -181,7 +190,7 @@ esac
 # NOT A REPOSITORY AT ALL is the same answer, since `git` fails rather than
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
-rm -f "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
@@ -198,7 +207,7 @@ printf '%s\n' "$FORGED"
 exit 1
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a remote read that prints and then fails is refused" \
@@ -220,7 +229,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a multi-line remote is refused rather than split" \
@@ -244,14 +253,14 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
 # …AND PLAIN COMMAND SUBSTITUTION WOULD HAVE ACCEPTED IT, which is what makes the
 # sentinel load-bearing rather than decorative.
-naive="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" bash -c 'git remote get-url origin' 2>&1)" || true
+naive="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" bash -c 'git remote get-url origin' 2>&1)" || true
 [ "$naive" = 'git@github.com:acme/widget.git' ] \
     && pass "…where a bare capture would have taken the truncated value" \
     || die "the comparison case did not reproduce the naive result: '$naive'"
@@ -275,7 +284,7 @@ rm -f "$TMP/tr.value"
 printf 'VALUE=%s\n' "\$(<"$TMP/tr.value")" >&2
 TRSH
 for _fd in 1 9; do
-    tr_out="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD="$_fd" bash "$TMP/tr.sh" \
+    tr_out="$(run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" SHELLOPTS=xtrace BASH_XTRACEFD="$_fd" bash "$TMP/tr.sh" \
         9>>"$TMP/tr.trace" 2>&1 >/dev/null)" || true
     case "$tr_out" in
         *"VALUE=$REAL"*) pass "a caller tracing to fd $_fd gets the value alone" ;;
@@ -283,7 +292,7 @@ for _fd in 1 9; do
     esac
 done
 # …AND THE TRACING IS PROVED TO BE ON, or both cases pass on runs never traced.
-tprobe="$(run_limited 20 env SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c ':' 2>&1)" || true
+tprobe="$(run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c ':' 2>&1)" || true
 case "$tprobe" in
     *'+ :'*) pass "…and the exported xtrace does trace an ordinary child" ;;
     *)       die "the xtrace never took effect, so the cases above prove nothing: '$tprobe'" ;;
@@ -295,7 +304,7 @@ esac
 # function called `bash` runs instead, and it can write the value file itself and
 # return without the subject running at all.
 rm -f "$TMP/fn.value"
-run_limited 20 bash -c '
+run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
     /usr/bin/env bash -p "'"$SCRIPT"'" read "'"$TMP/fn.value"'"' >/dev/null 2>&1 || true
@@ -337,7 +346,7 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 # stayed green with the attack setup broken. An interpreter has to be started for
 # the comparison to mean anything.
 rm -f "$TMP/unprot.value"
-( cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" BASH_ENV="$TMP/hook-direct.sh" \
     /usr/bin/env bash "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
 unprot=""
 [ -f "$TMP/unprot.value" ] && unprot="$(<"$TMP/unprot.value")"
@@ -372,7 +381,7 @@ mkdir -p "$SYMDIR"
 printf 'PRECIOUS\n' > "$SYMDIR/victim"
 ln -s "$SYMDIR/victim" "$SYMDIR/out"
 sym_rc=0
-sym_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/out" 2>&1 )" || sym_rc=$?
+sym_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/out" 2>&1 )" || sym_rc=$?
 { [ "$sym_rc" -ne 0 ] \
   && case "$sym_diag" in *exclusively*) true ;; *) false ;; esac; } \
     && pass "an output that is a symlink to an owned file is refused" \
@@ -385,7 +394,7 @@ sym_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$
 # caller allocates a fresh directory per run, so nothing legitimate collides here.
 printf 'STALE\n' > "$SYMDIR/plain"
 plain_rc=0
-plain_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/plain" 2>&1 )" || plain_rc=$?
+plain_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/plain" 2>&1 )" || plain_rc=$?
 { [ "$plain_rc" -ne 0 ] && [ "$(cat "$SYMDIR/plain")" = STALE ]; } \
     && pass "…and a path that already exists is refused rather than truncated" \
     || die "an existing output was truncated (rc=$plain_rc)"
@@ -393,7 +402,7 @@ plain_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read 
 # mode says who may write it once it is there.
 rm -f "$TMP/modecheck.marker"
 rm -f "$TMP/modecheck"
-( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/modecheck" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$TMP/modecheck" ) >/dev/null 2>&1
 mode="$(ls -l "$TMP/modecheck" 2>/dev/null | cut -c1-10)"
 case "$mode" in
     -rw-------) pass "…and the object it creates is readable only by this user" ;;
@@ -453,7 +462,7 @@ OPENDIR="$TMP/open"
 mkdir -p "$OPENDIR"
 chmod 777 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/origin" ]; } \
@@ -462,7 +471,7 @@ open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "
 # …AND A GROUP-WRITABLE ONE TOO, which is the shape a shared machine actually has.
 chmod 770 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
     && pass "…and so is a group-writable one" \
@@ -479,7 +488,7 @@ mkdir -p "$ANCESTOR/mid/leaf"
 chmod 777 "$ANCESTOR/mid"
 chmod 700 "$ANCESTOR/mid/leaf"
 anc_rc=0
-anc_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" 2>&1 )" || anc_rc=$?
+anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" 2>&1 )" || anc_rc=$?
 { [ "$anc_rc" -ne 0 ] \
   && case "$anc_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$ANCESTOR/mid/leaf/origin" ]; } \
@@ -490,7 +499,7 @@ anc_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$
 # would refuse the directory it was written for.
 chmod 1777 "$ANCESTOR/mid"
 rm -f "$ANCESTOR/mid/leaf/origin"
-( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" ) >/dev/null 2>&1
 [ "$(cat "$ANCESTOR/mid/leaf/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a sticky ancestor is accepted, as /tmp is" \
     || die "a sticky ancestor was refused; this would refuse every ordinary session"
@@ -521,7 +530,7 @@ for _cand in /lost+found /run/user/* /var/lib/* /home/*; do
 done
 if [ -n "$FOREIGN" ]; then
     foreign_rc=0
-    foreign_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/origin" 2>&1 )" || foreign_rc=$?
+    foreign_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/origin" 2>&1 )" || foreign_rc=$?
     { [ "$foreign_rc" -ne 0 ] \
       && case "$foreign_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
         && pass "…and a component owned by another account is refused ($FOREIGN)" \
@@ -545,7 +554,7 @@ if [ -n "$FOREIGN" ]; then
     mkdir -p "$LINKDIR"
     ln -sfn "$FOREIGN" "$LINKDIR/t"
     link_rc=0
-    link_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/origin" 2>&1 )" || link_rc=$?
+    link_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/origin" 2>&1 )" || link_rc=$?
     { [ "$link_rc" -ne 0 ] \
       && case "$link_diag" in *"could be replaced between this write"*|*"could not examine"*|*"could not resolve"*) true ;; *) false ;; esac; } \
         && pass "…and a symlink into a third account's tree is refused, not walked lexically" \
@@ -560,7 +569,7 @@ mkdir -p "$SAFELINK"
 ln -sfn "$OPENDIR" "$SAFELINK/t"
 chmod 700 "$OPENDIR"
 rm -f "$OPENDIR/origin"
-( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/origin" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/origin" ) >/dev/null 2>&1
 [ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a symlink to a directory this user owns is followed as before" \
     || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
@@ -581,7 +590,7 @@ if command -v setfacl >/dev/null 2>&1; then
     # the first version of this case asserted.
     if setfacl -m u:nobody:r-x "$ACLDIR" >/dev/null 2>&1; then
         acl_rc=0
-        acl_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/origin" 2>&1 )" || acl_rc=$?
+        acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/origin" 2>&1 )" || acl_rc=$?
         { [ "$acl_rc" -ne 0 ] \
           && case "$acl_diag" in *"access-control list"*) true ;; *) false ;; esac \
           && [ ! -e "$ACLDIR/origin" ]; } \
@@ -617,7 +626,7 @@ mkdir -p "$XASTUB"
 printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
 chmod +x "$XASTUB/ls"
 xa_rc=0
-xa_diag="$( cd "$REPO" && run_limited 20 env PATH="$XASTUB:$PATH" \
+xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$XASTUB:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$XADIR/origin" 2>&1 )" || xa_rc=$?
 { [ "$xa_rc" -ne 0 ] \
   && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
@@ -637,7 +646,7 @@ chmod +x "$LSFAIL/ls"
 rm -f "$OPENDIR/origin"
 chmod 700 "$OPENDIR"
 lsf_rc=0
-lsf_diag="$( cd "$REPO" && run_limited 20 env PATH="$LSFAIL:$PATH" \
+lsf_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$LSFAIL:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || lsf_rc=$?
 { [ "$lsf_rc" -ne 0 ] \
   && case "$lsf_diag" in *"could not read the permissions"*) true ;; *) false ;; esac \
@@ -656,7 +665,7 @@ printf '#!/usr/bin/env bash\nexit 2\n' > "$FINDSTUB/find"
 chmod +x "$FINDSTUB/find"
 rm -f "$OPENDIR/origin"
 probe_rc=0
-probe_diag="$( cd "$REPO" && run_limited 20 env PATH="$FINDSTUB:$PATH" \
+probe_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$FINDSTUB:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || probe_rc=$?
 { [ "$probe_rc" -ne 0 ] \
   && case "$probe_diag" in *"could not examine"*) true ;; *) false ;; esac \
@@ -667,7 +676,7 @@ probe_diag="$( cd "$REPO" && run_limited 20 env PATH="$FINDSTUB:$PATH" \
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"
 rm -f "$OPENDIR/origin"
-( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" ) >/dev/null 2>&1
 [ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a private directory is written as before" \
     || die "a private directory was refused"
@@ -721,7 +730,7 @@ case "${got#*|}" in
 esac
 # THE FIXTURE'S OWN REACH: the same variable must actually redirect a bare `git`,
 # or the case above passes because nothing was ever pointed anywhere.
-reach="$(cd "$REPO" && GIT_DIR="$OTHER/.git" git remote get-url origin 2>/dev/null)"
+reach="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_DIR="$OTHER/.git" git remote get-url origin 2>/dev/null)"
 [ "$reach" = "$FORGED" ] \
     && pass "…where the same GIT_DIR redirects a bare git" \
     || die "GIT_DIR does not redirect git here (got '$reach'); the case above proves nothing"
@@ -753,7 +762,7 @@ got="$(run read "GIT_CONFIG_GLOBAL=$TMP/forged-config")"
 # green tick this repository has paid for twice.
 if [ -c /dev/full ] && [ -w /dev/full ]; then
     _full_rc=0
-    _full_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read /dev/full 2>&1 )" \
+    _full_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" /usr/bin/env bash -p "$SCRIPT" read /dev/full 2>&1 )" \
         || _full_rc=$?
     { [ "$_full_rc" -ne 0 ] \
       && case "$_full_diag" in *"write the origin"*) true ;; *) false ;; esac; } \
@@ -761,7 +770,7 @@ if [ -c /dev/full ] && [ -w /dev/full ]; then
         || die "read accepted a rejected write (rc=$_full_rc diag='$_full_diag')"
 
     _full_rc=0
-    _full_diag="$( cd "$REPO" && run_limited 20 env REVIEW_BUS_REMOTE="$REAL" \
+    _full_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" REVIEW_BUS_REMOTE="$REAL" \
         /usr/bin/env bash -p "$SCRIPT" pin /dev/full 2>&1 )" || _full_rc=$?
     { [ "$_full_rc" -ne 0 ] \
       && case "$_full_diag" in *"write the pin"*) true ;; *) false ;; esac; } \

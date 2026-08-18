@@ -88,12 +88,14 @@
 
   **The transport directory's parent has to be one nobody else can replace it
   in**, which mode 700 does not give. That mode protects what is inside the
-  directory and says nothing about the entry naming it: on a `TMPDIR` another
-  account can write and search and that lacks the sticky bit, the account can
-  observe the name, rename the directory without entering it, and leave a
-  writable one of its own at that path — after which the value read back is
-  theirs. The parent must now be sticky or owned by this user, tested with `[[ -k
-  ]]` and `[[ -O ]]` and refused by name otherwise.
+  directory and says nothing about the entry naming it: where another account can
+  write the parent, it can observe the name, rename the directory without
+  entering it, and leave a writable one of its own at that path — after which the
+  value read back is theirs. The rule that answers this is stated further down in
+  this entry, where it settled: every component owned by this user or root. A
+  sticky parent was an intermediate answer and is NOT sufficient — sticky stops
+  one account renaming another's entries and does nothing about the directory's
+  owner renaming ours.
 
   **Every cleanup is reached by path.** `rm` and `rmdir` are names, and each ran
   between a value being obtained and that value being trusted: an

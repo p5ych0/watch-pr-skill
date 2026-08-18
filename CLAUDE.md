@@ -43,8 +43,16 @@ monitor, no bus directory, and no systemd unit.
 
 ## The helpers are started privileged
 
-Every `pr-*.sh` except `pr-selfcheck.sh` begins `#!/usr/bin/env -S bash -p`, and
-refuses if `$-` does not contain `p`.
+Every `pr-*.sh` except `pr-selfcheck.sh` and `pr-origin.sh` begins
+`#!/usr/bin/env -S bash -p`, and every one of them refuses if `$-` does not
+contain `p`.
+
+`pr-origin.sh` is the narrower of the two exceptions: it is **not executable**,
+so a shebang is inert — nothing can start it but a caller naming an interpreter,
+and the documented caller names `/usr/bin/env bash -p`. Giving it a privileged
+shebang would state a protection the file does not rely on and cannot enforce.
+`test-pr-identity.sh` asserts both halves, so the exception cannot quietly become
+an executable entry point.
 
 **This is the answer to a whole class, and it replaces answering it one name at a
 time.** An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS functions

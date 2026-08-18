@@ -47,11 +47,20 @@ fi
 # passes it, which is why the CALLER is asserted here rather than the callee.
 _unpriv=""
 while IFS= read -r _line; do
+    _bare="${_line#"${_line%%[![:space:]]*}"}"
+    case "$_bare" in '#'*) continue ;; esac
     case "$_line" in
         # A COMMENT IS NOT AN INVOCATION. The block below explains why the path
         # matters and quotes it while doing so, and the scan read that as a bare
         # call — a finding against prose.
-        '#'*|' '*'#'*) ;;
+        #
+        # THE FIRST NON-BLANK CHARACTER, NOT "CONTAINS A `#`". Written as
+        # `' '*'#'*` this skipped any indented line with a `#` ANYWHERE, so an
+        # indented invocation with a trailing comment was removed from the list
+        # and the guard reported clean on a call that had lost its `bash -p`. The
+        # exemption was wider than the thing it exempted. The trim happens BEFORE
+        # the case, because a `${var%%…}` written as part of a case PATTERN is not
+        # the test it looks like.
         # `pr-selfcheck.sh` IS THE EXEMPTION, and it is named rather than allowed
         # to slip through a pattern. It is the one helper that is not started
         # privileged: it re-execs itself into a clean shell, clears every
@@ -67,6 +76,23 @@ $_line" ;;
 done <<EOF
 $(grep -F '"$RB_SCRIPTS"/pr-' "$SKILL" || true)
 EOF
+# …AND THE COMMENT EXEMPTION IS NOT A LOOPHOLE. An indented invocation with a
+# trailing comment is the shape that slipped through the first version, so the
+# scan is run here against exactly that line: a bare call, indented, with a `#`
+# later on it. If this stops being reported the exemption has widened again.
+_probe_line='    "$RB_SCRIPTS"/pr-watch.sh N "$WHO"   # rationale'
+_probe_bare="${_probe_line#"${_probe_line%%[![:space:]]*}"}"
+_probe_hit=no
+case "$_probe_bare" in '#'*) ;; *)
+    case "$_probe_line" in
+        *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
+        *'"$RB_SCRIPTS"/pr-selfcheck.sh'*) ;;
+        *) _probe_hit=yes ;;
+    esac ;;
+esac
+[ "$_probe_hit" = yes ] \
+    && pass "…and an indented invocation with a trailing comment is still caught" \
+    || die "the comment exemption swallows an indented call with a trailing comment"
 [ -z "$_unpriv" ] \
     && pass "every helper the driver runs is started with /usr/bin/env bash -p" \
     || die "helper invocation(s) not started privileged:$_unpriv"
