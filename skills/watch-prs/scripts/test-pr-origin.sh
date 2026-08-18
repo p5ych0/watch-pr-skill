@@ -708,6 +708,41 @@ nop_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash "$SCRIPT" read "$TMP
     && pass "…and an unprivileged bash reading it refuses with nothing written" \
     || die "an unprivileged bash was accepted (rc=$nop_rc diag='$nop_diag')"
 
+# ── `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT AND SURVIVES ───────────────────────
+#
+# It tells git to ignore the system-wide config. An emptied environment dropped
+# it, which does not lose a redirection — it TURNS ONE ON: a `url.*.insteadOf`
+# rule in the system config would then rewrite the origin this helper reads while
+# every ordinary git command in the session, still honouring the opt-out, used the
+# unexpanded one. The pin and the session would disagree about the repository.
+#
+# WHAT IS ASSERTED IS THE VARIABLE'S ARRIVAL, and it has to be, because the effect
+# cannot be staged: the real system config is `/etc/gitconfig`, which a fixture
+# cannot write, and `GIT_CONFIG_SYSTEM` — the only way to point git elsewhere — is
+# a REDIRECTION this helper drops on purpose. So a `git` stub reports the
+# environment it was called in, which is the thing the change is about.
+NSSTUB="$TMP/nsstub"
+mkdir -p "$NSSTUB"
+printf '#!/usr/bin/env bash\nprintf "git@github.com:seen/%%s.git\\n" "${GIT_CONFIG_NOSYSTEM:-unset}"\n' > "$NSSTUB/git"
+chmod +x "$NSSTUB/git"
+rm -f "$TMP/ns1.value"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    PATH="$NSSTUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns1.value" ) >/dev/null 2>&1
+ns_without="$(cat "$TMP/ns1.value" 2>/dev/null)"
+rm -f "$TMP/ns2.value"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    PATH="$NSSTUB:$PATH" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns2.value" ) >/dev/null 2>&1
+ns_with="$(cat "$TMP/ns2.value" 2>/dev/null)"
+# BOTH DIRECTIONS: unset must arrive unset, or the case would pass on a helper
+# that hard-codes the variable rather than carrying the operator's decision.
+[ "$ns_without" = 'git@github.com:seen/unset.git' ] \
+    && pass "the origin read runs with no GIT_CONFIG_NOSYSTEM when the session set none" \
+    || die "GIT_CONFIG_NOSYSTEM appeared from nowhere (got '$ns_without')"
+[ "$ns_with" = 'git@github.com:seen/1.git' ] \
+    && pass "…and the operator's opt-out survives the emptied environment" \
+    || die "GIT_CONFIG_NOSYSTEM was dropped by env -i (got '$ns_with')"
+
 # ── A SECOND CHECKOUT NAMED BY `GIT_DIR` IS NOT THIS ONE ───────────────────
 #
 # `bash -p` refuses startup files and inherited functions; it keeps ordinary

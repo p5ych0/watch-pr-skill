@@ -337,86 +337,39 @@ unset -f rb_identity 2>/dev/null \
 # aborted over a configuration that has a working fallback sitting next to it.
 # Requiring it in the candidate makes a relative `TMPDIR` fall through to `HOME`,
 # and a relative `HOME` refuse in these words rather than in the helper's.
-RB_TMPPARENT="${TMPDIR:-}"
-[[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
-    || RB_TMPPARENT="${HOME:-}"
-[[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
-    || { echo "ABORT: neither TMPDIR nor HOME is an absolute directory this user owns; there is nowhere to put the transport files that another account cannot replace"; exit 1; }
-RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-[[ $RB_TMPDIR = "$RB_TMPPARENT"/watch-pr.* ]] \
-    || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport path cannot be set"; exit 1; }
-/usr/bin/env mkdir -m 700 "$RB_TMPDIR" \
-    || { echo "ABORT: could not create a private directory for this session's transport files"; exit 1; }
-# EVERY CLEANUP HERE IS REACHED BY PATH, and that is not tidiness either. `rm` and
-# `rmdir` are NAMES, and each of them runs between a value being obtained and that
-# value being trusted: an `rm() { RB_REMOTE='git@github.com:WRONG/other.git'; }`
-# in the driving shell rewrites the pin after the protected read and before the
-# check below, and one on the pin side sets `RB_PIN_SEEN` after a failed probe so
-# the postcondition agrees. Neither is reachable through `/usr/bin/env`, which is
-# the same answer already used for `mkdir` two lines up. Which `rm` it finds is a
-# `PATH` question, and that is #91.
+# CANDIDATES ARE OFFERED; THE HELPER DECIDES. The driver used to pick a parent
+# with its own tests and hand the result over — and the helper then walked the
+# whole path and refused for reasons the driver had never asked about. An owned
+# mode-0777 `TMPDIR` passed `-O` here and was rejected there, so a session with a
+# perfectly good `HOME` sitting behind it aborted. That is the same
+# selector-versus-helper mismatch the relative-path case had, and the fix that
+# does not reproduce it a third time is to stop deciding here: the safety rule
+# lives in ONE place, and this loop finds out by asking.
 #
-# THE HELPER CREATES ITS OUTPUT AND DOES NOT TRUNCATE ONE. Under `set -C` the
-# write is O_EXCL, so a path that already exists is REFUSED rather than
-# overwritten. Nothing stale can be read back here for two reasons that do not
-# rely on overwriting: the directory above was created a moment ago and is empty,
-# and the helper's status is checked below — a refusal leaves the path absent, and
-# the open that follows fails rather than returning an older answer.
-#
-# `RB_TMPPARENT` NEEDS NO SEPARATE POSTCONDITION. A readonly one keeps its old
-# value, and the ownership test that follows is exactly the question being asked of
-# whatever value it holds — so the check that would prove the assignment is already
-# there, applied to the thing that matters rather than to the assignment.
-#
-# THE ASSIGNMENT IS PROVED BY READING IT BACK, AND ITS STATUS CANNOT BE USED. This
-# block runs in the driving session's own long-lived shell, where `RB_ORIGIN_OUT`
-# may already exist as a READONLY naming a file somebody else can write; the
-# assignment then fails, the variable keeps the old path, and the helper writes a
-# perfectly good value into a file the attacker edits before the read below.
-#
-# `RB_ORIGIN_OUT=… || abort` DOES NOT CATCH IT, and this was written that way
-# first. Measured on bash 5: a failed readonly assignment ON ITS OWN kills a
-# non-interactive shell, but the same assignment as the left side of an AND-OR
-# LIST neither fires the `||` nor exits — it prints its complaint and the list
-# reports success. So the guard that looks like it takes the status is the one
-# case where there is no status to take. Reading the variable back is a
-# postcondition, which is the shape this file already uses for the pin, and `[[`
-# is a reserved word no function can stand in front of.
+# `-d` AND ABSOLUTE ARE STILL TESTED, because they are about whether a candidate
+# can be TRIED at all: a relative path cannot be walked to the root, and a name
+# that is not a directory cannot hold a transport. Neither is a safety rule.
+RB_TMPDIR=
+for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
+    [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
+    RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+    [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
+    /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
+    # THE READ IS THE TEST. If the helper accepts this parent it has already
+    # written the value, so there is nothing to repeat; if it refuses, the reason
+    # is on stderr for the operator and this tries the next candidate.
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
+        RB_TMPDIR="$RB_TRY"
+        break
+    fi
+    /usr/bin/env rm -f "$RB_TRY/origin"
+    /usr/bin/env rmdir "$RB_TRY"
+done
+[[ -n $RB_TMPDIR ]] \
+    || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
 RB_ORIGIN_OUT="$RB_TMPDIR/origin"
 [[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
-    || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
-    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-# THE FILE IS CHECKED AND READ AS ONE OPEN OBJECT, and that is what closes the
-# substitution rather than the parent rule closing it. Checking a path and then
-# opening it are TWO operations on a name: whoever can write the directory holding
-# it can leave the helper's own output in place for the checks and swap the
-# pathname before the read, and no test on the path can see that. Opening it once
-# and asking about the OPEN FILE removes the second operation — `9<` is applied by
-# the shell as a redirection, so no name is involved, and `/dev/fd/9` is the object
-# this shell already holds rather than a path anybody can still redirect.
-#
-# `-O` IS THE PROOF, and it is the one thing a substitution cannot produce: a file
-# belongs to whoever created it, and the only creator of this one is the helper
-# this setup just ran. `-h` is NOT asked here and its absence is deliberate — on
-# Linux `/dev/fd/9` is itself a symlink into `/proc`, so `-h` is true of every
-# object and would refuse every session. It is not needed either: a path that was
-# a symlink has already been followed by the open, and `-O` then asks about what
-# it pointed AT.
-#
-# `RB_REMOTE` IS CLEARED AND THE CLEAR IS PROVED FIRST, before the group that
-# assigns it. The driving shell is long-lived and interactive; a readonly
-# `RB_REMOTE` already in it keeps its old value, and every check after the group —
-# non-empty, single-line, parseable as an identity — passes on a stale URL as
-# readily as on the real one, after which it is exported and every post goes
-# there.
-#
-# IT CANNOT BE CAUGHT INSIDE THE GROUP, which is why it is done here. Measured on
-# bash 5: a failed readonly assignment as an element of an `&&` chain ENDS THE
-# CHAIN AND THE LIST REPORTS SUCCESS — so `… && RB_REMOTE="$(<…)" && [[ … ]]` never
-# reaches its own comparison and the handler never runs. The answer is the one
-# `CLAUDE.md` gives for the plainer case: clear first, prove the clear, and let
-# nothing downstream depend on an assignment's status.
+    || { /usr/bin/env rm -f "$RB_TMPDIR/origin"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_REMOTE=
 [[ -z $RB_REMOTE ]] \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }

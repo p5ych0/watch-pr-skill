@@ -259,7 +259,7 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
-grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
+grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
 # …AND THAT IS ASSERTED BY RUNNING IT, because the line above finds the call and
@@ -268,12 +268,12 @@ grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"'
 # case the whole helper exists for: a read that writes a plausible URL and then
 # fails is accepted, and the session is pinned to it.
 _read_block=""
-_read_block="$(awk '/^RB_TMPPARENT=/, /there is no repository to pin this session to/' "$SKILL")" \
+_read_block="$(awk '/^RB_TMPDIR=$/, /there is no repository to pin this session to/' "$SKILL")" \
     || _read_block=""
 { [ -n "$_read_block" ] \
-  && case "$_read_block" in *'/pr-origin.sh read "$RB_ORIGIN_OUT"'*) true ;; *) false ;; esac \
+  && case "$_read_block" in *'/pr-origin.sh read "$RB_TRY/origin"'*) true ;; *) false ;; esac \
   && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac \
-  && case "$_read_block" in *'-O $RB_TMPPARENT'*) true ;; *) false ;; esac; } \
+  && case "$_read_block" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -524,9 +524,9 @@ LOCAL
             ' 2>&1)" || _sp_rc=$?
         { [ "$_sp_rc" -eq 0 ] \
           && case "$_sp_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac \
-          && case "$_sp_out" in *"PARENT=$_forge_dir"*) true ;; *) false ;; esac; } \
-            && pass "…while a sticky TMPDIR nobody here owns falls back to HOME" \
-            || die "a shared sticky TMPDIR was used or refused (rc=$_sp_rc out='$_sp_out')"
+          && case "$_sp_out" in *'PARENT=/tmp'*) true ;; *) false ;; esac; } \
+            && pass "…while a sticky TMPDIR nobody here owns is accepted, as /tmp is" \
+            || die "a shared sticky TMPDIR was refused (rc=$_sp_rc out='$_sp_out')"
     else
         echo "ok   - (/tmp is absent or owned by this user; the fallback case did not run)"
     fi
@@ -550,14 +550,24 @@ LOCAL
     _sq_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
         TMPDIR="$_forge_dir" bash -c '
             RANDOM=1
-            mkdir -p "$TMPDIR/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+            _sq_seed="$TMPDIR/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+            mkdir -p "$_sq_seed"
+            printf '%s\n' "$_sq_seed" > "$TMPDIR/.sq-dir"
             RANDOM=1
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _sq_rc=$?
-    { [ "$_sq_rc" -ne 0 ] \
-      && case "$_sq_out" in *PINNED=*) false ;; *) true ;; esac; } \
-        && pass "…and a pre-created transport directory stops setup rather than being reused" \
+    _sq_dir="$(cat "$_forge_dir/.sq-dir" 2>/dev/null)"
+    # THE DIRECTORY IS NOT REUSED, AND THE SESSION IS NOT ENDED EITHER. `mkdir`
+    # fails on a name that exists, which is what makes squatting useless; since
+    # the loop offers candidates rather than deciding, that failure moves to the
+    # next one instead of aborting. What must hold is that the pre-created
+    # directory is not the one used — an account that guesses the name gets
+    # nothing, and the operator keeps their session.
+    { [ "$_sq_rc" -eq 0 ] \
+      && case "$_sq_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac \
+      && [ ! -e "$_sq_dir/origin" ]; } \
+        && pass "…and a pre-created transport directory is passed over, not reused" \
         || die "setup reused a directory it did not create (rc=$_sq_rc out='$_sq_out')"
 fi
 # …AND THE PIN IS PROVED THROUGH THE SAME HELPER, for the same reason: `bash -c`

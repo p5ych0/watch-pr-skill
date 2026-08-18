@@ -359,6 +359,18 @@ fi
 # the bottom, not a new one.
 _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 [[ -n ${XDG_CONFIG_HOME-} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
+# `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT, NOT A REDIRECTION, and dropping it turns
+# one on. The operator sets it to make git ignore the system-wide config, and an
+# emptied environment silently restored that file — so a `url.*.insteadOf` rule in
+# it would rewrite the origin THIS helper reads while every ordinary git command
+# in the session, still honouring the opt-out, used the unexpanded one. The pin
+# and the session would disagree about the repository, which is the failure this
+# file exists to prevent.
+#
+# THE TEST IS THAT IT WAS SET, not what it says: git treats any non-empty value as
+# "skip the system config", so carrying the operator's value through is exactly
+# reproducing their decision.
+[[ -n ${GIT_CONFIG_NOSYSTEM-} ]] && _rb_env+=( GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM" )
 _rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
