@@ -45,52 +45,47 @@ fi
 # `echo` and `exit` findings one per review round. The helpers' own `$-` check
 # cannot establish this: a hook that runs `set -p` before the script's first line
 # passes it, which is why the CALLER is asserted here rather than the callee.
-_unpriv=""
-while IFS= read -r _line; do
-    _bare="${_line#"${_line%%[![:space:]]*}"}"
-    case "$_bare" in '#'*) continue ;; esac
-    case "$_line" in
-        # A COMMENT IS NOT AN INVOCATION. The block below explains why the path
-        # matters and quotes it while doing so, and the scan read that as a bare
-        # call — a finding against prose.
-        #
-        # THE FIRST NON-BLANK CHARACTER, NOT "CONTAINS A `#`". Written as
-        # `' '*'#'*` this skipped any indented line with a `#` ANYWHERE, so an
-        # indented invocation with a trailing comment was removed from the list
-        # and the guard reported clean on a call that had lost its `bash -p`. The
-        # exemption was wider than the thing it exempted. The trim happens BEFORE
-        # the case, because a `${var%%…}` written as part of a case PATTERN is not
-        # the test it looks like.
-        # `pr-selfcheck.sh` IS THE EXEMPTION, and it is named rather than allowed
-        # to slip through a pattern. It is the one helper that is not started
-        # privileged: it re-execs itself into a clean shell, clears every
-        # inherited function and refuses if one cannot be cleared — a stronger
-        # boundary than `-p`, made once in that file with its own test. Putting
-        # `bash -p` in front of it would state the same property twice and
-        # differently, which is how the two copies come to disagree.
-        *'"$RB_SCRIPTS"/pr-selfcheck.sh'*) ;;
-        *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
-        *) _unpriv="$_unpriv
-$_line" ;;
-    esac
-done <<EOF
-$(grep -F '"$RB_SCRIPTS"/pr-' "$SKILL" || true)
-EOF
-# …AND THE COMMENT EXEMPTION IS NOT A LOOPHOLE. An indented invocation with a
-# trailing comment is the shape that slipped through the first version, so the
-# scan is run here against exactly that line: a bare call, indented, with a `#`
-# later on it. If this stops being reported the exemption has widened again.
-_probe_line='    "$RB_SCRIPTS"/pr-watch.sh N "$WHO"   # rationale'
-_probe_bare="${_probe_line#"${_probe_line%%[![:space:]]*}"}"
-_probe_hit=no
-case "$_probe_bare" in '#'*) ;; *)
-    case "$_probe_line" in
-        *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
-        *'"$RB_SCRIPTS"/pr-selfcheck.sh'*) ;;
-        *) _probe_hit=yes ;;
-    esac ;;
-esac
-[ "$_probe_hit" = yes ] \
+# ONE CLASSIFIER, USED BY THE SCAN AND BY THE REGRESSION CASE BELOW. Written
+# twice, the case reimplemented the corrected logic — so a regression in the real
+# scanner left `_unpriv` empty while the copy still reported the synthetic line,
+# and the guard passed on exactly the state it exists to catch.
+#
+# A COMMENT IS NOT AN INVOCATION. The block in `SKILL.md` explains why the path
+# matters and quotes it while doing so, and the scan read that as a bare call — a
+# finding against prose.
+#
+# THE FIRST NON-BLANK CHARACTER, NOT "CONTAINS A `#`". Written as `' '*'#'*` this
+# skipped any indented line with a `#` ANYWHERE, so an indented invocation with a
+# trailing comment was removed and the guard reported clean on a call that had
+# lost its `bash -p`. The exemption was wider than the thing it exempted. The trim
+# happens BEFORE the case, because a `${var%%…}` written as part of a case PATTERN
+# is not the test it looks like.
+#
+# `pr-selfcheck.sh` IS THE EXEMPTION, named rather than allowed to slip through a
+# pattern. It is the one helper not started privileged: it re-execs into a clean
+# shell, clears every inherited function and refuses if one cannot be cleared — a
+# stronger boundary than `-p`. Putting `bash -p` in front of it would state the
+# same property twice and differently, which is how two copies come to disagree.
+rb_bare_invocations() {   # stdin: candidate lines ; stdout: those not started privileged
+    local line bare
+    while IFS= read -r line; do
+        bare="${line#"${line%%[![:space:]]*}"}"
+        case "$bare" in '#'*) continue ;; esac
+        case "$line" in
+            *'"$RB_SCRIPTS"/pr-selfcheck.sh'*) ;;
+            *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
+            *) printf '%s\n' "$line" ;;
+        esac
+    done
+}
+_unpriv="$(grep -F '"$RB_SCRIPTS"/pr-' "$SKILL" | rb_bare_invocations)"
+# …AND THE COMMENT EXEMPTION IS NOT A LOOPHOLE, asserted through THE SAME
+# classifier the scan above uses. An indented invocation with a trailing comment
+# is the shape that slipped through the first version; a second copy of the logic
+# would go on reporting it after the real one regressed, which is how a guard
+# comes to pass on the state it exists to catch.
+_probe_hit="$(printf '%s\n' '    "$RB_SCRIPTS"/pr-watch.sh N "$WHO"   # rationale' | rb_bare_invocations)"
+[ -n "$_probe_hit" ] \
     && pass "…and an indented invocation with a trailing comment is still caught" \
     || die "the comment exemption swallows an indented call with a trailing comment"
 [ -z "$_unpriv" ] \
