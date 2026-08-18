@@ -27,7 +27,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-copilot-phase.sh` | The Copilot phase end to end, in three stages with the operator's decision between them: `record` proves Codex clean on an exact head, proves that head's checks and writes the signoff onto the PR, then stops and asks; `open` runs only on the answer, and proves the phase is STILL open before it touches anything: the head is unmoved, Codex's live verdict on that sha is clean, and the recorded Codex signoff still names it — a revocation is how a phase is deliberately reopened, and GitHub serves the old clean verdict until the new pass reports. It re-enforces the round boundary too, because `record` publishes the signoff before pausing and a later session can resume straight into here; that is why `open` can return 3. All of it runs THREE times — up front, before the revocation, and again after it — because none of these need the head to move and the revocation is itself a mutation with the request still to come. The order is revoke, prove, baseline, request: the proof as late as it can be while the Copilot baseline stays last, which it must be or a pass landing meanwhile answers a request made after it. `close` is the other end: Copilot's verdict came back clean, so the second signoff is written down and the operator is asked what to do with two closed phases. It takes the Codex head as well as reading the current one, because whether those two shas are EQUAL is what decides which question gets asked — the fault-tolerance pass is offered only where the phase produced commits. It takes the reviewers mode too, since `codex-only` means no Copilot review was ever requested and there is nothing to record; saying so is not the same as skipping it. 0 recorded/opened/closed, 1 stopped, 3 paused. Every guard in it is a reserved-word test, not `[`: the stage dispatch decides which of three mutations runs, and the head-equality and verdict-status proofs decide whether a signoff is recorded at all — see #81. Was 176 lines in `SKILL.md`, and `close` a further 93 whose aborts all exited 0 — see #26, #78. |
 | `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. Takes a reviewers mode: `both`, or `codex-only` which requires the head to BE the reviewed commit. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. 0 verdict in hand, 1 timed out, 2 unreadable, **4 the review carried only replies** — nothing to fix and no signoff, so the driver stops for the operator. That one has its own status because every caller branches on status: saying it in the record alone left `pr-close-round.sh` taking the 0 and closing the round. |
-| `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
+| `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. The one helper NOT started privileged — see § The helpers are started privileged. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is, which lines a reader honours as a control record, and what text requests a review — one definition each, sourced by every helper that reads the API or posts a caller-written body. |
 | `skills/watch-prs/scripts/clocklib.sh` | What "how much time has passed" means — one clock reader, with the guards a bare read has not got, sourced by `pr-watch.sh` and `pr-ci-gate.sh`. It exists because the gate used `$SECONDS`, a builtin no fixture can reach, so every deadline case in its suite raced real time; `date` is a command, so a fixture owns it. See #66. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
@@ -39,6 +39,41 @@ request cannot rewrite the rules it is judged by.
 Everything else is documentation. **v2 runs no reviewer of its own**: Codex and
 Copilot are first-party GitHub apps, so there is no watcher, no response
 monitor, no bus directory, and no systemd unit.
+
+## The helpers are started privileged
+
+Every `pr-*.sh` except `pr-selfcheck.sh` begins `#!/usr/bin/env -S bash -p`, and
+refuses if `$-` does not contain `p`.
+
+**This is the answer to a whole class, and it replaces answering it one name at a
+time.** An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS functions
+from the environment, and honours an exported `SHELLOPTS` — so every builtin a
+helper uses is a name the operator's shell can replace. Found one per review
+round before this: `type` said a good library defined nothing; `return` made a
+refusing stub succeed; `set` made `set +e` a no-op; `echo` swallowed a structured
+sentinel; `exit` made a refusal non-terminal, so a helper announced an abort and
+went on to post. Each fix was correct and each introduced the next name.
+Privileged mode does none of the three things, so there is nothing to shadow.
+
+- **The shebang, not a re-exec.** A `BASH_ENV` hook runs before the script's first
+  line; one that prints a forged `PR_X …` line and exits has already answered a
+  caller capturing stdout, and no later re-exec takes that back. The interpreter
+  has to be privileged from the start, which only the shebang or the caller can
+  arrange.
+- **`$-` is the guard, and it is not redundant.** An `env` without `-S` fails
+  loudly, but `bash pr-x.sh` skips the shebang entirely; without the guard that is
+  a silent downgrade to an unprotected shell.
+- **`pr-selfcheck.sh` is exempt, deliberately.** It is run by a person rather than
+  by the driver, and it already re-execs into a clean shell and clears every
+  inherited function — the guarantee it makes for the whole suite.
+  `test-pr-identity.sh` asserts the exemption as well as the rule, so neither can
+  drift silently.
+- **A fixture that sources a helper needs `bash -p -c`.** When sourced, `$-` is
+  the *caller's* flags, so an unprivileged shell is refused — which is correct,
+  because the library half would otherwise run somewhere a hook can reach.
+- **What it does NOT cover**: `SKILL.md`'s own bash, which runs in the operator's
+  shell and cannot re-exec itself, so the driver keeps every name it has (#102);
+  and a poisoned `PATH`, which is #91.
 
 ## Bash conventions
 

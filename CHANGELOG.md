@@ -1,5 +1,48 @@
 # Changelog
 
+## [2.0.27] — 2026-08-18
+
+- **Every runtime helper is started privileged, which retires a class the review
+  had been answering one member at a time.** A helper ran through
+  `#!/usr/bin/env bash`, and an ordinary bash SOURCES `BASH_ENV`, IMPORTS
+  functions from the environment, and honours an exported `SHELLOPTS`. Every
+  builtin a helper used was therefore a name the operator's shell could replace,
+  and each one was found on its own round: `type` reported that a perfectly good
+  `loadlib.sh` had defined nothing; `return` made a refusing stub return 0 and
+  report an empty loader as a successful load; `set` made `set +e` a no-op, so an
+  inherited `errexit` killed a helper before it could name its refusal; `echo`
+  swallowed the structured sentinel a caller branches on, leaving an
+  ordinary-looking empty answer; and `exit` made every refusal non-terminal, so a
+  helper announced an abort and carried on to post to GitHub. Every fix was
+  correct, and every one introduced the next name.
+
+  The shebang is now `#!/usr/bin/env -S bash -p`. Privileged mode does none of
+  those three things, so there is nothing to shadow and nothing to clear —
+  measured: under a forged `echo` and `set`, a privileged shell reports both as
+  builtins, and five forged builtins at once do not reach a helper.
+
+  **It is the shebang and not a re-exec, because the hook cannot be out-run from
+  inside.** A `BASH_ENV` hook runs before a script's first line; one that prints a
+  forged `PR_X …` line and exits has already answered a caller capturing stdout.
+  The interpreter has to be privileged from the start.
+
+  **`$-` is still checked, and is not redundant.** An `env` without `-S` fails
+  loudly, but `bash pr-x.sh` skips the shebang entirely — without the guard that
+  would be a silent downgrade to an unprotected shell. Each helper refuses with
+  its own sentinel and `reason=not_privileged`.
+
+  `pr-selfcheck.sh` is the exception and is asserted to be one: it is run by a
+  person, and it already re-execs into a clean shell and clears every inherited
+  function.
+
+  Two fixtures changed meaning rather than being adjusted. The clock-hook cases
+  asserted that a hostile `BASH_ENV` hook produced each caller's documented
+  refusal; the hook is no longer sourced at all, so they now assert its ABSENCE
+  together with the concrete outcome, and each one first proves the hook still
+  lands on an ordinary shell. `test-pr-review-state.sh` sources a helper to
+  inspect its identity derivation, which now needs `bash -p -c`, because a
+  sourced file sees the caller's `$-`.
+
 ## [2.0.26] — 2026-08-18
 
 - **Four shipped files claimed CI coverage that is not running.** `SKILL.md`,

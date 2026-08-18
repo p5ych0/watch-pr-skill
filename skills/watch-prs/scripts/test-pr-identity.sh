@@ -672,20 +672,25 @@ SPY
             echo "FAIL - $_n gave rc=$rc for an empty clocklib (wanted $_want) out='$out'"; idfail=1
         fi
     done
-    # …AND THE SAME REFUSAL FROM A HOSTILE STARTUP HOOK, at the callers, with a
-    # REAL library. `BASH_ENV` runs before the script and can leave `RB_ELAPSED`
-    # readonly; assigning to it would be fatal, so the process would die with no
-    # sentinel and — for the watch — status 1, which the driver re-arms as an
-    # ordinary timeout. The library refuses before writing, and what that has to
-    # look like from outside is each caller's documented failure, not merely
-    # "non-zero".
+    # …AND A HOSTILE STARTUP HOOK NO LONGER REACHES THE CALLERS AT ALL. This
+    # block used to assert the opposite — that a `BASH_ENV` hook leaving
+    # `RB_ELAPSED` readonly produced each caller's documented clock refusal
+    # rather than a bare non-zero status. That was the best available answer
+    # while the callers ran through `#!/usr/bin/env bash`, which SOURCES
+    # `BASH_ENV`.
+    #
+    # They start privileged now, so the hook is never sourced and there is no
+    # refusal to report: the caller runs its ordinary path and fails for its own
+    # reason further down. What is asserted is therefore the ABSENCE of the clock
+    # refusal — together with the concrete outcome, because absence alone passes
+    # against a run that never started.
     # TWO HOOKS: the plain one, and the one that also FORGES the inspection. A
     # first fix asked `declare` whether these names were plain, and a hook that
     # defines `declare` answers yes for everything — after which the assignment is
     # fatal exactly as before. The forged case is the discriminating one, so it is
     # here rather than left as a shape nobody runs.
-    printf 'readonly RB_ELAPSED=0\n' > "$CLKTMP/hook.sh"
-    printf 'declare() { printf "declare -- %%s\\n" "$2"; }\nreadonly RB_ELAPSED=0\n' \
+    printf 'RB_HOOK_RAN=yes\nreadonly RB_ELAPSED=0\n' > "$CLKTMP/hook.sh"
+    printf 'RB_HOOK_RAN=yes\ndeclare() { printf "declare -- %%s\\n" "$2"; }\nreadonly RB_ELAPSED=0\n' \
         > "$CLKTMP/hook-forged.sh"
     # …and the alias BETWEEN two state variables, which no same-value check sees.
     #
@@ -696,7 +701,7 @@ SPY
     # caught it: the unit case was guarded by version and this one was not.
     _hooks="hook hook-forged"
     if [ "${BASH_VERSINFO[0]:-0}" -gt 4 ] || { [ "${BASH_VERSINFO[0]:-0}" -eq 4 ] && [ "${BASH_VERSINFO[1]:-0}" -ge 3 ]; }; then
-        printf 'declare -n RB_CLOCK_T0=RB_CLOCK_LAST\n' > "$CLKTMP/hook-alias.sh"
+        printf 'RB_HOOK_RAN=yes\ndeclare -n RB_CLOCK_T0=RB_CLOCK_LAST\n' > "$CLKTMP/hook-alias.sh"
         _hooks="$_hooks hook-alias"
     else
         echo "ok   - …(alias hook skipped: Bash ${BASH_VERSINFO[0]:-?}.${BASH_VERSINFO[1]:-?} has no declare -n)"
@@ -706,22 +711,119 @@ SPY
     ln -sf "$ROOT/clocklib.sh" "$CLKTMP/run/clocklib.sh"
     ln -sf "$ROOT/loadlib.sh" "$CLKTMP/run/loadlib.sh"
     for _hook in $_hooks; do
-        for sc in pr-watch.sh:2:clock_unreadable pr-ci-gate.sh:1:"could not read the clock"; do
-            _n="${sc%%:*}"; _rest="${sc#*:}"; _want="${_rest%%:*}"; _say="${_rest#*:}"
+        # THE HOOK'S OWN REACH FIRST. Every hook file also sets a marker, so this
+        # asks an ORDINARY shell whether the file still lands — without it, a hook
+        # that had stopped working for some unrelated reason would make every case
+        # below pass while proving nothing.
+        _reach="$(run_limited 20 env BASH_ENV="$CLKTMP/$_hook.sh" \
+                    bash -c 'printf %s "${RB_HOOK_RAN-no}"' 2>/dev/null)"
+        if [ "$_reach" = yes ]; then
+            echo "ok   - the $_hook file is still sourced by an ordinary shell"
+        else
+            echo "FAIL - the $_hook file no longer runs anywhere (marker='$_reach'); the cases below prove nothing"
+            idfail=1
+        fi
+        for sc in pr-watch.sh:clock_unreadable pr-ci-gate.sh:"could not read the clock"; do
+            _n="${sc%%:*}"; _say="${sc#*:}"
             [ -f "$ROOT/$_n" ] || continue
             rc=0
             out="$(run_limited 20 env BASH_ENV="$CLKTMP/$_hook.sh" \
                      REVIEW_BUS_REMOTE='git@github.com:o/r.git' \
                      "$CLKTMP/run/$_n" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
-            if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q "$_say"; then
-                echo "ok   - $_n reports a hook-owned clock as rc=$_want ($_hook), not a timeout to re-arm"
+            # THE CONCRETE OUTCOME as well as the absence: the caller reached its
+            # ordinary work and refused there, which is a non-zero status and a
+            # sentinel of its own. A run killed at the first line satisfies the
+            # absence check and nothing else.
+            if [ "$rc" -ne 0 ] \
+                && ! printf '%s' "$out" | grep -q "$_say" \
+                && printf '%s' "$out" | grep -q 'status=error\|state=error'; then
+                echo "ok   - $_n runs past the $_hook file, which its shell never sources"
             else
-                echo "FAIL - $_n gave rc=$rc under $_hook (wanted $_want / '$_say') out='$out'"; idfail=1
+                echo "FAIL - $_n was reached by $_hook (rc=$rc) out='$out'"; idfail=1
             fi
         done
     done
     rm -rf "$CLKTMP"
 fi
+
+# ── EVERY RUNTIME HELPER IS STARTED PRIVILEGED ─────────────────────────────
+#
+# This is the contract that retires the shadowed-name class rather than answering
+# it one name at a time. An ordinary `#!/usr/bin/env bash` sources `BASH_ENV`,
+# imports functions from the environment and honours an exported `SHELLOPTS`, so
+# every builtin a helper uses is a name the operator's shell can replace — `type`,
+# `return`, `set`, `echo` and `exit` were each found that way, one per review
+# round. `env -S bash -p` does none of the three.
+#
+# `pr-selfcheck.sh` IS EXEMPT AND IS ASSERTED TO BE. It is run by a person, not by
+# the driver, and it already re-execs into a clean shell and clears every
+# inherited function — a guarantee it makes for the whole suite and that this
+# would duplicate rather than strengthen.
+set +e
+priv_missing=""
+for f in "$ROOT"/pr-*.sh; do
+    _b="$(basename "$f")"
+    [ "$_b" = pr-selfcheck.sh ] && continue
+    head -n 1 "$f" | grep -qxF '#!/usr/bin/env -S bash -p' \
+        || priv_missing="$priv_missing $_b"
+done
+[ -z "$priv_missing" ] \
+    && echo "ok   - every runtime helper asks for a privileged interpreter" \
+    || { echo "FAIL - helper(s) without a privileged shebang:$priv_missing"; idfail=1; }
+head -n 1 "$ROOT/pr-selfcheck.sh" | grep -qxF '#!/usr/bin/env bash' \
+    && echo "ok   - …and pr-selfcheck.sh is the stated exception, which re-execs its own way" \
+    || { echo "FAIL - pr-selfcheck.sh's shebang changed; its exemption is no longer what it says"; idfail=1; }
+# AND IT IS TRUE AT RUNTIME, not only in the text. A shebang that a platform's
+# `env` cannot honour would leave every helper unprotected while this file stayed
+# green, so one is executed and asked what flags it actually got.
+priv_probe="$ROOT/../../../.rb-priv-probe.sh"
+rm -f "$priv_probe"
+{ head -n 1 "$ROOT/pr-review-state.sh"; printf 'printf "%%s" "$-"\n'; } > "$priv_probe"
+chmod +x "$priv_probe"
+priv_flags="$(run_limited 20 env 'BASH_FUNC_echo%%=() { :; }' "$priv_probe" 2>/dev/null)"
+rm -f "$priv_probe"
+case "$priv_flags" in
+    *p*) echo "ok   - …and that shebang really starts a privileged shell here" ;;
+    *)   echo "FAIL - the privileged shebang did not take (flags='$priv_flags'); does this env support -S?"; idfail=1 ;;
+esac
+# …AND A HELPER RUN THROUGH AN UNPRIVILEGED INTERPRETER REFUSES, which is what
+# stops `bash pr-x.sh` being a silent downgrade past the shebang.
+for sc in $ID_CALLERS pr-watch.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
+    up_out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        bash "$ROOT/$sc" "$@" 2>&1)"; up_rc=$?
+    if [ "$up_rc" -ne 0 ] && printf '%s' "$up_out" | grep -q 'reason=not_privileged'; then
+        echo "ok   - $sc refuses an unprivileged interpreter by name"
+    else
+        echo "FAIL - $sc ran unprivileged (rc=$up_rc out='$up_out')"; idfail=1
+    fi
+done
+# …AND THE CLASS IS ACTUALLY DEAD, which is the point of the whole change. Five
+# forged builtins at once, each of which took a review round to answer
+# individually: `echo` swallowed the sentinel, `set` made `set +e` a no-op, `exit`
+# made refusals non-terminal, `type` made a good library abort, `return` made a
+# refusing stub succeed. Under a privileged interpreter none of them is imported.
+class_out="$(run_limited 20 env \
+    'BASH_FUNC_echo%%=() { :; }' \
+    'BASH_FUNC_set%%=() { :; }' \
+    'BASH_FUNC_exit%%=() { return 0; }' \
+    'BASH_FUNC_type%%=() { return 1; }' \
+    'BASH_FUNC_return%%=() { :; }' \
+    "$ROOT/pr-review-state.sh" 2>&1)"; class_rc=$?
+{ [ "$class_rc" -ne 0 ] && printf '%s' "$class_out" | grep -q 'usage:'; } \
+    && pass_priv=1 || pass_priv=0
+[ "$pass_priv" = 1 ] \
+    && echo "ok   - five forged builtins at once do not reach a helper" \
+    || { echo "FAIL - a forged builtin reached the helper (rc=$class_rc out='$class_out')"; idfail=1; }
+# THE FIXTURE'S OWN REACH: the same environment must still land on an ordinary
+# interpreter, or this proves nothing about privileged mode.
+class_reach="$(run_limited 20 env 'BASH_FUNC_echo%%=() { :; }' \
+    bash -c 'echo SHOULD-NOT-APPEAR; printf %s "$(type -t echo)"' 2>/dev/null)"
+[ "$class_reach" = function ] \
+    && echo "…and the same forgery does reach an ordinary one" \
+    || { echo "FAIL - the forgery does not land anywhere (got '$class_reach'); the case above proves nothing"; idfail=1; }
+set -e
 
 if [ "$idfail" -ne 0 ]; then
     echo "RESULT: FAIL"

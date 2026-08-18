@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Wait until this PR's checks have settled on the head that was just pushed, and
 # say whether the round may close.
 #
@@ -41,6 +41,33 @@
 # `set -uo pipefail`, NOT `-e`: the probe's exit status IS the control flow here —
 # `pr-ci-state.sh` reports pending, none and stale as non-zero, and every one of
 # them is an ordinary answer this loop acts on. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `ABORT: the CI gate` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# `$-` IS THE GUARD because it is shell state a hook cannot write, and it is not
+# belt-and-braces for the shebang: an `env` without `-S` fails loudly, but a
+# caller that runs this file through its own interpreter — `bash pr-x.sh` —
+# skips the shebang entirely, and this is what stops that being a silent
+# downgrade to an unprotected shell.
+if [[ $- != *p* ]]; then
+    echo "ABORT: the CI gate reason=not_privileged"
+    exit 1
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {

@@ -158,6 +158,23 @@ fixture — each one contains at least one of `local`, `awk`, `[`, `read`, `cat`
 warns about elsewhere, and a second, worse copy of a guarantee that already
 holds. **Do not raise a shadowable name against a fixture.**
 
+**And do not raise one against a runtime helper either, now that they start
+privileged.** Every `pr-*.sh` except `pr-selfcheck.sh` begins
+`#!/usr/bin/env -S bash -p` and refuses if `$-` lacks `p`. Privileged mode does
+not source `BASH_ENV` or `ENV`, does not import functions from the environment,
+and ignores `SHELLOPTS` — so `echo`, `set`, `exit`, `type`, `return` and every
+other builtin in those files is a builtin, not a name an operator's shell can
+replace. This closed a class the review had been answering one member per round.
+
+Two things are still worth raising, and they are the stated exceptions:
+
+- `SKILL.md`'s own bash runs in the operator's long-lived shell, which nothing
+  controls. A shadowable name there is a real finding — that is where reserved
+  words (`[[`, `if`), assignments and expansions are the answer, and #102 tracks
+  what remains;
+- a poisoned `PATH` forges the external commands a privileged shell still calls.
+  That is #91 and is out of scope for a finding on any individual file.
+
 **A shadowed `type` inside `rb_load` is accepted, not a finding.** The loader
 verifies the symbol it just loaded with `type -t`, and there is no name-free way
 to ask whether a name is a function: `type`, `declare` and `command` are all
