@@ -604,7 +604,19 @@ RB_PIN_SEEN=
         && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
 /usr/bin/env rm -f "$RB_PIN_OUT"
 /usr/bin/env rmdir "$RB_PIN_DIR"
-if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
+# Every refusal above ends in `exit`, and `exit` is a name: with one shadowed, a
+# refused transport check carries on with `RB_REMOTE` still empty, the pin probe
+# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
+# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
+# derived its identity from wherever the session happened to stand.
+#
+# THIS IS NOT THE WHOLE OF THAT CLASS, and #102 has the rest: a shadowed `exit`
+# makes every refusal in this block non-terminal, and gating the remainder
+# structurally is a restructure rather than a line. What this closes is the
+# consequence — an empty pin can no longer reach the success line, whatever
+# walked past the refusal that should have stopped it.
+if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
     echo "ABORT: the repository pin did not take; every stage would route by the current directory"

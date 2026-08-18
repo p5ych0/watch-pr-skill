@@ -135,6 +135,15 @@
   means nothing; the ownership clause applies to them exactly as to directories,
   because whoever owns a link can repoint it.
 
+  **An empty pin can no longer reach setup's success line.** Every refusal in the
+  transport block ends in `exit`, and `exit` is a NAME: with one shadowed, a
+  refused check carried on with `RB_REMOTE` still empty, the probe reported empty
+  because no child had been asked, and `"" = ""` succeeded — so setup announced
+  success with no `REVIEW_BUS_REMOTE` at all and every later stage derived its
+  identity from wherever the session stood. The postcondition requires a non-empty
+  pin as well as an equal one. That is the consequence rather than the class;
+  #102 has the rest.
+
   **An ACL is a permission the mode bits do not show.** On macOS a user-owned
   `0700` directory can still grant another local account `add_file` and
   `delete_child` through an extended ACL, and Linux POSIX ACLs do the same;

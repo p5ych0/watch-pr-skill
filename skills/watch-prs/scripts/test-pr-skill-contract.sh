@@ -666,6 +666,26 @@ if [ -n "$_forge_dir" ]; then
         *)        pass "…and a readonly RB_PIN_SEEN cannot answer for the child" ;;
     esac
 fi
+# …AND AN EMPTY PIN CANNOT REACH THE SUCCESS LINE, whatever walked past the
+# refusal that should have stopped it. Every refusal in this block ends in `exit`,
+# and `exit` is a name: with one shadowed, a refused transport check carries on
+# with `RB_REMOTE` still empty, the probe reports empty because no child was
+# asked, and `"" = ""` succeeds — setup announcing success with no
+# `REVIEW_BUS_REMOTE` at all. #102 has the rest of that class; this is its
+# consequence, and it is closed on its own.
+if [ -n "$_forge_dir" ]; then
+    _mt_out=""
+    _mt_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+            RB_REMOTE=
+            RB_TMPPARENT="${RB_TMPBASE:?}"
+            '"$_pin_block"'
+        ' 2>&1)" || true
+    case "$_mt_out" in
+        *OWNER=*) die "setup announced success with an empty pin: '$_mt_out'" ;;
+        *)        pass "…and an empty pin cannot reach the success line even with exit shadowed" ;;
+    esac
+fi
 # …AND A SHADOWED `rm` ON THE PIN SIDE CANNOT SUPPLY THE ANSWER. The same name
 # runs between the probe and the postcondition here, and the state it reaches is
 # worse: a failed probe leaves `RB_PIN_SEEN` empty, so a function by that name
