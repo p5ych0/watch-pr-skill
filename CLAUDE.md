@@ -307,6 +307,18 @@ rediscovering them.
   it is not derived from the core count, because the `macos-shell` job asserts
   `nproc` is unreachable. See issue #52.
 
+- **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
+  verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
+  in the operator's shell turns a good library into `reason=<lib>_empty`. #88
+  removes the same call from the ten helpers that wrap the loader — a separate
+  change, in flight alongside this one — because there the check has somewhere to go — calling an undefined `rb_load` exits 127, which
+  has no name in it. That does not transfer: asking whether a name is a function
+  needs `type`, `declare` or `command`, all shadowable, or calling the symbol,
+  which for `rb_identity` means shelling out to `git`. Dropping the check moves
+  the failure to the caller's first use and loses the precise reason; a subshell
+  probe forks per load and still runs the function. It stays, on this boundary,
+  and `loadlib.sh` says so beside it. #96.
+
 ## Documentation sync
 
 A behaviour change updates every layer that describes it: `SKILL.md` (what the
