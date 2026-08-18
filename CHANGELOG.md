@@ -85,6 +85,22 @@
   value left by an interrupted earlier setup only had to match to report that a
   child had inherited a pin no child had been asked for.
 
+  **The transport directory's parent has to be one nobody else can replace it
+  in**, which mode 700 does not give. That mode protects what is inside the
+  directory and says nothing about the entry naming it: on a `TMPDIR` another
+  account can write and search and that lacks the sticky bit, the account can
+  observe the name, rename the directory without entering it, and leave a
+  writable one of its own at that path — after which the value read back is
+  theirs. The parent must now be sticky or owned by this user, tested with `[[ -k
+  ]]` and `[[ -O ]]` and refused by name otherwise.
+
+  **Every cleanup is reached by path.** `rm` and `rmdir` are names, and each ran
+  between a value being obtained and that value being trusted: an
+  `rm() { RB_REMOTE='git@github.com:WRONG/other.git'; }` in the driving shell
+  replaced the pin immediately after the protected read, and one setting
+  `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
+  helper cannot see either — it had already done its job.
+
 ## [2.0.22] — 2026-08-17
 
 - **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted

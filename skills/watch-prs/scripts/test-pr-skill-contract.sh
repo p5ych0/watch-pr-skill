@@ -193,11 +193,12 @@ grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"'
 # case the whole helper exists for: a read that writes a plausible URL and then
 # fails is accepted, and the session is pinned to it.
 _read_block=""
-_read_block="$(awk '/^RB_TMPDIR=/, /there is no repository to pin this session to/' "$SKILL")" \
+_read_block="$(awk '/^RB_TMPPARENT=/, /there is no repository to pin this session to/' "$SKILL")" \
     || _read_block=""
 { [ -n "$_read_block" ] \
   && case "$_read_block" in *'/pr-origin.sh read "$RB_ORIGIN_OUT"'*) true ;; *) false ;; esac \
-  && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac; } \
+  && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac \
+  && case "$_read_block" in *'-k $RB_TMPPARENT'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -238,6 +239,83 @@ FORGE
       && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
         && pass "…while a helper that succeeds pins the value it wrote" \
         || die "the read block refused a good read (rc=$_rs_rc out='$_rs_out')"
+    # …AND A SHADOWED `rm` CANNOT REWRITE THE VALUE BETWEEN THE READ AND THE
+    # CHECK. `rm` is a name, and setup ran one immediately after the protected
+    # read and before `$RB_REMOTE` was validated or exported — so a function by
+    # that name in the driving shell replaced the pin the helper had just been
+    # hardened to deliver, and everything the session posted went to the forged
+    # repository. The helper cannot see this: it did its job.
+    _rm_rc=0
+    _rm_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" \
+        'BASH_FUNC_rm%%=() { RB_REMOTE="git@github.com:WRONG/other.git"; return 0; }' bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rm_rc=$?
+    case "$_rm_out" in
+        *WRONG/other*) die "a shadowed rm rewrote the pinned remote: '$_rm_out'" ;;
+        *)             pass "…and a shadowed rm cannot rewrite the value it cleans up after" ;;
+    esac
+    # THE FIXTURE'S OWN REACH, so the case above cannot pass by the forger never
+    # arriving. The same function, in front of a bare `rm`, must land.
+    _rmreach="$(env -u SHELLOPTS -u BASH_ENV -u ENV \
+        'BASH_FUNC_rm%%=() { RB_REMOTE="git@github.com:WRONG/other.git"; return 0; }' bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            rm -f /dev/null
+            printf %s "$RB_REMOTE"' 2>/dev/null)"
+    [ "$_rmreach" = "git@github.com:WRONG/other.git" ] \
+        && pass "…where the same function reaches an rm called by name" \
+        || die "the rm forger does not arrive at all (got '$_rmreach'); the case above proves nothing"
+    # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
+    # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
+    # the directory and not the entry naming it: on a shared, non-sticky `TMPDIR`
+    # another account can observe the name, rename the directory without entering
+    # it, and leave a writable one of its own at that path — after which the value
+    # read back is theirs.
+    #
+    # `/usr` IS THE NEGATIVE CASE because it is owned by root and not sticky, so
+    # an ordinary user fails both tests against it. Running as root — or anywhere
+    # `-O /usr` holds — there is no such directory to point at, and the case says
+    # so rather than asserting something it cannot set up.
+    if [ -d /usr ] && [ ! -O /usr ] && [ ! -k /usr ]; then
+        _rp_rc=0
+        _rp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            TMPDIR=/usr bash -c '
+                '"$_read_block"'
+                echo "PINNED=$RB_REMOTE"
+            ' 2>&1)" || _rp_rc=$?
+        # THE REASON IS ASSERTED, NOT ONLY THE REFUSAL. `/usr` is unwritable as
+        # well as unowned, so `mkdir` fails there on its own — a case that
+        # accepted any non-zero status passed unchanged against a parent check
+        # weakened to `[[ -d … ]]`, which is the whole defect. What must be true
+        # is that setup stopped BEFORE creating anything, and only the check's
+        # own words say that happened.
+        { [ "$_rp_rc" -ne 0 ] \
+          && case "$_rp_out" in *'neither sticky nor owned'*) true ;; *) false ;; esac \
+          && case "$_rp_out" in *'could not create a private directory'*) false ;; *) true ;; esac \
+          && case "$_rp_out" in *PINNED=*) false ;; *) true ;; esac; } \
+            && pass "…and a parent another account could replace the directory in is refused" \
+            || die "setup built its transport in a replaceable parent (rc=$_rp_rc out='$_rp_out')"
+    else
+        echo "ok   - (no unowned non-sticky directory available; the replaceable-parent case did not run)"
+    fi
+    # …WHILE A STICKY PARENT IS THE ORDINARY CASE, or the check above would be a
+    # refusal of every session that uses the directory it was written for.
+    if [ -k /tmp ]; then
+        _sp_rc=0
+        _sp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            TMPDIR=/tmp bash -c '
+                '"$_read_block"'
+                /usr/bin/env rmdir "$RB_TMPDIR"
+                echo "PINNED=$RB_REMOTE"
+            ' 2>&1)" || _sp_rc=$?
+        { [ "$_sp_rc" -eq 0 ] \
+          && case "$_sp_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
+            && pass "…while a sticky parent is accepted" \
+            || die "a sticky TMPDIR was refused (rc=$_sp_rc out='$_sp_out')"
+    else
+        echo "ok   - (/tmp is not sticky here; the sticky-parent case did not run)"
+    fi
     # …AND THE TRANSPORT DIRECTORY IS EXCLUSIVE. `mkdir` is what makes the name
     # being guessable a nuisance rather than a substitution: an account that
     # pre-creates it stops this session instead of supplying it a repository.
@@ -403,6 +481,24 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
 [ "$_ok_rc" -eq 0 ] \
     && pass "…while an ordinary shell pins and continues" \
     || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
+# …AND A SHADOWED `rm` ON THE PIN SIDE CANNOT SUPPLY THE ANSWER. The same name
+# runs between the probe and the postcondition here, and the state it reaches is
+# worse: a failed probe leaves `RB_PIN_SEEN` empty, so a function by that name
+# setting it to `$RB_REMOTE` makes the equality agree and setup reports a pin that
+# no child was ever asked about.
+if [ -n "$_forge_dir" ]; then
+    _pr_rc=0
+    _pr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        'BASH_FUNC_rm%%=() { RB_PIN_SEEN="$RB_REMOTE"; return 0; }' bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+            '"$_pin_block"'
+        ' 2>&1)" || _pr_rc=$?
+    { [ "$_pr_rc" -ne 0 ] \
+      && case "$_pr_out" in *OWNER=*) false ;; *) true ;; esac; } \
+        && pass "…and a shadowed rm cannot supply the pin the probe failed to report" \
+        || die "a shadowed rm satisfied the pin postcondition (rc=$_pr_rc out='$_pr_out')"
+fi
 # …AND A PIN HELPER THAT FAILS IS NOT READ BACK, which is the other half of the
 # same status. The block used to run the helper and read the file whatever
 # happened, on the grounds that the helper truncates before it writes — true, and

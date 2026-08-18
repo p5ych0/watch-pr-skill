@@ -299,23 +299,52 @@ unset -f rb_identity 2>/dev/null \
 # trace. `mkdir` runs through `/usr/bin/env` for the reason every other command in
 # this block does: a function called `mkdir` would otherwise answer, report
 # success, and leave the transport in a directory of its choosing.
-RB_TMPDIR="${TMPDIR:-/tmp}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+#
+# THE PARENT HAS TO BE ONE NOBODY ELSE CAN REPLACE THE DIRECTORY IN, and mode 700
+# does not give that. It protects what is INSIDE the directory; it says nothing
+# about the entry naming it. On a shared `TMPDIR` that another account can write
+# and search and that lacks the sticky bit, that account can watch for the name,
+# RENAME the directory without ever entering it, and put a writable one of its own
+# at the same path — after which the helper writes `origin` into the replacement
+# and the value read back is the attacker's. The random suffix stops the name
+# being pre-created and does nothing about it being observed and then replaced.
+#
+# STICKY OR OURS, tested with reserved words and no command at all. `-k` is the
+# sticky bit, which is exactly the property in question: it stops one account
+# renaming or removing another's entries, and it is why `/tmp` is usable. `-O` is
+# ownership by this effective user, which is the other way the entry cannot be
+# taken — nobody else has write on a directory of ours unless we granted it, and
+# that is the stated limit of this check rather than a hole in it. Anything else
+# is refused by name, since continuing there is the substitution above.
+RB_TMPPARENT="${TMPDIR:-/tmp}"
+{ [[ -k $RB_TMPPARENT ]] || [[ -O $RB_TMPPARENT ]]; } \
+    || { echo "ABORT: $RB_TMPPARENT is neither sticky nor owned by this user; another account could replace the transport directory in it"; exit 1; }
+RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 /usr/bin/env mkdir -m 700 "$RB_TMPDIR" \
     || { echo "ABORT: could not create a private directory for this session's transport files"; exit 1; }
+# EVERY CLEANUP HERE IS REACHED BY PATH, and that is not tidiness either. `rm` and
+# `rmdir` are NAMES, and each of them runs between a value being obtained and that
+# value being trusted: an `rm() { RB_REMOTE='git@github.com:WRONG/other.git'; }`
+# in the driving shell rewrites the pin after the protected read and before the
+# check below, and one on the pin side sets `RB_PIN_SEEN` after a failed probe so
+# the postcondition agrees. Neither is reachable through `/usr/bin/env`, which is
+# the same answer already used for `mkdir` two lines up. Which `rm` it finds is a
+# `PATH` question, and that is #91.
+#
 # THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
 # earlier run in the same shell cannot be read back as this one's answer.
 RB_ORIGIN_OUT="$RB_TMPDIR/origin"
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
-    || { rm -f "$RB_ORIGIN_OUT"; rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
 RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
-rm -f "$RB_ORIGIN_OUT"
+/usr/bin/env rm -f "$RB_ORIGIN_OUT"
 # THE DIRECTORY GOES WITH THE FILE ON EVERY EXIT FROM HERE, not only on the one
 # that reaches the pin. A refused read used to leave the directory standing, and
 # an operator who runs setup twice against a misconfigured checkout accumulates
 # one per attempt — each private, each empty, none of them removable by anything
 # but them.
 [[ -n $RB_REMOTE ]] \
-    || { rmdir "$RB_TMPDIR"; echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+    || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
 # public information, so this is tidiness rather than secrecy — but the setup block
 # already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
@@ -465,12 +494,12 @@ RB_PIN_OUT="$RB_TMPDIR/pin"
 RB_PIN_SEEN=
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
     && RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
-rm -f "$RB_PIN_OUT"
+/usr/bin/env rm -f "$RB_PIN_OUT"
 # THE DIRECTORY GOES WITH THEM, AND `rmdir` IS THE POINT. Both files have just
 # been removed, so it succeeds — and if it does not, something this setup did not
 # put there is in a directory this setup made private, which is worth the noise on
 # stderr. `rm -rf` on a variable would remove a tree instead of reporting one.
-rmdir "$RB_TMPDIR"
+/usr/bin/env rmdir "$RB_TMPDIR"
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
