@@ -39,9 +39,10 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     local mode="$1"; shift
     local out rc=0
     # `bash -p` AS THE CALLER, which is the documented invocation. Privileged mode
-    # has to be in force before the subject's first line: the hop inside it reaches
-    # `-p` a moment too late, and a hook needs to shadow nothing to use that moment
-    # — `printf '…' >&9; exit 0` is enough, since fd 9 is already the capture.
+    # has to be in force before the subject's first line, and only the caller can
+    # arrange that: there is no hop inside the file and it is not executable. A
+    # hook needs to shadow nothing to use the gap — one that writes the transport
+    # file it can see as `$2` and exits has already answered.
     local vf="$TMP/value.out" diag
     # REMOVED, NOT TRUNCATED. The helper creates its output with `set -C`, which
     # is O_EXCL — a pre-created file is refused, symlink or not, and that is the
@@ -313,12 +314,12 @@ run_limited 20 bash -c '
 
 # ── A HOOK THAT SHADOWS NOTHING AT ALL ─────────────────────────────────────
 #
-# It does not have to defeat a guard; it only has to run first. fd 9 is already
-# the caller's capture by the time `BASH_ENV` is sourced, so writing a plausible
-# URL there and exiting is a complete attack against any defence that lives inside
-# this file. `bash -p` at the CALL SITE is the answer, because privileged mode is
-# what stops the hook being sourced — the hop inside the script reaches it one
-# moment too late.
+# It does not have to defeat a guard; it only has to run first. `BASH_ENV` is
+# sourced inside the script's own shell, so the hook can see the transport path as
+# `$2` — writing a plausible URL there and exiting is a complete attack against
+# any defence that lives inside this file. `bash -p` at the CALL SITE is the
+# answer, because privileged mode is what stops the hook being sourced at all, and
+# nothing inside the file can undo work that happened before its first line.
 # THE HOOK WRITES THE VALUE FILE, whose path it can see as `$2` — it is sourced
 # inside the script's own shell, so the script's arguments are its arguments.
 printf "printf '%%s\\n' '%s' > \"\$2\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
@@ -328,10 +329,18 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
     || die "a hook needing no shadowed name reached the value: '${got}'"
 # …AND WITHOUT `-p` AT THE CALL SITE IT WOULD HAVE WON, which is what makes the
 # caller's part load-bearing rather than belt-and-braces.
+#
+# THROUGH AN ORDINARY `bash`, NOT BY EXECUTING THE FILE. The helper is no longer
+# executable, so `"$SCRIPT" …` fails before any shell starts — the hook is never
+# sourced, the value file stays absent, and the empty branch below accepted that
+# as "the attack did not land on this version". It proved nothing and would have
+# stayed green with the attack setup broken. An interpreter has to be started for
+# the comparison to mean anything.
 rm -f "$TMP/unprot.value"
 ( cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
-    "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
-unprot="$(<"$TMP/unprot.value")"
+    /usr/bin/env bash "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
+unprot=""
+[ -f "$TMP/unprot.value" ] && unprot="$(<"$TMP/unprot.value")"
 # REPORTED, NOT REQUIRED, because the ROUTE is version-dependent. This hook writes
 # the value file whose path it reads as `$2` — the script's own arguments, since
 # `BASH_ENV` is sourced inside the script's shell. bash 5 gives it those arguments;
@@ -587,30 +596,54 @@ if command -v setfacl >/dev/null 2>&1; then
     else
         echo "ok   - (setfacl could not set an ACL here; that case did not run)"
     fi
-    # …AND THE `@` MARK IS REFUSED TOO, which is the one that matters on macOS:
-    # there `ls -l` marks extended ATTRIBUTES with `@` and security information
-    # with `+`, and a component carrying BOTH shows `@` ALONE — so an ACL granting
-    # another account `delete_child` reads as clean beside any xattr. This machine
-    # cannot stage that pairing, so the mark is staged directly: what is asserted
-    # is that the refusal keys on either mark, not on `+` alone.
-    XADIR="$TMP/xattrcase"
-    mkdir -p "$XADIR"
-    chmod 700 "$XADIR"
-    XASTUB="$TMP/xastub"
-    mkdir -p "$XASTUB"
-    printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
-    chmod +x "$XASTUB/ls"
-    xa_rc=0
-    xa_diag="$( cd "$REPO" && run_limited 20 env PATH="$XASTUB:$PATH" \
-        /usr/bin/env bash -p "$SCRIPT" read "$XADIR/origin" 2>&1 )" || xa_rc=$?
-    { [ "$xa_rc" -ne 0 ] \
-      && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
-      && [ ! -e "$XADIR/origin" ]; } \
-        && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
-        || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
 else
     echo "ok   - (no setfacl on this machine; the ACL case did not run)"
 fi
+# THE `@` CASE NEEDS NO ACL TOOL, so it sits outside that conditional. Inside it,
+# a platform without `setfacl` — stock macOS, the one whose behaviour this case is
+# about — skipped the synthetic marker too, and a regression to accepting `@`
+# would have stayed green exactly there.
+# …AND THE `@` MARK IS REFUSED TOO, which is the one that matters on macOS:
+# there `ls -l` marks extended ATTRIBUTES with `@` and security information
+# with `+`, and a component carrying BOTH shows `@` ALONE — so an ACL granting
+# another account `delete_child` reads as clean beside any xattr. This machine
+# cannot stage that pairing, so the mark is staged directly: what is asserted
+# is that the refusal keys on either mark, not on `+` alone.
+XADIR="$TMP/xattrcase"
+mkdir -p "$XADIR"
+chmod 700 "$XADIR"
+XASTUB="$TMP/xastub"
+mkdir -p "$XASTUB"
+printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 1 00:00 %%s\\n" "$2" && exit 0\nexec /usr/bin/ls "$@"\n' > "$XASTUB/ls"
+chmod +x "$XASTUB/ls"
+xa_rc=0
+xa_diag="$( cd "$REPO" && run_limited 20 env PATH="$XASTUB:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" read "$XADIR/origin" 2>&1 )" || xa_rc=$?
+{ [ "$xa_rc" -ne 0 ] \
+  && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
+  && [ ! -e "$XADIR/origin" ]; } \
+    && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
+    || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
+
+# …AND THE ACL PROBE FAILS CLOSED TOO. It is the second status-sensitive probe on
+# this path and the `find` case below does not cover it: the `ls` stub used for
+# `@` always succeeds. If `ls -ld` fails — the component vanished, or became
+# unreadable — its empty output is indistinguishable from an unmarked safe
+# component, which is the shape that let a renamed directory through before.
+LSFAIL="$TMP/lsfail"
+mkdir -p "$LSFAIL"
+printf '#!/usr/bin/env bash\nexit 3\n' > "$LSFAIL/ls"
+chmod +x "$LSFAIL/ls"
+rm -f "$OPENDIR/origin"
+chmod 700 "$OPENDIR"
+lsf_rc=0
+lsf_diag="$( cd "$REPO" && run_limited 20 env PATH="$LSFAIL:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || lsf_rc=$?
+{ [ "$lsf_rc" -ne 0 ] \
+  && case "$lsf_diag" in *"could not read the permissions"*) true ;; *) false ;; esac \
+  && [ ! -e "$OPENDIR/origin" ]; } \
+    && pass "…and an ACL probe that cannot run refuses rather than reading empty as unmarked" \
+    || die "a failing ls was treated as a clean result (rc=$lsf_rc diag='$lsf_diag')"
 
 # …AND A PROBE THAT CANNOT RUN IS A REFUSAL, NOT A PASS. `find` prints nothing
 # when it fails, and empty output is what the walk reads as safe — so an attacker
