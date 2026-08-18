@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # The merge decision: every gate, evaluated immediately before merging, against
 # the head that is merged.
 #
@@ -44,6 +44,44 @@
 # `set -uo pipefail`, NOT `-e`: nearly every probe below reports its answer as an
 # exit status, and several of them fail as ordinary operation. See CLAUDE.md
 # § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `merge blocked:` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "merge blocked: reason=not_privileged"
+    exit 1
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
@@ -153,7 +191,7 @@ fi
 #
 # So: ask about the CURRENT head first, and fall back to the recorded signoff
 # only when Codex has genuinely not reviewed this head.
-CODEX_HEAD_STATE=$("$_RB_SELF_DIR"/pr-review-state.sh state "$PR" "$CODEX_BOT" "$HEAD_OID"); CODEX_STATE_RC=$?
+CODEX_HEAD_STATE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh state "$PR" "$CODEX_BOT" "$HEAD_OID"); CODEX_STATE_RC=$?
 # ONLY rc 0 is an answer. A wrapper or a replaced helper can print a plausible
 # `state=none` and exit with something other than the documented 2 — and this
 # branch decides whether to fall back to the older signoff, so a bad read here
@@ -213,14 +251,14 @@ case "$CODEX_STATE" in
             exit 1
         fi
         CODEX_EFFECTIVE_SHA="$CODEX_SHA"
-        CODEX_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$CODEX_SHA"); CODEX_RC=$? ;;
+        CODEX_VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$CODEX_SHA"); CODEX_RC=$? ;;
     *)
         # Codex HAS judged this head — that judgement wins over the older one,
         # whatever it says. Record WHICH sha the verdict describes: step (2) has
         # to measure from the same commit, or it would demand Copilot trailers
         # across a range Codex has already reviewed in full.
         CODEX_EFFECTIVE_SHA="$HEAD_OID"
-        CODEX_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$HEAD_OID"); CODEX_RC=$? ;;
+        CODEX_VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$CODEX_BOT" "$HEAD_OID"); CODEX_RC=$? ;;
 esac
 # $HEAD_OID is passed explicitly rather than letting the call resolve the head: a
 # push landing mid-gate would otherwise leave a verdict describing an older
@@ -245,7 +283,7 @@ esac
 # withdrawn. See CLAUDE.md § Tests on rules that apply to more than one caller.
 signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will use>
     local who="$1" want="$2" line rc=0 got
-    line=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
+    line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     case "$rc" in
         0) got="${line##*sha=}"
            if [ "$got" != "$want" ]; then
@@ -316,7 +354,7 @@ rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may
 }
 signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
     local who="$1" want="$2" line rc=0 at rat arc=0
-    line=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
+    line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
     [ "${line##*sha=}" = "$want" ] || return 1
     # A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
@@ -327,7 +365,7 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
     case "$at" in
         ""|*[!0-9TZ:-]*) echo "merge blocked: the $who signoff record carries no usable timestamp ('$line')"; return 1 ;;
     esac
-    rat=$("$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
+    rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
     [ -n "$rat" ] || { echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer"; return 1; }
     # EQUAL IS NOT NEWER. GitHub timestamps are second-resolution, so a tie cannot
@@ -367,7 +405,7 @@ else
     # …AND COPILOT'S RECORD, ON THE HEAD BEING MERGED. Only in this mode: there is
     # no Copilot phase to reopen in the other one.
     signoff_contradicts "$COPILOT_BOT" "$HEAD_OID" || exit 1
-    COPILOT_VERDICT=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
+    COPILOT_VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$COPILOT_BOT" "$HEAD_OID"); COPILOT_RC=$?
     if ! rc_answered "$CODEX_BOT" "$CODEX_EFFECTIVE_SHA" "$CODEX_RC" "$CODEX_VERDICT" \
        || ! rc_answered "$COPILOT_BOT" "$HEAD_OID" "$COPILOT_RC" "$COPILOT_VERDICT"; then
         echo "merge blocked: codex=$CODEX_RC copilot=$COPILOT_RC (1 = not clean, 2 = could not tell)"; exit 1
@@ -444,7 +482,7 @@ done
 # recorded sha instead would demand Copilot trailers across a range Codex has
 # already reviewed in full, and block a merge both reviewers just approved.
 if [ "$HEAD_OID" != "$CODEX_EFFECTIVE_SHA" ]; then
-    "$_RB_SELF_DIR"/pr-merge-range.sh "$CODEX_EFFECTIVE_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
+    /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-merge-range.sh "$CODEX_EFFECTIVE_SHA" "$HEAD_OID" "$REPO_DIR"; RANGE=$?
     if [ "$RANGE" -ne 0 ]; then
         echo "merge blocked: range check returned $RANGE (1 = an untagged commit, or the Codex-reviewed SHA is not an ancestor; 2 = could not inspect)"; exit 1
     fi
@@ -509,7 +547,7 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # checks at all, which makes that probe blind to everything.
 #
 # The same gate, on the head the merge is pinned to.
-"$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 1; }
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_OID" || { echo "merge blocked: the head's checks are not green"; exit 1; }
 
 # (4) Required checks green — through the same helper the round loop uses.
 #
@@ -531,7 +569,7 @@ if [ "$OK" -ne 1 ] || [ "$UNRESOLVED" -gt 0 ]; then echo "merge blocked: unresol
 # without branch protection, permanently — not a fail-closed guard but a gate that
 # never opens, and it was found by trying to merge rather than by reading the
 # code. The helper distinguishes the two and reports 4 for it.
-"$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required; CHECKS_RC=$?
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$PR" --required; CHECKS_RC=$?
 case "$CHECKS_RC" in
     0) ;;
     4) echo "note: no required checks configured on this branch; the checks gate has nothing to assert" ;;
@@ -544,7 +582,7 @@ esac
 # head would otherwise walk straight into a merge without the operator being
 # asked at all — the pause is about committing to an outcome, and merging is the
 # largest one available.
-"$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$COPILOT_BOT"; MERGE_ROUNDS_RC=$?
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$COPILOT_BOT"; MERGE_ROUNDS_RC=$?
 case "$MERGE_ROUNDS_RC" in
     0) ;;
     3) echo "PAUSE: round boundary reached. Decide with the operator before merging: merge now, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"

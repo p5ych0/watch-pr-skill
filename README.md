@@ -184,6 +184,25 @@ Per-repository behaviour lives on the Codex **Code review** settings page:
 Portable: the plugin shells out to `git`, `gh` and `jq` only. v1's Linux-only
 caveat is gone with the daemons it was about.
 
+**The helpers run in a privileged shell**, started that way by the skill itself —
+`/usr/bin/env bash -p …`. That is what stops a `BASH_ENV` startup file, an
+exported shell function or an inherited `SHELLOPTS` from reaching them, and it
+needs nothing of your setup: the driver supplies it on every call.
+
+Running a helper **by hand** goes through its shebang instead, which is
+`#!/usr/bin/env -S bash -p`. `env -S` has been in GNU coreutils since 8.30 (2018)
+and BSD/macOS `env` supports it; on an older `env` the helper refuses to start
+rather than starting unprotected.
+
+**Contributors need that `env`, users do not.** The plugin never depends on the
+shebang: the skill supplies `-p` on every call, and so does every call a helper
+makes to another helper. The test suite is the exception — it executes the
+helpers directly — so `pr-selfcheck.sh`, the mandatory pre-push gate, needs an
+`env` with `-S`.
+
+`bash skills/watch-prs/scripts/pr-…​.sh` is **not** supported either way: a startup
+file runs before the script's first line and nothing inside it can undo that.
+
 The suite is a mandatory pre-push gate, so a GNU-only construct *in the suite*
 stops a macOS contributor from closing a review round while Ubuntu CI stays green
 — invisible on the machine that introduced it. CI therefore runs the whole suite a

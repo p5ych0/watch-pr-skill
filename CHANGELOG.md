@@ -1,5 +1,67 @@
 # Changelog
 
+## [2.0.27] — 2026-08-18
+
+- **Every runtime helper is started privileged, which retires a class the review
+  had been answering one member at a time.** A helper ran through
+  `#!/usr/bin/env bash`, and an ordinary bash SOURCES `BASH_ENV`, IMPORTS
+  functions from the environment, and honours an exported `SHELLOPTS`. Every
+  builtin a helper used was therefore a name the operator's shell could replace,
+  and each one was found on its own round: `type` reported that a perfectly good
+  `loadlib.sh` had defined nothing; `return` made a refusing stub return 0 and
+  report an empty loader as a successful load; `set` made `set +e` a no-op, so an
+  inherited `errexit` killed a helper before it could name its refusal; `echo`
+  swallowed the structured sentinel a caller branches on, leaving an
+  ordinary-looking empty answer; and `exit` made every refusal non-terminal, so a
+  helper announced an abort and carried on to post to GitHub. Every fix was
+  correct, and every one introduced the next name.
+
+  The shebang is now `#!/usr/bin/env -S bash -p`. Privileged mode does none of
+  those three things, so there is nothing to shadow and nothing to clear —
+  measured: under a forged `echo` and `set`, a privileged shell reports both as
+  builtins, and five forged builtins at once do not reach a helper.
+
+  **`env -S` is a contributor requirement, not a user one**, and the split is
+  stated in `README.md`. The plugin never depends on the shebang — the driver
+  supplies `-p`, and so does every helper-to-helper call, of which there are
+  twenty-six across five files plus the watch's five probes. Leaving those bare
+  would have put the requirement back through the side door on the very flows
+  the driver protects. The suite is the exception: the fixtures execute helpers
+  directly at hundreds of call sites, so `pr-selfcheck.sh` needs an `env` with
+  `-S`. GNU coreutils has had it since 8.30
+  and BSD `env` supports it.
+
+  **The driver supplies it, and the shebang is the fallback.** `SKILL.md` invokes
+  every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a
+  fresh privileged interpreter whatever the driving shell is and whatever that
+  platform's `env` supports — so the plugin gains no `env -S` requirement. The
+  shebang covers the other way in, executing a helper directly, and that one does
+  need `-S`.
+
+  It cannot be a re-exec from inside: a `BASH_ENV` hook runs before a script's
+  first line, and one that prints a forged `PR_X …` line and exits has already
+  answered a caller capturing stdout.
+
+  **`$-` is checked as a last-resort refusal, and it proves less than it looks.**
+  It reports the MODE a shell is in, not how it got there — run as
+  `BASH_ENV=hook bash pr-x.sh`, the hook is sourced first and can itself `set -p`
+  and then define `echo` or `exit`, after which the test passes on a shell that
+  has already executed hostile code. Nothing inside a script can detect work done
+  before its first line, so `bash pr-x.sh` is unsupported rather than defended,
+  and it is the CALLER that carries the guarantee.
+
+  `pr-selfcheck.sh` is the exception and is asserted to be one: it is run by a
+  person, and it already re-execs into a clean shell and clears every inherited
+  function.
+
+  Two fixtures changed meaning rather than being adjusted. The clock-hook cases
+  asserted that a hostile `BASH_ENV` hook produced each caller's documented
+  refusal; the hook is no longer sourced at all, so they now assert its ABSENCE
+  together with the concrete outcome, and each one first proves the hook still
+  lands on an ordinary shell. `test-pr-review-state.sh` sources a helper to
+  inspect its identity derivation, which now needs `bash -p -c`, because a
+  sourced file sees the caller's `$-`.
+
 ## [2.0.26] — 2026-08-18
 
 - **Four shipped files claimed CI coverage that is not running.** `SKILL.md`,

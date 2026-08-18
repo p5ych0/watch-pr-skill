@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Close a review round: push the fixes, prove the head is green, post the summary
 # and request the next pass.
 #
@@ -64,6 +64,44 @@
 #
 # `set -uo pipefail`, NOT `-e`: every probe here reports its answer as an exit
 # status and several fail as ordinary operation. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `ABORT:` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "ABORT: reason=not_privileged"
+    exit 1
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
@@ -188,7 +226,7 @@ fi
 # a pause there would stop a round that is already irreversibly half-closed — and
 # the count it would be pausing on was checked before any of that.
 if [ "$STAGE" = gate ]; then
-    "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$WHO"; ROUNDS_RC=$?
+    /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$WHO"; ROUNDS_RC=$?
     case "$ROUNDS_RC" in
         0) ;;
         3) echo "PAUSE: round boundary reached. Decide with the operator before requesting the next pass: continue, merge, leave it open, or close this PR and start over with a better approach. Say what the rounds have been ABOUT, not just how many"
@@ -203,7 +241,7 @@ request_review() {   # request_review ; posts the summary and asks for the pass
     # wait as the answer to a request made after it — and a Codex pass on a small
     # diff can beat the checks.
     local prior
-    prior=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
+    prior=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; return 1; }
     # WHICH REVIEWER THE ROUND WAS ABOUT DECIDES HOW IT IS RE-REQUESTED. Copilot is
     # never triggered by a mention and never by a push — only by `--add-reviewer` —
@@ -263,7 +301,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     # green first and the threads answered afterwards, with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
     git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
-    "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
+    /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
     exit 0
 fi
@@ -300,11 +338,11 @@ fi
 # is the only thing a Copilot round needs — a stall with no upside.
 PUSH_BASE=""
 if [ "$WHO" != "$COPILOT_BOT" ]; then
-    PUSH_BASE=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
+    PUSH_BASE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the review id before the push."; exit 1; }
 fi
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
-"$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 
 # THE PUSHED HEAD IS CONFIRMED, WITH RETRIES. The API can serve the previous head
 # for a moment after a push, and every check below is about the commit that was
@@ -332,7 +370,7 @@ fi
 # for it would re-arm every timeout forever. Copilot is never triggered by a push
 # at all.
 if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
-    "$_RB_SELF_DIR"/pr-watch.sh "$PR" "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
+    /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-watch.sh "$PR" "$WHO" --after-review "$PUSH_BASE"; PUSHPASS_RC=$?
     case "$PUSHPASS_RC" in
         0) ;;
         1) echo "ABORT: the pass the push started has not finished; its result would answer the next request."; exit 1 ;;
