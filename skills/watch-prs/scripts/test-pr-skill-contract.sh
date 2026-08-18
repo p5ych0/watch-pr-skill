@@ -198,7 +198,7 @@ _read_block="$(awk '/^RB_TMPPARENT=/, /there is no repository to pin this sessio
 { [ -n "$_read_block" ] \
   && case "$_read_block" in *'/pr-origin.sh read "$RB_ORIGIN_OUT"'*) true ;; *) false ;; esac \
   && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac \
-  && case "$_read_block" in *'-k $RB_TMPPARENT'*) true ;; *) false ;; esac; } \
+  && case "$_read_block" in *'-O $RB_TMPPARENT'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -319,14 +319,16 @@ SWAP
     # it, and leave a writable one of its own at that path — after which the value
     # read back is theirs.
     #
-    # `/usr` IS THE NEGATIVE CASE because it is owned by root and not sticky, so
-    # an ordinary user fails both tests against it. Running as root — or anywhere
-    # `-O /usr` holds — there is no such directory to point at, and the case says
-    # so rather than asserting something it cannot set up.
-    if [ -d /usr ] && [ ! -O /usr ] && [ ! -k /usr ]; then
+    # `/usr` IS THE NEGATIVE CASE because it is owned by root, so an ordinary user
+    # fails `-O` against it. BOTH candidates are pointed at it: the rule tries
+    # `TMPDIR` and then `HOME`, so leaving `HOME` alone would land the transport
+    # in a directory the user does own and prove nothing. Running as root — or
+    # anywhere `-O /usr` holds — there is no such directory to point at, and the
+    # case says so rather than asserting something it cannot set up.
+    if [ -d /usr ] && [ ! -O /usr ]; then
         _rp_rc=0
         _rp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-            TMPDIR=/usr bash -c '
+            TMPDIR=/usr HOME=/usr bash -c '
                 '"$_read_block"'
                 echo "PINNED=$RB_REMOTE"
             ' 2>&1)" || _rp_rc=$?
@@ -337,7 +339,7 @@ SWAP
         # is that setup stopped BEFORE creating anything, and only the check's
         # own words say that happened.
         { [ "$_rp_rc" -ne 0 ] \
-          && case "$_rp_out" in *'neither sticky nor owned'*) true ;; *) false ;; esac \
+          && case "$_rp_out" in *'is a directory this user owns'*) true ;; *) false ;; esac \
           && case "$_rp_out" in *'could not create a private directory'*) false ;; *) true ;; esac \
           && case "$_rp_out" in *PINNED=*) false ;; *) true ;; esac; } \
             && pass "…and a parent another account could replace the directory in is refused" \
@@ -345,23 +347,41 @@ SWAP
     else
         echo "ok   - (no unowned non-sticky directory available; the replaceable-parent case did not run)"
     fi
-    # …WHILE A STICKY PARENT IS THE ORDINARY CASE, or the check above would be a
-    # refusal of every session that uses the directory it was written for.
-    if [ -k /tmp ]; then
+    # …AND A SHARED STICKY `TMPDIR` FALLS BACK TO `HOME` RATHER THAN BEING USED.
+    # `/tmp` is the case the sticky arm existed for, and it is exactly the one that
+    # cannot be made safe: root owns it, so an account that owns a sticky parent
+    # elsewhere has the same power over entries in it that this rule now refuses.
+    # What must happen is not a refusal but a fallback — the session continues,
+    # and the transport is not in `/tmp`.
+    if [ -d /tmp ] && [ ! -O /tmp ]; then
         _sp_rc=0
         _sp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-            TMPDIR=/tmp bash -c '
+            TMPDIR=/tmp HOME="$_forge_dir" bash -c '
                 '"$_read_block"'
-                /usr/bin/env rmdir "$RB_TMPDIR"
+                echo "PARENT=$RB_TMPPARENT"
                 echo "PINNED=$RB_REMOTE"
             ' 2>&1)" || _sp_rc=$?
         { [ "$_sp_rc" -eq 0 ] \
-          && case "$_sp_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
-            && pass "…while a sticky parent is accepted" \
-            || die "a sticky TMPDIR was refused (rc=$_sp_rc out='$_sp_out')"
+          && case "$_sp_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac \
+          && case "$_sp_out" in *"PARENT=$_forge_dir"*) true ;; *) false ;; esac; } \
+            && pass "…while a sticky TMPDIR nobody here owns falls back to HOME" \
+            || die "a shared sticky TMPDIR was used or refused (rc=$_sp_rc out='$_sp_out')"
     else
-        echo "ok   - (/tmp is not sticky here; the sticky-parent case did not run)"
+        echo "ok   - (/tmp is absent or owned by this user; the fallback case did not run)"
     fi
+    # …AND AN OWNED `TMPDIR` IS STILL USED, or the rule would move every session's
+    # transport into the home directory whether or not it needed to.
+    _op_rc=0
+    _op_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" HOME=/usr bash -c '
+            '"$_read_block"'
+            echo "PARENT=$RB_TMPPARENT"
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _op_rc=$?
+    { [ "$_op_rc" -eq 0 ] \
+      && case "$_op_out" in *"PARENT=$_forge_dir"*) true ;; *) false ;; esac; } \
+        && pass "…and a TMPDIR this user owns is used as it stands" \
+        || die "an owned TMPDIR was not used (rc=$_op_rc out='$_op_out')"
     # …AND THE TRANSPORT DIRECTORY IS EXCLUSIVE. `mkdir` is what makes the name
     # being guessable a nuisance rather than a substitution: an account that
     # pre-creates it stops this session instead of supplying it a repository.
@@ -392,27 +412,23 @@ fi
 #
 # `/usr/bin/env` IS ASSERTED WITH IT, because `bash` is a name: written as
 # `bash -p …` the call goes to a function called `bash` if the driving shell has
-# one, and such a function writes a forged URL to fd 9 — which is the capture —
+# one, and such a function writes a forged URL to the transport file it was handed
 # and returns, without the helper running at all. A path cannot be shadowed.
 #
 # `bash -p` IS ASSERTED WITH THEM, and it is the caller's part of the defence:
 # privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
 # before the helper's first line. A hook needs to shadow nothing to use the gap —
-# `printf '…' >&9; exit 0` is a complete attack, because fd 9 is already this
-# capture by then.
+# one that writes that same file and exits is a complete attack.
 #
-# THE BRACES ARE ASSERTED TOO, and they are not style. Written as a simple
-# command, bash traces the invocation BEFORE applying its redirections — and
-# inside a command substitution fd 1 is already the capture, so a traced driving
-# shell puts that line in the value ahead of the URL. The group takes the
-# redirections first. Measured both ways in `test-pr-origin.sh`.
-#
-# `9>&1 1>&2` IS PART OF BOTH CALLS AND IS ASSERTED WITH THEM. The helper writes
-# its value to fd 9, and these redirections are applied by the driving shell
-# BEFORE bash begins executing it — which is what keeps an exported
-# `SHELLOPTS=xtrace` off the captured value. Dropping them does not degrade the
-# read, it breaks it, and it is exactly the kind of detail a later edit tidies
-# away.
+# WHAT IS ASSERTED IS THE WHOLE INVOCATION, AND THERE IS NO LONGER ANYTHING ELSE
+# IN IT. Earlier versions of this comment required a brace group and `9>&1 1>&2`,
+# and required them for a real reason: bash traces a simple command BEFORE
+# applying its redirections, so inside a command substitution the trace landed in
+# the value ahead of the URL, and the group took the redirections first. None of
+# it survives the move to a file — the call is a plain command whose output nobody
+# captures — and the paragraph is rewritten rather than left, because it described
+# assertions these greps do not make and pointed a maintainer back at the design
+# that produced the failure.
 grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT"' <<<"$skill_flat" \
     && pass "…and the pin is proved by a real child, not by a shell copy" \
     || die "the pin proof does not go through pr-origin.sh"

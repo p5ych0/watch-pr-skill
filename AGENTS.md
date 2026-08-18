@@ -218,9 +218,11 @@ rather than a name, and privileged mode is what stops `BASH_ENV` and
 environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and
 nothing inherited to clear. It has to be the FIRST interpreter: entering
 privileged mode from inside a shell that has already run the hook is too late,
-and a hook needs to shadow nothing to use that gap — `printf '…' >&9; exit 0` is
-enough, because fd 9 is already the caller's capture.: a shell function called `git` that answers only
-`remote get-url origin` otherwise forges the identity every stage is addressed by.
+and a hook needs to shadow nothing to use that gap — one that writes the transport
+file the helper was handed and exits is a complete attack. The value travels in a
+file the caller names, not on a descriptor: a shell function called `git` that
+answers only `remote get-url origin` otherwise forges the identity every stage is
+addressed by.
 The pin is proved the same way — `pr-origin.sh pin` is a real child, where
 `bash -c` is a name whose shell copy inherits NON-exported variables and so agrees
 the pin arrived while the real helpers inherit nothing. **Treat a change that

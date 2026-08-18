@@ -317,28 +317,31 @@ unset -f rb_identity 2>/dev/null \
 # that is the stated limit of this check rather than a hole in it. Anything else
 # is refused by name, since continuing there is the substitution above.
 #
-# THE PARENT CHECK IS THE CHEAP REFUSAL AND NOT THE PROOF. Sticky stops one
-# account renaming ANOTHER'S entries; it does not stop the directory's OWNER
-# renaming ours, so an attacker-owned mode-1777 `TMPDIR` passes `-k` and can still
-# have our directory replaced after `mkdir`. Ownership has the matching gap — a
-# parent we own but made world-writable, or one whose own entry sits somewhere
-# another account can rename. Validating the whole ancestry means walking it and
-# reading modes, which needs `stat`, whose flags differ between GNU and BSD; this
-# repository has a section on what that kind of scanner costs.
+# THE PARENT MUST BE ONE THIS USER OWNS, AND STICKY IS NOT ACCEPTED. Sticky stops
+# one account renaming ANOTHER'S entries and does nothing about the directory's
+# OWNER renaming ours, so an attacker-owned mode-1777 `TMPDIR` passed a `-k` test
+# and could still have this directory replaced after `mkdir` — and no check on the
+# FILE closes that, because the owner of the parent can leave the helper's own
+# output in place for the checks and swap the pathname before the read. Checking a
+# path and then opening it are two operations on a name, and whoever controls the
+# directory controls what the name means in between.
 #
-# WHAT PROVES IT INSTEAD IS THE FILE, ASSERTED AFTER THE HELPER WRITES IT. An
-# account that replaces the directory can put anything it likes at the path — but
-# it cannot put a file THIS USER OWNS there, because a file belongs to whoever
-# created it, and the only creator of this one is the helper this setup just ran.
-# So `-O` on the file is the thing the substitution cannot forge, and `-h` refuses
-# the symlink that would otherwise satisfy it by pointing at something of ours.
-# The parent check stays because refusing early costs nothing and names the
-# misconfiguration; the file check is what makes a replaced directory harmless.
-RB_TMPPARENT="${TMPDIR:-/tmp}"
-[[ $RB_TMPPARENT = "${TMPDIR:-/tmp}" ]] \
-    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport path cannot be set"; exit 1; }
-{ [[ -k $RB_TMPPARENT ]] || [[ -O $RB_TMPPARENT ]]; } \
-    || { echo "ABORT: $RB_TMPPARENT is neither sticky nor owned by this user; another account could replace the transport directory in it"; exit 1; }
+# A directory only this user can write has no such window: renaming an entry needs
+# write permission on the directory holding it, and nobody else has it. That is
+# what `-O` asks, and it is why the sticky arm is gone rather than kept as a
+# fallback — a fallback is the case an attacker selects.
+#
+# `$TMPDIR` FIRST, `$HOME` SECOND, and `/tmp` therefore refused. Many systems set
+# `TMPDIR` per user, and where they do this changes nothing; where `TMPDIR` is the
+# shared `/tmp`, root owns it and this falls back to a directory that is the
+# operator's by definition. The remaining case is a home directory the operator
+# has made writable by others, which is stated here as the limit rather than left
+# to be inferred.
+RB_TMPPARENT="${TMPDIR:-}"
+[[ -n $RB_TMPPARENT ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
+    || RB_TMPPARENT="${HOME:-}"
+[[ -n $RB_TMPPARENT ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
+    || { echo "ABORT: neither TMPDIR nor HOME is a directory this user owns; there is nowhere to put the transport files that another account cannot replace"; exit 1; }
 RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_TMPDIR = "$RB_TMPPARENT"/watch-pr.* ]] \
     || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport path cannot be set"; exit 1; }
@@ -355,6 +358,11 @@ RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 #
 # THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
 # earlier run in the same shell cannot be read back as this one's answer.
+#
+# `RB_TMPPARENT` NEEDS NO SEPARATE POSTCONDITION. A readonly one keeps its old
+# value, and the ownership test that follows is exactly the question being asked of
+# whatever value it holds — so the check that would prove the assignment is already
+# there, applied to the thing that matters rather than to the assignment.
 #
 # THE ASSIGNMENT IS PROVED BY READING IT BACK, AND ITS STATUS CANNOT BE USED. This
 # block runs in the driving session's own long-lived shell, where `RB_ORIGIN_OUT`
@@ -375,8 +383,13 @@ RB_ORIGIN_OUT="$RB_TMPDIR/origin"
     || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-# THE FILE IS OURS, AND IS A FILE. See the paragraph above the parent check: this
-# is the assertion a replaced transport directory cannot satisfy.
+# THE FILE IS OURS, AND IS A FILE. This is no longer load-bearing — a parent only
+# this user can write has no window for the directory to be replaced in — and it
+# is kept because it costs three reserved-word tests and catches a helper that
+# wrote somewhere other than where it was told. It is NOT what makes a replaceable
+# parent safe: checking a path and then opening it are two operations on a name,
+# so these three would pass on the helper's own output and the read would take
+# whatever the name meant by then. That is why the parent rule changed instead.
 { [[ -O $RB_ORIGIN_OUT ]] && [[ ! -h $RB_ORIGIN_OUT ]] && [[ -f $RB_ORIGIN_OUT ]]; } \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
 RB_REMOTE="$(<"$RB_ORIGIN_OUT")"

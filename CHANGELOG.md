@@ -34,16 +34,15 @@
 
   **The caller starts it privileged, through a path**: `/usr/bin/env bash -p`.
   Written as `bash -p …` the call is a NAME — a function called `bash` in the
-  driving shell writes a forged URL to fd 9, which is the capture, and returns
-  without the helper running at all. `/usr/bin/env` is the same path every script
+  driving shell writes a forged URL to the transport file it was handed and
+  returns, without the helper running at all. `/usr/bin/env` is the same path every script
   here already depends on through its shebang, so it is not a new assumption;
   which `bash` it finds is a `PATH` question, and that is #91.
 
   **Starting it privileged cannot be delegated:**
   privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
   before the helper's first line. A hook needs to shadow nothing to use the gap —
-  `printf '…' >&9; exit 0` is a complete attack, because fd 9 is already the
-  caller's capture by then. The helper hops to `-p` itself as well, for a caller
+  one that writes the transport file and exits is a complete attack. The helper hops to `-p` itself as well, for a caller
   that forgets, which is the difference between a defence and a default.
 
   Privileged mode does not source `BASH_ENV` or `ENV`, does not import functions
@@ -101,16 +100,20 @@
   `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
   helper cannot see either — it had already done its job.
 
-  **The transport file is proved to be the one this setup created.** The parent
-  check alone was not enough and could not be made enough: sticky stops one
-  account renaming *another's* entries and not the owner renaming ours, so an
-  attacker-owned mode-1777 `TMPDIR` passed it, and ownership has the matching gap
-  for a world-writable parent or one sitting in a directory somebody else can
-  rename. Validating the whole ancestry means walking it and reading modes, which
-  needs `stat` and its GNU/BSD divergence. What the substitution cannot forge is a
-  file **this user owns** — a file belongs to whoever created it — so `-O`, `-h`
-  and `-f` on the transport file after the helper writes it is the proof, and the
-  parent check stays as the cheap early refusal that names the misconfiguration.
+  **The transport directory's parent must be one this user owns.** Sticky was
+  accepted first and cannot be: it stops one account renaming *another's* entries
+  and does nothing about the directory's OWNER renaming ours, so an attacker-owned
+  mode-1777 `TMPDIR` passed. Checking the resulting file instead — `-O`, `-h`,
+  `-f`, on the grounds that nobody else can produce a file this user owns — was
+  the second answer and is not sufficient either: checking a path and then opening
+  it are two operations on a NAME, so the owner of the parent can leave the
+  helper's own output in place for the checks and swap the pathname before the
+  read. A directory only this user can write has no such window, because renaming
+  an entry needs write permission on the directory holding it. `TMPDIR` is used
+  where this user owns it, `$HOME` otherwise, and a session with neither refuses
+  rather than continuing. The file checks stay as a cheap postcondition; they are
+  no longer what makes it safe. A home directory the operator has made writable by
+  others is the stated limit.
 
   **A readonly transport variable no longer passes silently.** The driving shell
   is long-lived, so `RB_ORIGIN_OUT` can already exist as a readonly naming a file
