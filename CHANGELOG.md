@@ -174,10 +174,10 @@
   somebody else can write; the assignment failed, the variable kept the old path,
   and the helper wrote a good value into a file an attacker could edit before the
   read. Written as `RB_ORIGIN_OUT=… || abort` this still did not catch it:
-  measured on bash 5, a failed readonly assignment on its own kills a
-  non-interactive shell, but as the left side of an AND-OR list it neither fires
-  the `||` nor exits. Each of the four transport assignments is now proved by
-  reading the variable back.
+  measured on bash 5, a failed readonly assignment as the left side of an AND-OR
+  list does not fire the `||` — the list reports success and the variable keeps
+  its old value. Each of the four transport assignments is now proved by reading
+  the variable back.
 
 ## [2.0.22] — 2026-08-17
 

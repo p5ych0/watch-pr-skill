@@ -118,13 +118,20 @@ rediscovering them.
   inherited" is a claim about every route into the process.** `function 'a*b'` is
   rejected and `env 'BASH_FUNC_a*b%%=…'` is imported. Never remove a guard on the
   strength of one route.
-- **An assignment's status cannot be taken in an AND-OR list.** Measured on
-  bash 5: a failed readonly assignment ON ITS OWN kills a non-interactive shell,
-  but the same assignment written as `VAR=value || { abort; }` neither fires the
-  `||` nor exits — it prints its complaint and the list reports success. So the
-  form that looks like it takes the status is the one case where there is no
-  status to take, and the guard reads correctly while catching nothing. Prove an
-  assignment by reading the variable back with `[[`.
+- **An assignment's status cannot be taken.** Measured on bash 5: a failed
+  readonly assignment written as `VAR=value || { abort; }` does not fire the `||`
+  — it prints its complaint and the list reports SUCCESS, with the variable
+  keeping its old value. So the form that looks like it takes the status is the
+  one case where there is no status to take, and the guard reads correctly while
+  catching nothing. Prove an assignment by reading the variable back with `[[`.
+
+  Whether the shell then CONTINUES is a separate question with a surprising
+  answer, and it is not the one to build on: the same failure ends the script when
+  the assignment shares a line with what follows it (`readonly V=a; V=b; echo`
+  exits 1 and never echoes) and does not when they are on separate lines. Neither
+  the `||` nor the standalone form is what decides it. Do not write a guard that
+  depends on either behaviour; write the postcondition, which holds in every
+  case.
 - **A comment that argues against the code beside it is an instruction**, and it
   will be followed.
 

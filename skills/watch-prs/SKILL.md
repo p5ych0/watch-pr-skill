@@ -410,10 +410,9 @@ RB_ORIGIN_OUT="$RB_TMPDIR/origin"
 # IT CANNOT BE CAUGHT INSIDE THE GROUP, which is why it is done here. Measured on
 # bash 5: a failed readonly assignment as an element of an `&&` chain ENDS THE
 # CHAIN AND THE LIST REPORTS SUCCESS — so `… && RB_REMOTE="$(<…)" && [[ … ]]` never
-# reaches its own comparison and the handler never runs. That is the same shape as
-# the AND-OR case in `CLAUDE.md`, one level in, and the answer is the same:
-# assignment first, postcondition after, and nothing downstream depending on the
-# status of either.
+# reaches its own comparison and the handler never runs. The answer is the one
+# `CLAUDE.md` gives for the plainer case: clear first, prove the clear, and let
+# nothing downstream depend on an assignment's status.
 RB_REMOTE=
 [[ -z $RB_REMOTE ]] \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
