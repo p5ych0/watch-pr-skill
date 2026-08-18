@@ -135,6 +135,16 @@
   means nothing; the ownership clause applies to them exactly as to directories,
   because whoever owns a link can repoint it.
 
+  **An ACL is a permission the mode bits do not show.** On macOS a user-owned
+  `0700` directory can still grant another local account `add_file` and
+  `delete_child` through an extended ACL, and Linux POSIX ACLs do the same;
+  `find -perm` sees none of it, so every ownership and mode check passed while
+  that account could replace the directory. Any component carrying one is refused.
+  What is read is the MARKER — `ls -l` appends `+` to the mode field on both
+  platforms — and not the ACL's contents, which would mean `getfacl` on one
+  platform and `ls -e` on the other, two grammars and two new ways to be wrong.
+  Coarse, and it fails closed.
+
   The probe's status is taken, because `find` prints nothing when it fails and
   empty output is what the walk reads as safe — so a component renamed during its
   own probe would have been let through by that interference. Tested with

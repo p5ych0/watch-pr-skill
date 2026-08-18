@@ -241,6 +241,28 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
             echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
             return 1
         fi
+        # AND AN ACL IS A PERMISSION THE MODE BITS DO NOT SHOW. On macOS a
+        # user-owned `0700` directory can still grant another local account
+        # `add_file`/`delete_child` through an extended ACL, and Linux POSIX ACLs
+        # do the same — `find -perm` sees none of it, so every check above passes
+        # while that account can replace this directory.
+        #
+        # THE MARKER, NOT THE CONTENTS. `ls -l` appends `+` to the mode field of
+        # anything carrying an ACL, on both platforms; reading WHAT the ACL grants
+        # means `getfacl` on one and `ls -e` on the other, with different grammars
+        # to parse and a new way to be wrong on each. Refusing any component that
+        # carries one is coarse and fails closed, and the message says which
+        # component so an operator can look.
+        acl="$(ls -ld "$p" 2>/dev/null)"
+        arc=$?
+        if [[ $arc -ne 0 ]]; then
+            echo "ABORT: could not read the permissions of '$p'; refusing rather than assuming it is safe" >&2
+            return 1
+        fi
+        case "${acl%% *}" in
+            *+) echo "ABORT: '$p' carries an access-control list, which the mode bits do not show; refusing rather than trusting a permission this cannot read" >&2
+                return 1 ;;
+        esac
         [[ $p = / ]] && break
         next="${p%/*}"
         [[ -n $next ]] || next=/

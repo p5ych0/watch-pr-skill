@@ -556,6 +556,41 @@ rm -f "$OPENDIR/origin"
     && pass "…while a symlink to a directory this user owns is followed as before" \
     || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
 
+# …AND AN ACL IS REFUSED, because the mode bits do not show it. A user-owned
+# `0700` directory can still grant another account write through an extended ACL
+# on macOS or a POSIX ACL on Linux, and `find -perm` sees none of it — every
+# ownership and mode check passes while that account can replace the directory.
+# What is asserted is the refusal, not the ACL's contents: reading those means
+# `getfacl` on one platform and `ls -e` on the other.
+if command -v setfacl >/dev/null 2>&1; then
+    ACLDIR="$TMP/aclcase"
+    mkdir -p "$ACLDIR"
+    chmod 700 "$ACLDIR"
+    # A READ-AND-EXECUTE ACL, so the MODE stays `0700` and the ACL branch is what
+    # refuses. A writable one raises the visible group bits and the ownership
+    # check fires first — a correct refusal for the wrong reason, which is what
+    # the first version of this case asserted.
+    if setfacl -m u:nobody:r-x "$ACLDIR" >/dev/null 2>&1; then
+        acl_rc=0
+        acl_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/origin" 2>&1 )" || acl_rc=$?
+        { [ "$acl_rc" -ne 0 ] \
+          && case "$acl_diag" in *"access-control list"*) true ;; *) false ;; esac \
+          && [ ! -e "$ACLDIR/origin" ]; } \
+            && pass "…and a component carrying an ACL is refused" \
+            || die "an ACL-bearing directory was accepted (rc=$acl_rc diag='$acl_diag')"
+        # THE FIXTURE'S OWN REACH: the ACL must actually be there, or the case
+        # passes because nothing was ever granted.
+        case "$(ls -ld "$ACLDIR" | cut -d' ' -f1)" in
+            *+) pass "…where the ACL is really present on it" ;;
+            *)  die "setfacl reported success but left no ACL; the case above proves nothing" ;;
+        esac
+    else
+        echo "ok   - (setfacl could not set an ACL here; that case did not run)"
+    fi
+else
+    echo "ok   - (no setfacl on this machine; the ACL case did not run)"
+fi
+
 # …AND A PROBE THAT CANNOT RUN IS A REFUSAL, NOT A PASS. `find` prints nothing
 # when it fails, and empty output is what the walk reads as safe — so an attacker
 # renaming a component mid-probe would have been let through by their own
