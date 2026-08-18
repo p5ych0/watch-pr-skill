@@ -249,6 +249,18 @@ rediscovering them.
   one from the day it was written. Absence covers the other half: a command name
   assembled at runtime is invisible to text and dies at once here.
 
+  **That job is switched off, and so is the workflow that would run the normal
+  one.** `.github/workflows/tests.yml` triggers on `workflow_dispatch` only and
+  `macos-shell` carries `if: false`; a push produces no check, and the gates read
+  `none`, which they document as nothing to assert. The paragraph above therefore
+  describes what CI *is for*, not what it is doing — while this stands, the suite
+  is proven only by `pr-selfcheck.sh` on the contributor's own machine, and a
+  regression that needs the second shell to see can merge. It came off because the
+  suite was the largest fixed cost per round and several of the assertions doing
+  the blocking were themselves wrong; #93 owns restoring the triggers and the job
+  alike — both are named in its acceptance criteria — after the fixtures
+  are audited against *assert the invariant, not the version's route to it*.
+
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
   than an oversight: ~950 lines of executable shell live in a Markdown file, and
   reaching it means parsing Markdown. That was tried and removed — four rounds of

@@ -167,6 +167,24 @@ alongside this one — because there it has somewhere to go (an undefined `rb_lo
 exits 127); here it has not. Decided on
 #96 and recorded beside the check.
 
+**The test workflow is off, deliberately and temporarily, and that is not a
+finding.** `.github/workflows/tests.yml` runs on `workflow_dispatch` only and
+`macos-shell` carries `if: false`, so a push produces no check and the gates read
+`none` — which `pr-ci-gate.sh` and `pr-merge-gate.sh` both document as "nothing to
+assert". The operator turned it off while the issue backlog is worked through,
+because the suite is the largest fixed cost per round and it had been blocking
+correct changes on portability assertions that were themselves wrong.
+
+**What it costs is real and is not disputed:** while this stands, a green round
+means the reviewers were satisfied, NOT that the suite ran, and a bash 3.2 or
+macOS-userland regression can merge. #93 owns restoring the triggers and the job
+alike, names both in its acceptance criteria, and requires the
+fixtures to be audited against *assert the invariant, not the version's route to
+it* first — re-enabling before that simply reproduces the failures that caused it.
+
+Do not raise the disabled workflow as a finding while this paragraph stands. Do
+raise anything that would be caught only by it, on its own merits.
+
 Three limits are worth knowing, and all three have produced real defects.
 
 **The guarantee is the gate's, not the file's.** A fixture run directly — `bash
@@ -198,10 +216,18 @@ script into a stricter mode.
 
 ## Portability: what CI cannot see, and you can
 
-CI runs the whole suite twice — once normally, once in a `macos-shell` job on a
-**bash 3.2.57 built from source and first on `PATH`**, with the GNU-only tools
-removed from `PATH`. Post-3.2 constructs and absent commands therefore fail there
-on their own, and you do not need to check for them.
+**NEITHER CI JOB IS RUNNING, so read this section as work that is now yours.**
+The workflow triggers on `workflow_dispatch` only and `macos-shell` carries
+`if: false`; a push produces no check at all. While that stands, post-3.2
+constructs and absent commands reach `main` unless a reader catches them, so check
+for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
+`declare -A`, `mapfile`/`readarray`, `&>>`, negative array indices, and any
+command name assembled at runtime. The paragraph below says why it is off and what
+it costs.
+
+When it is on again — #93 — CI runs the whole suite twice, once normally and once
+in a `macos-shell` job on a **bash 3.2.57 built from source and first on `PATH`**
+with the GNU-only tools removed, and those two classes fail there on their own.
 
 **Three classes stay invisible to that job, and they are yours.** The runner is
 Ubuntu with GNU userland, so in each case CI goes green and a macOS contributor

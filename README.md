@@ -198,6 +198,17 @@ the suite never takes; a GNU-only *flag* on a command that exists everywhere
 (`sed -i`, `readlink -f`, `grep -P`); and `\s` in a `grep` pattern, where BSD
 `grep` does not fail but matches a literal `s`. Those are review's job.
 
+**None of it is running at the moment.** `.github/workflows/tests.yml` is on
+`workflow_dispatch` only and `macos-shell` carries `if: false`, so a push produces
+no check at all and a dispatch runs the normal job alone. The suite is still the
+mandatory pre-push gate — `pr-selfcheck.sh` is unchanged, and it is what a
+contributor actually runs — but the second machine is not checking anyone's work
+while this stands, so a bash 3.2 or macOS-userland regression can merge. It was
+turned off because the per-round cost had grown past what the backlog could carry,
+and because several of the portability assertions doing the blocking were
+themselves wrong. #93 owns turning the triggers and the job back on — both are named in its
+acceptance criteria — after those fixtures are audited.
+
 ## Install
 
 ```

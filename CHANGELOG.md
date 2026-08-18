@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.26] — 2026-08-18
+
+- **Four shipped files claimed CI coverage that is not running.** `SKILL.md`,
+  `pr-ci-gate.sh` and `pr-merge-gate.sh` each explain why a helper is a script
+  rather than a fenced block by saying that everything under `scripts/` is covered
+  by the suite, by `pr-selfcheck.sh` and by the bash 3.2 `macos-shell` CI job. The
+  workflow now triggers on `workflow_dispatch` only and that job carries
+  `if: false`, so the third of those is not running — and an operator reading any
+  of them takes a green pre-push check for portability validation it did not
+  receive. Each claim is now conditional on the job being enabled, and names #93
+  as what turns it back on.
+
 ## [2.0.25] — 2026-08-17
 
 - **A shadowed `type` inside `rb_load` is now documented as accepted rather than
