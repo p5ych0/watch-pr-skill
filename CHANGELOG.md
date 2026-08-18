@@ -100,6 +100,60 @@
   `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
   helper cannot see either — it had already done its job.
 
+  **The transport file is checked and read as ONE OPEN OBJECT.** Checking a path
+  and then opening it are two operations on a name, so whoever can write the
+  directory holding it — the owner of a mode-0777 `TMPDIR` this user owns, among
+  others — can leave the helper's own output in place for the checks and swap the
+  pathname before the read. The file is opened once with a redirection, which the
+  shell applies and no function can stand in front of, and both the `-O` proof and
+  the read are of `/dev/fd/9`. `-h` is deliberately absent: on Linux that path is
+  itself a symlink into `/proc`, and a path that was a symlink has already been
+  followed by the open.
+
+  **`GIT_DIR` pointed the read at another checkout.** Privileged mode refuses
+  startup files and inherited functions and keeps ordinary environment variables,
+  so a `GIT_DIR` exported by the driving session made the helper read a second
+  repository's origin while standing in this one — and every signoff, revocation
+  and review request then went to that project. The lookup runs under `env -i`
+  with `PATH` alone, rather than a list of `-u`s that is wrong the first time git
+  adds a variable; `GIT_CONFIG_GLOBAL` is covered by the same change and is
+  asserted separately for that reason.
+
+  **Each transport directory now lives exactly as long as its value.** It used to
+  stand from allocation until the pin at the end of setup, putting eight aborts in
+  between — an empty origin, a multi-line one, an unparseable identity, a
+  summary file that could not be created — each leaving a private `watch-pr.*`
+  nothing else can remove. Adding cleanup to eight sites is a list wrong by
+  omission; the origin's directory goes as soon as its value has been read, and
+  the pin allocates its own.
+
+  **The transport file is checked and read as ONE OPEN OBJECT.** Checking a path
+  and then opening it are two operations on a name, so whoever can write the
+  directory holding it — the owner of a mode-0777 `TMPDIR` this user owns, among
+  others — can leave the helper's own output in place for the checks and swap the
+  pathname before the read. The file is opened once with a redirection, which the
+  shell applies and no function can stand in front of, and both the `-O` proof and
+  the read are of `/dev/fd/9`. `-h` is deliberately absent: on Linux that path is
+  itself a symlink into `/proc`, and a path that was a symlink has already been
+  followed by the open.
+
+  **`GIT_DIR` pointed the read at another checkout.** Privileged mode refuses
+  startup files and inherited functions and keeps ordinary environment variables,
+  so a `GIT_DIR` exported by the driving session made the helper read a second
+  repository's origin while standing in this one — and every signoff, revocation
+  and review request then went to that project. The lookup runs under `env -i`
+  with `PATH` alone, rather than a list of `-u`s that is wrong the first time git
+  adds a variable; `GIT_CONFIG_GLOBAL` is covered by the same change and asserted
+  separately for that reason.
+
+  **Each transport directory now lives exactly as long as its value.** It used to
+  stand from allocation until the pin at the end of setup, putting eight aborts in
+  between — an empty origin, a multi-line one, an unparseable identity, a summary
+  file that could not be created — each leaving a private `watch-pr.*` nothing
+  else can remove. Adding cleanup to eight sites is a list wrong by omission; the
+  origin's directory goes as soon as its value has been read, and the pin
+  allocates its own.
+
   **The transport directory's parent must be one this user owns.** Sticky was
   accepted first and cannot be: it stops one account renaming *another's* entries
   and does nothing about the directory's OWNER renaming ours, so an attacker-owned

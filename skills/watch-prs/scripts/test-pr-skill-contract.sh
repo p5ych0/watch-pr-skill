@@ -296,6 +296,41 @@ SWAP
     else
         echo "ok   - (no unowned file to point a symlink at; the substituted-file case did not run)"
     fi
+    # …AND A REFUSAL LEAVES THE PARENT EMPTY. The directory used to stand from its
+    # allocation until the pin at the end of setup, with eight aborts in between —
+    # an empty origin, a multi-line one, an unparseable identity, a summary file
+    # that could not be created — each leaving a private `watch-pr.*` nothing else
+    # can remove. It is removed as soon as its value has been read instead, so
+    # what is asserted is not "the abort cleans up" but that there is nothing left
+    # to clean up by then.
+    #
+    # A ONE-LINE LOCAL PATH IS THE VALUE USED, because it is the one that gets
+    # furthest: `pr-origin.sh` accepts it and so does every check in this block,
+    # and it is `rb_identity` — past the end of the lift — that refuses it. So
+    # this asserts the state the rest of setup inherits: the block returns having
+    # left nothing behind, whatever happens next.
+    _lk_dir=""
+    _lk_dir="$(mktemp_d)" || die "no scratch directory for the leftover probe"
+    if [ -n "$_lk_dir" ]; then
+        cat > "$_forge_dir/pr-origin-local.sh" <<'LOCAL'
+#!/usr/bin/env bash
+printf '%s
+' "/home/somebody/a-checkout" > "$2"
+exit 0
+LOCAL
+        mkdir -p "$_forge_dir/local"
+        cp "$_forge_dir/pr-origin-local.sh" "$_forge_dir/local/pr-origin.sh"
+        env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/local" \
+            TMPDIR="$_lk_dir" bash -c '
+                '"$_read_block"'
+                echo "PINNED=$RB_REMOTE"
+            ' >/dev/null 2>&1
+        _lk_left="$(ls -A "$_lk_dir" 2>/dev/null)"
+        [ -z "$_lk_left" ] \
+            && pass "…and a setup that refuses later leaves no transport directory behind" \
+            || die "a refused setup left the transport directory: '$_lk_left'"
+        rm -rf "$_lk_dir"
+    fi
     # …AND A READONLY TRANSPORT VARIABLE STOPS SETUP RATHER THAN BEING IGNORED.
     # The driving session's shell is long-lived, so `RB_ORIGIN_OUT` can already
     # exist as a readonly naming a file somebody else can write. The assignment
@@ -311,6 +346,23 @@ SWAP
     case "$_ro_out" in
         *PINNED=*) die "a readonly RB_ORIGIN_OUT was ignored and setup pinned anyway: '$_ro_out'" ;;
         *)         pass "…and a readonly RB_ORIGIN_OUT stops setup rather than being ignored" ;;
+    esac
+    # …AND A READONLY `RB_REMOTE` IS REFUSED RATHER THAN KEPT. The driving shell
+    # is long-lived and interactive; a readonly `RB_REMOTE` already in it survives
+    # the assignment, and the checks that follow — non-empty, single-line,
+    # parseable — all pass on the stale URL, which is then exported and addressed
+    # by every later post. The comparison is against the same open descriptor the
+    # value came from, so it cannot be satisfied by a second look at the path.
+    _rr_out=""
+    _rr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" bash -c '
+            readonly RB_REMOTE="git@github.com:WRONG/other.git"
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || true
+    case "$_rr_out" in
+        *WRONG/other*) die "a readonly RB_REMOTE survived and setup pinned it: '$_rr_out'" ;;
+        *)             pass "…and a readonly RB_REMOTE is refused rather than pinned" ;;
     esac
     # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
     # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
@@ -498,7 +550,7 @@ _ro_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _ro_rc=$?
 [ "$_ro_rc" -ne 0 ] \
@@ -511,7 +563,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
 _sh_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" 'BASH_FUNC_export%%=() { return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _sh_rc=$?
 [ "$_sh_rc" -ne 0 ] \
@@ -526,7 +578,7 @@ _noexp_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _noexp_rc=$?
 [ "$_noexp_rc" -ne 0 ] \
@@ -537,7 +589,7 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 _ok_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
     ' >/dev/null 2>&1 || _ok_rc=$?
 [ "$_ok_rc" -eq 0 ] \
@@ -551,13 +603,33 @@ if [ -n "$_forge_dir" ]; then
     _rp2_out=""
     _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
             RB_REMOTE="git@github.com:acme/widget.git"
-            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
-            readonly RB_PIN_OUT="$RB_TMPDIR/elsewhere"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+            readonly RB_PIN_OUT="${RB_TMPBASE:?}/elsewhere"
             '"$_pin_block"'
         ' 2>&1)" || true
     case "$_rp2_out" in
         *OWNER=*) die "a readonly RB_PIN_OUT was ignored and setup reported success: '$_rp2_out'" ;;
         *)        pass "…and a readonly RB_PIN_OUT stops setup rather than being ignored" ;;
+    esac
+fi
+# …AND A READONLY `RB_PIN_SEEN` CANNOT ANSWER FOR THE CHILD. This is the state
+# where the reset decides the verdict: a readonly one already holding the real
+# origin survives both the reset and the assignment after it, so a child that
+# inherited nothing reports nothing and the equality still agrees. Combined with
+# an `export` that assigns without exporting — the case two blocks up — setup
+# announces a pin that no helper will ever see.
+if [ -n "$_forge_dir" ]; then
+    _rps_out=""
+    _rps_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+        'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPPARENT="${RB_TMPBASE:?}"
+            readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
+            '"$_pin_block"'
+        ' 2>&1)" || true
+    case "$_rps_out" in
+        *OWNER=*) die "a readonly RB_PIN_SEEN answered for the child and setup reported success: '$_rps_out'" ;;
+        *)        pass "…and a readonly RB_PIN_SEEN cannot answer for the child" ;;
     esac
 fi
 # …AND A SHADOWED `rm` ON THE PIN SIDE CANNOT SUPPLY THE ANSWER. The same name
@@ -570,7 +642,7 @@ if [ -n "$_forge_dir" ]; then
     _pr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
         'BASH_FUNC_rm%%=() { RB_PIN_SEEN="$RB_REMOTE"; return 0; }' bash -c '
             RB_REMOTE="git@github.com:acme/widget.git"
-            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
             '"$_pin_block"'
         ' 2>&1)" || _pr_rc=$?
     { [ "$_pr_rc" -ne 0 ] \
@@ -594,7 +666,7 @@ if [ -n "$_forge_dir" ]; then
     _pf_rc=0
     _pf_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 bash -c '
             RB_REMOTE="git@github.com:acme/widget.git"
-            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
             '"$_pin_block"'
         ' 2>&1)" || _pf_rc=$?
     { [ "$_pf_rc" -ne 0 ] \
@@ -621,7 +693,7 @@ _both_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         # RB_SCRIPTS IS NOT OVERRIDDEN HERE. The pin block calls
         # `"$RB_SCRIPTS"/pr-origin.sh pin` since #84, so pointing it at a
         # nonexistent directory made the helper fail before it could report what
@@ -668,7 +740,7 @@ _forged_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV -u REVIEW_BUS_REMOTE RB_SCRIP
         printf "PROBE_RAN\n" >&2
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
     ' 2>&1 >/dev/null)" || _forged_rc=$?
 case "$_forged_out" in
@@ -687,9 +759,16 @@ unset RB_TMPBASE
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather
 # than as failed.
-grep -qF 'RB_REMOTE="$(<"$RB_ORIGIN_OUT")"' <<<"$skill_flat" \
-    && pass "…and the value is read back from that file, not from a captured stream" \
-    || die "the origin value is not read back from the file the helper wrote"
+# THE READ IS THROUGH THE OPEN DESCRIPTOR, not through the pathname a second
+# time. `RB_REMOTE="$(<"$RB_ORIGIN_OUT")"` was the shape until a swap between the
+# checks and the read was found; the redirection is what makes the object the one
+# already validated, so the assertion names it rather than the variable alone.
+grep -qF 'RB_REMOTE="$(<"/dev/fd/9")"' <<<"$skill_flat" \
+    && pass "…and the value is read back from the open transport, not from a captured stream" \
+    || die "the origin value is not read back from the descriptor the checks validated"
+grep -qF '9<"$RB_ORIGIN_OUT"' <<<"$skill_flat" \
+    && pass "…with the descriptor bound by a redirection, which is not a name" \
+    || die "the origin transport is not opened by a redirection"
 grep -qF 'rm -f "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
     && pass "…and the file is removed once its value has been read" \
     || die "the origin file is left behind"

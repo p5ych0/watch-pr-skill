@@ -168,7 +168,23 @@ fi
 # the wrong-repository failure this file exists to prevent, reached from the other
 # direction. The `x` is appended inside the substitution and removed after, so
 # every byte `git` wrote survives to be checked.
-_rb_origin="$(command git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
+# `env -i` BECAUSE `GIT_DIR` IS NOT A NAME AND `bash -p` DOES NOT TOUCH IT.
+# Privileged mode refuses startup files and inherited functions; it keeps ordinary
+# environment variables, and `GIT_DIR` pointing at a second checkout makes this
+# real `git` read that repository's origin while running in this one. Every later
+# signoff, revocation and review request then goes to the wrong project — which is
+# the failure this whole file exists to prevent, arriving by a route that has
+# nothing to do with shadowing.
+#
+# `-i` RATHER THAN A LIST OF `-u`s. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+# `GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_OBJECT_DIRECTORY`,
+# `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CEILING_DIRECTORIES`,
+# `GIT_DISCOVERY_ACROSS_FILESYSTEM` … a list is wrong by omission the first time
+# git adds one, and this repository has a rule about that. An empty environment
+# needs no list. `PATH` is carried because that is how `git` is found at all —
+# which is #91 — and nothing else is, so the lookup sees the working directory and
+# the repository it stands in.
+_rb_origin="$(/usr/bin/env -i PATH="$PATH" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything

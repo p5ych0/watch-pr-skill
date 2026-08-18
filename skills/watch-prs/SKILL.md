@@ -383,24 +383,57 @@ RB_ORIGIN_OUT="$RB_TMPDIR/origin"
     || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-# THE FILE IS OURS, AND IS A FILE. This is no longer load-bearing — a parent only
-# this user can write has no window for the directory to be replaced in — and it
-# is kept because it costs three reserved-word tests and catches a helper that
-# wrote somewhere other than where it was told. It is NOT what makes a replaceable
-# parent safe: checking a path and then opening it are two operations on a name,
-# so these three would pass on the helper's own output and the read would take
-# whatever the name meant by then. That is why the parent rule changed instead.
-{ [[ -O $RB_ORIGIN_OUT ]] && [[ ! -h $RB_ORIGIN_OUT ]] && [[ -f $RB_ORIGIN_OUT ]]; } \
+# THE FILE IS CHECKED AND READ AS ONE OPEN OBJECT, and that is what closes the
+# substitution rather than the parent rule closing it. Checking a path and then
+# opening it are TWO operations on a name: whoever can write the directory holding
+# it can leave the helper's own output in place for the checks and swap the
+# pathname before the read, and no test on the path can see that. Opening it once
+# and asking about the OPEN FILE removes the second operation — `9<` is applied by
+# the shell as a redirection, so no name is involved, and `/dev/fd/9` is the object
+# this shell already holds rather than a path anybody can still redirect.
+#
+# `-O` IS THE PROOF, and it is the one thing a substitution cannot produce: a file
+# belongs to whoever created it, and the only creator of this one is the helper
+# this setup just ran. `-h` is NOT asked here and its absence is deliberate — on
+# Linux `/dev/fd/9` is itself a symlink into `/proc`, so `-h` is true of every
+# object and would refuse every session. It is not needed either: a path that was
+# a symlink has already been followed by the open, and `-O` then asks about what
+# it pointed AT.
+#
+# `RB_REMOTE` IS CLEARED AND THE CLEAR IS PROVED FIRST, before the group that
+# assigns it. The driving shell is long-lived and interactive; a readonly
+# `RB_REMOTE` already in it keeps its old value, and every check after the group —
+# non-empty, single-line, parseable as an identity — passes on a stale URL as
+# readily as on the real one, after which it is exported and every post goes
+# there.
+#
+# IT CANNOT BE CAUGHT INSIDE THE GROUP, which is why it is done here. Measured on
+# bash 5: a failed readonly assignment as an element of an `&&` chain ENDS THE
+# CHAIN AND THE LIST REPORTS SUCCESS — so `… && RB_REMOTE="$(<…)" && [[ … ]]` never
+# reaches its own comparison and the handler never runs. That is the same shape as
+# the AND-OR case in `CLAUDE.md`, one level in, and the answer is the same:
+# assignment first, postcondition after, and nothing downstream depending on the
+# status of either.
+RB_REMOTE=
+[[ -z $RB_REMOTE ]] \
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
+{ [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+    && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_OUT" \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
-RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
 /usr/bin/env rm -f "$RB_ORIGIN_OUT"
-# THE DIRECTORY GOES WITH THE FILE ON EVERY EXIT FROM HERE, not only on the one
-# that reaches the pin. A refused read used to leave the directory standing, and
-# an operator who runs setup twice against a misconfigured checkout accumulates
-# one per attempt — each private, each empty, none of them removable by anything
-# but them.
+# THE DIRECTORY GOES HERE, WHILE THE LIST OF PLACES THAT WOULD HAVE TO REMOVE IT
+# IS STILL ONE LONG. It used to stand until the pin at the end of setup, which put
+# eight aborts between allocation and cleanup — an empty origin, a multi-line one,
+# an unparseable identity, a summary file that could not be created — and each of
+# them left a private `watch-pr.*` directory behind that nothing else can remove.
+# Adding `rmdir` to eight sites is the list-wrong-by-omission this repository has
+# a rule about; the transport is dead the moment its value has been read, so it is
+# removed the moment its value has been read, and every abort after this line has
+# nothing to clean up. The pin allocates its own directory later, for the same
+# reason and with the same lifetime.
+/usr/bin/env rmdir "$RB_TMPDIR"
 [[ -n $RB_REMOTE ]] \
-    || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+    || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
 # public information, so this is tidiness rather than secrecy — but the setup block
 # already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
@@ -546,19 +579,32 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # at column 0. An `if … else … fi` around this call ends the lift before the
 # postcondition, and every case built on it then runs against a truncated block —
 # nine assertions passed against nothing on the first attempt at this.
-RB_PIN_OUT="$RB_TMPDIR/pin"
-[[ $RB_PIN_OUT = "$RB_TMPDIR/pin" ]] \
-    || { echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
+# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE FOUR LINES LATER. The origin read
+# removed the first one as soon as it had its value; this is the second half of
+# that, and it is why no abort between the two has a directory to clean up. Same
+# parent, same rules, same lifetime.
+RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
+    || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
+/usr/bin/env mkdir -m 700 "$RB_PIN_DIR" \
+    || { echo "ABORT: could not create a private directory for the pin probe"; exit 1; }
+RB_PIN_OUT="$RB_PIN_DIR/pin"
+[[ $RB_PIN_OUT = "$RB_PIN_DIR/pin" ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_PIN_SEEN=
+# THE RESET IS PROVED TOO, and this is the case where it decides the answer. A
+# readonly `RB_PIN_SEEN` already holding the real origin survives both this line
+# and the assignment below it, so a child that inherited nothing reports nothing
+# and the equality still agrees — setup announces a pin that no helper will see.
+# Combined with an `export` that assigns without exporting, that is a session
+# whose every stage re-derives identity from wherever it later stands.
+[[ -z $RB_PIN_SEEN ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"; exit 1; }
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
-    && { [[ -O $RB_PIN_OUT ]] && [[ ! -h $RB_PIN_OUT ]] && [[ -f $RB_PIN_OUT ]]; } \
-    && RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
+    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
 /usr/bin/env rm -f "$RB_PIN_OUT"
-# THE DIRECTORY GOES WITH THEM, AND `rmdir` IS THE POINT. Both files have just
-# been removed, so it succeeds — and if it does not, something this setup did not
-# put there is in a directory this setup made private, which is worth the noise on
-# stderr. `rm -rf` on a variable would remove a tree instead of reporting one.
-/usr/bin/env rmdir "$RB_TMPDIR"
+/usr/bin/env rmdir "$RB_PIN_DIR"
 if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else

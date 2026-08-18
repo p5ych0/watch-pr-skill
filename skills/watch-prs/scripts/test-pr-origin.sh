@@ -341,6 +341,44 @@ case "$unprot" in
     *)         die "the unprivileged comparison gave neither the forged value nor nothing: '$unprot'" ;;
 esac
 
+# ── A SECOND CHECKOUT NAMED BY `GIT_DIR` IS NOT THIS ONE ───────────────────
+#
+# `bash -p` refuses startup files and inherited functions; it keeps ordinary
+# environment variables, and `GIT_DIR` is one. Exported at a second checkout it
+# makes the real `git` here read THAT repository's origin while standing in this
+# one — the wrong-repository failure this file exists to prevent, arriving by a
+# route that has nothing to do with shadowing. `env -i` is the answer rather than
+# a list of `-u`s, because the list is wrong the first time git adds a variable.
+OTHER="$TMP/other"
+mkdir -p "$OTHER"
+( cd "$OTHER" && git init -q . && git remote add origin "$FORGED" ) >/dev/null 2>&1 \
+    || die "could not build the second checkout"
+got="$(run read "GIT_DIR=$OTHER/.git")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "an exported GIT_DIR cannot redirect the read to another checkout" \
+    || die "GIT_DIR reached the read: '${got}'"
+case "${got#*|}" in
+    *WRONG*) die "…the second checkout's remote leaked into the output: '${got#*|}'" ;;
+    *)       pass "…and the other repository's remote appears nowhere in the output" ;;
+esac
+# THE FIXTURE'S OWN REACH: the same variable must actually redirect a bare `git`,
+# or the case above passes because nothing was ever pointed anywhere.
+reach="$(cd "$REPO" && GIT_DIR="$OTHER/.git" git remote get-url origin 2>/dev/null)"
+[ "$reach" = "$FORGED" ] \
+    && pass "…where the same GIT_DIR redirects a bare git" \
+    || die "GIT_DIR does not redirect git here (got '$reach'); the case above proves nothing"
+# …AND `GIT_CONFIG_GLOBAL` IS NOT A SECOND LIST ENTRY TO ADD LATER. `env -i`
+# clears whatever git reads, so a variable nobody enumerated is cleared too. This
+# one is checked because it reaches the same answer by a different file.
+cat > "$TMP/forged-config" <<CFG
+[remote "origin"]
+	url = $FORGED
+CFG
+got="$(run read "GIT_CONFIG_GLOBAL=$TMP/forged-config")"
+{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
+    && pass "…and a forged GIT_CONFIG_GLOBAL does not reach it either" \
+    || die "GIT_CONFIG_GLOBAL reached the read: '${got}'"
+
 # ── AN OUTPUT THAT OPENS AND THEN REJECTS THE WRITE ────────────────────────
 #
 # Both writes take their status, and until now nothing exercised the state that
