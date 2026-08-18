@@ -25,13 +25,22 @@
 # empty library costs differs per case — the wrong repository, an unvalidated
 # record, a watchdog that does not kill — but the loading rule is identical.
 #
-# THE BOOTSTRAP IS THE ONE THING THAT CANNOT USE THIS. Every caller writes FOUR
-# lines to load `loadlib.sh` itself — clear, take the clear's status, source,
-# verify — because a helper cannot load the file that defines it. The count is
-# four and not three deliberately: taking the CLEARING's status is a separate part
-# of the invariant, and calling it three lines somewhere else is how it comes to
-# be the step that gets collapsed. The asymmetry is irreducible; it is stated here
-# so the next reader does not spend time looking for the trick that removes it.
+# THE BOOTSTRAP IS THE ONE THING THAT CANNOT USE THIS. Every caller writes the
+# sequence out itself — clear, take the clear's status, define a refusing stub,
+# source — because a helper cannot load the file that defines it. Taking the
+# CLEARING's status is a separate step on purpose: describing it as part of the
+# clear is how it comes to be the step that gets collapsed.
+#
+# THERE IS NO `type -t` VERIFICATION IN IT, and the FIRST LOAD is what replaced
+# one: calling an `rb_load` that does not exist fails exactly as an empty library
+# would, and the handler on that call names it `reason=loadlib_empty`. The stub is
+# what makes that true rather than optional — an `rb_load` that is not a function
+# is looked up on `PATH`, which privileged startup does not change, and an
+# executable by that name exiting 0 would report every load successful with
+# nothing cleared and no library sourced. #88.
+#
+# The asymmetry is irreducible; it is stated here so the next reader does not
+# spend time looking for the trick that removes it.
 
 # Load a library and prove it loaded.
 #
@@ -79,10 +88,9 @@ rb_load() {
     # perfectly good library into `reason=${lib}_empty`. Measured; it fails in the
     # safe direction, but it fails, and the loop stops on nothing being wrong.
     #
-    # #88 REMOVES THE SAME CALL FROM THE TEN HELPERS that wrap this one — a
-    # separate change, in flight alongside this one — because there the
-    # verification has somewhere to go: calling an undefined `rb_load` exits 127,
-    # which is a check with no name in it. That does not transfer here.
+    # #88 REMOVED THE SAME CALL FROM THE TEN HELPERS that wrap this one, because
+    # there the verification has somewhere to go: a refusing stub, and a first
+    # load whose failure IS the check. That does not transfer here.
     # Asking whether a NAME is a function needs `type`, `declare` or `command` —
     # all shadowable — or calling the symbol, and calling an arbitrary library
     # function as a probe runs it: `rb_identity` would shell out to `git`.

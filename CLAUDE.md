@@ -231,9 +231,16 @@ rediscovering them.
   verifications, and an exported value satisfies a `[ -n … ]` test exactly as an
   exported function satisfies `type -t`. It takes the caller's whole error prefix
   too: `pr-watch.sh` says `state=error` where the others say `status=error`. The
-  four lines that load `loadlib.sh` itself are the one thing that cannot use it —
-  and they still clear, source and verify, because a stale loader is what makes
-  every other load look clean. `test-pr-identity.sh` fails if a `pr-*.sh` script
+  lines that load `loadlib.sh` itself are the one thing that cannot use it, and
+  they are **clear, take the clear's status, define a refusing stub, source** —
+  no `type -t` verification, because the FIRST LOAD is the verification: calling
+  an `rb_load` that does not exist fails exactly as an empty library would, and
+  the handler on that first call carries `reason=loadlib_empty` so the failure is
+  still named. The stub is what makes it true rather than optional — without it
+  an undefined `rb_load` is looked up on `PATH`, and an executable by that name
+  exiting 0 reports every load successful with nothing cleared and no library
+  sourced. The clear is still there because a stale loader is what makes every
+  other load look clean. #88. `test-pr-identity.sh` fails if a `pr-*.sh` script
   loads a library by hand.
 
   **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the
@@ -373,9 +380,9 @@ rediscovering them.
 - **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
   verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
   in the operator's shell turns a good library into `reason=<lib>_empty`. #88
-  removes the same call from the ten helpers that wrap the loader — a separate
-  change, in flight alongside this one — because there the check has somewhere to go — calling an undefined `rb_load` exits 127, which
-  has no name in it. That does not transfer: asking whether a name is a function
+  removed the same call from the ten helpers that wrap the loader, because there
+  the check had somewhere to go: a refusing stub, and a first load whose failure
+  is the verification. That does not transfer: asking whether a name is a function
   needs `type`, `declare` or `command`, all shadowable, or calling the symbol,
   which for `rb_identity` means shelling out to `git`. Dropping the check moves
   the failure to the caller's first use and loses the precise reason; a subshell
