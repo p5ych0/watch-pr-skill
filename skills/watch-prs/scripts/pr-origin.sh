@@ -185,12 +185,35 @@ set -C
 # differ between GNU and BSD. It runs HERE and not in the caller because this
 # process is privileged: `find` is a name, and in the driving shell a function by
 # that name would answer instead. What remains is `PATH`, which is #91.
+# EVERY DIRECTORY UP TO THE ROOT, not just the one holding the file. Checking the
+# file's own directory is not enough and was the first shape of this: the caller
+# creates that one mode 700, so it was always going to pass — while an account
+# with write on the directory ABOVE it can rename it after the check and put a
+# writable replacement at the same name. The question is not "can they write where
+# the file goes" but "can they rename anything on the way to it", and that is
+# every component.
+#
+# STICKY IS THE EXCEPTION AND IS WHY `/tmp` STILL WORKS. A sticky directory lets
+# anyone create entries and lets nobody rename or remove another account's, which
+# is exactly the property being asked for — so `1777` on `/tmp` is safe while
+# `0777` without the bit is not. `! -perm -1000` is that test, and the whole
+# condition is POSIX `find`.
+[[ $OUT = /* ]] \
+    || { echo "ABORT: the output path must be absolute; '$OUT' cannot be checked to the root" >&2; exit 1; }
 _rb_dir="${OUT%/*}"
-[[ $_rb_dir = "$OUT" ]] && _rb_dir=.
-if [[ -n "$(find "$_rb_dir" -prune \( -perm -g+w -o -perm -o+w \) -print 2>/dev/null)" ]]; then
-    echo "ABORT: '$_rb_dir' is writable by other accounts; the transport could be replaced between this write and the caller's read" >&2
-    exit 1
-fi
+[[ -n $_rb_dir ]] || _rb_dir=/
+_rb_p="$_rb_dir"
+while : ; do
+    if [[ -n "$(find "$_rb_p" -prune \( -perm -g+w -o -perm -o+w \) ! -perm -1000 -print 2>/dev/null)" ]]; then
+        echo "ABORT: '$_rb_p' is writable by other accounts and not sticky; the transport could be replaced between this write and the caller's read" >&2
+        exit 1
+    fi
+    [[ $_rb_p = / ]] && break
+    _rb_next="${_rb_p%/*}"
+    [[ -n $_rb_next ]] || _rb_next=/
+    [[ $_rb_next = "$_rb_p" ]] && break
+    _rb_p="$_rb_next"
+done
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"

@@ -109,9 +109,15 @@
   write there could replace the whole directory between the helper closing its
   file and the caller opening it. Both of the caller's checks then pass, because
   the planted file belongs to the operator too. The helper refuses a group- or
-  other-writable parent, tested with `find -prune -perm`, which is POSIX where
-  `stat`'s flags are not — and it runs in the helper rather than the driver
-  because that process is privileged, so `find` cannot be a shadowed name there.
+  other-writable component ANYWHERE on the path to its output — not just the
+  directory holding it, which the caller creates mode 700 and which would
+  therefore always have passed, while an account with write on the directory
+  above it can rename that one after the check and leave a replacement at the
+  same name. Sticky is the exception, and is why `/tmp` still works: anyone may
+  create an entry there and nobody may rename another account's. Tested with
+  `find -prune -perm`, which is POSIX where `stat`'s flags are not, and run in
+  the helper rather than the driver because that process is privileged, so `find`
+  cannot be a shadowed name there.
 
   **A global `insteadOf` rule is expanded again.** Emptying the environment to
   shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented

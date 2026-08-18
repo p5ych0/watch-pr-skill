@@ -458,6 +458,34 @@ open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "
   && case "$open_diag" in *"writable by other accounts"*) true ;; *) false ;; esac; } \
     && pass "…and so is a group-writable one" \
     || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
+# …AND SO IS AN ANCESTOR, which is the case the first version of this check
+# missed. The directory holding the file is created mode 700 by the caller, so
+# checking only that one always passed — while an account with write on the
+# directory ABOVE it can rename it after the check and leave a writable
+# replacement at the same name. What must be refused is a writable component
+# anywhere on the way to the file.
+chmod 700 "$OPENDIR"
+ANCESTOR="$TMP/anc"
+mkdir -p "$ANCESTOR/mid/leaf"
+chmod 777 "$ANCESTOR/mid"
+chmod 700 "$ANCESTOR/mid/leaf"
+anc_rc=0
+anc_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" 2>&1 )" || anc_rc=$?
+{ [ "$anc_rc" -ne 0 ] \
+  && case "$anc_diag" in *"writable by other accounts"*) true ;; *) false ;; esac \
+  && [ ! -e "$ANCESTOR/mid/leaf/origin" ]; } \
+    && pass "…and a writable ANCESTOR is refused, not just the directory itself" \
+    || die "an ancestor that can rename the transport directory was accepted (rc=$anc_rc diag='$anc_diag')"
+# …WHILE STICKY IS ACCEPTED, which is why `/tmp` still works: anyone may create an
+# entry there and nobody may rename another account's. Without this the check
+# would refuse the directory it was written for.
+chmod 1777 "$ANCESTOR/mid"
+rm -f "$ANCESTOR/mid/leaf/origin"
+( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" ) >/dev/null 2>&1
+[ "$(cat "$ANCESTOR/mid/leaf/origin" 2>/dev/null)" = "$REAL" ] \
+    && pass "…while a sticky ancestor is accepted, as /tmp is" \
+    || die "a sticky ancestor was refused; this would refuse every ordinary session"
+
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"
 rm -f "$OPENDIR/origin"
