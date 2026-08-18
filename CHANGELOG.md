@@ -101,6 +101,27 @@
   `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
   helper cannot see either — it had already done its job.
 
+  **The transport file is proved to be the one this setup created.** The parent
+  check alone was not enough and could not be made enough: sticky stops one
+  account renaming *another's* entries and not the owner renaming ours, so an
+  attacker-owned mode-1777 `TMPDIR` passed it, and ownership has the matching gap
+  for a world-writable parent or one sitting in a directory somebody else can
+  rename. Validating the whole ancestry means walking it and reading modes, which
+  needs `stat` and its GNU/BSD divergence. What the substitution cannot forge is a
+  file **this user owns** — a file belongs to whoever created it — so `-O`, `-h`
+  and `-f` on the transport file after the helper writes it is the proof, and the
+  parent check stays as the cheap early refusal that names the misconfiguration.
+
+  **A readonly transport variable no longer passes silently.** The driving shell
+  is long-lived, so `RB_ORIGIN_OUT` can already exist as a readonly naming a file
+  somebody else can write; the assignment failed, the variable kept the old path,
+  and the helper wrote a good value into a file an attacker could edit before the
+  read. Written as `RB_ORIGIN_OUT=… || abort` this still did not catch it:
+  measured on bash 5, a failed readonly assignment on its own kills a
+  non-interactive shell, but as the left side of an AND-OR list it neither fires
+  the `||` nor exits. Each of the four transport assignments is now proved by
+  reading the variable back.
+
 ## [2.0.22] — 2026-08-17
 
 - **A shadowed `[` could make a moved head read as unmoved.** 2.0.20 converted

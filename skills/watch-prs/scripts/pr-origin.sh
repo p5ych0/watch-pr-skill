@@ -17,21 +17,23 @@
 # for the two to collide over.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
-# called `bash` if the caller has one, and such a function can write a forged URL
-# to fd 9 and return — which is the caller's capture. A path cannot be shadowed.
+# called `bash` if the caller has one, and such a function writes a forged URL to
+# the file it was handed and returns, without this script running at all. A path
+# cannot be shadowed.
 #
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
 # line — the hop below reaches it a moment too late, and a hook needs to shadow
 # nothing to use that moment: a hook that writes the value file and exits is
-# enough, and when the value travelled on a descriptor it was shorter still —
-# `printf '…' >&9; exit 0`, because fd 9 was the caller's capture by then. The hop stays for a caller that forgets, and it is
-# the difference between a defence and a default.
+# enough. The hop stays for a caller that forgets, and it is the difference
+# between a defence and a default.
 #
-# THE BRACES AND THE DESCRIPTORS ARE THE INVOCATION, not decoration around it —
-# see the block on fd 9 below. A usage line teaching the simple form is a usage
-# line teaching a session that refuses itself under an inherited xtrace, so both
-# copies of it say the same thing.
+# THERE ARE NO BRACES AND NO DESCRIPTORS LEFT TO GET WRONG, which is the point of
+# the file. An earlier version of this header required both, and required them for
+# a real reason — bash traces a simple command before applying its redirections, so
+# the trace landed inside a substitution that was already the capture. Nothing is
+# captured now: the usage above is the whole invocation, and a maintainer reading
+# the old paragraph would have reintroduced the failure it described.
 #
 #   0  the value is in the file named by the second argument
 #   1  refused — the reason is on STDERR, and the file is left empty

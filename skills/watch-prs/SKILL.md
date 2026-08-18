@@ -251,17 +251,17 @@ unset -f rb_identity 2>/dev/null \
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. Written as `bash -p …` this
 # calls a function called `bash` if the driving shell has one — and such a function
-# can print a forged URL to fd 9 and return, which is this capture. A path cannot
-# be shadowed. `/usr/bin/env` is the same one every script here already depends on
+# writes a forged URL to the file it was handed and returns, with the helper never
+# running. A path cannot be shadowed. `/usr/bin/env` is the same one every script here already depends on
 # through its shebang, so it is not a new assumption; which `bash` it then finds is
 # a `PATH` question, and that is #91.
 #
 # `bash -p` STARTS THE FIRST INTERPRETER PROTECTED, and it has to be the first:
 # privileged mode is what stops `BASH_ENV` being sourced at all, so entering it
 # from inside a shell that has already run the hook is too late. A hook needs to
-# shadow nothing to win that race — `printf '…' >&9; exit 0` is enough, because
-# fd 9 is already this capture. The helper hops to `-p` itself as well, for a
-# caller that forgets, but only this gets there before the hook.
+# shadow nothing to win that race: one that writes the transport file and exits is
+# a complete attack. The helper hops to `-p` itself as well, for a caller that
+# forgets, but only this gets there before the hook.
 #
 # READ THROUGH A HELPER, BY PATH, BECAUSE `git` IS A NAME. This was
 # `git remote get-url origin` here, and a function answering only
@@ -316,10 +316,32 @@ unset -f rb_identity 2>/dev/null \
 # taken — nobody else has write on a directory of ours unless we granted it, and
 # that is the stated limit of this check rather than a hole in it. Anything else
 # is refused by name, since continuing there is the substitution above.
+#
+# THE PARENT CHECK IS THE CHEAP REFUSAL AND NOT THE PROOF. Sticky stops one
+# account renaming ANOTHER'S entries; it does not stop the directory's OWNER
+# renaming ours, so an attacker-owned mode-1777 `TMPDIR` passes `-k` and can still
+# have our directory replaced after `mkdir`. Ownership has the matching gap — a
+# parent we own but made world-writable, or one whose own entry sits somewhere
+# another account can rename. Validating the whole ancestry means walking it and
+# reading modes, which needs `stat`, whose flags differ between GNU and BSD; this
+# repository has a section on what that kind of scanner costs.
+#
+# WHAT PROVES IT INSTEAD IS THE FILE, ASSERTED AFTER THE HELPER WRITES IT. An
+# account that replaces the directory can put anything it likes at the path — but
+# it cannot put a file THIS USER OWNS there, because a file belongs to whoever
+# created it, and the only creator of this one is the helper this setup just ran.
+# So `-O` on the file is the thing the substitution cannot forge, and `-h` refuses
+# the symlink that would otherwise satisfy it by pointing at something of ours.
+# The parent check stays because refusing early costs nothing and names the
+# misconfiguration; the file check is what makes a replaced directory harmless.
 RB_TMPPARENT="${TMPDIR:-/tmp}"
+[[ $RB_TMPPARENT = "${TMPDIR:-/tmp}" ]] \
+    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport path cannot be set"; exit 1; }
 { [[ -k $RB_TMPPARENT ]] || [[ -O $RB_TMPPARENT ]]; } \
     || { echo "ABORT: $RB_TMPPARENT is neither sticky nor owned by this user; another account could replace the transport directory in it"; exit 1; }
 RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_TMPDIR = "$RB_TMPPARENT"/watch-pr.* ]] \
+    || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport path cannot be set"; exit 1; }
 /usr/bin/env mkdir -m 700 "$RB_TMPDIR" \
     || { echo "ABORT: could not create a private directory for this session's transport files"; exit 1; }
 # EVERY CLEANUP HERE IS REACHED BY PATH, and that is not tidiness either. `rm` and
@@ -333,9 +355,30 @@ RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 #
 # THE HELPER TRUNCATES WHAT IT IS GIVEN before writing, so a stale file from an
 # earlier run in the same shell cannot be read back as this one's answer.
+#
+# THE ASSIGNMENT IS PROVED BY READING IT BACK, AND ITS STATUS CANNOT BE USED. This
+# block runs in the driving session's own long-lived shell, where `RB_ORIGIN_OUT`
+# may already exist as a READONLY naming a file somebody else can write; the
+# assignment then fails, the variable keeps the old path, and the helper writes a
+# perfectly good value into a file the attacker edits before the read below.
+#
+# `RB_ORIGIN_OUT=… || abort` DOES NOT CATCH IT, and this was written that way
+# first. Measured on bash 5: a failed readonly assignment ON ITS OWN kills a
+# non-interactive shell, but the same assignment as the left side of an AND-OR
+# LIST neither fires the `||` nor exits — it prints its complaint and the list
+# reports success. So the guard that looks like it takes the status is the one
+# case where there is no status to take. Reading the variable back is a
+# postcondition, which is the shape this file already uses for the pin, and `[[`
+# is a reserved word no function can stand in front of.
 RB_ORIGIN_OUT="$RB_TMPDIR/origin"
+[[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
+    || { /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT" \
     || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
+# THE FILE IS OURS, AND IS A FILE. See the paragraph above the parent check: this
+# is the assertion a replaced transport directory cannot satisfy.
+{ [[ -O $RB_ORIGIN_OUT ]] && [[ ! -h $RB_ORIGIN_OUT ]] && [[ -f $RB_ORIGIN_OUT ]]; } \
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
 RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
 /usr/bin/env rm -f "$RB_ORIGIN_OUT"
 # THE DIRECTORY GOES WITH THE FILE ON EVERY EXIT FROM HERE, not only on the one
@@ -491,8 +534,11 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # postcondition, and every case built on it then runs against a truncated block —
 # nine assertions passed against nothing on the first attempt at this.
 RB_PIN_OUT="$RB_TMPDIR/pin"
+[[ $RB_PIN_OUT = "$RB_TMPDIR/pin" ]] \
+    || { echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_PIN_SEEN=
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+    && { [[ -O $RB_PIN_OUT ]] && [[ ! -h $RB_PIN_OUT ]] && [[ -f $RB_PIN_OUT ]]; } \
     && RB_PIN_SEEN="$(<"$RB_PIN_OUT")"
 /usr/bin/env rm -f "$RB_PIN_OUT"
 # THE DIRECTORY GOES WITH THEM, AND `rmdir` IS THE POINT. Both files have just

@@ -266,6 +266,52 @@ FORGE
     [ "$_rmreach" = "git@github.com:WRONG/other.git" ] \
         && pass "…where the same function reaches an rm called by name" \
         || die "the rm forger does not arrive at all (got '$_rmreach'); the case above proves nothing"
+    # …AND A TRANSPORT FILE THIS USER DID NOT CREATE IS REFUSED. This is what
+    # makes a replaced transport directory harmless, and it is the assertion the
+    # substitution cannot satisfy: an account that swaps the directory can put
+    # anything at the path, but not a file THIS user owns, because a file belongs
+    # to whoever created it. A symlink is the way that check gets satisfied by
+    # something of ours, so `-h` is asserted with it — and it is also the only
+    # form of the attack a fixture can stage without a second uid.
+    cat > "$_forge_dir/pr-origin-swap.sh" <<'SWAP'
+#!/usr/bin/env bash
+rm -f "$2"
+ln -s /etc/hostname "$2"
+exit 0
+SWAP
+    mkdir -p "$_forge_dir/swap"
+    cp "$_forge_dir/pr-origin-swap.sh" "$_forge_dir/swap/pr-origin.sh"
+    if [ -e /etc/hostname ] && [ ! -O /etc/hostname ]; then
+        _sw_rc=0
+        _sw_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/swap" \
+            TMPDIR="$_forge_dir" bash -c '
+                '"$_read_block"'
+                echo "PINNED=$RB_REMOTE"
+            ' 2>&1)" || _sw_rc=$?
+        { [ "$_sw_rc" -ne 0 ] \
+          && case "$_sw_out" in *'not the one this setup created'*) true ;; *) false ;; esac \
+          && case "$_sw_out" in *PINNED=*) false ;; *) true ;; esac; } \
+            && pass "…and a transport file this setup did not create is refused" \
+            || die "setup pinned from a substituted transport file (rc=$_sw_rc out='$_sw_out')"
+    else
+        echo "ok   - (no unowned file to point a symlink at; the substituted-file case did not run)"
+    fi
+    # …AND A READONLY TRANSPORT VARIABLE STOPS SETUP RATHER THAN BEING IGNORED.
+    # The driving session's shell is long-lived, so `RB_ORIGIN_OUT` can already
+    # exist as a readonly naming a file somebody else can write. The assignment
+    # then fails, the variable keeps the old path, and the helper writes a
+    # perfectly good value into a file the attacker edits before the read.
+    _ro_out=""
+    _ro_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" bash -c '
+            readonly RB_ORIGIN_OUT="'"$_forge_dir"'/elsewhere"
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || true
+    case "$_ro_out" in
+        *PINNED=*) die "a readonly RB_ORIGIN_OUT was ignored and setup pinned anyway: '$_ro_out'" ;;
+        *)         pass "…and a readonly RB_ORIGIN_OUT stops setup rather than being ignored" ;;
+    esac
     # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
     # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
     # the directory and not the entry naming it: on a shared, non-sticky `TMPDIR`
@@ -481,6 +527,23 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
 [ "$_ok_rc" -eq 0 ] \
     && pass "…while an ordinary shell pins and continues" \
     || die "the pin block aborts a session with nothing wrong with it (rc=$_ok_rc)"
+# …AND A READONLY `RB_PIN_OUT` STOPS SETUP TOO. Same shape as the read side, same
+# long-lived shell, and the same reason the guard is a postcondition rather than a
+# status: a failed readonly assignment on the left of an AND-OR list reports
+# success.
+if [ -n "$_forge_dir" ]; then
+    _rp2_out=""
+    _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPDIR="$(mktemp -d "${RB_TMPBASE:-${TMPDIR:-/tmp}}/pin.XXXXXX")"
+            readonly RB_PIN_OUT="$RB_TMPDIR/elsewhere"
+            '"$_pin_block"'
+        ' 2>&1)" || true
+    case "$_rp2_out" in
+        *OWNER=*) die "a readonly RB_PIN_OUT was ignored and setup reported success: '$_rp2_out'" ;;
+        *)        pass "…and a readonly RB_PIN_OUT stops setup rather than being ignored" ;;
+    esac
+fi
 # …AND A SHADOWED `rm` ON THE PIN SIDE CANNOT SUPPLY THE ANSWER. The same name
 # runs between the probe and the postcondition here, and the state it reaches is
 # worse: a failed probe leaves `RB_PIN_SEEN` empty, so a function by that name
