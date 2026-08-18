@@ -826,7 +826,13 @@ done
 # individually: `echo` swallowed the sentinel, `set` made `set +e` a no-op, `exit`
 # made refusals non-terminal, `type` made a good library abort, `return` made a
 # refusing stub succeed. Under a privileged interpreter none of them is imported.
+# THE IDENTITY IS SUPPLIED, like every helper probe above it. Line 29 clears the
+# session's `REVIEW_BUS_REMOTE` on purpose, so without one here this probe reaches
+# `rb_identity` before the usage error it expects — and in a checkout with no
+# parseable GitHub origin it would report that a forged builtin got through when
+# privileged startup had worked correctly.
 class_out="$(run_limited 20 env \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     'BASH_FUNC_echo%%=() { :; }' \
     'BASH_FUNC_set%%=() { :; }' \
     'BASH_FUNC_exit%%=() { return 0; }' \

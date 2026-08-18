@@ -55,6 +55,13 @@ sentinel; `exit` made a refusal non-terminal, so a helper announced an abort and
 went on to post. Each fix was correct and each introduced the next name.
 Privileged mode does none of the three things, so there is nothing to shadow.
 
+- **The suite needs `env -S`; the plugin does not.** The fixtures execute helpers
+  directly — hundreds of call sites across twelve files — so they go through the
+  shebang, and `pr-selfcheck.sh` cannot pass on an `env` that predates `-S`.
+  Routing every fixture invocation through `/usr/bin/env bash -p` was considered
+  and refused: it is a mechanical rewrite far larger than the change it would
+  serve, on a requirement met by GNU coreutils since 8.30 and by BSD `env`.
+  `README.md` states which side of the line a reader is on.
 - **The CALLER supplies it.** `SKILL.md` invokes every helper as
   `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a fresh privileged
   interpreter whatever the driving shell is and whatever the platform's `env`

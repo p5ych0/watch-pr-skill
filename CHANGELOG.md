@@ -21,6 +21,12 @@
   measured: under a forged `echo` and `set`, a privileged shell reports both as
   builtins, and five forged builtins at once do not reach a helper.
 
+  **`env -S` is a contributor requirement, not a user one**, and the split is
+  stated in `README.md`. The plugin never depends on the shebang; the suite does,
+  because the fixtures execute helpers directly at hundreds of call sites, so
+  `pr-selfcheck.sh` needs an `env` with `-S`. GNU coreutils has had it since 8.30
+  and BSD `env` supports it.
+
   **The driver supplies it, and the shebang is the fallback.** `SKILL.md` invokes
   every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a
   fresh privileged interpreter whatever the driving shell is and whatever that
