@@ -724,7 +724,7 @@ expensive part of this loop: each one costs a review pass, a fix, a summary and 
 wait, so a finding caught here is worth several caught there.
 
 ```bash
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
+"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?
 ```
 
 - `0` — the mechanical checks pass. Continue with the judgement list below.

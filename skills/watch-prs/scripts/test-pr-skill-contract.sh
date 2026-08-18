@@ -48,6 +48,14 @@ fi
 _unpriv=""
 while IFS= read -r _line; do
     case "$_line" in
+        # `pr-selfcheck.sh` IS THE EXEMPTION, and it is named rather than allowed
+        # to slip through a pattern. It is the one helper that is not started
+        # privileged: it re-execs itself into a clean shell, clears every
+        # inherited function and refuses if one cannot be cleared — a stronger
+        # boundary than `-p`, made once in that file with its own test. Putting
+        # `bash -p` in front of it would state the same property twice and
+        # differently, which is how the two copies come to disagree.
+        *'"$RB_SCRIPTS"/pr-selfcheck.sh'*) ;;
         *'/usr/bin/env bash -p "$RB_SCRIPTS"/pr-'*) ;;
         *) _unpriv="$_unpriv
 $_line" ;;
@@ -58,6 +66,17 @@ EOF
 [ -z "$_unpriv" ] \
     && pass "every helper the driver runs is started with /usr/bin/env bash -p" \
     || die "helper invocation(s) not started privileged:$_unpriv"
+# …AND THE EXEMPTION IS ASSERTED, not just tolerated. A blanket prefix put
+# `bash -p` in front of `pr-selfcheck.sh` too, which contradicted the contract in
+# `CLAUDE.md` that names it the one helper started otherwise — two statements
+# about one file, in different places, disagreeing. This fails if the driver ever
+# starts it privileged, so the disagreement cannot come back silently.
+# THE FILE, NOT `$skill_flat`: this block runs before that variable is built, and
+# an empty needle-haystack fails every case in it for a reason nobody would look
+# for.
+grep -qF '"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?' "$SKILL" \
+    && pass "…and pr-selfcheck.sh is invoked directly, as its own re-exec requires" \
+    || die "pr-selfcheck.sh is not invoked directly; its clean-shell re-exec is the boundary, not bash -p"
 
 # ── the reviewers are the GitHub apps, not a local process ─────────────────
 grep -q 'chatgpt-codex-connector\[bot\]' "$SKILL" \
