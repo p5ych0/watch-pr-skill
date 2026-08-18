@@ -80,15 +80,29 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # that defines it, so this sequence is written out here; that asymmetry is
 # irreducible, but it is not a licence to load the loader carelessly. An exported
 # `rb_load` survives into this shell and an empty `loadlib.sh` still sources
-# successfully, so without the clear the type check below accepts the inherited
+# successfully, so without the clear the first load runs the INHERITED
 # function — and a stale loader is the one thing that can make every OTHER load
 # look clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
     echo "PR_CI_STATE status=error reason=loadlib_stale_definition" >&2; exit 2; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_CI_STATE status=error reason=loadlib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "PR_CI_STATE status=error reason=loadlib_empty" >&2; exit 2; }
 # `run_limited` — the portable watchdog. A `gh` call that hangs on a dead
 # connection never returns, and the caller's `PR_CI_TIMEOUT` is then not a bound at
 # all: the round gate waits forever on a probe that is the thing being bounded.
@@ -98,7 +112,15 @@ unset -f rb_load 2>/dev/null || {
 # `testlib.sh` is the fixture watchdog by history and is a runtime dependency now.
 # The alternative was a second copy of ninety lines that already exist and are
 # already tested, which is the duplication issues #11 and #18 were opened for.
-rb_load "$_RB_SELF_DIR" testlib run_limited "PR_CI_STATE status=error" || exit 2
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" testlib run_limited "PR_CI_STATE status=error" || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "PR_CI_STATE status=error reason=loadlib_empty" >&2
+    exit 2; }
 # `sha_reason` — one definition of "a full commit SHA" across the plugin, used
 # below to validate both the OID asked about and the one the API returns.
 rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_CI_STATE status=error" || exit 2

@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.28] — 2026-08-18
+
+- **The loader was verified by asking `type`, which is a name.** Ten helpers ran
+  `[ "$(type -t rb_load)" = function ]` before using the loader, and an inherited
+  `type() { return 1; }` made a perfectly good `loadlib.sh` abort every stage.
+  #104 has since made that particular forgery impossible — a privileged shell
+  imports no functions — but verifying a thing by asking a second thing about it
+  is only as good as the asker, and the answer was always available for free: the
+  FIRST LOAD is the verification: an empty `loadlib.sh` leaves the refusing stub
+  the caller defined, and calling it fails.
+
+  **A refusing stub is what makes that true.** Without it an undefined `rb_load`
+  is looked up on `PATH` — privileged startup keeps functions out and does not
+  change `PATH` — so an executable by that name exiting 0 would report every load
+  successful with nothing cleared and no library sourced. The stub means the call
+  cannot leave the shell: a good `loadlib.sh` replaces it when sourced, an empty
+  one leaves the refusal.
+
+  **The sentinel moved to the first load with it.** An empty library still reports
+  `reason=loadlib_empty` on the stream its caller reads, because a bare exit
+  status is the ordinary-looking empty answer `CLAUDE.md` forbids. 127 is the
+  stub's and nothing else's; `rb_load`'s own refusals carry their own reason and
+  status.
+
+  `loadlib.sh`'s internal `type -t` is unchanged and is not a defect: that is the
+  decision recorded in #96 and documented by #97, and #104 has made it safe by
+  construction.
+
 ## [2.0.27] — 2026-08-18
 
 - **Every runtime helper is started privileged, which retires a class the review

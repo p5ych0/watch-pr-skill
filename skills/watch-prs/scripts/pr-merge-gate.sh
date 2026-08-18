@@ -92,20 +92,43 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # the guard a script still fails — just further downstream, against the wrong
 # repository — and an rc-only assertion passes on the unguarded code.
 #
-# The loader, loaded the one way it cannot load itself: clear, source, verify. An
+# The loader, loaded the one way it cannot load itself: clear, take that clear's
+# status, define a refusing stub, source. An
 # exported `rb_load` survives into this shell and an empty `loadlib.sh` still
-# sources successfully, so without the clear the type check accepts the inherited
+# sources successfully, so without the clear the first load runs the INHERITED
 # function — and a stale loader is what makes every other load look clean.
 unset -f rb_load 2>/dev/null || {
     echo "merge blocked: reason=loadlib_stale_definition"; exit 1; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "merge blocked: reason=loadlib_unreadable"; exit 1; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "merge blocked: reason=loadlib_empty"; exit 1; }
 # `2>&1` on both: `rb_load` reports on stderr, and every diagnostic this gate
 # produces is documented as stdout — a caller capturing it would otherwise get
 # nothing at all for the failures that happen before anything else can.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "merge blocked:" 2>&1 || exit 1
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "merge blocked:" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "merge blocked: reason=loadlib_empty"
+    exit 1; }
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "merge blocked:" 2>&1 || exit 1
 # `reason=` LIKE EVERY OTHER HELPER. The identity fixtures read that token rather
 # than an exit status, because without the guard these scripts still fail — just

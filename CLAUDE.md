@@ -31,7 +31,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is, which lines a reader honours as a control record, and what text requests a review — one definition each, sourced by every helper that reads the API or posts a caller-written body. |
 | `skills/watch-prs/scripts/clocklib.sh` | What "how much time has passed" means — one clock reader, with the guards a bare read has not got, sourced by `pr-watch.sh` and `pr-ci-gate.sh`. It exists because the gate used `$SECONDS`, a builtin no fixture can reach, so every deadline case in its suite raced real time; `date` is a command, so a fixture owns it. See #66. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
-| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
+| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, take that clear's status, source, and prove the symbol arrived — in one place. The BOOTSTRAP that loads this file cannot use it, and is clear, take the clear's status, define a refusing stub, source: the first load is what verifies it, and the stub is what stops `PATH` answering in its place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
@@ -231,9 +231,16 @@ rediscovering them.
   verifications, and an exported value satisfies a `[ -n … ]` test exactly as an
   exported function satisfies `type -t`. It takes the caller's whole error prefix
   too: `pr-watch.sh` says `state=error` where the others say `status=error`. The
-  four lines that load `loadlib.sh` itself are the one thing that cannot use it —
-  and they still clear, source and verify, because a stale loader is what makes
-  every other load look clean. `test-pr-identity.sh` fails if a `pr-*.sh` script
+  lines that load `loadlib.sh` itself are the one thing that cannot use it, and
+  they are **clear, take the clear's status, define a refusing stub, source** —
+  no `type -t` verification, because the FIRST LOAD is the verification: calling
+  an empty `loadlib.sh` leaves the refusing stub the caller defined, calling it
+  fails, and the handler on that first call carries `reason=loadlib_empty` so the
+  failure is still named. The stub is what makes it true rather than optional — without it
+  an undefined `rb_load` is looked up on `PATH`, and an executable by that name
+  exiting 0 reports every load successful with nothing cleared and no library
+  sourced. The clear is still there because a stale loader is what makes every
+  other load look clean. #88. `test-pr-identity.sh` fails if a `pr-*.sh` script
   loads a library by hand.
 
   **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the
@@ -373,9 +380,9 @@ rediscovering them.
 - **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
   verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
   in the operator's shell turns a good library into `reason=<lib>_empty`. #88
-  removes the same call from the ten helpers that wrap the loader — a separate
-  change, in flight alongside this one — because there the check has somewhere to go — calling an undefined `rb_load` exits 127, which
-  has no name in it. That does not transfer: asking whether a name is a function
+  removed the same call from the ten helpers that wrap the loader, because there
+  the check had somewhere to go: a refusing stub, and a first load whose failure
+  is the verification. That does not transfer: asking whether a name is a function
   needs `type`, `declare` or `command`, all shadowable, or calling the symbol,
   which for `rb_identity` means shelling out to `git`. Dropping the check moves
   the failure to the caller's first use and loses the precise reason; a subshell

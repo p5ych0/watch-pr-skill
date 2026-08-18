@@ -139,6 +139,16 @@ id_args() {   # id_args <script> ; sets "$@" for that caller
     esac
     ID_ARGV=( "$@" )
 }
+id_stream() {   # id_stream <script> ; the stream its loader sentinel goes to
+    # THE FOUR PROSE CALLERS SAY IT ON STDOUT; the structured ones follow the
+    # `PR_X status=error` lines around them, which go to stderr. Capturing both
+    # together cannot tell them apart, and a sentinel on the wrong stream is the
+    # ordinary-looking empty answer its consumer would get instead.
+    case "$1" in
+        pr-ci-gate.sh|pr-close-round.sh|pr-copilot-phase.sh|pr-merge-gate.sh) printf out ;;
+        *) printf err ;;
+    esac
+}
 id_rc() {   # id_rc <script> ; the status that script uses to refuse
     case "$1" in
         pr-merge-gate.sh) printf 1 ;;   # 0 merged, 1 blocked, 3 paused
@@ -886,6 +896,93 @@ class_reach="$(run_limited 20 env 'BASH_FUNC_echo%%=() { :; }' \
 [ "$class_reach" = function ] \
     && echo "…and the same forgery does reach an ordinary one" \
     || { echo "FAIL - the forgery does not land anywhere (got '$class_reach'); the case above proves nothing"; idfail=1; }
+set -e
+
+# ── THE LOADER IS VERIFIED BY USING IT, NOT BY ASKING `type` ───────────────
+#
+# #88: the preflight asked `type -t rb_load` and took the answer as proof. The
+# first load is the verification now, and two states have to hold for that to be
+# worth anything — an empty library must still be NAMED, and `PATH` must not be
+# able to answer in the library's place.
+set +e
+LDTMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
+mkdir -p "$LDTMP/bin" "$LDTMP/run"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$LDTMP/bin/gh"
+chmod +x "$LDTMP/bin/gh"
+for g in "$ROOT"/*.sh; do ln -sf "$g" "$LDTMP/run/$(basename "$g")"; done
+rm -f "$LDTMP/run/loadlib.sh"; : > "$LDTMP/run/loadlib.sh"
+for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
+    ld_out="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$LDTMP/run/$sc" "$@" 2>"$LDTMP/err")"; ld_rc=$?
+    ld_err="$(cat "$LDTMP/err")"
+    # ON ITS OWN STREAM. Read together, a sentinel written to the wrong one still
+    # matched — and the consumer reading the documented stream would have got
+    # nothing at all.
+    if [ "$(id_stream "$sc")" = out ]; then ld_said="$ld_out"; else ld_said="$ld_err"; fi
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_said" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc names an empty loader on its documented stream, with no preflight"
+    else
+        echo "FAIL - $sc did not name an empty loader on $(id_stream "$sc") (rc=$ld_rc want=$(id_rc "$sc") out='$ld_out' err='$ld_err')"; idfail=1
+    fi
+done
+# …AND AN `rb_load` ON `PATH` CANNOT ANSWER IN THE LIBRARY'S PLACE. Privileged
+# startup keeps functions out; it does not change `PATH`, so without the refusing
+# stub an undefined `rb_load` would be looked up there — and an executable by that
+# name exiting 0 reports every load successful with nothing cleared and no library
+# sourced. The forger is an executable for exactly that reason.
+printf '#!/usr/bin/env bash\nexit 0\n' > "$LDTMP/bin/rb_load"
+chmod +x "$LDTMP/bin/rb_load"
+ld_probe="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" bash -c 'rb_load && echo REACHED' 2>/dev/null)"
+if [ "$ld_probe" = REACHED ]; then
+    echo "ok   - an rb_load on PATH is reachable at all"
+else
+    echo "FAIL - the PATH forger does not run (probe='$ld_probe'); the cases below prove nothing"
+    idfail=1
+fi
+for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
+    [ -f "$ROOT/$sc" ] || continue
+    id_args "$sc"; set -- "${ID_ARGV[@]}"
+    ld_out="$(run_limited 20 env PATH="$LDTMP/bin:$PATH" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        "$LDTMP/run/$sc" "$@" 2>"$LDTMP/err")"; ld_rc=$?
+    ld_err="$(cat "$LDTMP/err")"
+    if [ "$(id_stream "$sc")" = out ]; then ld_said="$ld_out"; else ld_said="$ld_err"; fi
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_said" | grep -q 'reason=loadlib_empty'; then
+        echo "ok   - $sc refuses an empty loader with an rb_load on PATH"
+    else
+        echo "FAIL - $sc took its loader from PATH (rc=$ld_rc out='$ld_out' err='$ld_err')"; idfail=1
+    fi
+done
+rm -rf "$LDTMP"
+# …AND THE PREFLIGHT CANNOT COME BACK, which needs a STRUCTURAL check because no
+# behaviour separates the two. Under a privileged interpreter a forged `type`
+# cannot be imported, so `[ "$(type -t rb_load)" = function ]` and the stub give
+# the same answer in every state this suite can build: with a good library both
+# proceed, with an empty one both refuse, and with an `rb_load` executable on
+# `PATH` the preflight sees `file` where the stub returns 127 — the same
+# `loadlib_empty` either way. Restoring the dependency this PR removes would
+# therefore leave both loops above green.
+#
+# What is left to assert is the SHAPE, which is what #88 is about: the loader is
+# verified by being used, not by being asked about.
+pre_back=""; stub_missing=""
+for f in "$ROOT"/pr-*.sh; do
+    _b="$(basename "$f")"
+    grep -q '^\. "\$_RB_SELF_DIR/loadlib\.sh"' "$f" || continue
+    grep -q 'type -t rb_load' <<EOF && pre_back="$pre_back $_b"
+$(grep -v '^#' "$f")
+EOF
+    grep -qxF 'rb_load() { return 127; }' "$f" || stub_missing="$stub_missing $_b"
+done
+[ -z "$pre_back" ] \
+    && echo "ok   - no helper verifies the loader by asking type" \
+    || { echo "FAIL - the type preflight is back in:$pre_back"; idfail=1; }
+[ -z "$stub_missing" ] \
+    && echo "ok   - …and every one defines the refusing stub instead" \
+    || { echo "FAIL - helper(s) without the refusing stub:$stub_missing"; idfail=1; }
 set -e
 
 if [ "$idfail" -ne 0 ]; then

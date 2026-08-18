@@ -83,17 +83,32 @@ set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
-# The library loader, loaded the one way it cannot load itself: clear, source,
-# verify. An exported `rb_load` survives into this shell and an empty `loadlib.sh`
-# still sources successfully, so without the clear the type check accepts the
-# inherited function — and a stale loader is what makes every other load look
+# The library loader, loaded the one way it cannot load itself: clear, take that
+# clear's status, define a refusing stub, source. An exported `rb_load` survives
+# into this shell and an empty `loadlib.sh`
+# still sources successfully, so without the clear the first load runs the INHERITED
+# function — and a stale loader is what makes every other load look
 # clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
     echo "ABORT: a pre-existing rb_load could not be cleared"; exit 1; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "ABORT: the library loader is unreadable"; exit 1; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "ABORT: the library loader defined nothing"; exit 1; }
 # `sha_reason` — ONE definition of "a full commit SHA" across the plugin. The
 # first version of this script wrote the shape out as a `case` of its own, and
 # `test-recordlib.sh`'s drift guard rejected it: a rule that applies to more than
@@ -105,7 +120,15 @@ unset -f rb_load 2>/dev/null || {
 # missing, unreadable or empty `recordlib.sh` produces its only explanation inside
 # the loader, so a caller capturing stdout got an empty result and an exit status
 # for the one failure that happens before anything else can.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || exit 1
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "ABORT: the CI gate reason=loadlib_empty"
+    exit 1; }
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "ABORT: the CI gate" 2>&1 || exit 1
 
 pr="${1:-}"; oid="${2:-}"
