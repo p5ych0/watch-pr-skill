@@ -102,6 +102,26 @@
   `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
   helper cannot see either — it had already done its job.
 
+  **A transport directory other accounts can write is refused.** The caller can
+  test that the parent belongs to the operator; it cannot test whether the
+  operator left it open to others, because bash has no test for another account's
+  write bit — so an owned mode-0777 `TMPDIR` got through, and an account with
+  write there could replace the whole directory between the helper closing its
+  file and the caller opening it. Both of the caller's checks then pass, because
+  the planted file belongs to the operator too. The helper refuses a group- or
+  other-writable parent, tested with `find -prune -perm`, which is POSIX where
+  `stat`'s flags are not — and it runs in the helper rather than the driver
+  because that process is privileged, so `find` cannot be a shadowed name there.
+
+  **A global `insteadOf` rule is expanded again.** Emptying the environment to
+  shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented
+  to expand `url.<base>.insteadOf` — rules that live in the user's global config.
+  A checkout whose origin is `work:acme/widget.git` came back unexpanded with host
+  `work`, so setup refused a valid checkout or addressed the session at a host it
+  does not push to. `HOME` and `XDG_CONFIG_HOME` are carried through; everything
+  that redirects the repository still goes, and the list needs no maintaining
+  because the environment is emptied rather than filtered.
+
   **The helper creates its output exclusively, and cannot be started
   unprivileged.** `: > "$OUT"` opened with O_TRUNC and followed symlinks, so an
   account able to replace the transport directory could leave a symlink there

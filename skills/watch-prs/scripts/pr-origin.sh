@@ -36,7 +36,10 @@
 # the old paragraph would have reintroduced the failure it described.
 #
 #   0  the value is in the file named by the second argument
-#   1  refused — the reason is on STDERR, and the file is left empty
+#   1  refused — the reason is on STDERR, and the file is NOT created. The value
+#      is written by the single redirection that creates it, so a refusal before
+#      that point leaves the path ABSENT rather than empty; a caller that opens it
+#      sees the open fail, which is what `SKILL.md` branches on.
 #
 # NOTHING IS EVER WRITTEN TO STDOUT. The value goes to the file and the reasons go
 # to stderr, so a caller reads one and never sees the other — which is what lets
@@ -169,6 +172,25 @@ OUT="${2-}"
 # to check and read it — sees the open fail rather than an empty file.
 umask 077
 set -C
+# AND THE DIRECTORY IT SITS IN MUST BE ONE NOBODY ELSE CAN WRITE. Everything
+# above protects the object; this protects the NAME. The caller's `-O` test says
+# the parent belongs to the operator and cannot say whether the operator has left
+# it open to others — bash has no test for another account's write bit — so an
+# owned mode-0777 `TMPDIR` passed it, and an account with write there can replace
+# the whole transport directory between this script closing its file and the
+# caller opening it. Both `-O` and `-f` then pass on the planted file, because the
+# planted file belongs to the operator too.
+#
+# `find -prune -perm` IS THE TEST, and it is POSIX rather than `stat`, whose flags
+# differ between GNU and BSD. It runs HERE and not in the caller because this
+# process is privileged: `find` is a name, and in the driving shell a function by
+# that name would answer instead. What remains is `PATH`, which is #91.
+_rb_dir="${OUT%/*}"
+[[ $_rb_dir = "$OUT" ]] && _rb_dir=.
+if [[ -n "$(find "$_rb_dir" -prune \( -perm -g+w -o -perm -o+w \) -print 2>/dev/null)" ]]; then
+    echo "ABORT: '$_rb_dir' is writable by other accounts; the transport could be replaced between this write and the caller's read" >&2
+    exit 1
+fi
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
@@ -214,7 +236,26 @@ fi
 # needs no list. `PATH` is carried because that is how `git` is found at all —
 # which is #91 — and nothing else is, so the lookup sees the working directory and
 # the repository it stands in.
-_rb_origin="$(/usr/bin/env -i PATH="$PATH" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
+# `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
+# documented to expand `url.<base>.insteadOf`, and those rules live in the user's
+# GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
+# checkout whose origin is `work:acme/widget.git` came back with host `work`.
+# `rb_identity` then refused a valid checkout, or addressed the session somewhere
+# that is not where it pushes. Measured both ways.
+#
+# WHAT IS EXCLUDED IS STILL EVERYTHING THAT REDIRECTS THE REPOSITORY: `GIT_DIR`,
+# `GIT_WORK_TREE`, `GIT_CONFIG`, `GIT_CONFIG_GLOBAL` and the rest go with `-i`,
+# and the list needs no maintaining because the environment is emptied rather
+# than filtered. `XDG_CONFIG_HOME` is carried when set, because git reads
+# `$XDG_CONFIG_HOME/git/config` as global config too and omitting it would lose
+# the same rewrites for anyone who uses it.
+#
+# A FORGED `HOME` CAN STILL REWRITE URLS, and that is the operator's own shell
+# lying about the operator's own home — the boundary this file already records at
+# the bottom, not a new one.
+_rb_env=( PATH="$PATH" HOME="${HOME-}" )
+[[ -n ${XDG_CONFIG_HOME-} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
+_rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything

@@ -391,6 +391,81 @@ case "$mode" in
     *)          die "the transport was created with mode '$mode'" ;;
 esac
 
+# ── A GLOBAL `insteadOf` RULE IS STILL EXPANDED ────────────────────────────
+#
+# `git remote get-url` expands `url.<base>.insteadOf`, and those rules live in the
+# user's GLOBAL config — so emptying the environment to shut out `GIT_DIR` also
+# hid them, and a checkout whose origin is `work:acme/widget.git` came back
+# unexpanded with host `work`. `rb_identity` then refuses a valid checkout, or
+# addresses the session at a host it does not push to.
+IOHOME="$TMP/insteadof-home"
+mkdir -p "$IOHOME"
+printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n' > "$IOHOME/.gitconfig"
+IOREPO="$TMP/insteadof-repo"
+mkdir -p "$IOREPO"
+( cd "$IOREPO" && git init -q . && git remote add origin 'work:acme/widget.git' ) >/dev/null 2>&1 \
+    || die "could not build the insteadOf checkout"
+rm -f "$TMP/io.value"
+( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" /usr/bin/env bash -p "$SCRIPT" read "$TMP/io.value" ) >/dev/null 2>&1
+io_got="$(cat "$TMP/io.value" 2>/dev/null)"
+[ "$io_got" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "a global insteadOf rule is expanded, not returned as the alias" \
+    || die "insteadOf was not expanded (got '$io_got')"
+# THE FIXTURE'S OWN REACH: the rule must actually apply to a bare `git` here, or
+# the case above passes on a checkout that never needed it.
+io_reach="$(cd "$IOREPO" && HOME="$IOHOME" git remote get-url origin 2>/dev/null)"
+[ "$io_reach" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "…where the same rule applies to a bare git" \
+    || die "the insteadOf rule does not apply here (got '$io_reach'); the case above proves nothing"
+# …AND `GIT_DIR` IS STILL SHUT OUT with `HOME` carried through, which is the
+# combination the emptied environment existed for.
+IOOTHER="$TMP/insteadof-other"
+mkdir -p "$IOOTHER"
+( cd "$IOOTHER" && git init -q . && git remote add origin "$FORGED" ) >/dev/null 2>&1 \
+    || die "could not build the second insteadOf checkout"
+rm -f "$TMP/io2.value"
+( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_DIR="$IOOTHER/.git" \
+    /usr/bin/env bash -p "$SCRIPT" read "$TMP/io2.value" ) >/dev/null 2>&1
+io2_got="$(cat "$TMP/io2.value" 2>/dev/null)"
+[ "$io2_got" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "…while GIT_DIR still cannot redirect the read" \
+    || die "GIT_DIR reached the read once HOME was carried (got '$io2_got')"
+
+# ── A DIRECTORY OTHER ACCOUNTS CAN WRITE IS REFUSED ────────────────────────
+#
+# Everything above protects the OBJECT; this protects the NAME. The caller can
+# test that the parent belongs to the operator and cannot test whether the
+# operator left it open to others — bash has no test for another account's write
+# bit — so an owned mode-0777 `TMPDIR` got through, and an account with write
+# there can replace the whole transport directory between this script closing its
+# file and the caller opening it. Both of the caller's checks then pass, because
+# the planted file belongs to the operator too.
+OPENDIR="$TMP/open"
+mkdir -p "$OPENDIR"
+chmod 777 "$OPENDIR"
+open_rc=0
+open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+{ [ "$open_rc" -ne 0 ] \
+  && case "$open_diag" in *"writable by other accounts"*) true ;; *) false ;; esac \
+  && [ ! -e "$OPENDIR/origin" ]; } \
+    && pass "a transport directory other accounts can write is refused" \
+    || die "the helper wrote into a world-writable directory (rc=$open_rc diag='$open_diag')"
+# …AND A GROUP-WRITABLE ONE TOO, which is the shape a shared machine actually has.
+chmod 770 "$OPENDIR"
+open_rc=0
+open_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+{ [ "$open_rc" -ne 0 ] \
+  && case "$open_diag" in *"writable by other accounts"*) true ;; *) false ;; esac; } \
+    && pass "…and so is a group-writable one" \
+    || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
+# …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
+chmod 700 "$OPENDIR"
+rm -f "$OPENDIR/origin"
+( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" ) >/dev/null 2>&1
+[ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
+    && pass "…while a private directory is written as before" \
+    || die "a private directory was refused"
+
 # ── THE HELPER CANNOT BE STARTED UNPRIVILEGED AT ALL ───────────────────────
 #
 # The fallback hop advertised a recovery it could not perform: by the time it ran,
