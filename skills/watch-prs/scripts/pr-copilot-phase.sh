@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # The Copilot phase, end to end: record what Codex signed off, and — if the
 # operator asks for it — open the Copilot pass on that same head, then close it on
 # Copilot's own clean verdict.
@@ -44,17 +44,78 @@
 #
 # `set -uo pipefail`, NOT `-e`: every probe here reports its answer as an exit
 # status and several fail as ordinary operation. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `ABORT:` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "ABORT: reason=not_privileged"
+    exit 1
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || { echo "ABORT: reason=loadlib_unreadable"; exit 1; }
-[[ "$(type -t rb_load 2>/dev/null)" = function ]] || { echo "ABORT: reason=loadlib_empty"; exit 1; }
 # `2>&1` on each: `rb_load` reports on stderr, and everything this script says is
 # documented as stdout — a caller capturing it would otherwise get nothing for the
 # failures that happen before anything else can.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || exit 1
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT:" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "ABORT: reason=loadlib_empty"
+    exit 1; }
 # BOTH CONSTANTS, EACH THROUGH `rb_load`. Verifying only one leaves the other
 # inheritable: a `recordlib.sh` truncated after the first definition passes the
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted as
@@ -133,7 +194,7 @@ if [[ $STAGE = open ]]; then
         # verdict: a review dismissed while the head stood still leaves the
         # equality passing and the recorded signoff describing a phase that is no
         # longer clean.
-        recheck=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); rc=$?
+        recheck=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); rc=$?
         [[ $rc -eq 0 ]] \
             || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($recheck) — the signoff is history, not a current verdict; do not open the Copilot phase"; return 1; }
 
@@ -141,7 +202,7 @@ if [[ $STAGE = open ]]; then
         # deliberately REOPENED. Reopening posts a revocation and requests a new
         # pass, and GitHub keeps serving the old clean verdict until that pass
         # reports — so the verdict alone still passes on a reopened phase.
-        record=$("$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT"); rc=$?
+        record=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT"); rc=$?
         case "$rc" in
             0) ;;
             1) echo "ABORT: there is no current Codex signoff on this PR ($record) — it was revoked or never recorded; do not open the Copilot phase"; return 1 ;;
@@ -162,7 +223,7 @@ if [[ $STAGE = open ]]; then
     # back and arrive here with the boundary still unacknowledged. Checking only in
     # `record` meant the pause was skipped by the very resume path the published
     # signoff exists to enable.
-    "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; OPEN_ROUNDS_RC=$?
+    /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; OPEN_ROUNDS_RC=$?
     case "$OPEN_ROUNDS_RC" in
         0) ;;
         3) echo "PAUSE: round boundary reached and not acknowledged. Decide with the operator before opening the Copilot phase: continue, merge on the Codex signoff, leave it open, or close this PR and start over"
@@ -218,7 +279,7 @@ if [[ $STAGE = open ]]; then
     # request made after it, advancing the phase on a pass nobody asked for.
     #
     # Empty is a legitimate answer (no review yet); only a failed read is fatal.
-    PRIOR_REVIEW=$("$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
+    PRIOR_REVIEW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$RB_COPILOT_BOT") \
         || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 1; }
 
     # `--add-reviewer` IS the request. If it fails there is no Copilot pass to wait
@@ -279,7 +340,7 @@ if [[ $STAGE = close ]]; then
     # stop parked — recorded the NEW, unreviewed head as Copilot-signed. The
     # durable record would then say both phases closed on a commit neither
     # reviewer saw, and every later session would believe it.
-    COPILOT_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
+    COPILOT_RECHECK=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); COPILOT_RECHECK_RC=$?
     [[ $COPILOT_RECHECK_RC -eq 0 ]] \
         || { echo "ABORT: Copilot is not clean on the sha being recorded ($COPILOT_RECHECK) — the head moved; do not record a signoff for it"; exit 1; }
 
@@ -391,7 +452,7 @@ _why="$(sha_reason "$CODEX_SHA")" \
 
 # RE-VALIDATED ON EXACTLY THAT SHA. If it is not clean, the head moved and the
 # phase must not advance.
-CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
+CODEX_RECHECK=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_RECHECK_RC=$?
 [[ $CODEX_RECHECK_RC -eq 0 ]] \
     || { echo "ABORT: Codex is not clean on the sha being recorded ($CODEX_RECHECK) — the head moved; do not start the Copilot phase"; exit 1; }
 
@@ -401,7 +462,7 @@ CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT"
 # only at REQUIRED checks, which a failing optional one is not. Every path that
 # accepts a verdict as phase-completing has to have seen the checks, not just the
 # paths that pushed something.
-"$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$CODEX_SHA" || exit 1
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$CODEX_SHA" || exit 1
 
 
 # THE SIGNOFF IS WRITTEN DOWN, not just printed. This line is the record the next
@@ -423,7 +484,7 @@ CODEX_RECHECK=$("$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT"
 # take the codex-only merge without anyone having established whether an operator
 # boundary was due. An unreadable count is a stop, and a stop must leave nothing
 # behind.
-"$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; ROUNDS_RC=$?
+/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-round-count.sh "$PR" "$RB_CODEX_BOT"; ROUNDS_RC=$?
 case "$ROUNDS_RC" in
     0|3) ;;
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC); nothing recorded"; exit 1 ;;

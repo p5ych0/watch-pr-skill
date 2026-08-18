@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Which head has a reviewer signed off clean on, according to the PR itself?
 #
 #   pr-signoff.sh <pr> <reviewer-login>
@@ -43,17 +43,77 @@
 #
 # `set -uo pipefail`, NOT `-e`: `gh` probes fail as normal operation and the
 # result is control flow. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `PR_SIGNOFF status=error` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "PR_SIGNOFF status=error reason=not_privileged" >&2
+    exit 2
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "PR_SIGNOFF status=error reason=lib_dir_unresolvable" >&2; exit 2; }
 unset -f rb_load 2>/dev/null || {
     echo "PR_SIGNOFF status=error reason=loadlib_stale_definition" >&2; exit 2; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_SIGNOFF status=error reason=loadlib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "PR_SIGNOFF status=error reason=loadlib_empty" >&2; exit 2; }
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_SIGNOFF status=error" || exit 2
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_SIGNOFF status=error" || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "PR_SIGNOFF status=error reason=loadlib_empty" >&2
+    exit 2; }
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_SIGNOFF status=error" || exit 2
 rb_identity || { echo "PR_SIGNOFF status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 

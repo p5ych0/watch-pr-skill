@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Block until a reviewer's review of the current head is actionable, printing a
 # line whenever the state changes and one final line when it is.
 #
@@ -27,6 +27,44 @@
 #
 # `set -uo pipefail`, NOT `-e`: pr-review-state.sh uses exit status as control
 # flow. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `PR_REVIEW_WATCH state=error` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "PR_REVIEW_WATCH state=error reason=not_privileged" >&2
+    exit 2
+fi
+
 set -uo pipefail
 
 # The shared shape rules. `pr-watch.sh` validates helper OUTPUT rather than API
@@ -38,21 +76,49 @@ _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
 # The library loader — and it obeys its own rule. A helper cannot load the file
 # that defines it, so this sequence is written out here; an exported `rb_load`
 # survives into this shell and an empty `loadlib.sh` still sources successfully,
-# so without the clear the type check accepts the inherited function — and a stale
+# so without the clear the first load runs the INHERITED function — and a stale
 # loader is the one thing that can make every OTHER load look clean. See
 # loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
     echo "PR_REVIEW_WATCH state=error reason=loadlib_stale_definition" >&2; exit 2; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "PR_REVIEW_WATCH state=error reason=loadlib_unreadable" >&2; exit 2; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2; exit 2; }
 # `state=` rather than `status=`, which is this script's own sentinel shape — the
 # loader takes the prefix precisely so each caller keeps its own.
-rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || exit 2
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2
+    exit 2; }
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# STARTED PRIVILEGED AT EVERY CALL SITE BELOW, not folded into this variable.
+# `pr-review-state.sh` is a helper like any other, and a nested call that reaches
+# it by pathname alone leaves the kernel to process its shebang — which needs
+# `env -S`, the thing the driver's own invocation exists to avoid depending on.
+# The prefix stays at the call sites because `probe` takes a command list and an
+# override may name a stub, which `bash -p` reads just as well.
 STATE_SCRIPT="${PR_WATCH_STATE_SCRIPT:-$SELF_DIR/pr-review-state.sh}"
 
 INTERVAL="${PR_WATCH_INTERVAL:-30}"
@@ -289,7 +355,7 @@ while :; do
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    head="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; hrc=$?
+    head="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; hrc=$?
     [ "$hrc" -eq 124 ] && timed_out
     [ "$hrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$hrc" -ne 0 ] || ! is_full_sha "$head"; then
@@ -302,7 +368,7 @@ while :; do
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-    line="$(probe "$rem" "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
+    line="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" state "$PR" "$WHO" "$head")"; rc=$?
     [ "$rc" -eq 124 ] && timed_out
     [ "$rc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
     if [ "$rc" -ne 0 ]; then
@@ -373,7 +439,7 @@ while :; do
                 remaining_s; rrc=$?; rem="$REMAINING"
                 [ "$rrc" -eq 2 ] && timed_out
                 [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-                cur="$(probe "$rem" "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
+                cur="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" review-id "$PR" "$WHO" "$head")"; crc2=$?
                 [ "$crc2" -eq 124 ] && timed_out
                 [ "$crc2" -ne 0 ] && { echo "PR_REVIEW_WATCH state=error reason=review_id_unreadable" >&2; exit 2; }
                 # The SHAPE of both ids, before they are compared or printed.
@@ -422,7 +488,7 @@ while :; do
             remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            verdict="$(probe "$rem" "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
+            verdict="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" verdict "$PR" "$WHO" "$head")"; vrc=$?
             [ "$vrc" -eq 124 ] && timed_out
             [ "$vrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             # Only 0 (clean) and 1 (not clean) are ANSWERS. Anything else — the
@@ -564,7 +630,7 @@ while :; do
             remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
     [ "$rrc" -eq 0 ] || { echo "PR_REVIEW_WATCH state=error reason=clock_unreadable" >&2; exit 2; }
-            head_now="$(probe "$rem" "$STATE_SCRIPT" head "$PR")"; nrc=$?
+            head_now="$(probe "$rem" /usr/bin/env bash -p "$STATE_SCRIPT" head "$PR")"; nrc=$?
             [ "$nrc" -eq 124 ] && timed_out
             [ "$nrc" -eq 125 ] && { echo "PR_REVIEW_WATCH state=error reason=probe_unreadable" >&2; exit 2; }
             if [ "$nrc" -ne 0 ] || ! is_full_sha "$head_now"; then

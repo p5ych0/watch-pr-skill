@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Wait until this PR's checks have settled on the head that was just pushed, and
 # say whether the round may close.
 #
@@ -15,8 +15,8 @@
 #
 #   - IT WAS UNCHECKED. Everything under this directory is covered by the suite,
 #     by `pr-selfcheck.sh` — which requires a test per script — and by the
-#     `macos-shell` CI job. Shell inside a Markdown file is covered by none of
-#     them, and reaching it means parsing Markdown, which was tried and deleted
+#     `macos-shell` CI job when that job is enabled, which it is not while #93
+#     stands. Shell inside a Markdown file is covered by none of them, and reaching it means parsing Markdown, which was tried and deleted
 #     (issue #26, PR #25). `test-pr-skill-contract.sh` had resorted to `sed`-ing
 #     the function out of the document to execute it.
 #   - IT NEEDED A GUARD DANCE. A function pasted into a session that may already
@@ -41,21 +41,74 @@
 # `set -uo pipefail`, NOT `-e`: the probe's exit status IS the control flow here —
 # `pr-ci-state.sh` reports pending, none and stale as non-zero, and every one of
 # them is an ordinary answer this loop acts on. See CLAUDE.md § Bash conventions.
+# ── STARTED PRIVILEGED, OR NOT STARTED ─────────────────────────────────────
+#
+# The shebang above is `env -S bash -p`, and that is the defence this block
+# exists to state. An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS
+# functions from the environment, and honours an exported `SHELLOPTS` — so every
+# builtin this script uses is a name the operator's shell can replace, and each
+# one found took a review round of its own: `type`, `return`, `set`, `echo`,
+# `exit`. Privileged mode does none of the three, so there is nothing to shadow
+# and nothing to clear. Measured: under `BASH_FUNC_echo%` and `BASH_FUNC_set%`,
+# a privileged shell reports both as builtins.
+#
+# THE HOOK CANNOT BE OUT-RUN FROM IN HERE, which is why this is the shebang and
+# not a re-exec. A `BASH_ENV` hook runs before this file's first line, and one
+# that prints a forged `ABORT: the CI gate` line and exits has already answered the
+# caller — no later re-exec takes that back. The interpreter has to be privileged
+# from the start, which only the shebang or the caller can arrange.
+#
+# WHAT STARTS IT PRIVILEGED IS THE CALLER, AND THE SHEBANG IS THE FALLBACK.
+# `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+# which starts a fresh privileged interpreter whatever the driving shell is and
+# whatever that platform's `env` supports. The shebang covers the other way in —
+# executing the file directly — and needs `env -S`, which is why it is not the
+# thing relied on.
+#
+# `$-` IS A LAST-RESORT REFUSAL AND PROVES LESS THAN IT LOOKS. It reports the
+# MODE this shell is in, not how it got there: run as `BASH_ENV=hook bash
+# pr-x.sh`, the hook is sourced BEFORE this line and can itself run `set -p` and
+# then define `echo` or `exit`, after which `$-` contains `p` and this test
+# passes on a shell that has already executed hostile code. Nothing inside a
+# script can detect work done before its first line — so this catches the honest
+# mistake, and `bash pr-x.sh` is UNSUPPORTED rather than defended. Measured:
+# `BASH_ENV=/tmp/h bash -c 'printf "%s %s" "$-" "$(type -t echo)"'` with a hook
+# running `set -p; echo() { :; }` prints `hpBc function`.
+if [[ $- != *p* ]]; then
+    echo "ABORT: the CI gate reason=not_privileged"
+    exit 1
+fi
+
 set -uo pipefail
 
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: the CI gate could not resolve its own directory"; exit 1; }
-# The library loader, loaded the one way it cannot load itself: clear, source,
-# verify. An exported `rb_load` survives into this shell and an empty `loadlib.sh`
-# still sources successfully, so without the clear the type check accepts the
-# inherited function — and a stale loader is what makes every other load look
+# The library loader, loaded the one way it cannot load itself: clear, take that
+# clear's status, define a refusing stub, source. An exported `rb_load` survives
+# into this shell and an empty `loadlib.sh`
+# still sources successfully, so without the clear the first load runs the INHERITED
+# function — and a stale loader is what makes every other load look
 # clean. See loadlib.sh and issue #22.
 unset -f rb_load 2>/dev/null || {
     echo "ABORT: a pre-existing rb_load could not be cleared"; exit 1; }
+# NO `type -t rb_load` PREFLIGHT. It verified the loader by asking `type`, which
+# is a NAME — and while a privileged interpreter means no function by that name
+# can be imported, verifying a thing by asking a second thing about it is the
+# shape #88 is about: the answer is only as good as the asker. The FIRST LOAD is
+# the verification instead: the stub below is what an empty `loadlib.sh` leaves
+# behind, and calling it fails. Nothing is asked ABOUT the loader — the load
+# itself is the answer.
+#
+# THE REFUSING STUB IS WHAT MAKES THAT TRUE. Without it, an `rb_load` that is not
+# a function is looked up on `PATH` — privileged mode does not change `PATH` —
+# and an executable by that name exiting 0 would report every load successful
+# with nothing cleared and no library sourced. Defining it means the call cannot
+# leave this shell: a good `loadlib.sh` replaces the stub when sourced, an empty
+# one leaves the refusal. `return` is a builtin and nothing can shadow it here,
+# because a privileged shell imports no functions. #88.
+rb_load() { return 127; }
 . "$_RB_SELF_DIR/loadlib.sh" || {
     echo "ABORT: the library loader is unreadable"; exit 1; }
-[ "$(type -t rb_load 2>/dev/null)" = function ] || {
-    echo "ABORT: the library loader defined nothing"; exit 1; }
 # `sha_reason` — ONE definition of "a full commit SHA" across the plugin. The
 # first version of this script wrote the shape out as a `case` of its own, and
 # `test-recordlib.sh`'s drift guard rejected it: a rule that applies to more than
@@ -67,7 +120,15 @@ unset -f rb_load 2>/dev/null || {
 # missing, unreadable or empty `recordlib.sh` produces its only explanation inside
 # the loader, so a caller capturing stdout got an empty result and an exit status
 # for the one failure that happens before anything else can.
-rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || exit 1
+# THE FIRST LOAD CARRIES THE SENTINEL, because it is what the preflight used to
+# say. An empty `loadlib.sh` leaves the stub, the stub returns 127, and without
+# this arm the only trace is a bare exit status — the ordinary-looking empty
+# answer `CLAUDE.md` forbids. 127 is the stub's and nothing else's: `rb_load`'s
+# own refusals report their own reason and their own status.
+rb_load "$_RB_SELF_DIR" recordlib sha_reason "ABORT: the CI gate" 2>&1 || {
+    _rb_rc=$?
+    [[ $_rb_rc -eq 127 ]] && echo "ABORT: the CI gate reason=loadlib_empty"
+    exit 1; }
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "ABORT: the CI gate" 2>&1 || exit 1
 
 pr="${1:-}"; oid="${2:-}"
@@ -135,7 +196,7 @@ while :; do
     fi
     budget=$((tmo - elapsed))
     [ "$budget" -gt "$probe" ] && budget="$probe"
-    PR_CI_PROBE_TIMEOUT="$budget" "$_RB_SELF_DIR"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
+    PR_CI_PROBE_TIMEOUT="$budget" /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-state.sh "$pr" --head "$oid"; rc=$?
     rb_elapsed || { echo "ABORT: the CI gate lost the clock; refusing to poll unbounded."; exit 1; }
     elapsed="$RB_ELAPSED"
     # THE DEADLINE IS CHECKED BEFORE A VERDICT IS ACCEPTED, not after. With the

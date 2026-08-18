@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.23] — 2026-08-17
+## [2.0.29] — 2026-08-18
 
 - **The setup block read origin with `git` and proved its pin with `bash -c`, and
   both are names.** A function answering only `remote get-url origin` forged the
@@ -242,6 +242,122 @@
   list does not fire the `||` — the list reports success and the variable keeps
   its old value. Each of the four transport assignments is now proved by reading
   the variable back.
+## [2.0.28] — 2026-08-18
+
+- **The loader was verified by asking `type`, which is a name.** Ten helpers ran
+  `[ "$(type -t rb_load)" = function ]` before using the loader, and an inherited
+  `type() { return 1; }` made a perfectly good `loadlib.sh` abort every stage.
+  #104 has since made that particular forgery impossible — a privileged shell
+  imports no functions — but verifying a thing by asking a second thing about it
+  is only as good as the asker, and the answer was always available for free: the
+  FIRST LOAD is the verification: an empty `loadlib.sh` leaves the refusing stub
+  the caller defined, and calling it fails.
+
+  **A refusing stub is what makes that true.** Without it an undefined `rb_load`
+  is looked up on `PATH` — privileged startup keeps functions out and does not
+  change `PATH` — so an executable by that name exiting 0 would report every load
+  successful with nothing cleared and no library sourced. The stub means the call
+  cannot leave the shell: a good `loadlib.sh` replaces it when sourced, an empty
+  one leaves the refusal.
+
+  **The sentinel moved to the first load with it.** An empty library still reports
+  `reason=loadlib_empty` on the stream its caller reads, because a bare exit
+  status is the ordinary-looking empty answer `CLAUDE.md` forbids. 127 is the
+  stub's and nothing else's; `rb_load`'s own refusals carry their own reason and
+  status.
+
+  `loadlib.sh`'s internal `type -t` is unchanged and is not a defect: that is the
+  decision recorded in #96 and documented by #97, and #104 has made it safe by
+  construction.
+
+## [2.0.27] — 2026-08-18
+
+- **Every runtime helper is started privileged, which retires a class the review
+  had been answering one member at a time.** A helper ran through
+  `#!/usr/bin/env bash`, and an ordinary bash SOURCES `BASH_ENV`, IMPORTS
+  functions from the environment, and honours an exported `SHELLOPTS`. Every
+  builtin a helper used was therefore a name the operator's shell could replace,
+  and each one was found on its own round: `type` reported that a perfectly good
+  `loadlib.sh` had defined nothing; `return` made a refusing stub return 0 and
+  report an empty loader as a successful load; `set` made `set +e` a no-op, so an
+  inherited `errexit` killed a helper before it could name its refusal; `echo`
+  swallowed the structured sentinel a caller branches on, leaving an
+  ordinary-looking empty answer; and `exit` made every refusal non-terminal, so a
+  helper announced an abort and carried on to post to GitHub. Every fix was
+  correct, and every one introduced the next name.
+
+  The shebang is now `#!/usr/bin/env -S bash -p`. Privileged mode does none of
+  those three things, so there is nothing to shadow and nothing to clear —
+  measured: under a forged `echo` and `set`, a privileged shell reports both as
+  builtins, and five forged builtins at once do not reach a helper.
+
+  **`env -S` is a contributor requirement, not a user one**, and the split is
+  stated in `README.md`. The plugin never depends on the shebang — the driver
+  supplies `-p`, and so does every helper-to-helper call, of which there are
+  twenty-six across five files plus the watch's five probes. Leaving those bare
+  would have put the requirement back through the side door on the very flows
+  the driver protects. The suite is the exception: the fixtures execute helpers
+  directly at hundreds of call sites, so `pr-selfcheck.sh` needs an `env` with
+  `-S`. GNU coreutils has had it since 8.30
+  and BSD `env` supports it.
+
+  **The driver supplies it, and the shebang is the fallback.** `SKILL.md` invokes
+  every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`, which starts a
+  fresh privileged interpreter whatever the driving shell is and whatever that
+  platform's `env` supports — so the plugin gains no `env -S` requirement. The
+  shebang covers the other way in, executing a helper directly, and that one does
+  need `-S`.
+
+  It cannot be a re-exec from inside: a `BASH_ENV` hook runs before a script's
+  first line, and one that prints a forged `PR_X …` line and exits has already
+  answered a caller capturing stdout.
+
+  **`$-` is checked as a last-resort refusal, and it proves less than it looks.**
+  It reports the MODE a shell is in, not how it got there — run as
+  `BASH_ENV=hook bash pr-x.sh`, the hook is sourced first and can itself `set -p`
+  and then define `echo` or `exit`, after which the test passes on a shell that
+  has already executed hostile code. Nothing inside a script can detect work done
+  before its first line, so `bash pr-x.sh` is unsupported rather than defended,
+  and it is the CALLER that carries the guarantee.
+
+  `pr-selfcheck.sh` is the exception and is asserted to be one: it is run by a
+  person, and it already re-execs into a clean shell and clears every inherited
+  function.
+
+  Two fixtures changed meaning rather than being adjusted. The clock-hook cases
+  asserted that a hostile `BASH_ENV` hook produced each caller's documented
+  refusal; the hook is no longer sourced at all, so they now assert its ABSENCE
+  together with the concrete outcome, and each one first proves the hook still
+  lands on an ordinary shell. `test-pr-review-state.sh` sources a helper to
+  inspect its identity derivation, which now needs `bash -p -c`, because a
+  sourced file sees the caller's `$-`.
+
+## [2.0.26] — 2026-08-18
+
+- **Four shipped files claimed CI coverage that is not running.** `SKILL.md`,
+  `pr-ci-gate.sh` and `pr-merge-gate.sh` each explain why a helper is a script
+  rather than a fenced block by saying that everything under `scripts/` is covered
+  by the suite, by `pr-selfcheck.sh` and by the bash 3.2 `macos-shell` CI job. The
+  workflow now triggers on `workflow_dispatch` only and that job carries
+  `if: false`, so the third of those is not running — and an operator reading any
+  of them takes a green pre-push check for portability validation it did not
+  receive. Each claim is now conditional on the job being enabled, and names #93
+  as what turns it back on.
+
+## [2.0.25] — 2026-08-17
+
+- **A shadowed `type` inside `rb_load` is now documented as accepted rather than
+  left open.** The loader verifies the symbol it just loaded with `type -t`, and a
+  `type() { return 1; }` in the operator's shell turns a good library into
+  `reason=<lib>_empty`. There is no name-free way to ask whether a name is a
+  function — `type`, `declare` and `command` are all shadowable, and calling the
+  symbol runs it, which for `rb_identity` means shelling out to `git`. Dropping the
+  check moves the failure to the caller's first use and loses the precise reason; a
+  subshell probe forks per load and still executes the function.
+
+  So the check stays, on the boundary settled in #76, and `loadlib.sh` now says so
+  beside it. No behaviour changed — what changed is that a reviewer raising it gets
+  an answer instead of reopening the question.
 
 ## [2.0.22] — 2026-08-17
 

@@ -28,11 +28,11 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. Takes a reviewers mode: `both`, or `codex-only` which requires the head to BE the reviewed commit. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. 0 verdict in hand, 1 timed out, 2 unreadable, **4 the review carried only replies** — nothing to fix and no signoff, so the driver stops for the operator. That one has its own status because every caller branches on status: saying it in the record alone left `pr-close-round.sh` taking the 0 and closing the round. |
 | `skills/watch-prs/scripts/pr-origin.sh` | The session's repository, read where the driving shell's names cannot reach. `read` writes origin's URL to a file the caller names; `pin` writes `REVIEW_BUS_REMOTE` as a child process sees it to the same. Nothing goes to stdout and every reason goes to stderr, so a caller reads one stream and never sees the other — which is what lets the value be read with `$(<"$path")` whatever the shell is tracing. It exists because `SKILL.md`'s setup needed `git` and `bash -c`, and both are NAMES: a function answering only `remote get-url origin` forges the identity every stage is addressed by, and a function called `bash` runs in a shell copy that inherits NON-exported variables, so it agrees the pin arrived while the real helpers inherit nothing. Invoked as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the value read back from that file — a path rather than a name, because `bash -p …` alone is a name a function can take. **Privileged mode is what does the work**: it stops `BASH_ENV` and `ENV` being sourced, stops shell functions being imported from the environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and nothing inherited to clear. It has to be the FIRST interpreter, since entering it from inside a shell that has already run the hook is too late and a hook needs to shadow nothing to use that gap. The value comes back in a file the caller names, read back with `$(<…)`: it travelled on stdout and then on fd 9, and each put it on a stream some caller traces to — and moving `BASH_XTRACEFD` aside instead closed fd 2 when it was restored, since bash closes the descriptor that variable referred to. `pin` is a real child, which is why its answer is the one that matters. Limits, stated in the file: a caller that omits `bash -p` is refused rather than recovered — there is no fallback hop and the file is not executable — and a poisoned `PATH` (#91). See #84. |
-| `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. |
+| `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. The one helper NOT started privileged — see § The helpers are started privileged. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is, which lines a reader honours as a control record, and what text requests a review — one definition each, sourced by every helper that reads the API or posts a caller-written body. |
 | `skills/watch-prs/scripts/clocklib.sh` | What "how much time has passed" means — one clock reader, with the guards a bare read has not got, sourced by `pr-watch.sh` and `pr-ci-gate.sh`. It exists because the gate used `$SECONDS`, a builtin no fixture can reach, so every deadline case in its suite raced real time; `date` is a command, so a fixture owns it. See #66. |
 | `skills/watch-prs/scripts/identitylib.sh` | Which repository this checkout is — one definition, sourced by every helper and by `SKILL.md`. |
-| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, source, verify — in one place. |
+| `skills/watch-prs/scripts/loadlib.sh` | How a shared library is loaded and proven loaded — clear, take that clear's status, source, and prove the symbol arrived — in one place. The BOOTSTRAP that loads this file cannot use it, and is clear, take the clear's status, define a refusing stub, source: the first load is what verifies it, and the stub is what stops `PATH` answering in its place. |
 | `skills/watch-prs/scripts/testlib.sh` | The portable watchdog and the validated scratch directory. Every fixture runs under it, and `pr-ci-state.sh` bounds its `gh` calls with it — so it ships at runtime too, not only in the suite. |
 | `skills/watch-prs/scripts/test-*.sh` | The suite. |
 | `.claude-plugin/` | Plugin and marketplace manifests. |
@@ -40,6 +40,57 @@ request cannot rewrite the rules it is judged by.
 Everything else is documentation. **v2 runs no reviewer of its own**: Codex and
 Copilot are first-party GitHub apps, so there is no watcher, no response
 monitor, no bus directory, and no systemd unit.
+
+## The helpers are started privileged
+
+Every `pr-*.sh` except `pr-selfcheck.sh` begins `#!/usr/bin/env -S bash -p`, and
+refuses if `$-` does not contain `p`.
+
+**This is the answer to a whole class, and it replaces answering it one name at a
+time.** An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS functions
+from the environment, and honours an exported `SHELLOPTS` — so every builtin a
+helper uses is a name the operator's shell can replace. Found one per review
+round before this: `type` said a good library defined nothing; `return` made a
+refusing stub succeed; `set` made `set +e` a no-op; `echo` swallowed a structured
+sentinel; `exit` made a refusal non-terminal, so a helper announced an abort and
+went on to post. Each fix was correct and each introduced the next name.
+Privileged mode does none of the three things, so there is nothing to shadow.
+
+- **The suite needs `env -S`; the plugin does not.** The fixtures execute helpers
+  directly — hundreds of call sites across twelve files — so they go through the
+  shebang, and `pr-selfcheck.sh` cannot pass on an `env` that predates `-S`.
+  Routing every fixture invocation through `/usr/bin/env bash -p` was considered
+  and refused: it is a mechanical rewrite far larger than the change it would
+  serve, on a requirement met by GNU coreutils since 8.30 and by BSD `env`.
+  `README.md` states which side of the line a reader is on.
+- **The CALLER supplies it — including when the caller is another helper.**
+  `SKILL.md` invokes every helper as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-x.sh`,
+  and the gate, the round close, the phase, the merge gate and the watch each call
+  other helpers the same way. A nested call reaching one by pathname alone would
+  leave the kernel to process its shebang and put the `env -S` requirement back
+  through the side door — `test-pr-identity.sh` fails if any helper calls another
+  bare, and `test-pr-skill-contract.sh` asserts the driver's eighteen.
+- **It cannot be a re-exec from inside.** A `BASH_ENV` hook runs before the
+  script's first line; one that prints a forged `PR_X …` line and exits has
+  already answered a caller capturing stdout, and no later re-exec takes that
+  back.
+- **`$-` proves less than it looks, and is a last-resort refusal.** It reports the
+  MODE, not how the shell got there: run as `BASH_ENV=hook bash pr-x.sh`, the hook
+  is sourced first and can `set -p` and then define `echo` or `exit`, after which
+  the test passes on a shell that has already run hostile code. Nothing inside a
+  script can detect work done before its first line — so `bash pr-x.sh` is
+  UNSUPPORTED rather than defended. Do not add a check that claims otherwise.
+- **`pr-selfcheck.sh` is exempt, deliberately.** It is run by a person rather than
+  by the driver, and it already re-execs into a clean shell and clears every
+  inherited function — the guarantee it makes for the whole suite.
+  `test-pr-identity.sh` asserts the exemption as well as the rule, so neither can
+  drift silently.
+- **A fixture that sources a helper needs `bash -p -c`.** When sourced, `$-` is
+  the *caller's* flags, so an unprivileged shell is refused — which is correct,
+  because the library half would otherwise run somewhere a hook can reach.
+- **What it does NOT cover**: `SKILL.md`'s own bash, which runs in the operator's
+  shell and cannot re-exec itself, so the driver keeps every name it has (#102);
+  and a poisoned `PATH`, which is #91.
 
 ## Bash conventions
 
@@ -195,9 +246,16 @@ rediscovering them.
   verifications, and an exported value satisfies a `[ -n … ]` test exactly as an
   exported function satisfies `type -t`. It takes the caller's whole error prefix
   too: `pr-watch.sh` says `state=error` where the others say `status=error`. The
-  four lines that load `loadlib.sh` itself are the one thing that cannot use it —
-  and they still clear, source and verify, because a stale loader is what makes
-  every other load look clean. `test-pr-identity.sh` fails if a `pr-*.sh` script
+  lines that load `loadlib.sh` itself are the one thing that cannot use it, and
+  they are **clear, take the clear's status, define a refusing stub, source** —
+  no `type -t` verification, because the FIRST LOAD is the verification: calling
+  an empty `loadlib.sh` leaves the refusing stub the caller defined, calling it
+  fails, and the handler on that first call carries `reason=loadlib_empty` so the
+  failure is still named. The stub is what makes it true rather than optional — without it
+  an undefined `rb_load` is looked up on `PATH`, and an executable by that name
+  exiting 0 reports every load successful with nothing cleared and no library
+  sourced. The clear is still there because a stale loader is what makes every
+  other load look clean. #88. `test-pr-identity.sh` fails if a `pr-*.sh` script
   loads a library by hand.
 
   **`SKILL.md` is the exception, and it is deliberate.** Its bash runs in the
@@ -263,6 +321,18 @@ rediscovering them.
   pattern with a parenthesis is a syntax error on 3.2, and `pr-watch.sh` carried
   one from the day it was written. Absence covers the other half: a command name
   assembled at runtime is invisible to text and dies at once here.
+
+  **That job is switched off, and so is the workflow that would run the normal
+  one.** `.github/workflows/tests.yml` triggers on `workflow_dispatch` only and
+  `macos-shell` carries `if: false`; a push produces no check, and the gates read
+  `none`, which they document as nothing to assert. The paragraph above therefore
+  describes what CI *is for*, not what it is doing — while this stands, the suite
+  is proven only by `pr-selfcheck.sh` on the contributor's own machine, and a
+  regression that needs the second shell to see can merge. It came off because the
+  suite was the largest fixed cost per round and several of the assertions doing
+  the blocking were themselves wrong; #93 owns restoring the triggers and the job
+  alike — both are named in its acceptance criteria — after the fixtures
+  are audited against *assert the invariant, not the version's route to it*.
 
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
   than an oversight: ~950 lines of executable shell live in a Markdown file, and
@@ -336,6 +406,18 @@ rediscovering them.
   worth more on a machine nobody is waiting at. `RB_SUITE_JOBS` sets the degree;
   it is not derived from the core count, because the `macos-shell` job asserts
   `nproc` is unreachable. See issue #52.
+
+- **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
+  verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
+  in the operator's shell turns a good library into `reason=<lib>_empty`. #88
+  removed the same call from the ten helpers that wrap the loader, because there
+  the check had somewhere to go: a refusing stub, and a first load whose failure
+  is the verification. That does not transfer: asking whether a name is a function
+  needs `type`, `declare` or `command`, all shadowable, or calling the symbol,
+  which for `rb_identity` means shelling out to `git`. Dropping the check moves
+  the failure to the caller's first use and loses the precise reason; a subshell
+  probe forks per load and still runs the function. It stays, on this boundary,
+  and `loadlib.sh` says so beside it. #96.
 
 ## Documentation sync
 

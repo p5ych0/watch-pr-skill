@@ -13,10 +13,18 @@ there is one place to change it.
 
 ## Portability: what CI cannot see, and you can
 
-CI runs the whole suite twice — once normally, once in a `macos-shell` job on a
-**bash 3.2.57 built from source and first on `PATH`**, with the GNU-only tools
-removed from `PATH`. Post-3.2 constructs and absent commands therefore fail there
-on their own, and you do not need to check for them.
+**NEITHER CI JOB IS RUNNING, so read this section as work that is now yours.**
+The workflow triggers on `workflow_dispatch` only and `macos-shell` carries
+`if: false`; a push produces no check at all. While that stands, post-3.2
+constructs and absent commands reach `main` unless a reader catches them, so check
+for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
+`declare -A`, `mapfile`/`readarray`, `&>>`, negative array indices, and any
+command name assembled at runtime. The paragraph below says why it is off and what
+it costs.
+
+When it is on again — #93 — CI runs the whole suite twice, once normally and once
+in a `macos-shell` job on a **bash 3.2.57 built from source and first on `PATH`**
+with the GNU-only tools removed, and those two classes fail there on their own.
 
 **Three classes stay invisible to that job, and they are yours.** The runner is
 Ubuntu with GNU userland, so in each case CI goes green and a macOS contributor
@@ -208,26 +216,8 @@ to the plugin's own metadata (`.claude-plugin/`) or to the
 install commands in `README.md`, which legitimately name this repository.
 
 **And identity is pinned once per session, not re-derived per child.** `SKILL.md`
-reads origin ONCE in its setup block — through `pr-origin.sh read`, not by running
-`git` itself — checks that read's status, and exports it as `REVIEW_BUS_REMOTE`;
-`rb_identity` prefers that over deriving. The helper is invoked as
-`/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the
-value read back from that file — a PATH
-rather than a name, and privileged mode is what stops `BASH_ENV` and
-`ENV` being sourced at all, stops shell functions being imported from the
-environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and
-nothing inherited to clear. It has to be the FIRST interpreter: entering
-privileged mode from inside a shell that has already run the hook is too late,
-and a hook needs to shadow nothing to use that gap — one that writes the transport
-file the helper was handed and exits is a complete attack. The value travels in a
-file the caller names, not on a descriptor: a shell function called `git` that
-answers only `remote get-url origin` otherwise forges the identity every stage is
-addressed by.
-The pin is proved the same way — `pr-origin.sh pin` is a real child, where
-`bash -c` is a name whose shell copy inherits NON-exported variables and so agrees
-the pin arrived while the real helpers inherit nothing. **Treat a change that
-reads origin with `git` in the driving shell, or proves the pin with `bash -c`, as
-a blocking finding.** See #84.
+reads `git remote get-url origin` in its setup block, checks that read's status,
+and exports it as `REVIEW_BUS_REMOTE`; `rb_identity` prefers that over deriving.
 Every helper runs `rb_identity` in its own process against its own current
 directory, so without the pin a `cd` into a second checkout retargets every stage
 that POSTS — a signoff, a revocation, a review request — at whatever pull request
@@ -255,6 +245,40 @@ fixture — each one contains at least one of `local`, `awk`, `[`, `read`, `cat`
 warns about elsewhere, and a second, worse copy of a guarantee that already
 holds. **Do not raise a shadowable name against a fixture.**
 
+**And do not raise one against a runtime helper either, now that they start
+privileged.** Every `pr-*.sh` except `pr-selfcheck.sh` begins
+`#!/usr/bin/env -S bash -p` and refuses if `$-` lacks `p`. Privileged mode does
+not source `BASH_ENV` or `ENV`, does not import functions from the environment,
+and ignores `SHELLOPTS` — so `echo`, `set`, `exit`, `type`, `return` and every
+other builtin in those files is a builtin, not a name an operator's shell can
+replace. This closed a class the review had been answering one member per round.
+
+The guarantee is the CALLER's: `SKILL.md` invokes each helper as
+`/usr/bin/env bash -p …`. A helper's own `$-` test is a last-resort refusal and
+cannot prove privileged STARTUP — a hook that runs `set -p` before the script's
+first line passes it — so `bash pr-x.sh` is unsupported rather than defended, and
+a finding that the guard can be fooled that way is answered by that, not by a
+better guard.
+
+Two things are still worth raising, and they are the stated exceptions:
+
+- `SKILL.md`'s own bash runs in the operator's long-lived shell, which nothing
+  controls. A shadowable name there is a real finding — that is where reserved
+  words (`[[`, `if`), assignments and expansions are the answer, and #102 tracks
+  what remains;
+- a poisoned `PATH` forges the external commands a privileged shell still calls.
+  That is #91 and is out of scope for a finding on any individual file.
+
+**A shadowed `type` inside `rb_load` is accepted, not a finding.** The loader
+verifies the symbol it just loaded with `type -t`, and there is no name-free way
+to ask whether a name is a function: `type`, `declare` and `command` are all
+shadowable, and calling the symbol runs it — `rb_identity` would shell out to
+`git`. #88 removed the same call from the ten helpers, because there it had somewhere to
+go: each defines a refusing `rb_load` before sourcing, so an empty `loadlib.sh`
+leaves that stub, calling it fails, and the first load IS the check. Here there is
+no equivalent — this is the loader itself, and it has nothing to fall back on.
+Decided on #96 and recorded beside the check.
+
 **The test workflow is off, deliberately and temporarily, and that is not a
 finding.** `.github/workflows/tests.yml` runs on `workflow_dispatch` only and
 `macos-shell` carries `if: false`, so a push produces no check and the gates read
@@ -265,7 +289,8 @@ correct changes on portability assertions that were themselves wrong.
 
 **What it costs is real and is not disputed:** while this stands, a green round
 means the reviewers were satisfied, NOT that the suite ran, and a bash 3.2 or
-macOS-userland regression can merge. #93 owns restoring both, and requires the
+macOS-userland regression can merge. #93 owns restoring the triggers and the job
+alike, names both in its acceptance criteria, and requires the
 fixtures to be audited against *assert the invariant, not the version's route to
 it* first — re-enabling before that simply reproduces the failures that caused it.
 

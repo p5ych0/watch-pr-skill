@@ -9,7 +9,8 @@ name: tests
 # Turned off by the operator while the open issue backlog is worked through: the
 # suite is the largest fixed cost in each review round, paid locally and then
 # again here, and it was blocking rounds on portability assertions that were
-# themselves wrong. See #93, which owns turning this back on.
+# themselves wrong. See #93: uncommenting these triggers is one of its acceptance
+# criteria, alongside deleting `macos-shell`'s `if:`.
 #
 # `workflow_dispatch` keeps the workflow runnable by hand — `gh workflow run
 # tests.yml --ref <branch>` — so nothing is deleted and a branch can still be

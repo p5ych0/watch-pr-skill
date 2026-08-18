@@ -74,7 +74,7 @@ mk_reviews() {   # <state> <submitted_at|null> <id>
 
 # ── identity is derived, never hard-coded ──────────────────────────────────
 out="$(PR_REVIEW_STATE_LIB_ONLY=1 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-        bash -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
+        bash -p -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
 # The slug now carries the HOST as well, so a `GH_HOST` override cannot send
 # these calls to the same-numbered PR on another GitHub host.
 [ "$out" = "github.com/acme/widget" ] && pass "identity derived from origin, host included" \
@@ -90,7 +90,7 @@ for case in 'git@ghe.example:org/github.com-mirror.git|ghe.example/org/github.co
 do
     url="${case%%|*}"; want="${case##*|}"
     got="$(PR_REVIEW_STATE_LIB_ONLY=1 REVIEW_BUS_REMOTE="$url" \
-            bash -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
+            bash -p -c 'source "$1"; echo "$REPO_SLUG"' _ "$SCRIPT" 2>&1)"
     [ "$got" = "$want" ] \
         && pass "identity: $url => $want" \
         || die "identity: $url gave '$got' (want $want)"
