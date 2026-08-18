@@ -186,10 +186,11 @@ Two things are still worth raising, and they are the stated exceptions:
 verifies the symbol it just loaded with `type -t`, and there is no name-free way
 to ask whether a name is a function: `type`, `declare` and `command` are all
 shadowable, and calling the symbol runs it — `rb_identity` would shell out to
-`git`. #88 removes the same call from the ten helpers — a separate change, in flight
-alongside this one — because there it has somewhere to go (an undefined `rb_load`
-exits 127); here it has not. Decided on
-#96 and recorded beside the check.
+`git`. #88 removed the same call from the ten helpers, because there it had somewhere to
+go: each defines a refusing `rb_load` before sourcing, so an empty `loadlib.sh`
+leaves that stub, calling it fails, and the first load IS the check. Here there is
+no equivalent — this is the loader itself, and it has nothing to fall back on.
+Decided on #96 and recorded beside the check.
 
 **The test workflow is off, deliberately and temporarily, and that is not a
 finding.** `.github/workflows/tests.yml` runs on `workflow_dispatch` only and
