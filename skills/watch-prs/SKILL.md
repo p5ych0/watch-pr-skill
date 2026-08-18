@@ -286,9 +286,10 @@ unset -f rb_identity 2>/dev/null \
 # substitution and the follow-the-symlink write untouched.
 #
 # `mkdir` IS THE EXCLUSION, and `$RANDOM` only keeps it from being a nuisance.
-# `mkdir` fails if the name exists, so an account that guesses right stops this
-# session rather than supplying it a repository — the fail-closed half, and the
-# half that matters. Three `$RANDOM` draws make guessing right unlikely enough
+# `mkdir` fails if the name exists, so an account that guesses right gets nothing
+# — the candidate is passed over and the next one is tried, which is the
+# fail-closed half and the half that matters. It does not end the session: a
+# guessed name is a reason to use a different directory, not to stop. Three `$RANDOM` draws make guessing right unlikely enough
 # that nobody can hold the session open by squatting the name. `-m 700` is applied
 # by `mkdir` itself, so nothing can be placed in the directory between its creation
 # and its use, and both files below inherit that protection rather than each
@@ -310,26 +311,28 @@ unset -f rb_identity 2>/dev/null \
 # and the value read back is the attacker's. The random suffix stops the name
 # being pre-created and does nothing about it being observed and then replaced.
 #
-# THE PARENT MUST BE ONE THIS USER OWNS, AND STICKY IS NOT ACCEPTED. Sticky stops
-# one account renaming ANOTHER'S entries and does nothing about the directory's
-# OWNER renaming ours, so an attacker-owned mode-1777 `TMPDIR` passed a `-k` test
-# and could still have this directory replaced after `mkdir` — and no check on the
-# FILE closes that, because the owner of the parent can leave the helper's own
-# output in place for the checks and swap the pathname before the read. Checking a
-# path and then opening it are two operations on a name, and whoever controls the
-# directory controls what the name means in between.
+# WHO MAY RENAME THE DIRECTORY IS THE QUESTION, and the helper is what answers it.
+# Checking a path and then opening it are two operations on a name, and whoever
+# controls the directory controls what the name means in between — so a parent
+# another account can rename entries in is unusable however the file itself checks
+# out, because that account can leave the helper's own output in place for the
+# checks and swap the pathname before the read.
 #
-# A directory only this user can write has no such window: renaming an entry needs
-# write permission on the directory holding it, and nobody else has it. That is
-# what `-O` asks, and it is why the sticky arm is gone rather than kept as a
-# fallback — a fallback is the case an attacker selects.
+# WHICH IS NOT THE SAME AS "OWNED BY THIS USER". Root-owned and sticky — `/tmp` —
+# is safe: sticky means nobody may rename another account's entries, and the
+# entries above it belong to root, who can replace this script anyway. What is
+# NOT safe is an attacker-owned sticky directory, because sticky says nothing
+# about its OWNER renaming ours. Ownership and mode together decide that, and the
+# rule lives in `pr-origin.sh` where the whole ancestry is walked; the loop below
+# offers candidates and lets it answer.
 #
-# `$TMPDIR` FIRST, `$HOME` SECOND, and `/tmp` therefore refused. Many systems set
-# `TMPDIR` per user, and where they do this changes nothing; where `TMPDIR` is the
-# shared `/tmp`, root owns it and this falls back to a directory that is the
-# operator's by definition. The remaining case is a home directory the operator
-# has made writable by others, which is stated here as the limit rather than left
-# to be inferred.
+# `$TMPDIR` FIRST, `$HOME` SECOND. Where `TMPDIR` is per-user this changes
+# nothing; where it is the shared `/tmp` the helper accepts it, because root owns
+# it and it is sticky. `HOME` is the fallback for the cases the helper refuses —
+# an attacker-owned `TMPDIR`, one made world-writable without the sticky bit, a
+# relative one, or a component of its ancestry that fails the same tests. What
+# neither covers is a home directory the operator has made writable by others,
+# which is stated here as the limit rather than left to be inferred.
 # ABSOLUTE, AND TESTED HERE RATHER THAN DISCOVERED LATER. The helper walks every
 # component of the output path to the root, which a relative path cannot be walked
 # to — so it refuses one. Without this test a relative but perfectly usable
@@ -350,6 +353,13 @@ unset -f rb_identity 2>/dev/null \
 # can be TRIED at all: a relative path cannot be walked to the root, and a name
 # that is not a directory cannot hold a transport. Neither is a safety rule.
 RB_TMPDIR=
+# THE RESET IS PROVED, because the loop's exit test reads this variable. A
+# readonly `RB_TMPDIR` in the long-lived driving shell survives the clear AND the
+# assignment below, so the loop would break on a stale value, the non-empty test
+# after it would accept that value, and setup would open the stale directory's
+# `origin` instead of the one it had just verified.
+[[ -z $RB_TMPDIR ]] \
+    || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
     RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
@@ -360,6 +370,11 @@ for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     # is on stderr for the operator and this tries the next candidate.
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
         RB_TMPDIR="$RB_TRY"
+        # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
+        # assignment that did not happen is what turns a readonly into a stale
+        # directory the rest of setup then trusts.
+        [[ $RB_TMPDIR = "$RB_TRY" ]] \
+            || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
         break
     fi
     /usr/bin/env rm -f "$RB_TRY/origin"

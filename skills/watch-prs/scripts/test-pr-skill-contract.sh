@@ -473,6 +473,30 @@ LOCAL
       && case "$_relh_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…while a relative HOME is refused by name" \
         || die "a relative HOME was accepted (rc=$_relh_rc out='$_relh_out')"
+    # …AND A READONLY `RB_TMPDIR` DOES NOT BECOME THE CHOSEN ONE. The loop reads
+    # that variable to decide it succeeded, so a readonly one in the driving shell
+    # survives the reset AND the assignment, the break happens anyway, and setup
+    # opens the STALE directory's `origin` instead of the one it just verified —
+    # which passes `-O`/`-f` if that directory is the operator's own.
+    # THE STALE DIRECTORY HOLDS A PLAUSIBLE, OPERATOR-OWNED VALUE, which is the
+    # whole point: an empty or absent one is refused by the open that follows, so
+    # the case would pass with the postcondition removed and prove nothing. This
+    # is the shape that gets through — the file is ours, so `-O` and `-f` accept
+    # it and the forged remote is exported.
+    mkdir -p "$_forge_dir/stale"
+    printf '%s\n' 'git@github.com:WRONG/other.git' > "$_forge_dir/stale/origin"
+    _st_rc=0
+    _st_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            readonly RB_TMPDIR="'"$_forge_dir"'/stale"
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _st_rc=$?
+    { [ "$_st_rc" -ne 0 ] \
+      && case "$_st_out" in *WRONG/other*) false ;; *) true ;; esac \
+      && case "$_st_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and a readonly RB_TMPDIR stops setup rather than becoming the chosen directory" \
+        || die "a readonly RB_TMPDIR was accepted (rc=$_st_rc out='$_st_out')"
     # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
     # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
     # the directory and not the entry naming it: on a shared, non-sticky `TMPDIR`
@@ -509,11 +533,13 @@ LOCAL
         echo "ok   - (no unowned non-sticky directory available; the replaceable-parent case did not run)"
     fi
     # …AND A SHARED STICKY `TMPDIR` FALLS BACK TO `HOME` RATHER THAN BEING USED.
-    # `/tmp` is the case the sticky arm existed for, and it is exactly the one that
-    # cannot be made safe: root owns it, so an account that owns a sticky parent
-    # elsewhere has the same power over entries in it that this rule now refuses.
-    # What must happen is not a refusal but a fallback — the session continues,
-    # and the transport is not in `/tmp`.
+    # `/tmp` IS SAFE AND IS USED, which is what distinguishes it from the case
+    # above: root owns it and it is sticky, so nobody may rename another account's
+    # entries there, and the components above belong to root — who can replace this
+    # script anyway. An ATTACKER-owned sticky directory is the unsafe one, because
+    # sticky says nothing about its owner renaming ours. A driver rule of
+    # "owned by this user" refused `/tmp` and was stricter than the helper's own,
+    # which is the mismatch that ended valid sessions.
     if [ -d /tmp ] && [ ! -O /tmp ]; then
         _sp_rc=0
         _sp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
@@ -558,7 +584,8 @@ LOCAL
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _sq_rc=$?
     _sq_dir="$(cat "$_forge_dir/.sq-dir" 2>/dev/null)"
-    # THE DIRECTORY IS NOT REUSED, AND THE SESSION IS NOT ENDED EITHER. `mkdir`
+    # THE DIRECTORY IS NOT REUSED, AND THE SESSION IS NOT ENDED EITHER — a guessed
+    # name is a reason to use a different directory, not to stop. `mkdir`
     # fails on a name that exists, which is what makes squatting useless; since
     # the loop offers candidates rather than deciding, that failure moves to the
     # next one instead of aborting. What must hold is that the pre-created

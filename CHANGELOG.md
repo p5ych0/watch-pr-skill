@@ -73,7 +73,8 @@
   revocation and review request is addressed by — would have been that account's
   choice. Reasoning that a remote URL is public answered disclosure and left the
   substitution untouched. `mkdir` is the exclusion and is what fails closed: an
-  account that guesses the name stops the session instead of supplying it a
+  account that guesses the name gets nothing — the candidate is passed over and
+  the next is tried — instead of supplying the session a
   repository, and three `$RANDOM` draws make guessing it unlikely enough that
   nobody can hold a session open by squatting it. The directory is removed on
   every exit from setup, including the two that refuse.
@@ -228,11 +229,17 @@
   the second answer and is not sufficient either: checking a path and then opening
   it are two operations on a NAME, so the owner of the parent can leave the
   helper's own output in place for the checks and swap the pathname before the
-  read. A directory only this user can write has no such window, because renaming
-  an entry needs write permission on the directory holding it. `TMPDIR` is used
-  where this user owns it, `$HOME` otherwise, and a session with neither refuses
-  rather than continuing. The file checks stay as a cheap postcondition; they are
-  no longer what makes it safe. A home directory the operator has made writable by
+  read. What decides it is who may RENAME an entry there, which is ownership and
+  mode together — and that is not the same as "owned by this user": a root-owned
+  sticky `/tmp` is safe, because sticky means nobody may rename another account's
+  entries and root can replace this script anyway. An attacker-owned sticky
+  directory is not, for the reason above.
+
+  The rule lives in one place, `pr-origin.sh`, which walks the whole ancestry;
+  the driver offers `TMPDIR` then `HOME` and lets the helper answer, because two
+  copies of a safety rule end a valid session wherever they disagree — which they
+  did, three times. The file checks stay as a cheap postcondition; they are no
+  longer what makes it safe. A home directory the operator has made writable by
   others is the stated limit.
 
   **A readonly transport variable no longer passes silently.** The driving shell
