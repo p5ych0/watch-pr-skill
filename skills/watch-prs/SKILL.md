@@ -330,11 +330,18 @@ unset -f rb_identity 2>/dev/null \
 # operator's by definition. The remaining case is a home directory the operator
 # has made writable by others, which is stated here as the limit rather than left
 # to be inferred.
+# ABSOLUTE, AND TESTED HERE RATHER THAN DISCOVERED LATER. The helper walks every
+# component of the output path to the root, which a relative path cannot be walked
+# to — so it refuses one. Without this test a relative but perfectly usable
+# `TMPDIR` such as `.tmp` was SELECTED here and refused there, and the session
+# aborted over a configuration that has a working fallback sitting next to it.
+# Requiring it in the candidate makes a relative `TMPDIR` fall through to `HOME`,
+# and a relative `HOME` refuse in these words rather than in the helper's.
 RB_TMPPARENT="${TMPDIR:-}"
-[[ -n $RB_TMPPARENT ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
+[[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
     || RB_TMPPARENT="${HOME:-}"
-[[ -n $RB_TMPPARENT ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
-    || { echo "ABORT: neither TMPDIR nor HOME is a directory this user owns; there is nowhere to put the transport files that another account cannot replace"; exit 1; }
+[[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] && [[ -O $RB_TMPPARENT ]] \
+    || { echo "ABORT: neither TMPDIR nor HOME is an absolute directory this user owns; there is nowhere to put the transport files that another account cannot replace"; exit 1; }
 RB_TMPDIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_TMPDIR = "$RB_TMPPARENT"/watch-pr.* ]] \
     || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport path cannot be set"; exit 1; }

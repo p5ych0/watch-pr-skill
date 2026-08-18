@@ -364,6 +364,40 @@ LOCAL
         *WRONG/other*) die "a readonly RB_REMOTE survived and setup pinned it: '$_rr_out'" ;;
         *)             pass "…and a readonly RB_REMOTE is refused rather than pinned" ;;
     esac
+    # …AND A RELATIVE CANDIDATE FALLS THROUGH RATHER THAN ABORTING THE SESSION.
+    # The helper walks every component of the output path to the root, so it
+    # refuses a relative one — and a relative but perfectly usable `TMPDIR` such
+    # as `.tmp` was selected here and refused there, ending a session that had a
+    # working fallback next to it.
+    # THE RELATIVE DIRECTORY HAS TO EXIST AND BE OURS, or `-d` rejects it and the
+    # fallback happens for the wrong reason — the case then passes against the
+    # unfixed code, which is what it did on the first attempt.
+    mkdir -p "$_forge_dir/.tmp"
+    _rel_rc=0
+    _rel_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR=.tmp HOME="$_forge_dir" bash -c '
+            '"$_read_block"'
+            echo "PARENT=$RB_TMPPARENT"
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rel_rc=$?
+    { [ "$_rel_rc" -eq 0 ] \
+      && case "$_rel_out" in *"PARENT=$_forge_dir"*) true ;; *) false ;; esac; } \
+        && pass "…and a relative TMPDIR falls through to HOME instead of ending the session" \
+        || die "a relative TMPDIR was selected or refused (rc=$_rel_rc out='$_rel_out')"
+    # …AND A RELATIVE `HOME` IS REFUSED HERE, in these words, rather than in the
+    # helper's — the abort a reader can act on names the two variables it read.
+    mkdir -p "$_forge_dir/.home"
+    _relh_rc=0
+    _relh_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR=.tmp HOME=.home bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _relh_rc=$?
+    { [ "$_relh_rc" -ne 0 ] \
+      && case "$_relh_out" in *"absolute directory this user owns"*) true ;; *) false ;; esac \
+      && case "$_relh_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…while a relative HOME is refused by name" \
+        || die "a relative HOME was accepted (rc=$_relh_rc out='$_relh_out')"
     # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
     # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
     # the directory and not the entry naming it: on a shared, non-sticky `TMPDIR`
@@ -391,7 +425,7 @@ LOCAL
         # is that setup stopped BEFORE creating anything, and only the check's
         # own words say that happened.
         { [ "$_rp_rc" -ne 0 ] \
-          && case "$_rp_out" in *'is a directory this user owns'*) true ;; *) false ;; esac \
+          && case "$_rp_out" in *'directory this user owns'*) true ;; *) false ;; esac \
           && case "$_rp_out" in *'could not create a private directory'*) false ;; *) true ;; esac \
           && case "$_rp_out" in *PINNED=*) false ;; *) true ;; esac; } \
             && pass "…and a parent another account could replace the directory in is refused" \

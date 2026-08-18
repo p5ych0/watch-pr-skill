@@ -494,12 +494,24 @@ rm -f "$ANCESTOR/mid/leaf/origin"
 # root, so it uses one that already exists and is owned by root — the operator is
 # not root here, and the case says so rather than asserting something it cannot
 # stage.
-if [ ! -O / ] && [ -d /lost+found ] && [ ! -O /lost+found ]; then
+# THE CANDIDATE MUST BE OWNED BY NEITHER, and `! -O` is not that test: it is
+# false for a root-owned directory too, and the helper TRUSTS root — so pointing
+# at `/lost+found` selected a path the rule accepts by design, the refusal never
+# came, and the case died later on an unwritable output while never reaching the
+# clause it names. The search asks the same question the helper does.
+FOREIGN=""
+for _cand in /lost+found /run/user/* /var/lib/* /home/*; do
+    [ -d "$_cand" ] || continue
+    if [ -n "$(find "$_cand" -prune ! -uid "$EUID" ! -uid 0 -print 2>/dev/null)" ]; then
+        FOREIGN="$_cand"; break
+    fi
+done
+if [ -n "$FOREIGN" ]; then
     foreign_rc=0
-    foreign_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read /lost+found/origin 2>&1 )" || foreign_rc=$?
+    foreign_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/origin" 2>&1 )" || foreign_rc=$?
     { [ "$foreign_rc" -ne 0 ] \
       && case "$foreign_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
-        && pass "…and a component owned by another account is refused" \
+        && pass "…and a component owned by another account is refused ($FOREIGN)" \
         || die "a foreign-owned component was accepted (rc=$foreign_rc diag='$foreign_diag')"
 else
     # NAMED, NOT WAVED THROUGH. Staging this needs a directory owned by a THIRD
