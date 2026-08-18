@@ -257,7 +257,8 @@ rediscovering them.
   is proven only by `pr-selfcheck.sh` on the contributor's own machine, and a
   regression that needs the second shell to see can merge. It came off because the
   suite was the largest fixed cost per round and several of the assertions doing
-  the blocking were themselves wrong; #93 owns restoring both, after the fixtures
+  the blocking were themselves wrong; #93 owns restoring the triggers and the job
+  alike — both are named in its acceptance criteria — after the fixtures
   are audited against *assert the invariant, not the version's route to it*.
 
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather

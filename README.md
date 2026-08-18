@@ -206,7 +206,8 @@ contributor actually runs — but the second machine is not checking anyone's wo
 while this stands, so a bash 3.2 or macOS-userland regression can merge. It was
 turned off because the per-round cost had grown past what the backlog could carry,
 and because several of the portability assertions doing the blocking were
-themselves wrong. #93 owns turning both back on, after those fixtures are audited.
+themselves wrong. #93 owns turning the triggers and the job back on — both are named in its
+acceptance criteria — after those fixtures are audited.
 
 ## Install
 

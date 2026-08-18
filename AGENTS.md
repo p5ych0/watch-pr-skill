@@ -264,7 +264,8 @@ correct changes on portability assertions that were themselves wrong.
 
 **What it costs is real and is not disputed:** while this stands, a green round
 means the reviewers were satisfied, NOT that the suite ran, and a bash 3.2 or
-macOS-userland regression can merge. #93 owns restoring both, and requires the
+macOS-userland regression can merge. #93 owns restoring the triggers and the job
+alike, names both in its acceptance criteria, and requires the
 fixtures to be audited against *assert the invariant, not the version's route to
 it* first — re-enabling before that simply reproduces the failures that caused it.
 
