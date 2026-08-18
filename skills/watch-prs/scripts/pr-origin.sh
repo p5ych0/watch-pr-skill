@@ -109,16 +109,23 @@
 # reaches one. Removing `-p` from the line below hangs this script rather than
 # failing it, which is how the bound was found.
 #
-# FORGING THE BOUND COSTS A REFUSAL, NOT A VALUE. A hook can set this variable, and
-# then this script aborts instead of hopping — no read happens, nothing is
-# captured, and the driver stops. That is the difference between the bound and the
-# guard: the bound may be forged into a stop, the guard may not be forged at all.
+# THERE IS NO HOP, AND THE FILE IS NOT EXECUTABLE. Both were removed together, and
+# for the same reason: neither could work. The hop re-execed into `bash -p` for a
+# caller that had forgotten it — but by then the caller's `BASH_ENV` hook had
+# already run in this process, and a hook that writes a forged value to `$2` and
+# exits has finished the job before any line of this file executes. Advertising a
+# recovery that cannot recover is worse than refusing, because a caller may rely
+# on it. Removing the executable bit removes the invocation that reaches that
+# state at all: `./pr-origin.sh …` and `#!/usr/bin/env bash` are gone, and the
+# documented `/usr/bin/env bash -p pr-origin.sh …` is unaffected — `bash` reads
+# the file, it does not exec it.
+#
+# WHAT IS LEFT IS A REFUSAL, and it is the guard rather than a bound: `$-` is
+# shell state a hook cannot write, so an unprivileged shell that reaches here
+# stops, with nothing read and nothing captured.
 if [[ $- != *p* ]]; then
-    if [[ -n ${RB_ORIGIN_HOP-} ]]; then
-        echo "ABORT: this shell did not honour 'bash -p'; refusing to read origin unprotected" >&2
-        exit 1
-    fi
-    RB_ORIGIN_HOP=1 exec /usr/bin/env -u BASH_ENV -u ENV -u SHELLOPTS -u BASH_XTRACEFD bash -p "$0" "$@"
+    echo "ABORT: this shell is not privileged; invoke as /usr/bin/env bash -p pr-origin.sh <mode> <path>" >&2
+    exit 1
 fi
 set -uo pipefail
 
@@ -136,9 +143,35 @@ esac
 OUT="${2-}"
 [[ -n $OUT ]] \
     || { echo "ABORT: pr-origin.sh writes its value to a file; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <path>" >&2; exit 1; }
-# TRUNCATED BEFORE ANYTHING ELSE, so a refusal cannot leave a previous run's value
-# behind for the caller to read back as this one's.
-: > "$OUT" || { echo "ABORT: could not write to '$OUT'" >&2; exit 1; }
+# CREATED, NOT TRUNCATED, AND THE DIFFERENCE IS THE WHOLE POINT. `: > "$OUT"`
+# opens with O_TRUNC and FOLLOWS SYMLINKS: an account that can replace the
+# directory this path names can put a symlink there pointing at any file the
+# operator owns, and this helper then truncates that file and writes a remote URL
+# into it. The caller's `-O` check passes precisely BECAUSE the target belongs to
+# the operator, so nothing downstream sees it. A world-writable target is worse
+# still — the account edits it afterwards and the session pins what it likes.
+#
+# `set -C` MAKES `>` EXCLUSIVE. With noclobber, `> file` fails if the path exists
+# at all, and that is O_EXCL: it refuses a regular file, and it refuses a symlink
+# whether or not the target exists, because O_CREAT|O_EXCL fails on a symlink by
+# definition. Nothing legitimate is lost — the caller allocates a fresh private
+# directory per run, so this path never pre-exists. `>|` is deliberately NOT used;
+# that is the spelling that overrides noclobber, and it is what a later edit
+# reaches for when this refuses something.
+#
+# `umask 077` GOES WITH IT, because O_EXCL says who may replace the object and the
+# mode says who may write it once created. The caller's umask is whatever the
+# operator's shell had.
+#
+# THE VALUE IS THEN APPENDED, NOT REDIRECTED AGAIN. Under noclobber a second `>`
+# to the path this line just created fails — correctly — so the write below uses
+# `>>` into the empty object already open to us. That keeps `>|`, the spelling
+# that overrides noclobber, out of the file entirely: it is what a later edit
+# reaches for when one of these refuses something, and there is now nothing here
+# for it to look like it belongs to.
+umask 077
+set -C
+> "$OUT" || { echo "ABORT: could not create '$OUT' exclusively; it already exists, or is a symlink" >&2; exit 1; }
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
@@ -149,7 +182,7 @@ if [[ $MODE = pin ]]; then
     # `/dev/full`, or a quota reached after the truncation above — and in `pin` mode
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
-    printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
+    printf '%s\n' "${REVIEW_BUS_REMOTE-}" >> "$OUT" \
         || { echo "ABORT: could not write the pin to '$OUT'" >&2; exit 1; }
     exit 0
 fi
@@ -209,7 +242,7 @@ if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
     echo "ABORT: origin contains a newline; it cannot be a single value" >&2; exit 1
 fi
-printf '%s\n' "$_rb_origin" > "$OUT" \
+printf '%s\n' "$_rb_origin" >> "$OUT" \
     || { echo "ABORT: could not write the origin to '$OUT'" >&2; exit 1; }
 exit 0
 

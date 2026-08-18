@@ -309,14 +309,6 @@ unset -f rb_identity 2>/dev/null \
 # and the value read back is the attacker's. The random suffix stops the name
 # being pre-created and does nothing about it being observed and then replaced.
 #
-# STICKY OR OURS, tested with reserved words and no command at all. `-k` is the
-# sticky bit, which is exactly the property in question: it stops one account
-# renaming or removing another's entries, and it is why `/tmp` is usable. `-O` is
-# ownership by this effective user, which is the other way the entry cannot be
-# taken — nobody else has write on a directory of ours unless we granted it, and
-# that is the stated limit of this check rather than a hole in it. Anything else
-# is refused by name, since continuing there is the substitution above.
-#
 # THE PARENT MUST BE ONE THIS USER OWNS, AND STICKY IS NOT ACCEPTED. Sticky stops
 # one account renaming ANOTHER'S entries and does nothing about the directory's
 # OWNER renaming ours, so an attacker-owned mode-1777 `TMPDIR` passed a `-k` test

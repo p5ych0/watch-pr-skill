@@ -43,12 +43,20 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # `-p` a moment too late, and a hook needs to shadow nothing to use that moment
     # — `printf '…' >&9; exit 0` is enough, since fd 9 is already the capture.
     local vf="$TMP/value.out" diag
-    : > "$vf"
+    # REMOVED, NOT TRUNCATED. The helper creates its output with `set -C`, which
+    # is O_EXCL — a pre-created file is refused, symlink or not, and that is the
+    # point of it. A caller hands over a path in a directory it just made; it does
+    # not hand over a file. Truncating here made every case in this file fail with
+    # `cannot overwrite existing file`, which is the contract working.
+    rm -f "$vf"
     diag="$(cd "$REPO" && run_limited 20 env "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vf" 2>&1)" || rc=$?
     # THE VALUE AND THE DIAGNOSTICS ARE SEPARATE STREAMS, which is the point of the
     # file: the caller reads one and never sees the other. They are joined here
     # only so a single assertion can look at both.
-    out="$(<"$vf")"
+    # ABSENT IS A VALUE HERE: a refusal before the create leaves no file at all,
+    # and reading a missing one would put the shell's own error into the result.
+    out=""
+    [ -f "$vf" ] && out="$(<"$vf")"
     [ -n "$diag" ] && out="$out$diag"
     printf '%s|%s' "$rc" "$out"
 }
@@ -136,7 +144,7 @@ got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
 # …AND ABSENCE IS AN ANSWER, NOT A REFUSAL. "The export did not take" is exactly
 # what the caller needs to distinguish, so it is an empty line and status 0 rather
 # than an abort, which would look like every other failure from that side.
-: > "$TMP/pin.value"
+rm -f "$TMP/pin.value"
 run_limited 20 env -u REVIEW_BUS_REMOTE /usr/bin/env bash -p "$SCRIPT" pin "$TMP/pin.value" >/dev/null 2>&1; pin_rc=$?
 pin_out="$(<"$TMP/pin.value")"
 { [ "$pin_rc" = 0 ] && [ -z "$pin_out" ]; } \
@@ -160,7 +168,7 @@ got="$(run sideways)"
 # and used, so the absence is asserted as well as the status.
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
-: > "$TMP/v"; out="$(cd "$BARE" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$BARE" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
@@ -172,7 +180,7 @@ esac
 # NOT A REPOSITORY AT ALL is the same answer, since `git` fails rather than
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
-: > "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
@@ -189,7 +197,7 @@ printf '%s\n' "$FORGED"
 exit 1
 GITSH
 chmod +x "$STUB/git"
-: > "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a remote read that prints and then fails is refused" \
@@ -211,7 +219,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
-: > "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a multi-line remote is refused rather than split" \
@@ -235,7 +243,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
-: > "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
@@ -261,7 +269,7 @@ naive="$(cd "$REPO" && run_limited 20 env PATH="$STUB:$PATH" bash -c 'git remote
 # for every trace target, and both are run.
 cat > "$TMP/tr.sh" <<TRSH
 cd "$REPO" || exit 1
-: > "$TMP/tr.value"
+rm -f "$TMP/tr.value"
 /usr/bin/env bash -p "$SCRIPT" read "$TMP/tr.value" || printf 'CALL_FAILED\n' >&2
 printf 'VALUE=%s\n' "\$(<"$TMP/tr.value")" >&2
 TRSH
@@ -285,7 +293,7 @@ esac
 # The call says `/usr/bin/env bash -p` because `bash -p` alone is a NAME: a
 # function called `bash` runs instead, and it can write the value file itself and
 # return without the subject running at all.
-: > "$TMP/fn.value"
+rm -f "$TMP/fn.value"
 run_limited 20 bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
@@ -294,7 +302,7 @@ run_limited 20 bash -c '
     && pass "a bash function in the caller does not stand in for the interpreter" \
     || die "a shadowed bash wrote the value: '$(<"$TMP/fn.value")'"
 # …AND THE SAME CALL WITHOUT THE PATH IS TAKEN BY IT, so the path is load-bearing.
-: > "$TMP/fn2.value"
+rm -f "$TMP/fn2.value"
 run_limited 20 bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn2.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
@@ -320,7 +328,7 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
     || die "a hook needing no shadowed name reached the value: '${got}'"
 # …AND WITHOUT `-p` AT THE CALL SITE IT WOULD HAVE WON, which is what makes the
 # caller's part load-bearing rather than belt-and-braces.
-: > "$TMP/unprot.value"
+rm -f "$TMP/unprot.value"
 ( cd "$REPO" && run_limited 20 env BASH_ENV="$TMP/hook-direct.sh" \
     "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
 unprot="$(<"$TMP/unprot.value")"
@@ -340,6 +348,75 @@ case "$unprot" in
     "")        pass "…and on this bash the hook cannot reach the script's arguments at all" ;;
     *)         die "the unprivileged comparison gave neither the forged value nor nothing: '$unprot'" ;;
 esac
+
+# ── AN OUTPUT THAT IS A SYMLINK IS REFUSED, AND ITS TARGET IS UNTOUCHED ────
+#
+# `: > "$OUT"` opened with O_TRUNC and FOLLOWED SYMLINKS. An account that can
+# replace the directory this path names puts a symlink there pointing at any file
+# the operator owns, and the helper truncates that file and writes a remote URL
+# into it — with the caller's `-O` check passing precisely BECAUSE the target
+# belongs to the operator. The earlier symlink case pointed at root-owned
+# `/etc/hostname`, which the caller refuses for the wrong reason; this one points
+# at a file this user owns, which is the case that reached the truncation.
+SYMDIR="$TMP/symcase"
+mkdir -p "$SYMDIR"
+printf 'PRECIOUS\n' > "$SYMDIR/victim"
+ln -s "$SYMDIR/victim" "$SYMDIR/out"
+sym_rc=0
+sym_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/out" 2>&1 )" || sym_rc=$?
+{ [ "$sym_rc" -ne 0 ] \
+  && case "$sym_diag" in *exclusively*) true ;; *) false ;; esac; } \
+    && pass "an output that is a symlink to an owned file is refused" \
+    || die "the symlink output was accepted (rc=$sym_rc diag='$sym_diag')"
+# THE CONSEQUENCE, which is the finding: the target must be untouched.
+[ "$(cat "$SYMDIR/victim")" = PRECIOUS ] \
+    && pass "…and the file it pointed at is not truncated" \
+    || die "the symlink target was overwritten: '$(cat "$SYMDIR/victim")'"
+# …AND A PRE-EXISTING REGULAR FILE IS REFUSED TOO, which is the same open. The
+# caller allocates a fresh directory per run, so nothing legitimate collides here.
+printf 'STALE\n' > "$SYMDIR/plain"
+plain_rc=0
+plain_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/plain" 2>&1 )" || plain_rc=$?
+{ [ "$plain_rc" -ne 0 ] && [ "$(cat "$SYMDIR/plain")" = STALE ]; } \
+    && pass "…and a path that already exists is refused rather than truncated" \
+    || die "an existing output was truncated (rc=$plain_rc)"
+# …AND THE OBJECT IT DOES CREATE IS PRIVATE. O_EXCL says who may replace it; the
+# mode says who may write it once it is there.
+rm -f "$TMP/modecheck.marker"
+rm -f "$TMP/modecheck"
+( cd "$REPO" && run_limited 20 /usr/bin/env bash -p "$SCRIPT" read "$TMP/modecheck" ) >/dev/null 2>&1
+mode="$(ls -l "$TMP/modecheck" 2>/dev/null | cut -c1-10)"
+case "$mode" in
+    -rw-------) pass "…and the object it creates is readable only by this user" ;;
+    *)          die "the transport was created with mode '$mode'" ;;
+esac
+
+# ── THE HELPER CANNOT BE STARTED UNPRIVILEGED AT ALL ───────────────────────
+#
+# The fallback hop advertised a recovery it could not perform: by the time it ran,
+# the caller's `BASH_ENV` hook had already executed in this process, and a hook
+# that writes a forged value to `$2` and exits has finished before any line of
+# this file. The hop is gone and so is the executable bit — `./pr-origin.sh` and
+# the shebang are no longer an entry point, and the documented invocation is
+# unaffected because `bash` READS the file rather than execing it.
+[ ! -x "$SCRIPT" ] \
+    && pass "the helper is not executable, so there is no unprivileged entry point" \
+    || die "the helper is executable; ./pr-origin.sh reaches a hook-run shell"
+unpriv_rc=0
+unpriv_out="$( cd "$REPO" && run_limited 20 "$SCRIPT" read "$TMP/unpriv.value" 2>&1 )" || unpriv_rc=$?
+[ "$unpriv_rc" -ne 0 ] \
+    && pass "…and executing it directly fails rather than running unprotected" \
+    || die "the helper ran when executed directly (out='$unpriv_out')"
+# …AND AN UNPRIVILEGED `bash` READING IT STILL REFUSES, which is the guard rather
+# than the file mode: `$-` is shell state a hook cannot write.
+rm -f "$TMP/nop.value"
+nop_rc=0
+nop_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash "$SCRIPT" read "$TMP/nop.value" 2>&1 )" || nop_rc=$?
+{ [ "$nop_rc" -ne 0 ] \
+  && case "$nop_diag" in *"not privileged"*) true ;; *) false ;; esac \
+  && [ ! -s "$TMP/nop.value" ]; } \
+    && pass "…and an unprivileged bash reading it refuses with nothing written" \
+    || die "an unprivileged bash was accepted (rc=$nop_rc diag='$nop_diag')"
 
 # ── A SECOND CHECKOUT NAMED BY `GIT_DIR` IS NOT THIS ONE ───────────────────
 #
