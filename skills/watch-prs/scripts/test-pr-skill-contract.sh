@@ -71,10 +71,15 @@ EOF
 # `CLAUDE.md` that names it the one helper started otherwise — two statements
 # about one file, in different places, disagreeing. This fails if the driver ever
 # starts it privileged, so the disagreement cannot come back silently.
+# THE COMPLETE LINE, with `-x`. As a substring this needle is CONTAINED IN the
+# regression it exists to catch: `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-selfcheck.sh;
+# SELF_RC=$?` still matches it, and the scan above exempts every self-check line,
+# so restoring the prefix would have left this file green — the assertion passing
+# on the state it was written to reject.
+#
 # THE FILE, NOT `$skill_flat`: this block runs before that variable is built, and
-# an empty needle-haystack fails every case in it for a reason nobody would look
-# for.
-grep -qF '"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?' "$SKILL" \
+# an empty haystack fails every case in it for a reason nobody would look for.
+grep -qxF '"$RB_SCRIPTS"/pr-selfcheck.sh; SELF_RC=$?' "$SKILL" \
     && pass "…and pr-selfcheck.sh is invoked directly, as its own re-exec requires" \
     || die "pr-selfcheck.sh is not invoked directly; its clean-shell re-exec is the boundary, not bash -p"
 
