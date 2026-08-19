@@ -494,8 +494,27 @@ main() {
     # review on the SAME HEAD would otherwise vouch for a later replies-only review
     # nobody read. A head is not a moment.
     if [ "$cmd" = "review-at" ]; then
-        local at
-        at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
+        # THE FETCH'S STATUS IS TAKEN ON ITS OWN LINE, as `head_review_snapshot`
+        # does. Nested inside the outer substitution it was DISCARDED: a failed
+        # reviews endpoint prints nothing, `jq` reads empty input, and `jq` on
+        # empty input produces no output and exits 0 — measured. So the answer was
+        # an empty string with status 0, which every caller reads as "no verdict on
+        # this head".
+        #
+        # WHAT THAT COSTS: the merge gate orders records against this value, so a
+        # signoff recorded for an earlier clean review on the same head would vouch
+        # for a later replies-only review nobody read. An incomplete snapshot
+        # presented as a complete one — the fail-open shape this repository forbids.
+        #
+        # The `||` on the outer substitution looks like it takes the status and
+        # does; the status it takes is `jq`'s, and `jq` succeeded. The failure was
+        # one level in. #113.
+        local at reviews
+        reviews=$(reviewer_reviews "$pr" "$who") || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        at="$(printf '%s' "$reviews" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
             if type != "array" then error("bad shape")
             else [ .[]
                    | select(.commit_id == $h)

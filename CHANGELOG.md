@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.35] — 2026-08-19
+
+- **`review-at` reported "no verdict" when it could not ask.** It fetched and
+  parsed in one expression, with the fetch nested inside the parse:
+
+  ```bash
+  at="$(printf '%s' "$(reviewer_reviews "$pr" "$who")" | jq -r … )" || { … }
+  ```
+
+  A nested substitution's status is discarded. A failed reviews endpoint prints
+  nothing, `jq` reads empty input, and `jq` on empty input produces no output and
+  exits **0** — so the answer was an empty string with status 0, which every
+  caller reads as "there is no verdict on this head". The `||` looks like it takes
+  the status and does; the status it takes is `jq`'s, and `jq` had succeeded.
+
+  The merge gate orders records against this value, so an incomplete snapshot
+  presented as a complete one lets a signoff recorded for an earlier clean review
+  on the same head vouch for a later replies-only review nobody read. A head is
+  not a moment, which is what this command exists to say.
+
+  The fetch's status is now taken on its own line, as `head_review_snapshot` in
+  the same file already did — this was one call site out of step with the rule the
+  file follows. Four cases: a failed fetch exits 2, prints nothing on stdout
+  (where a caller capturing a substitution would read a reason as a timestamp),
+  names `reason=unreadable` on stderr, and a readable fetch still reports when the
+  review landed, so a helper that always refused would not satisfy the other
+  three.
+
 ## [2.0.34] — 2026-08-19
 
 - **The control-line scan can no longer answer "clean" about text it never

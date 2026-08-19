@@ -220,6 +220,38 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/none2.json" run review-id 7 "$BOT" 2>&
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-id 7 "$BOT" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "review-id: an unreadable fetch => 2" || die "review-id: fetch failure gave rc=$rc"
 
+# ── `review-at` FAILS CLOSED ON AN UNREADABLE FETCH ───────────────────────
+# The merge gate orders records against this value, so an empty answer read as
+# "no verdict on this head" lets a signoff recorded for an earlier clean review
+# vouch for a later replies-only one nobody read.
+#
+# THE FETCH WAS NESTED INSIDE THE PARSE, so its status was discarded: a failed
+# reviews endpoint prints nothing, `jq` reads empty input, and `jq` on empty input
+# produces no output and exits 0 — so the answer was "" with status 0. The `||` on
+# the outer substitution took `jq`'s status, and `jq` had succeeded. #113.
+#
+# STDOUT MUST BE EMPTY TOO, not merely the status non-zero: a caller capturing this
+# in a substitution sees the stream, and a reason printed there would be read as a
+# timestamp.
+_at_err="$TMP/at.err"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-at 7 "$BOT" 2>"$_at_err")"; rc=$?
+[ "$rc" -eq 2 ] \
+    && pass "review-at: an unreadable reviews fetch => 2, not an empty answer" \
+    || die "review-at: a failed fetch gave rc=$rc out='$out'"
+[ -z "$out" ] \
+    && pass "…with nothing on stdout, where a caller would read it as a timestamp" \
+    || die "review-at printed '$out' on a failed fetch"
+grep -q 'reason=unreadable' "$_at_err" \
+    && pass "…and the reason on stderr, where the value's stream is not" \
+    || die "review-at did not name the failure: '$(cat "$_at_err")'"
+# AND THE ORDINARY ANSWER STILL COMES BACK, or a helper that always refused would
+# satisfy all three above.
+mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 41
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-01T00:00:00Z' ]; } \
+    && pass "…while a readable one still reports when the review landed" \
+    || die "review-at broke the ordinary answer (rc=$rc out='$out')"
+
 # ── a clean pass arrives as a COMMENT, not a review ───────────────────────
 # Codex submits a review only when it has findings. A clean pass is an issue
 # comment carrying `**Reviewed commit:** <sha10>` and no review at all, so
