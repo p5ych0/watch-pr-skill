@@ -1057,178 +1057,53 @@ grep -qi 'precede the push' "$SKILL" \
 # was gated on something that is not a commit. The resume parser at the bottom of
 # the same file has always required `\{40\}` — one rule, two copies, one of them
 # wrong, which is the shape `CLAUDE.md` says belongs in a single place. #39.
-# ── THE PARSER IS EXTRACTED AND RUN, NOT DESCRIBED ─────────────────────────
-# Greps agreed with every version of this parser that has been wrong. Restoring a
-# restrictive match while leaving the unconditional assignment satisfies any
-# pattern written about the assignment, and a valid record followed by a
-# malformed one is skipped again — the stale head accepted, with the check green.
+# ── THE HEAD IS ASKED FOR, NOT PARSED ──────────────────────────────────────
 #
-# So the block is lifted from `SKILL.md` and executed on inputs. This is the
-# narrow lift #26 allows: anchored, no grammar, and it covers the one piece of
-# that file whose behaviour a merge is gated on.
-_phase_block="$(awk '/^CODEX_SHA=""$/, /^fi$/' "$SKILL")"
-# COMPLETE, NOT MERELY NON-EMPTY. The range ends at the first `fi` in column one,
-# which is the shape check; every `fi` inside the loop is indented or trails its
-# line. If one were ever unindented the lift would truncate, and a truncated block
-# is a syntax error — the cases would fail rather than pass, but they would fail
-# for a reason nobody could read. Both ends are asserted so the failure names
-# itself.
-{ [ -n "$_phase_block" ] \
-  && case "$_phase_block" in *"done"*) true ;; *) false ;; esac \
-  && case "$_phase_block" in *RX_PHASE_SHA40*) true ;; *) false ;; esac \
-  && case "$_phase_block" in *PHASE_RC*) true ;; *) false ;; esac; } \
-    && pass "the phase parser lifts out of SKILL.md whole, guard and what follows it" \
-    || die "the lifted phase parser is truncated or missing: '$_phase_block'"
-_V=0123456789abcdef0123456789abcdef01234567
-_W=fedcba9876543210fedcba9876543210fedcba98
-phase_case() {   # phase_case <records> <want: sha|refused> <label>
-    local out rc=0
-    # `PHASE_RC=0`, BECAUSE THE LIFTED BLOCK BRANCHES ON IT. Without it the child
-    # reached `[ "$PHASE_RC" -eq 3 ]` unset, bash printed `integer expression
-    # expected`, and the trailing `printf` still produced `ACCEPTED:…` — so a case
-    # asserting a clean parse was passing on an errored run. The diagnostic went
-    # into `$out` and the substring test ignored it.
-    # STDERR IS THE TEST, NOT THE WORDING. An error on the ordinary path is not a
-    # clean parse, and matching the message is not available: bash says `integer
-    # expected` where the first version of this looked for `integer expression
-    # expected`, and the text differs by version and locale. Nor is counting
-    # lines — the abort echoes `$PHASE_OUT`, which is deliberately multi-line in
-    # half these cases. What separates them is the STREAM: the block's own output
-    # is stdout, and a diagnostic is stderr.
-    out="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
-        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-        '"$_phase_block"'
-        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || rc=$?
-    # THE SAME RUN AGAIN, KEEPING ONLY STDERR. No scratch file: this file asserts
-    # its own `mktemp` behaviour and counts what it leaves behind, so a temporary
-    # of mine breaks three of its cases. The block is a pure parse over a string,
-    # so running it twice costs nothing and changes nothing.
-    local err
-    err="$(PHASE_OUT="$1" PHASE_RC=0 bash -c '
-        PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-        '"$_phase_block"'
-        printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
-    # `|| true` HERE AND NOWHERE ELSE. A refusing block exits non-zero, which is
-    # what half these cases WANT, and under `set -e` that would abort the file at
-    # the assignment. The status is already taken from the first run; this one is
-    # only for the text.
-    if [ -n "$err" ]; then
-        die "$3 — the parser wrote to stderr: '$err'"; return 0
-    fi
-    case "$2" in
-        # REFUSED IS "THE ABORT WAS REACHED", not "nothing was printed". The
-        # guard's own `exit` is a builtin a function can shadow, so a caller that
-        # neuters it runs on with the bad value in `$CODEX_SHA` — what has to hold
-        # is that the refusal branch ran and no VALID head was produced from a
-        # record that has none.
-        refused) case "$out" in
-                     *ABORT:*[!0-9a-f]"ACCEPTED:$_V"*|*"ACCEPTED:$_V") die "$3 — a valid head came out of a record without one: '"'"'$out'"'"'" ;;
-                     *ABORT:*) pass "$3" ;;
-                     *) die "$3 — the parser accepted '"'"'$out'"'"'" ;;
-                 esac ;;
-        *)       case "$out" in
-                     *"ACCEPTED:$2"*) pass "$3" ;;
-                     *) die "$3 — wanted $2, got '"'"'$out'"'"'" ;;
-                 esac ;;
-    esac
-}
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
-    "a single well-formed phase record yields its head"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
-PR_PHASE_RECORDED pr=7 codex-sha=a" refused \
-    "…and a malformed record AFTER it refuses, rather than returning the older head"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a
-PR_PHASE_RECORDED pr=7 codex-sha=$_V" "$_V" \
-    "…while a malformed record BEFORE it is simply superseded"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
-PR_PHASE_RECORDED pr=7 codex-sha=$_W" "$_W" \
-    "…and the last of two well-formed records wins"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
-PR_PHASE_RECORDED pr=7 codex-sha=" refused \
-    "…and an empty final field refuses, having overwritten the head"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
-PR_PHASE_RECORDED pr=7 reviewer=chatgpt-codex-connector[bot]" refused \
-    "…and so does a final record with NO field, which says nothing about the head"
-phase_case "PR_PHASE_RECORDED pr=7 xcodex-sha=$_V" refused \
-    "…and a field name that merely ends in codex-sha= is not the field"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=a xcodex-sha=$_V" refused \
-    "…and a later lookalike field cannot supply the head the real one lacks"
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=$_V
-PR_PHASE_RECORDED" refused \
-    "…and a bare marker with no trailing space still resets the candidate"
-# EXACTLY forty, which needs a value that is too LONG as well as too short: the
-# short cases pass with the closing anchor dropped, and only this one fails.
-phase_case "PR_PHASE_RECORDED pr=7 codex-sha=${_V}f" refused \
-    "…and forty-one hex is refused, so the bound is exact at both ends"
-# NO COMMAND IN THE PARSER, which is what stopped this being defeated a third
-# time: `set` and `awk` are both shadowable, and a function returning a stale sha
-# and exiting 0 is accepted by any status check written around it.
-# …AND A SHADOWED `exit` CANNOT CARRY A BAD HEAD PAST THE GUARD. The refusal used
-# `exit`, which a function can neuter into a `return`; what uses the head sits
-# inside the successful branch now, so reachability does the work instead.
-# `PHASE_RC=3` IS WHAT MAKES THE DIFFERENCE VISIBLE. The block's downstream is the
-# round-boundary branch, which announces the head; without that variable set,
-# nothing downstream runs and the guarded and unguarded shapes look identical.
-# The first version of this case omitted it and passed against both.
-_phase_exit="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
-    exit() { return 0; }
-    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-    '"$_phase_block"'
-    printf "END\n"' 2>&1)" || true
-case "$_phase_exit" in
-    *ABORT:*) pass "…and a shadowed exit still takes the refusal branch" ;;
-    *) die "a shadowed exit skipped the refusal: '$_phase_exit'" ;;
+# This was ~90 lines of expansion-only parsing in `SKILL.md`, lifted and executed
+# here against fourteen record shapes — a truncated record that could not
+# overwrite a stale candidate, `xcodex-sha=` matching as the field, a greedy
+# `##*codex-sha=` reading a later substring, and so on. Every one of those was a
+# rule about what a well-formed record is, and that rule now lives in
+# `pr-signoff.sh` and `recordlib.sh`, where `test-pr-signoff.sh` covers it against
+# the same shapes and `pr-selfcheck.sh` gates it. Issue #89.
+#
+# WHAT REMAINS TO ASSERT HERE IS THE WIRING, which is this file's job: that the
+# driver ASKS, that it takes the status, that it checks the shape anyway, and that
+# no copy of the parser grew back. The behavioural coverage did not shrink — it
+# moved to the file that can run it, which is the whole point of the removal.
+_sha_reads="$(grep -c 'pr-signoff.sh sha N' "$SKILL" || true)"
+[ "$_sha_reads" -eq 3 ] \
+    && pass "all three head reads ask pr-signoff.sh for the sha alone" \
+    || die "expected three 'pr-signoff.sh sha' reads in SKILL.md, found $_sha_reads"
+# NO RECORD PARSING LEFT, IN ANY SHAPE. A `sed` over `PR_SIGNOFF` was the second
+# form this took, and `sed` is a name: one that prints a plausible forty hex and
+# exits 0 pins a merge to whatever it says.
+#
+# OVER THE CODE, NOT THE PROSE. The comments explain at length which parsing was
+# removed and name the constructs to do it, so a scan of the raw file finds the
+# argument against the defect and reports the defect — the same trap the setup
+# block's `set +x` scan fell into.
+_skill_code="$(awk '/^```bash$/{f=1;next} /^```$/{f=0;next} f && !/^[[:space:]]*#/' "$SKILL")"
+case "$_skill_code" in
+    *'##*codex-sha='*|*"sed -n 's/^PR_SIGNOFF"*|*"sed -n 's/^PR_PHASE"*)
+        die "SKILL.md parses a signoff or phase record again; the head is asked for, not parsed" ;;
+    *) pass "…and no code in SKILL.md parses a record line for a head any more" ;;
 esac
-case "$_phase_exit" in
-    *"signed off on"*) die "a shadowed exit carried a malformed head into the step that uses it: '$_phase_exit'" ;;
-    *) pass "…and nothing downstream of the guard runs on a head it refused" ;;
-esac
-# …AND WITH `echo` SHADOWED AS WELL, where the branch can say nothing at all. The
-# only signal left is the block's STATUS, which is why the refusal ends on a
-# reserved word: with both builtins neutered a failed parse otherwise returns 0
-# and reads as an ordinary phase.
-_phase_mute="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=a" PHASE_RC=3 bash -c '
-    echo() { return 0; }
-    exit() { return 0; }
-    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-    '"$_phase_block"'
-    printf "STATUS:%s\n" "$?"' 2>&1)" || true
-case "$_phase_mute" in
-    *STATUS:0*) die "a muted refusal returned success: '$_phase_mute'" ;;
-    *STATUS:*) pass "…and with echo shadowed too, the refusal still ends non-zero" ;;
-    *) die "the muted-refusal probe produced no status: '$_phase_mute'" ;;
-esac
-case "$_phase_mute" in
-    *"signed off on"*) die "a muted refusal still reached the step that uses the head: '$_phase_mute'" ;;
-    *) pass "…and still reaches nothing downstream of the guard" ;;
-esac
-# `PHASE_RC=0` AND STDERR CHECKED HERE TOO. This probe was written before
-# `phase_case` learned both, and kept the defect that thread was about: with
-# `PHASE_RC` unset the guard's downstream branch failed with a diagnostic, the
-# trailing `printf` still produced `ACCEPTED:…`, and a substring test called that
-# a clean parse. A case about shadowed commands must not itself pass on an
-# errored run.
-_phase_shadowed_err="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
-    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
-    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
-    set() { return 0; }
-    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-    '"$_phase_block"'
-    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>&1 >/dev/null)" || true
-_phase_shadowed="$(PHASE_OUT="PR_PHASE_RECORDED pr=7 codex-sha=$_V" PHASE_RC=0 bash -c '
-    awk() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
-    sed() { printf "%s\n" fedcba9876543210fedcba9876543210fedcba98; }
-    set() { return 0; }
-    PHASE_OUT="$PHASE_OUT"; PHASE_RC="$PHASE_RC"
-    '"$_phase_block"'
-    printf "ACCEPTED:%s\n" "$CODEX_SHA"' 2>/dev/null)" || true
-[ -z "$_phase_shadowed_err" ] \
-    && pass "…and the shadowing case runs the block without a diagnostic" \
-    || die "the shadowing case ran with errors: '$_phase_shadowed_err'"
-case "$_phase_shadowed" in
-    *"ACCEPTED:$_V"*) pass "…and shadowed awk, sed and set cannot supply the head" ;;
-    *) die "a shadowed command reached the phase parser: '$_phase_shadowed'" ;;
-esac
+# THE STATUS IS TAKEN AT EVERY ONE OF THEM. `sha` prints nothing on stdout when
+# there is no signoff, so a caller that ignored the status would carry an empty
+# string into a merge gate.
+_sha_unchecked="$(grep -F 'pr-signoff.sh sha N' "$SKILL" | grep -vc 'RC=\$?' || true)"
+[ "$_sha_unchecked" -eq 0 ] \
+    && pass "…and every one of them takes the status on the same line" \
+    || die "$_sha_unchecked head reads ignore the helper's status"
+# AND THE SHAPE IS CHECKED AS WELL AS THE STATUS, in both the phase block and the
+# resume path: this value is what every gate in step 8 is pinned to, and it is not
+# left resting on one helper's promise.
+_sha_shapes="$(grep -c '=~ \$RX_SHA40\|=~ \$RX_PHASE_SHA40' "$SKILL" || true)"
+[ "$_sha_shapes" -ge 2 ] \
+    && pass "…and the 40-hex shape is asserted on the value before it is used" \
+    || die "the head is used without a shape check ($_sha_shapes found)"
+
 
 # ── the pushed head is checked before the round is closed ─────────────────
 # CI was red for four consecutive commits and nothing noticed: every round was
@@ -1604,7 +1479,7 @@ _tail_ok=0
     && pass "the record block's ordinary path leaves it succeeding" \
     || die "the record block exits non-zero when the phase recorded normally"
 # …and the document uses that shape rather than the trailing `&&` that did not.
-grep -q 'if \[ "\$PHASE_RC" -eq 3 \]; then' "$SKILL" \
+grep -q 'if \[\[ \$PHASE_RC -eq 3 \]\]; then' "$SKILL" \
     && pass "…and SKILL.md branches with an if, not a trailing &&" \
     || die "the record block ends in a test whose false value becomes the block's status"
 
@@ -2394,7 +2269,7 @@ printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" 
 # that delta once it has checked the trailers — so demanding equality there
 # rejects the exact state the second stop exists in, and sends the operator back
 # through a Codex phase for nothing.
-printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh N "\$COPILOT_BOT"' \
+printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh sha N "\$COPILOT_BOT"' \
     && printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SIGNOFF_RC" -eq 0' \
     && pass "…and a resume after the Copilot phase is told apart from one before it" \
     || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"

@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.32] — 2026-08-19
+
+- **The driver no longer parses a record to learn the signed-off head.** All
+  three reads ask `pr-signoff.sh sha`, which prints the 40-hex commit alone.
+  `SKILL.md` loses 154 lines of executable shell, and the suite gains nothing it
+  did not already have — the coverage moved to the file that can run it.
+
+  What went was ~90 lines of expansion-only parsing against
+  `PR_PHASE_RECORDED … codex-sha=`, and every one of them had been paid for in
+  review: a truncated record that could not overwrite a stale candidate, a bare
+  `PR_PHASE_RECORDED` with no trailing space, `xcodex-sha=` matching as the field,
+  a greedy `##*codex-sha=` reading the value after a *later* substring. Nine
+  rounds on #74, for a fact the pull request itself already held. Two `sed` copies
+  went with it, and those were worse than long: `sed` is a name, so one that
+  prints a plausible forty hex and exits 0 pins a merge to whatever it says.
+
+  **It is a round trip, and that is the trade.** `record` posts the signoff and
+  the block reads it straight back, so a stale or eventually-consistent read is a
+  failure mode the parse did not have — but it is the same read a resumed session
+  already makes, so the exposure is the system's rather than this step's, and it
+  fails as a stop rather than as a silent empty. A revocation landing in between
+  reads as status 1, which is a refusal here: the phase it would open is no longer
+  closed.
+
+  Both the status and the shape are checked at every read. `sha` prints 40 hex or
+  nothing, so the shape check cannot currently fail — which is the point: this
+  value is what every gate in step 8 is pinned to, and it does not rest on one
+  helper's promise.
+
+  `test-pr-skill-contract.sh` no longer lifts and executes a parser, because there
+  is none. It asserts the wiring instead — three reads, each taking the status,
+  each shape-checked, and no record parsing anywhere in the file's *code*. That
+  last scan reads the fenced bash with comments stripped: the comments explain
+  which constructs were removed and name them to do it, so a scan of the raw file
+  would find the argument against the defect and report the defect.
+
 ## [2.0.31] — 2026-08-19
 
 - **`pr-signoff.sh` can answer with the head alone.** `pr-signoff.sh sha <pr>
