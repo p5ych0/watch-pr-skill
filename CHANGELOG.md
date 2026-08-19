@@ -53,6 +53,12 @@
   place where a walked-past refusal produces a plausible answer instead of an
   absent one.
 
+  **The assignments are proved before anything is created.** They were inside the
+  `mkdir` arm, which leaks: a failed readonly assignment can end the shell where it
+  stands — bash's own behaviour, and what the reset fixture observes — and by then
+  the directory existed with nobody left to remove it. Proved first, a refusal
+  happens while there is still nothing to clean up.
+
   **The whole probe is an arm of the `mkdir` that creates its directory**, so
   nothing runs on one this invocation did not make. `mkdir -m 700` fails precisely
   when `RB_PIN_DIR` names something that already exists — which is what a readonly
@@ -90,7 +96,9 @@
   own abort, asserted structurally because on this bash the failed readonly
   assignment ends the run before that arm is evaluated — so the behavioural case
   alone would stay green with the arm deleted. All twelve fail against the shape
-  each replaces.
+  each replaces. The branch's four arms are lifted by their own headers and
+  checked one at a time, since a count over the whole conditional is satisfied by
+  two cleanups in one arm and none in another.
 
 ## [2.0.32] — 2026-08-19
 

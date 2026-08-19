@@ -701,58 +701,76 @@ _pin_refuse=""
 _pin_refuse="$(printf '%s\n' "$_pin_body" | sed -n '1,/^else$/p')" || _pin_refuse=""
 _pin_then=""
 _pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
-# THE OUTER BRANCH IS THE `mkdir`, so the success line is in its `then` — the arm
-# reached only when THIS invocation created the transport directory. `mkdir` fails
-# when `RB_PIN_DIR` names something that already exists, which is what a readonly
-# pre-seeded value points at, so a walked-past failure must not reach the probe or
-# the cleanups.
-case "$_pin_refuse" in
-    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the directory was made" ;;
-    *)               die "setup's success line is not inside the successful branch: '$_pin_refuse'" ;;
+# THE PIN PROBE IS ONE BRANCH, AND EACH ARM IS EXTRACTED BY ITS OWN HEADER. Every
+# refusal is an arm rather than a guard, because `exit` is a name: a guard a
+# shadowed one walks past lands in the probe, where a pre-seeded readonly
+# `RB_PIN_SEEN` certifies a pin no child ever saw. And the assignments are proved
+# BEFORE the `mkdir`, so a refusal happens while there is still nothing to clean
+# up — a failed readonly assignment can end the shell where it stands, which would
+# otherwise leave the directory behind with nobody to remove it.
+_arm_out=""
+_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ -n $RB_PIN_SEEN/p')" || _arm_out=""
+_arm_seen=""
+_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^elif ! /p')" || _arm_seen=""
+_arm_mkdir=""
+_arm_mkdir="$(printf '%s\n' "$_pin_body" | sed -n '/^elif ! .*mkdir /,/^else$/p')" || _arm_mkdir=""
+_arm_work=""
+_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_work=""
+{ [ -n "$_arm_out" ] && [ -n "$_arm_seen" ] && [ -n "$_arm_mkdir" ] && [ -n "$_arm_work" ]; } \
+    && pass "…and all four arms of the pin branch lift out separately" \
+    || die "an arm of the pin branch could not be lifted (out=${#_arm_out} seen=${#_arm_seen} mkdir=${#_arm_mkdir} work=${#_arm_work})"
+# THE ASSIGNMENTS COME BEFORE THE BRANCH, so nothing exists when a refusal fires.
+_pin_pre=""
+_pin_pre="$(printf '%s\n' "$_pin_body" | sed -n '1,/^if \[\[ $RB_PIN_OUT != /p')" || _pin_pre=""
+{ case "$_pin_pre" in *'RB_PIN_OUT="$RB_PIN_DIR/pin"'*) true ;; *) false ;; esac \
+  && case "$_pin_pre" in *'RB_PIN_SEEN='*) true ;; *) false ;; esac \
+  && case "$(printf '%s\n' "$_pin_pre" | grep -v '^[[:space:]]*#')" in *mkdir*) false ;; *) true ;; esac; } \
+    && pass "…with both assignments proved before anything is created" \
+    || die "an assignment is proved after the directory exists, so its refusal leaks one: '$_pin_pre'"
+# THE SUCCESS LINE IS IN THE WORK ARM AND NOWHERE ELSE.
+case "$_arm_work" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the arm where the directory was made" ;;
+    *)               die "setup's success line is not in the work arm: '$_arm_work'" ;;
 esac
-# THE OUTER ARM THAT REFUSES MUST NOT CONTAIN IT, or "inside a branch" is
-# satisfied by a block that announces success on both paths.
-case "$_pin_then" in
-    *'echo "OWNER='*) die "setup announces success from the refusing branch too: '$_pin_then'" ;;
-    *)               pass "…and never from the one that refuses" ;;
+for _a in out seen mkdir; do
+    eval "_v=\"\$_arm_$_a\""
+    case "$_v" in
+        *'echo "OWNER='*) die "setup announces success from the $_a refusal too" ;;
+    esac
+done
+pass "…and never from any of the three refusals"
+# THE PROBE IS IN THERE WITH IT, which is what the arms exist for: a walked-past
+# refusal must not reach the child.
+case "$_arm_work" in
+    *'pr-origin.sh pin "$RB_PIN_OUT"'*) pass "…with the pin probe inside that arm, not before it" ;;
+    *) die "the pin probe runs outside the arm the mkdir guards: '$_arm_work'" ;;
 esac
-# AND THE PROBE IS IN THERE WITH IT, which is the property this shape exists for:
-# a refusal walked past must not reach the child at all.
-case "$_pin_refuse" in
-    *'pr-origin.sh pin "$RB_PIN_OUT"'*) pass "…with the pin probe inside that branch, not before it" ;;
-    *) die "the pin probe runs outside the branch the mkdir guards: '$_pin_refuse'" ;;
+# AND EVERY CLEANUP IS IN THERE TOO. Outside it the directory is not this shell's
+# to remove — `mkdir` fails precisely when the path already exists, which is what
+# a readonly pre-seeded value points at — and `rm -f` and `rmdir` would then take
+# the operator's file and directory.
+for _a in out seen mkdir; do
+    eval "_v=\"\$_arm_$_a\""
+    case "$_v" in
+        *'rm -f "$RB_PIN_OUT"'*|*'rmdir "$RB_PIN_DIR"'*)
+            die "the $_a refusal cleans up a path this shell may not have created" ;;
+    esac
+done
+pass "…and no refusal removes anything, because none of them created it"
+{ case "$_arm_work" in *'rm -f "$RB_PIN_OUT"'*) true ;; *) false ;; esac \
+  && case "$_arm_work" in *'rmdir "$RB_PIN_DIR"'*) true ;; *) false ;; esac; } \
+    && pass "…while the arm that made the directory removes both" \
+    || die "the work arm leaves its transport file or directory behind"
+# THE RESET REFUSAL IS AN ARM WITH ITS OWN ABORT, asserted structurally: on this
+# bash the failed readonly assignment ends the run before the arm is evaluated, so
+# a behavioural case alone would stay green with the arm deleted — while a shell
+# that CONTINUES past that assignment would reach the probe and certify the stale
+# value.
+case "$_arm_seen" in
+    *'ABORT: RB_PIN_SEEN is readonly'*) pass "…and the reset refusal is an arm that says so before it stops" ;;
+    *) die "the reset refusal is not an arm with an abort: '$_arm_seen'" ;;
 esac
-# AND THE CLEANUPS ARE IN THERE WITH IT. Outside, they run on paths this shell may
-# not have made: `rm -f` deletes the operator's file and `rmdir` their directory
-# whenever it is empty.
-case "$_pin_then" in
-    *'rm -f "$RB_PIN_OUT"'*|*'rmdir "$RB_PIN_DIR"'*)
-        die "a cleanup runs in the branch where the directory was not created: '$_pin_then'" ;;
-    *) pass "…and no cleanup runs where the directory was not this shell's to make" ;;
-esac
-# …WHILE THE ARMS INSIDE IT DO REMOVE THE DIRECTORY, because there the `mkdir`
-# proved this shell created it. Refusing without that leaves an empty
-# `watch-pr.*` behind on every failed setup in those two states.
-# ONE PER ARM, NOT TWO ACROSS BOTH. A count over the whole conditional is
-# satisfied by two cleanups in the first arm and none in the second — and the
-# readonly-`RB_PIN_SEEN` state is exactly the second one, so setup would leave an
-# empty `watch-pr.*` behind with the suite green. Each arm is extracted and
-# checked on its own.
-_pin_arm_out=""
-_pin_arm_out="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    if \[\[ $RB_PIN_OUT/,/^    elif /p')" || _pin_arm_out=""
-_pin_arm_seen=""
-_pin_arm_seen="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^    else$/p')" || _pin_arm_seen=""
-{ [ -n "$_pin_arm_out" ] && [ -n "$_pin_arm_seen" ]; } \
-    && pass "…and both inner refusal arms lift out separately" \
-    || die "an inner refusal arm could not be lifted (out='$_pin_arm_out' seen='$_pin_arm_seen')"
-case "$_pin_arm_out" in
-    *'rmdir "$RB_PIN_DIR"'*) pass "…the RB_PIN_OUT refusal removes the directory the mkdir proved was ours" ;;
-    *) die "the RB_PIN_OUT refusal leaves its transport directory behind" ;;
-esac
-case "$_pin_arm_seen" in
-    *'rmdir "$RB_PIN_DIR"'*) pass "…and so does the RB_PIN_SEEN refusal" ;;
-    *) die "the RB_PIN_SEEN refusal leaves its transport directory behind" ;;
-esac
+
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
 # while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
@@ -841,13 +859,6 @@ esac
 case "$_pin_refuse" in
     *'elif [[ -n $RB_PIN_SEEN ]]; then'*) pass "…and the reset refusal is an arm of that branch" ;;
     *) die "the reset refusal is not an arm; a shell that continues past the failed assignment would reach the probe" ;;
-esac
-# AND IT ABORTS RATHER THAN FALLING THROUGH, which is what the arm is for.
-_pin_reset_arm=""
-_pin_reset_arm="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^    else$/p')" || _pin_reset_arm=""
-case "$_pin_reset_arm" in
-    *'ABORT: RB_PIN_SEEN is readonly'*) pass "…and says so before it stops" ;;
-    *) die "the reset arm does not refuse: '$_pin_reset_arm'" ;;
 esac
 # ITS REACH: that shell must really stop on the pre-seeded value. Either message
 # counts — a failed readonly assignment inside a compound command can end the
