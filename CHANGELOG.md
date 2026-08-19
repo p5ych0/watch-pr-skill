@@ -38,6 +38,28 @@
   still empty. The non-emptiness test is what stops that reaching the success line,
   and it is why the check is not equality alone.
 
+- **A pre-seeded readonly `RB_PIN_SEEN` can no longer certify a pin no child saw.**
+  That is the one walked-past refusal the non-emptiness test cannot catch, because
+  nothing in it is empty: with `exit` neutered, an `export` that assigns without
+  exporting, and a readonly `RB_PIN_SEEN` already holding the real remote, the
+  reset's refusal is stepped over, the child inherits nothing and reports nothing,
+  its empty answer cannot overwrite a readonly variable, and the equality compares
+  the pre-seeded value with `RB_REMOTE` and agrees. Setup announced a pin no helper
+  would ever see, and a later `cd` retargeted every stage.
+
+  The probe and the success line are now ARMS of that reset proof rather than
+  lines after it, so neither is reachable when the reset fails, whatever has been
+  done to `exit`. That is the structural shape #102 asked for, applied at the one
+  place where a walked-past refusal produces a plausible answer instead of an
+  absent one.
+
+  Three cases: the success line must be inside the branch where the reset held,
+  must NOT appear in the arm that refuses — or "inside a branch" is satisfied by
+  announcing success on both — and the probe must be in there with it. Plus the
+  combined state itself, run end to end, with its own reach probe asserting that
+  shell really does keep the pre-seeded value. All four fail against the previous
+  shape.
+
 ## [2.0.32] — 2026-08-19
 
 - **The driver no longer parses a record to learn the signed-off head.** All

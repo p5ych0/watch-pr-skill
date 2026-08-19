@@ -756,62 +756,84 @@ RB_PIN_SEEN=
 # and the equality still agrees — setup announces a pin that no helper will see.
 # Combined with an `export` that assigns without exporting, that is a session
 # whose every stage re-derives identity from wherever it later stands.
-[[ -z $RB_PIN_SEEN ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
-    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
-/usr/bin/env rm -f "$RB_PIN_OUT"
-/usr/bin/env rmdir "$RB_PIN_DIR"
-# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
-# Every refusal above ends in `exit`, and `exit` is a name: with one shadowed, a
-# refused transport check carries on with `RB_REMOTE` still empty, the pin probe
-# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
-# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
-# derived its identity from wherever the session happened to stand.
 #
-# WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because three rounds
-# of review walked up to it and it is cheaper to state than to rediscover. #102.
+# THE PROBE AND THE SUCCESS LINE ARE ARMS OF THAT PROOF, NOT LINES AFTER IT, and
+# this is the case where the difference decides the answer. Written as a refusal
+# that `exit`s, a shadowed `exit` walks past it — and a readonly `RB_PIN_SEEN`
+# pre-seeded to the real remote then survives everything: the child inherits no
+# pin and reports nothing, its empty answer cannot overwrite a readonly variable,
+# and the equality below compares the pre-seeded value with `$RB_REMOTE` and
+# AGREES. Setup announces a pin no helper will ever see, and a later `cd`
+# retargets every stage.
 #
-# IT PROVES A CHILD INHERITED THE PIN, which is the failure it was built for: an
-# `export` that assigns without setting the export attribute leaves this shell
-# holding the right value while every helper holds none, and a `cd` into a second
-# checkout then retargets every stage. That is #80, it is an ACCIDENT rather than
-# an attack, and asking a real child is what catches it.
-#
-# IT DOES NOT PROVE ANYTHING AGAINST A FUNCTION IN THIS SHELL, and no comparison
-# written here can. `export` is a name, and one that MUTATES its operand —
-#
-#     export() { RB_REMOTE='git@github.com:WRONG/other.git'
-#                builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
-#
-# — makes the child report the forged value and this line compare forged with
-# forged. Measured. A SECOND `pr-origin.sh read` was built to compare against the
-# repository instead, and it is not in this file because it bought exactly one
-# thing: an attacker who knew one variable name and not the other. The same
-# function rewrites both; it can also `cd` first, so a later read agrees with the
-# forgery, and an earlier one is just another variable. Every value this shell
-# holds is nameable, and the function runs at a point of its own choosing — so
-# there is no ordering and no extra child that makes the comparison mean more than
-# the shell it runs in. `SKILL.md` itself is a file such a shell can edit, which is
-# the same boundary `pr-origin.sh` § WHAT THIS DOES NOT CLOSE and #91 draw.
-#
-# WHAT IT DOES DO ABOUT THE SHADOWED `exit` is narrower and real: every refusal
-# above ends in `exit`, which a function can neuter into a `return`, so a refused
-# transport check carries on — to here, with `RB_REMOTE` still empty. The
-# non-emptiness below is what stops that reaching the success line, and it is why
-# the test is not equality alone.
-# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here. A
-# refusal walked past with `exit` shadowed leaves `RB_REMOTE` empty, the pin probe
-# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
-# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
-# derived its identity from wherever the session happened to stand.
-if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
-else
-    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+# The non-emptiness test cannot catch that, because nothing here is empty. As arms
+# nothing downstream is reachable when the reset fails, whatever has been done to
+# `exit` — the structural shape #102 asked for, applied where a walked-past
+# refusal can still produce a plausible answer rather than an absent one.
+if [[ -n $RB_PIN_SEEN ]]; then
+    /usr/bin/env rm -f "$RB_PIN_OUT"
+    /usr/bin/env rmdir "$RB_PIN_DIR"
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
+    # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
+    # the block's status is then the only signal left.
     [[ -n "" ]]
+else
+    /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+        && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+            && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
+    /usr/bin/env rm -f "$RB_PIN_OUT"
+    /usr/bin/env rmdir "$RB_PIN_DIR"
+    # NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
+    # Every refusal above ends in `exit`, and `exit` is a name: with one shadowed, a
+    # refused transport check carries on with `RB_REMOTE` still empty, the pin probe
+    # reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
+    # announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
+    # derived its identity from wherever the session happened to stand.
+    #
+    # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because three rounds
+    # of review walked up to it and it is cheaper to state than to rediscover. #102.
+    #
+    # IT PROVES A CHILD INHERITED THE PIN, which is the failure it was built for: an
+    # `export` that assigns without setting the export attribute leaves this shell
+    # holding the right value while every helper holds none, and a `cd` into a second
+    # checkout then retargets every stage. That is #80, it is an ACCIDENT rather than
+    # an attack, and asking a real child is what catches it.
+    #
+    # IT DOES NOT PROVE ANYTHING AGAINST A FUNCTION IN THIS SHELL, and no comparison
+    # written here can. `export` is a name, and one that MUTATES its operand —
+    #
+    #     export() { RB_REMOTE='git@github.com:WRONG/other.git'
+    #                builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
+    #
+    # — makes the child report the forged value and this line compare forged with
+    # forged. Measured. A SECOND `pr-origin.sh read` was built to compare against the
+    # repository instead, and it is not in this file because it bought exactly one
+    # thing: an attacker who knew one variable name and not the other. The same
+    # function rewrites both; it can also `cd` first, so a later read agrees with the
+    # forgery, and an earlier one is just another variable. Every value this shell
+    # holds is nameable, and the function runs at a point of its own choosing — so
+    # there is no ordering and no extra child that makes the comparison mean more than
+    # the shell it runs in. `SKILL.md` itself is a file such a shell can edit, which is
+    # the same boundary `pr-origin.sh` § WHAT THIS DOES NOT CLOSE and #91 draw.
+    #
+    # WHAT IT DOES DO ABOUT THE SHADOWED `exit` is narrower and real: every refusal
+    # above ends in `exit`, which a function can neuter into a `return`, so a refused
+    # transport check carries on — to here, with `RB_REMOTE` still empty. The
+    # non-emptiness below is what stops that reaching the success line, and it is why
+    # the test is not equality alone.
+    # NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here. A
+    # refusal walked past with `exit` shadowed leaves `RB_REMOTE` empty, the pin probe
+    # reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
+    # announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
+    # derived its identity from wherever the session happened to stand.
+    if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+        echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+    else
+        echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+        exit 1
+        [[ -n "" ]]
+    fi
 fi
 ```
 

@@ -689,13 +689,33 @@ _next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL
 # …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
 # would run whatever the pin did, once `exit` is shadowed — the driver would be
 # told setup completed with no pin in place, which is the whole failure.
+#
+# TWO BRANCHES DEEP NOW, and the outer one is what a walked-past refusal cannot
+# reach: a readonly `RB_PIN_SEEN` pre-seeded to the real remote survives the reset,
+# so the probe's empty answer cannot overwrite it and the equality would agree on a
+# pin no child ever saw. The refusal is the outer `if`'s FIRST arm, so the probe
+# and the success line both sit in its `else` — unreachable whatever `exit` does.
+_pin_body=""
+_pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL")" || _pin_body=""
+_pin_refuse=""
+_pin_refuse="$(printf '%s\n' "$_pin_body" | sed -n '1,/^else$/p')" || _pin_refuse=""
 _pin_then=""
-_pin_then="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '/^else$/,$p')" || _pin_then=""
-_pin_ok=""
-_pin_ok="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '1,/^else$/p')" || _pin_ok=""
-case "$_pin_ok" in
-    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the pin took" ;;
-    *)               die "setup's success line is not inside the successful branch: '$_pin_ok'" ;;
+_pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
+case "$_pin_then" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the reset held" ;;
+    *)               die "setup's success line is not inside the successful branch: '$_pin_then'" ;;
+esac
+# THE OUTER ARM THAT REFUSES MUST NOT CONTAIN IT, or "inside a branch" is
+# satisfied by a block that announces success on both paths.
+case "$_pin_refuse" in
+    *'echo "OWNER='*) die "setup announces success from the refusing branch too: '$_pin_refuse'" ;;
+    *)               pass "…and never from the one that refuses" ;;
+esac
+# AND THE PROBE IS IN THERE WITH IT, which is the property this shape exists for:
+# a refusal walked past must not reach the child at all.
+case "$_pin_then" in
+    *'pr-origin.sh pin "$RB_PIN_OUT"'*) pass "…with the pin probe inside that branch, not before it" ;;
+    *) die "the pin probe runs outside the branch the reset guards: '$_pin_then'" ;;
 esac
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
@@ -753,6 +773,33 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 [ "$_noexp_rc" -ne 0 ] \
     && pass "…and an export that assigns without exporting is caught by asking a child" \
     || die "the pin passed while no child could see it; every stage would route by the current directory"
+# …AND A PRE-SEEDED READONLY `RB_PIN_SEEN` CANNOT CERTIFY A PIN NO CHILD SAW.
+# This is the combined state, and it is the one the non-emptiness test cannot
+# reach: `export` assigns without exporting, `exit` is neutered so the reset's
+# refusal is walked past, and a readonly `RB_PIN_SEEN` already holding the real
+# remote survives both the reset and the probe — the child inherits nothing,
+# reports nothing, its empty answer cannot overwrite a readonly variable, and the
+# equality compares the pre-seeded value with `$RB_REMOTE` and AGREES. Only making
+# the probe and the success line arms of that refusal stops it.
+_seed_out=""
+_seed_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+    'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+        readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' 2>&1)" || true
+case "$_seed_out" in
+    *'OWNER='*) die "a pre-seeded readonly RB_PIN_SEEN certified a pin no child saw: '$_seed_out'" ;;
+    *)          pass "…and a pre-seeded readonly RB_PIN_SEEN cannot reach the success line" ;;
+esac
+# ITS REACH: the same shell must really keep the pre-seeded value, or the case
+# above passes because the assignment overwrote it and the answer was empty.
+case "$_seed_out" in
+    *'RB_PIN_SEEN is readonly'*) pass "…where that shell does refuse for the reason the case names" ;;
+    *) die "the pre-seeded case did not reach the reset refusal ('$_seed_out')" ;;
+esac
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0
