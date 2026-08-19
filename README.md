@@ -632,10 +632,10 @@ plugin docs and open an issue.
 
 ## Troubleshooting
 
-- **Your shell traces to stdout, and the loop moves it:** if you drive with
-  `set -x` and a `BASH_XTRACEFD` that lands on standard output, setup reassigns it
-  to `2` for the rest of the session — you still see every trace line, on standard error, where
-  bash sends it by default. It has to: inside `X="$(cmd)"` file descriptor 1 *is*
+- **Your shell traces to stdout, and the loop moves it while it starts up:** if
+  you drive with `set -x` and a `BASH_XTRACEFD` that lands on standard output,
+  setup reassigns it to `2` for the length of its own startup — you still see
+  every trace line meanwhile, on standard error, where bash sends it by default. It has to: inside `X="$(cmd)"` file descriptor 1 *is*
   the capture, so a trace aimed there is read back as part of the value, and
   setup would refuse a checkout that is perfectly fine. Nothing else about your
   tracing changes, and a session tracing anywhere else — stderr, a log file on
@@ -644,8 +644,10 @@ plugin docs and open an issue.
   trace running there is nothing to contaminate, and your chosen destination is
   left alone. Setup decides by running one command inside a capture and looking at
   what comes back, so it is the destination that matters and not how you spelled
-  it — and it puts your setting back before setup finishes, so nothing about your
-  tracing outlives the loop's own startup.
+  it. And nothing about your tracing outlives that startup: the previous value is
+  saved before the check and put back before setup reports its result, so a check
+  that concludes wrongly — an inherited `DEBUG` trap can print anything a trace
+  could — leaves your session as it found it.
 - **`@codex` answers with a setup link instead of reviewing:** the connector is
   not linked for this account. Link it at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
