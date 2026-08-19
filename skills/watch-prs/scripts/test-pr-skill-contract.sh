@@ -2307,11 +2307,57 @@ case "$_res_arm" in
     REFUSED*) pass "…and a malformed sha selects the refusal arm, not either phase" ;;
     *) die "a malformed Copilot sha selected a phase arm ('$_res_arm')" ;;
 esac
-# AND `SKILL.md` USES THAT SHAPE. The run above proves the shape works; this
-# proves the document has it, and the two together are what the arm is for.
-printf '%s' "$resume_blk" | grep -q 'elif \[\[ \$COPILOT_SIGNOFF_RC -eq 0 \]\]' \
-    && pass "…and SKILL.md branches with elif, so the refusal is an arm rather than a guard" \
-    || die "the malformed-sha refusal is a guard before the branch, which a shadowed exit walks past"
+# AND THE DOCUMENT'S OWN CONDITIONS ARE WHAT RUNS. The probe above is a copy, so
+# it proves the shape works and nothing about the shape `SKILL.md` has; a grep
+# proves a spelling and not a behaviour. So the two header lines are LIFTED and
+# executed with trivial bodies — a regression to `[ "$COPILOT_SHA" = … ]` then
+# arrives in the probe itself, and a `[` returning true selects the wrong arm.
+_res_if="$(printf '%s' "$resume_blk" | grep -m1 '^if .*COPILOT_SIGNOFF_RC')"
+_res_elif="$(printf '%s' "$resume_blk" | grep -m1 '^elif .*COPILOT_SIGNOFF_RC')"
+{ [ -n "$_res_if" ] && [ -n "$_res_elif" ]; } \
+    && pass "…and both branch headers lift out of the resume recipe" \
+    || die "the resume branch's headers could not be lifted (if='$_res_if' elif='$_res_elif')"
+# DISTINCT VALID SHAS, so the honest answer is the pre-Copilot arm: a stale
+# Copilot signoff names a commit that is not the head. With `[` shadowed to
+# return true, only a reserved-word equality still says so.
+_res_stale="$(COPILOT_SIGNOFF_RC=0 \
+    COPILOT_SHA=1111111111111111111111111111111111111111 \
+    RESUMED_HEAD=2222222222222222222222222222222222222222 bash -c '
+    [() { return 0; }
+    exit() { return 0; }
+    echo() { return 0; }
+    RX_SHA40="^[0-9a-f]{40}$"
+    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
+    '"$_res_if"'
+        builtin printf "REFUSED\n"
+    '"$_res_elif"'
+        builtin printf "POST-COPILOT\n"
+    else
+        builtin printf "PRE-COPILOT\n"
+    fi' 2>&1)" || true
+case "$_res_stale" in
+    PRE-COPILOT*) pass "…and a stale Copilot signoff cannot select the post-Copilot arm through a shadowed [" ;;
+    *) die "the resume branch chose '$_res_stale' for a signoff naming another commit" ;;
+esac
+# THE SAME LIFTED HEADERS ON A MALFORMED SHA, so the refusal arm is proved on the
+# document's condition rather than on a copy of it.
+_res_arm2="$(COPILOT_SIGNOFF_RC=0 COPILOT_SHA=notasha RESUMED_HEAD=notasha bash -c '
+    [() { return 0; }
+    exit() { return 0; }
+    echo() { return 0; }
+    RX_SHA40="^[0-9a-f]{40}$"
+    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
+    '"$_res_if"'
+        builtin printf "REFUSED\n"
+    '"$_res_elif"'
+        builtin printf "POST-COPILOT\n"
+    else
+        builtin printf "PRE-COPILOT\n"
+    fi' 2>&1)" || true
+case "$_res_arm2" in
+    REFUSED*) pass "…and SKILL.md's own condition sends a malformed sha to the refusal arm" ;;
+    *) die "SKILL.md's condition chose '$_res_arm2' for a malformed sha" ;;
+esac
 
 # ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
 # Entering the Copilot phase a second time — after a Codex pass that came back
