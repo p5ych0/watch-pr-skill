@@ -640,10 +640,11 @@ plugin docs and open an issue.
   never on a reassignment. It has to: inside `X="$(cmd)"` file
   descriptor 1 *is* the capture, so a trace aimed there is read back as part of
   the value, and setup would refuse a checkout that is perfectly fine. A session
-  tracing anywhere else — stderr, a log file on another descriptor — is left
-  exactly as it was, and so is one that has set `BASH_XTRACEFD=1` ready for a
+  tracing anywhere else — stderr, a log file on another descriptor — is normally
+  left exactly as it was, and so is one that has set `BASH_XTRACEFD=1` ready for a
   later `set -x` but is not tracing yet: with no trace running there is nothing to
-  contaminate. Setup decides by running one command inside a capture and looking
+  contaminate. "Normally" is doing real work in that sentence — see the false
+  positive below, which is the one case where a log-file target does get moved. Setup decides by running one command inside a capture and looking
   at what comes back, so it is the destination that matters and not how you
   spelled it.
 
@@ -651,10 +652,11 @@ plugin docs and open an issue.
   you: bash refuses to aim the trace at a closed descriptor, so it stays on
   standard output and setup refuses, which is what it did before this existed.
 
-  It can be wrong in one direction. A shell that writes into command
-  substitutions by other means — a shadowed command, or an inherited `DEBUG` trap
-  under `set -T` — looks the same as a trace arriving, so your tracing moves to
-  standard error even though it was not in the way. Putting it back afterwards was
+  **The one exception, and the reason for that "normally".** The check can be
+  wrong in one direction: a shell that writes into command substitutions by other
+  means — a shadowed command, or an inherited `DEBUG` trap under
+  `set -T` — looks the same as a trace arriving, so your tracing moves to standard
+  error even though it was not in the way, log file target included. Putting it back afterwards was
   built and removed: a startup file can make the variables that would remember it
   `readonly` and steer the restore somewhere of its own choosing. In that shell
   the loop cannot start regardless — whatever is writing into those captures

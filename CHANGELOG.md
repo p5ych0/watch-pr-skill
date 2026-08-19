@@ -76,9 +76,12 @@
   corrupted `REPO_DIR` is not a directory, so the first use of it refuses, and
   that is what the fixture asserts.
 
-  **The accepted outcome, stated rather than left to be found:** in such a shell
-  the operator's chosen trace destination becomes stderr for the rest of the
-  session. `README.md` says so.
+  **The accepted outcome of a FALSE POSITIVE, stated rather than left to be
+  found:** where the probe fires because something else was writing into that
+  capture — a shadowed command, a `DEBUG` trap — the operator's chosen trace
+  destination becomes stderr for the rest of the session. That is a different case
+  from the closed-stderr one above, where the move is rejected and the trace stays
+  where it was; the two are not alternatives. `README.md` says both.
 
   The origin read was never affected and still is not: its value arrives in a
   file read with `$(<"$path")`, and a redirection-only substitution executes
