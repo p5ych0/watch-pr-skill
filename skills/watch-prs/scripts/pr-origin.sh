@@ -371,6 +371,24 @@ _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 # "skip the system config", so carrying the operator's value through is exactly
 # reproducing their decision.
 [[ -n ${GIT_CONFIG_NOSYSTEM-} ]] && _rb_env+=( GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM" )
+# CONFIG LOCATION IS CARRIED; REPOSITORY SCOPE IS NOT. That is the line, and it is
+# the reason the list has the shape it has. `GIT_CONFIG_GLOBAL` and
+# `GIT_CONFIG_SYSTEM` say WHICH CONFIG the operator's git reads — drop them and
+# this helper reads a different one, so an `insteadOf` rule the session honours is
+# invisible here and a checkout whose origin is `work:acme/widget.git` comes back
+# as the unexpanded alias. Setup then refuses a valid checkout, or addresses the
+# session at a host it does not push to. `GIT_DIR`, `GIT_WORK_TREE`,
+# `GIT_COMMON_DIR` and the rest say WHICH REPOSITORY, and those must not survive:
+# this helper's whole job is to read the origin of the checkout it stands in.
+#
+# `env -i` PLUS A CARRY LIST, NOT `-u` PLUS A DROP LIST, and the difference is the
+# direction of the omission. A variable nobody thought of is DROPPED here — so a
+# new repository-scoping variable in a future git cannot redirect the read, and
+# the worst a missing config variable can do is make this helper read the
+# operator's default config instead of their chosen one. One direction loses a
+# rewrite; the other loses the repository.
+[[ -n ${GIT_CONFIG_GLOBAL-} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
+[[ -n ${GIT_CONFIG_SYSTEM-} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
 _rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"

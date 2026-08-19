@@ -497,6 +497,24 @@ LOCAL
       && case "$_st_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…and a readonly RB_TMPDIR stops setup rather than becoming the chosen directory" \
         || die "a readonly RB_TMPDIR was accepted (rc=$_st_rc out='$_st_out')"
+    # …AND A READONLY `RB_TMPPARENT` IS NAMED, not left to look like a bad TMPDIR.
+    # `for` cannot report that its control variable is unassignable: every
+    # iteration fails silently, no candidate is tried, and the refusal at the end
+    # blames `TMPDIR` and `HOME` — sending the operator to look at an environment
+    # that is fine. A usable fallback is supplied here, so the only reason to stop
+    # is the readonly itself.
+    _rp2_rc=0
+    _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
+            readonly RB_TMPPARENT=/nonexistent
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rp2_rc=$?
+    { [ "$_rp2_rc" -ne 0 ] \
+      && case "$_rp2_out" in *'RB_TMPPARENT is readonly'*) true ;; *) false ;; esac \
+      && case "$_rp2_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and a readonly RB_TMPPARENT is refused by name, not blamed on TMPDIR" \
+        || die "a readonly RB_TMPPARENT was mis-reported (rc=$_rp2_rc out='$_rp2_out')"
     # …AND A PARENT THIS USER NEITHER OWNS NOR IS PROTECTED BY STICKY SEMANTICS IS
     # REFUSED BEFORE ANYTHING IS CREATED IN IT. Mode 700 protects what is inside
     # the directory and not the entry naming it: on a shared, non-sticky `TMPDIR`

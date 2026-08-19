@@ -769,17 +769,21 @@ reach="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_
 [ "$reach" = "$FORGED" ] \
     && pass "…where the same GIT_DIR redirects a bare git" \
     || die "GIT_DIR does not redirect git here (got '$reach'); the case above proves nothing"
-# …AND `GIT_CONFIG_GLOBAL` IS NOT A SECOND LIST ENTRY TO ADD LATER. `env -i`
-# clears whatever git reads, so a variable nobody enumerated is cleared too. This
-# one is checked because it reaches the same answer by a different file.
-cat > "$TMP/forged-config" <<CFG
-[remote "origin"]
-	url = $FORGED
-CFG
-got="$(run read "GIT_CONFIG_GLOBAL=$TMP/forged-config")"
-{ [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
-    && pass "…and a forged GIT_CONFIG_GLOBAL does not reach it either" \
-    || die "GIT_CONFIG_GLOBAL reached the read: '${got}'"
+# …AND THE LINE IS CONFIG LOCATION VERSUS REPOSITORY SCOPE, not "every GIT_*".
+# `GIT_CONFIG_GLOBAL` says WHICH CONFIG the operator's git reads, and dropping it
+# does not block a redirection — it makes this helper read a DIFFERENT config
+# from the session, so an `insteadOf` rule the session honours is invisible here
+# and a valid checkout comes back as its unexpanded alias. It is carried, and a
+# rule supplied through it must therefore apply.
+IOGLOBAL="$TMP/insteadof-global"
+printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n' > "$IOGLOBAL"
+rm -f "$TMP/iog.value"
+( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_GLOBAL="$IOGLOBAL" /usr/bin/env bash -p "$SCRIPT" read "$TMP/iog.value" ) >/dev/null 2>&1
+iog_got="$(cat "$TMP/iog.value" 2>/dev/null)"
+[ "$iog_got" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "…and a GIT_CONFIG_GLOBAL the operator chose is honoured, as their own git honours it" \
+    || die "GIT_CONFIG_GLOBAL was dropped; the helper read a different config from the session (got '$iog_got')"
 
 # ── AN OUTPUT THAT OPENS AND THEN REJECTS THE WRITE ────────────────────────
 #

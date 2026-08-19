@@ -360,6 +360,17 @@ RB_TMPDIR=
 # `origin` instead of the one it had just verified.
 [[ -z $RB_TMPDIR ]] \
     || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
+# THE LOOP VARIABLE IS PROVED ASSIGNABLE FIRST, because `for` cannot report that
+# it is not. A readonly `RB_TMPPARENT` in the long-lived driving shell makes every
+# iteration's assignment fail, so no candidate is ever tried and setup refuses
+# with a message about `TMPDIR` and `HOME` that describes neither — the operator
+# is sent to look at their environment for a variable that is fine. The probe
+# writes a value only this line writes and reads it back, which no readonly can
+# satisfy; the clear after it cannot fail once that has passed.
+RB_TMPPARENT=probe
+[[ $RB_TMPPARENT = probe ]] \
+    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
+RB_TMPPARENT=
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
     RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"

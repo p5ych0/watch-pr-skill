@@ -167,6 +167,17 @@
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.
 
+  **Config location is carried; repository scope is not**, and that is the line
+  the environment list draws. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` say
+  WHICH CONFIG the operator's git reads — dropping them does not block a
+  redirection, it makes the helper read a different config from the session, so a
+  rewrite the session honours is invisible here. `GIT_DIR`, `GIT_WORK_TREE` and
+  the rest say WHICH REPOSITORY and must not survive. `env -i` plus a carry list
+  rather than `-u` plus a drop list, because the omission then falls the safe way:
+  a variable nobody thought of is dropped, so a future repository-scoping variable
+  cannot redirect the read, and the worst a missing config variable can do is make
+  the helper read the operator's default config instead of their chosen one.
+
   **A global `insteadOf` rule is expanded again.** Emptying the environment to
   shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented
   to expand `url.<base>.insteadOf` — rules that live in the user's global config.
