@@ -96,7 +96,14 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    cat "$W/head.out" 2>/dev/null
+    *" pr view "*)    # COUNTED, so a case can fail the SECOND or the LAST head read
+                      # rather than the first. `head.rc` alone aborts at the
+                      # initial capture and never reaches the later handlers, so a
+                      # status-swallowing regression in either would go unseen.
+                      _hn=$(( $(cat "$W/head.n" 2>/dev/null || echo 0) + 1 ))
+                      printf '%s' "$_hn" > "$W/head.n"
+                      cat "$W/head.out" 2>/dev/null
+                      if [ -f "$W/head.rc.$_hn" ]; then exit "$(cat "$W/head.rc.$_hn")"; fi
                       exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
     *" pr comment "*) _b=""
                       while [ $# -gt 0 ]; do
@@ -267,6 +274,21 @@ got="$(run record 7 "$TMP/body.md")"
     && pass "…and a push landing in that window stops it too" \
     || die "a moved head gave '${got}'"
 nothing_posted "…with no signoff recorded"
+# AND EITHER LATE HEAD READ FAILING STOPS IT. `head.rc` alone aborts at the first
+# capture, so neither of the new handlers was ever reached: a regression that
+# swallowed one of their statuses would publish a signoff with every case green.
+# The stub counts its calls, so a case can fail exactly the second or the third —
+# each printing a plausible `$HEAD40` first, which is what makes a swallowed
+# status look like success.
+for _n in 2 3; do
+    world; printf '1\n' > "$W/head.rc.$_n"
+    got="$(run record 7 "$TMP/body.md")"
+    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not re-read the head'; } \
+        && pass "…and head read #$_n failing after printing a plausible sha stops it" \
+        || die "head read #$_n failing gave '${got}'"
+    nothing_posted "…with no signoff recorded"
+done
+
 # A PUSH DURING THE LATER PROBES, which the FIRST re-read cannot catch: it has
 # already passed, and the verdict is pinned to `$CODEX_SHA` so it stays clean and
 # says nothing about the move. Only re-reading the head last closes it. The

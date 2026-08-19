@@ -500,10 +500,11 @@ esac
 # and a clean verdict and requests Copilot underneath a phase somebody had
 # reopened.
 #
-# THREE CHECKS, THE SAME ONES `open` MAKES AND FOR THE SAME REASONS: none of them
-# requires the head to have moved, so none of them subsumes another. A revocation
-# is what this gap actually admits; the head and the verdict are cheap and cover a
-# push or a dismissal landing in the same window. #115.
+# THE HEAD, THE VERDICT, AND THE HEAD AGAIN. Not the same set `open` makes — that
+# one includes the recorded signoff, and refusing on a revocation is deferred here
+# for the reason written below. These are the two facts that can be established
+# without ordering records, plus a second read of the head because the verdict
+# lookup between them is a network call. #115.
 RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
 [[ $RECHECK_HEAD = "$CODEX_SHA" ]] \

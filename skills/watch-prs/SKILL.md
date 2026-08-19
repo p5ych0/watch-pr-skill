@@ -1644,8 +1644,11 @@ fi
 ```
 
 **STOP — the next phase is the operator's decision.** `record` has proved Codex
-clean on an exact head, proved that head's checks, and written the signoff onto
-the PR. What happens next is not the loop's call to make:
+clean on an exact head, proved that head's checks, re-proved the head and the
+verdict immediately before writing — the CI gate WAITS, so a push or a dismissal
+can land in that window and either stops the record with nothing posted — and
+written the signoff onto the PR. What happens next is not the loop's call to
+make:
 
 - **merge now** — one reviewer's clean signoff is a legitimate place to stop, and
   for a small or urgent change it is often the right one. Run step 8 with

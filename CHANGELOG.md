@@ -36,11 +36,6 @@
   stage narrows the window rather than closing it, and says so where the check
   would have gone.
 
-  "None recorded" is the ordinary state here — nothing has been recorded yet, and
-  recording it is the point — so the check distinguishes it from a revocation by
-  the reason rather than by the status, which is 1 for both. A case asserts it
-  records normally.
-
   Three cases leave nothing posted where they refuse — a push before the CI gate,
   a push during the later probes which only the final head read catches, and a
   withdrawn verdict — and all three fail against the previous stage. A fourth
