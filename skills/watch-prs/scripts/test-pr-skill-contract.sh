@@ -3650,6 +3650,61 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
         || die "$name: does not say a code suggestion is only a proposal"
 done
 
+# ── A DRIVER TRACING TO STDOUT DOES NOT REACH A CAPTURE ────────────────────
+#
+# `BASH_XTRACEFD=1` sends xtrace to file descriptor 1, and inside `X="$(cmd)"` fd
+# 1 IS the capture — so the trace of `cmd` is assigned to `X` with its output.
+# Every substitution in setup was affected: the repository root, the plugin
+# discovery, the `mktemp`, the `type -t` probe. The validations then rejected the
+# corrupted values, so it failed closed and aborted a session that had nothing
+# wrong with it. Issue #92.
+#
+# STRUCTURAL FIRST: the guard has to precede every substitution in the block, not
+# merely exist somewhere in it.
+_setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f' "$SKILL")"     || _setup_block=""
+[ -n "$_setup_block" ]     && pass "the setup block lifts out of SKILL.md"     || die "the setup block could not be lifted"
+_first_exec="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | head -1)"
+[ "$_first_exec" = 'set +x' ]     && pass "…and its first executable line turns inherited tracing off"     || die "setup runs a substitution before disabling tracing (first line: '$_first_exec')"
+
+# BEHAVIOURAL, ON THE REAL LINES: the repository-root read and the helper-path
+# validation, lifted and run under an inherited trace aimed at stdout. Without the
+# guard `REPO_DIR` holds a trace line and the path; with it, the path alone.
+_tr_block="$(printf '%s\n' "$_setup_block" | sed -n '/^REPO_DIR="\$(git rev-parse/,/could not locate the plugin helper scripts/p')"     || _tr_block=""
+case "$_tr_block" in
+    *'git rev-parse --show-toplevel'*) pass "…and the repository-root read lifts with it" ;;
+    *) die "the repository-root read could not be lifted: '$_tr_block'" ;;
+esac
+_tr_dir="$(mktemp_d)" || die "no scratch directory for the tracing probe"
+( cd "$_tr_dir" && git init -q . ) >/dev/null 2>&1 || die "could not build the tracing probe checkout"
+mkdir -p "$_tr_dir/plug/skills/watch-prs/scripts"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$_tr_dir/plug/skills/watch-prs/scripts/pr-review-state.sh"
+chmod +x "$_tr_dir/plug/skills/watch-prs/scripts/pr-review-state.sh"
+# WITHOUT THE GUARD FIRST, or the case below passes against a shell that never
+# traced anything and proves nothing about the guard.
+_tr_bare="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+    SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+        '"$_tr_block"'
+        printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_bare=""
+# THE ASSERTION IS ON THE VARIABLE, not on the run's whole output. `set +x` is
+# itself traced before it takes effect, so the block's stdout legitimately carries
+# one `+ set +x` line — that goes to the operator's terminal, which is where the
+# trace belongs. What must never carry it is a captured value.
+_tr_bare_v="$(printf '%s\n' "$_tr_bare" | grep '^REPO_DIR=\[' | head -1)"
+case "$_tr_bare_v" in
+    *'rev-parse'*) pass "…where an inherited trace really does reach the capture" ;;
+    *) die "the trace did not reach the capture here; the case below proves nothing ('$_tr_bare_v')" ;;
+esac
+_tr_fixed="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+    SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+        set +x
+        '"$_tr_block"'
+        printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_fixed=""
+_tr_fixed_v="$(printf '%s\n' "$_tr_fixed" | grep '^REPO_DIR=\[' | head -1)"
+{ [ "$_tr_fixed_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_fixed_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+    && pass "…and with tracing off the capture holds the path and nothing else" \
+    || die "the capture was still corrupted with tracing off ('$_tr_fixed_v')"
+rm -rf "$_tr_dir"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

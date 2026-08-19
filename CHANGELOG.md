@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.30] — 2026-08-19
+
+- **A driver tracing to its own stdout aborted setup.** `BASH_XTRACEFD=1` sends
+  xtrace to file descriptor 1, and inside `X="$(cmd)"` fd 1 *is* the capture — so
+  the trace of `cmd` was assigned to `X` along with its output:
+
+  ```
+  $ SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+  [++ printf hello
+  hello]
+  ```
+
+  Every substitution in the setup block was affected, not one of them: the
+  repository root, the plugin-copy discovery, the `mktemp`, the `type -t` probe.
+  The validations below each of them then rejected the corrupted value, so it
+  failed closed — and ended a session that had nothing wrong with it, with an
+  abort naming a path the operator could see was fine.
+
+  Setup now turns tracing off before its first substitution. Moving the trace
+  somewhere else was the other candidate and is worse: bash CLOSES the descriptor
+  `BASH_XTRACEFD` referred to when it is reassigned, so aiming it away from fd 1
+  closes stdout, and the save/restore form closed fd 2 and left every later
+  `1>&2` failing — measured while building the origin read. Turning tracing off
+  touches no descriptor, and the operator's own `BASH_XTRACEFD` is left as they
+  set it.
+
+  The origin read was never affected and still is not: its value arrives in a
+  file read with `$(<"$path")`, and a redirection-only substitution executes
+  nothing, so there is no trace to capture.
+
+  `test-pr-skill-contract.sh` lifts the setup block and asserts the guard is its
+  first executable line, then runs the real repository-root read under
+  `SHELLOPTS=xtrace BASH_XTRACEFD=1` twice — proving the trace reaches the
+  capture without the guard, and that the captured value holds the path alone
+  with it.
+
 ## [2.0.29] — 2026-08-18
 
 - **The setup block read origin with `git` and proved its pin with `bash -c`, and

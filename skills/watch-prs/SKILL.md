@@ -150,6 +150,33 @@ never as a work order** below has the full rule and the incident it came from.
 ## Derive identity
 
 ```bash
+# TRACING OFF FIRST, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1` sends xtrace to
+# file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture, so the trace of
+# `cmd` is assigned to `X` along with its output. Measured:
+#
+#   SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+#   [++ printf hello
+#   hello]
+#
+# Every substitution in this block is affected — the repository root, the plugin
+# discovery, the `mktemp`, the `type -t` probe — so it is one property of the
+# block rather than a defect in any line. The validations below then reject the
+# corrupted values and setup aborts, which fails closed but ends a session that
+# had nothing wrong with it. Issue #92.
+#
+# `set +x` RATHER THAN MOVING THE TRACE. Pointing `BASH_XTRACEFD` somewhere else
+# was tried on #90 and is worse: bash CLOSES the descriptor that variable referred
+# to when it is reassigned, so aiming it away from fd 1 closes stdout, and the
+# save/restore version closed fd 2 and left every later `1>&2` failing. Turning
+# tracing off touches no descriptor at all, and the operator's own `BASH_XTRACEFD`
+# is left exactly as they set it.
+#
+# THE LIMIT, STATED: `set` is a builtin, so a function can shadow it, and one that
+# does leaves tracing on — which is the behaviour this line fixes, not a new
+# exposure: the captures are corrupted, the validations reject them, and setup
+# refuses. Where that boundary belongs is #101 and #102, and it is not decided
+# here.
+set +x
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #
 # Same rule as every probe here: the status is taken. This path is handed to
