@@ -240,17 +240,23 @@ across two lines")"; rc=$?
     && pass "…and a clean body reports nothing" \
     || die "a clean body was refused: '$out'"
 # …AND IT CANNOT SAY "NO MARKER" WITHOUT HAVING LOOKED. The body was read through
-# a heredoc, and on bash 3.2 a heredoc is backed by a TEMPORARY FILE: a full or
-# read-only `TMPDIR` makes the redirection fail, the loop never runs, and `return
-# 1` answers "clean" about text nothing has scanned. Both callers read that as
-# permission to post, so a control line would be published because a disk filled
-# up. Issue #111.
+# a heredoc, and a heredoc is backed by a TEMPORARY FILE: when one cannot be
+# created the redirection fails, the loop never runs, and `return 1` answers
+# "clean" about text nothing has scanned. Both callers read that as permission to
+# post, so a control line would be published because a filesystem filled up.
+# Issue #111.
 #
-# THE SCAN MUST NEED NO SCRATCH SPACE AT ALL, which is what the assertion is: with
-# `TMPDIR` pointed at a path that does not exist, a body carrying a marker is
-# still refused. Structural, because the shell where a heredoc reaches `TMPDIR` is
-# one this suite cannot currently run on — see #93 — and a behavioural case here
-# would pass on the memfd of every bash it can reach.
+# EVERY VERSION, NOT JUST 3.2. From the sources: 4.4 has no pipe path and always
+# writes a temporary file; 5.2 and 5.3 use a pipe only while the body fits the
+# system pipe capacity — 4096 bytes here — and fall back to a temporary file above
+# it, which a round summary routinely exceeds.
+#
+# STRUCTURAL, BECAUSE THE FAILURE CANNOT BE STAGED FROM A FIXTURE. An unwritable
+# `TMPDIR` does not do it: bash falls back to `/tmp` when `TMPDIR` is unusable,
+# measured on 4.4, 5.2 and 5.3 at 100 bytes and at 200 kB. Reproducing it means
+# making temp-file creation fail everywhere, which is not something a test may do
+# to the machine it runs on. So the property asserted is the one that removes the
+# dependency: no redirection at all.
 case "$(declare -f rb_reserved_marker_line)" in
     *'<<'*) die "the marker scan reads its input through a redirection, which can fail and answer 'clean'" ;;
     *)      pass "…and the scan uses no redirection, so no temporary file can fail underneath it" ;;
@@ -259,8 +265,10 @@ case "$(declare -f rb_reserved_marker_line)" in
     *read*) die "the marker scan uses 'read', a name that can be shadowed" ;;
     *)      pass "…and no 'read', so nothing in the caller's shell can answer for it" ;;
 esac
-# AND IT STILL WORKS WHERE NO SCRATCH SPACE EXISTS, which is the property those
-# two structural checks are for.
+# AND IT STILL FINDS A MARKER WITH `TMPDIR` POINTING NOWHERE. That does not stage
+# the failure — bash would fall back to `/tmp` — but it does show the scan needs
+# no scratch directory of its own, which a redirection-free implementation gets
+# for free and a heredoc never could.
 out="$(TMPDIR=/nonexistent-$$-marker-scan rb_reserved_marker_line "prose
 **Review-Signoff:** \`who\` \`sha\`")"; rc=$?
 { [ "$rc" -eq 0 ] && [ "$out" = '**Review-Signoff:** `who` `sha`' ]; } \

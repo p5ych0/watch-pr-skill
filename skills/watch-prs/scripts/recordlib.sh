@@ -243,16 +243,25 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # that must not be present in one of them and missing from the other.
 rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
     # NO REDIRECTION, BECAUSE A REDIRECTION CAN FAIL AND THIS ANSWERS "CLEAN".
-    # The body was read through `<<EOF`, and on bash 3.2 a heredoc is backed by a
-    # TEMPORARY FILE: a full or read-only `TMPDIR` makes the redirection fail, the
-    # loop never runs, and `return 1` says "no marker" about text nothing has
-    # looked at. Both callers read that as permission to post, so a control line
-    # would be published under the operator's identity because a disk filled up —
-    # the fail-open shape this repository forbids, where a failure is
+    # The body was read through `<<EOF`, and a heredoc is backed by a TEMPORARY
+    # FILE: when one cannot be created the redirection fails, the loop never runs,
+    # and `return 1` says "no marker" about text nothing has looked at. Both
+    # callers read that as permission to post, so a control line would be
+    # published under the operator's identity because a filesystem filled up — the
+    # fail-open shape this repository forbids, where a failure is
     # indistinguishable from a clean answer.
     #
-    # Modern bash uses a memfd or a pipe, so it does not reproduce on 4.4, 5.2 or
-    # 5.3 — measured. It is specific to the shell the suite exists to cover.
+    # IT IS NOT A BASH 3.2 PROBLEM, and saying so was wrong. Read from the
+    # sources: 4.4 has no pipe path at all and always writes a temporary file; 5.2
+    # and 5.3 use a pipe only while the body fits `HEREDOC_PIPESIZE` — the system
+    # pipe capacity, 4096 bytes on this machine — and fall back to a temporary
+    # file above it. A round summary is routinely larger than that.
+    #
+    # WHAT WAS MEASURED, AND WHAT IT SHOWED: an unwritable `TMPDIR` does not
+    # reproduce it on 4.4, 5.2 or 5.3, at 100 bytes or at 200 kB — because bash
+    # falls back to `/tmp` when `TMPDIR` is unusable (`get_sys_tmpdir`). That is a
+    # fact about the fallback, not about the backend, and it is why no fixture
+    # stages this: making temp-file creation fail means making it fail everywhere.
     #
     # PEELED WITH EXPANSIONS, which is the same removal `SKILL.md`'s phase parser
     # used: `${…%%…}` and `${…#…}` are handled by the parser, so there is no

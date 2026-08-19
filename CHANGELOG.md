@@ -9,25 +9,36 @@
   readers scan the raw body and a fence does not hide a line that starts at column
   zero.
 
-  It read its input through a heredoc, and on bash 3.2 a heredoc is backed by a
-  temporary file. A full or read-only `TMPDIR` makes that redirection fail, the
-  loop never runs, and `return 1` reports "no marker" about text nothing has
-  looked at — which both callers treat as permission to post. A control line would
-  then be published under the operator's identity because a disk filled up: a
-  failure indistinguishable from a clean answer, which is the one shape this
-  repository's fail-closed rule forbids.
+  It read its input through a heredoc, and a heredoc is backed by a temporary
+  file. When one cannot be created the redirection fails, the loop never runs, and
+  `return 1` reports "no marker" about text nothing has looked at — which both
+  callers treat as permission to post. A control line would then be published
+  under the operator's identity because a filesystem filled up: a failure
+  indistinguishable from a clean answer, which is the one shape this repository's
+  fail-closed rule forbids.
+
+  **It is not a bash 3.2 problem.** Read from the sources: 4.4 has no pipe path at
+  all and always writes a temporary file; 5.2 and 5.3 use a pipe only while the
+  body fits `HEREDOC_PIPESIZE` — the system pipe capacity, 4096 bytes here — and
+  fall back to a temporary file above it, which a round summary routinely
+  exceeds.
 
   The redirection is removed rather than guarded. The body is peeled with
   parameter expansions — the same removal `SKILL.md`'s phase parser used before
   #89 deleted it — so there is no temporary file to fail and no `read` to shadow.
   Behaviour is unchanged in every case the suite already covered.
 
-  Measured: the failure does not reproduce on bash 4.4, 5.2 or 5.3, each built and
-  run for it, because modern bash backs a heredoc with a memfd or a pipe. It is
-  specific to the shell `macos-shell` builds — which is also the shell nothing
-  currently runs against (#93), so the new cases are structural: the function may
-  contain no redirection and no `read`, with a behavioural case that it still
-  finds a marker when `TMPDIR` points nowhere.
+  What was measured is narrower than the first draft of this entry claimed: an
+  unwritable `TMPDIR` does not reproduce it on 4.4, 5.2 or 5.3 — each built and run,
+  at 100 bytes and at 200 kB — because bash falls back to `/tmp` when `TMPDIR` is
+  unusable. That is a fact about the fallback rather than the backend.
+
+  So the new cases are structural, and for a better reason than the version: the
+  failure cannot be staged from a fixture at all, since reproducing it means making
+  temp-file creation fail everywhere, which is not something a test may do to the
+  machine it runs on. What is asserted is the property that removes the
+  dependency — no redirection and no `read` in the function — with one behavioural
+  case that it still finds a marker with `TMPDIR` pointing nowhere.
 
 ## [2.0.33] — 2026-08-19
 
