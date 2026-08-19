@@ -1316,6 +1316,20 @@ hard-coded answer — one recipe here, two orders there:
 #     1  stopped  — the reason is on stdout; the round is NOT closed
 #     3  paused   — a round boundary. Decide with the operator
 #
+# RUN `gate` FROM A CHECKOUT ON THIS PR'S BRANCH. It pushes, and a push has to go
+# somewhere: it names the repository and the one ref it may write, and refuses —
+# having pushed nothing — if this checkout is on another branch, on a detached
+# HEAD, or if the PR is from a fork. That refusal is a 1 with the reason on
+# stdout, and the answer is to move to the right worktree and run it again; the
+# round is untouched.
+#
+# IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED. A bare `git push` sends
+# whatever branch the checkout is on, and a round driven from a checkout left on
+# `main` — a `cd` or `checkout` that failed, a second worktree holding the branch
+# — pushed the DEFAULT BRANCH: an unreviewed commit on `main`, and the round lost
+# as well, because the checks were then awaited on a head the PR did not have.
+# #119.
+#
 # `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN. It was established in step 2 and the
 # script refuses anything but `yes` or `no`, so the mode this PR is in picks the
 # order INSIDE the script — rather than deciding which of two recipes to copy out

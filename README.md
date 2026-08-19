@@ -312,7 +312,11 @@ Then:
    remembered, and runs in **two stages with your thread replies between them**:
 
    - `gate <PR> <reviewer> <summary-file> <auto-review>` pushes and proves the
-     head is green, and reports it as `head=…`;
+     head is green, and reports it as `head=…`. **Run it from a checkout on that
+     PR's branch**: it names the repository and the one ref it may write, and it
+     refuses — pushing nothing — if the checkout is on another branch, on a
+     detached HEAD, or if the PR is from a fork. If it refuses, switch to the
+     right worktree and run it again; nothing has happened yet;
    - **then** reply to each thread with what changed, react 👍/👎, and resolve it;
    - `post <PR> <reviewer> <summary-file> <auto-review> <head>` re-proves the head
      has not moved, posts the summary and requests the next pass.

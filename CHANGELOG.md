@@ -13,14 +13,33 @@
   checks on a head the PR still did not have, so the summary was never posted and
   no review was requested. Two failures from one missing question.
 
-  Both push sites now prove the branch first: the PR's `headRefName` is read, the
-  checkout's branch is read with `git symbolic-ref`, and they must match. Four
-  refusals, each leaving nothing pushed — a different branch, a detached HEAD
-  (where a push reaches no PR and the next step would wait for a head that never
-  appears), an unreadable answer, and an empty one, which is what a 200 with a
-  missing field looks like and why a status check alone is not enough.
+  **The destination is named now, rather than checked and then left to
+  configuration.** `git push origin HEAD:refs/heads/<branch>` names the repository
+  and the one ref it may write, so nothing in `push.default`, `branch.<n>.remote`
+  or `remote.<n>.push` can widen it — a branch-name check followed by a bare push
+  is a guard over a call that can still go elsewhere, which is the shape this
+  repository keeps deleting.
 
-  Ten cases, all failing against the previous gate. The Copilot head-lookup count
+  The branch comparison stays for what it actually does: telling the operator they
+  are in the wrong worktree, which is the case that caused this, rather than
+  pushing their work somewhere they did not mean and reporting success. Both push
+  sites use one refspec computed once, because one of the two being bare is
+  exactly the defect.
+
+  Five refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  (where a push reaches no PR and the next step would wait for a head that never
+  appears), an unreadable answer, an empty one — which is what a 200 with a
+  missing field looks like, and why a status check alone is not enough — and a PR
+  from a **fork**, where `origin` pointed at a same-named branch would put the
+  round's fixes somewhere else entirely and report success.
+
+  Fourteen cases, all failing against the previous gate, including two that
+  assert the push's arguments verbatim — one per mode, since a refspec applied to
+  only one site is the same defect halved.
+
+  `SKILL.md` and `README.md` tell the driver and the operator to run the gate from
+  the PR's checkout and what the refusal means; both reviewer files carry the
+  general rule, which is that a call that writes somewhere must name where. The Copilot head-lookup count
   now counts `headRefOid` reads specifically, since the branch read is a different
   question asked for a different reason and would otherwise move that number.
 

@@ -191,15 +191,44 @@ esac
 # A DETACHED HEAD HAS NO BRANCH and is refused too: `git push` from one pushes
 # nothing useful, and "nothing useful" is not a state to guess about when the next
 # step waits for a head to appear.
+# THE REFSPEC IS THE PROTECTION; THE BRANCH CHECK IS THE EXPLANATION. A bare
+# `git push` leaves BOTH destination inputs to configuration: `push.default` and
+# `branch.<n>.remote` decide the repository, and `remote.<n>.push` can supply
+# refspecs that update other refs — an ahead `main` among them — however the
+# current branch is named. So checking the name and then pushing bare is a guard
+# over a call that can still go elsewhere, which is the shape this repository
+# keeps deleting.
+#
+# `git push origin HEAD:refs/heads/<branch>` names the repository and the one ref
+# it may write, so no configuration can widen it. The branch comparison stays
+# because it is what TELLS THE OPERATOR they are in the wrong worktree — the case
+# that caused #119 — rather than pushing their work to a branch they did not mean
+# and reporting success.
+#
+# `RB_PUSH_REFSPEC` IS SET HERE AND USED AT BOTH PUSH SITES, so the two cannot
+# drift: one of them being bare is exactly the defect, and a value computed once
+# cannot be half-applied.
 rb_push_is_the_prs() {
-    local _want _have
+    local _want _have _repo
     _want=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName --jq '.headRefName' 2>/dev/null) \
         || { echo "ABORT: could not read the PR's head branch; refusing to push blind."; return 1; }
     [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
+    # A FORK'S BRANCH IS NOT OURS TO WRITE, and pushing `origin` at it would put
+    # the round's fixes on a branch of this repository with the same name — a
+    # different place entirely. This loop drives same-repository branches; saying
+    # so is not the same as silently doing something else.
+    _repo=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRepositoryOwner,headRepository \
+        --jq '(.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")' 2>/dev/null) \
+        || { echo "ABORT: could not read the PR's head repository; refusing to push blind."; return 1; }
+    [[ $_repo = "$OWNER/$REPO" ]] \
+        || { echo "ABORT: PR $PR is from '$_repo', not '$OWNER/$REPO'; this loop does not push to forks."; return 1; }
     _have=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) \
         || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
     [[ $_have = "$_want" ]] \
         || { echo "ABORT: this checkout is on '$_have' and PR $PR is for '$_want'; refusing to push the wrong branch."; return 1; }
+    RB_PUSH_REFSPEC="HEAD:refs/heads/$_want"
+    [[ $RB_PUSH_REFSPEC = "HEAD:refs/heads/$_want" ]] \
+        || { echo "ABORT: RB_PUSH_REFSPEC is readonly in this shell; the push destination cannot be pinned."; return 1; }
     return 0
 }
 # AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
@@ -351,7 +380,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     # green first and the threads answered afterwards, with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
     rb_push_is_the_prs || exit 1
-    git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
+    git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
     exit 0
@@ -393,7 +422,7 @@ if [ "$WHO" != "$COPILOT_BOT" ]; then
         || { echo "ABORT: could not read the review id before the push."; exit 1; }
 fi
 rb_push_is_the_prs || exit 1
-git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
+git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 
 # THE PUSHED HEAD IS CONFIRMED, WITH RETRIES. The API can serve the previous head

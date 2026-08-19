@@ -101,6 +101,21 @@ that block is judged against both:
   operator's diagnostics away for the rest of the session, and `set` is a builtin
   a function can shadow.
 
+## A helper that mutates must name what it mutates
+
+`pr-close-round.sh` pushed with a bare `git push`, which sends whatever branch
+the checkout is on and leaves the repository to `push.default` besides. Driven
+from a checkout left on `main`, it pushed the default branch: an unreviewed
+commit landed there, and the round was lost too, because the checks were then
+awaited on a head the PR did not have.
+
+So: **a call that writes somewhere must name where.** A check on the current
+branch before a bare push is a guard over a call that can still go elsewhere —
+`remote.<name>.push` refspecs update other refs however the branch is named.
+`git push origin HEAD:refs/heads/<branch>` names both. The same reading applies
+to any helper that posts, merges or deletes: if configuration or the working
+directory can redirect it, the redirect is the finding, not the missing guard.
+
 ## Reviewing a pull request
 
 ### You review. You do not implement.

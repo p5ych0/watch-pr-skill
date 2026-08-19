@@ -91,6 +91,8 @@ case " $* " in
                       # and this stage was never told which one that should be.
                       # #119.
                       case " $* " in
+                          *headRepositoryOwner*) cat "$W/headrepo.out" 2>/dev/null
+                                                 exit "$(cat "$W/headrepo.rc" 2>/dev/null || echo 0)" ;;
                           *headRefName*) cat "$W/branch.out" 2>/dev/null
                                          exit "$(cat "$W/branch.rc" 2>/dev/null || echo 0)" ;;
                       esac
@@ -122,7 +124,11 @@ esac
 # answers on the event itself rather than on a call count — a counter makes the
 # first call special whether or not it precedes the push, so a defect that MOVES a
 # call past the push still gets the first answer and looks correct.
-[ "$1" = push ] && { : > "$W/pushed"; exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"; }
+# THE PUSH'S ARGUMENTS ARE RECORDED, because a bare `git push` leaves both the
+# repository and the refspec to configuration — `push.default` and
+# `remote.<n>.push` can send it elsewhere however the branch is named. What
+# protects the destination is naming it. #119.
+[ "$1" = push ] && { printf '%s\n' "$*" > "$W/pushed"; exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"; }
 exit 0
 GITSH
 chmod +x "$TMP/bin/gh" "$TMP/bin/git"
@@ -136,6 +142,7 @@ world() {   # world ; the state in which a round closes cleanly
     # bare `git push` sends whatever branch the checkout is on. #119.
     printf 'fix/the-branch\n' > "$W/branch.out"
     printf 'fix/the-branch\n' > "$W/branch.local"
+    printf 'acme/widget\n' > "$W/headrepo.out"
     # THE REAL HELPER PRINTS A BARE ID — `42`, or `comment:42`. A stub returning a
     # structured line let the propagation cases pass on a value `pr-watch.sh`
     # rejects as `malformed_review_id`, which stops the NEXT round: the fixture was
@@ -421,6 +428,35 @@ _hv="$(grep -c 'gh pr view.*headRefOid' "$TMP/calls" || true)"
 nothing_pushed() {   # nothing_pushed <label>
     [ -f "$W/pushed" ]         && die "$1 — but it pushed anyway"         || pass "$1"
 }
+# THE DESTINATION IS NAMED, NOT LEFT TO CONFIGURATION. A bare `git push` leaves
+# both inputs to config: `push.default` and `branch.<n>.remote` choose the
+# repository, and `remote.<n>.push` can supply refspecs that update other refs —
+# an ahead `main` among them — however the current branch is named. So the branch
+# comparison alone is a guard over a call that can still go elsewhere; what
+# protects the destination is naming it.
+for _m in no yes; do
+    world; printf 'the round summary\n' > "$TMP/summary.md"
+    stage gate 7 "$CODEXBOT" "$TMP/summary.md" "$_m" >/dev/null 2>&1
+    _pushargs="$(cat "$W/pushed" 2>/dev/null)"
+    [ "$_pushargs" = 'push origin HEAD:refs/heads/fix/the-branch' ] \
+        && pass "the gate names the repository and the one ref it may write ($_m mode)" \
+        || die "the $_m-mode gate left its destination to configuration: 'git $_pushargs'"
+done
+# A FORK'S BRANCH IS NOT OURS TO WRITE. `origin` pointed at a same-named branch of
+# THIS repository would put the round's fixes somewhere else entirely, and report
+# success.
+world; printf 'someone/widget\n' > "$W/headrepo.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'does not push to forks'; } \
+    && pass "…and a PR from a fork refuses rather than pushing at a same-named branch here" \
+    || die "a fork PR was pushed for: '${got}'"
+nothing_pushed "…with nothing pushed"
+world; printf '1' > "$W/headrepo.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'head repository'; } \
+    && pass "…and an unreadable head repository refuses too" \
+    || die "an unreadable head repository was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
 for _m in no yes; do
     world; printf 'some-other-branch
 ' > "$W/branch.local"
