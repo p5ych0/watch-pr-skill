@@ -747,8 +747,14 @@ RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 /usr/bin/env mkdir -m 700 "$RB_PIN_DIR" \
     || { echo "ABORT: could not create a private directory for the pin probe"; exit 1; }
 RB_PIN_OUT="$RB_PIN_DIR/pin"
+# NO CLEANUP IN THIS REFUSAL EITHER, for the reason the arm below states at
+# length: it is reached only when `RB_PIN_OUT` was pre-seeded READONLY, which no
+# ordinary shell does — so `RB_PIN_DIR` may equally be a readonly pre-seeded path
+# naming a directory of the operator's, and `rmdir` removes it when it is empty,
+# which such a directory often is. An ordinary session never takes this branch,
+# so nothing is left behind by it.
 [[ $RB_PIN_OUT = "$RB_PIN_DIR/pin" ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
+    || { echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_PIN_SEEN=
 # THE RESET IS PROVED TOO, and this is the case where it decides the answer. A
 # readonly `RB_PIN_SEEN` already holding the real origin survives both this line
@@ -771,14 +777,17 @@ RB_PIN_SEEN=
 # `exit` — the structural shape #102 asked for, applied where a walked-past
 # refusal can still produce a plausible answer rather than an absent one.
 if [[ -n $RB_PIN_SEEN ]]; then
-    # NOTHING IS UNLINKED HERE, because this arm runs BEFORE the probe and there
-    # is nothing yet for it to have created. An `rm -f "$RB_PIN_OUT"` in this
-    # position deletes whatever that path names — and reaching this arm at all
-    # means the shell is hostile enough to have walked past the postcondition on
-    # `RB_PIN_OUT`, so the path can be a readonly pre-seeded one pointing at the
-    # operator's own file. `rmdir` is safe in a way `rm -f` is not: it removes an
-    # EMPTY directory or fails, so it cannot destroy anything.
-    /usr/bin/env rmdir "$RB_PIN_DIR"
+    # NOTHING IS REMOVED HERE, and that includes the directory. This arm runs
+    # BEFORE the probe, so there is nothing yet for it to have created — and
+    # reaching it at all means `RB_PIN_SEEN` was pre-seeded READONLY, which no
+    # ordinary shell does, so every postcondition above it may equally have been
+    # walked past with `exit` neutered. `RB_PIN_OUT` and `RB_PIN_DIR` can then be
+    # readonly pre-seeded paths naming the operator's own file and directory:
+    # `rm -f` deletes the file, and `rmdir` deletes the directory if it happens to
+    # be empty. Neither is safe here, and there is nothing this arm needs them for.
+    #
+    # AN ORDINARY SHELL NEVER REACHES THIS, so it costs no cleanup: `RB_PIN_SEEN=`
+    # succeeds, the reset holds, and the other arm removes what the probe made.
     echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
     # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
