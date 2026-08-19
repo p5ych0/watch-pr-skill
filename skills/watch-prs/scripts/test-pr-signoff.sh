@@ -227,5 +227,70 @@ got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc
     && pass "…and a missing reviewer" \
     || die "a missing reviewer gave rc=$rc '$got'"
 
+# ── `sha` ANSWERS WITH THE HEAD ALONE ──────────────────────────────────────
+#
+# It exists so no caller has to parse the record line: `SKILL.md` did it in three
+# places and two shapes, one of them ~90 lines of expansion-only code and two of
+# them a `sed` — a NAME, and one that prints a plausible forty hex and exits 0
+# pins a merge to whatever it says.
+#
+# THE TWO STREAMS ARE SEPARATE, which is what makes an empty answer safe: stdout
+# carries the sha or nothing, every reason goes to stderr, so a caller reads one
+# and never sees the other.
+sha_run() {   # sha_run [reviewer] ; prints "<rc>|<stdout>|<stderr>"
+    local rc=0 o e
+    o="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
+        REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" sha 7 "${1:-$BOT}" 2>"$TMP/sha.err")" || rc=$?
+    e="$(cat "$TMP/sha.err" 2>/dev/null)"
+    printf '%s|%s|%s' "$rc" "$o" "$e"
+}
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 0 ] && [ "$(printf '%s' "$got" | cut -d'|' -f2)" = "$SHA" ]; } \
+    && pass "sha prints the recorded head and nothing else" \
+    || die "sha gave '$got'"
+# NOTHING OF THE RECORD SHAPE REACHES STDOUT, or a caller shape-checking the
+# result would still be parsing a line — which is the whole point of the mode.
+case "$(printf '%s' "$got" | cut -d'|' -f2)" in
+    *PR_SIGNOFF*|*reviewer=*|*sha=*) die "the record's own shape reached stdout in sha mode ('$got')" ;;
+    *) pass "…with no field name, login or record prefix on that stream" ;;
+esac
+# NONE IS NOT A VALUE, so it goes to stderr. A caller that captured
+# `PR_SIGNOFF … sha=none` on stdout would hold a non-empty string that is not a
+# sha — the ordinary-looking wrong answer the fail-closed rule exists to prevent.
+world; comments "OWNER|nothing to see here" > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ]; } \
+    && pass "…and with none recorded stdout is empty, with status 1" \
+    || die "sha printed something with no signoff recorded ('$got')"
+case "$(printf '%s' "$got" | cut -d'|' -f3)" in
+    *sha=none*) pass "…while the reason is on stderr, where the caller is not reading" ;;
+    *) die "the 'none' answer was not reported at all ('$got')" ;;
+esac
+# A REVOCATION IS THE SAME ANSWER by a different route, and must not differ here.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 1 ] && [ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ]; } \
+    && pass "…and a revoked signoff answers the same way" \
+    || die "a revoked signoff printed a sha ('$got')"
+# AN UNREADABLE ANSWER IS 2 AND STILL PRINTS NOTHING, so a caller cannot read a
+# failure as an answer on either stream.
+printf '1' > "$TMP/rc"; : > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 2 ] && [ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ]; } \
+    && pass "…and an unreadable API leaves stdout empty with status 2" \
+    || die "an unreadable API produced output on stdout ('$got')"
+# THE DEFAULT SHAPE IS UNCHANGED, which the resume path's abort messages and
+# `test-pr-skill-contract.sh` both depend on.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 0 "PR_SIGNOFF pr=7 reviewer=$BOT" "…while the default mode still prints the whole record"
+# AND AN UNKNOWN SUBCOMMAND IS REFUSED rather than silently taken as a mode: it
+# lands in the PR argument, which is validated as digits.
+got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" head 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$got" | grep -q usage; } \
+    && pass "…and an unknown subcommand is refused" \
+    || die "an unknown subcommand gave rc=$rc '$got'"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

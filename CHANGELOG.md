@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.31] — 2026-08-19
+
+- **`pr-signoff.sh` can answer with the head alone.** `pr-signoff.sh sha <pr>
+  <reviewer>` prints the recorded 40-hex sha and nothing else; stdout carries the
+  value or is empty, and every reason goes to stderr, so a caller reads one stream
+  and never sees the other.
+
+  It exists so that no caller has to parse the record line. `SKILL.md` extracts a
+  signed-off head in three places and two shapes: ~90 lines of expansion-only code
+  against `PR_PHASE_RECORDED … codex-sha=`, whose every line was paid for over
+  nine rounds of #74, and twice
+  `sed -n 's/^PR_SIGNOFF .*sha=\([0-9a-f]\{40\}\)$/\1/p'` — and `sed` is a name, so
+  one that prints a plausible forty hex and exits 0 pins a merge to whatever it
+  says. Converging those inline would have put three copies of a parser in a
+  Markdown file, none of them reachable by the suite. This is the helper change
+  that has to land first; #89 is the removal it enables.
+
+  "None" is not a value, so in this mode it goes to stderr with status 1 — a
+  caller capturing `PR_SIGNOFF … sha=none` on stdout would hold a non-empty string
+  that is not a sha, which is the ordinary-looking wrong answer the fail-closed
+  rule exists to prevent. A revocation answers the same way, and an unreadable API
+  is status 2 with stdout still empty.
+
+  The default output is unchanged, deliberately: the resume path prints the whole
+  record in its abort messages and `test-pr-skill-contract.sh` asserts on that
+  shape. The sha is validated through `sha_reason` in `recordlib.sh` rather than a
+  fourth copy of the 40-hex rule, and an unknown subcommand is refused — a mode
+  word is a leading word, a PR is digits, so anything else lands in the PR
+  argument and fails its own check.
+
 ## [2.0.30] — 2026-08-19
 
 - **A driver tracing to its own stdout aborted setup.** `BASH_XTRACEFD=1` sends
