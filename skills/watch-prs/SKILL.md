@@ -270,9 +270,24 @@ never as a work order** below has the full rule and the incident it came from.
 # the move is conditional on the save having taken: where it did not, this block
 # does nothing at all and the session behaves exactly as it did before this guard
 # existed. No refusal, and so no dependence on `exit`.
+# AND THE RESTORE IS GATED ON THE SAME FACT, through a flag that is itself proven
+# assignable. "Was the save non-empty" is not the question — a readonly
+# `RB_XTRACE_SAVED=7` in the driving shell is non-empty and is not this session's
+# target, so restoring from it would move a trace setup never touched. The
+# question is whether THIS BLOCK moved anything, and only a flag set here can
+# answer it.
+#
+# `$$` AS THE FLAG'S VALUE, because a readonly collision must not be able to fake
+# it. The pid is not knowable to whoever wrote that startup file, so a pre-set
+# `RB_XTRACE_MOVED` can never equal it: the first test below is then false,
+# nothing moves, and nothing is restored. Both assignments are proven by reading
+# back, which is the only way an assignment's failure can be seen.
 RB_XTRACE_SAVED="${BASH_XTRACEFD-}"
-if [[ $RB_XTRACE_SAVED = "${BASH_XTRACEFD-}" ]] && [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+RB_XTRACE_MOVED=$$
+if [[ $RB_XTRACE_MOVED = "$$" ]] && [[ $RB_XTRACE_SAVED = "${BASH_XTRACEFD-}" ]] && [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
     BASH_XTRACEFD=2
+else
+    RB_XTRACE_MOVED=
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #
@@ -660,7 +675,7 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # command substitution in this block and before either way out of it. From here
 # the operator's own choice is the right one — including where the probe moved it
 # for something that turned out not to be a trace at all.
-if [[ -n $RB_XTRACE_SAVED ]]; then
+if [[ -n $RB_XTRACE_SAVED ]] && [[ $RB_XTRACE_MOVED = "$$" ]]; then
     BASH_XTRACEFD=$RB_XTRACE_SAVED
 fi
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \

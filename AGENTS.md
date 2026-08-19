@@ -79,7 +79,10 @@ that block is judged against both:
   valid checkout. The two directions are not symmetric. What makes the loose test
   safe is that the block SAVES the target before the probe and sets it back after
   its last substitution, on both paths out, and moves nothing at all if the save
-  did not take. Removing either of those is a finding. It moves the destination rather than disabling
+  did not take. The restore is keyed on a flag this block sets — not on the saved
+  value being non-empty, since a readonly collision in the driving shell is
+  non-empty and names a descriptor setup never chose. Removing any of those is a
+  finding. It moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
   closes the shell's stdout. `set +x` is wrong here twice over: it takes the

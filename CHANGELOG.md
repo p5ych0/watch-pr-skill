@@ -49,6 +49,17 @@
   the block does nothing and the session behaves exactly as it did before the
   guard existed. No refusal, and so no dependence on `exit`.
 
+  **The restore is gated on the same fact, through a flag proven assignable.**
+  "Was the save non-empty" is not the question: a readonly `RB_XTRACE_SAVED=7` in
+  the driving shell is non-empty and names a descriptor setup never chose, so
+  restoring from it moved a trace target nothing had touched. The question is
+  whether this block moved anything, and only a flag set here can answer it. Its
+  value is `$$`, because a readonly collision must not be able to fake it — the pid
+  is not knowable to whoever wrote that startup file, so a pre-set flag can never
+  equal it, and the block then moves nothing and restores nothing. Both
+  assignments are proven by reading them back, which is the only way an
+  assignment's failure can be seen.
+
   An empty save is left alone rather than unset: `BASH_XTRACEFD` unset means xtrace
   goes to stderr, which is what `2` does, and unsetting it would close that
   descriptor.

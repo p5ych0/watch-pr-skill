@@ -3828,7 +3828,7 @@ else
     # is that the SESSION'S TRACE TARGET IS AS IT WAS, whatever it concluded,
     # which is what the restore buys. Each case runs the guard AND the restore,
     # exactly as the block does.
-    _tr_restore="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n $RB_XTRACE_SAVED \]\]; then$/,/^fi$/p')"
+    _tr_restore="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n $RB_XTRACE_SAVED \]\] && \[\[ $RB_XTRACE_MOVED/,/^fi$/p')"
     case "$_tr_restore" in
         *'BASH_XTRACEFD=$RB_XTRACE_SAVED'*) pass "…and the block restores the saved target" ;;
         *) die "the setup block never restores the trace target: '$_tr_restore'" ;;
@@ -3873,6 +3873,22 @@ else
     { [ "$_tr_ropstr_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_ropstr_v" = "REPO_DIR=[$_tr_dir]" ]; } \
         && pass "…while a readonly PS4 no longer blinds it to a trace on stdout" \
         || die "a readonly PS4 left the capture corrupted ('$_tr_ropstr_v')"
+    # A NON-EMPTY SAVE IS NOT THE SAME AS A SAVE THIS BLOCK MADE. A readonly
+    # `RB_XTRACE_SAVED=7` in the driving shell is non-empty and names a
+    # descriptor setup never chose, so a restore keyed on non-emptiness moved a
+    # trace target nothing had touched. The flag answers "did THIS block move
+    # it", and its value is the pid so a pre-set readonly cannot fake it.
+    _tr_rononempty="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            readonly RB_XTRACE_SAVED=7
+            export BASH_XTRACEFD=1
+            '"$_tr_guard"'
+            '"$_tr_restore"'
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_rononempty=""
+    case "$_tr_rononempty" in
+        *'FD=[1]'*) pass "…and a readonly non-empty save restores nothing, because this block moved nothing" ;;
+        *) die "a readonly non-empty save moved the trace target ('$_tr_rononempty')" ;;
+    esac
     # THE RESTORE IS WHAT DOES THAT, and this is the probe for it: the same
     # hostile shell with the guard alone moves the target, so the five cases
     # above are not passing because nothing could have moved it.
