@@ -1506,100 +1506,53 @@ case "$PHASE_RC" in
     *) echo "The phase did not advance and no signoff was recorded. The reason is above; do not retry it blind."; exit "$PHASE_RC" ;;
 esac
 # THE SIGNED-OFF HEAD IS THE ONE VALUE THAT OUTLIVES THIS STEP. Step 8 needs the
-# full 40 characters of it, and a child cannot assign a variable here — so it
-# reports the value and this reads it back. A later session, which has no shell
-# left to read, gets it from `pr-signoff.sh` instead.
+# full 40 characters of it, and a child cannot assign a variable here — so it is
+# read back from the record `record` just wrote.
 #
-# READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex signoff",
-# and that path needs this sha: exiting without it made the operator re-run a
-# phase that had already been proved clean, just to recover a value that was
-# printed and thrown away.
+# READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex
+# signoff", and that path needs this sha: exiting without it made the operator
+# re-run a phase that had already been proved clean, just to recover a value that
+# was printed and thrown away.
 #
-# EXACTLY FORTY HEX, AND THE LAST RECORD, which is the rule the resume parser at
-# the bottom of this file already applies to `PR_SIGNOFF`. Here it was
-# `[0-9a-f]*`: `codex-sha=a` is non-empty, so the emptiness test below passed and
-# step 8 was handed something that is not a commit — and two matching records put
-# two lines in one variable, which no gate downstream can mean anything by. The
-# same rule written twice with one copy right is what `CLAUDE.md` says belongs in
-# one place; this is the copy that was wrong. Issue #39.
+# ASKED OF THE HELPER THAT OWNS THE RECORD, rather than parsed out of the stage's
+# stdout. This was ~90 lines of expansion-only code against
+# `PR_PHASE_RECORDED … codex-sha=`, and every one of them was paid for in review:
+# a truncated record that could not overwrite a stale candidate, a bare
+# `PR_PHASE_RECORDED` with no trailing space, `xcodex-sha=` matching as the field,
+# a greedy `##*codex-sha=` reading the value after a LATER substring. Nine rounds
+# on #74, for a fact the PR itself already holds.
 #
-# NO COMMAND AT ALL, WHICH IS THE ONLY WAY TO STOP LOSING THIS ARGUMENT. A `sed`
-# or `tail` that prints a plausible forty hex and then fails leaves that value in
-# a substitution, where a shape check reads it as a good parse — so the status has
-# to be taken. `set -o pipefail` took it, and `set` is a builtin a function can
-# shadow. `awk` took it in one process, and `awk` is a command a function can
-# shadow: one returning a stale sha and exiting 0 is accepted whatever the record
-# says.
+# `sha` PRINTS THE HEAD ALONE, and stdout carries that value or nothing — every
+# reason goes to stderr, so there is no record shape here to get wrong and no
+# `sed` in the path. That matters beyond tidiness: `sed` is a NAME, and one that
+# prints a plausible forty hex and exits 0 pins a merge to whatever it says. The
+# rule about what a well-formed record is stays in `recordlib.sh`, where it is
+# tested. Issue #89.
 #
-# `CLAUDE.md` states the way out rather than the next name to distrust: prefer a
-# RESERVED WORD or an ASSIGNMENT, which the parser handles and no function can
-# take the place of. `while`, `if` and `[[` are reserved; `${…}` is expansion.
-# This loop uses nothing else, so there is no status to lose and nothing to
-# shadow — the value can only come from `$PHASE_OUT`.
-#
-# PEELED WITH EXPANSIONS RATHER THAN SPLIT ON IFS: `for x in $PHASE_OUT` would
-# also glob, so a record containing `*` would expand against the filesystem, and
-# suppressing that needs `set -f` — the builtin this paragraph exists to avoid.
-#
-# EVERY RECORD OVERWRITES THE ANSWER, so the newest one decides even when it is
-# the unreadable one. Keeping only sha-shaped records left a valid record followed
-# by a malformed one returning the earlier head: a stale answer, offered exactly
-# when the latest record could not be read.
-CODEX_SHA=""
-_rb_rest="$PHASE_OUT"
-while [[ -n $_rb_rest ]]; do
-    _rb_line="${_rb_rest%%$'\n'*}"
-    if [[ $_rb_rest == *$'\n'* ]]; then _rb_rest="${_rb_rest#*$'\n'}"; else _rb_rest=""; fi
-    # EVERY PHASE RECORD OVERWRITES, INCLUDING ONE WITH NO FIELD AT ALL. Matching
-    # only records that carry `codex-sha=` left a truncated record — a line that
-    # is a phase record and says nothing about the head — unable to overwrite
-    # anything, so the previous record's head stood. That is the stale answer
-    # again, by the one route the earlier fix did not close: the field missing
-    # rather than malformed.
-    #
-    # DELIMITED BY WHITESPACE, so `xcodex-sha=` is not the field.
-    # THE BARE MARKER IS A PHASE RECORD TOO. A line truncated to exactly
-    # `PR_PHASE_RECORDED`, with no trailing space, did not match — so it could not
-    # reset the candidate, and the previous record's head stood. Same staleness,
-    # one character further along than the last one.
-    if [[ $_rb_line == PR_PHASE_RECORDED || $_rb_line == PR_PHASE_RECORDED\ * ]]; then
-        _rb_v=""
-        # THE DELIMITER IS IN THE REMOVAL PATTERN TOO, not only in the test above
-        # it. `##*codex-sha=` is greedy, so on
-        # `codex-sha=a xcodex-sha=<40 hex>` it took the value after the LATER
-        # substring: the condition saw the real field, the extraction read a
-        # different one, and the shape check accepted a sha that was never the
-        # `codex-sha` field at all.
-        if [[ $_rb_line == *[[:space:]]codex-sha=* ]]; then
-            _rb_v="${_rb_line##*[[:space:]]codex-sha=}"
-            _rb_v="${_rb_v%%[[:space:]]*}"
-        fi
-        CODEX_SHA="$_rb_v"
-    fi
-done
-# WHAT USES THE HEAD SITS INSIDE THE SUCCESSFUL BRANCH, rather than after a guard
-# that aborts. The guard aborted with `exit`, and `exit` is a builtin a function
-# can shadow: `exit() { return 0; }` turns the refusal into a `return`, execution
-# carries on, and the malformed head this check exists to stop is used by
-# everything after it. Reachability is structural and cannot be shadowed;
-# `if`, `else` and `[[` are reserved words.
+# IT IS A ROUND TRIP, and that is the trade. `record` posted the signoff and this
+# reads it straight back, so a stale or eventually-consistent read is a failure
+# mode the parse did not have — but it is the same read a RESUMED session makes at
+# the bottom of this file, so the exposure is the system's rather than this step's,
+# and it fails as a stop rather than as a silent empty. A revocation landing in
+# between reads as status 1, which is a refusal here: the phase it would open is
+# no longer closed.
+CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SHA_RC=$?
 RX_PHASE_SHA40='^[0-9a-f]{40}$'
-if [[ "$CODEX_SHA" =~ $RX_PHASE_SHA40 ]]; then
-    # AN `if`, NOT A TRAILING `&&`. This is the last command in the block, so its
-    # status IS the block's status — and `[ 0 -eq 3 ] && …` is FALSE on the
-    # ordinary path, which left a phase that recorded and parsed perfectly exiting
-    # 1. A driver reads that as a failed step and stops or retries instead of
-    # reaching the operator decision, on the one path where nothing went wrong.
-    if [ "$PHASE_RC" -eq 3 ]; then
+# THE STATUS AND THE SHAPE, because neither covers the other. A status of 1 with
+# an empty answer is the phase not being closed; a status of 0 with something
+# that is not 40 hex cannot happen through the helper and is checked anyway,
+# because this value is what every gate in step 8 is pinned to.
+if [[ $SHA_RC -eq 0 ]] && [[ $CODEX_SHA =~ $RX_PHASE_SHA40 ]]; then
+    if [[ $PHASE_RC -eq 3 ]]; then
         echo "Stopping here: the operator decides at a round boundary. Codex is signed off on $CODEX_SHA, so merging on that signoff is one of the answers."
         exit 3
     fi
 else
-    echo "ABORT: the phase recorded no full 40-hex head; step 8 would have nothing to gate on ('$PHASE_OUT')"
+    echo "ABORT: no Codex signoff could be read back for this phase (rc=$SHA_RC, sha='$CODEX_SHA'); step 8 would have nothing to gate on"
     exit 1
     # THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken
     # away. `echo` and `exit` are builtins a function can shadow, and with both
-    # shadowed this branch says nothing and returns 0 — a failed parse
+    # shadowed this branch says nothing and returns 0 — a failed read
     # indistinguishable from an ordinary phase, which is the reading that lets the
     # driver carry on. `[[ … ]]` is a reserved word, so this branch ends non-zero
     # whatever has been done to the builtins, and the block's status is the last
@@ -1772,20 +1725,22 @@ before continuing into the Copilot phase.
 #   2  could not tell — fail closed. An unreadable answer is not "no signoff",
 #      and treating it as one repeats a phase; treating it as a signoff skips a
 #      review nobody did
-SIGNOFF_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh N "$CODEX_BOT" 2>&1)"; SIGNOFF_RC=$?
+# `sha` ASKS FOR THE HEAD ALONE, so nothing here parses a record line. It was a
+# `sed`, and `sed` is a NAME: one that prints a plausible forty hex and exits 0
+# pins a merge to whatever it says, and a pipeline's status is lost besides. The
+# helper owns the shape and its suite covers it. Issue #89.
+CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
 case "$SIGNOFF_RC" in
     0) ;;
-    1) echo "The Codex phase is not closed on this PR — there is no recorded signoff. Run it before merging or opening the Copilot phase."; exit 0 ;;
-    *) echo "ABORT: could not read the signoff record (rc=$SIGNOFF_RC): $SIGNOFF_OUT"; exit 0 ;;
+    1) echo "The Codex phase is not closed on this PR — there is no recorded signoff, or it was revoked. Run it before merging or opening the Copilot phase."; exit 0 ;;
+    *) echo "ABORT: could not read the signoff record (rc=$SIGNOFF_RC)"; exit 0 ;;
 esac
-# PARSED, not substring-matched, and the shape is checked before it is used: this
-# value is what every gate in step 8 is evaluated against, so a truncated or
-# wrapped line must not become the sha a merge is pinned to.
-CODEX_SHA="$(printf '%s\n' "$SIGNOFF_OUT" \
-    | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
+# THE SHAPE IS CHECKED AS WELL AS THE STATUS. `sha` prints 40 hex or nothing, so
+# this cannot currently fail — which is the point: this value is what every gate
+# in step 8 is pinned to, and it is not left resting on one helper's promise.
 RX_SHA40='^[0-9a-f]{40}$'
 if ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
-    echo "ABORT: the recorded signoff did not yield a full 40-hex sha ('$SIGNOFF_OUT')"; exit 0
+    echo "ABORT: the recorded signoff did not yield a full 40-hex sha ('$CODEX_SHA')"; exit 0
 fi
 # THE RECORD IS HISTORY, NOT A CURRENT FACT. It says Codex was clean on that
 # commit when it was written — not that the commit is still the head, nor that the
@@ -1808,20 +1763,45 @@ RESUMED_HEAD=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '
 #
 # A recorded COPILOT signoff is what tells the two apart, and it is a fact on the
 # PR rather than a guess about the session.
-COPILOT_SIGNOFF_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh N "$COPILOT_BOT" 2>&1)"; COPILOT_SIGNOFF_RC=$?
+# 1 IS AN ANSWER HERE, not a refusal: "no Copilot signoff" is exactly what the
+# branch below is asking about, and `sha` leaves the value empty in that case, so
+# the empty string means the same thing it did when a `sed` matched nothing.
+COPILOT_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$COPILOT_BOT")"; COPILOT_SIGNOFF_RC=$?
 case "$COPILOT_SIGNOFF_RC" in
     0|1) ;;
-    *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC): $COPILOT_SIGNOFF_OUT"; exit 0 ;;
+    *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC)"; exit 0 ;;
 esac
-COPILOT_SHA="$(printf '%s\n' "$COPILOT_SIGNOFF_OUT" \
-    | sed -n 's/^PR_SIGNOFF .*[[:space:]]sha=\([0-9a-f]\{40\}\)$/\1/p')"
+# THE SHAPE IS CHECKED HERE TOO, ON STATUS 0. Status 1 leaves the value empty and
+# that is an answer — "no Copilot signoff" is what the branch below is asking
+# about. Status 0 with something that is not 40 hex is not an answer, and without
+# this it would be read as "no signoff" and send the operator back through a phase
+# that is closed — or, if the head read were malformed the same way, SELECT the
+# post-Copilot arm on two values that match only because both are wrong.
+#
+# IT IS THE FIRST ARM OF THE BRANCH, NOT A GUARD BEFORE IT, and that is the
+# difference between a refusal and a wish. Written as its own `if … exit`, a
+# shadowed `exit` returns and execution falls into the selection below, where a
+# malformed value is read as "no Copilot signoff" — the outcome the check exists
+# to prevent. As an arm it is structural: a malformed sha SELECTS this arm, so
+# neither of the others can run on it whatever has been done to the builtins.
+#
+# `[[` THROUGHOUT, because `[` is a command a function can take the place of. One
+# returning false skips a validation written with it; one returning true selects
+# an arm the values do not justify.
 # THE BRANCH TURNS ON WHICH SIGNOFF DESCRIBES THE HEAD, not on whether a Copilot
 # record exists at all. After "another Codex pass" produced fixes, the NEW Codex
 # signoff names the current head while an older Copilot signoff still names the
 # previous one — and choosing the post-Copilot path merely because that historical
 # record exists then reported that neither phase was closed, sending the operator
 # through a review nobody needed.
-if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && [ "$COPILOT_SHA" = "$RESUMED_HEAD" ]; then
+if [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
+    echo "ABORT: the recorded Copilot signoff did not yield a full 40-hex sha ('$COPILOT_SHA')"
+    exit 0
+    # THE LAST WORD IS A RESERVED ONE, for the same reason it is in the record
+    # block: with `echo` and `exit` both shadowed this arm says nothing and
+    # returns 0, and the block's status is the only signal left.
+    [[ -n "" ]]
+elif [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && [[ $COPILOT_SHA = "$RESUMED_HEAD" ]]; then
     # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
     # than the head; the gate is what proves the delta is Copilot-only. What must
     # still hold is the COPILOT signoff, on the head being merged.
