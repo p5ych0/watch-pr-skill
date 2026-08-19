@@ -24,14 +24,19 @@
   reads as status 1, which is a refusal here: the phase it would open is no longer
   closed.
 
-  Both the status and the shape are checked at every read. `sha` prints 40 hex or
+  Both the status and the shape are checked at every read — all three, including
+  the Copilot one, where status 0 with something that is not 40 hex would have
+  read as "no signoff" and sent the operator back through a phase that is closed. `sha` prints 40 hex or
   nothing, so the shape check cannot currently fail — which is the point: this
   value is what every gate in step 8 is pinned to, and it does not rest on one
   helper's promise.
 
   `test-pr-skill-contract.sh` no longer lifts and executes a parser, because there
   is none. It asserts the wiring instead — three reads, each taking the status,
-  each shape-checked, and no record parsing anywhere in the file's *code*. That
+  each shape-checked — the count of shape checks is tied to the count of reads,
+  not to a floor, because a floor of two was satisfied by the two Codex ones while
+  the third went unvalidated — and no record parsing anywhere in the file's
+  *code*. That
   last scan reads the fenced bash with comments stripped: the comments explain
   which constructs were removed and name them to do it, so a scan of the raw file
   would find the argument against the defect and report the defect.

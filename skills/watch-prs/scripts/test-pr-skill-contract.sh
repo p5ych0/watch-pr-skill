@@ -1099,10 +1099,14 @@ _sha_unchecked="$(grep -F 'pr-signoff.sh sha N' "$SKILL" | grep -vc 'RC=\$?' || 
 # AND THE SHAPE IS CHECKED AS WELL AS THE STATUS, in both the phase block and the
 # resume path: this value is what every gate in step 8 is pinned to, and it is not
 # left resting on one helper's promise.
+# ONE SHAPE CHECK PER READ, not "at least two". The Copilot read had none, and a
+# `-ge 2` bound was satisfied by the two Codex ones — so the assertion passed
+# while the value that SELECTS the post-Copilot arm was unchecked. A count tied to
+# the number of reads cannot do that.
 _sha_shapes="$(grep -c '=~ \$RX_SHA40\|=~ \$RX_PHASE_SHA40' "$SKILL" || true)"
-[ "$_sha_shapes" -ge 2 ] \
-    && pass "…and the 40-hex shape is asserted on the value before it is used" \
-    || die "the head is used without a shape check ($_sha_shapes found)"
+[ "$_sha_shapes" -eq "$_sha_reads" ] \
+    && pass "…and every one of the $_sha_reads reads shape-checks its value before using it" \
+    || die "$_sha_reads head reads but $_sha_shapes shape checks; one is used unvalidated"
 
 
 # ── the pushed head is checked before the round is closed ─────────────────

@@ -1771,6 +1771,15 @@ case "$COPILOT_SIGNOFF_RC" in
     0|1) ;;
     *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC)"; exit 0 ;;
 esac
+# THE SHAPE IS CHECKED HERE TOO, ON STATUS 0. Status 1 leaves the value empty and
+# that is an answer — "no Copilot signoff" is what the branch below is asking
+# about. Status 0 with something that is not 40 hex is not an answer, and without
+# this it would be read as "no signoff" and send the operator back through a phase
+# that is closed — or, if the head read were malformed the same way, SELECT the
+# post-Copilot arm on two values that match only because both are wrong.
+if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
+    echo "ABORT: the recorded Copilot signoff did not yield a full 40-hex sha ('$COPILOT_SHA')"; exit 0
+fi
 # THE BRANCH TURNS ON WHICH SIGNOFF DESCRIBES THE HEAD, not on whether a Copilot
 # record exists at all. After "another Codex pass" produced fixes, the NEW Codex
 # signoff names the current head while an older Copilot signoff still names the
