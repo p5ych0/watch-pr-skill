@@ -65,9 +65,15 @@
   combined state itself, run end to end, with its own reach probe asserting that
   shell really does keep the pre-seeded value. And a sentinel: with `RB_PIN_OUT`
   pre-seeded readonly onto a file this block never made, that file must still be
-  there afterwards, and their empty directory beside it; and that no cleanup
-  appears in the arm where the directory was not this shell's to make. All eight
-  fail against the shape each replaces.
+  there afterwards, and their empty directory beside it — with that run required
+  to refuse non-zero and say so, since deleting the outer `else` would otherwise
+  leave both survival checks green while setup finished silently; that no cleanup
+  appears in the arm where the directory was not this shell's to make, and that
+  both inner refusals do remove it; and that the reset refusal is an ARM with its
+  own abort, asserted structurally because on this bash the failed readonly
+  assignment ends the run before that arm is evaluated — so the behavioural case
+  alone would stay green with the arm deleted. All twelve fail against the shape
+  each replaces.
 
 ## [2.0.32] — 2026-08-19
 
