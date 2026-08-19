@@ -800,6 +800,35 @@ case "$_seed_out" in
     *'RB_PIN_SEEN is readonly'*) pass "…where that shell does refuse for the reason the case names" ;;
     *) die "the pre-seeded case did not reach the reset refusal ('$_seed_out')" ;;
 esac
+# …AND A REFUSAL DESTROYS NOTHING ON ITS WAY OUT. The refusing arm runs before
+# the probe, so there is nothing it can have created — and reaching it at all
+# means the shell walked past the postcondition on `RB_PIN_OUT`, which can
+# therefore be a readonly pre-seeded path naming the operator's own file. `rmdir`
+# is safe in a way `rm -f` is not: it removes an empty directory or fails.
+# UNDER THE SCRATCH TREE THAT ALREADY EXISTS, not a fresh `mktemp_d`. The probe
+# at the end of this file re-runs it with `mktemp` stubbed and asserts on the
+# FIRST refusal's text; a new call here would refuse before that one and change
+# which message comes out.
+# GUARDED ON THE SCRATCH TREE EXISTING, like the forger cases: the probe at the
+# end of this file re-runs it with `mktemp` stubbed, where there is no tree — and
+# a `:?` here would kill the run with a message that probe does not expect.
+if [ -n "${RB_TMPBASE:-}" ]; then
+_sentinel="$RB_TMPBASE/sentinel"
+mkdir -p "$_sentinel"
+printf 'DO NOT DELETE\n' > "$_sentinel/keep"
+env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+        readonly RB_PIN_OUT="'"$_sentinel"'/keep"
+        readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' >/dev/null 2>&1 || true
+[ -s "$_sentinel/keep" ] \
+    && pass "…and a refusal on a pre-seeded readonly path leaves the operator's file alone" \
+    || die "the refusing arm deleted a file it never created"
+rm -rf "$_sentinel"
+fi
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0

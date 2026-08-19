@@ -53,12 +53,19 @@
   place where a walked-past refusal produces a plausible answer instead of an
   absent one.
 
+  That arm unlinks nothing. It runs BEFORE the probe, so there is nothing it can
+  have created — and reaching it at all means the shell walked past the
+  postcondition on `RB_PIN_OUT`, which can therefore be a readonly pre-seeded path
+  naming the operator's own file. `rmdir` is safe in a way `rm -f` is not: it
+  removes an empty directory or fails, so it cannot destroy anything.
+
   Three cases: the success line must be inside the branch where the reset held,
   must NOT appear in the arm that refuses — or "inside a branch" is satisfied by
   announcing success on both — and the probe must be in there with it. Plus the
   combined state itself, run end to end, with its own reach probe asserting that
-  shell really does keep the pre-seeded value. All four fail against the previous
-  shape.
+  shell really does keep the pre-seeded value. And a sentinel: with `RB_PIN_OUT`
+  pre-seeded readonly onto a file this block never made, that file must still be
+  there afterwards. All five fail against the shape each replaces.
 
 ## [2.0.32] — 2026-08-19
 

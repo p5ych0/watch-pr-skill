@@ -771,7 +771,13 @@ RB_PIN_SEEN=
 # `exit` — the structural shape #102 asked for, applied where a walked-past
 # refusal can still produce a plausible answer rather than an absent one.
 if [[ -n $RB_PIN_SEEN ]]; then
-    /usr/bin/env rm -f "$RB_PIN_OUT"
+    # NOTHING IS UNLINKED HERE, because this arm runs BEFORE the probe and there
+    # is nothing yet for it to have created. An `rm -f "$RB_PIN_OUT"` in this
+    # position deletes whatever that path names — and reaching this arm at all
+    # means the shell is hostile enough to have walked past the postcondition on
+    # `RB_PIN_OUT`, so the path can be a readonly pre-seeded one pointing at the
+    # operator's own file. `rmdir` is safe in a way `rm -f` is not: it removes an
+    # EMPTY directory or fails, so it cannot destroy anything.
     /usr/bin/env rmdir "$RB_PIN_DIR"
     echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
