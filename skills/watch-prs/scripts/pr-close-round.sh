@@ -147,6 +147,13 @@ rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
+# THE SESSION'S IDENTITY IS KEPT, because `rb_identity` runs again below against
+# origin's PUSH url and overwrites these. Copied here once, before anything can
+# move them, so the comparison is against what this session was pinned to rather
+# than against whatever the last parse produced.
+RB_PIN_HOST="$HOST"; RB_PIN_OWNER="$OWNER"; RB_PIN_REPO="$REPO"
+{ [ "$RB_PIN_HOST" = "$HOST" ] && [ "$RB_PIN_OWNER" = "$OWNER" ] && [ "$RB_PIN_REPO" = "$REPO" ]; } \
+    || { echo "ABORT: the pinned identity could not be captured; one of RB_PIN_HOST/OWNER/REPO is readonly."; exit 1; }
 COPILOT_BOT="$RB_COPILOT_BOT"
 
 # THE STAGE IS FIRST AND HAS NO DEFAULT. A default is the whole defect back: a
@@ -209,19 +216,63 @@ esac
 # drift: one of them being bare is exactly the defect, and a value computed once
 # cannot be half-applied.
 rb_push_is_the_prs() {
-    local _want _have _repo
-    _want=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName --jq '.headRefName' 2>/dev/null) \
+    local _want _cross _pair _pushurl _have
+    # ONE CALL FOR BOTH FACTS, joined by a TAB. A git ref name cannot contain a
+    # space or any control character — `git check-ref-format` forbids them — so a
+    # tab cannot appear in `headRefName` and cannot shift the field. That is the
+    # test this repository applies to any delimiter, and it is why two values may
+    # share one line here where three identity fields may not.
+    _pair=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName,isCrossRepository \
+        --jq '.headRefName + "\t" + (.isCrossRepository | tostring)' 2>/dev/null) \
         || { echo "ABORT: could not read the PR's head branch; refusing to push blind."; return 1; }
+    _want="${_pair%%$'\t'*}"
+    _cross="${_pair#*$'\t'}"
     [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
-    # A FORK'S BRANCH IS NOT OURS TO WRITE, and pushing `origin` at it would put
-    # the round's fixes on a branch of this repository with the same name — a
-    # different place entirely. This loop drives same-repository branches; saying
-    # so is not the same as silently doing something else.
-    _repo=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRepositoryOwner,headRepository \
-        --jq '(.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")' 2>/dev/null) \
-        || { echo "ABORT: could not read the PR's head repository; refusing to push blind."; return 1; }
-    [[ $_repo = "$OWNER/$REPO" ]] \
-        || { echo "ABORT: PR $PR is from '$_repo', not '$OWNER/$REPO'; this loop does not push to forks."; return 1; }
+    # THE API SAYS WHETHER IT IS A FORK; THIS DOES NOT COMPARE NAMES. Comparing
+    # `headRepositoryOwner/headRepository` with `$OWNER/$REPO` was the first
+    # version and it is wrong on casing: a pinned `git@github.com:Acme/widget.git`
+    # addresses the same repository the API returns as `acme/widget`, and a
+    # case-sensitive test called every such PR a fork and refused every push.
+    # Lower-casing needs a name — `tr`, or a bash 4 expansion this suite's 3.2 job
+    # does not have — so the comparison is removed rather than fixed:
+    # `isCrossRepository` is the same question asked of the thing that knows.
+    case "$_cross" in
+        false) ;;
+        true) echo "ABORT: PR $PR is from a fork; this loop does not push to forks."; return 1 ;;
+        *) echo "ABORT: could not tell whether PR $PR is from a fork (got '$_cross'); refusing to push blind."; return 1 ;;
+    esac
+    # AND `origin` HAS TO BE THE PINNED REPOSITORY, because it is a NAME the
+    # checkout resolves. `remote.origin.pushurl` can send it somewhere else
+    # entirely, and a second checkout can define `origin` as another project — so
+    # the branch and fork checks above would pass while the commit landed in a
+    # repository nobody asked about and the PR stayed unchanged.
+    #
+    # PARSED BY THE ONE PARSER, not by a second copy. `rb_identity` is what turns
+    # a remote into HOST/OWNER/REPO, and a second implementation here is the
+    # duplication this repository has already deleted four times. It runs in a
+    # SUBSHELL with the push URL pinned, so its globals cannot leak back, and the
+    # answer comes out as the subshell's STATUS rather than as three values
+    # serialised through one string — which is the delimiter problem `CLAUDE.md`
+    # records for exactly this parser.
+    _pushurl=$(git remote get-url --push origin 2>/dev/null) \
+        || { echo "ABORT: could not read origin's push URL; refusing to push blind."; return 1; }
+    [ -n "$_pushurl" ] || { echo "ABORT: origin has no push URL; refusing to push blind."; return 1; }
+    #
+    # COMPARED CASE-INSENSITIVELY, because casing is not a different repository:
+    # `git@github.com:Acme/Widget.git` and `acme/widget` address the same thing,
+    # and a fetch URL and a push URL written with different capitalisation are one
+    # operator's inconsistency rather than a redirection. Comparing them exactly
+    # refused every push in that configuration — the same defect this round
+    # removed from the fork check, one level over.
+    #
+    # `shopt` IS SAFE HERE, and that is a fact about this file rather than a
+    # general licence: every helper starts `bash -p`, which imports no functions,
+    # so no builtin in it can be shadowed. That is what #101 and #83 settled. It
+    # is set inside the SUBSHELL, so the option does not outlive the comparison.
+    ( shopt -s nocasematch
+      REVIEW_BUS_REMOTE="$_pushurl"; REVIEW_BUS_OWNER=''; REVIEW_BUS_REPO=''
+      rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
+        || { echo "ABORT: origin pushes to '$_pushurl', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
     _have=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) \
         || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
     [[ $_have = "$_want" ]] \
@@ -231,6 +282,7 @@ rb_push_is_the_prs() {
         || { echo "ABORT: RB_PUSH_REFSPEC is readonly in this shell; the push destination cannot be pinned."; return 1; }
     return 0
 }
+
 # AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
 # than assumed. Guessing wrong here does not fail loudly — it closes the round in
 # the wrong order, which is only visible afterwards.

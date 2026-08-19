@@ -14,9 +14,33 @@
   no review was requested. Two failures from one missing question.
 
   **The destination is named now, rather than checked and then left to
-  configuration.** `git push origin HEAD:refs/heads/<branch>` names the repository
-  and the one ref it may write, so nothing in `push.default`, `branch.<n>.remote`
-  or `remote.<n>.push` can widen it — a branch-name check followed by a bare push
+  configuration.** `git push origin HEAD:refs/heads/<branch>` names the remote and
+  the one ref it may write, so nothing in `push.default`, `branch.<n>.remote` or
+  `remote.<n>.push` can widen it.
+
+  **And `origin` is proved to be the pinned repository**, because it is a NAME the
+  checkout resolves: `remote.origin.pushurl` can send it elsewhere entirely, and a
+  second checkout can define `origin` as another project — so the branch and fork
+  checks would pass while the commit landed in a repository nobody asked about and
+  the PR stayed unchanged. The effective push URL goes through `rb_identity`, the
+  one parser, in a subshell so its globals cannot leak back, and the answer is the
+  subshell's status rather than three values serialised through one string.
+
+  That comparison is case-insensitive: `git@github.com:Acme/Widget.git` and
+  `acme/widget` address the same repository, and comparing them exactly refused
+  every push in that configuration. `shopt -s nocasematch` is safe in a helper for
+  a reason specific to these files — they start `bash -p`, which imports no
+  functions, so no builtin in them can be shadowed, which is what #101 and #83
+  settled — and it is set inside the subshell so the option does not outlive the
+  comparison.
+
+  **Whether the PR is from a fork is asked of the API**, not derived from names.
+  Comparing `headRepositoryOwner/headRepository` with the pinned owner and repo
+  was the first version, and it is wrong on casing in exactly the same way;
+  lower-casing needs a name — `tr`, or a bash 4 expansion the 3.2 job does not
+  have — so the comparison is removed rather than fixed. `isCrossRepository` is
+  the same question asked of the thing that knows, and an answer that is neither
+  `true` nor `false` is a refusal — a branch-name check followed by a bare push
   is a guard over a call that can still go elsewhere, which is the shape this
   repository keeps deleting.
 
@@ -26,14 +50,16 @@
   sites use one refspec computed once, because one of the two being bare is
   exactly the defect.
 
-  Five refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  Eight refusals, each leaving nothing pushed — a different branch, a detached HEAD
   (where a push reaches no PR and the next step would wait for a head that never
   appears), an unreadable answer, an empty one — which is what a 200 with a
   missing field looks like, and why a status check alone is not enough — and a PR
   from a **fork**, where `origin` pointed at a same-named branch would put the
-  round's fixes somewhere else entirely and report success.
+  round's fixes somewhere else entirely and report success; a cross-repository
+  answer that says neither; an `origin` whose push URL is another repository; and
+  a push URL that cannot be read at all.
 
-  Fourteen cases, all failing against the previous gate, including two that
+  Eighteen cases, all failing against the gate they replace, including two that
   assert the push's arguments verbatim — one per mode, since a refspec applied to
   only one site is the same defect halved.
 

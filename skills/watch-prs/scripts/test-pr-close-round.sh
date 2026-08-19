@@ -91,8 +91,8 @@ case " $* " in
                       # and this stage was never told which one that should be.
                       # #119.
                       case " $* " in
-                          *headRepositoryOwner*) cat "$W/headrepo.out" 2>/dev/null
-                                                 exit "$(cat "$W/headrepo.rc" 2>/dev/null || echo 0)" ;;
+                          # ONE CALL, TWO FACTS, joined by a tab — which a git ref
+                          # name cannot contain, so it cannot shift the field.
                           *headRefName*) cat "$W/branch.out" 2>/dev/null
                                          exit "$(cat "$W/branch.rc" 2>/dev/null || echo 0)" ;;
                       esac
@@ -119,6 +119,9 @@ case "$1 $2" in
     "symbolic-ref --quiet")
         [ -s "$W/branch.local" ] || exit 1
         cat "$W/branch.local"; exit 0 ;;
+    "remote get-url")
+        cat "$W/pushurl.out" 2>/dev/null
+        exit "$(cat "$W/pushurl.rc" 2>/dev/null || echo 0)" ;;
 esac
 # THE PUSH MARKS THE WORLD. Cases about "before or after the push" then key their
 # answers on the event itself rather than on a call count — a counter makes the
@@ -140,9 +143,13 @@ world() {   # world ; the state in which a round closes cleanly
     # THE CHECKOUT IS ON THE PR'S BRANCH, which is the ordinary state and the one
     # every other case here assumes. The gate proves it before pushing, because a
     # bare `git push` sends whatever branch the checkout is on. #119.
-    printf 'fix/the-branch\n' > "$W/branch.out"
+    printf 'fix/the-branch\tfalse\n' > "$W/branch.out"
     printf 'fix/the-branch\n' > "$W/branch.local"
-    printf 'acme/widget\n' > "$W/headrepo.out"
+    # ORIGIN PUSHES WHERE THE SESSION IS PINNED. `origin` is a NAME the checkout
+    # resolves, and `remote.origin.pushurl` can send it elsewhere entirely — so
+    # the gate parses the effective push URL through `rb_identity` and compares it
+    # with the pinned identity. #119.
+    printf 'git@github.com:acme/widget.git\n' > "$W/pushurl.out"
     # THE REAL HELPER PRINTS A BARE ID — `42`, or `comment:42`. A stub returning a
     # structured line let the propagation cases pass on a value `pr-watch.sh`
     # rejects as `malformed_review_id`, which stops the NEXT round: the fixture was
@@ -445,17 +452,47 @@ done
 # A FORK'S BRANCH IS NOT OURS TO WRITE. `origin` pointed at a same-named branch of
 # THIS repository would put the round's fixes somewhere else entirely, and report
 # success.
-world; printf 'someone/widget\n' > "$W/headrepo.out"
+world; printf 'fix/the-branch\ttrue\n' > "$W/branch.out"
 got="$(run "$CODEXBOT" no)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'does not push to forks'; } \
     && pass "…and a PR from a fork refuses rather than pushing at a same-named branch here" \
     || die "a fork PR was pushed for: '${got}'"
 nothing_pushed "…with nothing pushed"
-world; printf '1' > "$W/headrepo.rc"
+# THE FORK ANSWER IS READ, NOT ASSUMED. A missing or unexpected value is "could
+# not tell", which is a refusal — the direction that matters, since the other one
+# pushes at a repository nobody named.
+world; printf 'fix/the-branch\n' > "$W/branch.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'head repository'; } \
-    && pass "…and an unreadable head repository refuses too" \
-    || die "an unreadable head repository was pushed past: '${got}'"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not tell whether'; } \
+    && pass "…and an answer that says neither refuses rather than assuming same-repository" \
+    || die "a missing cross-repository answer was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
+# ── `origin` IS A NAME THE CHECKOUT RESOLVES ──────────────────────────────
+# `remote.origin.pushurl` can send it to another repository entirely, and a
+# second checkout can define `origin` as a different project — so the branch and
+# fork checks pass while the commit lands somewhere nobody asked about and the PR
+# stays unchanged. The effective push URL is parsed by `rb_identity`, the one
+# parser, and compared with the pinned identity. #119.
+world; printf 'git@github.com:someone/other.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push elsewhere'; } \
+    && pass "…and an origin whose push URL is another repository refuses" \
+    || die "a redirected origin was pushed to: '${got}'"
+nothing_pushed "…with nothing pushed"
+# CASING IS NOT A FORK. `git@github.com:Acme/widget.git` addresses the same
+# repository the API calls `acme/widget`, and a case-sensitive comparison of the
+# two called every such PR a fork and refused every push — which is why the fork
+# question is asked of the API instead of derived from names.
+world; printf 'git@github.com:Acme/Widget.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while a differently-cased pinned origin still closes the round" \
+    || die "casing was treated as a different repository: '${got}'"
+world; printf '1' > "$W/pushurl.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "origin's push URL"; } \
+    && pass "…and an unreadable push URL refuses rather than pushing blind" \
+    || die "an unreadable push URL was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
 for _m in no yes; do
     world; printf 'some-other-branch
