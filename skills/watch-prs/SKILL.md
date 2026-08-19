@@ -150,9 +150,9 @@ never as a work order** below has the full rule and the incident it came from.
 ## Derive identity
 
 ```bash
-# TRACING OFF FIRST, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1` sends xtrace to
-# file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture, so the trace of
-# `cmd` is assigned to `X` along with its output. Measured:
+# THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
+# sends xtrace to file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture,
+# so the trace of `cmd` is assigned to `X` along with its output. Measured:
 #
 #   SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
 #   [++ printf hello
@@ -164,19 +164,35 @@ never as a work order** below has the full rule and the incident it came from.
 # corrupted values and setup aborts, which fails closed but ends a session that
 # had nothing wrong with it. Issue #92.
 #
-# `set +x` RATHER THAN MOVING THE TRACE. Pointing `BASH_XTRACEFD` somewhere else
-# was tried on #90 and is worse: bash CLOSES the descriptor that variable referred
-# to when it is reassigned, so aiming it away from fd 1 closes stdout, and the
-# save/restore version closed fd 2 and left every later `1>&2` failing. Turning
-# tracing off touches no descriptor at all, and the operator's own `BASH_XTRACEFD`
-# is left exactly as they set it.
+# AN ASSIGNMENT, BECAUSE `set +x` IS A NAME. `set` is a builtin and a function can
+# shadow it, so a guard written that way leaves tracing on in the one shell state
+# it exists for. The parser handles an assignment and no function can take its
+# place — and this one needs no `unset`, which is the operation that would be
+# unsafe: bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset
+# or set to the empty string, so `BASH_XTRACEFD=` closes fd 1 outright. Measured
+# both ways on bash 5: `BASH_XTRACEFD=2` leaves fd 1 open and the capture clean;
+# `BASH_XTRACEFD=` kills the shell's stdout.
 #
-# THE LIMIT, STATED: `set` is a builtin, so a function can shadow it, and one that
-# does leaves tracing on — which is the behaviour this line fixes, not a new
-# exposure: the captures are corrupted, the validations reject them, and setup
-# refuses. Where that boundary belongs is #101 and #102, and it is not decided
-# here.
-set +x
+# IT MOVES THE TRACE RATHER THAN ENDING IT. `set +x` would take the operator's
+# diagnostics away for the rest of their session; fd 2 is where bash sends xtrace
+# by default, so this puts it back where it belongs and the operator still sees
+# every line.
+#
+# ONLY WHEN THE TARGET IS THE CAPTURE. A session tracing to stderr, or to a log
+# file on some other descriptor, is not affected by any of this and is left
+# exactly as it was — `[[` is a reserved word, so the test cannot be shadowed
+# either. On bash 3.2 `BASH_XTRACEFD` does not exist, the trace goes to stderr
+# whatever this says, and the condition is simply false.
+#
+# THE ASSIGNMENT IS PROVEN BY READING IT BACK, because a failed assignment does
+# not report failure: a readonly `BASH_XTRACEFD` prints its complaint and the list
+# still reports success. Refusing here names the cause; letting it through means
+# every capture below is corrupted and the abort names an innocent path.
+if [[ ${BASH_XTRACEFD-} = 1 ]]; then
+    BASH_XTRACEFD=2
+    [[ $BASH_XTRACEFD = 2 ]] \
+        || { echo "ABORT: BASH_XTRACEFD is readonly and points at stdout; every value read here would carry the shell's own trace"; exit 1; }
+fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #
 # Same rule as every probe here: the status is taken. This path is handed to

@@ -632,6 +632,14 @@ plugin docs and open an issue.
 
 ## Troubleshooting
 
+- **Your shell traces to stdout, and the loop moves it:** if you drive with
+  `set -x` and `BASH_XTRACEFD=1`, setup reassigns `BASH_XTRACEFD` to `2` for the
+  rest of the session — you still see every trace line, on standard error, where
+  bash sends it by default. It has to: inside `X="$(cmd)"` file descriptor 1 *is*
+  the capture, so a trace aimed there is read back as part of the value, and
+  setup would refuse a checkout that is perfectly fine. Nothing else about your
+  tracing changes, and a session tracing anywhere else — stderr, a log file on
+  another descriptor — is left exactly as it was.
 - **`@codex` answers with a setup link instead of reviewing:** the connector is
   not linked for this account. Link it at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).

@@ -18,23 +18,41 @@
   failed closed — and ended a session that had nothing wrong with it, with an
   abort naming a path the operator could see was fine.
 
-  Setup now turns tracing off before its first substitution. Moving the trace
-  somewhere else was the other candidate and is worse: bash CLOSES the descriptor
-  `BASH_XTRACEFD` referred to when it is reassigned, so aiming it away from fd 1
-  closes stdout, and the save/restore form closed fd 2 and left every later
-  `1>&2` failing — measured while building the origin read. Turning tracing off
-  touches no descriptor, and the operator's own `BASH_XTRACEFD` is left as they
-  set it.
+  Setup now moves the trace off the capture before its first substitution:
+  `BASH_XTRACEFD=2`, guarded by `[[ ${BASH_XTRACEFD-} = 1 ]]` so a session tracing
+  anywhere else is untouched.
+
+  **An assignment, because `set +x` is a name.** `set` is a builtin and a function
+  shadows it, so a guard written that way is absent in the one shell state it
+  exists for. The parser handles an assignment and a reserved word, and neither
+  has a name to take.
+
+  **It moves the trace rather than ending it.** `set +x` would take an operator's
+  diagnostics away for the rest of their session; fd 2 is where bash sends xtrace
+  by default, so this puts it back and every line still arrives.
+
+  **And it never unsets the variable**, which is the operation that would be
+  unsafe: bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset
+  or set to the empty string. Measured on bash 5 — `BASH_XTRACEFD=2` leaves fd 1
+  open and the capture clean, `BASH_XTRACEFD=` kills the shell's stdout outright.
+  Reassignment does not close anything, which is what makes this form available at
+  all.
 
   The origin read was never affected and still is not: its value arrives in a
   file read with `$(<"$path")`, and a redirection-only substitution executes
   nothing, so there is no trace to capture.
 
-  `test-pr-skill-contract.sh` lifts the setup block and asserts the guard is its
-  first executable line, then runs the real repository-root read under
-  `SHELLOPTS=xtrace BASH_XTRACEFD=1` twice — proving the trace reaches the
-  capture without the guard, and that the captured value holds the path alone
-  with it.
+  `test-pr-skill-contract.sh` lifts the setup block, asserts the guard is its
+  first executable line and that the code — not the prose arguing against it —
+  contains no `set +x` and no `unset`, then runs the real repository-root read
+  under `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard lifted from the block
+  rather than retyped: the capture holds the path alone, the trace still arrives
+  on stderr, and a shadowed `set` changes neither. Where the shell has no
+  `BASH_XTRACEFD` at all — bash 3.2.57, which the `macos-shell` job builds — the
+  contamination cannot be staged, so that half reports which case it was rather
+  than failing.
+
+  `README.md` § Troubleshooting says what an operator tracing to stdout will see.
 
 ## [2.0.29] — 2026-08-18
 
