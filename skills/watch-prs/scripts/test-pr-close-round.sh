@@ -85,7 +85,16 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    # SEQUENCED, because the head MOVING is the whole subject of
+    *" pr view "*)    # WHICH BRANCH THE PR IS FOR is a different question from
+                      # which head it has, and the gate asks it before every push:
+                      # a bare `git push` sends whatever branch the checkout is on,
+                      # and this stage was never told which one that should be.
+                      # #119.
+                      case " $* " in
+                          *headRefName*) cat "$W/branch.out" 2>/dev/null
+                                         exit "$(cat "$W/branch.rc" 2>/dev/null || echo 0)" ;;
+                      esac
+                      # SEQUENCED, because the head MOVING is the whole subject of
                       # some cases: the pre-push read and the post-push read are
                       # the same call to this stub and must be able to differ.
                       if [ ! -f "$W/pushed" ] && [ -f "$W/head.before.out" ]
@@ -102,6 +111,12 @@ cat > "$TMP/bin/git" <<'GITSH'
 printf 'git %s\n' "$*" >> "$CALLS"
 case "$1 $2" in
     "rev-parse HEAD") cat "$W/local.out" 2>/dev/null; exit 0 ;;
+    # WHICH BRANCH THIS CHECKOUT IS ON. Empty with a non-zero status is a DETACHED
+    # HEAD, which the gate must refuse: a push from one reaches no PR, and the
+    # next step would wait for a head that never appears. #119.
+    "symbolic-ref --quiet")
+        [ -s "$W/branch.local" ] || exit 1
+        cat "$W/branch.local"; exit 0 ;;
 esac
 # THE PUSH MARKS THE WORLD. Cases about "before or after the push" then key their
 # answers on the event itself rather than on a call count — a counter makes the
@@ -116,6 +131,11 @@ world() {   # world ; the state in which a round closes cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/local.out"
     printf '%s\n' "$HEAD40" > "$W/head.out"
+    # THE CHECKOUT IS ON THE PR'S BRANCH, which is the ordinary state and the one
+    # every other case here assumes. The gate proves it before pushing, because a
+    # bare `git push` sends whatever branch the checkout is on. #119.
+    printf 'fix/the-branch\n' > "$W/branch.out"
+    printf 'fix/the-branch\n' > "$W/branch.local"
     # THE REAL HELPER PRINTS A BARE ID — `42`, or `comment:42`. A stub returning a
     # structured line let the propagation cases pass on a value `pr-watch.sh`
     # rejects as `malformed_review_id`, which stops the NEXT round: the fixture was
@@ -377,9 +397,56 @@ got="$(run "$COPILOTBOT" yes)"; rc="${got%%|*}"
 # whenever anything else did, and stop being about the pre-push read at all.
 world; printf 'the round summary\n' > "$TMP/summary.md"
 stage gate 7 "$COPILOTBOT" "$TMP/summary.md" yes >/dev/null
-[ "$(grep -c 'gh pr view' "$TMP/calls")" -eq 1 ] \
+# THE HEAD LOOKUPS, NOT EVERY `pr view`. The gate also asks which BRANCH the PR
+# is for before it pushes — a different question, made for a different reason —
+# so counting every `pr view` would move whenever that one did and stop being
+# about the pre-push head read at all.
+_hv="$(grep -c 'gh pr view.*headRefOid' "$TMP/calls" || true)"
+[ "$_hv" -eq 1 ] \
     && pass "…and the gate reads the head once, not twice, since the pre-push one is unused" \
-    || die "a Copilot gate made $(grep -c 'gh pr view' "$TMP/calls") head lookups"
+    || die "a Copilot gate made $_hv head lookups"
+
+# ── THE GATE PUSHES THE PR'S BRANCH, OR NOTHING ───────────────────────────
+#
+# A bare `git push` sends whatever branch the checkout is on, and this stage is
+# given a PR number and a reviewer — it was never told which branch that PR is
+# for, and never asked. Driving #118's round from a checkout sitting on `main`,
+# because a `git checkout` had failed and the shell stayed put, it pushed the
+# DEFAULT BRANCH: an unreviewed commit reached `main`, and the round was lost
+# besides, since the CI gate then waited for checks on a head the PR did not have.
+# #119.
+#
+# NOTHING PUSHED IS THE ASSERTION, in every refusal. A message alone would be
+# satisfied by a gate that complains and pushes anyway.
+nothing_pushed() {   # nothing_pushed <label>
+    [ -f "$W/pushed" ]         && die "$1 — but it pushed anyway"         || pass "$1"
+}
+for _m in no yes; do
+    world; printf 'some-other-branch
+' > "$W/branch.local"
+    got="$(run "$CODEXBOT" "$_m")"
+    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push the wrong branch'; }         && pass "a checkout on another branch refuses ($_m mode)"         || die "the wrong branch was pushed in $_m mode: '${got}'"
+    nothing_pushed "…with nothing pushed"
+done
+# A DETACHED HEAD HAS NO BRANCH, and a push from one reaches no PR — so the next
+# step would wait for a head that never appears. The stub reports that as an empty
+# answer with a non-zero status, which is what `git symbolic-ref` does.
+world; : > "$W/branch.local"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'detached HEAD'; }     && pass "…and a detached HEAD refuses rather than pushing nothing useful"     || die "a detached HEAD was pushed from: '${got}'"
+nothing_pushed "…with nothing pushed"
+# AN UNREADABLE ANSWER IS A REFUSAL TOO. "Could not ask which branch" is not
+# "any branch will do", and this is the one that decides where a commit lands.
+world; printf '1' > "$W/branch.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push blind'; }     && pass "…and an unreadable head branch refuses rather than pushing blind"     || die "an unreadable head branch was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
+# AND AN EMPTY ONE, which a 200 with a missing field produces — the same shape as
+# a successful read, and the reason a status check alone is not enough.
+world; : > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no head branch'; }     && pass "…and an empty one, which a 200 with a missing field looks like"     || die "an empty head branch was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
 
 # THE PASS THE PUSH STARTED CAN TIME OUT, and that stops the round: its result
 # would otherwise answer the request made after it.

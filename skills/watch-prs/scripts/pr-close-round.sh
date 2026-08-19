@@ -175,6 +175,33 @@ case "$WHO" in
     *) echo "ABORT: '$WHO' is not a reviewer this loop drives (expected $RB_CODEX_BOT or $RB_COPILOT_BOT)"; exit 1 ;;
 esac
 [ -n "$SUMMARY_FILE" ] || { echo "ABORT: a summary file is required"; exit 1; }
+# WHAT `git push` WOULD PUSH IS NOT THIS PR UNLESS SOMEBODY CHECKS. A bare
+# `git push` sends whatever branch the checkout happens to be on, and this stage
+# is given a PR number and a reviewer — it was never told which branch that PR is
+# for, and never asked.
+#
+# IT PUSHED `main`. Driving #118's round from a checkout sitting on `main` — a
+# `git checkout` had failed because a second worktree held the feature branch, so
+# the shell stayed put — the gate pushed the default branch. An unreviewed commit
+# went straight to `main`, and the round was lost besides: the CI gate then waited
+# for checks on a head the PR still did not have. Two failures from one missing
+# question. #119.
+#
+# ASKED OF THE PR, ANSWERED FROM THE CHECKOUT, AND COMPARED WITH A RESERVED WORD.
+# A DETACHED HEAD HAS NO BRANCH and is refused too: `git push` from one pushes
+# nothing useful, and "nothing useful" is not a state to guess about when the next
+# step waits for a head to appear.
+rb_push_is_the_prs() {
+    local _want _have
+    _want=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName --jq '.headRefName' 2>/dev/null) \
+        || { echo "ABORT: could not read the PR's head branch; refusing to push blind."; return 1; }
+    [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
+    _have=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) \
+        || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
+    [[ $_have = "$_want" ]] \
+        || { echo "ABORT: this checkout is on '$_have' and PR $PR is for '$_want'; refusing to push the wrong branch."; return 1; }
+    return 0
+}
 # AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
 # than assumed. Guessing wrong here does not fail loudly — it closes the round in
 # the wrong order, which is only visible afterwards.
@@ -323,6 +350,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     # Nothing is queued until the comment is posted, so the push can be proven
     # green first and the threads answered afterwards, with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
+    rb_push_is_the_prs || exit 1
     git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
@@ -364,6 +392,7 @@ if [ "$WHO" != "$COPILOT_BOT" ]; then
     PUSH_BASE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the review id before the push."; exit 1; }
 fi
+rb_push_is_the_prs || exit 1
 git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 

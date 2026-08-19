@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.38] — 2026-08-20
+
+- **The round gate pushed whatever branch the checkout was on.** `git push` with
+  no argument sends the current branch, and the stage is given a PR number and a
+  reviewer — it was never told which branch that PR is for, and never asked.
+
+  It pushed `main`. Driving a round from a checkout that was sitting on the
+  default branch — a `git checkout` had failed because a second worktree held the
+  feature branch, so the shell stayed put — the gate pushed `main`, putting an
+  unreviewed commit on it. The round was lost as well: the CI gate then waited for
+  checks on a head the PR still did not have, so the summary was never posted and
+  no review was requested. Two failures from one missing question.
+
+  Both push sites now prove the branch first: the PR's `headRefName` is read, the
+  checkout's branch is read with `git symbolic-ref`, and they must match. Four
+  refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  (where a push reaches no PR and the next step would wait for a head that never
+  appears), an unreadable answer, and an empty one, which is what a 200 with a
+  missing field looks like and why a status check alone is not enough.
+
+  Ten cases, all failing against the previous gate. The Copilot head-lookup count
+  now counts `headRefOid` reads specifically, since the branch read is a different
+  question asked for a different reason and would otherwise move that number.
+
 ## [2.0.37] — 2026-08-19
 
 - **The records now carry enough to order a revocation against a verdict**, which
