@@ -98,16 +98,15 @@ that block is judged against both:
   looking at what comes back, not by comparing `BASH_XTRACEFD` to a number, since
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a descriptor duplicated
   from stdout is not `1` at all. That probe runs inside a capture, so it must be
-  an assignment and not a command, and it must look for a marker only xtrace could
-  have written — its own `PS4`, carrying a value no command in the substitution
-  contains. Anything else writing to stdout there is otherwise indistinguishable
-  from a trace that arrived: a shadowed `:`, a `DEBUG` trap inherited under
-  `set -T`, and a trap echoing `$BASH_COMMAND` reproduces the probe's own text
-  exactly. All three moved a destination the operator had chosen. No content test
-  settles it outright, since an inherited trap can print any bytes at all — so the
-  block also SAVES the target before the probe and sets it back after its last
-  substitution, on both paths out, which bounds a wrong conclusion to the block
-  instead of leaving it in the session. It moves the destination rather than disabling
+  an assignment and not a command. Do NOT ask it to identify the trace by its
+  content: a shadowed `:`, a `DEBUG` trap inherited under `set -T`, one echoing
+  `$BASH_COMMAND` and one printing `$$` can each put anything into that capture, so
+  no marker proves provenance — and every sharper marker adds a way to MISS, which
+  is the harmful direction, since a miss leaves the trace on stdout and aborts a
+  valid checkout. The two directions are not symmetric. What makes the loose test
+  safe is that the block SAVES the target before the probe and sets it back after
+  its last substitution, on both paths out, and moves nothing at all if the save
+  did not take. Removing either of those is a finding. It moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
   closes the shell's stdout. `set +x` is wrong here twice over: it takes the

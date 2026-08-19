@@ -3817,148 +3817,95 @@ else
             && pass "…and BASH_XTRACEFD='$_tr_spell' is caught as the descriptor it is" \
             || die "BASH_XTRACEFD='$_tr_spell' left the capture corrupted ('$_tr_alt_v')"
     done
-    # AND A PRINTING COMMAND CANNOT MAKE THE PROBE FIRE. The probe runs inside a
-    # capture, so anything that writes to stdout there looks exactly like a trace
-    # that arrived. `$( : )` was the first spelling and a driving shell with
-    # `:() { printf marker; }` moved a destination the operator had chosen; an
-    # assignment has no name to take and no output of its own.
-    _tr_shadowed_probe="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS \
-        CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -x
-            :() { printf marker; }
-            printf() { builtin printf marker; }
-            echo() { builtin echo marker; }
-            '"$_tr_guard"'
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_shadowed_probe=""
-    # THE PROBE'S OWN REACH: the same shell with `$( : )` in that position must
-    # move the target, or the case above passes against a shell where nothing
-    # could have fired.
-    _tr_colon="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -x
-            :() { builtin printf marker; }
-            if [[ -n "$( : )" ]]; then BASH_XTRACEFD=2; fi
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_colon=""
-    case "$_tr_colon" in
-        *'FD=[2]'*) pass "…where a ':' probe in the same shell does move it" ;;
-        *) die "a printing ':' did not move the target here; the case below proves nothing ('$_tr_colon')" ;;
-    esac
-    case "$_tr_shadowed_probe" in
-        *'FD=[7]'*) pass "…and a printing ':' cannot make the shipped probe fire" ;;
-        *) die "a shadowed command moved a trace target that was never near a capture ('$_tr_shadowed_probe')" ;;
-    esac
-    # AN INHERITED `DEBUG` TRAP IS NOT A TRACE THAT ARRIVED. Under `set -T` the
-    # trap is inherited by the substitution's subshell, so a trap that prints
-    # lands in the capture while xtrace itself is still going to fd 7. That
-    # session's captures are corrupted and this guard is not the cure — setup
-    # refuses further down — but it must not change the destination the operator
-    # chose on the way past.
-    _tr_debug="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -T
-            trap "builtin printf marker" DEBUG
-            set -x
-            '"$_tr_guard"'
-            trap - DEBUG
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_debug=""
-    case "$_tr_debug" in
-        *'FD=[7]'*) pass "…and an inherited DEBUG trap cannot make it fire" ;;
-        *) die "an inherited DEBUG trap moved a trace target that was never near a capture ('$_tr_debug')" ;;
-    esac
-    # A TRAP THAT ECHOES `$BASH_COMMAND` REPRODUCES THE PROBE EXACTLY, which is
-    # why matching the probe's own text was not enough either. What it cannot
-    # produce is a string none of the commands in that substitution contains.
-    _tr_cmdtrap="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -T
-            trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG
-            set -x
-            '"$_tr_guard"'
-            trap - DEBUG
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_cmdtrap=""
-    # ITS REACH: the same shell with the previous spelling — matching the probe's
-    # own text — must move the target, or this case passes because the trap never
-    # echoed anything.
-    _tr_cmdtrap_reach="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -T
-            trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG
-            set -x
-            if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then BASH_XTRACEFD=2; fi
-            trap - DEBUG
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_cmdtrap_reach=""
-    case "$_tr_cmdtrap_reach" in
-        *'FD=[2]'*) pass "…where matching the probe's own text does move it" ;;
-        *) die "the command-logging trap did not reach the capture here; the case below proves nothing ('$_tr_cmdtrap_reach')" ;;
-    esac
-    case "$_tr_cmdtrap" in
-        *'FD=[7]'*) pass "…and a trap echoing \$BASH_COMMAND cannot make it fire" ;;
-        *) die "a command-logging DEBUG trap moved a trace target that was never near a capture ('$_tr_cmdtrap')" ;;
-    esac
-    # …AND THE OPERATOR'S OWN `PS4` IS NOT TOUCHED. The probe sets one to give
-    # xtrace a signature; setting it in the driving shell would change the format
-    # of every trace line the operator sees for the rest of the session.
-    _tr_ps4="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS BASH_XTRACEFD=1 bash -c '
-            set -x
-            '"$_tr_guard"'
-            set +x
-            builtin printf "PS4=[%s]\n" "$PS4"' 2>/dev/null)" || _tr_ps4=""
-    case "$_tr_ps4" in
-        *'PS4=[+ ]'*) pass "…and the driving shell's PS4 is left as it was" ;;
-        *) die "the probe changed the session's PS4 ('$_tr_ps4')" ;;
-    esac
-    # THE REACH PROBE FOR IT: the same shell with the non-empty test in that
-    # position does move the target, so the case above is not passing because the
-    # trap never printed.
-    _tr_debug_reach="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
-            exec 7>/dev/null
-            BASH_XTRACEFD=7
-            set -T
-            trap "builtin printf marker" DEBUG
-            set -x
-            if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then BASH_XTRACEFD=2; fi
-            trap - DEBUG
-            set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_debug_reach=""
-    case "$_tr_debug_reach" in
-        *'FD=[2]'*) pass "…where a non-empty test in the same shell does move it" ;;
-        *) die "the DEBUG trap did not reach the capture here; the case above proves nothing ('$_tr_debug_reach')" ;;
-    esac
-    # A TRAP CAN PRINT THE PID TOO, so no test on the captured bytes settles it —
-    # what settles it is that the block puts the target back. The restore runs on
-    # both paths out of setup, after every capture, so a probe that concluded
-    # wrongly leaves no residue in the operator's session.
+    # ── WHAT A HOSTILE SHELL CAN PUT IN THAT CAPTURE, AND WHY IT NO LONGER
+    # DECIDES ANYTHING. The probe runs inside a substitution, so a shadowed
+    # command or an inherited `DEBUG` trap can write into it and look exactly
+    # like a trace that arrived. Marker schemes were tried against each — the
+    # probe's own text, then a pid delivered through `PS4` — and each was forged
+    # by the next trap, while every sharper marker added a way to MISS.
+    #
+    # So the invariant asserted here is not "the probe concludes correctly". It
+    # is that the SESSION'S TRACE TARGET IS AS IT WAS, whatever it concluded,
+    # which is what the restore buys. Each case runs the guard AND the restore,
+    # exactly as the block does.
     _tr_restore="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n $RB_XTRACE_SAVED \]\]; then$/,/^fi$/p')"
     case "$_tr_restore" in
         *'BASH_XTRACEFD=$RB_XTRACE_SAVED'*) pass "…and the block restores the saved target" ;;
         *) die "the setup block never restores the trace target: '$_tr_restore'" ;;
     esac
-    _tr_pidtrap="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+    tr_hostile() {   # tr_hostile <label> <shell-preamble>
+        local _label="$1" _pre="$2" _out
+        _out="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+                exec 7>/dev/null
+                BASH_XTRACEFD=7
+                '"$_pre"'
+                set -x
+                '"$_tr_guard"'
+                '"$_tr_restore"'
+                trap - DEBUG 2>/dev/null
+                set +x
+                builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _out=""
+        case "$_out" in
+            *'FD=[7]'*) pass "$_label" ;;
+            *) die "$_label — the session's trace target moved ('$_out')" ;;
+        esac
+    }
+    tr_hostile "…a printing ':' leaves the session's target as it was" \
+        ':() { builtin printf marker; }'
+    tr_hostile "…and a DEBUG trap printing a marker does too" \
+        'set -T; trap "builtin printf marker" DEBUG'
+    tr_hostile "…and one echoing \$BASH_COMMAND, which reproduces the probe exactly" \
+        'set -T; trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG'
+    tr_hostile "…and one printing the pid, which no marker scheme can outrun" \
+        'set -T; trap "builtin printf \"%s:\" \"\$\$\"" DEBUG'
+    tr_hostile "…and a readonly PS4, which made the marker schemes blind" \
+        'readonly PS4="+ "'
+    # AND UNDER A READONLY `PS4` THE GUARD STILL PROTECTS THE CAPTURE, which is
+    # the direction that actually matters: the pid scheme went blind there,
+    # leaving the trace on stdout and aborting a valid checkout.
+    _tr_ropstr="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            readonly PS4="+ "
+            '"$_tr_guard"'
+            '"$_tr_block"'
+            printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_ropstr=""
+    _tr_ropstr_v="$(printf '%s\n' "$_tr_ropstr" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+    { [ "$_tr_ropstr_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_ropstr_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+        && pass "…while a readonly PS4 no longer blinds it to a trace on stdout" \
+        || die "a readonly PS4 left the capture corrupted ('$_tr_ropstr_v')"
+    # THE RESTORE IS WHAT DOES THAT, and this is the probe for it: the same
+    # hostile shell with the guard alone moves the target, so the five cases
+    # above are not passing because nothing could have moved it.
+    _tr_noresto="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
             exec 7>/dev/null
             BASH_XTRACEFD=7
             set -T
-            trap "builtin printf \"%s:\" \"\$\$\"" DEBUG
+            trap "builtin printf marker" DEBUG
             set -x
             '"$_tr_guard"'
-            '"$_tr_restore"'
             trap - DEBUG
             set +x
-            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_pidtrap=""
-    case "$_tr_pidtrap" in
-        *'FD=[7]'*) pass "…so even a trap printing the pid leaves the session's target as it was" ;;
-        *) die "a pid-printing DEBUG trap left the trace target moved ('$_tr_pidtrap')" ;;
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_noresto=""
+    case "$_tr_noresto" in
+        *'FD=[2]'*) pass "…where the guard alone does move it, so the restore is what holds it" ;;
+        *) die "the guard alone did not move the target here; the cases above prove nothing ('$_tr_noresto')" ;;
     esac
+    # A READONLY SAVE MOVES NOTHING. The assignment fails silently — assignments
+    # do not report failure — so the restore would skip and the move would be
+    # permanent. The guard tests that the save took before it moves anything, so
+    # this shell comes out exactly as it went in.
+    _tr_rosave="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            readonly RB_XTRACE_SAVED=
+            export BASH_XTRACEFD=1
+            set -x
+            '"$_tr_guard"'
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_rosave=""
+    case "$_tr_rosave" in
+        *'FD=[1]'*) pass "…and a readonly save moves nothing, so there is nothing to restore" ;;
+        *) die "the target moved with no usable save ('$_tr_rosave')" ;;
+    esac
+
     # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
     # with the `x` option off contaminates nothing, and the operator may have set
     # it ready for a later `set -x`; moving it would redirect diagnostics they had

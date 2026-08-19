@@ -234,17 +234,19 @@ never as a work order** below has the full rule and the incident it came from.
 # "$BASH_COMMAND"' DEBUG` prints exactly the probe's text, so matching that
 # literal cannot establish where it came from.
 #
-# SO THE PROBE SETS ITS OWN `PS4`, INSIDE THE SUBSHELL. Xtrace prefixes every line
-# with `PS4`; nothing else does. `PS4` is expanded when the line is PRINTED, so
-# `'$$:'` — single-quoted, so the assignment stores the two characters rather than
-# the number — reaches the capture as this shell's pid. The command TEXT of that
-# assignment is `PS4='$$:'`, which is what a `$BASH_COMMAND` trap can echo, and it
-# contains no pid. A trap can reproduce any command in that substitution; it
-# cannot produce a value none of them holds.
+# SO THE TEST IS "DID ANYTHING COME BACK", AND THE RESTORE BELOW IS WHAT MAKES
+# THAT SAFE. Marker schemes were tried — the probe's own text, then a pid
+# delivered through `PS4` — and each was forged by the next trap: `$BASH_COMMAND`
+# reproduces the command exactly, and `printf "%s:" "$$"` produces the pid. A trap
+# can emit any bytes, so no content test can prove provenance, and each sharper
+# marker added a way to MISS: an operator with `readonly PS4` made the pid scheme
+# blind, which is the harmful direction — the trace stays on stdout, every capture
+# is corrupted, and a perfectly good checkout is refused.
 #
-# `PS4` IS SET IN THE SUBSHELL AND NOWHERE ELSE, so the operator's own trace
-# format is unchanged the moment the capture closes. Measured: `PS4` reads back as
-# `+ ` afterwards.
+# THE TWO DIRECTIONS ARE NOT SYMMETRIC, and that is the whole argument. A false
+# positive moves the trace for the length of this block and the restore puts it
+# back. A false negative aborts the session. So the test is the one that cannot
+# miss, and the cost of its extra firing is bounded rather than argued away.
 #
 # WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
 # and must not pretend to be: a `DEBUG` trap that prints corrupts every capture in
@@ -262,8 +264,14 @@ never as a work order** below has the full rule and the incident it came from.
 # AN EMPTY SAVE IS LEFT ALONE, and that is not an omission: `BASH_XTRACEFD` unset
 # means xtrace goes to stderr, which is what `2` does, so restoring by UNSETTING
 # would only close the descriptor. This value is set again rather than removed.
+# THE SAVE IS PROVEN BEFORE ANYTHING IS MOVED. A driving shell with a readonly
+# `RB_XTRACE_SAVED` makes the assignment fail silently — assignments do not report
+# failure — and the restore below would then skip, leaving the move permanent. So
+# the move is conditional on the save having taken: where it did not, this block
+# does nothing at all and the session behaves exactly as it did before this guard
+# existed. No refusal, and so no dependence on `exit`.
 RB_XTRACE_SAVED="${BASH_XTRACEFD-}"
-if [[ "$( PS4='$$:'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]; then
+if [[ $RB_XTRACE_SAVED = "${BASH_XTRACEFD-}" ]] && [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.

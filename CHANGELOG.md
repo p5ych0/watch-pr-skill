@@ -19,34 +19,35 @@
   abort naming a path the operator could see was fine.
 
   Setup now moves the trace off the capture before its first substitution:
-  `BASH_XTRACEFD=2`, guarded by
-  `[[ "$( PS4='$$:'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]` — a capture that comes back
-  holding something only this shell's xtrace could have written there, which is
-  the property itself rather than a proxy for it.
+  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( RB_TRACE_PROBE=1 )" ]]` — a capture
+  that comes back with anything in it at all, run before the first substitution
+  that matters and undone before the block ends.
 
-  Every part of that was paid for. The probe is an **assignment** because every
-  command is a name: `$( : )` was the first spelling, and a shell with
-  `:() { printf marker; }` made the capture non-empty through the function's own
-  output. The test looks for a **marker rather than for output**, because a
-  `DEBUG` trap under `set -T` is inherited by the substitution's subshell and a
-  trap that prints lands in the capture while xtrace is still going somewhere else
-  entirely. And the marker is the **pid, delivered through `PS4`**, because
-  `trap 'printf "%s\n" "$BASH_COMMAND"' DEBUG` echoes the probe's own text
-  exactly — so matching that text could not establish where it came from. Xtrace
-  prefixes each line with `PS4` and nothing else does; `PS4` is expanded when the
-  line is printed, so the single-quoted `'$$:'` stores two characters and arrives
-  as a number. A trap can reproduce any command in that substitution; it cannot
-  produce a value none of them holds. `PS4` is set inside the subshell, so the
-  operator's own trace format is unchanged.
+  The probe is an **assignment** because every command is a name: `$( : )` was the
+  first spelling, and a shell with `:() { printf marker; }` made the capture
+  non-empty through the function's own output.
 
-  **And whatever the probe concludes is undone before the block ends.** That is
-  what closes the class rather than the case: an inherited `DEBUG` trap runs inside
-  the substitution and can print any bytes, the pid included, so no test on what
-  comes back can prove the trace put it there. A trap that prints corrupts every
-  capture in the block on its own, which setup refuses further down — so the
-  residue of a mis-fire was never a wrong answer, it was a trace target the
-  operator did not choose. The value is saved before the probe and set back after
-  the last substitution, on both paths out.
+  **Marker schemes were tried and removed.** Matching the probe's own text, then a
+  pid delivered through `PS4`: a `DEBUG` trap inherited under `set -T` runs inside
+  the substitution and forged each in turn — `$BASH_COMMAND` reproduces the
+  command exactly, and `printf "%s:" "$$"` produces the pid. A trap can emit any
+  bytes, so no content test can prove provenance. Each sharper marker also added a
+  way to MISS: an operator with `readonly PS4` made the pid scheme blind, and a
+  miss is the harmful direction — the trace stays on stdout, every capture is
+  corrupted, and a perfectly good checkout is refused.
+
+  **The two directions are not symmetric, and that is the whole design.** A false
+  positive moves the trace for the length of this block and the restore puts it
+  back. A false negative aborts the session. So the test is the one that cannot
+  miss, and the cost of its extra firing is bounded rather than argued away:
+  `BASH_XTRACEFD` is saved before the probe and set back after the last
+  substitution, on both paths out.
+
+  **The move is conditional on the save having taken.** A driving shell with a
+  readonly `RB_XTRACE_SAVED` makes that assignment fail silently, and the restore
+  would then skip, leaving the move permanent — so where the save did not take,
+  the block does nothing and the session behaves exactly as it did before the
+  guard existed. No refusal, and so no dependence on `exit`.
 
   An empty save is left alone rather than unset: `BASH_XTRACEFD` unset means xtrace
   goes to stderr, which is what `2` does, and unsetting it would close that
@@ -91,20 +92,31 @@
   file read with `$(<"$path")`, and a redirection-only substitution executes
   nothing, so there is no trace to capture.
 
-  `test-pr-skill-contract.sh` lifts the setup block, asserts the guard is its
-  first executable line and that the code — not the prose arguing against it —
-  contains no `set +x` and no `unset`, then runs the real repository-root read
-  under `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard lifted from the block
-  rather than retyped: the capture holds the path alone, the trace still arrives
-  on stderr, and a shadowed `set` changes neither. Where the shell has no
-  `BASH_XTRACEFD` at all — bash 3.2.57, which the `macos-shell` job builds — the
-  contamination cannot be staged, so that half reports which case it was rather
-  than failing.
+  `test-pr-skill-contract.sh` lifts the setup block, asserts the save is its first
+  executable line and that the code — not the prose arguing against it — contains
+  no `set +x` and no `unset`, then runs the real repository-root read under
+  `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard and the restore lifted from
+  the block rather than retyped. The capture holds the path alone under `1`, `01`,
+  `+1`, ` 1` and a readonly `PS4`; the trace still arrives on stderr; the driving
+  shell's stdout survives, with `BASH_XTRACEFD=` asserted to close it so that case
+  is not vacuous; and a shadowed `set` changes nothing.
+
+  The hostile-shell cases assert the invariant that survived the rounds — the
+  SESSION'S trace target is as it was, whatever the probe concluded. A printing
+  `:`, a marker `DEBUG` trap, one echoing `$BASH_COMMAND`, one printing the pid,
+  and a readonly `PS4` all leave it on fd 7; the same shell with the guard and no
+  restore moves it, so the restore is demonstrably what holds it; and a readonly
+  save moves nothing at all.
+
+  Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
+  job builds — the contamination cannot be staged, so that half reports which case
+  it was rather than failing.
 
   `README.md` § Troubleshooting says what an operator tracing to stdout will see,
   and both reviewer contracts state the invariant so a later change cannot remove
-  it with a clean review: the guard must stay above the first substitution, and it
-  must not grow into disabling tracing or unsetting the variable.
+  it with a clean review: the guard must stay above the first substitution, it must
+  not grow into disabling tracing or unsetting the variable, and the save and
+  restore around it are what bound a wrong conclusion to the block.
 
 ## [2.0.29] — 2026-08-18
 
