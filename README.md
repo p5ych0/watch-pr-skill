@@ -647,7 +647,8 @@ plugin docs and open an issue.
   it. And nothing about your tracing outlives that startup: the previous value is
   saved before the check and put back before setup reports its result, so a check
   that concludes wrongly — an inherited `DEBUG` trap can print anything a trace
-  could — leaves your session as it found it.
+  could — leaves your session as it found it. If that save cannot be made at all,
+  nothing is moved either.
 - **`@codex` answers with a setup link instead of reviewing:** the connector is
   not linked for this account. Link it at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).
