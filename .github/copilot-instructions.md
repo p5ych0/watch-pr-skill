@@ -94,8 +94,9 @@ that block is judged against both:
   nothing wrong with it. A change that removes that guard, or that adds a
   substitution above it, is a regression.
 - **And nothing more than that may change.** The guard fires only where a trace
-  would actually reach a capture — it decides by running a command inside one and
-  looking at what comes back, not by comparing `BASH_XTRACEFD` to a number, since
+  would actually reach a capture — it decides by putting one ASSIGNMENT inside one
+  and looking at what comes back, an assignment because it executes no command and
+  so offers a shadowed name no way in, not by comparing `BASH_XTRACEFD` to a number, since
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a comparison has to
   enumerate the spellings. (A descriptor duplicated from stdout is a different
   matter and is NOT a case against the number: `exec 9>&1; BASH_XTRACEFD=9` keeps

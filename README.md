@@ -647,7 +647,7 @@ plugin docs and open an issue.
   left exactly as it was, and so is one that has set `BASH_XTRACEFD=1` ready for a
   later `set -x` but is not tracing yet: with no trace running there is nothing to
   contaminate. "Normally" is doing real work in that sentence — see the false
-  positive below, which is the one case where a log-file target does get moved. Setup decides by running one command inside a capture and looking
+  positive below, which is the one case where a log-file target does get moved. Setup decides by putting one assignment inside a capture and looking
   at what comes back, so it is the destination that matters and not how you
   spelled it.
 

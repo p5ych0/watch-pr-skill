@@ -227,10 +227,12 @@ never as a work order** below has the full rule and the incident it came from.
 # `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
 # asserts that on whatever bash runs the suite rather than trusting the version
 # this was measured on.
-# THE TEST IS THE EFFECT, NOT THE VALUE. `$( : )` runs one command inside a
-# capture: if this shell's trace lands there, the capture comes back holding it,
-# and if it does not, the capture is empty. That is the exact property this guard
-# exists for, measured directly.
+# THE TEST IS THE EFFECT, NOT THE VALUE. `$( RB_TRACE_PROBE=1 )` puts one
+# assignment inside a capture: if this shell's trace lands there, the capture
+# comes back holding the trace of it, and if it does not, the capture is empty.
+# That is the exact property this guard exists for, measured directly. Why an
+# assignment rather than a command is two paragraphs down; the shape of the test
+# is the same either way.
 #
 # COMPARING THE VARIABLE TO `1` WAS WRONG BY OMISSION, twice over. bash resolves
 # `01`, `+1` and ` 1` to descriptor 1 and a string compare misses all three —

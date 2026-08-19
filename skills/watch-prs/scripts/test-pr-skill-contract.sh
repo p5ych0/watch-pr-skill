@@ -3871,8 +3871,9 @@ else
     #
     # So the accepted outcome in those shells is that the trace ends on fd 2 —
     # where bash sends xtrace by default, so every line still arrives. Their
-    # captures are corrupted by the trap or the function regardless, and setup
-    # refuses further down. What is asserted here is that NOTHING WORSE happens:
+    # captures are corrupted by the trap regardless — a shadowed function cannot
+    # reach an assignment-only probe, which is why its case above is the strict
+    # one — and setup refuses further down. What is asserted here is that NOTHING WORSE happens:
     # the trace is never silenced, and it never lands on a descriptor nobody
     # named.
     tr_hostile() {   # tr_hostile <label> <shell-preamble>
