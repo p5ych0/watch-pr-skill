@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.36] — 2026-08-19
+
+- **`record` proves the phase again immediately before it publishes the signoff.**
+  Two stages ran between the last proof and the irreversible post — the CI gate,
+  which WAITS for checks to settle, and the round count — so that window is as
+  long as a build.
+
+  In it another session can post a `**Review-Signoff-Revoked:**`, which is how a
+  phase is deliberately reopened. The signoff would then supersede it, because the
+  readers take the last record, while GitHub keeps serving the old clean verdict
+  until the new pass reports — so nothing this stage looked at earlier could see
+  the reopening. A later `open` then finds a current signoff and a clean verdict
+  and requests Copilot underneath a phase somebody had just reopened.
+
+  Three checks now sit immediately before the post, the same ones `open` makes and
+  for the same reason: none of them requires the head to have moved, so none
+  subsumes another. The head is still the signed sha, Codex's live verdict on it
+  is still clean, and no revocation is the newest record for that reviewer. That
+  last one is what this gap actually admits; the other two are cheap and cover a
+  push or a dismissal landing in the same window.
+
+  "None recorded" is the ordinary state here — nothing has been recorded yet, and
+  recording it is the point — so the check distinguishes it from a revocation by
+  the reason rather than by the status, which is 1 for both. A case asserts it
+  records normally.
+
+  Four cases, each leaving nothing posted where it refuses: a revocation, a push,
+  a withdrawn verdict, and the ordinary absent record. All fail against the
+  previous stage.
+
 ## [2.0.35] — 2026-08-19
 
 - **`review-at` reported "no verdict" when it could not ask.** It fetched and

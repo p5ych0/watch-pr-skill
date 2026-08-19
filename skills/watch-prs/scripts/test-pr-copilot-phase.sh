@@ -228,6 +228,52 @@ got="$(run record 7 "$TMP/body.md")"
     || die "a malformed head gave '${got}'"
 nothing_posted "…with no signoff recorded"
 
+# ── `record` RE-PROVES THE PHASE IMMEDIATELY BEFORE IT PUBLISHES ──────────
+#
+# The CI gate WAITS for checks to settle and the round count is a network read, so
+# the window between the last proof and the irreversible post is as long as a
+# build. In it another session can post a `**Review-Signoff-Revoked:**` — how a
+# phase is deliberately reopened — and this stage's signoff would SUPERSEDE it,
+# because the readers take the last record, while GitHub keeps serving the old
+# clean verdict until the new pass reports. A later `open` then finds a current
+# signoff and a clean verdict and requests Copilot underneath a reopened phase.
+# #115.
+#
+# THE REVOCATION IS THE ONE THIS GAP ADMITS. `record` reads the signoff ONCE — the
+# new check — so this is `signoff.out` rather than the stub's `.2` second answer,
+# which belongs to `open`'s repeated proofs.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+    && pass "a revocation landing before the post stops the record" \
+    || die "a revocation in the window gave '${got}'"
+nothing_posted "…with no signoff recorded, so it cannot supersede the revocation"
+# AND "NONE RECORDED" IS THE ORDINARY STATE HERE, which must not refuse: nothing
+# has been recorded yet, and the whole point of this stage is to record it.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while no record at all is the ordinary state and records normally" \
+    || die "an absent signoff was treated as a revocation: '${got}'"
+# A PUSH IN THE SAME WINDOW, which the head re-read catches.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+    && pass "…and a push landing in that window stops it too" \
+    || die "a moved head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+# A DISMISSAL IN THE SAME WINDOW, which the verdict re-read catches. `.2` again:
+# the first check is the one before the CI gate, the second the one before the post.
+world; printf 'PR_REVIEW_STATE verdict=findings findings=2\n' > "$W/verdict.2.out"
+printf '1\n' > "$W/verdict.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean on'; } \
+    && pass "…and a verdict withdrawn in that window stops it" \
+    || die "a withdrawn verdict gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
 # THE ABBREVIATED SHA IS THE ONE THAT MATTERS. `pr-review-state.sh` prints seven
 # characters and the merge gate needs forty, so a phase recorded from the short
 # form populates the gate with something it cannot match.

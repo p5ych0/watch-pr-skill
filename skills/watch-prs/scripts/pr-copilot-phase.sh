@@ -490,6 +490,42 @@ case "$ROUNDS_RC" in
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC); nothing recorded"; exit 1 ;;
 esac
 
+# PROVED AGAIN, IMMEDIATELY BEFORE THE POST, because the two stages above are not
+# instant and the post is irreversible. The CI gate WAITS for checks to settle, so
+# the window between the proof and the write is as long as a build — and in it
+# another session can post a `**Review-Signoff-Revoked:**`, which is how a phase is
+# deliberately reopened. The signoff below would then SUPERSEDE that revocation,
+# because the readers take the last record, while GitHub keeps serving the old
+# clean verdict until the new pass reports. A later `open` finds a current signoff
+# and a clean verdict and requests Copilot underneath a phase somebody had
+# reopened.
+#
+# THREE CHECKS, THE SAME ONES `open` MAKES AND FOR THE SAME REASONS: none of them
+# requires the head to have moved, so none of them subsumes another. A revocation
+# is what this gap actually admits; the head and the verdict are cheap and cover a
+# push or a dismissal landing in the same window. #115.
+RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
+[[ $RECHECK_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $RECHECK_HEAD while the checks were proving; nothing posted"; exit 1; }
+CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
+[[ $CODEX_STILL_RC -eq 0 ]] \
+    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
+# A REVOCATION IS THE ONE THIS GAP ADMITS. `pr-signoff.sh` reports `sha=none
+# reason=revoked` when the newest record for this reviewer is a revocation —
+# status 1, which is also "none recorded", so the REASON is what tells them apart.
+# "None recorded" is the ordinary state here and must not refuse.
+SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
+case "$SIGNOFF_NOW_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not read the signoff record before recording (rc=$SIGNOFF_NOW_RC); nothing posted"; exit 1 ;;
+esac
+case "$SIGNOFF_NOW" in
+    *reason=revoked*)
+        echo "ABORT: this phase was reopened while the checks were proving — a revocation is the newest record. Recording a signoff now would supersede it; nothing posted"
+        exit 1 ;;
+esac
+
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
