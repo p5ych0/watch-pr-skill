@@ -338,11 +338,11 @@ fi
 # by omission the first time git adds one, and this repository has a rule about
 # that. An empty environment needs no list.
 #
-# WHAT IS CARRIED BACK IN IS NAMED ONE AT A TIME, further down: `PATH`, because
-# that is how `git` is found at all (#91); and `HOME`, `XDG_CONFIG_HOME`,
-# `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM`, because they
-# say WHICH CONFIG the operator's git reads and a different one loses the rewrites
-# the session honours.
+# WHAT IS CARRIED BACK IN is `PATH`, because that is how `git` is found at all
+# (#91); `HOME` and `XDG_CONFIG_HOME`; and every `GIT_CONFIG_*` variable, by
+# prefix rather than by name — see the block just above the list. They say WHICH
+# CONFIG the operator's git reads, and a different one loses the rewrites the
+# session honours.
 # `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
 # documented to expand `url.<base>.insteadOf`, and those rules live in the user's
 # GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
@@ -353,10 +353,10 @@ fi
 # WHAT IS EXCLUDED IS EVERYTHING THAT SCOPES THE REPOSITORY: `GIT_DIR`,
 # `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY` and the rest go with
 # `-i`, and the list needs no maintaining because the environment is emptied
-# rather than filtered. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are CARRIED,
-# not excluded — see the block above the list — because they say which config the
-# operator's git reads, and reading a different one loses the rewrites the session
-# honours. `XDG_CONFIG_HOME` is carried for the same reason: git reads
+# rather than filtered. The `GIT_CONFIG_*` variables are CARRIED, not excluded —
+# see the block above the list — because they say which config the operator's git
+# reads, and reading a different one loses the rewrites the session honours.
+# `XDG_CONFIG_HOME` is carried for the same reason: git reads
 # `$XDG_CONFIG_HOME/git/config` as global config too.
 #
 # A CARRIED CONFIG CAN CHOOSE THE REPOSITORY, and that is accepted rather than
@@ -367,44 +367,38 @@ fi
 # lying about the operator's own home — the boundary this file already records at
 # the bottom, not a new one.
 #
-# CARRIED BY SETNESS, NOT BY CONTENT. `GIT_CONFIG_GLOBAL=` and
-# `GIT_CONFIG_SYSTEM=` are documented as "set", and git reads an empty path as no
-# such file — so an operator who exports one EMPTY has switched that source off.
-# A `[[ -n … ]]` guard dropped it, an emptied environment restored the default
-# file, and a rule in it rewrote the origin this helper reads while the operator's
-# own git ignored it. `${VAR+x}` reproduces their decision either way.
+# THE CONFIG VARIABLES ARE CARRIED BY PREFIX, NOT BY NAME. `${!GIT_CONFIG_@}`
+# lists every set variable whose name starts with `GIT_CONFIG_`, and each is
+# passed through with the value it has. That is `GIT_CONFIG_GLOBAL`,
+# `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, the runtime family
+# `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`,
+# `GIT_CONFIG_PARAMETERS`, and whatever git adds next.
+#
+# A LIST OF THREE WAS WRONG BY OMISSION, which is the failure this repository has
+# already paid for twice. It named the two file locations and the opt-out, and
+# missed both runtime channels — so an operator whose rewrite arrives as
+# `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.…insteadOf` had it expanded by every
+# ordinary command and dropped here, and the session was pinned to the unexpanded
+# alias. Both channels measured on git 2.55. An indexed family cannot be
+# enumerated at all, so the shape changes instead: no list, no omission.
+#
+# SETNESS COMES FREE WITH IT. A name only appears in `${!GIT_CONFIG_@}` if it is
+# set, so `GIT_CONFIG_GLOBAL=` is carried as empty rather than dropped — and that
+# matters, because git defines these by whether they are SET and reads an empty
+# path as no such file. An operator exporting one empty has switched that source
+# off; a `[[ -n … ]]` test silently restored git's default file, and a rule in it
+# reached this helper alone.
+#
+# NOTHING THAT SCOPES THE REPOSITORY SHARES THE PREFIX. `GIT_DIR`,
+# `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`,
+# `GIT_CEILING_DIRECTORIES` and the rest are dropped by `-i` and cannot arrive
+# through this loop, which is the whole point of matching on `GIT_CONFIG_` rather
+# than on `GIT_`.
 _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 [[ -n ${XDG_CONFIG_HOME+x} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
-# `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT, NOT A REDIRECTION, and dropping it turns
-# one on. The operator sets it to make git ignore the system-wide config, and an
-# emptied environment silently restored that file — so a `url.*.insteadOf` rule in
-# it would rewrite the origin THIS helper reads while every ordinary git command
-# in the session, still honouring the opt-out, used the unexpanded one. The pin
-# and the session would disagree about the repository, which is the failure this
-# file exists to prevent.
-#
-# THE TEST IS THAT IT WAS SET, not what it says: git treats any non-empty value as
-# "skip the system config", so carrying the operator's value through is exactly
-# reproducing their decision.
-[[ -n ${GIT_CONFIG_NOSYSTEM+x} ]] && _rb_env+=( GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM" )
-# CONFIG LOCATION IS CARRIED; REPOSITORY SCOPE IS NOT. That is the line, and it is
-# the reason the list has the shape it has. `GIT_CONFIG_GLOBAL` and
-# `GIT_CONFIG_SYSTEM` say WHICH CONFIG the operator's git reads — drop them and
-# this helper reads a different one, so an `insteadOf` rule the session honours is
-# invisible here and a checkout whose origin is `work:acme/widget.git` comes back
-# as the unexpanded alias. Setup then refuses a valid checkout, or addresses the
-# session at a host it does not push to. `GIT_DIR`, `GIT_WORK_TREE`,
-# `GIT_COMMON_DIR` and the rest say WHICH REPOSITORY, and those must not survive:
-# this helper's whole job is to read the origin of the checkout it stands in.
-#
-# `env -i` PLUS A CARRY LIST, NOT `-u` PLUS A DROP LIST, and the difference is the
-# direction of the omission. A variable nobody thought of is DROPPED here — so a
-# new repository-scoping variable in a future git cannot redirect the read, and
-# the worst a missing config variable can do is make this helper read the
-# operator's default config instead of their chosen one. One direction loses a
-# rewrite; the other loses the repository.
-[[ -n ${GIT_CONFIG_GLOBAL+x} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
-[[ -n ${GIT_CONFIG_SYSTEM+x} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
+for _rb_n in ${!GIT_CONFIG_@}; do
+    _rb_env+=( "$_rb_n=${!_rb_n}" )
+done
 # GIT RESOLVES THE URL, AND NOTHING HERE SECOND-GUESSES IT. Every attempt to take
 # a piece of that resolution into this file has produced a divergence from git's
 # own semantics, and the count is the evidence: a scalar read returning the LAST

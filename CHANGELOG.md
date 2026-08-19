@@ -181,13 +181,24 @@
   So there is one ordinary call — `git remote get-url origin`, under the
   operator's own config, which is what `fetch` and `push` consult. What the
   helper still decides is the environment it runs in: `env -i` with `PATH`,
-  `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and
-  `GIT_CONFIG_NOSYSTEM` carried back — the line the next paragraph draws.
+  `HOME`, `XDG_CONFIG_HOME` and the config variables carried back — the line the
+  next paragraph draws.
 
-  Those variables are carried by **setness**, not by content. Git defines them by
-  whether they are set and reads an empty path as no such file, so an operator
-  who exports `GIT_CONFIG_GLOBAL=` has switched that source off; a non-empty test
-  dropped it and the emptied environment silently restored git's default file.
+  **Those are carried by prefix, not by name.** `${!GIT_CONFIG_@}` passes through
+  every set variable whose name begins `GIT_CONFIG_`, so the two file locations,
+  the system opt-out, the runtime family `GIT_CONFIG_COUNT` /
+  `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_CONFIG_PARAMETERS` and
+  whatever git adds next all arrive. A list of three named the files and the
+  opt-out and missed both runtime channels — an operator whose `insteadOf` rule
+  arrives that way had it expanded by every ordinary command and dropped here,
+  pinning the session to the unexpanded alias. An indexed family cannot be
+  enumerated at all, so the shape changed rather than the list growing.
+
+  Setness comes with it: a name appears only if it is set, so `GIT_CONFIG_GLOBAL=`
+  is carried as empty rather than dropped. That matters because git defines these
+  by whether they are set and reads an empty path as no such file — an operator
+  exporting one empty has switched that source off, and a non-empty test silently
+  restored git's default file.
 
   Shutting the operator's config out of the resolution was tried and removed. It
   stopped a carried file contributing `[remote "origin"] url = …`, which does win

@@ -817,59 +817,98 @@ else
     echo "ok   - (this git could not stage a worktree-scoped origin; that case did not run)"
 fi
 
-# ── THE CONFIG-SOURCE VARIABLES ARE CARRIED BY SETNESS ─────────────────────
+# ── EVERY `GIT_CONFIG_*` VARIABLE IS CARRIED, BY PREFIX ────────────────────
 #
-# `GIT_CONFIG_NOSYSTEM` is an OPT-OUT, not a redirection, and dropping it does not
-# lose a redirection — it turns one on, letting a system `url.*.insteadOf` the
-# operator opted out of rewrite the origin this helper reads while every ordinary
-# command in their session used the unexpanded one.
+# Git takes config from the environment through several channels, and a helper
+# that names them one at a time is wrong the first time it misses one. It did:
+# `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM` were carried
+# and the RUNTIME family was not, so an operator whose `insteadOf` arrives as
+# `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` — or as
+# `GIT_CONFIG_PARAMETERS` — had it expanded by every ordinary command and dropped
+# here, pinning the session to the unexpanded alias.
 #
-# `GIT_CONFIG_GLOBAL=` AND `GIT_CONFIG_SYSTEM=` ARE THE SAME SHAPE ONE STEP ON.
-# Git defines those by whether they are SET, and reads an empty path as no such
-# file — so an operator exporting one empty has switched that source OFF. A
-# non-empty test dropped it, the emptied environment restored git's default file,
-# and a rule in that file reached this helper alone. Setness is what has to be
-# carried, and only a stub can see which arrived: the effect needs config files
-# the fixture cannot write.
+# THE FIRST TWO CASES ARE REAL GIT, not a stub, and each asserts AGREEMENT: the
+# checkout's origin is an alias, the variables carry the rule that expands it, and
+# the helper must answer what `git remote get-url origin` answers beside it.
+RTREPO="$TMP/runtimecfg"
+mkdir -p "$RTREPO"
+( cd "$RTREPO" && git init -q . && git remote add origin 'work:acme/widget.git' ) >/dev/null 2>&1 \
+    || die "could not build the runtime-config checkout"
+rt_case() {   # rt_case <label> <expect-pass-text> [env-entries…]
+    local _label="$1" _text="$2"; shift 2
+    local _got _git
+    rm -f "$TMP/rt.value"
+    ( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
+    _got="$(cat "$TMP/rt.value" 2>/dev/null)"
+    _git="$(cd "$RTREPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 "$@" git remote get-url origin 2>/dev/null)"
+    # THE PROBE'S OWN REACH FIRST: the rule must really expand for git here, or the
+    # agreement below holds because nothing happened.
+    [ "$_git" = 'git@ghe.example:acme/widget.git' ] \
+        || die "$_label: the rule does not reach git here (git said '$_git'); the case proves nothing"
+    [ "$_got" = "$_git" ] \
+        && pass "$_text" \
+        || die "$_label: the helper dropped the rule (helper '$_got', git '$_git')"
+}
+rt_case 'count-family' 'a rewrite supplied through GIT_CONFIG_COUNT reaches the helper' \
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0='url.git@ghe.example:.insteadOf' GIT_CONFIG_VALUE_0='work:'
+rt_case 'parameters' '…and one supplied through GIT_CONFIG_PARAMETERS reaches it too' \
+    GIT_CONFIG_PARAMETERS="'url.git@ghe.example:.insteadOf'='work:'"
+# AND WITHOUT THEM THE ALIAS COMES BACK, or the two cases above pass against a
+# checkout that was never aliased.
+rm -f "$TMP/rt.value"
+( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
+[ "$(cat "$TMP/rt.value" 2>/dev/null)" = 'work:acme/widget.git' ] \
+    && pass "…while with no rule at all the alias is what comes back" \
+    || die "the alias did not survive an unrewritten read; the cases above prove nothing"
+
+# ── …AND SETNESS COMES WITH THE PREFIX ─────────────────────────────────────
+#
+# A name appears in `${!GIT_CONFIG_@}` only if it is SET, which is exactly the
+# distinction git draws: it reads an empty path as no such file, so an operator
+# exporting `GIT_CONFIG_GLOBAL=` has switched that source OFF. A `[[ -n … ]]` test
+# dropped it, the emptied environment restored git's default file, and a rule in
+# that file reached this helper alone. Only a stub can see which variables
+# arrived: the effect needs config files the fixture cannot write.
 NSSTUB="$TMP/nsstub"
 mkdir -p "$NSSTUB"
 cat > "$NSSTUB/git" <<'NSSH'
 #!/usr/bin/env bash
-printf 'nosystem=[%s] global=[%s] system=[%s]
+printf 'nosystem=[%s] global=[%s] system=[%s] count=[%s]
 ' "${GIT_CONFIG_NOSYSTEM-unset}" "${GIT_CONFIG_GLOBAL-unset}" "${GIT_CONFIG_SYSTEM-unset}" \
-    >> "${BASH_SOURCE[0]}.log"
+  "${GIT_CONFIG_COUNT-unset}" >> "${BASH_SOURCE[0]}.log"
 printf 'git@github.com:seen/repo.git
 '
 NSSH
 chmod +x "$NSSTUB/git"
-ns_env() {   # ns_env <label> [env-entries…] ; prints what the subject's git saw
-    local _l="$1"; shift
+ns_env() {   # ns_env [env-entries…] ; prints what the subject's git saw
     rm -f "$TMP/ns.value" "$NSSTUB/git.log"
     ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         PATH="$NSSTUB:$PATH" "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns.value" ) >/dev/null 2>&1
     cat "$NSSTUB/git.log" 2>/dev/null
 }
-# BOTH DIRECTIONS ON EACH VARIABLE. Unset must arrive unset, or the case passes
-# against a helper that hard-codes the value rather than carrying the operator's
-# decision; and EMPTY must arrive empty rather than absent, which is the whole
-# distinction.
-ns_none="$(ns_env none)"
+# BOTH DIRECTIONS. Unset must arrive unset, or the case passes against a helper
+# that hard-codes a value rather than carrying the operator's decision.
+ns_none="$(ns_env)"
 case "$ns_none" in
-    *'nosystem=[unset]'*global=\[unset\]*system=\[unset\]*) pass "a session that set no config-source variable passes none on" ;;
-    *) die "a config-source variable appeared from nowhere ('$ns_none')" ;;
+    *"nosystem=[unset] global=[unset] system=[unset] count=[unset]"*)
+        pass "a session that set no GIT_CONFIG_ variable passes none on" ;;
+    *) die "a GIT_CONFIG_ variable appeared from nowhere ('$ns_none')" ;;
 esac
-ns_set="$(ns_env set GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/g.cfg" GIT_CONFIG_SYSTEM="$TMP/s.cfg")"
+ns_set="$(ns_env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$TMP/g.cfg" GIT_CONFIG_SYSTEM="$TMP/s.cfg" GIT_CONFIG_COUNT=0)"
 case "$ns_set" in
-    *"nosystem=[1] global=[$TMP/g.cfg] system=[$TMP/s.cfg]"*) pass "…and the operator's chosen sources reach it when they set them" ;;
-    *) die "a config-source variable was dropped ('$ns_set')" ;;
+    *"nosystem=[1] global=[$TMP/g.cfg] system=[$TMP/s.cfg] count=[0]"*)
+        pass "…and the operator's chosen sources reach it when they set them" ;;
+    *) die "a GIT_CONFIG_ variable was dropped ('$ns_set')" ;;
 esac
-# THE CASE THIS ROUND ADDS: set-but-empty. `[[ -n … ]]` passed the two above and
-# failed this one, and the failure is silent — git falls back to its default file
-# and rewrites the origin the operator excluded.
-ns_empty="$(ns_env empty GIT_CONFIG_NOSYSTEM= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM=)"
+# THE DISTINCTION THE PREFIX MAKES FOR FREE: set-but-empty is not unset.
+ns_empty="$(ns_env GIT_CONFIG_NOSYSTEM= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= GIT_CONFIG_COUNT=)"
 case "$ns_empty" in
-    *'nosystem=[] global=[] system=[]'*) pass "…and an explicitly EMPTY one is carried as empty, not dropped" ;;
-    *) die "an empty config-source variable was dropped, restoring git's default file ('$ns_empty')" ;;
+    *"nosystem=[] global=[] system=[] count=[]"*)
+        pass "…and an explicitly EMPTY one is carried as empty, not dropped" ;;
+    *) die "an empty GIT_CONFIG_ variable was dropped, restoring git's default file ('$ns_empty')" ;;
 esac
 
 # ── A SECOND CHECKOUT NAMED BY `GIT_DIR` IS NOT THIS ONE ───────────────────
