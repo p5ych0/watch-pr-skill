@@ -203,6 +203,10 @@ rm -f "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XD
 STUB="$TMP/stub"; mkdir -p "$STUB"
 cat > "$STUB/git" <<GITSH
 #!/usr/bin/env bash
+# THE RULE QUERY AND THE RESOLUTION ARE TWO CALLS. The helper asks for the
+# rewrite rules first and resolves second; a stub that answers both with the same
+# thing makes the rule parser refuse before the case is reached.
+case "\$*" in *--get-regexp*) exit 1 ;; esac
 printf '%s\n' "$FORGED"
 exit 1
 GITSH
@@ -219,30 +223,22 @@ esac
 
 # ── ONE VALUE LEAVES, WHATEVER THE REMOTE CONTAINS ─────────────────────────
 #
-# TWO VALUES ARE NOT AN ERROR ANY MORE, AND THE FIRST IS THE ANSWER. The helper
-# asks `git config --get-all remote.origin.url`, which prints one value per line,
-# because a remote may legitimately have several URLs — `git remote get-url`
-# returns the FIRST of them and a scalar `--get` returns the LAST, which pinned
-# the session to a secondary repository while every ordinary operation used the
-# primary. So this stub's two lines are now two URLs, and what must hold is that
-# the first one is taken.
-#
-# WHAT THAT COSTS, stated rather than hidden: a single URL CONTAINING a newline is
-# no longer distinguishable from two URLs through this interface, so it is
-# truncated at the newline instead of refused. Reaching that state means writing
-# `.git/config` in the operator's own checkout, which is the boundary
-# § WHAT THIS DOES NOT CLOSE already draws — such a writer can edit the helper.
-# The refusal below still covers a newline arriving any other way.
+# A remote holding a newline would arrive at the caller as two values, the second
+# being whatever the tail happened to be. `git remote get-url` returns ONE URL, so
+# two lines here are one value containing a newline — and multi-URL remotes are
+# git's own business now that git does the resolution, since it returns the first
+# of them itself.
 cat > "$STUB/git" <<'GITSH'
 #!/usr/bin/env bash
+case "$*" in *--get-regexp*) exit 1 ;; esac
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
 rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
-{ [ "$rc" = 0 ] && [ "$out" = "$REAL" ]; } \
-    && pass "a remote with two URLs answers with the first, as git remote get-url does" \
-    || die "a two-URL remote gave rc=$rc '$out'"
+{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
+    && pass "a multi-line remote is refused rather than split" \
+    || die "a two-line remote gave rc=$rc '$out'"
 
 # ── A TRAILING NEWLINE IS DATA, AND THE BOUNDARY IS PRESERVED ──────────────
 #
@@ -257,20 +253,17 @@ out="$(<"$TMP/v")$out"
 # terminator, so the case cannot be reached through the config read on this
 # version. The sentinel is kept so the read does not DEPEND on that, and the stub
 # below is what holds it there.
-#
-# WHAT IS ASSERTED IS THE FIRST VALUE, since `--get-all` prints one per line: a
-# trailing empty line is an empty second value and the URL is still the first.
-# The sentinel's job is that the boundary is not LOST — the value must not be
-# stripped into something that parses as a different slug.
+
 cat > "$STUB/git" <<'GITSH'
 #!/usr/bin/env bash
+case "$*" in *--get-regexp*) exit 1 ;; esac
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
 rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
-{ [ "$rc" = 0 ] && [ "$out" = "$REAL" ]; } \
-    && pass "a trailing empty value leaves the first URL intact, not stripped into another slug" \
+{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
+    && pass "a trailing data newline is refused, not stripped into a valid slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
 # …AND PLAIN COMMAND SUBSTITUTION WOULD HAVE ACCEPTED IT, which is what makes the
 # sentinel load-bearing rather than decorative.
@@ -781,66 +774,96 @@ nc_reach="$(cd "$NAMEREPO" && env HOME="$TMP/nohome" GIT_CONFIG_GLOBAL="$NAMECFG
     && pass "…where ls-remote --get-url does resolve that same name to the config's repository" \
     || die "the name does not resolve here (got '$nc_reach'); the case above proves nothing"
 
-# ── A WORKTREE-SCOPED ORIGIN IS READ ───────────────────────────────────────
+# ── A LINKED WORKTREE ANSWERS AS GIT ANSWERS ───────────────────────────────
 #
-# With `extensions.worktreeConfig` enabled a linked worktree defines its own
-# origin, and git reads that in preference to the repository's. A `--local`-only
-# query reports that a valid checkout has none and setup aborts.
+# `extensions.worktreeConfig` lets a linked worktree hold its own
+# `remote.origin.url`, and `git config --get` reports it — but `git remote get-url`
+# does NOT: the remote machinery reads the repository's config, and that is what
+# `fetch` and `push` use. Measured on git 2.55:
+#
+#     git config --worktree --get remote.origin.url   -> the worktree's value
+#     git config --get remote.origin.url              -> the worktree's value
+#     git remote get-url origin                       -> the REPOSITORY's value
+#
+# So there is nothing here for the helper to decide. What must hold is that it
+# agrees with `git remote get-url` wherever it is run, including inside a linked
+# worktree — the helper asks git the same question the session's own operations
+# ask, and a scope-picking read of its own is exactly what diverged from that.
 WTMAIN="$TMP/wtmain"
 mkdir -p "$WTMAIN"
-( cd "$WTMAIN" && git init -q . && git remote add origin "$FORGED" \
+( cd "$WTMAIN" && git init -q . && git remote add origin "$REAL" \
     && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
     && git worktree add -q "$TMP/wtlinked" -b wtbranch \
-    && cd "$TMP/wtlinked" && git config --worktree extensions.worktreeConfig true 2>/dev/null \
-    ; cd "$WTMAIN" && git config extensions.worktreeConfig true \
-    && cd "$TMP/wtlinked" && git config --worktree remote.origin.url "$REAL" ) >/dev/null 2>&1
-if [ -d "$TMP/wtlinked" ] && [ "$(cd "$TMP/wtlinked" && git config --worktree --get remote.origin.url 2>/dev/null)" = "$REAL" ]; then
+    && git config extensions.worktreeConfig true \
+    && cd "$TMP/wtlinked" && git config --worktree remote.origin.url "$FORGED" ) >/dev/null 2>&1
+if [ -d "$TMP/wtlinked" ] && [ -n "$(cd "$TMP/wtlinked" && git config --worktree --get remote.origin.url 2>/dev/null)" ]; then
+    wt_git="$(cd "$TMP/wtlinked" && env HOME="$TMP/nohome" git remote get-url origin 2>/dev/null)"
     rm -f "$TMP/wt.value"
     ( cd "$TMP/wtlinked" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         /usr/bin/env bash -p "$SCRIPT" read "$TMP/wt.value" ) >/dev/null 2>&1
     wt_got="$(cat "$TMP/wt.value" 2>/dev/null)"
-    [ "$wt_got" = "$REAL" ] \
-        && pass "a worktree-scoped origin is read, and takes precedence over the repository's" \
-        || die "the worktree origin was not read (got '$wt_got', wanted '$REAL')"
+    [ -n "$wt_got" ] && [ "$wt_got" = "$wt_git" ] \
+        && pass "inside a linked worktree the helper answers exactly as git remote get-url does" \
+        || die "the helper and git disagree in a worktree (helper '$wt_got', git '$wt_git')"
 else
     echo "ok   - (this git could not stage a worktree-scoped origin; that case did not run)"
 fi
 
-# ── `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT AND SURVIVES ───────────────────────
+# ── `GIT_CONFIG_NOSYSTEM` REACHES THE RULE QUERY, AND THE RESOLUTION IS SEALED ─
 #
-# It tells git to ignore the system-wide config. An emptied environment dropped
-# it, which does not lose a redirection — it TURNS ONE ON: a `url.*.insteadOf`
-# rule in the system config would then rewrite the origin this helper reads while
-# every ordinary git command in the session, still honouring the opt-out, used the
-# unexpanded one. The pin and the session would disagree about the repository.
+# Two calls with different environments, so this has two halves.
 #
-# WHAT IS ASSERTED IS THE VARIABLE'S ARRIVAL, because the EFFECT needs a system
-# config the fixture cannot write — the real one is `/etc/gitconfig`. A `git` stub
-# reports the environment it was called in, which is the thing the change is
-# about. `GIT_CONFIG_SYSTEM` is carried like `GIT_CONFIG_GLOBAL`, since it names a
-# config location rather than a repository; the case beside this one covers what
-# a carried config may and may not do.
+# The RULE QUERY runs under the operator's config, because that is where
+# `url.<base>.insteadOf` lives. Their `GIT_CONFIG_NOSYSTEM` must reach it: they
+# set it so git ignores the system config, and dropping it does not lose a
+# redirection — it TURNS ONE ON, letting a system rule they opted out of rewrite
+# the origin this helper reads while the session used the unexpanded one.
+#
+# The RESOLUTION runs with the operator's config LOCKED OUT — `HOME` nowhere and
+# `GIT_CONFIG_NOSYSTEM=1` unconditionally — because a global or system file may
+# carry `[remote "origin"] url = …`, which wins over the repository. The rules
+# that mattered have already been extracted.
+#
+# A `git` STUB REPORTS THE ENVIRONMENT IT WAS CALLED IN, separately per call,
+# because the effect needs a system config the fixture cannot write.
 NSSTUB="$TMP/nsstub"
 mkdir -p "$NSSTUB"
-printf '#!/usr/bin/env bash\nprintf "git@github.com:seen/%%s.git\\n" "${GIT_CONFIG_NOSYSTEM:-unset}"\n' > "$NSSTUB/git"
+cat > "$NSSTUB/git" <<'NSSH'
+#!/usr/bin/env bash
+case "$*" in
+    *--get-regexp*) printf 'rules-saw:%s
+' "${GIT_CONFIG_NOSYSTEM:-unset}" >> "${BASH_SOURCE[0]}.log"; exit 1 ;;
+esac
+printf 'git@github.com:seen/%s.git
+' "${GIT_CONFIG_NOSYSTEM:-unset}"
+NSSH
 chmod +x "$NSSTUB/git"
-rm -f "$TMP/ns1.value"
+rm -f "$TMP/ns1.value" "$NSSTUB/git.log"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     PATH="$NSSTUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns1.value" ) >/dev/null 2>&1
-ns_without="$(cat "$TMP/ns1.value" 2>/dev/null)"
-rm -f "$TMP/ns2.value"
+ns1_err="$(cat "$NSSTUB/git.log" 2>/dev/null)"
+rm -f "$TMP/ns2.value" "$NSSTUB/git.log"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     PATH="$NSSTUB:$PATH" GIT_CONFIG_NOSYSTEM=1 \
     /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns2.value" ) >/dev/null 2>&1
-ns_with="$(cat "$TMP/ns2.value" 2>/dev/null)"
-# BOTH DIRECTIONS: unset must arrive unset, or the case would pass on a helper
-# that hard-codes the variable rather than carrying the operator's decision.
-[ "$ns_without" = 'git@github.com:seen/unset.git' ] \
-    && pass "the origin read runs with no GIT_CONFIG_NOSYSTEM when the session set none" \
-    || die "GIT_CONFIG_NOSYSTEM appeared from nowhere (got '$ns_without')"
-[ "$ns_with" = 'git@github.com:seen/1.git' ] \
-    && pass "…and the operator's opt-out survives the emptied environment" \
-    || die "GIT_CONFIG_NOSYSTEM was dropped by env -i (got '$ns_with')"
+ns2_err="$(cat "$NSSTUB/git.log" 2>/dev/null)"
+ns2_val="$(cat "$TMP/ns2.value" 2>/dev/null)"
+# BOTH DIRECTIONS ON THE RULE QUERY: unset must arrive unset, or the case would
+# pass against a helper that hard-codes the variable rather than carrying the
+# operator's decision.
+case "$ns1_err" in
+    *rules-saw:unset*) pass "the rule query runs with no GIT_CONFIG_NOSYSTEM when the session set none" ;;
+    *) die "GIT_CONFIG_NOSYSTEM appeared from nowhere in the rule query ('$ns1_err')" ;;
+esac
+case "$ns2_err" in
+    *rules-saw:1*) pass "…and the operator's opt-out reaches it when they set one" ;;
+    *) die "GIT_CONFIG_NOSYSTEM was dropped from the rule query ('$ns2_err')" ;;
+esac
+# …AND THE RESOLUTION IS SEALED EITHER WAY, which is what stops a system config
+# supplying `remote.origin.url`.
+[ "$ns2_val" = 'git@github.com:seen/1.git' ] \
+    && pass "…while the resolution always runs with the system config shut out" \
+    || die "the resolution did not seal the system config (got '$ns2_val')"
 
 # ── A SECOND CHECKOUT NAMED BY `GIT_DIR` IS NOT THIS ONE ───────────────────
 #

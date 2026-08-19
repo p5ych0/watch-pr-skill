@@ -167,22 +167,22 @@
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.
 
-  **The rewrite is applied here, not by `ls-remote --get-url`.** That command's
-  operand may be a URL *or the name of a remote*, so a local origin of `mirror`
-  beside a carried `[remote "mirror"]` resolved to the config's repository — the
-  attack the local read had just closed, reopened by the command applying the
-  rewrite. No git interface applies `insteadOf` to a value without that ambiguity,
-  so the rule is applied directly: a prefix match against each
-  `url.<base>.insteadOf`, longest match winning, which is what git documents and
-  what `git remote get-url` produces on a checkout with two overlapping rules.
+  **Git resolves the URL; the helper only decides which rules it may use.** Every
+  attempt to take a piece of that resolution into the script diverged from git's
+  own semantics — a scalar read returning the LAST of several URLs where
+  `remote get-url` returns the first, a `--local` query missing the worktree
+  scope, a hand-applied `insteadOf` re-deriving longest-match, and
+  `ls-remote --get-url` resolving its operand as a remote NAME.
 
-  **The first URL, and the worktree scope.** A remote may have several URLs:
-  `git remote get-url` returns the first and a scalar `git config --get` returns
-  the LAST, so the session was pinned to a secondary repository while every
-  ordinary operation used the primary. And with `extensions.worktreeConfig` a
-  linked worktree defines its own origin, which a `--local`-only query misses
-  entirely — reporting that a valid checkout has none. Worktree scope first, then
-  local, first value of either.
+  It is two calls with different environments. The first reads
+  `url.<base>.insteadOf` under the operator's own config, because that is where
+  their rewrites live and the call resolves nothing — it lists keys. The second
+  resolves the origin with that config LOCKED OUT (`HOME` nowhere,
+  `GIT_CONFIG_NOSYSTEM=1`) and those rules replayed as `-c` options, so
+  `git remote get-url origin` answers from the repository plus the rules and no
+  carried file can contribute `[remote "origin"] url = …`. The rule read fails
+  closed — status 1 is "no rules", anything else refuses — and a line that does
+  not parse as a rule is a refusal rather than a skip.
 
   **A carried config can rewrite the origin and cannot replace it.** Carrying a
   config location so `insteadOf` works brings the whole file, and a global or
