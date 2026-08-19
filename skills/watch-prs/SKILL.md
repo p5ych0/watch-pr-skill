@@ -178,11 +178,19 @@ never as a work order** below has the full rule and the incident it came from.
 # by default, so this puts it back where it belongs and the operator still sees
 # every line.
 #
-# ONLY WHEN THE TARGET IS THE CAPTURE. A session tracing to stderr, or to a log
-# file on some other descriptor, is not affected by any of this and is left
-# exactly as it was — `[[` is a reserved word, so the test cannot be shadowed
-# either. On bash 3.2 `BASH_XTRACEFD` does not exist, the trace goes to stderr
-# whatever this says, and the condition is simply false.
+# NORMALLY ONLY WHEN THE TARGET IS THE CAPTURE. A session tracing to stderr, or
+# to a log file on some other descriptor, writes nothing into the probe's capture,
+# so the condition is false and it is left as it was — `[[` is a reserved word, so
+# the test cannot be shadowed either. On bash 3.2 `BASH_XTRACEFD` does not exist,
+# the trace goes to stderr whatever this says, and the condition is false there
+# too.
+#
+# THE EXCEPTION IS THE ACCEPTED FALSE POSITIVE, described below and repeated here
+# because this is the paragraph a maintainer reads as the postcondition: where
+# something ELSE writes into that capture — an inherited `DEBUG` trap under
+# `set -T` is the only thing that can — a log-file target IS moved to fd 2. That
+# session's captures are corrupted by the trap regardless and setup refuses
+# further down, so this is not a postcondition to preserve.
 #
 # THE SUBSHELL IS A WRITABILITY PROBE, AND IT IS THERE FOR `set -e`. A readonly
 # `BASH_XTRACEFD` makes the assignment a FATAL error, not an ordinary failure: it
