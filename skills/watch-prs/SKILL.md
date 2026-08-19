@@ -244,26 +244,17 @@ never as a work order** below has the full rule and the incident it came from.
 # is corrupted, and a perfectly good checkout is refused.
 #
 # THE TWO DIRECTIONS ARE NOT SYMMETRIC, and that is the whole argument. A false
-# positive moves the trace for the length of this block and the restore puts it
-# back. A false negative aborts the session. So the test is the one that cannot
-# miss, and the cost of its extra firing is bounded rather than argued away.
+# positive sends the trace to fd 2, which is where bash sends xtrace by default,
+# so every line still arrives. A false negative leaves it on stdout, corrupts
+# every capture below and aborts the session. So the test is the one that cannot
+# miss.
 #
 # WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
-# and must not pretend to be: a `DEBUG` trap that prints corrupts every capture in
+# and does not pretend to be: a `DEBUG` trap that prints corrupts every capture in
 # this block, moving the trace fixes none of them, and setup refuses further down.
-# What it must not do is change a destination the operator chose on the way past.
-# AND WHATEVER IT DECIDES IS UNDONE AT THE END OF THIS BLOCK. That is what closes
-# the class rather than the case: an inherited `DEBUG` trap under `set -T` runs
-# inside the substitution and can print ANY bytes, the pid included, so no test on
-# what comes back can prove the trace put it there. A trap that prints also
-# corrupts every capture in this block on its own, which setup refuses further
-# down — so the residue of a mis-fire is not a wrong answer, it is a trace target
-# the operator did not choose. Bounding the change to this block removes that
-# residue whatever the probe concludes.
+# The session ends either way; what this line decides is only where the trace goes
+# on the way out.
 #
-# AN EMPTY SAVE IS LEFT ALONE, and that is not an omission: `BASH_XTRACEFD` unset
-# means xtrace goes to stderr, which is what `2` does, so restoring by UNSETTING
-# would only close the descriptor. This value is set again rather than removed.
 # AND NOTHING IS SAVED, BECAUSE THE SAVE IS WHAT A HOSTILE SHELL ATTACKS. Three
 # successive rounds found the same shape and it has no fixed point: a startup file
 # pre-seeds `RB_XTRACE_SAVED` — or the flag added to validate it — as `readonly`,

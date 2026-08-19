@@ -21,7 +21,7 @@
   Setup now moves the trace off the capture before its first substitution:
   `BASH_XTRACEFD=2`, guarded by `[[ -n "$( RB_TRACE_PROBE=1 )" ]]` — a capture
   that comes back with anything in it at all, run before the first substitution
-  that matters and undone before the block ends.
+  that matters.
 
   The probe is an **assignment** because every command is a name: `$( : )` was the
   first spelling, and a shell with `:() { printf marker; }` made the capture
@@ -77,9 +77,15 @@
   The hostile-shell cases assert what is actually promised there: the trace is
   never silenced and never lands on a descriptor nobody named. A printing `:`, a
   marker `DEBUG` trap, one echoing `$BASH_COMMAND`, one printing the pid and a
-  readonly `PS4` all leave it on fd 7 or fd 2. One case asserts the block writes
-  no variable a startup file could pre-seed, which is what the save-and-restore
-  could not promise.
+  readonly `PS4` all leave it on fd 7 or fd 2. And the guard is asserted to BE its
+  three lines rather than merely to avoid two retired variable names — a list of
+  spellings is wrong the first time a new one is written, and `RB_TRACE_SAVED`
+  would have passed a scan for `RB_XTRACE_SAVED` while reintroducing exactly what
+  it forbids.
+
+  The scan for the descriptor-closing spelling covers both: `unset
+  BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
+  stayed green for the other.
 
   Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
   job builds — the contamination cannot be staged, so that half reports which case

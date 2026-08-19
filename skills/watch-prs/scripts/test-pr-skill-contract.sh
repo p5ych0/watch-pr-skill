@@ -3688,9 +3688,16 @@ esac
 # `BASH_XTRACEFD=` EMPTY IS THE ONE SPELLING THAT MUST NOT APPEAR: bash closes the
 # descriptor the variable referred to when it is unset or emptied, so that form
 # closes fd 1 outright. Measured — the shell produces no further output at all.
+# BOTH SPELLINGS THAT CLOSE THE DESCRIPTOR. `unset BASH_XTRACEFD` and
+# `BASH_XTRACEFD=` do the same thing — bash closes the descriptor the variable
+# named — and a scan for one of them stays green for the other, which is the
+# regression this check exists to stop. The pattern matches an assignment whose
+# value does not begin with a digit, so `BASH_XTRACEFD=2` passes and
+# `BASH_XTRACEFD=` and `BASH_XTRACEFD=$x` do not.
 case "$_setup_code" in
     *'unset BASH_XTRACEFD'*) die "setup unsets BASH_XTRACEFD, which closes the descriptor it named" ;;
-    *) pass "…and never unsets it, which would close that descriptor" ;;
+    *'BASH_XTRACEFD='[!0-9]*|*'BASH_XTRACEFD=') die "setup assigns BASH_XTRACEFD a non-literal or empty value; empty closes the descriptor it named" ;;
+    *) pass "…and never unsets or empties it, either of which closes that descriptor" ;;
 esac
 
 # BEHAVIOURAL, ON THE REAL LINES: the repository-root read and the helper-path
@@ -3861,11 +3868,18 @@ else
         'readonly PS4="+ "'
     # NO STATE MEANS NO COLLISION. A startup file that pre-seeds readonly
     # variables named like this block's own — which is what defeated the
-    # save-and-restore, three rounds running — has nothing here to seize.
-    _tr_nostate="$(printf '%s\n' "$_setup_block" | grep -c 'RB_XTRACE_SAVED\|RB_XTRACE_MOVED' || true)"
-    [ "$_tr_nostate" -le 1 ] \
-        && pass "…and the block keeps no state a startup file could pre-seed" \
-        || die "the guard writes state a readonly collision can seize ($_tr_nostate references)"
+    # save-and-restore, three rounds running — must have nothing here to seize.
+    #
+    # THE WHOLE SHAPE IS ASSERTED, not two retired names. A list of spellings is
+    # wrong the first time a new one is written: `RB_TRACE_SAVED` would pass a
+    # scan for `RB_XTRACE_SAVED` while reintroducing exactly what it forbids. The
+    # guard is three lines; requiring it to BE those three lines admits no fourth.
+    _tr_shape="$(printf '%s\n' "$_tr_guard" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')"
+    [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+    BASH_XTRACEFD=2
+fi' ] \
+        && pass "…and the guard is exactly those three lines, so it keeps no state to seize" \
+        || die "the guard has grown beyond moving the trace: '$_tr_shape'"
     # AND UNDER A READONLY `PS4` THE GUARD STILL PROTECTS THE CAPTURE, which is
     # the direction that actually matters: the pid scheme went blind there,
     # leaving the trace on stdout and aborting a valid checkout.
