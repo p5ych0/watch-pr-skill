@@ -776,21 +776,21 @@ if /usr/bin/env mkdir -m 700 "$RB_PIN_DIR"; then
     # `exit` — the structural shape #102 asked for, applied where a walked-past
     # refusal can still produce a plausible answer rather than an absent one.
     if [[ $RB_PIN_OUT != "$RB_PIN_DIR/pin" ]]; then
+        # THE DIRECTORY IS OURS TO REMOVE HERE, and only here: the `mkdir` above
+        # succeeded, so this shell created it. That is the whole difference from
+        # the arms outside this branch, which remove nothing because they cannot
+        # know whose the directory is.
+        /usr/bin/env rmdir "$RB_PIN_DIR"
         echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"
         exit 1
         [[ -n "" ]]
     elif [[ -n $RB_PIN_SEEN ]]; then
-        # NOTHING IS REMOVED HERE, and that includes the directory. This arm runs
-        # BEFORE the probe, so there is nothing yet for it to have created — and
-        # reaching it at all means `RB_PIN_SEEN` was pre-seeded READONLY, which no
-        # ordinary shell does, so every postcondition above it may equally have been
-        # walked past with `exit` neutered. `RB_PIN_OUT` and `RB_PIN_DIR` can then be
-        # readonly pre-seeded paths naming the operator's own file and directory:
-        # `rm -f` deletes the file, and `rmdir` deletes the directory if it happens to
-        # be empty. Neither is safe here, and there is nothing this arm needs them for.
-        #
-        # AN ORDINARY SHELL NEVER REACHES THIS, so it costs no cleanup: `RB_PIN_SEEN=`
-        # succeeds, the reset holds, and the other arm removes what the probe made.
+        /usr/bin/env rmdir "$RB_PIN_DIR"
+        # THE DIRECTORY, AND NOTHING ELSE. `rm -f "$RB_PIN_OUT"` does not belong
+        # here: the probe has not run, so no `pin` of ours exists, and reaching this
+        # arm means `RB_PIN_SEEN` was pre-seeded READONLY — a shell where
+        # `RB_PIN_OUT` may equally be a readonly path naming a file of the
+        # operator's.
         echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
         exit 1
         # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and

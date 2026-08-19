@@ -730,6 +730,15 @@ case "$_pin_then" in
         die "a cleanup runs in the branch where the directory was not created: '$_pin_then'" ;;
     *) pass "…and no cleanup runs where the directory was not this shell's to make" ;;
 esac
+# …WHILE THE ARMS INSIDE IT DO REMOVE THE DIRECTORY, because there the `mkdir`
+# proved this shell created it. Refusing without that leaves an empty
+# `watch-pr.*` behind on every failed setup in those two states.
+_pin_inner=""
+_pin_inner="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    if \[\[ $RB_PIN_OUT/,/^    else$/p')" || _pin_inner=""
+_pin_inner_rmdirs="$(printf '%s\n' "$_pin_inner" | grep -c 'rmdir "$RB_PIN_DIR"' || true)"
+[ "$_pin_inner_rmdirs" -eq 2 ] \
+    && pass "…and both inner refusals remove the directory the mkdir proved was ours" \
+    || die "an inner refusal leaves its transport directory behind ($_pin_inner_rmdirs of 2)"
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
 # while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
@@ -809,6 +818,23 @@ case "$_seed_out" in
 esac
 # ITS REACH: the same shell must really keep the pre-seeded value, or the case
 # above passes because the assignment overwrote it and the answer was empty.
+# THE RESET ARM IS ASSERTED STRUCTURALLY AS WELL, and it has to be: on this bash
+# the failed readonly assignment ends the `bash -c` before the arm is evaluated,
+# so the behavioural case above passes on the shell's own refusal and would stay
+# green with that arm deleted. A shell that CONTINUES past the failed assignment
+# — the behaviour `CLAUDE.md` records as depending on where the assignment sits —
+# would then reach the probe and certify the stale value.
+case "$_pin_refuse" in
+    *'elif [[ -n $RB_PIN_SEEN ]]; then'*) pass "…and the reset refusal is an arm of that branch" ;;
+    *) die "the reset refusal is not an arm; a shell that continues past the failed assignment would reach the probe" ;;
+esac
+# AND IT ABORTS RATHER THAN FALLING THROUGH, which is what the arm is for.
+_pin_reset_arm=""
+_pin_reset_arm="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^    else$/p')" || _pin_reset_arm=""
+case "$_pin_reset_arm" in
+    *'ABORT: RB_PIN_SEEN is readonly'*) pass "…and says so before it stops" ;;
+    *) die "the reset arm does not refuse: '$_pin_reset_arm'" ;;
+esac
 # ITS REACH: that shell must really stop on the pre-seeded value. Either message
 # counts — a failed readonly assignment inside a compound command can end the
 # script before the arm's own abort prints, which is bash's behaviour and not a
@@ -838,7 +864,8 @@ _sentinel="$RB_TMPBASE/sentinel"
 mkdir -p "$_sentinel"
 printf 'DO NOT DELETE\n' > "$_sentinel/keep"
 mkdir -p "$_sentinel/emptydir"
-env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+_sent_rc=0
+_sent_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
         RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
@@ -846,7 +873,18 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
         readonly RB_PIN_DIR="'"$_sentinel"'/emptydir"
         readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
         '"$_pin_block"'
-    ' >/dev/null 2>&1 || true
+    ' 2>&1)" || _sent_rc=$?
+# THE REFUSAL ITSELF, not only the survival. `RB_PIN_DIR` names a directory that
+# already exists, so `mkdir` fails and the outer `else` is the whole fail-closed
+# path — delete it and both survival checks stay green while setup finishes with
+# no diagnostic at all.
+{ [ "$_sent_rc" -ne 0 ] && case "$_sent_out" in *ABORT:*) true ;; *) false ;; esac; } \
+    && pass "…where a mkdir onto an existing directory refuses, non-zero and saying so" \
+    || die "a failed mkdir did not refuse (rc=$_sent_rc out='$_sent_out')"
+case "$_sent_out" in
+    *'OWNER='*) die "a failed mkdir reached the success line ('$_sent_out')" ;;
+    *) pass "…and never reaches the success line" ;;
+esac
 [ -s "$_sentinel/keep" ] \
     && pass "…and a refusal on a pre-seeded readonly path leaves the operator's file alone" \
     || die "the refusing arm deleted a file it never created"
