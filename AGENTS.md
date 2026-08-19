@@ -54,6 +54,53 @@ A tool stock macOS lacks is still usable when it is guarded: `command -v timeout
 && timeout 5 …` with a working fallback is correct, and `testlib.sh` does exactly
 that. Report the unguarded use, not the guarded one.
 
+## The driving shell is not yours to change
+
+`SKILL.md`'s setup runs in the operator's own long-lived shell, so anything it
+sets stays set for the rest of their session. Two rules follow, and a change to
+that block is judged against both:
+
+- **A stdout-directed xtrace must be moved off the capture before the first
+  command substitution.** `BASH_XTRACEFD=1` sends the trace to file descriptor 1,
+  and inside `X="$(cmd)"` fd 1 *is* the capture — so the trace is assigned to `X`
+  with the output, the validation rejects it, and setup aborts a session that had
+  nothing wrong with it. A change that removes that guard, or that adds a
+  substitution above it, is a regression.
+- **And nothing more than that may change.** The guard fires only where a trace
+  would actually reach a capture — it decides by putting one ASSIGNMENT inside one
+  and looking at what comes back, an assignment because it executes no command and
+  so offers a shadowed name no way in, not by comparing `BASH_XTRACEFD` to a number, since
+  bash resolves `01`, `+1` and ` 1` to descriptor 1 and a comparison has to
+  enumerate the spellings. (A descriptor duplicated from stdout is a different
+  matter and is NOT a case against the number: `exec 9>&1; BASH_XTRACEFD=9` keeps
+  fd 9 on the terminal while a substitution replaces fd 1 with its pipe, so that
+  trace never enters a capture and must be left alone — which the effect test does
+  by construction.) That probe runs inside a capture, so it must be an assignment
+  and not a command — an assignment runs nothing, so a shadowed name has no way in
+  at all. Do NOT ask it to identify the trace by its content: a `DEBUG` trap
+  inherited under `set -T`, one echoing `$BASH_COMMAND` and one printing `$$` can
+  each put anything into that capture, so no marker proves provenance — and every sharper marker adds a way to MISS, which
+  is the harmful direction, since a miss leaves the trace on stdout and aborts a
+  valid checkout, where a false positive only sends the trace to stderr — which is
+  where bash sends it by default. The two directions are not symmetric.
+
+  Do NOT ask it to save and restore the target either. That was built and removed:
+  a startup file pre-seeds the saved value, or the flag validating it, as
+  `readonly`, both assignments fail silently, and the restore aims the trace
+  wherever that file chose. The pid does not help as a flag value — that file runs
+  in the same shell. **Any state this block writes can be pre-seeded with the value
+  it was going to write**, so the guard keeps none, and a change that adds some
+  back is a finding. It moves the destination rather than disabling
+  tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
+  descriptor that variable named when it is unset or emptied, so that spelling
+  closes the shell's stdout. A REASSIGNMENT closes nothing, and that is not a
+  recent behaviour: `sv_xtracefd` reaches `xtrace_reset`, the only path that
+  closes, exactly when the variable is unset or its value is empty, and otherwise
+  takes `xtrace_set`, which replaces the target and leaves the old descriptor
+  open. Measured on 4.4.0, 5.2.0 and 5.3.9, each built and run for this. `set +x` is wrong here twice over: it takes the
+  operator's diagnostics away for the rest of the session, and `set` is a builtin
+  a function can shadow.
+
 ## Reviewing a pull request
 
 ### You review. You do not implement.

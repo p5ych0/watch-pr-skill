@@ -632,6 +632,38 @@ plugin docs and open an issue.
 
 ## Troubleshooting
 
+- **Your shell traces to stdout, and the loop moves it:** if you drive with
+  `set -x` and a `BASH_XTRACEFD` that lands on standard output, setup reassigns it
+  to `2` and leaves it there — you still see every trace line, on standard error,
+  where bash sends xtrace by default, and your standard output is untouched: bash
+  closes the descriptor that variable named only when it is unset or emptied,
+  never on a reassignment. Unless you made `BASH_XTRACEFD` **readonly**, in which
+  case setup will not touch it — a readonly assignment is a fatal error in bash
+  and under `set -e` would end your shell — so the trace stays on standard output
+  and setup refuses instead, exactly as it did before any of this existed. It has to: inside `X="$(cmd)"` file
+  descriptor 1 *is* the capture, so a trace aimed there is read back as part of
+  the value, and setup would refuse a checkout that is perfectly fine. A session
+  tracing anywhere else — stderr, a log file on another descriptor — is normally
+  left exactly as it was, and so is one that has set `BASH_XTRACEFD=1` ready for a
+  later `set -x` but is not tracing yet: with no trace running there is nothing to
+  contaminate. "Normally" is doing real work in that sentence — see the false
+  positive below, which is the one case where a log-file target does get moved. Setup decides by putting one assignment inside a capture and looking
+  at what comes back, so it is the destination that matters and not how you
+  spelled it.
+
+  If your shell has no standard error at all — `exec 2>&-` — the loop cannot help
+  you: bash refuses to aim the trace at a closed descriptor, so it stays on
+  standard output and setup refuses, which is what it did before this existed.
+
+  **The one exception, and the reason for that "normally".** The check can be
+  wrong in one direction: a shell with an inherited `DEBUG` trap under `set -T`
+  that prints writes into command substitutions of its own accord, which looks the
+  same as a trace arriving, so your tracing moves to standard
+  error even though it was not in the way, log file target included. Putting it back afterwards was
+  built and removed: a startup file can make the variables that would remember it
+  `readonly` and steer the restore somewhere of its own choosing. In that shell
+  the loop cannot start regardless — whatever is writing into those captures
+  corrupts all of them, and setup refuses.
 - **`@codex` answers with a setup link instead of reviewing:** the connector is
   not linked for this account. Link it at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).

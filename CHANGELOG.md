@@ -1,5 +1,149 @@
 # Changelog
 
+## [2.0.30] — 2026-08-19
+
+- **A driver tracing to its own stdout aborted setup.** `BASH_XTRACEFD=1` sends
+  xtrace to file descriptor 1, and inside `X="$(cmd)"` fd 1 *is* the capture — so
+  the trace of `cmd` was assigned to `X` along with its output:
+
+  ```
+  $ SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+  [++ printf hello
+  hello]
+  ```
+
+  Every substitution in the setup block was affected, not one of them: the
+  repository root, the plugin-copy discovery, the `mktemp`, the `type -t` probe.
+  The validations below each of them then rejected the corrupted value, so it
+  failed closed — and ended a session that had nothing wrong with it, with an
+  abort naming a path the operator could see was fine.
+
+  Setup now moves the trace off the capture before its first substitution:
+  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( RB_TRACE_PROBE=1 )" ]]` — a capture
+  that comes back with anything in it at all, run before the first substitution
+  that matters.
+
+  The probe is an **assignment** because every command is a name: `$( : )` was the
+  first spelling, and a shell with `:() { printf marker; }` made the capture
+  non-empty through the function's own output.
+
+  **The move is gated on a subshell writability probe, for `set -e`.** A readonly
+  `BASH_XTRACEFD` makes the assignment a FATAL error rather than an ordinary
+  failure: `||` does not catch it, an `if` around it does not catch it, and under
+  `errexit` it ended the operator's long-lived shell where the documented outcome
+  is a refusal further down. All three forms measured. So the assignment is tried
+  in a subshell first, where that fatality is confined, and its status decides
+  whether the real one runs — `( … )` and an assignment are both parser
+  constructs, so no name is introduced, and a condition of `&&` is exempt from
+  `errexit`.
+
+  **The move is a reassignment, which closes nothing.** bash closes the descriptor
+  `BASH_XTRACEFD` named when the variable is unset or set to the empty string, and
+  only then: `sv_xtracefd` reaches `xtrace_reset` — the one path that closes — in
+  exactly those two cases, and otherwise takes `xtrace_set`, which replaces the
+  target and leaves the old descriptor open. Measured on 4.4.0, 5.2.0 and 5.3.9,
+  each built and run for this: after `BASH_XTRACEFD=1` → `2`, ordinary `printf`
+  output still reaches fd 1 and `exec 3>&1` still succeeds, while
+  `BASH_XTRACEFD=` produces no further output at all. That is what makes this form
+  available where a save-and-restore, which has to unset, was not.
+
+  **Marker schemes were tried and removed.** Matching the probe's own text, then a
+  pid delivered through `PS4`: a `DEBUG` trap inherited under `set -T` runs inside
+  the substitution and forged each in turn — `$BASH_COMMAND` reproduces the
+  command exactly, and `printf "%s:" "$$"` produces the pid. A trap can emit any
+  bytes, so no content test can prove provenance. Each sharper marker also added a
+  way to MISS: an operator with `readonly PS4` made the pid scheme blind, and a
+  miss is the harmful direction — the trace stays on stdout, every capture is
+  corrupted, and a perfectly good checkout is refused.
+
+  **The two directions are not symmetric, and that is the whole design.** A false
+  positive moves the trace to fd 2, where bash sends xtrace by default, so every
+  line still arrives. A false negative leaves it on stdout, corrupts every capture
+  and aborts the session. So the test is the one that cannot miss.
+
+  **And the guard keeps no state.** A save-and-restore around the block was built
+  and removed: three successive rounds found the same defeat, and it has no fixed
+  point. A startup file pre-seeds the saved value — or the flag added to validate
+  it — as `readonly`; both assignments fail silently, since assignments do not
+  report failure; and the restore then aims the operator's trace at whatever
+  descriptor that file chose. Making the flag's value the pid does not help: the
+  startup file runs in the same shell, so `$$` is as knowable to it. Any state this
+  block writes can be pre-seeded with the value it was going to write.
+
+  What the restore bought was tidiness after a mis-fire, and a mis-fire needs
+  something else writing into that capture, and only an inherited `DEBUG` trap
+  under `set -T` can: the probe runs no command, so there is no function for a
+  shadowed name to supply. Such a shell has already corrupted every capture in
+  the block, so setup refuses further down and the session ends either way.
+  Trading that for an unbounded regress of collision guards is the over-building
+  this repository's rules warn against.
+
+  **A driving shell with no stderr is out of reach**, and that is stated rather
+  than pretended away: with fd 2 closed bash rejects `BASH_XTRACEFD=2` as an
+  invalid descriptor, the trace stays on stdout, and the captures are contaminated
+  exactly as before. There is no other target to choose — every descriptor that is
+  not the capture is one this block would have to open, and the place a trace
+  belongs is the standard error that shell does not have. It fails closed: a
+  corrupted `REPO_DIR` is not a directory, so the first use of it refuses, and
+  that is what the fixture asserts.
+
+  **The accepted outcome of a FALSE POSITIVE, stated rather than left to be
+  found:** where the probe fires because something else was writing into that
+  capture — an inherited `DEBUG` trap — the operator's chosen trace
+  destination becomes stderr for the rest of the session. That is a different case
+  from the closed-stderr one above, where the move is rejected and the trace stays
+  where it was; the two are not alternatives. `README.md` says both.
+
+  The origin read was never affected and still is not: its value arrives in a
+  file read with `$(<"$path")`, and a redirection-only substitution executes
+  nothing, so there is no trace to capture.
+
+  `test-pr-skill-contract.sh` lifts the setup block, asserts the guard is its first
+  executable line and that the code — not the prose arguing against it — contains
+  no `set +x` and no `unset`, then runs the real repository-root read under
+  `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard lifted from the block rather
+  than retyped. The capture holds the path alone under `1`, `01`,
+  `+1`, ` 1` and a readonly `PS4`; the trace still arrives on stderr; the driving
+  shell's stdout survives, with `BASH_XTRACEFD=` asserted to close it so that case
+  is not vacuous; and a shadowed `set` changes nothing.
+
+  The hostile-shell cases assert what is actually promised there: the trace is
+  never silenced and never lands on a descriptor nobody named. A marker `DEBUG`
+  trap, one echoing `$BASH_COMMAND`, one printing the pid and a readonly `PS4` all
+  leave it on fd 7 or fd 2 — the trap cases may fire, and that is the accepted
+  false positive. A shadowed `:` has its own, stricter case: the probe runs no
+  command, so it cannot fire at all and the target must be untouched. And the guard is asserted to BE its
+  three lines rather than merely to avoid two retired variable names — a list of
+  spellings is wrong the first time a new one is written, and `RB_TRACE_SAVED`
+  would have passed a scan for `RB_XTRACE_SAVED` while reintroducing exactly what
+  it forbids. The whole block is checked as well as the guard, because a save
+  added after its `fi` leaves those three lines untouched: any restore must write
+  `BASH_XTRACEFD` a second time whatever it calls the variable it remembers, so
+  the block is required to name it nowhere outside the guard — the count is
+  compared against the guard's own rather than fixed, since the guard names it
+  twice, in its writability probe and in the move that probe gates. That check is
+  run against the save-and-restore itself, which must fail it.
+
+  The scan for the descriptor-closing spelling covers both: `unset
+  BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
+  stayed green for the other. Disabling tracing is checked twice over — no
+  executable line in the whole block may contain a `set +…`, anchored nowhere so
+  that `[[ 1 ]] && set +o xtrace` is caught mid-line, and after the guard and the
+  lifted read run, `$-` must still carry `x`. The scan is run against that exact
+  mutation, which must fail it. The pattern is a portable ERE rather than `\b`,
+  which BSD `grep` can match literally — a word boundary that finds nothing would
+  pass everything.
+
+  Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
+  job builds — the contamination cannot be staged, so that half reports which case
+  it was rather than failing.
+
+  `README.md` § Troubleshooting says what an operator tracing to stdout will see,
+  and both reviewer contracts state the invariant so a later change cannot remove
+  it with a clean review: the guard must stay above the first substitution, it must
+  not grow into disabling tracing or unsetting the variable, and it must keep no
+  state a startup file could pre-seed.
+
 ## [2.0.29] — 2026-08-18
 
 - **The setup block read origin with `git` and proved its pin with `bash -c`, and

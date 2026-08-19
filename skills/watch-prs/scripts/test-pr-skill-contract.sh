@@ -3650,6 +3650,402 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
         || die "$name: does not say a code suggestion is only a proposal"
 done
 
+# ── A DRIVER TRACING TO STDOUT DOES NOT REACH A CAPTURE ────────────────────
+#
+# `BASH_XTRACEFD=1` sends xtrace to file descriptor 1, and inside `X="$(cmd)"` fd
+# 1 IS the capture — so the trace of `cmd` is assigned to `X` with its output.
+# Every substitution in setup was affected: the repository root, the plugin
+# discovery, the `mktemp`, the `type -t` probe. The validations then rejected the
+# corrupted values, so it failed closed and aborted a session that had nothing
+# wrong with it. Issue #92.
+#
+# STRUCTURAL FIRST: the guard has to precede every substitution in the block, not
+# merely exist somewhere in it.
+_setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f' "$SKILL")"     || _setup_block=""
+[ -n "$_setup_block" ]     && pass "the setup block lifts out of SKILL.md"     || die "the setup block could not be lifted"
+# ONE READER OVER THE FILE, NOT A PIPELINE ENDING IN `head`. `head -1` closes the
+# pipe after the first line while the upstream still has ~500 to write; the writer
+# takes EPIPE, `pipefail` makes the assignment non-zero, and `set -e` ends the
+# whole fixture before any of these assertions run. `awk` reading `$SKILL`
+# directly has no pipe to break.
+_first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
+[ "$_first_exec" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then' ] \
+    && pass "…and its first executable line moves the trace off the capture" \
+    || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
+# AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
+# function shadows it, so a guard written that way is absent in the one shell
+# state it exists for. And it must MOVE the trace rather than end it: the operator
+# keeps their diagnostics, on the descriptor bash sends them to by default.
+# THE CODE, NOT THE COMMENTS. The block explains at length why `set +x` was not
+# used, so a scan over the raw text finds that spelling in the prose arguing
+# against it and reports the defect the prose exists to prevent.
+_setup_code="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#')"
+# ANY `set +…`, NOT ONE SPELLING. `set +x` and `set +o xtrace` do the same thing,
+# and a check for the first stays green for the second — while every behavioural
+# case here lifts the guard alone and would miss a disabling line placed after it.
+# UNANCHORED, because `set` need not begin the line: `[[ 1 ]] && set +o xtrace`
+# and `if x; then set +x; fi` both turn tracing off from the middle of one.
+tr_no_set_minus() {   # tr_no_set_minus <code> ; 0 if no `set +…` appears
+    local _n
+    # `grep -E`, NOT `\b`. Word boundaries are a GNU extension: BSD `grep` can
+    # match `\b` literally, so the pattern would find nothing and the check would
+    # pass everything — fail-open, on the platform the suite exists to cover.
+    _n="$(printf '%s\n' "$1" | grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' || true)"
+    [ "$_n" -eq 0 ]
+}
+tr_no_set_minus "$_setup_code" \
+    || die "setup turns a shell option off; disabling tracing is what this forbids"
+# THE MUTATION IT IS MEANT TO CATCH, run against the check itself.
+tr_no_set_minus "$_setup_code
+[[ 1 ]] && set +o xtrace" \
+    && die "the scan passes a block that disables tracing mid-line; it proves nothing" \
+    || pass "…and a 'set +o xtrace' anywhere on a line does fail that scan"
+case "$_setup_code" in
+    *'set +x'*) die "setup disables tracing through a shadowable name" ;;
+    *'BASH_XTRACEFD=2'*) pass "…and moves the trace by assignment rather than disabling it" ;;
+    *) die "setup does not move the trace off the capture" ;;
+esac
+# `BASH_XTRACEFD=` EMPTY IS THE ONE SPELLING THAT MUST NOT APPEAR: bash closes the
+# descriptor the variable referred to when it is unset or emptied, so that form
+# closes fd 1 outright. Measured — the shell produces no further output at all.
+# BOTH SPELLINGS THAT CLOSE THE DESCRIPTOR. `unset BASH_XTRACEFD` and
+# `BASH_XTRACEFD=` do the same thing — bash closes the descriptor the variable
+# named — and a scan for one of them stays green for the other, which is the
+# regression this check exists to stop. The pattern matches an assignment whose
+# value does not begin with a digit, so `BASH_XTRACEFD=2` passes and
+# `BASH_XTRACEFD=` and `BASH_XTRACEFD=$x` do not.
+case "$_setup_code" in
+    *'unset BASH_XTRACEFD'*) die "setup unsets BASH_XTRACEFD, which closes the descriptor it named" ;;
+    *'BASH_XTRACEFD='[!0-9]*|*'BASH_XTRACEFD=') die "setup assigns BASH_XTRACEFD a non-literal or empty value; empty closes the descriptor it named" ;;
+    *) pass "…and never unsets or empties it, either of which closes that descriptor" ;;
+esac
+
+# BEHAVIOURAL, ON THE REAL LINES: the repository-root read and the helper-path
+# validation, lifted and run under an inherited trace aimed at stdout. Without the
+# guard `REPO_DIR` holds a trace line and the path; with it, the path alone.
+_tr_block="$(printf '%s\n' "$_setup_block" | sed -n '/^REPO_DIR="\$(git rev-parse/,/could not locate the plugin helper scripts/p')"     || _tr_block=""
+case "$_tr_block" in
+    *'git rev-parse --show-toplevel'*) pass "…and the repository-root read lifts with it" ;;
+    *) die "the repository-root read could not be lifted: '$_tr_block'" ;;
+esac
+# `die` RECORDS A FAILURE AND RETURNS; it does not end the file. Without the guard
+# below, an empty `_tr_dir` sent every path here to `/plug`, so the probe built
+# files outside its own scratch tree — or died at an unguarded `mkdir` before
+# `RESULT:` was printed at all.
+_tr_dir=""
+_tr_dir="$(mktemp_d)" || _tr_dir=""
+if [ -z "$_tr_dir" ] || [ ! -d "$_tr_dir" ]; then
+    die "no scratch directory for the tracing probe"
+else
+    ( cd "$_tr_dir" && git init -q . ) >/dev/null 2>&1 || die "could not build the tracing probe checkout"
+    mkdir -p "$_tr_dir/plug/skills/watch-prs/scripts"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$_tr_dir/plug/skills/watch-prs/scripts/pr-review-state.sh"
+    chmod +x "$_tr_dir/plug/skills/watch-prs/scripts/pr-review-state.sh"
+    # WITHOUT THE GUARD FIRST, or the case below passes against a shell that never
+    # traced anything and proves nothing about the guard.
+    _tr_bare="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            '"$_tr_block"'
+            printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_bare=""
+    # THE ASSERTION IS ON THE VARIABLE, not on the run's whole output. `set +x` is
+    # itself traced before it takes effect, so the block's stdout legitimately carries
+    # one `+ set +x` line — that goes to the operator's terminal, which is where the
+    # trace belongs. What must never carry it is a captured value.
+    _tr_bare_v="$(printf '%s\n' "$_tr_bare" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+    # THIS SHELL MAY NOT HAVE THE ROUTE AT ALL, and that is not a failure. bash 3.2.57
+    # — which the `macos-shell` job builds and puts first on `PATH` — has no
+    # `BASH_XTRACEFD`, so xtrace stays on stderr and nothing can contaminate a
+    # capture. Requiring the contamination there would turn that job red over a
+    # variable the shell does not implement. The invariant below is asserted either
+    # way; only the proof that the route is live is conditional, and which of the two
+    # happened is named rather than hidden.
+    _tr_route=no
+    case "$_tr_bare_v" in
+        *'rev-parse'*) _tr_route=yes; pass "…where an inherited trace really does reach the capture" ;;
+        *) pass "…(this bash has no BASH_XTRACEFD route to a capture; that half did not run)" ;;
+    esac
+    # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
+    # that some line works, not that the one that ships does.
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( RB_TRACE_PROBE=1 )" \]\] &&/,/^fi$/p')"
+    case "$_tr_guard" in
+        *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
+        *) die "the guard could not be lifted: '$_tr_guard'" ;;
+    esac
+    _tr_fixed="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            '"$_tr_guard"'
+            '"$_tr_block"'
+            printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_fixed=""
+    _tr_fixed_v="$(printf '%s\n' "$_tr_fixed" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+    { [ "$_tr_fixed_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_fixed_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+        && pass "…and with the guard the capture holds the path and nothing else" \
+        || die "the capture was still corrupted with the guard in place ('$_tr_fixed_v')"
+    # AND THE TRACE IS STILL PRODUCED, on stderr. `set +x` would satisfy the line
+    # above by taking the operator's diagnostics away for the rest of their session,
+    # so this absence check is what separates moving the trace from ending it. Only
+    # where the route exists: on a shell without `BASH_XTRACEFD` it was never
+    # anywhere else to begin with.
+    if [ "$_tr_route" = yes ]; then
+        _tr_err="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>&1 >/dev/null)" || _tr_err=""
+        case "$_tr_err" in
+            *'rev-parse'*) pass "…while the operator's trace still arrives, on stderr" ;;
+            *) die "the trace was silenced rather than moved ('$_tr_err')" ;;
+        esac
+        # AND TRACING IS STILL ON AFTERWARDS, which is the behavioural half of
+        # the structural scan above: `set +x`, `set +o xtrace` and anything else
+        # that turns the option off all show up here as a missing `x` in `$-`, so
+        # no spelling has to be enumerated.
+        _tr_still="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                case $- in *x*) builtin printf "TRACING=[on]\n" ;; *) builtin printf "TRACING=[off]\n" ;; esac' 2>/dev/null)" || _tr_still=""
+        case "$_tr_still" in
+            *'TRACING=[on]'*) pass "…and the x option is still set after the block runs" ;;
+            *) die "setup turned the operator's tracing off ('$_tr_still')" ;;
+        esac
+        # AND A SHADOWED `set` CHANGES NOTHING, which is the whole reason the guard is
+        # an assignment. `set +x` in this position would be a call to that function,
+        # leaving the trace on fd 1 and the capture corrupted — in exactly the shell
+        # state the guard exists for. `[[` is a reserved word and an assignment is
+        # handled by the parser, so neither has a name to take.
+        _tr_shadow="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+                set() { return 0; }
+                unset() { return 0; }
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_shadow=""
+        _tr_shadow_v="$(printf '%s\n' "$_tr_shadow" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+        { [ "$_tr_shadow_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_shadow_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+            && pass "…and a shadowed 'set' does not reach it" \
+            || die "a shadowed 'set' left the capture corrupted ('$_tr_shadow_v')"
+    # AND THE DRIVING SHELL'S STDOUT SURVIVES IT. bash closes the descriptor
+    # `BASH_XTRACEFD` referred to when it is UNSET or emptied; a reassignment is
+    # documented to close nothing, and this asserts it on whatever bash runs the
+    # suite rather than on the one it was measured against. If some build closes
+    # fd 1 here, ordinary output after the guard disappears and this goes red —
+    # which is the point: the claim is about a shell, so a shell has to answer it.
+    #
+    # ORDINARY OUTPUT AND A DUP, because they fail differently: a closed fd 1
+    # loses the `printf` while `exec 3>&1` errors, and one case has passed with
+    # the other broken.
+    _tr_fd="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            '"$_tr_guard"'
+            printf "ORDINARY\n"
+            exec 3>&1 && printf "DUP\n" >&3' 2>/dev/null)" || _tr_fd=""
+    case "$_tr_fd" in
+        *ORDINARY*DUP*) pass "…and the driving shell's stdout survives the reassignment" ;;
+        *) die "the reassignment closed the shell's stdout ('$_tr_fd')" ;;
+    esac
+    # EVERY SPELLING BASH RESOLVES TO DESCRIPTOR 1, not just the digit. bash reads
+    # `01`, `+1` and ` 1` as fd 1 and a string compare against `1` missed all
+    # three — which is why the guard tests the effect instead of the value.
+    for _tr_spell in 01 '+1' ' 1'; do
+        _tr_alt="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD="$_tr_spell" bash -c '
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_alt=""
+        _tr_alt_v="$(printf '%s\n' "$_tr_alt" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+        { [ "$_tr_alt_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_alt_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+            && pass "…and BASH_XTRACEFD='$_tr_spell' is caught as the descriptor it is" \
+            || die "BASH_XTRACEFD='$_tr_spell' left the capture corrupted ('$_tr_alt_v')"
+    done
+    # ── WHAT A HOSTILE SHELL CAN PUT IN THAT CAPTURE, AND WHAT IS ACCEPTED.
+    # The probe runs inside a substitution, so an inherited `DEBUG` trap can write
+    # into it and look exactly like a trace that arrived. A shadowed command
+    # cannot — the probe is an assignment and runs nothing — which is why that
+    # case is asserted strictly above and these are not.
+    # Marker schemes were tried against each — the probe's own text, then a pid
+    # delivered through `PS4` — and each was forged by the next trap, while every
+    # sharper marker added a way to MISS, which is the direction that aborts a
+    # valid session. A save-and-restore was tried next and is worse: a startup
+    # file pre-seeds the saved value, or the flag validating it, as `readonly`,
+    # and the restore then aims the trace wherever that file chose.
+    #
+    # So the accepted outcome in those shells is that the trace ends on fd 2 —
+    # where bash sends xtrace by default, so every line still arrives. Their
+    # captures are corrupted by the trap regardless — a shadowed function cannot
+    # reach an assignment-only probe, which is why its case above is the strict
+    # one — and setup refuses further down. What is asserted here is that NOTHING WORSE happens:
+    # the trace is never silenced, and it never lands on a descriptor nobody
+    # named.
+    tr_hostile() {   # tr_hostile <label> <shell-preamble>
+        local _label="$1" _pre="$2" _out
+        _out="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+                exec 7>/dev/null
+                BASH_XTRACEFD=7
+                '"$_pre"'
+                set -x
+                '"$_tr_guard"'
+                trap - DEBUG 2>/dev/null
+                set +x
+                builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _out=""
+        case "$_out" in
+            *'FD=[7]'*|*'FD=[2]'*) pass "$_label" ;;
+            *) die "$_label — the trace landed somewhere nobody named ('$_out')" ;;
+        esac
+    }
+    # A SHADOWED COMMAND CANNOT REACH THIS PROBE AT ALL, so its case is the
+    # strict one: the probe runs no command, and an assignment supplies no name
+    # for a function to take, so the target must be untouched rather than merely
+    # named.
+    _tr_shadow_only="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -x
+            :() { builtin printf marker; }
+            printf() { builtin printf marker; }
+            '"$_tr_guard"'
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_shadow_only=""
+    case "$_tr_shadow_only" in
+        *'FD=[7]'*) pass "a shadowed command cannot reach the probe, so the target is untouched" ;;
+        *) die "a shadowed command reached the assignment-only probe ('$_tr_shadow_only')" ;;
+    esac
+    tr_hostile "…and so does a DEBUG trap printing a marker" \
+        'set -T; trap "builtin printf marker" DEBUG'
+    tr_hostile "…and one echoing \$BASH_COMMAND, which reproduces the probe exactly" \
+        'set -T; trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG'
+    tr_hostile "…and one printing the pid, which no marker scheme can outrun" \
+        'set -T; trap "builtin printf \"%s:\" \"\$\$\"" DEBUG'
+    tr_hostile "…and a readonly PS4, which made the marker schemes blind" \
+        'readonly PS4="+ "'
+    # NO STATE MEANS NO COLLISION. A startup file that pre-seeds readonly
+    # variables named like this block's own — which is what defeated the
+    # save-and-restore, three rounds running — must have nothing here to seize.
+    #
+    # THE WHOLE SHAPE IS ASSERTED, not two retired names. A list of spellings is
+    # wrong the first time a new one is written: `RB_TRACE_SAVED` would pass a
+    # scan for `RB_XTRACE_SAVED` while reintroducing exactly what it forbids. The
+    # guard is three lines; requiring it to BE those three lines admits no fourth.
+    _tr_shape="$(printf '%s\n' "$_tr_guard" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')"
+    [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
+    BASH_XTRACEFD=2
+fi' ] \
+        && pass "…and the guard is exactly those three lines, so it keeps no state to seize" \
+        || die "the guard has grown beyond moving the trace: '$_tr_shape'"
+    # AND ACROSS THE WHOLE BLOCK, not only those three lines. A save added after
+    # the `fi` and a restore near the end of setup would leave the guard's own
+    # shape untouched while reintroducing exactly the collision this removed. Any
+    # restore must write `BASH_XTRACEFD` a SECOND time, whatever it names the
+    # variable it remembers — so the count is the invariant, and it needs no list
+    # of names.
+    # THE COUNT IS COMPARED WITH THE GUARD'S OWN, not fixed at one: the guard
+    # names `BASH_XTRACEFD` twice, in its writability probe and in the move it
+    # gates. What must hold is that NOTHING ELSE in the block names it — a restore
+    # has to write it again, wherever it puts the value it remembers.
+    _tr_guard_names="$(printf '%s\n' "$_tr_guard" | grep -c 'BASH_XTRACEFD' || true)"
+    tr_writes_once() {   # tr_writes_once <block-code> ; 0 if only the guard names it
+        local _n
+        _n="$(printf '%s\n' "$1" | grep -c 'BASH_XTRACEFD' || true)"
+        [ "$_n" -eq "$_tr_guard_names" ]
+    }
+    tr_writes_once "$_setup_code" \
+        && pass "…and only the guard names BASH_XTRACEFD, so nothing restores it" \
+        || die "the setup block names BASH_XTRACEFD outside the guard; a restore is back"
+    # THE MUTATION IT IS MEANT TO CATCH, run against the check itself: the exact
+    # save-and-restore three rounds of review removed.
+    tr_writes_once "$_setup_code
+RB_TRACE_SAVED=\"\${BASH_XTRACEFD-}\"
+BASH_XTRACEFD=\$RB_TRACE_SAVED" \
+        && die "the check passes a block that saves and restores the trace target; it proves nothing" \
+        || pass "…where a save-and-restore under a new name does fail that check"
+    # A READONLY TARGET UNDER `errexit` MUST NOT KILL THE SHELL. A readonly
+    # `BASH_XTRACEFD` makes the assignment a FATAL error rather than an ordinary
+    # failure — `||` does not catch it and neither does an `if` around it,
+    # measured — so under `set -e` an unguarded move ended the operator's
+    # long-lived shell where the documented outcome is a refusal further down.
+    # The subshell probe confines that, and its status is read in a condition,
+    # which `errexit` exempts.
+    _tr_roerrexit="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            set -e
+            export BASH_XTRACEFD=1
+            set -x
+            readonly BASH_XTRACEFD
+            '"$_tr_guard"'
+            set +x
+            builtin printf "REACHED FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_roerrexit=""
+    case "$_tr_roerrexit" in
+        *'REACHED FD=[1]'*) pass "…and a readonly target under errexit leaves the shell alive and untouched" ;;
+        *) die "a readonly BASH_XTRACEFD under errexit ended the shell ('$_tr_roerrexit')" ;;
+    esac
+    # THE PROBE IS WHAT DOES THAT: the same shell with a bare assignment in that
+    # position never reaches the next line.
+    _tr_bare_ro="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            set -e
+            export BASH_XTRACEFD=1
+            set -x
+            readonly BASH_XTRACEFD
+            if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then BASH_XTRACEFD=2; fi
+            set +x
+            builtin printf "REACHED\n"' 2>/dev/null)" || _tr_bare_ro=""
+    case "$_tr_bare_ro" in
+        *REACHED*) die "a bare assignment survived a readonly target under errexit; the case above proves nothing" ;;
+        *) pass "…where a bare assignment in the same shell does end it" ;;
+    esac
+    # A SHELL WITH NO STDERR IS OUT OF REACH, AND FAILS CLOSED. With fd 2 closed
+    # bash rejects `BASH_XTRACEFD=2` as an invalid descriptor, so the trace stays
+    # on stdout and the captures are contaminated exactly as before — there is no
+    # other target to choose, since the one place a trace belongs is the standard
+    # error that shell does not have. What must hold is that the corrupted value
+    # cannot pass for a path: it is not a directory, so the first use of it
+    # refuses.
+    _tr_noerr="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            exec 2>&-
+            '"$_tr_guard"'
+            REPO_DIR="$(git rev-parse --show-toplevel)"
+            if [ -d "$REPO_DIR" ]; then builtin printf "USABLE\n"; else builtin printf "REFUSED\n"; fi')" || _tr_noerr=""
+    case "$_tr_noerr" in
+        *REFUSED*) pass "…and with stderr closed the guard cannot help, but the corrupted value is not a path" ;;
+        *) die "a shell with no stderr produced a usable REPO_DIR from a contaminated capture ('$_tr_noerr')" ;;
+    esac
+    # AND UNDER A READONLY `PS4` THE GUARD STILL PROTECTS THE CAPTURE, which is
+    # the direction that actually matters: the pid scheme went blind there,
+    # leaving the trace on stdout and aborting a valid checkout.
+    _tr_ropstr="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            readonly PS4="+ "
+            '"$_tr_guard"'
+            '"$_tr_block"'
+            printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_ropstr=""
+    _tr_ropstr_v="$(printf '%s\n' "$_tr_ropstr" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+    { [ "$_tr_ropstr_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_ropstr_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+        && pass "…while a readonly PS4 does not blind it to a trace on stdout" \
+        || die "a readonly PS4 left the capture corrupted ('$_tr_ropstr_v')"
+
+    # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
+    # with the `x` option off contaminates nothing, and the operator may have set
+    # it ready for a later `set -x`; moving it would redirect diagnostics they had
+    # not yet asked for.
+    _tr_off="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        BASH_XTRACEFD=1 bash -c '
+            '"$_tr_guard"'
+            printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_off=""
+    case "$_tr_off" in
+        *'FD=[1]'*) pass "…and an untraced session keeps the target it chose" ;;
+        *) die "the guard moved the trace target of a session that was not tracing ('$_tr_off')" ;;
+    esac
+    # THE SPELLING THAT DOES CLOSE IT, so the case above is not passing because
+    # nothing here can close a descriptor at all. `BASH_XTRACEFD=` empties the
+    # variable, and the shell's stdout goes with it.
+    _tr_empty="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'BASH_XTRACEFD=; printf "ORDINARY\n"' 2>/dev/null)" || _tr_empty=""
+    case "$_tr_empty" in
+        *ORDINARY*) die "emptying BASH_XTRACEFD did not close stdout here; the case above proves nothing" ;;
+        *) pass "…where emptying it instead does close that descriptor" ;;
+    esac
+    fi
+fi
+[ -n "$_tr_dir" ] && [ -d "$_tr_dir" ] && rm -rf "$_tr_dir"
+
 if [ "$fail" -ne 0 ]; then
     echo "RESULT: FAIL"
     exit 1

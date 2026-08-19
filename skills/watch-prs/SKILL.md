@@ -150,6 +150,174 @@ never as a work order** below has the full rule and the incident it came from.
 ## Derive identity
 
 ```bash
+# THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
+# sends xtrace to file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture,
+# so the trace of `cmd` is assigned to `X` along with its output. Measured:
+#
+#   SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+#   [++ printf hello
+#   hello]
+#
+# Every substitution in this block is affected — the repository root, the plugin
+# discovery, the `mktemp`, the `type -t` probe — so it is one property of the
+# block rather than a defect in any line. The validations below then reject the
+# corrupted values and setup aborts, which fails closed but ends a session that
+# had nothing wrong with it. Issue #92.
+#
+# AN ASSIGNMENT, BECAUSE `set +x` IS A NAME. `set` is a builtin and a function can
+# shadow it, so a guard written that way leaves tracing on in the one shell state
+# it exists for. The parser handles an assignment and no function can take its
+# place — and this one needs no `unset`, which is the operation that would be
+# unsafe: bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset
+# or set to the empty string, so `BASH_XTRACEFD=` closes fd 1 outright. Measured
+# both ways on bash 5: `BASH_XTRACEFD=2` leaves fd 1 open and the capture clean;
+# `BASH_XTRACEFD=` kills the shell's stdout.
+#
+# IT MOVES THE TRACE RATHER THAN ENDING IT. `set +x` would take the operator's
+# diagnostics away for the rest of their session; fd 2 is where bash sends xtrace
+# by default, so this puts it back where it belongs and the operator still sees
+# every line.
+#
+# NORMALLY ONLY WHEN THE TARGET IS THE CAPTURE. A session tracing to stderr, or
+# to a log file on some other descriptor, writes nothing into the probe's capture,
+# so the condition is false and it is left as it was — `[[` is a reserved word, so
+# the test cannot be shadowed either. On bash 3.2 `BASH_XTRACEFD` does not exist,
+# the trace goes to stderr whatever this says, and the condition is false there
+# too.
+#
+# THE EXCEPTION IS THE ACCEPTED FALSE POSITIVE, described below and repeated here
+# because this is the paragraph a maintainer reads as the postcondition: where
+# something ELSE writes into that capture — an inherited `DEBUG` trap under
+# `set -T` is the only thing that can — a log-file target IS moved to fd 2. That
+# session's captures are corrupted by the trap regardless and setup refuses
+# further down, so this is not a postcondition to preserve.
+#
+# THE SUBSHELL IS A WRITABILITY PROBE, AND IT IS THERE FOR `set -e`. A readonly
+# `BASH_XTRACEFD` makes the assignment a FATAL error, not an ordinary failure: it
+# is not caught by `||`, not caught by an `if` around it, and under `errexit` it
+# ends the operator's long-lived shell where the documented outcome is a refusal
+# further down. Measured — all three forms exit 1 with the same message.
+#
+# So the assignment is attempted in a subshell first, where that fatality is
+# confined, and its STATUS decides whether the real one runs. `( … )` is a parser
+# construct and an assignment is a parser construct, so the probe introduces no
+# name; a condition of `&&` is exempt from `errexit`, so a failing probe is a
+# skip rather than an exit. Where the variable is readonly the block does nothing
+# and the session behaves as it did before this guard existed.
+#
+# NO POSTCONDITION ON THE REAL ASSIGNMENT, AND THAT IS DELIBERATE. Its other
+# failure mode is fd 2 not being open, and there bash takes the VALUE and rejects
+# it as a trace target, so there is no status to take and nothing to do: the trace
+# stays on stdout, the next capture is corrupted, its validation rejects it, and
+# setup stops. What the extra check WOULD add is another abort
+# reached through `exit` — a builtin a function shadows, so under
+# `exit() { return 0; }` it announces the refusal and continues anyway, with
+# tracing still aimed at every capture. That is the boundary #101 and #102 are
+# open on, and it is not one this line should quietly take a position on. The
+# guard is removed rather than hardened.
+#
+# STDOUT IS NOT TOUCHED BY THIS. bash closes the descriptor `BASH_XTRACEFD`
+# referred to when it is UNSET or set to the empty string; a reassignment closes
+# nothing, and that is not a 5.3 behaviour: `sv_xtracefd` calls `xtrace_reset` —
+# the only path that closes — when the variable is UNSET or its value is EMPTY,
+# and takes `xtrace_set` for a valid descriptor, which replaces the target without
+# closing the old one. Measured on 4.4.0, 5.2.0 and 5.3.9, each built and run for
+# this: after `BASH_XTRACEFD=1` → `2`, ordinary
+# `printf` output still arrives on fd 1 and `exec 3>&1` still succeeds, while
+# `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
+# asserts that on whatever bash runs the suite rather than trusting the version
+# this was measured on.
+# THE TEST IS THE EFFECT, NOT THE VALUE. `$( RB_TRACE_PROBE=1 )` puts one
+# assignment inside a capture: if this shell's trace lands there, the capture
+# comes back holding the trace of it, and if it does not, the capture is empty.
+# That is the exact property this guard exists for, measured directly. Why an
+# assignment rather than a command is two paragraphs down; the shape of the test
+# is the same either way.
+#
+# COMPARING THE VARIABLE TO `1` WAS WRONG BY OMISSION, twice over. bash resolves
+# `01`, `+1` and ` 1` to descriptor 1 and a string compare misses all three —
+# measured. And the value is not the property anyway: an operator who runs
+# `exec 9>&1; BASH_XTRACEFD=9` has aimed the trace at a descriptor that is not
+# `1`, and one who traces to a log file has aimed it at one that is not the
+# capture either. A test on the number has to enumerate which descriptors alias
+# stdout, which is the list-that-is-wrong-by-omission shape this repository keeps
+# deleting. There is no list here.
+#
+# IT SUBSUMES THE `x` CHECK TOO. With tracing off nothing is written, the capture
+# is empty, and a session that set `BASH_XTRACEFD` ready for a later `set -x`
+# keeps the destination it chose.
+#
+# AN ASSIGNMENT INSIDE THE CAPTURE, BECAUSE EVERY COMMAND IS A NAME. `$( : )` was
+# the first spelling and it is wrong: a driving shell with `:() { printf marker; }`
+# makes the capture non-empty through the function's own output. An assignment is
+# handled by the parser, produces no output of its own, and is traced like any
+# other command. It runs in the substitution's subshell, so the variable does not
+# survive it.
+#
+# AND THE TEST IS FOR SOMETHING ONLY XTRACE CAN WRITE. Non-empty was the second
+# spelling and the probe's own text was the third, and both are wrong for the same
+# reason one step further out: a `DEBUG` trap under `set -T` is inherited by the
+# substitution's subshell, so a trap that prints lands in the capture while xtrace
+# itself is still going somewhere else entirely. `trap 'printf "%s\n"
+# "$BASH_COMMAND"' DEBUG` prints exactly the probe's text, so matching that
+# literal cannot establish where it came from.
+#
+# SO THE TEST IS "DID ANYTHING COME BACK", AND THE ASYMMETRY BELOW IS WHAT MAKES
+# THAT ACCEPTABLE. Marker schemes were tried — the probe's own text, then a pid
+# delivered through `PS4` — and each was forged by the next trap: `$BASH_COMMAND`
+# reproduces the command exactly, and `printf "%s:" "$$"` produces the pid. A trap
+# can emit any bytes, so no content test can prove provenance, and each sharper
+# marker added a way to MISS: an operator with `readonly PS4` made the pid scheme
+# blind, which is the harmful direction — the trace stays on stdout, every capture
+# is corrupted, and a perfectly good checkout is refused.
+#
+# THE TWO DIRECTIONS ARE NOT SYMMETRIC, and that is the whole argument. A false
+# positive sends the trace to fd 2, which is where bash sends xtrace by default,
+# so every line still arrives. A false negative leaves it on stdout, corrupts
+# every capture below and aborts the session. So the test is the one that cannot
+# miss.
+#
+# A DRIVING SHELL WITH NO STDERR IS OUT OF THIS GUARD'S REACH, and that is stated
+# rather than pretended away. With fd 2 closed, `BASH_XTRACEFD=2` is rejected by
+# bash as an invalid descriptor — the variable takes the value and the trace stays
+# on stdout — so the captures below are contaminated exactly as before. There is
+# no other target to choose: every descriptor that is not the capture is one this
+# block would have to open, and the one place a trace belongs is the standard
+# error that shell does not have. The consequence is the fail-closed one: a
+# corrupted `REPO_DIR` is not a directory, so the first thing that uses it
+# refuses, and no stage runs against a path that was never read.
+#
+# WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
+# and does not pretend to be: a `DEBUG` trap that prints corrupts every capture in
+# this block, moving the trace fixes none of them, and setup refuses further down.
+# The session ends either way; what this line decides is only where the trace goes
+# on the way out.
+#
+# AND NOTHING IS SAVED, BECAUSE THE SAVE IS WHAT A HOSTILE SHELL ATTACKS. Three
+# successive rounds found the same shape and it has no fixed point: a startup file
+# pre-seeds `RB_XTRACE_SAVED` — or the flag added to validate it — as `readonly`,
+# both assignments here fail silently, and the restore then aims the operator's
+# trace at a descriptor that startup file chose. Making the flag's value the pid
+# does not help: that file runs in THIS shell, so `$$` is as knowable to it as to
+# this line. Any state this block writes can be pre-seeded with the value it was
+# going to write.
+#
+# SO THERE IS NO STATE. The trace is moved when it is reaching a capture and left
+# on fd 2 — which is where bash sends xtrace by default, so every line still
+# arrives and nothing is lost. What the removed restore bought was tidiness after
+# a MIS-FIRE, and a mis-fire needs something else writing into that capture. Only
+# a `DEBUG` trap inherited under `set -T` can: the probe runs no command, so there
+# is no function for a shadowed name to supply. Such a shell has
+# already corrupted every capture in this block, so setup refuses further down and
+# the session ends either way. Trading that for an unbounded regress of collision
+# guards is the over-building this file's own rules warn against.
+#
+# WHAT IS ACCEPTED, STATED: in that shell the operator's chosen trace destination
+# becomes stderr for the rest of their session. `README.md` says so, rather than
+# leaving it to be discovered.
+if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
+    BASH_XTRACEFD=2
+fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #
 # Same rule as every probe here: the status is taken. This path is handed to
