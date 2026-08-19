@@ -771,27 +771,44 @@ RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 # and something is not ours. Only the final arm, where the directory is
 # demonstrably this shell's, cleans up.
 RB_PIN_OUT="$RB_PIN_DIR/pin"
-# WRITABILITY IS PROVED WITH TWO UNEQUAL VALUES, because `readonly RB_PIN_SEEN=''`
-# defeats a single one: the reset assignment fails, the value is already empty, and
-# `[[ -z … ]]` agrees — so the probe runs, and the assignment that would store the
-# child's answer fails INSIDE the compound command, which can end the shell before
-# either cleanup. The file and the directory are then left behind, and the pin is
-# never proved. Two values no readonly can hold in turn is the only test that
-# distinguishes "empty because we set it" from "empty and unwritable".
 RB_PIN_SEEN=probe-a
-RB_PIN_WRITABLE=no
-[[ $RB_PIN_SEEN = probe-a ]] && RB_PIN_WRITABLE=yes
-RB_PIN_SEEN=probe-b
-[[ $RB_PIN_SEEN = probe-b ]] || RB_PIN_WRITABLE=no
-RB_PIN_SEEN=
-[[ -z $RB_PIN_SEEN ]] || RB_PIN_WRITABLE=no
+# WRITABILITY IS PROVED BY THREE ASSIGNMENTS, AND THE VERDICT IS WHERE YOU ARE
+# rather than a value anything can pre-seed. The first is here so the scan that
+# checks every variable is assigned can see one; the other two are in the
+# conditions themselves, where there is no value to pre-seed.
+#
+# `readonly RB_PIN_SEEN=''` defeats a single emptiness test: the reset fails, the
+# value is already empty, `[[ -z … ]]` agrees — so the probe runs, and the
+# assignment that would store the child's answer fails INSIDE the compound
+# command, which can end the shell before either cleanup. The file and the
+# directory are left behind and the pin is never proved.
+#
+# A FLAG WAS THE FIRST FIX AND IS NOT THIS ONE. A `writable=yes` variable is
+# variable, and a readonly pre-seed of `yes` made every reset of it fail while the
+# refusal was skipped — the same defect one name along, which is the shape this
+# repository keeps deleting. An assignment inside an `elif` list leaves nothing to
+# pre-seed: the arm is selected or it is not.
+#
+# THREE VALUES, BECAUSE THE LAST IS THE ONE THE PROBE NEEDS. `probe-a` and
+# `probe-b` differ, so no readonly can satisfy both; the empty reset is what the
+# child's answer overwrites. A shell where any of them fails to take either stops
+# on the spot — bash's own behaviour for a failed readonly assignment — or selects
+# that arm, and both happen BEFORE the `mkdir`, so nothing has been created.
 if [[ $RB_PIN_OUT != "$RB_PIN_DIR/pin" ]]; then
     echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"
     exit 1
     # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
     # the block's status is then the only signal left.
     [[ -n "" ]]
-elif [[ $RB_PIN_WRITABLE != yes ]]; then
+elif [[ $RB_PIN_SEEN != probe-a ]]; then
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
+    exit 1
+    [[ -n "" ]]
+elif RB_PIN_SEEN=probe-b; [[ $RB_PIN_SEEN != probe-b ]]; then
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
+    exit 1
+    [[ -n "" ]]
+elif RB_PIN_SEEN=; [[ -n $RB_PIN_SEEN ]]; then
     echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
     [[ -n "" ]]

@@ -53,13 +53,22 @@
   place where a walked-past refusal produces a plausible answer instead of an
   absent one.
 
-  **`RB_PIN_SEEN`'s writability is proved with two unequal values.** `readonly
-  RB_PIN_SEEN=''` defeats a single emptiness test: the reset assignment fails, the
-  value is already empty, and the test agrees — so the probe ran, and the
-  assignment that stores the child's answer then failed inside the compound
-  command, which can end the shell before either cleanup and leave the file and
-  the directory behind. Two values no readonly can hold in turn is what
-  distinguishes "empty because we set it" from "empty and unwritable".
+  **`RB_PIN_SEEN`'s writability is proved by three assignments, and the verdict is
+  control flow rather than a variable.** `readonly RB_PIN_SEEN=''` defeats a single
+  emptiness test: the reset assignment fails, the value is already empty, and the
+  test agrees — so the probe ran, and the assignment that stores the child's answer
+  then failed inside the compound command, which can end the shell before either
+  cleanup and leave the file and the directory behind.
+
+  A `writable=yes` flag was the first fix and is not this one: it is another
+  variable, and a readonly pre-seed of `yes` made every reset of it fail while the
+  refusal was skipped — the same defect one name along, which is the shape this
+  repository keeps deleting. Assignments inside the `elif` conditions leave nothing
+  to pre-seed: the arm is selected or it is not. `probe-a` and `probe-b` differ, so
+  no readonly satisfies both, and the empty reset is what the child's answer
+  overwrites. A shell where any of them fails to take either stops on the spot —
+  bash's behaviour for a failed readonly assignment — or selects that arm, and both
+  happen before the `mkdir`, so nothing has been created.
 
   **The assignments are proved before anything is created.** They were inside the
   `mkdir` arm, which leaks: a failed readonly assignment can end the shell where it

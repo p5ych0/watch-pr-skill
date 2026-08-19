@@ -709,9 +709,9 @@ _pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
 # up — a failed readonly assignment can end the shell where it stands, which would
 # otherwise leave the directory behind with nobody to remove it.
 _arm_out=""
-_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ $RB_PIN_WRITABLE/p')" || _arm_out=""
+_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ $RB_PIN_SEEN != probe-a/p')" || _arm_out=""
 _arm_seen=""
-_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ $RB_PIN_WRITABLE != yes \]\]; then$/,/^elif ! /p')" || _arm_seen=""
+_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ $RB_PIN_SEEN != probe-a/,/^elif ! /p')" || _arm_seen=""
 _arm_mkdir=""
 _arm_mkdir="$(printf '%s\n' "$_pin_body" | sed -n '/^elif ! .*mkdir /,/^else$/p')" || _arm_mkdir=""
 _arm_work=""
@@ -861,18 +861,21 @@ esac
 # emptiness test agrees — so the probe runs and the assignment that would store the
 # child's answer fails inside the compound command, which can end the shell before
 # either cleanup, leaving the file and the directory behind.
-case "$_pin_pre" in
-    *'RB_PIN_SEEN=probe-a'*) ;;
-    *) die "the writability probe does not use a first value: '$_pin_pre'" ;;
+# THE VERDICT IS CONTROL FLOW, NOT A VARIABLE. A `RB_PIN_WRITABLE` flag was the
+# first fix and is not this one: a readonly pre-seed of `yes` made every reset of
+# it fail while the refusal was skipped — the same defect one name along. An
+# assignment inside an `elif` list leaves nothing to pre-seed.
+case "$_pin_body" in
+    *RB_PIN_WRITABLE*) die "the writability verdict is held in a variable a pre-seed can hold" ;;
+    *) pass "…and the writability verdict is control flow, not a pre-seedable variable" ;;
 esac
-case "$_pin_pre" in
-    *'RB_PIN_SEEN=probe-b'*) pass "…and writability is proved with two unequal values, not one emptiness test" ;;
-    *) die "the writability probe does not use a second value; readonly RB_PIN_SEEN='' would pass it" ;;
-esac
-case "$_pin_refuse" in
-    *'elif [[ $RB_PIN_WRITABLE != yes ]]; then'*) pass "…and the reset refusal is an arm of that branch" ;;
-    *) die "the reset refusal is not an arm; a shell that continues past the failed assignment would reach the probe" ;;
-esac
+for _v in 'elif \[\[ $RB_PIN_SEEN != probe-a \]\]; then' \
+          'elif RB_PIN_SEEN=probe-b; \[\[ $RB_PIN_SEEN != probe-b \]\]; then' \
+          'elif RB_PIN_SEEN=; \[\[ -n $RB_PIN_SEEN \]\]; then'; do
+    printf '%s\n' "$_pin_body" | grep -q "^$_v\$" \
+        || die "the writability probe is missing an arm: $_v"
+done
+pass "…proved by three assignments in the conditions, so no readonly satisfies them all"
 # ITS REACH: that shell must really stop on the pre-seeded value. Either message
 # counts — a failed readonly assignment inside a compound command can end the
 # script before the arm's own abort prints, which is bash's behaviour and not a
@@ -956,10 +959,21 @@ _ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c
         readonly RB_PIN_SEEN=""
         '"$_pin_block"'
     ' 2>&1)" || _ero_rc=$?
+# EITHER REFUSAL COUNTS. A failed readonly assignment inside a condition list can
+# end the shell where it stands — bash's own behaviour — so the arm's own message
+# may never print. What must hold is that the run refuses and creates nothing,
+# which the next case asserts.
 { [ "$_ero_rc" -ne 0 ] \
-  && case "$_ero_out" in *'ABORT: RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+  && case "$_ero_out" in
+        *'ABORT: RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
+        *) false ;;
+     esac; } \
     && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
     || die "readonly RB_PIN_SEEN='' was not refused (rc=$_ero_rc out='$_ero_out')"
+case "$_ero_out" in
+    *'OWNER='*) die "readonly RB_PIN_SEEN='' reached the success line ('$_ero_out')" ;;
+    *) pass "…and never reaches the success line" ;;
+esac
 # AND IT LEFT NOTHING BEHIND, which is what refusing before the `mkdir` buys.
 [ -z "$(ls -A "$_emptyro" 2>/dev/null)" ] \
     && pass "…leaving no transport directory behind, because it refused before creating one" \
