@@ -234,8 +234,8 @@ never as a work order** below has the full rule and the incident it came from.
 # "$BASH_COMMAND"' DEBUG` prints exactly the probe's text, so matching that
 # literal cannot establish where it came from.
 #
-# SO THE TEST IS "DID ANYTHING COME BACK", AND THE RESTORE BELOW IS WHAT MAKES
-# THAT SAFE. Marker schemes were tried — the probe's own text, then a pid
+# SO THE TEST IS "DID ANYTHING COME BACK", AND THE ASYMMETRY BELOW IS WHAT MAKES
+# THAT ACCEPTABLE. Marker schemes were tried — the probe's own text, then a pid
 # delivered through `PS4` — and each was forged by the next trap: `$BASH_COMMAND`
 # reproduces the command exactly, and `printf "%s:" "$$"` produces the pid. A trap
 # can emit any bytes, so no content test can prove provenance, and each sharper

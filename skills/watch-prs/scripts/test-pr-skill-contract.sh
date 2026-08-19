@@ -3880,6 +3880,27 @@ else
 fi' ] \
         && pass "…and the guard is exactly those three lines, so it keeps no state to seize" \
         || die "the guard has grown beyond moving the trace: '$_tr_shape'"
+    # AND ACROSS THE WHOLE BLOCK, not only those three lines. A save added after
+    # the `fi` and a restore near the end of setup would leave the guard's own
+    # shape untouched while reintroducing exactly the collision this removed. Any
+    # restore must write `BASH_XTRACEFD` a SECOND time, whatever it names the
+    # variable it remembers — so the count is the invariant, and it needs no list
+    # of names.
+    tr_writes_once() {   # tr_writes_once <block-code> ; 0 if BASH_XTRACEFD is written once
+        local _n
+        _n="$(printf '%s\n' "$1" | grep -c 'BASH_XTRACEFD' || true)"
+        [ "$_n" -eq 1 ]
+    }
+    tr_writes_once "$_setup_code" \
+        && pass "…and the whole block names BASH_XTRACEFD exactly once, so nothing restores it" \
+        || die "the setup block writes BASH_XTRACEFD more than once; a restore is back"
+    # THE MUTATION IT IS MEANT TO CATCH, run against the check itself: the exact
+    # save-and-restore three rounds of review removed.
+    tr_writes_once "$_setup_code
+RB_TRACE_SAVED=\"\${BASH_XTRACEFD-}\"
+BASH_XTRACEFD=\$RB_TRACE_SAVED" \
+        && die "the check passes a block that saves and restores the trace target; it proves nothing" \
+        || pass "…where a save-and-restore under a new name does fail that check"
     # AND UNDER A READONLY `PS4` THE GUARD STILL PROTECTS THE CAPTURE, which is
     # the direction that actually matters: the pid scheme went blind there,
     # leaving the trace on stdout and aborting a valid checkout.

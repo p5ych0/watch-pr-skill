@@ -81,7 +81,11 @@
   three lines rather than merely to avoid two retired variable names — a list of
   spellings is wrong the first time a new one is written, and `RB_TRACE_SAVED`
   would have passed a scan for `RB_XTRACE_SAVED` while reintroducing exactly what
-  it forbids.
+  it forbids. The whole block is checked as well as the guard, because a save
+  added after its `fi` leaves those three lines untouched: any restore must write
+  `BASH_XTRACEFD` a second time whatever it calls the variable it remembers, so
+  the block is required to name it exactly once — and that check is run against
+  the save-and-restore itself, which must fail it.
 
   The scan for the descriptor-closing spelling covers both: `unset
   BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
