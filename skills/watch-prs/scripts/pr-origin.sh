@@ -333,13 +333,17 @@ fi
 # nothing to do with shadowing.
 #
 # `-i` RATHER THAN A LIST OF `-u`s. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
-# `GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_OBJECT_DIRECTORY`,
-# `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_CEILING_DIRECTORIES`,
-# `GIT_DISCOVERY_ACROSS_FILESYSTEM` … a list is wrong by omission the first time
-# git adds one, and this repository has a rule about that. An empty environment
-# needs no list. `PATH` is carried because that is how `git` is found at all —
-# which is #91 — and nothing else is, so the lookup sees the working directory and
-# the repository it stands in.
+# `GIT_CONFIG`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+# `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM` … a list is wrong
+# by omission the first time git adds one, and this repository has a rule about
+# that. An empty environment needs no list.
+#
+# WHAT IS CARRIED BACK IN IS NAMED ONE AT A TIME, further down: `PATH`, because
+# that is how `git` is found at all (#91); and `HOME`, `XDG_CONFIG_HOME`,
+# `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM`, because they
+# say WHICH CONFIG the operator's git reads and a different one loses the rewrites
+# the session honours. Carrying a config does not let it choose the repository —
+# that is handled where the URL is read.
 # `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
 # documented to expand `url.<base>.insteadOf`, and those rules live in the user's
 # GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
@@ -396,28 +400,77 @@ _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 # rewrite; the other loses the repository.
 [[ -n ${GIT_CONFIG_GLOBAL-} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
 [[ -n ${GIT_CONFIG_SYSTEM-} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
-# THE URL COMES FROM THE REPOSITORY, AND THE REWRITE COMES FROM THE CONFIG. Those
-# are two questions and `git remote get-url origin` answers them together — which
-# is why carrying a config location was not enough on its own: a global or system
-# config may contain `[remote "origin"] url = …`, and that value WINS. A carried
-# config could therefore name a different repository, which is the exact failure
-# this file exists to prevent, arriving through the variable that was carried to
-# make rewrites work.
+# THE URL COMES FROM THE REPOSITORY, AND THE REWRITE IS APPLIED HERE. Those are
+# two questions and `git remote get-url origin` answers them together, which is
+# why carrying a config location was not enough: a carried file may contain
+# `[remote "origin"] url = …` and that value WINS, so the config could name a
+# different repository.
 #
-# `--local` READS ONLY `.git/config`, so no carried file can supply the URL; then
-# `ls-remote --get-url` applies `url.<base>.insteadOf` to that value and nothing
-# else, and does not touch the network. The operator's rewrites still apply; their
-# config cannot choose the repository.
-_rb_raw="$(/usr/bin/env -i "${_rb_env[@]}" git config --local --get remote.origin.url 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
-    echo "ABORT: this checkout has no origin in its own configuration" >&2; exit 1; }
-_rb_raw="${_rb_raw%x}"
-_rb_raw="${_rb_raw%'
-'}"
+# `--get-all`, NOT `--get`, AND THE FIRST LINE. A remote may have several URLs;
+# `git remote get-url` returns the FIRST and a scalar `--get` returns the LAST, so
+# the scalar form pinned the session to a secondary repository while every
+# ordinary operation used the primary.
+#
+# WORKTREE SCOPE FIRST, THEN LOCAL, which is git's own precedence. With
+# `extensions.worktreeConfig` enabled a linked worktree defines its own origin,
+# and a `--local`-only query reports that a valid checkout has none.
+# THE STATUS IS TAKEN AND THE OUTPUT IS SENTINELLED, as everywhere else here: a
+# `git` that prints a plausible URL and then fails must not be believed, and
+# command substitution strips trailing newlines, so an `x` is appended inside and
+# removed after. The worktree probe is the one call whose failure is ORDINARY —
+# `--worktree` errors where `extensions.worktreeConfig` is off — so it is asked
+# without a status check and answered by whether it produced anything.
+if _rb_wt="$(/usr/bin/env -i "${_rb_env[@]}" git config --worktree --get-all remote.origin.url 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")"; then
+    _rb_wt="${_rb_wt%x}"
+else
+    # A FAILURE HERE IS ORDINARY — `--worktree` errors where
+    # `extensions.worktreeConfig` is off — but what it PRINTED before failing is
+    # not data, and dropping it is what stops a `git` that prints a plausible URL
+    # and then fails from answering through this probe. The local read below takes
+    # its own status, so a genuinely broken `git` is still refused there.
+    _rb_wt=""
+fi
+if [[ -n $_rb_wt ]]; then
+    _rb_all="$_rb_wt"
+else
+    _rb_all="$(/usr/bin/env -i "${_rb_env[@]}" git config --local --get-all remote.origin.url 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" \
+        || { echo "ABORT: this checkout has no origin in its own configuration" >&2; exit 1; }
+    _rb_all="${_rb_all%x}"
+fi
+# THE FIRST VALUE, because `git remote get-url` returns the first and a scalar
+# `--get` returns the last — which pinned the session to a secondary repository
+# while every ordinary operation used the primary.
+_rb_raw="${_rb_all%%
+*}"
 [[ -n $_rb_raw ]] \
     || { echo "ABORT: this checkout has no origin in its own configuration" >&2; exit 1; }
-_rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git ls-remote --get-url "$_rb_raw" 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
-    echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
-_rb_origin="${_rb_origin%x}"
+# THE REWRITE IS DONE HERE RATHER THAN BY `ls-remote --get-url`, because that
+# command's operand may be a URL **or the name of a remote** — and a local origin
+# of `mirror` beside a carried `[remote "mirror"]` resolved to the config's
+# repository, which is the attack the previous step had just closed. There is no
+# git interface that applies `insteadOf` to a value without that ambiguity.
+#
+# THE RULE IS GIT'S, STATED IN ITS DOCUMENTATION: a prefix match against each
+# `url.<base>.insteadOf`, and where several match, the LONGEST prefix wins.
+# Verified against `git remote get-url` on a checkout with two overlapping rules.
+_rb_best_len=0
+_rb_rewritten="$_rb_raw"
+while IFS= read -r _rb_rule; do
+    [[ -n $_rb_rule ]] || continue
+    _rb_key="${_rb_rule%% *}"
+    _rb_prefix="${_rb_rule#* }"
+    [[ $_rb_key = url.*.insteadof ]] || continue
+    _rb_base="${_rb_key#url.}"
+    _rb_base="${_rb_base%.insteadof}"
+    [[ -n $_rb_prefix ]] || continue
+    [[ $_rb_raw = "$_rb_prefix"* ]] || continue
+    (( ${#_rb_prefix} > _rb_best_len )) || continue
+    _rb_best_len=${#_rb_prefix}
+    _rb_rewritten="$_rb_base${_rb_raw#"$_rb_prefix"}"
+done <<RULES
+$(/usr/bin/env -i "${_rb_env[@]}" git config --get-regexp '^url\..*\.insteadof$' 2>/dev/null)
+RULES
+_rb_origin="$_rb_rewritten"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
 # after it is — and the newline in this pattern is written literally for the same
 # reason as the one below: `$(printf '\n')` strips its own newline, so the pattern

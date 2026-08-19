@@ -219,11 +219,20 @@ esac
 
 # ── ONE VALUE LEAVES, WHATEVER THE REMOTE CONTAINS ─────────────────────────
 #
-# A remote holding a newline would arrive at the caller as two values, the second
-# being whatever the tail happened to be. The check for this was written with
-# `*"$(printf '\n')"*` first — command substitution strips trailing newlines, so
-# the needle was the empty string, the pattern matched every input, and a valid
-# origin was refused. That is why the ordinary case above is asserted too.
+# TWO VALUES ARE NOT AN ERROR ANY MORE, AND THE FIRST IS THE ANSWER. The helper
+# asks `git config --get-all remote.origin.url`, which prints one value per line,
+# because a remote may legitimately have several URLs — `git remote get-url`
+# returns the FIRST of them and a scalar `--get` returns the LAST, which pinned
+# the session to a secondary repository while every ordinary operation used the
+# primary. So this stub's two lines are now two URLs, and what must hold is that
+# the first one is taken.
+#
+# WHAT THAT COSTS, stated rather than hidden: a single URL CONTAINING a newline is
+# no longer distinguishable from two URLs through this interface, so it is
+# truncated at the newline instead of refused. Reaching that state means writing
+# `.git/config` in the operator's own checkout, which is the boundary
+# § WHAT THIS DOES NOT CLOSE already draws — such a writer can edit the helper.
+# The refusal below still covers a newline arriving any other way.
 cat > "$STUB/git" <<'GITSH'
 #!/usr/bin/env bash
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
@@ -231,9 +240,9 @@ GITSH
 chmod +x "$STUB/git"
 rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
-    && pass "a multi-line remote is refused rather than split" \
-    || die "a two-line remote gave rc=$rc '$out'"
+{ [ "$rc" = 0 ] && [ "$out" = "$REAL" ]; } \
+    && pass "a remote with two URLs answers with the first, as git remote get-url does" \
+    || die "a two-URL remote gave rc=$rc '$out'"
 
 # ── A TRAILING NEWLINE IS DATA, AND THE BOUNDARY IS PRESERVED ──────────────
 #
@@ -245,9 +254,14 @@ out="$(<"$TMP/v")$out"
 # MEASURED FIRST, because the obvious way to provoke this does not work: a remote
 # configured as `git@…:acme/widget.git` followed by a newline produces output
 # byte-identical to one without it. `git` consumes the configured newline as its
-# terminator, so the case cannot be reached through `git remote get-url` on this
+# terminator, so the case cannot be reached through the config read on this
 # version. The sentinel is kept so the read does not DEPEND on that, and the stub
 # below is what holds it there.
+#
+# WHAT IS ASSERTED IS THE FIRST VALUE, since `--get-all` prints one per line: a
+# trailing empty line is an empty second value and the URL is still the first.
+# The sentinel's job is that the boundary is not LOST — the value must not be
+# stripped into something that parses as a different slug.
 cat > "$STUB/git" <<'GITSH'
 #!/usr/bin/env bash
 printf 'git@github.com:acme/widget.git\n\n'
@@ -255,8 +269,8 @@ GITSH
 chmod +x "$STUB/git"
 rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$(<"$TMP/v")$out"
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
-    && pass "a trailing data newline is refused, not stripped into a valid slug" \
+{ [ "$rc" = 0 ] && [ "$out" = "$REAL" ]; } \
+    && pass "a trailing empty value leaves the first URL intact, not stripped into another slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
 # …AND PLAIN COMMAND SUBSTITUTION WOULD HAVE ACCEPTED IT, which is what makes the
 # sentinel load-bearing rather than decorative.
@@ -738,6 +752,60 @@ hg_reach="$(cd "$IOREPO" && env HOME="$TMP/nohome" GIT_CONFIG_GLOBAL="$HOSTILE" 
     && pass "…where the same config does override a plain get-url" \
     || die "the hostile config has no effect here (got '$hg_reach'); the case above proves nothing"
 
+# ── A LOCAL ORIGIN THAT IS ALSO A REMOTE NAME ──────────────────────────────
+#
+# `git ls-remote --get-url <x>` takes a URL **or the name of a remote**, so an
+# origin of `mirror` beside a carried `[remote "mirror"]` resolved to the config's
+# repository — the attack the local read had just closed, reopened by the command
+# that was applying the rewrite. There is no git interface that applies
+# `insteadOf` to a value without that ambiguity, so the rewrite is applied here by
+# git's own documented rule and no name is ever resolved.
+NAMEREPO="$TMP/namecollide"
+mkdir -p "$NAMEREPO"
+( cd "$NAMEREPO" && git init -q . && git remote add origin 'work:acme/widget.git' ) >/dev/null 2>&1 \
+    || die "could not build the name-collision checkout"
+NAMECFG="$TMP/namecollide.gitconfig"
+printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "work:acme/widget.git"]\n\turl = %s\n' "$FORGED" > "$NAMECFG"
+rm -f "$TMP/nc.value"
+( cd "$NAMEREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_GLOBAL="$NAMECFG" /usr/bin/env bash -p "$SCRIPT" read "$TMP/nc.value" ) >/dev/null 2>&1
+nc_got="$(cat "$TMP/nc.value" 2>/dev/null)"
+[ "$nc_got" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "an origin that also names a carried remote is rewritten, not resolved" \
+    || die "the origin was resolved as a remote name (got '$nc_got')"
+# THE FIXTURE'S OWN REACH: that name must really resolve through the interface
+# this replaced, or the case above passes because nothing was ever ambiguous.
+nc_reach="$(cd "$NAMEREPO" && env HOME="$TMP/nohome" GIT_CONFIG_GLOBAL="$NAMECFG" \
+    git ls-remote --get-url 'work:acme/widget.git' 2>/dev/null)"
+[ "$nc_reach" = "$FORGED" ] \
+    && pass "…where ls-remote --get-url does resolve that same name to the config's repository" \
+    || die "the name does not resolve here (got '$nc_reach'); the case above proves nothing"
+
+# ── A WORKTREE-SCOPED ORIGIN IS READ ───────────────────────────────────────
+#
+# With `extensions.worktreeConfig` enabled a linked worktree defines its own
+# origin, and git reads that in preference to the repository's. A `--local`-only
+# query reports that a valid checkout has none and setup aborts.
+WTMAIN="$TMP/wtmain"
+mkdir -p "$WTMAIN"
+( cd "$WTMAIN" && git init -q . && git remote add origin "$FORGED" \
+    && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
+    && git worktree add -q "$TMP/wtlinked" -b wtbranch \
+    && cd "$TMP/wtlinked" && git config --worktree extensions.worktreeConfig true 2>/dev/null \
+    ; cd "$WTMAIN" && git config extensions.worktreeConfig true \
+    && cd "$TMP/wtlinked" && git config --worktree remote.origin.url "$REAL" ) >/dev/null 2>&1
+if [ -d "$TMP/wtlinked" ] && [ "$(cd "$TMP/wtlinked" && git config --worktree --get remote.origin.url 2>/dev/null)" = "$REAL" ]; then
+    rm -f "$TMP/wt.value"
+    ( cd "$TMP/wtlinked" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        /usr/bin/env bash -p "$SCRIPT" read "$TMP/wt.value" ) >/dev/null 2>&1
+    wt_got="$(cat "$TMP/wt.value" 2>/dev/null)"
+    [ "$wt_got" = "$REAL" ] \
+        && pass "a worktree-scoped origin is read, and takes precedence over the repository's" \
+        || die "the worktree origin was not read (got '$wt_got', wanted '$REAL')"
+else
+    echo "ok   - (this git could not stage a worktree-scoped origin; that case did not run)"
+fi
+
 # ── `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT AND SURVIVES ───────────────────────
 #
 # It tells git to ignore the system-wide config. An emptied environment dropped
@@ -746,11 +814,12 @@ hg_reach="$(cd "$IOREPO" && env HOME="$TMP/nohome" GIT_CONFIG_GLOBAL="$HOSTILE" 
 # every ordinary git command in the session, still honouring the opt-out, used the
 # unexpanded one. The pin and the session would disagree about the repository.
 #
-# WHAT IS ASSERTED IS THE VARIABLE'S ARRIVAL, and it has to be, because the effect
-# cannot be staged: the real system config is `/etc/gitconfig`, which a fixture
-# cannot write, and `GIT_CONFIG_SYSTEM` — the only way to point git elsewhere — is
-# a REDIRECTION this helper drops on purpose. So a `git` stub reports the
-# environment it was called in, which is the thing the change is about.
+# WHAT IS ASSERTED IS THE VARIABLE'S ARRIVAL, because the EFFECT needs a system
+# config the fixture cannot write — the real one is `/etc/gitconfig`. A `git` stub
+# reports the environment it was called in, which is the thing the change is
+# about. `GIT_CONFIG_SYSTEM` is carried like `GIT_CONFIG_GLOBAL`, since it names a
+# config location rather than a repository; the case beside this one covers what
+# a carried config may and may not do.
 NSSTUB="$TMP/nsstub"
 mkdir -p "$NSSTUB"
 printf '#!/usr/bin/env bash\nprintf "git@github.com:seen/%%s.git\\n" "${GIT_CONFIG_NOSYSTEM:-unset}"\n' > "$NSSTUB/git"

@@ -167,6 +167,23 @@
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.
 
+  **The rewrite is applied here, not by `ls-remote --get-url`.** That command's
+  operand may be a URL *or the name of a remote*, so a local origin of `mirror`
+  beside a carried `[remote "mirror"]` resolved to the config's repository — the
+  attack the local read had just closed, reopened by the command applying the
+  rewrite. No git interface applies `insteadOf` to a value without that ambiguity,
+  so the rule is applied directly: a prefix match against each
+  `url.<base>.insteadOf`, longest match winning, which is what git documents and
+  what `git remote get-url` produces on a checkout with two overlapping rules.
+
+  **The first URL, and the worktree scope.** A remote may have several URLs:
+  `git remote get-url` returns the first and a scalar `git config --get` returns
+  the LAST, so the session was pinned to a secondary repository while every
+  ordinary operation used the primary. And with `extensions.worktreeConfig` a
+  linked worktree defines its own origin, which a `--local`-only query misses
+  entirely — reporting that a valid checkout has none. Worktree scope first, then
+  local, first value of either.
+
   **A carried config can rewrite the origin and cannot replace it.** Carrying a
   config location so `insteadOf` works brings the whole file, and a global or
   system config may contain `[remote "origin"] url = …` — which
