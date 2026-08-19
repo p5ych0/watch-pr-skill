@@ -19,14 +19,23 @@
   abort naming a path the operator could see was fine.
 
   Setup now moves the trace off the capture before its first substitution:
-  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( RB_TRACE_PROBE=1 )" ]]` — a capture that
-  comes back holding this shell's own trace, which is the property itself rather
-  than a proxy for it. The probe is an assignment because every command is a name:
-  `$( : )` was the first spelling, and a driving shell with `:() { printf marker; }`
-  made the capture non-empty through the function's own output, moving a
-  destination the operator had chosen. An assignment is handled by the parser and
-  produces no output of its own, so the only thing that can come back is the
-  trace.
+  `BASH_XTRACEFD=2`, guarded by
+  `[[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]` — a capture that comes back
+  holding this shell's trace OF THIS PROBE, which is the property itself rather
+  than a proxy for it.
+
+  Both halves of that were paid for. The probe is an assignment because every
+  command is a name: `$( : )` was the first spelling, and a shell with
+  `:() { printf marker; }` made the capture non-empty through the function's own
+  output. And the test is for the probe's own text rather than for any output at
+  all, because a `DEBUG` trap under `set -T` is inherited by the substitution's
+  subshell — a trap that prints lands in the capture while xtrace is still going
+  somewhere else entirely. An xtrace line always contains the command it traces,
+  whatever `PS4` says; a marker from something else does not.
+
+  In both of those states the operator's captures are corrupted by something this
+  guard cannot fix, and setup refuses further down. What it must not do is change
+  a destination they chose on the way past.
 
   Comparing the variable to `1` was tried and is wrong by omission twice over.
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a string compare misses

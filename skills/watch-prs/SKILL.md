@@ -221,13 +221,24 @@ never as a work order** below has the full rule and the incident it came from.
 #
 # AN ASSIGNMENT INSIDE THE CAPTURE, BECAUSE EVERY COMMAND IS A NAME. `$( : )` was
 # the first spelling and it is wrong: a driving shell with `:() { printf marker; }`
-# makes the capture non-empty through the function's own output, so the guard
-# fires on a session whose trace was never near a capture and moves a destination
-# the operator chose. An assignment is handled by the parser, produces no output
-# of its own, and is traced like any other command — so the only thing that can
-# come back is this shell's trace. It runs in the substitution's subshell, so the
-# variable does not survive it.
-if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+# makes the capture non-empty through the function's own output. An assignment is
+# handled by the parser, produces no output of its own, and is traced like any
+# other command. It runs in the substitution's subshell, so the variable does not
+# survive it.
+#
+# AND THE TEST IS FOR THE PROBE'S OWN TEXT, NOT FOR ANY OUTPUT AT ALL. Non-empty
+# was the second spelling and it is wrong for the same reason one step out: a
+# `DEBUG` trap under `set -T` is inherited by the substitution's subshell, so a
+# trap that prints lands in the capture while xtrace itself is still going
+# somewhere else entirely. An xtrace line always contains the command it is
+# tracing, whatever `PS4` is set to; a marker from something else does not. So the
+# capture has to name this probe before the guard believes the trace reached it.
+#
+# WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
+# and must not pretend to be: a `DEBUG` trap that prints corrupts every capture in
+# this block, moving the trace fixes none of them, and setup refuses further down.
+# What it must not do is change a destination the operator chose on the way past.
+if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.

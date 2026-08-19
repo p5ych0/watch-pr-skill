@@ -3669,7 +3669,7 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then' ] \
+[ "$_first_exec" = 'if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then' ] \
     && pass "…and its first executable line tests whether a trace reaches a capture" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( RB_TRACE_PROBE=1 )" \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ "\$( RB_TRACE_PROBE=1 )" = \*RB_TRACE_PROBE=1\* \]\]; then$/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3851,6 +3851,43 @@ else
     case "$_tr_shadowed_probe" in
         *'FD=[7]'*) pass "…and a printing ':' cannot make the shipped probe fire" ;;
         *) die "a shadowed command moved a trace target that was never near a capture ('$_tr_shadowed_probe')" ;;
+    esac
+    # AN INHERITED `DEBUG` TRAP IS NOT A TRACE THAT ARRIVED. Under `set -T` the
+    # trap is inherited by the substitution's subshell, so a trap that prints
+    # lands in the capture while xtrace itself is still going to fd 7. That
+    # session's captures are corrupted and this guard is not the cure — setup
+    # refuses further down — but it must not change the destination the operator
+    # chose on the way past.
+    _tr_debug="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -T
+            trap "builtin printf marker" DEBUG
+            set -x
+            '"$_tr_guard"'
+            trap - DEBUG
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_debug=""
+    case "$_tr_debug" in
+        *'FD=[7]'*) pass "…and an inherited DEBUG trap cannot make it fire" ;;
+        *) die "an inherited DEBUG trap moved a trace target that was never near a capture ('$_tr_debug')" ;;
+    esac
+    # THE REACH PROBE FOR IT: the same shell with the non-empty test in that
+    # position does move the target, so the case above is not passing because the
+    # trap never printed.
+    _tr_debug_reach="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -T
+            trap "builtin printf marker" DEBUG
+            set -x
+            if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then BASH_XTRACEFD=2; fi
+            trap - DEBUG
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_debug_reach=""
+    case "$_tr_debug_reach" in
+        *'FD=[2]'*) pass "…where a non-empty test in the same shell does move it" ;;
+        *) die "the DEBUG trap did not reach the capture here; the case above proves nothing ('$_tr_debug_reach')" ;;
     esac
     # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
     # with the `x` option off contaminates nothing, and the operator may have set
