@@ -737,50 +737,132 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # at column 0. An `if … else … fi` around this call ends the lift before the
 # postcondition, and every case built on it then runs against a truncated block —
 # nine assertions passed against nothing on the first attempt at this.
-# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE FOUR LINES LATER. The origin read
-# removed the first one as soon as it had its value; this is the second half of
-# that, and it is why no abort between the two has a directory to clean up. Same
-# parent, same rules, same lifetime.
+# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE ON EVERY PATH OUT OF THE BRANCH
+# BELOW. The origin read removed the first one as soon as it had its value; this
+# is the second half of that. Same parent, same rules, same lifetime — but the
+# lifetime is now a branch rather than four lines, because WHO MADE IT decides who
+# may remove it: the `mkdir` below is what proves this shell did, so its arms
+# remove the directory and everything outside them removes nothing at all.
+#
+# ONE ARM REMOVES IT, AND ONLY ONE: the arm where the `mkdir` succeeded, which is
+# the only place this shell is known to have created it. Every refusal fires
+# BEFORE that `mkdir` — the assignments are proved first — so there is nothing for
+# them to clean up, and a `mkdir` that failed means the path was already
+# something, and something is not ours.
 RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
     || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
-/usr/bin/env mkdir -m 700 "$RB_PIN_DIR" \
-    || { echo "ABORT: could not create a private directory for the pin probe"; exit 1; }
-RB_PIN_OUT="$RB_PIN_DIR/pin"
-[[ $RB_PIN_OUT = "$RB_PIN_DIR/pin" ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
-RB_PIN_SEEN=
-# THE RESET IS PROVED TOO, and this is the case where it decides the answer. A
-# readonly `RB_PIN_SEEN` already holding the real origin survives both this line
-# and the assignment below it, so a child that inherited nothing reports nothing
-# and the equality still agrees — setup announces a pin that no helper will see.
-# Combined with an `export` that assigns without exporting, that is a session
-# whose every stage re-derives identity from wherever it later stands.
-[[ -z $RB_PIN_SEEN ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
-    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
-/usr/bin/env rm -f "$RB_PIN_OUT"
-/usr/bin/env rmdir "$RB_PIN_DIR"
-# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
-# Every refusal above ends in `exit`, and `exit` is a name: with one shadowed, a
-# refused transport check carries on with `RB_REMOTE` still empty, the pin probe
-# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
-# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
-# derived its identity from wherever the session happened to stand.
+# ONE BRANCH, AND ITS ARMS ARE IN THE ORDER THINGS CAN GO WRONG. Each refusal is
+# an ARM rather than a guard, because `exit` is a name: a guard that a shadowed
+# one walks past lands in the probe, where a pre-seeded readonly `RB_PIN_SEEN`
+# certifies a pin no child ever saw. As arms, a bad state SELECTS its refusal and
+# the probe is not reachable from it.
 #
-# THIS IS NOT THE WHOLE OF THAT CLASS, and #102 has the rest: a shadowed `exit`
-# makes every refusal in this block non-terminal, and gating the remainder
-# structurally is a restructure rather than a line. What this closes is the
-# consequence — an empty pin can no longer reach the success line, whatever
-# walked past the refusal that should have stopped it.
-if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
-else
-    echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+# AND THE ASSIGNMENTS COME FIRST, BEFORE ANYTHING IS CREATED. They were inside the
+# `mkdir` arm, which leaks: a failed readonly assignment can end the shell on the
+# spot — bash's own behaviour, and what the fixture's reset case observes — and by
+# then the directory existed with nobody left to remove it. Proved here, a refusal
+# happens while there is still nothing to clean up.
+#
+# THE `mkdir` IS THE LAST ARM BEFORE THE WORK, and it is what decides WHO MAY
+# REMOVE THE DIRECTORY. It fails precisely when `RB_PIN_DIR` names something that
+# already exists — which is what a readonly pre-seeded value points at — so its
+# `else` removes nothing: a failure there means the path was already something,
+# and something is not ours. Only the final arm, where the directory is
+# demonstrably this shell's, cleans up.
+RB_PIN_OUT="$RB_PIN_DIR/pin"
+RB_PIN_SEEN=probe-a
+# WRITABILITY IS PROVED BY THREE ASSIGNMENTS, AND THE VERDICT IS WHERE YOU ARE
+# rather than a value anything can pre-seed. The first is here so the scan that
+# checks every variable is assigned can see one; the other two are in the
+# conditions themselves, where there is no value to pre-seed.
+#
+# `readonly RB_PIN_SEEN=''` defeats a single emptiness test: the reset fails, the
+# value is already empty, `[[ -z … ]]` agrees — so the probe runs, and the
+# assignment that would store the child's answer fails INSIDE the compound
+# command, which can end the shell before either cleanup. The file and the
+# directory are left behind and the pin is never proved.
+#
+# A FLAG WAS THE FIRST FIX AND IS NOT THIS ONE. A `writable=yes` variable is
+# variable, and a readonly pre-seed of `yes` made every reset of it fail while the
+# refusal was skipped — the same defect one name along, which is the shape this
+# repository keeps deleting. An assignment inside an `elif` list leaves nothing to
+# pre-seed: the arm is selected or it is not.
+#
+# THREE VALUES, BECAUSE THE LAST IS THE ONE THE PROBE NEEDS. `probe-a` and
+# `probe-b` differ, so no readonly can satisfy both; the empty reset is what the
+# child's answer overwrites. A shell where any of them fails to take either stops
+# on the spot — bash's own behaviour for a failed readonly assignment — or selects
+# that arm, and both happen BEFORE the `mkdir`, so nothing has been created.
+if [[ $RB_PIN_OUT != "$RB_PIN_DIR/pin" ]]; then
+    echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"
+    exit 1
+    # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
+    # the block's status is then the only signal left.
+    [[ -n "" ]]
+elif [[ $RB_PIN_SEEN != probe-a ]]; then
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
     [[ -n "" ]]
+elif RB_PIN_SEEN=probe-b; [[ $RB_PIN_SEEN != probe-b ]]; then
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
+    exit 1
+    [[ -n "" ]]
+elif RB_PIN_SEEN=; [[ -n $RB_PIN_SEEN ]]; then
+    echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
+    exit 1
+    [[ -n "" ]]
+elif ! /usr/bin/env mkdir -m 700 "$RB_PIN_DIR"; then
+    echo "ABORT: could not create a private directory for the pin probe"
+    exit 1
+    [[ -n "" ]]
+else
+    /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+        && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+            && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
+    /usr/bin/env rm -f "$RB_PIN_OUT"
+    /usr/bin/env rmdir "$RB_PIN_DIR"
+    # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
+    # rounds of review walked up to it and it is cheaper to state than to
+    # rediscover. #102.
+    #
+    # IT PROVES A CHILD INHERITED THE PIN, which is the failure it was built for:
+    # an `export` that assigns without setting the export attribute leaves this
+    # shell holding the right value while every helper holds none, and a `cd` into
+    # a second checkout then retargets every stage. That is #80, it is an ACCIDENT
+    # rather than an attack, and asking a real child is what catches it.
+    #
+    # IT DOES NOT PROVE ANYTHING AGAINST A FUNCTION IN THIS SHELL, and no
+    # comparison written here can. `export` is a name, and one that MUTATES its
+    # operand —
+    #
+    #     export() { RB_REMOTE='git@github.com:WRONG/other.git'
+    #                builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
+    #
+    # — makes the child report the forged value and this line compare forged with
+    # forged. Measured. A SECOND `pr-origin.sh read` was built to compare against
+    # the repository instead, and it is not in this file because it bought exactly
+    # one thing: an attacker who knew one variable name and not the other. The same
+    # function rewrites both; it can also `cd` first, so a later read agrees with
+    # the forgery, and an earlier one is just another variable. Every value this
+    # shell holds is nameable, and the function runs at a point of its own
+    # choosing — so there is no ordering and no extra child that makes the
+    # comparison mean more than the shell it runs in. `SKILL.md` itself is a file
+    # such a shell can edit, which is the same boundary `pr-origin.sh` § WHAT THIS
+    # DOES NOT CLOSE and #91 draw.
+    #
+    # NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
+    # A refusal walked past with `exit` shadowed leaves `RB_REMOTE` empty, the pin
+    # probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
+    # setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
+    # stage derived its identity from wherever the session happened to stand.
+    if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+        echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+    else
+        echo "ABORT: the repository pin did not take; every stage would route by the current directory"
+        exit 1
+        [[ -n "" ]]
+    fi
 fi
 ```
 

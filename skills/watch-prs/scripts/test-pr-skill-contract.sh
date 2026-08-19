@@ -689,14 +689,88 @@ _next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL
 # …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
 # would run whatever the pin did, once `exit` is shadowed — the driver would be
 # told setup completed with no pin in place, which is the whole failure.
+#
+# TWO BRANCHES DEEP NOW, and the outer one is what a walked-past refusal cannot
+# reach: a readonly `RB_PIN_SEEN` pre-seeded to the real remote survives the reset,
+# so the probe's empty answer cannot overwrite it and the equality would agree on a
+# pin no child ever saw. The refusal is the outer `if`'s FIRST arm, so the probe
+# and the success line both sit in its `else` — unreachable whatever `exit` does.
+_pin_body=""
+_pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL")" || _pin_body=""
+_pin_refuse=""
+_pin_refuse="$(printf '%s\n' "$_pin_body" | sed -n '1,/^else$/p')" || _pin_refuse=""
 _pin_then=""
-_pin_then="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '/^else$/,$p')" || _pin_then=""
-_pin_ok=""
-_pin_ok="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed -n '1,/^else$/p')" || _pin_ok=""
-case "$_pin_ok" in
-    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the pin took" ;;
-    *)               die "setup's success line is not inside the successful branch: '$_pin_ok'" ;;
+_pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
+# THE PIN PROBE IS ONE BRANCH, AND EACH ARM IS EXTRACTED BY ITS OWN HEADER. Every
+# refusal is an arm rather than a guard, because `exit` is a name: a guard a
+# shadowed one walks past lands in the probe, where a pre-seeded readonly
+# `RB_PIN_SEEN` certifies a pin no child ever saw. And the assignments are proved
+# BEFORE the `mkdir`, so a refusal happens while there is still nothing to clean
+# up — a failed readonly assignment can end the shell where it stands, which would
+# otherwise leave the directory behind with nobody to remove it.
+_arm_out=""
+_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ $RB_PIN_SEEN != probe-a/p')" || _arm_out=""
+_arm_seen=""
+_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ $RB_PIN_SEEN != probe-a/,/^elif ! /p')" || _arm_seen=""
+_arm_mkdir=""
+_arm_mkdir="$(printf '%s\n' "$_pin_body" | sed -n '/^elif ! .*mkdir /,/^else$/p')" || _arm_mkdir=""
+_arm_work=""
+_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_work=""
+{ [ -n "$_arm_out" ] && [ -n "$_arm_seen" ] && [ -n "$_arm_mkdir" ] && [ -n "$_arm_work" ]; } \
+    && pass "…and all four arms of the pin branch lift out separately" \
+    || die "an arm of the pin branch could not be lifted (out=${#_arm_out} seen=${#_arm_seen} mkdir=${#_arm_mkdir} work=${#_arm_work})"
+# THE ASSIGNMENTS COME BEFORE THE BRANCH, so nothing exists when a refusal fires.
+_pin_pre=""
+_pin_pre="$(printf '%s\n' "$_pin_body" | sed -n '1,/^if \[\[ $RB_PIN_OUT != /p')" || _pin_pre=""
+{ case "$_pin_pre" in *'RB_PIN_OUT="$RB_PIN_DIR/pin"'*) true ;; *) false ;; esac \
+  && case "$_pin_pre" in *'RB_PIN_SEEN='*) true ;; *) false ;; esac \
+  && case "$(printf '%s\n' "$_pin_pre" | grep -v '^[[:space:]]*#')" in *mkdir*) false ;; *) true ;; esac; } \
+    && pass "…with both assignments proved before anything is created" \
+    || die "an assignment is proved after the directory exists, so its refusal leaks one: '$_pin_pre'"
+# THE SUCCESS LINE IS IN THE WORK ARM AND NOWHERE ELSE.
+case "$_arm_work" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the arm where the directory was made" ;;
+    *)               die "setup's success line is not in the work arm: '$_arm_work'" ;;
 esac
+for _a in out seen mkdir; do
+    eval "_v=\"\$_arm_$_a\""
+    case "$_v" in
+        *'echo "OWNER='*) die "setup announces success from the $_a refusal too" ;;
+    esac
+done
+pass "…and never from any of the three refusals"
+# THE PROBE IS IN THERE WITH IT, which is what the arms exist for: a walked-past
+# refusal must not reach the child.
+case "$_arm_work" in
+    *'pr-origin.sh pin "$RB_PIN_OUT"'*) pass "…with the pin probe inside that arm, not before it" ;;
+    *) die "the pin probe runs outside the arm the mkdir guards: '$_arm_work'" ;;
+esac
+# AND EVERY CLEANUP IS IN THERE TOO. Outside it the directory is not this shell's
+# to remove — `mkdir` fails precisely when the path already exists, which is what
+# a readonly pre-seeded value points at — and `rm -f` and `rmdir` would then take
+# the operator's file and directory.
+for _a in out seen mkdir; do
+    eval "_v=\"\$_arm_$_a\""
+    case "$_v" in
+        *'rm -f "$RB_PIN_OUT"'*|*'rmdir "$RB_PIN_DIR"'*)
+            die "the $_a refusal cleans up a path this shell may not have created" ;;
+    esac
+done
+pass "…and no refusal removes anything, because none of them created it"
+{ case "$_arm_work" in *'rm -f "$RB_PIN_OUT"'*) true ;; *) false ;; esac \
+  && case "$_arm_work" in *'rmdir "$RB_PIN_DIR"'*) true ;; *) false ;; esac; } \
+    && pass "…while the arm that made the directory removes both" \
+    || die "the work arm leaves its transport file or directory behind"
+# THE RESET REFUSAL IS AN ARM WITH ITS OWN ABORT, asserted structurally: on this
+# bash the failed readonly assignment ends the run before the arm is evaluated, so
+# a behavioural case alone would stay green with the arm deleted — while a shell
+# that CONTINUES past that assignment would reach the probe and certify the stale
+# value.
+case "$_arm_seen" in
+    *'ABORT: RB_PIN_SEEN is readonly'*) pass "…and the reset refusal is an arm that says so before it stops" ;;
+    *) die "the reset refusal is not an arm with an abort: '$_arm_seen'" ;;
+esac
+
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
 # while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back
@@ -753,6 +827,159 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 [ "$_noexp_rc" -ne 0 ] \
     && pass "…and an export that assigns without exporting is caught by asking a child" \
     || die "the pin passed while no child could see it; every stage would route by the current directory"
+# …AND A PRE-SEEDED READONLY `RB_PIN_SEEN` CANNOT CERTIFY A PIN NO CHILD SAW.
+# This is the combined state, and it is the one the non-emptiness test cannot
+# reach: `export` assigns without exporting, `exit` is neutered so the reset's
+# refusal is walked past, and a readonly `RB_PIN_SEEN` already holding the real
+# remote survives both the reset and the probe — the child inherits nothing,
+# reports nothing, its empty answer cannot overwrite a readonly variable, and the
+# equality compares the pre-seeded value with `$RB_REMOTE` and AGREES. Only making
+# the probe and the success line arms of that refusal stops it.
+_seed_out=""
+_seed_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+    'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+        readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
+        '"$_pin_block"'
+    ' 2>&1)" || true
+case "$_seed_out" in
+    *'OWNER='*) die "a pre-seeded readonly RB_PIN_SEEN certified a pin no child saw: '$_seed_out'" ;;
+    *)          pass "…and a pre-seeded readonly RB_PIN_SEEN cannot reach the success line" ;;
+esac
+# ITS REACH: the same shell must really keep the pre-seeded value, or the case
+# above passes because the assignment overwrote it and the answer was empty.
+# THE RESET ARM IS ASSERTED STRUCTURALLY AS WELL, and it has to be: on this bash
+# the failed readonly assignment ends the `bash -c` before the arm is evaluated,
+# so the behavioural case above passes on the shell's own refusal and would stay
+# green with that arm deleted. A shell that CONTINUES past the failed assignment
+# — the behaviour `CLAUDE.md` records as depending on where the assignment sits —
+# would then reach the probe and certify the stale value.
+# THE WRITABILITY PROBE IS TWO UNEQUAL VALUES, because `readonly RB_PIN_SEEN=''`
+# defeats a single one: the reset fails, the value is already empty, and an
+# emptiness test agrees — so the probe runs and the assignment that would store the
+# child's answer fails inside the compound command, which can end the shell before
+# either cleanup, leaving the file and the directory behind.
+# THE VERDICT IS CONTROL FLOW, NOT A VARIABLE. A `RB_PIN_WRITABLE` flag was the
+# first fix and is not this one: a readonly pre-seed of `yes` made every reset of
+# it fail while the refusal was skipped — the same defect one name along. An
+# assignment inside an `elif` list leaves nothing to pre-seed.
+case "$_pin_body" in
+    *RB_PIN_WRITABLE*) die "the writability verdict is held in a variable a pre-seed can hold" ;;
+    *) pass "…and the writability verdict is control flow, not a pre-seedable variable" ;;
+esac
+for _v in 'elif \[\[ $RB_PIN_SEEN != probe-a \]\]; then' \
+          'elif RB_PIN_SEEN=probe-b; \[\[ $RB_PIN_SEEN != probe-b \]\]; then' \
+          'elif RB_PIN_SEEN=; \[\[ -n $RB_PIN_SEEN \]\]; then'; do
+    printf '%s\n' "$_pin_body" | grep -q "^$_v\$" \
+        || die "the writability probe is missing an arm: $_v"
+done
+pass "…proved by three assignments in the conditions, so no readonly satisfies them all"
+# ITS REACH: that shell must really stop on the pre-seeded value. Either message
+# counts — a failed readonly assignment inside a compound command can end the
+# script before the arm's own abort prints, which is bash's behaviour and not a
+# spelling to assert.
+case "$_seed_out" in
+    *'RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*)
+        pass "…where that shell does refuse on the pre-seeded value" ;;
+    *) die "the pre-seeded case did not refuse at all ('$_seed_out')" ;;
+esac
+# …AND A REFUSAL DESTROYS NOTHING ON ITS WAY OUT — not the file and not the
+# directory. The refusing arm runs before the probe, so there is nothing it can
+# have created; and reaching it at all means `RB_PIN_SEEN` was pre-seeded
+# READONLY, which no ordinary shell does, so every postcondition above may equally
+# have been walked past with `exit` neutered. `RB_PIN_OUT` and `RB_PIN_DIR` can
+# then name the operator's own file and directory — `rm -f` deletes the file, and
+# `rmdir` deletes the directory when it is empty, which an operator's directory
+# often is.
+# UNDER THE SCRATCH TREE THAT ALREADY EXISTS, not a fresh `mktemp_d`. The probe
+# at the end of this file re-runs it with `mktemp` stubbed and asserts on the
+# FIRST refusal's text; a new call here would refuse before that one and change
+# which message comes out.
+# GUARDED ON THE SCRATCH TREE EXISTING, like the forger cases: the probe at the
+# end of this file re-runs it with `mktemp` stubbed, where there is no tree — and
+# a `:?` here would kill the run with a message that probe does not expect.
+# GUARDED ON `_forge_dir`, THE VALIDATED ALLOCATION, not on `RB_TMPBASE` — which
+# this fixture exports FROM it and which an invoking environment may already
+# carry. With `mktemp_d` failing and an inherited `RB_TMPBASE`, the guard passed
+# and this block wrote into, and then `rm -rf`'d, a path nobody here allocated.
+if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
+# NAMED `watch-pr.*` UNDER THE TRANSPORT PARENT, and with a matching `RB_PIN_OUT`,
+# so the two earlier arms pass their checks and the `mkdir` arm is the one that
+# fires. Pre-seeded onto a mismatching path the FIRST arm was selected, `mkdir` was
+# never attempted, and breaking its refusal left this case green.
+_sentinel="$_forge_dir/watch-pr.sentinel"
+mkdir -p "$_sentinel"
+printf 'DO NOT DELETE\n' > "$_sentinel/pin"
+_sent_rc=0
+_sent_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
+    'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+        readonly RB_PIN_DIR="'"$_sentinel"'"
+        readonly RB_PIN_OUT="'"$_sentinel"'/pin"
+        '"$_pin_block"'
+    ' 2>&1)" || _sent_rc=$?
+# THE REFUSAL ITSELF, not only the survival. `RB_PIN_DIR` names a directory that
+# already exists, so `mkdir` fails and the outer `else` is the whole fail-closed
+# path — delete it and both survival checks stay green while setup finishes with
+# no diagnostic at all.
+{ [ "$_sent_rc" -ne 0 ] \
+  && case "$_sent_out" in *'ABORT: could not create a private directory'*) true ;; *) false ;; esac; } \
+    && pass "…where a mkdir onto an existing directory takes the mkdir refusal, non-zero and saying so" \
+    || die "a failed mkdir did not take its own refusal (rc=$_sent_rc out='$_sent_out')"
+case "$_sent_out" in
+    *'OWNER='*) die "a failed mkdir reached the success line ('$_sent_out')" ;;
+    *) pass "…and never reaches the success line" ;;
+esac
+[ -s "$_sentinel/pin" ] \
+    && pass "…and a refusal on a pre-seeded readonly path leaves the operator's file alone" \
+    || die "the refusing arm deleted a file it never created"
+# AND THE DIRECTORY TOO. `rmdir` removes an EMPTY directory, and an operator's
+# directory often is one — so "it can only fail" was the wrong claim.
+[ -d "$_sentinel" ] \
+    && pass "…and their directory, which rmdir would have removed" \
+    || die "the refusing arm removed a directory it never created"
+rm -rf "$_sentinel"
+fi
+# …AND `readonly RB_PIN_SEEN=''` REFUSES BEFORE ANYTHING IS CREATED. The reset
+# assignment fails and the value is already empty, so an emptiness test agreed and
+# the probe ran — then the assignment that stores the child's answer failed inside
+# the compound command, which can end the shell before either cleanup, leaving the
+# file and the `watch-pr.*` directory behind. Two unequal probe values tell that
+# state apart from a variable this shell just emptied.
+if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
+_emptyro="$_forge_dir/emptyro"
+mkdir -p "$_emptyro"
+_ero_rc=0
+_ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="'"$_emptyro"'"
+        readonly RB_PIN_SEEN=""
+        '"$_pin_block"'
+    ' 2>&1)" || _ero_rc=$?
+# EITHER REFUSAL COUNTS. A failed readonly assignment inside a condition list can
+# end the shell where it stands — bash's own behaviour — so the arm's own message
+# may never print. What must hold is that the run refuses and creates nothing,
+# which the next case asserts.
+{ [ "$_ero_rc" -ne 0 ] \
+  && case "$_ero_out" in
+        *'ABORT: RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
+        *) false ;;
+     esac; } \
+    && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
+    || die "readonly RB_PIN_SEEN='' was not refused (rc=$_ero_rc out='$_ero_out')"
+case "$_ero_out" in
+    *'OWNER='*) die "readonly RB_PIN_SEEN='' reached the success line ('$_ero_out')" ;;
+    *) pass "…and never reaches the success line" ;;
+esac
+# AND IT LEFT NOTHING BEHIND, which is what refusing before the `mkdir` buys.
+[ -z "$(ls -A "$_emptyro" 2>/dev/null)" ] \
+    && pass "…leaving no transport directory behind, because it refused before creating one" \
+    || die "the empty-readonly refusal left something in the transport parent: $(ls -A "$_emptyro")"
+rm -rf "$_emptyro"
+fi
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0

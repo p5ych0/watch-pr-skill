@@ -1,5 +1,132 @@
 # Changelog
 
+## [2.0.33] — 2026-08-19
+
+- **The pin proof's boundary is written down where the proof is.** Three rounds of
+  review walked up to it from three directions, and it is cheaper to state than to
+  rediscover.
+
+  What the proof establishes is that a CHILD inherited the pin — the failure it
+  was built for, where an `export` that assigns without setting the export
+  attribute leaves the driving shell holding the right value while every helper
+  holds none, and a `cd` into a second checkout then retargets every stage. That
+  is an accident rather than an attack, and asking a real child is what catches
+  it.
+
+  What it cannot establish is anything against a function in that shell. `export`
+  is a name, and one that mutates its operand makes the child report a forged
+  remote and the comparison compare forged with forged:
+
+  ```bash
+  export() { RB_REMOTE='git@github.com:WRONG/other.git'
+             builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
+  ```
+
+  A second `pr-origin.sh read`, comparing against the repository rather than
+  against a variable, was built for this and is **not** in the file: it bought
+  exactly one thing, an attacker who knew one variable name and not the other. The
+  same function rewrites both. It can also `cd` first, so a later read agrees with
+  the forgery, and an earlier read is just another variable. Every value that shell
+  holds is nameable and the function runs at a point of its own choosing, so no
+  ordering and no extra child makes the comparison mean more than the shell it runs
+  in — and `SKILL.md` is a file such a shell can edit, which is the boundary
+  `pr-origin.sh` § WHAT THIS DOES NOT CLOSE and #91 already draw.
+
+  The narrow thing the proof does do about a shadowed `exit` is stated too: every
+  refusal in the block ends in `exit`, which a function can neuter into a `return`,
+  so a refused transport check carries on — to a comparison where `RB_REMOTE` is
+  still empty. The non-emptiness test is what stops that reaching the success line,
+  and it is why the check is not equality alone.
+
+- **A pre-seeded readonly `RB_PIN_SEEN` can no longer certify a pin no child saw.**
+  That is the one walked-past refusal the non-emptiness test cannot catch, because
+  nothing in it is empty: with `exit` neutered, an `export` that assigns without
+  exporting, and a readonly `RB_PIN_SEEN` already holding the real remote, the
+  reset's refusal is stepped over, the child inherits nothing and reports nothing,
+  its empty answer cannot overwrite a readonly variable, and the equality compares
+  the pre-seeded value with `RB_REMOTE` and agrees. Setup announced a pin no helper
+  would ever see, and a later `cd` retargeted every stage.
+
+  The probe and the success line are now ARMS of that reset proof rather than
+  lines after it, so neither is reachable when the reset fails, whatever has been
+  done to `exit`. That is the structural shape #102 asked for, applied at the one
+  place where a walked-past refusal produces a plausible answer instead of an
+  absent one.
+
+  **`RB_PIN_SEEN`'s writability is proved by three assignments, and the verdict is
+  control flow rather than a variable.** `readonly RB_PIN_SEEN=''` defeats a single
+  emptiness test: the reset assignment fails, the value is already empty, and the
+  test agrees — so the probe ran, and the assignment that stores the child's answer
+  then failed inside the compound command, which can end the shell before either
+  cleanup and leave the file and the directory behind.
+
+  A `writable=yes` flag was the first fix and is not this one: it is another
+  variable, and a readonly pre-seed of `yes` made every reset of it fail while the
+  refusal was skipped — the same defect one name along, which is the shape this
+  repository keeps deleting. Assignments inside the `elif` conditions leave nothing
+  to pre-seed: the arm is selected or it is not. `probe-a` and `probe-b` differ, so
+  no readonly satisfies both, and the empty reset is what the child's answer
+  overwrites. A shell where any of them fails to take either stops on the spot —
+  bash's behaviour for a failed readonly assignment — or selects that arm, and both
+  happen before the `mkdir`, so nothing has been created.
+
+  **The assignments are proved before anything is created.** They were inside the
+  `mkdir` arm, which leaks: a failed readonly assignment can end the shell where it
+  stands — bash's own behaviour, and what the reset fixture observes — and by then
+  the directory existed with nobody left to remove it. Proved first, a refusal
+  happens while there is still nothing to clean up.
+
+  **The whole probe is an arm of the `mkdir` that creates its directory**, so
+  nothing runs on one this invocation did not make. `mkdir -m 700` fails precisely
+  when `RB_PIN_DIR` names something that already exists — which is what a readonly
+  pre-seeded value points at — and with `exit` neutered that failure was stepped
+  over: the probe then created and removed `pin` inside the operator's directory,
+  `rm -f` deleted a `pin` of theirs if one was there, and `rmdir` took the
+  directory.
+
+  **Whose the directory is decides who may remove it.** Exactly one arm removes
+  it: the one where the `mkdir` succeeded, which is the only place this shell is
+  known to have created it. Every refusal fires before that `mkdir` — the
+  assignments are proved first — so there is nothing for a refusal to clean up,
+  and none of them tries: `RB_PIN_OUT` and `RB_PIN_DIR` can name the operator's own
+  file and directory, `rm -f` deletes the file, and `rmdir` deletes the directory
+  whenever it is empty, which an operator's often is.
+
+  An earlier draft of this entry claimed `rmdir` "removes an empty directory or
+  fails, so it cannot destroy anything". That is wrong: deleting an empty
+  directory IS the destruction, and an operator's directory is often empty.
+  `rmdir` is safe here only where this invocation's `mkdir` has just proved the
+  directory is ours.
+
+  Three cases: the success line must be inside the branch where the reset held,
+  must NOT appear in the arm that refuses — or "inside a branch" is satisfied by
+  announcing success on both — and the probe must be in there with it. Plus the
+  combined state itself, run end to end, with its own reach probe asserting that
+  shell really does keep the pre-seeded value.
+
+  A sentinel: a `watch-pr.*` directory and a `pin` file the block never made,
+  pre-seeded readonly as `RB_PIN_DIR` and `RB_PIN_OUT` so the two earlier arms
+  pass and the `mkdir` arm is the one that fires — that run must refuse non-zero
+  with the mkdir's own message, and both must still be there afterwards. Named any
+  other way the first arm was selected, `mkdir` was never attempted, and breaking
+  its refusal left the case green.
+
+  `readonly RB_PIN_SEEN=''` must be refused and must leave the transport parent
+  empty, which is what refusing before the `mkdir` buys.
+
+  And structurally: the branch's four arms are lifted by their own headers and
+  checked one at a time — a count over the whole conditional is satisfied by two
+  cleanups in one arm and none in another — with the success line and the probe
+  only in the work arm, no cleanup in any refusal, both cleanups in the work arm,
+  the assignments proved before the branch, the writability probe using two
+  unequal values, and the reset refusal carrying its own abort. That last one is
+  structural because on this bash the failed readonly assignment ends the run
+  before the arm is evaluated, so a behavioural case alone would stay green with
+  the arm deleted.
+
+  Each fails against the shape it replaces; the largest single mutation — moving
+  the assignments back inside the `mkdir` arm — turns eight red.
+
 ## [2.0.32] — 2026-08-19
 
 - **The driver no longer parses a record to learn the signed-off head.** All
