@@ -39,6 +39,10 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
 [ -f "$W/move-head-on-probe" ] && cat "$W/move-head-on-probe" > "$W/head.out"
 case "${1:-}" in
     verdict)   _n=$(( $(cat "$W/verdict.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$W/verdict.n"
+               # A PUSH CAN LAND DURING A LATER PROBE TOO, after the first head
+               # re-read has already passed — which is the window the read before
+               # the post exists for.
+               [ "$_n" -ge 2 ] && [ -f "$W/move-head-late" ] && cat "$W/move-head-late" > "$W/head.out"
                if [ "$_n" -ge 2 ] && [ -f "$W/verdict.2.rc" ]; then
                    cat "$W/verdict.2.out" 2>/dev/null; exit "$(cat "$W/verdict.2.rc")"
                fi
@@ -92,7 +96,14 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    cat "$W/head.out" 2>/dev/null
+    *" pr view "*)    # COUNTED, so a case can fail the SECOND or the LAST head read
+                      # rather than the first. `head.rc` alone aborts at the
+                      # initial capture and never reaches the later handlers, so a
+                      # status-swallowing regression in either would go unseen.
+                      _hn=$(( $(cat "$W/head.n" 2>/dev/null || echo 0) + 1 ))
+                      printf '%s' "$_hn" > "$W/head.n"
+                      cat "$W/head.out" 2>/dev/null
+                      if [ -f "$W/head.rc.$_hn" ]; then exit "$(cat "$W/head.rc.$_hn")"; fi
                       exit "$(cat "$W/head.rc" 2>/dev/null || echo 0)" ;;
     *" pr comment "*) _b=""
                       while [ $# -gt 0 ]; do
@@ -226,6 +237,77 @@ got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
     && pass "a head that is not a full OID stops the phase" \
     || die "a malformed head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+
+# ── `record` RE-PROVES THE PHASE IMMEDIATELY BEFORE IT PUBLISHES ──────────
+#
+# The CI gate WAITS for checks to settle and the round count is a network read, so
+# the window between the last proof and the irreversible post is as long as a
+# build. In it another session can post a `**Review-Signoff-Revoked:**` — how a
+# phase is deliberately reopened — and this stage's signoff would SUPERSEDE it,
+# because the readers take the last record, while GitHub keeps serving the old
+# clean verdict until the new pass reports. A later `open` then finds a current
+# signoff and a clean verdict and requests Copilot underneath a reopened phase.
+# #115.
+#
+# THE REVOCATION IN THAT WINDOW IS NOT REFUSED HERE, and that is a deferral rather
+# than an omission. The first fix refused on one and broke the legitimate path: the
+# fault-tolerance pass posts its revocation BEFORE requesting the review, so it is
+# still the newest record when the new clean verdict arrives — an unconditional
+# refusal means a reopened phase can never record its replacement signoff.
+#
+# TELLING THEM APART NEEDS THE RECORDS TO CARRY TIME, which is #37's remaining
+# defect and has to land first. What this asserts meanwhile is that the legitimate
+# case works: a revocation already on the PR, with a clean verdict, still records.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] \
+    && pass "a reopened phase with a clean verdict records its replacement signoff" \
+    || die "a pre-existing revocation blocked the reopened phase: '${got}'"
+
+# A PUSH IN THE SAME WINDOW, which the head re-read catches. `move-head-on-probe`
+# fires on the FIRST verdict call, so this is a push landing before the CI gate.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+    && pass "…and a push landing in that window stops it too" \
+    || die "a moved head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+# AND EITHER LATE HEAD READ FAILING STOPS IT. `head.rc` alone aborts at the first
+# capture, so neither of the new handlers was ever reached: a regression that
+# swallowed one of their statuses would publish a signoff with every case green.
+# The stub counts its calls, so a case can fail exactly the second or the third —
+# each printing a plausible `$HEAD40` first, which is what makes a swallowed
+# status look like success.
+for _n in 2 3; do
+    world; printf '1\n' > "$W/head.rc.$_n"
+    got="$(run record 7 "$TMP/body.md")"
+    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not re-read the head'; } \
+        && pass "…and head read #$_n failing after printing a plausible sha stops it" \
+        || die "head read #$_n failing gave '${got}'"
+    nothing_posted "…with no signoff recorded"
+done
+
+# A PUSH DURING THE LATER PROBES, which the FIRST re-read cannot catch: it has
+# already passed, and the verdict is pinned to `$CODEX_SHA` so it stays clean and
+# says nothing about the move. Only re-reading the head last closes it. The
+# verdict stub moves it on its SECOND call — the one after the CI gate — so the
+# change lands after the first head check and before the post.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-late"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+    && pass "…and one landing during the later probes stops it as well" \
+    || die "a head moved during the signoff probe gave '${got}'"
+nothing_posted "…with no signoff recorded"
+# A DISMISSAL IN THE SAME WINDOW, which the verdict re-read catches. `.2` again:
+# the first check is the one before the CI gate, the second the one before the post.
+world; printf 'PR_REVIEW_STATE verdict=findings findings=2\n' > "$W/verdict.2.out"
+printf '1\n' > "$W/verdict.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean on'; } \
+    && pass "…and a verdict withdrawn in that window stops it" \
+    || die "a withdrawn verdict gave '${got}'"
 nothing_posted "…with no signoff recorded"
 
 # THE ABBREVIATED SHA IS THE ONE THAT MATTERS. `pr-review-state.sh` prints seven

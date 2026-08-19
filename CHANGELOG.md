@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.0.36] — 2026-08-19
+
+- **`record` proves the phase again immediately before it publishes the signoff.**
+  Two stages ran between the last proof and the irreversible post — the CI gate,
+  which WAITS for checks to settle, and the round count — so that window is as
+  long as a build.
+
+  In it another session can post a `**Review-Signoff-Revoked:**`, which is how a
+  phase is deliberately reopened. The signoff would then supersede it, because the
+  readers take the last record, while GitHub keeps serving the old clean verdict
+  until the new pass reports — so nothing this stage looked at earlier could see
+  the reopening. A later `open` then finds a current signoff and a clean verdict
+  and requests Copilot underneath a phase somebody had just reopened.
+
+  Three checks now sit immediately before the post: the head is still the signed
+  sha, Codex's live verdict on it is still clean, and the head again, LAST. That
+  last read is not redundant — the verdict lookup is a network call, so the head
+  can move during it, and the verdict is pinned to the signed sha so it stays clean
+  and says nothing about the move. Reading the head only first would leave the same
+  window one probe narrower.
+
+  **Refusing on the revocation itself is deferred, and that is a correction to this
+  change rather than a limit of it.** It was the first fix and it breaks the
+  legitimate path: the fault-tolerance pass posts its revocation BEFORE requesting
+  the review, so that revocation is still the newest record when the new clean
+  verdict arrives — an unconditional refusal means a reopened phase can never
+  record its replacement signoff at all.
+
+  Telling the two apart needs the records to carry time, and they do not yet: a
+  revocation this pass is ANSWERING landed before the verdict, one that would
+  CANCEL it landed after, and `pr-signoff.sh` omits `at=` on a revocation so two
+  compare equal — at second resolution even a timestamp needs the comment id
+  beside it. That is #37's remaining defect and it has to land first, so this
+  stage narrows the window rather than closing it, and says so where the check
+  would have gone.
+
+  Three cases leave nothing posted where they refuse — a push before the CI gate,
+  a push during the later probes which only the final head read catches, and a
+  withdrawn verdict — and all three fail against the previous stage. A fourth
+  guards the legitimate path: a revocation already on the PR with a clean verdict
+  must still record, which is the reopened phase completing.
+
 ## [2.0.35] — 2026-08-19
 
 - **`review-at` reported "no verdict" when it could not ask.** It fetched and

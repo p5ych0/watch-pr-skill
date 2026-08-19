@@ -346,8 +346,11 @@ Then:
    project a signoff or a revocation lands on:
 
    - `record <PR> <body-file>` re-reads the head, re-validates Codex's verdict
-     against *that exact sha*, proves its checks are green, and writes the
-     signoff onto the PR in the form `pr-signoff.sh` reads back. Then it stops
+     against *that exact sha*, proves its checks are green — and then proves the
+     head and the verdict **again**, immediately before writing, because the
+     checks gate waits and a push or a dismissal can land while it does. Either
+     stops the record with nothing posted. It writes the signoff onto the PR in
+     the form `pr-signoff.sh` reads back. Then it stops
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
      everything a machine reads back is composed by the script;

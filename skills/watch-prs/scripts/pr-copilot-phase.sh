@@ -490,6 +490,52 @@ case "$ROUNDS_RC" in
     *) echo "ABORT: could not establish the round count (rc=$ROUNDS_RC); nothing recorded"; exit 1 ;;
 esac
 
+# PROVED AGAIN, IMMEDIATELY BEFORE THE POST, because the two stages above are not
+# instant and the post is irreversible. The CI gate WAITS for checks to settle, so
+# the window between the proof and the write is as long as a build — and in it
+# another session can post a `**Review-Signoff-Revoked:**`, which is how a phase is
+# deliberately reopened. The signoff below would then SUPERSEDE that revocation,
+# because the readers take the last record, while GitHub keeps serving the old
+# clean verdict until the new pass reports. A later `open` finds a current signoff
+# and a clean verdict and requests Copilot underneath a phase somebody had
+# reopened.
+#
+# THE HEAD, THE VERDICT, AND THE HEAD AGAIN. Not the same set `open` makes — that
+# one includes the recorded signoff, and refusing on a revocation is deferred here
+# for the reason written below. These are the two facts that can be established
+# without ordering records, plus a second read of the head because the verdict
+# lookup between them is a network call. #115.
+RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
+[[ $RECHECK_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $RECHECK_HEAD while the checks were proving; nothing posted"; exit 1; }
+CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
+[[ $CODEX_STILL_RC -eq 0 ]] \
+    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
+# NO REVOCATION CHECK HERE, AND THAT IS A DEFERRAL RATHER THAN AN OVERSIGHT. A
+# revocation landing in this window is the case #115 was filed for, and refusing
+# on one was the first fix — it is not in this file because it breaks the
+# legitimate path: the fault-tolerance pass posts its revocation BEFORE requesting
+# the review, so that revocation is still the newest record when the new clean
+# verdict arrives, and an unconditional refusal means a reopened phase can never
+# record its replacement signoff at all.
+#
+# TELLING THE TWO APART NEEDS THE RECORDS TO CARRY TIME, which they do not yet: a
+# revocation this pass is ANSWERING landed before the verdict, and one that would
+# CANCEL it landed after — and `pr-signoff.sh` omits `at=` on a revocation, so two
+# of them compare equal, and at second resolution even a timestamp is not enough
+# without the comment id. That is #37's remaining defect, and it has to land
+# first. Until it does, this stage narrows the window rather than closing it.
+# AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
+# move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
+# clean and says nothing about the move. Reading the head first and posting third
+# leaves exactly the window this stage exists to close, one probe narrower. This
+# is the last thing before the write.
+FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
+[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
+
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
