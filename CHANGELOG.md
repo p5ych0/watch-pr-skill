@@ -167,6 +167,16 @@
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.
 
+  **A carried config can rewrite the origin and cannot replace it.** Carrying a
+  config location so `insteadOf` works brings the whole file, and a global or
+  system config may contain `[remote "origin"] url = …` — which
+  `git remote get-url origin` PREFERS over the repository's own, so the variable
+  carried to make rewrites work could name a different repository. The URL is read
+  with `git config --local`, which no carried file can supply, and
+  `git ls-remote --get-url` then applies the rewrites to that value and nothing
+  else. Two questions, answered separately, because one command answering both is
+  what let a config choose the repository.
+
   **Config location is carried; repository scope is not**, and that is the line
   the environment list draws. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` say
   WHICH CONFIG the operator's git reads — dropping them does not block a

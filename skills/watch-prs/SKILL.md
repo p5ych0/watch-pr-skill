@@ -367,8 +367,16 @@ RB_TMPDIR=
 # is sent to look at their environment for a variable that is fine. The probe
 # writes a value only this line writes and reads it back, which no readonly can
 # satisfy; the clear after it cannot fail once that has passed.
-RB_TMPPARENT=probe
-[[ $RB_TMPPARENT = probe ]] \
+# TWO UNEQUAL ASSIGNMENTS, because ONE proves nothing against a readonly holding
+# the probe's own value. `readonly RB_TMPPARENT=probe` in the driving shell makes
+# the failed assignment leave exactly what the postcondition expects, so the guard
+# passes and every `for` assignment then fails silently. No single value can be
+# ruled out; two that differ can, because a readonly cannot equal both.
+RB_TMPPARENT=probe-a
+[[ $RB_TMPPARENT = probe-a ]] \
+    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
+RB_TMPPARENT=probe-b
+[[ $RB_TMPPARENT = probe-b ]] \
     || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
 RB_TMPPARENT=
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do

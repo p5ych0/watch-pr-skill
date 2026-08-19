@@ -708,6 +708,36 @@ nop_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash "$SCRIPT" read "$TMP
     && pass "…and an unprivileged bash reading it refuses with nothing written" \
     || die "an unprivileged bash was accepted (rc=$nop_rc diag='$nop_diag')"
 
+# ── A CARRIED CONFIG CANNOT CHOOSE THE REPOSITORY ──────────────────────────
+#
+# Carrying a config location so `insteadOf` works brings the whole file with it,
+# and a global or system config may contain `[remote "origin"] url = …` — which
+# `git remote get-url origin` PREFERS over the repository's own. So the variable
+# carried to make rewrites work could name a different repository, which is the
+# failure this file exists to prevent arriving by the front door. The URL comes
+# from `--local` and only the rewrite comes from the carried config.
+HOSTILE="$TMP/hostile-global"
+printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "origin"]\n\turl = %s\n' "$FORGED" > "$HOSTILE"
+rm -f "$TMP/hg1.value"
+( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_GLOBAL="$HOSTILE" /usr/bin/env bash -p "$SCRIPT" read "$TMP/hg1.value" ) >/dev/null 2>&1
+hg_got="$(cat "$TMP/hg1.value" 2>/dev/null)"
+# BOTH HALVES IN ONE ANSWER: the repository's own origin, with the carried
+# config's rewrite applied to it — and NOT the repository that config names.
+[ "$hg_got" = 'git@ghe.example:acme/widget.git' ] \
+    && pass "a carried config rewrites the origin and cannot replace it" \
+    || die "a carried config chose the repository (got '$hg_got')"
+case "$hg_got" in
+    *WRONG*) die "…the config's own remote.origin.url reached the value" ;;
+    *)       pass "…and its remote.origin.url appears nowhere in the value" ;;
+esac
+# THE FIXTURE'S OWN REACH: that config must really override a plain
+# `git remote get-url`, or the case above passes against a file with no effect.
+hg_reach="$(cd "$IOREPO" && env HOME="$TMP/nohome" GIT_CONFIG_GLOBAL="$HOSTILE" git remote get-url origin 2>/dev/null)"
+[ "$hg_reach" = "$FORGED" ] \
+    && pass "…where the same config does override a plain get-url" \
+    || die "the hostile config has no effect here (got '$hg_reach'); the case above proves nothing"
+
 # ── `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT AND SURVIVES ───────────────────────
 #
 # It tells git to ignore the system-wide config. An emptied environment dropped

@@ -503,10 +503,15 @@ LOCAL
     # blames `TMPDIR` and `HOME` — sending the operator to look at an environment
     # that is fine. A usable fallback is supplied here, so the only reason to stop
     # is the readonly itself.
+    #
+    # THE READONLY HOLDS THE PROBE'S OWN VALUE, which is the case a single
+    # assignment cannot see: the failed assignment leaves exactly what the
+    # postcondition expects, so the guard passes and every `for` assignment then
+    # fails silently. Two unequal probes are what rules it out.
     _rp2_rc=0
     _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
         TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
-            readonly RB_TMPPARENT=/nonexistent
+            readonly RB_TMPPARENT=probe-a
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _rp2_rc=$?

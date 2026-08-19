@@ -347,12 +347,19 @@ fi
 # `rb_identity` then refused a valid checkout, or addressed the session somewhere
 # that is not where it pushes. Measured both ways.
 #
-# WHAT IS EXCLUDED IS STILL EVERYTHING THAT REDIRECTS THE REPOSITORY: `GIT_DIR`,
-# `GIT_WORK_TREE`, `GIT_CONFIG`, `GIT_CONFIG_GLOBAL` and the rest go with `-i`,
-# and the list needs no maintaining because the environment is emptied rather
-# than filtered. `XDG_CONFIG_HOME` is carried when set, because git reads
-# `$XDG_CONFIG_HOME/git/config` as global config too and omitting it would lose
-# the same rewrites for anyone who uses it.
+# WHAT IS EXCLUDED IS EVERYTHING THAT SCOPES THE REPOSITORY: `GIT_DIR`,
+# `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY` and the rest go with
+# `-i`, and the list needs no maintaining because the environment is emptied
+# rather than filtered. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are CARRIED,
+# not excluded — see the block above the list — because they say which config the
+# operator's git reads, and reading a different one loses the rewrites the session
+# honours. `XDG_CONFIG_HOME` is carried for the same reason: git reads
+# `$XDG_CONFIG_HOME/git/config` as global config too.
+#
+# CARRYING A CONFIG DOES NOT LET IT CHOOSE THE REPOSITORY, and that is handled
+# where the URL is read rather than here: a carried file may contain
+# `[remote "origin"] url = …`, so the URL comes from `--local` and only the
+# rewrite comes from the config.
 #
 # A FORGED `HOME` CAN STILL REWRITE URLS, and that is the operator's own shell
 # lying about the operator's own home — the boundary this file already records at
@@ -389,7 +396,26 @@ _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 # rewrite; the other loses the repository.
 [[ -n ${GIT_CONFIG_GLOBAL-} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
 [[ -n ${GIT_CONFIG_SYSTEM-} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
-_rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
+# THE URL COMES FROM THE REPOSITORY, AND THE REWRITE COMES FROM THE CONFIG. Those
+# are two questions and `git remote get-url origin` answers them together — which
+# is why carrying a config location was not enough on its own: a global or system
+# config may contain `[remote "origin"] url = …`, and that value WINS. A carried
+# config could therefore name a different repository, which is the exact failure
+# this file exists to prevent, arriving through the variable that was carried to
+# make rewrites work.
+#
+# `--local` READS ONLY `.git/config`, so no carried file can supply the URL; then
+# `ls-remote --get-url` applies `url.<base>.insteadOf` to that value and nothing
+# else, and does not touch the network. The operator's rewrites still apply; their
+# config cannot choose the repository.
+_rb_raw="$(/usr/bin/env -i "${_rb_env[@]}" git config --local --get remote.origin.url 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
+    echo "ABORT: this checkout has no origin in its own configuration" >&2; exit 1; }
+_rb_raw="${_rb_raw%x}"
+_rb_raw="${_rb_raw%'
+'}"
+[[ -n $_rb_raw ]] \
+    || { echo "ABORT: this checkout has no origin in its own configuration" >&2; exit 1; }
+_rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" git ls-remote --get-url "$_rb_raw" 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
