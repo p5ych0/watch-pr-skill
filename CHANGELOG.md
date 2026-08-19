@@ -20,8 +20,11 @@
   Choosing a different variable name is no answer, since any name written in
   `SKILL.md` is a name that function's author has read. So the proof asks the
   world again instead: a second `pr-origin.sh read`, a real child reached by path
-  and started privileged, derives origin from the checkout, and the pin is proved
-  by the two children AGREEING — one reporting the `REVIEW_BUS_REMOTE` a stage
+  and started privileged, derives origin from the checkout — **before the export
+  line**, which is the anchor. That function runs arbitrary code, `cd` among it,
+  so one that pins a forged remote AND moves the shell into a checkout with that
+  origin makes both children agree; read first, no function has run and the cwd is
+  still the operator's own. The pin is then proved by the two children AGREEING — one reporting the `REVIEW_BUS_REMOTE` a stage
   will actually inherit, the other the origin a stage would fall back to. Nothing
   in the driving shell can alter what either says. Both sides must be non-empty,
   because two empties agree.

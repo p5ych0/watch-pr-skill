@@ -700,6 +700,30 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # already lying about its output. What survives a forged `echo` is the STATUS: the
 # branch still ends non-zero. Removing the dependency means not composing this
 # message here, which is #84 along with `git` and `bash`.
+# THE REFERENCE READ HAPPENS BEFORE `export`, AND THAT ORDER IS THE ANCHOR. A
+# function named `export` runs arbitrary code at the line below, and `cd` is
+# something it can do: one that pins a forged remote AND moves this shell into a
+# checkout with that origin makes both children agree, because they inherit the
+# cwd it left them in. Read here, no function has run yet — the value comes from
+# the checkout the operator actually started in.
+#
+# ANOTHER CHILD, NOT ANOTHER VARIABLE, for what it reads. `pr-origin.sh read` is
+# reached by path and started privileged, so it derives origin from the checkout
+# rather than from anything this shell holds, and no function here can alter what
+# it says.
+RB_PIN_REF_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_PIN_REF_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
+    || { echo "ABORT: RB_PIN_REF_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
+/usr/bin/env mkdir -m 700 "$RB_PIN_REF_DIR" \
+    || { echo "ABORT: could not create a private directory for the pin reference read"; exit 1; }
+RB_PIN_REF=
+[[ -z $RB_PIN_REF ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_REF_DIR"; echo "ABORT: RB_PIN_REF is readonly in this shell; the pin proof would compare against a value no child produced"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_PIN_REF_DIR/ref" \
+    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+        && RB_PIN_REF="$(<"/dev/fd/9")"; } 9<"$RB_PIN_REF_DIR/ref"
+/usr/bin/env rm -f "$RB_PIN_REF_DIR/ref"
+/usr/bin/env rmdir "$RB_PIN_REF_DIR"
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
 # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading
@@ -800,19 +824,6 @@ RB_PIN_SEEN=
 # itself, not against a variable the same shell was free to write. Gating each of
 # those refusals structurally was the alternative, and it is a restructure of the
 # whole block to re-derive a fact this one line already establishes. #102.
-RB_PIN_REF_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-[[ $RB_PIN_REF_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
-    || { echo "ABORT: RB_PIN_REF_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
-/usr/bin/env mkdir -m 700 "$RB_PIN_REF_DIR" \
-    || { echo "ABORT: could not create a private directory for the pin reference read"; exit 1; }
-RB_PIN_REF=
-[[ -z $RB_PIN_REF ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_REF_DIR"; echo "ABORT: RB_PIN_REF is readonly in this shell; the pin proof would compare against a value no child produced"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_PIN_REF_DIR/ref" \
-    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-        && RB_PIN_REF="$(<"/dev/fd/9")"; } 9<"$RB_PIN_REF_DIR/ref"
-/usr/bin/env rm -f "$RB_PIN_REF_DIR/ref"
-/usr/bin/env rmdir "$RB_PIN_REF_DIR"
 # NON-EMPTY ON BOTH SIDES, because two empties agree. A helper that could not
 # start leaves this empty, and a pin that never arrived leaves the other empty;
 # neither is a proof, and `"" = ""` is the success this file has already been
