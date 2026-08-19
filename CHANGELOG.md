@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.37] — 2026-08-19
+
+- **The records now carry enough to order a revocation against a verdict**, which
+  is what #115's remaining half needs and could not have.
+
+  Two revocations read identically today: the one the fault-tolerance pass posts
+  BEFORE requesting its review — still the newest record when the clean verdict
+  arrives, so the pass is *answering* it and must be allowed to record — and the
+  one another session posts AFTER that verdict, which *cancels* it. Refusing on
+  both breaks the reopened phase; refusing on neither is #115's defect. The
+  difference is ordering.
+
+  **`pr-signoff.sh` reports `at=` and `id=` on a revocation**, as it already did
+  on a signoff, and both records gain the comment id: `createdAt` is
+  second-resolution, so two records made in the same second compare equal and the
+  id is what breaks the tie. Omitting `at=` also meant one revocation replaced by
+  another could not be told from the original. The fields go before `sha=`,
+  because callers read the sha with `${line##*sha=}` and anything after it is
+  swallowed into the value. A node without a `databaseId` is now malformed, for
+  the same reason a node without `created_at` already was: a record that cannot be
+  ordered is not a record this tool can act on.
+
+  **`pr-review-state.sh review-at` answers from the comment channel too.** Codex
+  submits a review when it has findings and an issue comment when it does not — it
+  used a comment on #35 — so reading only `pulls/N/reviews` said "no verdict" on
+  exactly the heads a clean pass covers, and an ordering check built on it would
+  have refused the ordinary case. It now takes the later of the newest review and
+  the newest clean comment, compared lexically because both are canonical UTC, and
+  fails closed when either fetch fails. `verdict` and `state` have consulted both
+  channels for a while; this command had not.
+
+  Ten cases across the two fixtures, including both directions of the
+  later-of-two comparison — a review after a comment and a comment after a
+  review — so a helper that simply preferred one channel would not pass.
+
 ## [2.0.36] — 2026-08-19
 
 - **`record` proves the phase again immediately before it publishes the signoff.**

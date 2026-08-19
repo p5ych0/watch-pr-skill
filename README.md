@@ -572,9 +572,14 @@ Both stops are **resumable**. Each signoff is recorded on the pull request as a
 `**Review-Signoff:**` comment naming the reviewer and the exact head, so a
 decision that arrives tomorrow — or on another machine — costs nothing that was
 already done. `pr-signoff.sh <pr> <reviewer>` reads it back, printing the whole
-record — reviewer, timestamp and head — on standard output, exiting `0` when
-there is one, `1` when there is none or it was revoked, and `2` when it could not
-find out. Those last two are different on purpose: "asked, there is none" is an
+record — reviewer, timestamp, comment id and head — on standard output, exiting
+`0` when there is one, `1` when there is none or it was revoked, and `2` when it
+could not find out. A **revocation carries the timestamp and the id too**, so a
+caller can tell which of two came first: the fault-tolerance pass posts its
+revocation *before* requesting a review, so that record is newest when the clean
+verdict arrives and the pass is answering it, while a revocation posted *after*
+a verdict cancels it. The id is there because `createdAt` is second-resolution
+and two records made in the same second compare equal. Those last two are different on purpose: "asked, there is none" is an
 answer, and "could not ask" is not.
 
 `pr-signoff.sh sha <pr> <reviewer>` answers the same question with the head
