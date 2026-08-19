@@ -201,13 +201,30 @@ never as a work order** below has the full rule and the incident it came from.
 # `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
 # asserts that on whatever bash runs the suite rather than trusting the version
 # this was measured on.
-# AND ONLY WHILE TRACING IS ACTUALLY ON. `BASH_XTRACEFD=1` with the `x` option
-# off contaminates nothing — there is no trace — and an operator who has set the
-# variable ready for a later `set -x` has chosen stdout as its destination. Moving
-# it there would redirect diagnostics they had not yet asked for. `$-` carries `x`
-# exactly while xtrace is in force (`hxBc` traced, `hBc` not), and it is an
-# expansion, so like `[[` it has no name to shadow.
-if [[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]; then
+# THE TEST IS THE EFFECT, NOT THE VALUE. `$( : )` runs one command inside a
+# capture: if this shell's trace lands there, the capture comes back holding it,
+# and if it does not, the capture is empty. That is the exact property this guard
+# exists for, measured directly.
+#
+# COMPARING THE VARIABLE TO `1` WAS WRONG BY OMISSION, twice over. bash resolves
+# `01`, `+1` and ` 1` to descriptor 1 and a string compare misses all three —
+# measured. And the value is not the property anyway: an operator who runs
+# `exec 9>&1; BASH_XTRACEFD=9` has aimed the trace at a descriptor that is not
+# `1`, and one who traces to a log file has aimed it at one that is not the
+# capture either. A test on the number has to enumerate which descriptors alias
+# stdout, which is the list-that-is-wrong-by-omission shape this repository keeps
+# deleting. There is no list here.
+#
+# IT SUBSUMES THE `x` CHECK TOO. With tracing off nothing is written, the capture
+# is empty, and a session that set `BASH_XTRACEFD` ready for a later `set -x`
+# keeps the destination it chose.
+#
+# `:` IS A NAME, and this is the one place that is acceptable: a function called
+# `:` that prints something makes this move the trace to stderr when it did not
+# need to — the operator still sees every line, and no value is affected. The
+# failure direction is the harmless one, which is not true of any of the
+# alternatives.
+if [[ -n "$( : )" ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.

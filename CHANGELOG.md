@@ -19,11 +19,19 @@
   abort naming a path the operator could see was fine.
 
   Setup now moves the trace off the capture before its first substitution:
-  `BASH_XTRACEFD=2`, guarded by `[[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]` so
-  it fires only where a trace would actually reach one. A session tracing to
-  stderr or to a log file on another descriptor is untouched, and so is one that
-  has set the variable ready for a later `set -x` without tracing yet — `$-`
-  carries `x` exactly while xtrace is in force.
+  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( : )" ]]` — a capture that comes back
+  holding this shell's own trace, which is the property itself rather than a proxy
+  for it.
+
+  Comparing the variable to `1` was tried and is wrong by omission twice over.
+  bash resolves `01`, `+1` and ` 1` to descriptor 1 and a string compare misses
+  all three; and the value is not the property anyway, since an operator running
+  `exec 9>&1; BASH_XTRACEFD=9` has aimed the trace at a descriptor that is not
+  `1`. A numeric test has to enumerate which descriptors alias stdout. The effect
+  test enumerates nothing. It also subsumes the "is tracing even on" question:
+  with the `x` option off nothing is written, the capture is empty, and a session
+  that set `BASH_XTRACEFD` ready for a later `set -x` keeps the destination it
+  chose.
 
   **An assignment, because `set +x` is a name.** `set` is a builtin and a function
   shadows it, so a guard written that way is absent in the one shell state it

@@ -3669,8 +3669,8 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]; then' ] \
-    && pass "…and its first executable line tests the trace target" \
+[ "$_first_exec" = 'if [[ -n "$( : )" ]]; then' ] \
+    && pass "…and its first executable line tests whether a trace reaches a capture" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
 # function shadows it, so a guard written that way is absent in the one shell
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ \$- = \*x\* \]\] && \[\[ ${BASH_XTRACEFD-} = 1 \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( : )" \]\]; then$/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3803,6 +3803,20 @@ else
         *ORDINARY*DUP*) pass "…and the driving shell's stdout survives the reassignment" ;;
         *) die "the reassignment closed the shell's stdout ('$_tr_fd')" ;;
     esac
+    # EVERY SPELLING BASH RESOLVES TO DESCRIPTOR 1, not just the digit. bash reads
+    # `01`, `+1` and ` 1` as fd 1 and a string compare against `1` missed all
+    # three — which is why the guard tests the effect instead of the value.
+    for _tr_spell in 01 '+1' ' 1'; do
+        _tr_alt="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD="$_tr_spell" bash -c '
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                printf "REPO_DIR=[%s]\n" "$REPO_DIR"' 2>/dev/null)" || _tr_alt=""
+        _tr_alt_v="$(printf '%s\n' "$_tr_alt" | awk '/^REPO_DIR=\[/ && !seen {print; seen=1}')"
+        { [ "$_tr_alt_v" = "REPO_DIR=[$(cd "$_tr_dir" && pwd -P)]" ] || [ "$_tr_alt_v" = "REPO_DIR=[$_tr_dir]" ]; } \
+            && pass "…and BASH_XTRACEFD='$_tr_spell' is caught as the descriptor it is" \
+            || die "BASH_XTRACEFD='$_tr_spell' left the capture corrupted ('$_tr_alt_v')"
+    done
     # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
     # with the `x` option off contaminates nothing, and the operator may have set
     # it ready for a later `set -x`; moving it would redirect diagnostics they had
