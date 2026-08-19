@@ -3669,7 +3669,7 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then' ] \
+[ "$_first_exec" = 'if [[ "$( PS4='"'"'$$:'"'"'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]; then' ] \
     && pass "…and its first executable line tests whether a trace reaches a capture" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ "\$( RB_TRACE_PROBE=1 )" = \*RB_TRACE_PROBE=1\* \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ "\$( PS4=/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3871,6 +3871,52 @@ else
     case "$_tr_debug" in
         *'FD=[7]'*) pass "…and an inherited DEBUG trap cannot make it fire" ;;
         *) die "an inherited DEBUG trap moved a trace target that was never near a capture ('$_tr_debug')" ;;
+    esac
+    # A TRAP THAT ECHOES `$BASH_COMMAND` REPRODUCES THE PROBE EXACTLY, which is
+    # why matching the probe's own text was not enough either. What it cannot
+    # produce is a string none of the commands in that substitution contains.
+    _tr_cmdtrap="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -T
+            trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG
+            set -x
+            '"$_tr_guard"'
+            trap - DEBUG
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_cmdtrap=""
+    # ITS REACH: the same shell with the previous spelling — matching the probe's
+    # own text — must move the target, or this case passes because the trap never
+    # echoed anything.
+    _tr_cmdtrap_reach="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -T
+            trap "builtin printf \"%s\n\" \"\$BASH_COMMAND\"" DEBUG
+            set -x
+            if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then BASH_XTRACEFD=2; fi
+            trap - DEBUG
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_cmdtrap_reach=""
+    case "$_tr_cmdtrap_reach" in
+        *'FD=[2]'*) pass "…where matching the probe's own text does move it" ;;
+        *) die "the command-logging trap did not reach the capture here; the case below proves nothing ('$_tr_cmdtrap_reach')" ;;
+    esac
+    case "$_tr_cmdtrap" in
+        *'FD=[7]'*) pass "…and a trap echoing \$BASH_COMMAND cannot make it fire" ;;
+        *) die "a command-logging DEBUG trap moved a trace target that was never near a capture ('$_tr_cmdtrap')" ;;
+    esac
+    # …AND THE OPERATOR'S OWN `PS4` IS NOT TOUCHED. The probe sets one to give
+    # xtrace a signature; setting it in the driving shell would change the format
+    # of every trace line the operator sees for the rest of the session.
+    _tr_ps4="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS BASH_XTRACEFD=1 bash -c '
+            set -x
+            '"$_tr_guard"'
+            set +x
+            builtin printf "PS4=[%s]\n" "$PS4"' 2>/dev/null)" || _tr_ps4=""
+    case "$_tr_ps4" in
+        *'PS4=[+ ]'*) pass "…and the driving shell's PS4 is left as it was" ;;
+        *) die "the probe changed the session's PS4 ('$_tr_ps4')" ;;
     esac
     # THE REACH PROBE FOR IT: the same shell with the non-empty test in that
     # position does move the target, so the case above is not passing because the

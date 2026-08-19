@@ -20,18 +20,24 @@
 
   Setup now moves the trace off the capture before its first substitution:
   `BASH_XTRACEFD=2`, guarded by
-  `[[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]` — a capture that comes back
-  holding this shell's trace OF THIS PROBE, which is the property itself rather
-  than a proxy for it.
+  `[[ "$( PS4='$$:'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]` — a capture that comes back
+  holding something only this shell's xtrace could have written there, which is
+  the property itself rather than a proxy for it.
 
-  Both halves of that were paid for. The probe is an assignment because every
+  Every part of that was paid for. The probe is an **assignment** because every
   command is a name: `$( : )` was the first spelling, and a shell with
   `:() { printf marker; }` made the capture non-empty through the function's own
-  output. And the test is for the probe's own text rather than for any output at
-  all, because a `DEBUG` trap under `set -T` is inherited by the substitution's
-  subshell — a trap that prints lands in the capture while xtrace is still going
-  somewhere else entirely. An xtrace line always contains the command it traces,
-  whatever `PS4` says; a marker from something else does not.
+  output. The test looks for a **marker rather than for output**, because a
+  `DEBUG` trap under `set -T` is inherited by the substitution's subshell and a
+  trap that prints lands in the capture while xtrace is still going somewhere else
+  entirely. And the marker is the **pid, delivered through `PS4`**, because
+  `trap 'printf "%s\n" "$BASH_COMMAND"' DEBUG` echoes the probe's own text
+  exactly — so matching that text could not establish where it came from. Xtrace
+  prefixes each line with `PS4` and nothing else does; `PS4` is expanded when the
+  line is printed, so the single-quoted `'$$:'` stores two characters and arrives
+  as a number. A trap can reproduce any command in that substitution; it cannot
+  produce a value none of them holds. `PS4` is set inside the subshell, so the
+  operator's own trace format is unchanged.
 
   In both of those states the operator's captures are corrupted by something this
   guard cannot fix, and setup refuses further down. What it must not do is change

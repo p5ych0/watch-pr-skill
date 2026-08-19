@@ -226,19 +226,31 @@ never as a work order** below has the full rule and the incident it came from.
 # other command. It runs in the substitution's subshell, so the variable does not
 # survive it.
 #
-# AND THE TEST IS FOR THE PROBE'S OWN TEXT, NOT FOR ANY OUTPUT AT ALL. Non-empty
-# was the second spelling and it is wrong for the same reason one step out: a
-# `DEBUG` trap under `set -T` is inherited by the substitution's subshell, so a
-# trap that prints lands in the capture while xtrace itself is still going
-# somewhere else entirely. An xtrace line always contains the command it is
-# tracing, whatever `PS4` is set to; a marker from something else does not. So the
-# capture has to name this probe before the guard believes the trace reached it.
+# AND THE TEST IS FOR SOMETHING ONLY XTRACE CAN WRITE. Non-empty was the second
+# spelling and the probe's own text was the third, and both are wrong for the same
+# reason one step further out: a `DEBUG` trap under `set -T` is inherited by the
+# substitution's subshell, so a trap that prints lands in the capture while xtrace
+# itself is still going somewhere else entirely. `trap 'printf "%s\n"
+# "$BASH_COMMAND"' DEBUG` prints exactly the probe's text, so matching that
+# literal cannot establish where it came from.
+#
+# SO THE PROBE SETS ITS OWN `PS4`, INSIDE THE SUBSHELL. Xtrace prefixes every line
+# with `PS4`; nothing else does. `PS4` is expanded when the line is PRINTED, so
+# `'$$:'` — single-quoted, so the assignment stores the two characters rather than
+# the number — reaches the capture as this shell's pid. The command TEXT of that
+# assignment is `PS4='$$:'`, which is what a `$BASH_COMMAND` trap can echo, and it
+# contains no pid. A trap can reproduce any command in that substitution; it
+# cannot produce a value none of them holds.
+#
+# `PS4` IS SET IN THE SUBSHELL AND NOWHERE ELSE, so the operator's own trace
+# format is unchanged the moment the capture closes. Measured: `PS4` reads back as
+# `+ ` afterwards.
 #
 # WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
 # and must not pretend to be: a `DEBUG` trap that prints corrupts every capture in
 # this block, moving the trace fixes none of them, and setup refuses further down.
 # What it must not do is change a destination the operator chose on the way past.
-if [[ "$( RB_TRACE_PROBE=1 )" = *RB_TRACE_PROBE=1* ]]; then
+if [[ "$( PS4='$$:'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
