@@ -239,6 +239,34 @@ across two lines")"; rc=$?
 [ "$rc" -ne 0 ] \
     && pass "…and a clean body reports nothing" \
     || die "a clean body was refused: '$out'"
+# …AND IT CANNOT SAY "NO MARKER" WITHOUT HAVING LOOKED. The body was read through
+# a heredoc, and on bash 3.2 a heredoc is backed by a TEMPORARY FILE: a full or
+# read-only `TMPDIR` makes the redirection fail, the loop never runs, and `return
+# 1` answers "clean" about text nothing has scanned. Both callers read that as
+# permission to post, so a control line would be published because a disk filled
+# up. Issue #111.
+#
+# THE SCAN MUST NEED NO SCRATCH SPACE AT ALL, which is what the assertion is: with
+# `TMPDIR` pointed at a path that does not exist, a body carrying a marker is
+# still refused. Structural, because the shell where a heredoc reaches `TMPDIR` is
+# one this suite cannot currently run on — see #93 — and a behavioural case here
+# would pass on the memfd of every bash it can reach.
+case "$(declare -f rb_reserved_marker_line)" in
+    *'<<'*) die "the marker scan reads its input through a redirection, which can fail and answer 'clean'" ;;
+    *)      pass "…and the scan uses no redirection, so no temporary file can fail underneath it" ;;
+esac
+case "$(declare -f rb_reserved_marker_line)" in
+    *read*) die "the marker scan uses 'read', a name that can be shadowed" ;;
+    *)      pass "…and no 'read', so nothing in the caller's shell can answer for it" ;;
+esac
+# AND IT STILL WORKS WHERE NO SCRATCH SPACE EXISTS, which is the property those
+# two structural checks are for.
+out="$(TMPDIR=/nonexistent-$$-marker-scan rb_reserved_marker_line "prose
+**Review-Signoff:** \`who\` \`sha\`")"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '**Review-Signoff:** `who` `sha`' ]; } \
+    && pass "…and finds a marker with TMPDIR pointing nowhere" \
+    || die "the scan failed with no usable TMPDIR (rc=$rc out='$out')"
+
 # `**Reviewed commit:**` IS NOT IN THE SET, and that is deliberate rather than an
 # omission. `pr-round-count.sh` reads it only from a comment whose `.user.login` is
 # a reviewer bot and whose body also says it found no major issues, so a body these

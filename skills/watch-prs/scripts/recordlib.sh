@@ -242,19 +242,37 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
 # that must not be present in one of them and missing from the other.
 rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
-    local _l _found=""
-    while IFS= read -r _l || [ -n "$_l" ]; do
-        case "$_l" in
+    # NO REDIRECTION, BECAUSE A REDIRECTION CAN FAIL AND THIS ANSWERS "CLEAN".
+    # The body was read through `<<EOF`, and on bash 3.2 a heredoc is backed by a
+    # TEMPORARY FILE: a full or read-only `TMPDIR` makes the redirection fail, the
+    # loop never runs, and `return 1` says "no marker" about text nothing has
+    # looked at. Both callers read that as permission to post, so a control line
+    # would be published under the operator's identity because a disk filled up —
+    # the fail-open shape this repository forbids, where a failure is
+    # indistinguishable from a clean answer.
+    #
+    # Modern bash uses a memfd or a pipe, so it does not reproduce on 4.4, 5.2 or
+    # 5.3 — measured. It is specific to the shell the suite exists to cover.
+    #
+    # PEELED WITH EXPANSIONS, which is the same removal `SKILL.md`'s phase parser
+    # used: `${…%%…}` and `${…#…}` are handled by the parser, so there is no
+    # redirection to fail and no `read` to shadow. The empty-input case returns 1
+    # having looked at everything there was.
+    local _rest="$1" _line _nl='
+'
+    while [ -n "$_rest" ]; do
+        case "$_rest" in
+            *"$_nl"*) _line="${_rest%%"$_nl"*}"; _rest="${_rest#*"$_nl"}" ;;
+            *)        _line="$_rest"; _rest="" ;;
+        esac
+        case "$_line" in
             '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
             '**Review-Pause-Acknowledged:**'*)
-                _found="$_l"; break ;;
+                printf '%s\n' "$_line"
+                return 0 ;;
         esac
-    done <<EOF
-$1
-EOF
-    [ -n "$_found" ] || return 1
-    printf '%s\n' "$_found"
-    return 0
+    done
+    return 1
 }
 
 # ── WHAT REQUESTS A REVIEW ─────────────────────────────────────────────────

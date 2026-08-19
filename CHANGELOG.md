@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.34] — 2026-08-19
+
+- **The control-line scan can no longer answer "clean" about text it never
+  read.** `rb_reserved_marker_line` is what stops a round summary or a phase body
+  quoting `**Review-Signoff:**`, `**Review-Signoff-Revoked:**` or
+  `**Review-Pause-Acknowledged:**` — quoting one CREATES the record, since the
+  readers scan the raw body and a fence does not hide a line that starts at column
+  zero.
+
+  It read its input through a heredoc, and on bash 3.2 a heredoc is backed by a
+  temporary file. A full or read-only `TMPDIR` makes that redirection fail, the
+  loop never runs, and `return 1` reports "no marker" about text nothing has
+  looked at — which both callers treat as permission to post. A control line would
+  then be published under the operator's identity because a disk filled up: a
+  failure indistinguishable from a clean answer, which is the one shape this
+  repository's fail-closed rule forbids.
+
+  The redirection is removed rather than guarded. The body is peeled with
+  parameter expansions — the same removal `SKILL.md`'s phase parser used before
+  #89 deleted it — so there is no temporary file to fail and no `read` to shadow.
+  Behaviour is unchanged in every case the suite already covered.
+
+  Measured: the failure does not reproduce on bash 4.4, 5.2 or 5.3, each built and
+  run for it, because modern bash backs a heredoc with a memfd or a pipe. It is
+  specific to the shell `macos-shell` builds — which is also the shell nothing
+  currently runs against (#93), so the new cases are structural: the function may
+  contain no redirection and no `read`, with a behavioural case that it still
+  finds a marker when `TMPDIR` points nowhere.
+
 ## [2.0.33] — 2026-08-19
 
 - **The pin proof's boundary is written down where the proof is.** Three rounds of
