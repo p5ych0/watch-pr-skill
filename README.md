@@ -637,7 +637,10 @@ plugin docs and open an issue.
   to `2` and leaves it there — you still see every trace line, on standard error,
   where bash sends xtrace by default, and your standard output is untouched: bash
   closes the descriptor that variable named only when it is unset or emptied,
-  never on a reassignment. It has to: inside `X="$(cmd)"` file
+  never on a reassignment. Unless you made `BASH_XTRACEFD` **readonly**, in which
+  case setup will not touch it — a readonly assignment is a fatal error in bash
+  and under `set -e` would end your shell — so the trace stays on standard output
+  and setup refuses instead, exactly as it did before any of this existed. It has to: inside `X="$(cmd)"` file
   descriptor 1 *is* the capture, so a trace aimed there is read back as part of
   the value, and setup would refuse a checkout that is perfectly fine. A session
   tracing anywhere else — stderr, a log file on another descriptor — is normally

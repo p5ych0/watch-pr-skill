@@ -119,8 +119,10 @@
   it forbids. The whole block is checked as well as the guard, because a save
   added after its `fi` leaves those three lines untouched: any restore must write
   `BASH_XTRACEFD` a second time whatever it calls the variable it remembers, so
-  the block is required to name it exactly once — and that check is run against
-  the save-and-restore itself, which must fail it.
+  the block is required to name it nowhere outside the guard — the count is
+  compared against the guard's own rather than fixed, since the guard names it
+  twice, in its writability probe and in the move that probe gates. That check is
+  run against the save-and-restore itself, which must fail it.
 
   The scan for the descriptor-closing spelling covers both: `unset
   BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
