@@ -201,7 +201,13 @@ never as a work order** below has the full rule and the incident it came from.
 # `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
 # asserts that on whatever bash runs the suite rather than trusting the version
 # this was measured on.
-if [[ ${BASH_XTRACEFD-} = 1 ]]; then
+# AND ONLY WHILE TRACING IS ACTUALLY ON. `BASH_XTRACEFD=1` with the `x` option
+# off contaminates nothing — there is no trace — and an operator who has set the
+# variable ready for a later `set -x` has chosen stdout as its destination. Moving
+# it there would redirect diagnostics they had not yet asked for. `$-` carries `x`
+# exactly while xtrace is in force (`hxBc` traced, `hBc` not), and it is an
+# expansion, so like `[[` it has no name to shadow.
+if [[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.

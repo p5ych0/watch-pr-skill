@@ -54,6 +54,26 @@ A tool stock macOS lacks is still usable when it is guarded: `command -v timeout
 && timeout 5 …` with a working fallback is correct, and `testlib.sh` does exactly
 that. Report the unguarded use, not the guarded one.
 
+## The driving shell is not yours to change
+
+`SKILL.md`'s setup runs in the operator's own long-lived shell, so anything it
+sets stays set for the rest of their session. Two rules follow, and a change to
+that block is judged against both:
+
+- **A stdout-directed xtrace must be moved off the capture before the first
+  command substitution.** `BASH_XTRACEFD=1` sends the trace to file descriptor 1,
+  and inside `X="$(cmd)"` fd 1 *is* the capture — so the trace is assigned to `X`
+  with the output, the validation rejects it, and setup aborts a session that had
+  nothing wrong with it. A change that removes that guard, or that adds a
+  substitution above it, is a regression.
+- **And nothing more than that may change.** The guard fires only where a trace
+  would actually reach a capture, it moves the destination rather than disabling
+  tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
+  descriptor that variable named when it is unset or emptied, so that spelling
+  closes the shell's stdout. `set +x` is wrong here twice over: it takes the
+  operator's diagnostics away for the rest of the session, and `set` is a builtin
+  a function can shadow.
+
 ## Reviewing a pull request
 
 ### You review. You do not implement.

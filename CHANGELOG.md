@@ -19,8 +19,11 @@
   abort naming a path the operator could see was fine.
 
   Setup now moves the trace off the capture before its first substitution:
-  `BASH_XTRACEFD=2`, guarded by `[[ ${BASH_XTRACEFD-} = 1 ]]` so a session tracing
-  anywhere else is untouched.
+  `BASH_XTRACEFD=2`, guarded by `[[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]` so
+  it fires only where a trace would actually reach one. A session tracing to
+  stderr or to a log file on another descriptor is untouched, and so is one that
+  has set the variable ready for a later `set -x` without tracing yet — `$-`
+  carries `x` exactly while xtrace is in force.
 
   **An assignment, because `set +x` is a name.** `set` is a builtin and a function
   shadows it, so a guard written that way is absent in the one shell state it
@@ -61,7 +64,10 @@
   contamination cannot be staged, so that half reports which case it was rather
   than failing.
 
-  `README.md` § Troubleshooting says what an operator tracing to stdout will see.
+  `README.md` § Troubleshooting says what an operator tracing to stdout will see,
+  and both reviewer contracts state the invariant so a later change cannot remove
+  it with a clean review: the guard must stay above the first substitution, and it
+  must not grow into disabling tracing or unsetting the variable.
 
 ## [2.0.29] — 2026-08-18
 

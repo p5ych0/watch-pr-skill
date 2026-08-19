@@ -3669,7 +3669,7 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ ${BASH_XTRACEFD-} = 1 ]]; then' ] \
+[ "$_first_exec" = 'if [[ $- = *x* ]] && [[ ${BASH_XTRACEFD-} = 1 ]]; then' ] \
     && pass "…and its first executable line tests the trace target" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ ${BASH_XTRACEFD-} = 1 \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ \$- = \*x\* \]\] && \[\[ ${BASH_XTRACEFD-} = 1 \]\]; then$/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3802,6 +3802,18 @@ else
     case "$_tr_fd" in
         *ORDINARY*DUP*) pass "…and the driving shell's stdout survives the reassignment" ;;
         *) die "the reassignment closed the shell's stdout ('$_tr_fd')" ;;
+    esac
+    # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
+    # with the `x` option off contaminates nothing, and the operator may have set
+    # it ready for a later `set -x`; moving it would redirect diagnostics they had
+    # not yet asked for.
+    _tr_off="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        BASH_XTRACEFD=1 bash -c '
+            '"$_tr_guard"'
+            printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_off=""
+    case "$_tr_off" in
+        *'FD=[1]'*) pass "…and an untraced session keeps the target it chose" ;;
+        *) die "the guard moved the trace target of a session that was not tracing ('$_tr_off')" ;;
     esac
     # THE SPELLING THAT DOES CLOSE IT, so the case above is not passing because
     # nothing here can close a descriptor at all. `BASH_XTRACEFD=` empties the
