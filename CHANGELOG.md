@@ -208,16 +208,24 @@
   deliberately open, so closing the weaker one bought no guarantee and cost
   agreement with git. That boundary is now recorded in the file's limits.
 
-  **Config location is carried; repository scope is not**, and that is the line
-  the environment list draws. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` say
-  WHICH CONFIG the operator's git reads — dropping them does not block a
-  redirection, it makes the helper read a different config from the session, so a
-  rewrite the session honours is invisible here. `GIT_DIR`, `GIT_WORK_TREE` and
-  the rest say WHICH REPOSITORY and must not survive. `env -i` plus a carry list
-  rather than `-u` plus a drop list, because the omission then falls the safe way:
-  a variable nobody thought of is dropped, so a future repository-scoping variable
-  cannot redirect the read, and the worst a missing config variable can do is make
-  the helper read the operator's default config instead of their chosen one.
+  **Config location is carried; repository scope is not**, and the prefix is
+  where that line is drawn. A `GIT_CONFIG_*` variable says WHICH CONFIG the
+  operator's git reads — dropping one does not block a redirection, it makes the
+  helper read a different config from the session, so a rewrite the session
+  honours is invisible here. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR` and the
+  rest say WHICH REPOSITORY, share no prefix with them, and go with `-i`.
+
+  The omission falls the safe way in each direction, and the two directions are
+  not the same. Outside the prefix, `env -i` drops what nobody listed, so a future
+  repository-scoping variable cannot redirect the read. Inside it, a future
+  `GIT_CONFIG_*` variable is carried unseen — which is not a hole this design can
+  close and not one it needs to: everything reachable through that prefix is
+  arbitrary config, and arbitrary config is already an accepted channel here.
+  Carrying a config file at all means a `url.<base>.insteadOf` rule in it can
+  redirect the origin completely, which is recorded in the helper's limits. What
+  would be a hole is git putting repository SCOPE behind the `GIT_CONFIG_` prefix;
+  no such variable exists, and one would be a change to what the prefix means
+  rather than a variable this list forgot.
 
   **A global `insteadOf` rule is expanded again.** Emptying the environment to
   shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented

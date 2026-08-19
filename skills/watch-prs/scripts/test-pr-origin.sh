@@ -15,6 +15,22 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
 SCRIPT="$SELF_DIR/pr-origin.sh"
 
+# THIS FIXTURE'S SUBJECT IS AN ENVIRONMENT-DRIVEN OVERRIDE, so it clears the
+# environment itself. The subject now carries EVERY set `GIT_CONFIG_*` variable
+# through to git, so a contributor who exports one — `GIT_CONFIG_PARAMETERS` from
+# a `git -c` wrapper, a `GIT_CONFIG_COUNT` rewrite of their own — has it added to
+# each case's controlled entries: the deliberately unrewritten probe comes back
+# rewritten, and ordinary cases fail for a reason that is not their subject.
+#
+# `pr-selfcheck.sh` cannot do this. It clears inherited FUNCTIONS and the startup
+# hooks, and it must not clear arbitrary exported values: `SKILL.md` pins the
+# session by exporting `REVIEW_BUS_REMOTE`, and the suite runs with that pin in
+# the environment. Nor can it live in `testlib.sh`, which ships at runtime inside
+# `pr-ci-state.sh` — an `unset` there would strip the operator's own git config
+# out of a live session. It belongs here, in the file whose subject it is.
+for _n in ${!GIT_CONFIG_@}; do unset "$_n"; done
+unset _n
+
 TMP="$(mktemp_d)" || { printf 'FAIL - could not create a scratch directory\n'; echo "RESULT: FAIL"; exit 1; }
 trap 'rm -rf "$TMP" 2>/dev/null || true; true' EXIT
 
