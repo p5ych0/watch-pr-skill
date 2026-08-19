@@ -27,6 +27,16 @@
   first spelling, and a shell with `:() { printf marker; }` made the capture
   non-empty through the function's own output.
 
+  **The move is gated on a subshell writability probe, for `set -e`.** A readonly
+  `BASH_XTRACEFD` makes the assignment a FATAL error rather than an ordinary
+  failure: `||` does not catch it, an `if` around it does not catch it, and under
+  `errexit` it ended the operator's long-lived shell where the documented outcome
+  is a refusal further down. All three forms measured. So the assignment is tried
+  in a subshell first, where that fatality is confined, and its status decides
+  whether the real one runs — `( … )` and an assignment are both parser
+  constructs, so no name is introduced, and a condition of `&&` is exempt from
+  `errexit`.
+
   **The move is a reassignment, which closes nothing.** bash closes the descriptor
   `BASH_XTRACEFD` named when the variable is unset or set to the empty string, and
   only then: `sv_xtracefd` reaches `xtrace_reset` — the one path that closes — in

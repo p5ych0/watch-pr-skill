@@ -184,12 +184,24 @@ never as a work order** below has the full rule and the incident it came from.
 # either. On bash 3.2 `BASH_XTRACEFD` does not exist, the trace goes to stderr
 # whatever this says, and the condition is simply false.
 #
-# NO POSTCONDITION ON THE ASSIGNMENT, AND THAT IS DELIBERATE. It has two ways to
-# fail — the operator made `BASH_XTRACEFD` readonly, or fd 2 is not open, in which
-# case bash rejects the value as an invalid trace target and leaves the trace
-# where it was — and BOTH fall through to the same documented refusal. A guard
-# here would add nothing a refusal cannot already do: the very next capture is
-# corrupted, its validation rejects it, and setup stops. What the extra check WOULD add is another abort
+# THE SUBSHELL IS A WRITABILITY PROBE, AND IT IS THERE FOR `set -e`. A readonly
+# `BASH_XTRACEFD` makes the assignment a FATAL error, not an ordinary failure: it
+# is not caught by `||`, not caught by an `if` around it, and under `errexit` it
+# ends the operator's long-lived shell where the documented outcome is a refusal
+# further down. Measured — all three forms exit 1 with the same message.
+#
+# So the assignment is attempted in a subshell first, where that fatality is
+# confined, and its STATUS decides whether the real one runs. `( … )` is a parser
+# construct and an assignment is a parser construct, so the probe introduces no
+# name; a condition of `&&` is exempt from `errexit`, so a failing probe is a
+# skip rather than an exit. Where the variable is readonly the block does nothing
+# and the session behaves as it did before this guard existed.
+#
+# NO POSTCONDITION ON THE REAL ASSIGNMENT, AND THAT IS DELIBERATE. Its other
+# failure mode is fd 2 not being open, and there bash takes the VALUE and rejects
+# it as a trace target, so there is no status to take and nothing to do: the trace
+# stays on stdout, the next capture is corrupted, its validation rejects it, and
+# setup stops. What the extra check WOULD add is another abort
 # reached through `exit` — a builtin a function shadows, so under
 # `exit() { return 0; }` it announces the refusal and continues anyway, with
 # tracing still aimed at every capture. That is the boundary #101 and #102 are
@@ -293,7 +305,7 @@ never as a work order** below has the full rule and the incident it came from.
 # WHAT IS ACCEPTED, STATED: in that shell the operator's chosen trace destination
 # becomes stderr for the rest of their session. `README.md` says so, rather than
 # leaving it to be discovered.
-if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.

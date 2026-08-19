@@ -3669,7 +3669,7 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then' ] \
+[ "$_first_exec" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then' ] \
     && pass "…and its first executable line moves the trace off the capture" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
@@ -3766,7 +3766,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( RB_TRACE_PROBE=1 )" \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( RB_TRACE_PROBE=1 )" \]\] &&/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3925,7 +3925,7 @@ else
     # scan for `RB_XTRACE_SAVED` while reintroducing exactly what it forbids. The
     # guard is three lines; requiring it to BE those three lines admits no fourth.
     _tr_shape="$(printf '%s\n' "$_tr_guard" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')"
-    [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+    [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi' ] \
         && pass "…and the guard is exactly those three lines, so it keeps no state to seize" \
@@ -3936,14 +3936,19 @@ fi' ] \
     # restore must write `BASH_XTRACEFD` a SECOND time, whatever it names the
     # variable it remembers — so the count is the invariant, and it needs no list
     # of names.
-    tr_writes_once() {   # tr_writes_once <block-code> ; 0 if BASH_XTRACEFD is written once
+    # THE COUNT IS COMPARED WITH THE GUARD'S OWN, not fixed at one: the guard
+    # names `BASH_XTRACEFD` twice, in its writability probe and in the move it
+    # gates. What must hold is that NOTHING ELSE in the block names it — a restore
+    # has to write it again, wherever it puts the value it remembers.
+    _tr_guard_names="$(printf '%s\n' "$_tr_guard" | grep -c 'BASH_XTRACEFD' || true)"
+    tr_writes_once() {   # tr_writes_once <block-code> ; 0 if only the guard names it
         local _n
         _n="$(printf '%s\n' "$1" | grep -c 'BASH_XTRACEFD' || true)"
-        [ "$_n" -eq 1 ]
+        [ "$_n" -eq "$_tr_guard_names" ]
     }
     tr_writes_once "$_setup_code" \
-        && pass "…and the whole block names BASH_XTRACEFD exactly once, so nothing restores it" \
-        || die "the setup block writes BASH_XTRACEFD more than once; a restore is back"
+        && pass "…and only the guard names BASH_XTRACEFD, so nothing restores it" \
+        || die "the setup block names BASH_XTRACEFD outside the guard; a restore is back"
     # THE MUTATION IT IS MEANT TO CATCH, run against the check itself: the exact
     # save-and-restore three rounds of review removed.
     tr_writes_once "$_setup_code
@@ -3951,6 +3956,39 @@ RB_TRACE_SAVED=\"\${BASH_XTRACEFD-}\"
 BASH_XTRACEFD=\$RB_TRACE_SAVED" \
         && die "the check passes a block that saves and restores the trace target; it proves nothing" \
         || pass "…where a save-and-restore under a new name does fail that check"
+    # A READONLY TARGET UNDER `errexit` MUST NOT KILL THE SHELL. A readonly
+    # `BASH_XTRACEFD` makes the assignment a FATAL error rather than an ordinary
+    # failure — `||` does not catch it and neither does an `if` around it,
+    # measured — so under `set -e` an unguarded move ended the operator's
+    # long-lived shell where the documented outcome is a refusal further down.
+    # The subshell probe confines that, and its status is read in a condition,
+    # which `errexit` exempts.
+    _tr_roerrexit="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            set -e
+            export BASH_XTRACEFD=1
+            set -x
+            readonly BASH_XTRACEFD
+            '"$_tr_guard"'
+            set +x
+            builtin printf "REACHED FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_roerrexit=""
+    case "$_tr_roerrexit" in
+        *'REACHED FD=[1]'*) pass "…and a readonly target under errexit leaves the shell alive and untouched" ;;
+        *) die "a readonly BASH_XTRACEFD under errexit ended the shell ('$_tr_roerrexit')" ;;
+    esac
+    # THE PROBE IS WHAT DOES THAT: the same shell with a bare assignment in that
+    # position never reaches the next line.
+    _tr_bare_ro="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            set -e
+            export BASH_XTRACEFD=1
+            set -x
+            readonly BASH_XTRACEFD
+            if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then BASH_XTRACEFD=2; fi
+            set +x
+            builtin printf "REACHED\n"' 2>/dev/null)" || _tr_bare_ro=""
+    case "$_tr_bare_ro" in
+        *REACHED*) die "a bare assignment survived a readonly target under errexit; the case above proves nothing" ;;
+        *) pass "…where a bare assignment in the same shell does end it" ;;
+    esac
     # A SHELL WITH NO STDERR IS OUT OF REACH, AND FAILS CLOSED. With fd 2 closed
     # bash rejects `BASH_XTRACEFD=2` as an invalid descriptor, so the trace stays
     # on stdout and the captures are contaminated exactly as before — there is no
