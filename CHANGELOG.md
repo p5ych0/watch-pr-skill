@@ -167,32 +167,35 @@
   the helper rather than the driver because that process is privileged, so `find`
   cannot be a shadowed name there.
 
-  **Git resolves the URL; the helper only decides which rules it may use.** Every
+  **Git resolves the URL, and nothing in the helper second-guesses it.** Every
   attempt to take a piece of that resolution into the script diverged from git's
-  own semantics — a scalar read returning the LAST of several URLs where
-  `remote get-url` returns the first, a `--local` query missing the worktree
-  scope, a hand-applied `insteadOf` re-deriving longest-match, and
-  `ls-remote --get-url` resolving its operand as a remote NAME.
+  own semantics, and the count is the evidence: a scalar read returning the LAST
+  of several URLs where `remote get-url` returns the first; a `--local` query
+  that cannot see the worktree scope; a hand-applied `insteadOf` re-deriving
+  longest-match; `ls-remote --get-url` resolving its operand as a remote NAME;
+  and then, from a two-call design that replayed extracted rewrite rules as `-c`
+  options, cross-scope ordering, `~`-includes lost with `HOME`, and a subsection
+  containing a space. Each fix was right about the case it named and produced the
+  next one, because what was being rebuilt is git's config machinery.
 
-  It is two calls with different environments. The first reads
-  `url.<base>.insteadOf` under the operator's own config, because that is where
-  their rewrites live and the call resolves nothing — it lists keys. The second
-  resolves the origin with that config LOCKED OUT (`HOME` nowhere,
-  `GIT_CONFIG_NOSYSTEM=1`) and those rules replayed as `-c` options, so
-  `git remote get-url origin` answers from the repository plus the rules and no
-  carried file can contribute `[remote "origin"] url = …`. The rule read fails
-  closed — status 1 is "no rules", anything else refuses — and a line that does
-  not parse as a rule is a refusal rather than a skip.
+  So there is one ordinary call — `git remote get-url origin`, under the
+  operator's own config, which is what `fetch` and `push` consult. What the
+  helper still decides is the environment it runs in: `env -i` with `PATH`,
+  `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and
+  `GIT_CONFIG_NOSYSTEM` carried back — the line the next paragraph draws.
 
-  **A carried config can rewrite the origin and cannot replace it.** Carrying a
-  config location so `insteadOf` works brings the whole file, and a global or
-  system config may contain `[remote "origin"] url = …` — which
-  `git remote get-url origin` PREFERS over the repository's own, so the variable
-  carried to make rewrites work could name a different repository. The URL is read
-  with `git config --local`, which no carried file can supply, and
-  `git ls-remote --get-url` then applies the rewrites to that value and nothing
-  else. Two questions, answered separately, because one command answering both is
-  what let a config choose the repository.
+  Those variables are carried by **setness**, not by content. Git defines them by
+  whether they are set and reads an empty path as no such file, so an operator
+  who exports `GIT_CONFIG_GLOBAL=` has switched that source off; a non-empty test
+  dropped it and the emptied environment silently restored git's default file.
+
+  Shutting the operator's config out of the resolution was tried and removed. It
+  stopped a carried file contributing `[remote "origin"] url = …`, which does win
+  `get-url` — but the same file may carry `url.<base>.insteadOf`, which the helper
+  must honour, and a rewrite rule redirects the origin completely where an
+  injected URL only puts a second one in front. The stronger channel is
+  deliberately open, so closing the weaker one bought no guarantee and cost
+  agreement with git. That boundary is now recorded in the file's limits.
 
   **Config location is carried; repository scope is not**, and that is the line
   the environment list draws. `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` say

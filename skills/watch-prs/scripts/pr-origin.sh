@@ -342,8 +342,7 @@ fi
 # that is how `git` is found at all (#91); and `HOME`, `XDG_CONFIG_HOME`,
 # `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_CONFIG_NOSYSTEM`, because they
 # say WHICH CONFIG the operator's git reads and a different one loses the rewrites
-# the session honours. Carrying a config does not let it choose the repository —
-# that is handled where the URL is read.
+# the session honours.
 # `HOME` SURVIVES `-i`, AND THAT IS NOT A WEAKENING. `git remote get-url` is
 # documented to expand `url.<base>.insteadOf`, and those rules live in the user's
 # GLOBAL config — so an emptied environment returned the UNEXPANDED alias, and a
@@ -360,16 +359,22 @@ fi
 # honours. `XDG_CONFIG_HOME` is carried for the same reason: git reads
 # `$XDG_CONFIG_HOME/git/config` as global config too.
 #
-# CARRYING A CONFIG DOES NOT LET IT CHOOSE THE REPOSITORY, and that is handled
-# where the URL is read rather than here: a carried file may contain
-# `[remote "origin"] url = …`, so the URL comes from `--local` and only the
-# rewrite comes from the config.
+# A CARRIED CONFIG CAN CHOOSE THE REPOSITORY, and that is accepted rather than
+# guarded — see the block above the resolution below, and the limits at the
+# bottom. It is the same capability as a forged `HOME`, through a weaker channel.
 #
 # A FORGED `HOME` CAN STILL REWRITE URLS, and that is the operator's own shell
 # lying about the operator's own home — the boundary this file already records at
 # the bottom, not a new one.
+#
+# CARRIED BY SETNESS, NOT BY CONTENT. `GIT_CONFIG_GLOBAL=` and
+# `GIT_CONFIG_SYSTEM=` are documented as "set", and git reads an empty path as no
+# such file — so an operator who exports one EMPTY has switched that source off.
+# A `[[ -n … ]]` guard dropped it, an emptied environment restored the default
+# file, and a rule in it rewrote the origin this helper reads while the operator's
+# own git ignored it. `${VAR+x}` reproduces their decision either way.
 _rb_env=( PATH="$PATH" HOME="${HOME-}" )
-[[ -n ${XDG_CONFIG_HOME-} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
+[[ -n ${XDG_CONFIG_HOME+x} ]] && _rb_env+=( XDG_CONFIG_HOME="$XDG_CONFIG_HOME" )
 # `GIT_CONFIG_NOSYSTEM` IS AN OPT-OUT, NOT A REDIRECTION, and dropping it turns
 # one on. The operator sets it to make git ignore the system-wide config, and an
 # emptied environment silently restored that file — so a `url.*.insteadOf` rule in
@@ -381,7 +386,7 @@ _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 # THE TEST IS THAT IT WAS SET, not what it says: git treats any non-empty value as
 # "skip the system config", so carrying the operator's value through is exactly
 # reproducing their decision.
-[[ -n ${GIT_CONFIG_NOSYSTEM-} ]] && _rb_env+=( GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM" )
+[[ -n ${GIT_CONFIG_NOSYSTEM+x} ]] && _rb_env+=( GIT_CONFIG_NOSYSTEM="$GIT_CONFIG_NOSYSTEM" )
 # CONFIG LOCATION IS CARRIED; REPOSITORY SCOPE IS NOT. That is the line, and it is
 # the reason the list has the shape it has. `GIT_CONFIG_GLOBAL` and
 # `GIT_CONFIG_SYSTEM` say WHICH CONFIG the operator's git reads — drop them and
@@ -398,60 +403,35 @@ _rb_env=( PATH="$PATH" HOME="${HOME-}" )
 # the worst a missing config variable can do is make this helper read the
 # operator's default config instead of their chosen one. One direction loses a
 # rewrite; the other loses the repository.
-[[ -n ${GIT_CONFIG_GLOBAL-} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
-[[ -n ${GIT_CONFIG_SYSTEM-} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
-# GIT RESOLVES THE URL; THIS ONLY DECIDES WHICH RULES IT MAY USE. Every attempt to
-# take a piece of that resolution into this file has produced a divergence from
-# git's own semantics — a scalar read returning the LAST of several URLs where
-# `remote get-url` returns the first, a `--local` query missing the worktree
-# scope, a hand-applied `insteadOf` that had to re-derive longest-match, and
-# `ls-remote --get-url` resolving its operand as a remote NAME. The resolution is
-# git's; what this file decides is what git is allowed to read while doing it.
+[[ -n ${GIT_CONFIG_GLOBAL+x} ]] && _rb_env+=( GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL" )
+[[ -n ${GIT_CONFIG_SYSTEM+x} ]] && _rb_env+=( GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" )
+# GIT RESOLVES THE URL, AND NOTHING HERE SECOND-GUESSES IT. Every attempt to take
+# a piece of that resolution into this file has produced a divergence from git's
+# own semantics, and the count is the evidence: a scalar read returning the LAST
+# of several URLs where `remote get-url` returns the first; a `--local` query that
+# cannot see the worktree scope; a hand-applied `insteadOf` re-deriving
+# longest-match; `ls-remote --get-url` resolving its operand as a remote NAME; and
+# then, from the two-call design that replayed extracted rewrite rules as `-c`
+# options, cross-scope ordering, `~`-includes lost with `HOME`, and a subsection
+# containing a space. Each fix was correct about the case it named and produced
+# the next one, because the thing being rebuilt is git's config machinery.
 #
-# TWO CALLS, WITH DIFFERENT ENVIRONMENTS, and that is the whole design:
+# So there is ONE call and it is the ordinary one. `git remote get-url origin`,
+# under the operator's own config, is what `fetch` and `push` consult; agreeing
+# with it is the property this file needs, and re-deriving it is how that property
+# was repeatedly lost.
 #
-#   1. READ THE REWRITE RULES under the operator's own config, because
-#      `url.<base>.insteadOf` lives in their global or system file and the session
-#      honours it. This call resolves nothing — it lists keys — so a hostile
-#      config here can supply a rewrite and nothing else.
-#   2. RESOLVE THE ORIGIN with the operator's config LOCKED OUT and those rules
-#      replayed as `-c` options. `git remote get-url origin` then answers from the
-#      repository plus the rules, so a carried config cannot contribute
-#      `[remote "origin"] url = …` — the value that otherwise WINS and names a
-#      different repository.
-#
-# `HOME` POINTS NOWHERE AND `GIT_CONFIG_NOSYSTEM` IS SET for the second call. Both
-# global and system config can carry `remote.*`, so both are shut out; the rules
-# that mattered have already been extracted from them.
-_rb_rules_raw="$(/usr/bin/env -i "${_rb_env[@]}" git config --get-regexp '^url\..*\.insteadof$' 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")"
-_rb_s=$?
-_rb_rules_raw="${_rb_rules_raw%x}"
-# STATUS 1 IS "NO RULES" AND ANYTHING ELSE IS A FAILURE. `git config --get-regexp`
-# exits 1 when nothing matches, which is an answer; a broken config or an
-# unreadable file is not, and reading empty output as "no rewrites" would pin the
-# session to an unexpanded alias while every ordinary command expanded it.
-if [[ $_rb_s -ne 0 && $_rb_s -ne 1 ]]; then
-    echo "ABORT: could not read the URL rewrite rules (git exited $_rb_s); refusing rather than resolving origin without them" >&2
-    exit 1
-fi
-_rb_rules=()
-while IFS= read -r _rb_line; do
-    [[ -n $_rb_line ]] || continue
-    # EVERY LINE MUST PARSE, and one that does not is a refusal rather than a skip.
-    # `--get-regexp` prints `key value`, so a value containing a newline arrives as
-    # a line that is not a key — and skipping it would silently drop a rule the
-    # session applies, which is the difference this file exists to prevent.
-    case "$_rb_line" in
-        url.*.insteadof\ *) ;;
-        *) echo "ABORT: could not parse a URL rewrite rule ('$_rb_line'); refusing rather than resolving origin with an incomplete set" >&2
-           exit 1 ;;
-    esac
-    _rb_rules+=( -c "${_rb_line%% *}=${_rb_line#* }" )
-done <<RULES
-$_rb_rules_raw
-RULES
-_rb_origin="$(/usr/bin/env -i PATH="$PATH" HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 \
-    git "${_rb_rules[@]}" remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
+# THE LOCKOUT THAT USED TO BE HERE DEFENDED NOTHING. It shut the operator's global
+# and system config out of the resolution so a carried file could not contribute
+# `[remote "origin"] url = …` — which does win `get-url`, measured. But the same
+# file may contain `url.<base>.insteadOf`, which this helper must honour or it
+# pins the session to an unexpanded alias, and a rewrite rule redirects the origin
+# COMPLETELY where an injected URL only adds a second one. The channel left open
+# is strictly the stronger of the two, so closing the weaker one bought no
+# guarantee and cost agreement with git in every case above. That boundary is
+# recorded at the bottom of this file, where it already was.
+_rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" \
+    git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
     echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
@@ -491,6 +471,19 @@ exit 0
 # recovery: a hook that writes the value file and exits has already answered by
 # then. That is why the invocation is asserted by `test-pr-skill-contract.sh`
 # rather than assumed, and why there is no fallback hop here to be shadowed.
+#
+# THE OPERATOR'S OWN GIT CONFIG, WHICH THIS HELPER REPRODUCES RATHER THAN JUDGES.
+# `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` are
+# carried, so a config file the operator's git reads is a config file this helper
+# reads. Such a file can redirect the origin — with `url.<base>.insteadOf`
+# completely, with `[remote "origin"] url = …` by putting a second URL in front of
+# the repository's own. Locking the second one out was tried for three rounds and
+# is why this note exists: it left the FIRST channel open, which is the stronger
+# of the two, so it closed nothing while making this helper disagree with
+# `git remote get-url` over `~`-includes, cross-scope rule order and subsections
+# containing a space. Agreement with the operator's git is the property the pin
+# needs. Setting one of those variables means owning the shell that starts this
+# session, which is the boundary the paragraph above already draws.
 #
 # A POISONED `PATH`, WHICH IS NOT THIS FILE'S TO ANSWER. A directory prepended to
 # `PATH` — readonly, so the hook's own shell cannot undo it — supplies a forged
