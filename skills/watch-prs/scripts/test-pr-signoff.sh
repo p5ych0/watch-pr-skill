@@ -40,8 +40,14 @@ comments() {   # comments <assoc>|<body> …
         # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
         # review, and the merge gate cannot tell an answer from a leftover without
         # knowing which came first. A node without one is malformed.
-        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
-            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
+        # `databaseId` TOO, and for the same reason one step finer: `createdAt` is
+        # second-resolution, so two records made in the same second compare equal
+        # and a caller ordering a revocation against a verdict cannot tell which
+        # came first. The id breaks that tie, and it counts up, so a later node in
+        # this list is a later record. #117.
+        _cid=$(( ${_cid:-100} + 1 ))
+        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","databaseId":%s,"body":%s},' \
+            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$_cid" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[%s]}}}}}' "${nodes%,}"
 }
@@ -105,9 +111,9 @@ case_is 1 "sha=none" "…and one with prose trailing it does not sign off either
 # review nobody did.
 world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "a node missing its fields is unreadable, not absent"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","body":7}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","databaseId":1,"body":7}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and so is a body that is not a string"
-world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","body":"x"}]}}}}}' > "$TMP/out"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","databaseId":1,"body":"x"}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and an association that is not a string"
 
 # ── the LAST one wins, so a phase can be reopened ──────────────────────────
@@ -123,6 +129,33 @@ case_is 0 "sha=$SHA" "a later signoff supersedes an earlier one"
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
                 "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
 case_is 1 "reason=revoked" "a revocation after a signoff reopens the phase"
+# …AND IT CARRIES ITS TIME AND ITS ID, exactly as a signoff does. Without them a
+# caller cannot ORDER it: the fault-tolerance pass posts a revocation BEFORE
+# requesting its review, so that revocation is newest when the clean verdict
+# arrives and the pass is ANSWERING it; another session reopening the phase posts
+# one AFTER the verdict, and that one CANCELS it. The two read identically until
+# the record says when. Omitting `at=` also made two revocations compare equal, so
+# one replaced by another could not be told from the original. #117.
+case_is 1 "at=" "…and says when it was made, so it can be ordered against a verdict"
+case_is 1 "id=" "…and which comment it is, since createdAt is second-resolution"
+# THE FIELD ORDER MATTERS, and it is not cosmetic: every caller reads the sha with
+# a suffix expansion on `sha=`, so a field appended after it is swallowed into the
+# value and a gate compares a sha against a sha-plus-something.
+got="$(run "$BOT")"; _body="${got#*|}"
+case "$_body" in
+    *at=*id=*sha=*) pass "…with at= and id= before sha=, where a suffix read cannot swallow them" ;;
+    *) die "the revocation's fields are ordered so a suffix read would swallow one: '$_body'" ;;
+esac
+# AND A SIGNOFF CARRIES THE SAME TWO, or ordering one against the other compares a
+# record that has them with one that does not.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+got="$(run "$BOT")"; _body="${got#*|}"
+case "$_body" in
+    *at=*id=*sha="$SHA"*) pass "…and a signoff carries both as well, in the same order" ;;
+    *) die "a signoff is missing a field the revocation has: '$_body'" ;;
+esac
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out"
 # …AND ORDER DECIDES, both ways. A signoff after a revocation closes it again,
 # which is what happens when the new pass comes back clean on the same head.
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
@@ -162,8 +195,14 @@ page() {   # page <hasNext> <endCursor> <assoc>|<body> …
         # `createdAt` IS PART OF THE RECORD, not decoration: a signoff answers a
         # review, and the merge gate cannot tell an answer from a leftover without
         # knowing which came first. A node without one is malformed.
-        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","body":%s},' \
-            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$(printf '%s' "$body" | jq -Rs .)")"
+        # `databaseId` TOO, and for the same reason one step finer: `createdAt` is
+        # second-resolution, so two records made in the same second compare equal
+        # and a caller ordering a revocation against a verdict cannot tell which
+        # came first. The id breaks that tie, and it counts up, so a later node in
+        # this list is a later record. #117.
+        _cid=$(( ${_cid:-100} + 1 ))
+        nodes="$nodes$(printf '{"authorAssociation":"%s","createdAt":"%s","databaseId":%s,"body":%s},' \
+            "$assoc" "${SIGNED_AT_FIXTURE:-2026-01-02T00:00:00Z}" "$_cid" "$(printf '%s' "$body" | jq -Rs .)")"
     done
     printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":%s,"endCursor":%s},"nodes":[%s]}}}}}' \
         "$has" "$cur" "${nodes%,}"

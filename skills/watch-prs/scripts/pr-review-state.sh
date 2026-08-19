@@ -525,6 +525,32 @@ main() {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
+        # A CLEAN VERDICT ARRIVES AS A COMMENT AS OFTEN AS A REVIEW, and reading
+        # only `pulls/N/reviews` said "no verdict" on exactly those heads. Codex
+        # submits a review when it has findings and an issue comment when it does
+        # not — it used a comment on #35 — so a caller ordering a revocation
+        # against "when the verdict landed" would have refused the ordinary case.
+        # `verdict` and `state` have consulted both since; this one had not. #117.
+        # 1 IS "NO CLEAN COMMENT", WHICH IS AN ANSWER; only 2 is a failed read.
+        # Treating every non-zero as unreadable made the ordinary case — a head
+        # whose verdict came as a review — report an error instead of the review's
+        # timestamp.
+        local cinfo crc=0
+        cinfo="$(clean_comment_for_head "$pr" "$who" "$head")" || crc=$?
+        case "$crc" in
+            0|1) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+               return 2 ;;
+        esac
+        # THE LATER OF THE TWO, compared lexically — both are canonical UTC, which
+        # `valid_comment_record` and the `canonical_utc` filter above each enforce,
+        # so the string order is the time order. An absent one is the empty string
+        # and loses to any real timestamp.
+        local cat_=""
+        [ -n "$cinfo" ] && cat_="${cinfo#*$'\t'}"
+        if [ -n "$cat_" ] && { [ -z "$at" ] || [ "$cat_" \> "$at" ]; }; then
+            at="$cat_"
+        fi
         printf '%s\n' "$at"
         return 0
     fi
