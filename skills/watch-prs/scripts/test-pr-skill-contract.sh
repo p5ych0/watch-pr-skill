@@ -733,12 +733,26 @@ esac
 # …WHILE THE ARMS INSIDE IT DO REMOVE THE DIRECTORY, because there the `mkdir`
 # proved this shell created it. Refusing without that leaves an empty
 # `watch-pr.*` behind on every failed setup in those two states.
-_pin_inner=""
-_pin_inner="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    if \[\[ $RB_PIN_OUT/,/^    else$/p')" || _pin_inner=""
-_pin_inner_rmdirs="$(printf '%s\n' "$_pin_inner" | grep -c 'rmdir "$RB_PIN_DIR"' || true)"
-[ "$_pin_inner_rmdirs" -eq 2 ] \
-    && pass "…and both inner refusals remove the directory the mkdir proved was ours" \
-    || die "an inner refusal leaves its transport directory behind ($_pin_inner_rmdirs of 2)"
+# ONE PER ARM, NOT TWO ACROSS BOTH. A count over the whole conditional is
+# satisfied by two cleanups in the first arm and none in the second — and the
+# readonly-`RB_PIN_SEEN` state is exactly the second one, so setup would leave an
+# empty `watch-pr.*` behind with the suite green. Each arm is extracted and
+# checked on its own.
+_pin_arm_out=""
+_pin_arm_out="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    if \[\[ $RB_PIN_OUT/,/^    elif /p')" || _pin_arm_out=""
+_pin_arm_seen=""
+_pin_arm_seen="$(printf '%s\n' "$_pin_refuse" | sed -n '/^    elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^    else$/p')" || _pin_arm_seen=""
+{ [ -n "$_pin_arm_out" ] && [ -n "$_pin_arm_seen" ]; } \
+    && pass "…and both inner refusal arms lift out separately" \
+    || die "an inner refusal arm could not be lifted (out='$_pin_arm_out' seen='$_pin_arm_seen')"
+case "$_pin_arm_out" in
+    *'rmdir "$RB_PIN_DIR"'*) pass "…the RB_PIN_OUT refusal removes the directory the mkdir proved was ours" ;;
+    *) die "the RB_PIN_OUT refusal leaves its transport directory behind" ;;
+esac
+case "$_pin_arm_seen" in
+    *'rmdir "$RB_PIN_DIR"'*) pass "…and so does the RB_PIN_SEEN refusal" ;;
+    *) die "the RB_PIN_SEEN refusal leaves its transport directory behind" ;;
+esac
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
 # while setup carries on; if that readonly value is EMPTY, `rb_identity` falls back

@@ -53,11 +53,28 @@
   place where a walked-past refusal produces a plausible answer instead of an
   absent one.
 
-  That arm unlinks nothing. It runs BEFORE the probe, so there is nothing it can
-  have created — and reaching it at all means the shell walked past the
-  postcondition on `RB_PIN_OUT`, which can therefore be a readonly pre-seeded path
-  naming the operator's own file. `rmdir` is safe in a way `rm -f` is not: it
-  removes an empty directory or fails, so it cannot destroy anything.
+  **The whole probe is an arm of the `mkdir` that creates its directory**, so
+  nothing runs on one this invocation did not make. `mkdir -m 700` fails precisely
+  when `RB_PIN_DIR` names something that already exists — which is what a readonly
+  pre-seeded value points at — and with `exit` neutered that failure was stepped
+  over: the probe then created and removed `pin` inside the operator's directory,
+  `rm -f` deleted a `pin` of theirs if one was there, and `rmdir` took the
+  directory.
+
+  **Whose the directory is decides who may remove it.** Inside that branch the
+  `mkdir` has proved this shell created it, so the two inner refusals remove it
+  and leave nothing behind. Outside — the arms reached only when a variable was
+  pre-seeded READONLY, which no ordinary shell does, so every postcondition above
+  may equally have been walked past — nothing is removed at all: `RB_PIN_OUT` and
+  `RB_PIN_DIR` can name the operator's own file and directory, `rm -f` deletes the
+  file, and `rmdir` deletes the directory whenever it is empty, which an
+  operator's often is.
+
+  An earlier draft of this entry claimed `rmdir` "removes an empty directory or
+  fails, so it cannot destroy anything". That is wrong: deleting an empty
+  directory IS the destruction, and an operator's directory is often empty.
+  `rmdir` is safe here only where this invocation's `mkdir` has just proved the
+  directory is ours.
 
   Three cases: the success line must be inside the branch where the reset held,
   must NOT appear in the arm that refuses — or "inside a branch" is satisfied by
