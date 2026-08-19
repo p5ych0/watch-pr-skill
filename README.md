@@ -568,7 +568,19 @@ asks:
 Both stops are **resumable**. Each signoff is recorded on the pull request as a
 `**Review-Signoff:**` comment naming the reviewer and the exact head, so a
 decision that arrives tomorrow — or on another machine — costs nothing that was
-already done. `pr-signoff.sh <pr> <reviewer>` reads it back.
+already done. `pr-signoff.sh <pr> <reviewer>` reads it back, printing the whole
+record — reviewer, timestamp and head — on standard output, exiting `0` when
+there is one, `1` when there is none or it was revoked, and `2` when it could not
+find out. Those last two are different on purpose: "asked, there is none" is an
+answer, and "could not ask" is not.
+
+`pr-signoff.sh sha <pr> <reviewer>` answers the same question with the head
+**alone** — the 40-hex commit and nothing else. Standard output carries that
+value or is empty, never a reason: with no signoff recorded, or a revoked one, or
+an unreadable API, nothing is printed there and the reason goes to standard
+error. That is what makes it safe to use in a command substitution — an empty
+answer cannot be mistaken for a commit, and the status still says which case it
+was. The statuses are the same three.
 
 ## Round check-in
 

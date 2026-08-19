@@ -2,10 +2,29 @@
 # Which head has a reviewer signed off clean on, according to the PR itself?
 #
 #   pr-signoff.sh <pr> <reviewer-login>
+#   pr-signoff.sh sha <pr> <reviewer-login>
 #
 #   0  a signoff was found — `PR_SIGNOFF … sha=<40-hex>` on stdout
 #   1  none recorded — `PR_SIGNOFF … sha=none`. Not an error: most PRs, most days
 #   2  could not be established — fail closed, do NOT treat as "none"
+#
+# `sha` ANSWERS WITH THE HEAD ALONE, and it exists so that no caller has to parse
+# this line. `SKILL.md` extracted a signed-off head from a record in three places
+# and two shapes: ~90 lines of expansion-only code against
+# `PR_PHASE_RECORDED … codex-sha=`, whose every line was paid for over nine
+# rounds of #74, and twice `sed -n 's/^PR_SIGNOFF .*sha=\([0-9a-f]\{40\}\)$/\1/p'`
+# — and `sed` is a NAME, so one that prints a plausible forty hex and exits 0
+# pins a merge to whatever it says. Converging those inline would have put three
+# copies of a parser in a Markdown file, none of them reachable by this suite.
+#
+# IN THAT MODE STDOUT CARRIES THE SHA OR NOTHING. Every reason goes to stderr, so
+# a caller reads one stream and never sees the other, and an empty answer cannot
+# be mistaken for a value: it is not 40 hex, and the status says why. The statuses
+# are unchanged, because they are what the callers already branch on.
+#
+# THE DEFAULT OUTPUT IS UNCHANGED, deliberately: the resume path prints the whole
+# record in its abort messages, and `test-pr-skill-contract.sh` asserts on that
+# shape.
 #
 # WHY THIS EXISTS
 #
@@ -117,11 +136,19 @@ rb_load "$_RB_SELF_DIR" recordlib sha_reason "PR_SIGNOFF status=error" || {
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_SIGNOFF status=error" || exit 2
 rb_identity || { echo "PR_SIGNOFF status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
 
+# THE MODE IS A LEADING WORD, and a PR number is digits, so the two cannot be
+# confused. Anything else in that position is the PR argument and is validated as
+# one — an unknown subcommand is therefore refused by the digits check rather
+# than silently taken as a mode nobody implemented.
+MODE=record
+case "${1:-}" in
+    sha) MODE=sha; shift ;;
+esac
 PR="${1:-}"; WHO="${2:-}"
 case "$PR" in
-    ""|*[!0-9]*) echo "usage: $0 <pr> <reviewer-login>" >&2; exit 2 ;;
+    ""|*[!0-9]*) echo "usage: $0 [sha] <pr> <reviewer-login>" >&2; exit 2 ;;
 esac
-[ -n "$WHO" ] || { echo "usage: $0 <pr> <reviewer-login>" >&2; exit 2; }
+[ -n "$WHO" ] || { echo "usage: $0 [sha] <pr> <reviewer-login>" >&2; exit 2; }
 
 # THE LOGIN IS MATCHED AS A STRING, never interpolated into a pattern. These are
 # `…[bot]` logins, where `[` and `]` are regex metacharacters that would silently
@@ -216,12 +243,24 @@ fi
 # A REVOCATION IS AN ANSWER, and the answer is "no signoff". It is reported as
 # such rather than as an error: the phase is open, which is a fact about the PR
 # and not a failure to read it.
+# IN `sha` MODE THE ANSWER GOES TO STDERR, because stdout is the value's stream
+# and "none" is not a value. A caller that captured this line would hold a
+# non-empty string that is not a sha, which is the ordinary-looking wrong answer
+# this repository's fail-closed rule exists to prevent.
 if [ "$SHA" = REVOKED ]; then
-    echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none reason=revoked"
+    if [ "$MODE" = sha ]; then
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none reason=revoked" >&2
+    else
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none reason=revoked"
+    fi
     exit 1
 fi
 if [ -z "$SHA" ]; then
-    echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none"
+    if [ "$MODE" = sha ]; then
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none" >&2
+    else
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO sha=none"
+    fi
     exit 1
 fi
 # THROUGH `sha_reason`, like everything else that asks what a commit is. The jq
@@ -235,5 +274,12 @@ _why="$(sha_reason "$SHA")" || {
 # `at=` COMES BEFORE `sha=`, and that is not cosmetic: every caller reads the sha
 # with `${line##*sha=}`, so a field appended after it would be swallowed into the
 # value and the gate would compare a sha against a sha-plus-timestamp.
+# THE SHA ALONE, VALIDATED, AND ON ITS OWN LINE. It has been through
+# `sha_reason` above, so what leaves here in this mode is 40 hex or nothing at
+# all — there is no record shape left for a caller to get wrong.
+if [ "$MODE" = sha ]; then
+    echo "$SHA"
+    exit 0
+fi
 echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT sha=$SHA"
 exit 0
