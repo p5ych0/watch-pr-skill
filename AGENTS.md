@@ -88,7 +88,11 @@ that block is judged against both:
   back is a finding. It moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
-  closes the shell's stdout. `set +x` is wrong here twice over: it takes the
+  closes the shell's stdout. A REASSIGNMENT closes nothing, and that is not a
+  recent behaviour: `sv_xtracefd` reaches `xtrace_reset`, the only path that
+  closes, exactly when the variable is unset or its value is empty, and otherwise
+  takes `xtrace_set`, which replaces the target and leaves the old descriptor
+  open. Measured on 4.4.0, 5.2.0 and 5.3.9, each built and run for this. `set +x` is wrong here twice over: it takes the
   operator's diagnostics away for the rest of the session, and `set` is a builtin
   a function can shadow.
 

@@ -27,6 +27,16 @@
   first spelling, and a shell with `:() { printf marker; }` made the capture
   non-empty through the function's own output.
 
+  **The move is a reassignment, which closes nothing.** bash closes the descriptor
+  `BASH_XTRACEFD` named when the variable is unset or set to the empty string, and
+  only then: `sv_xtracefd` reaches `xtrace_reset` — the one path that closes — in
+  exactly those two cases, and otherwise takes `xtrace_set`, which replaces the
+  target and leaves the old descriptor open. Measured on 4.4.0, 5.2.0 and 5.3.9,
+  each built and run for this: after `BASH_XTRACEFD=1` → `2`, ordinary `printf`
+  output still reaches fd 1 and `exec 3>&1` still succeeds, while
+  `BASH_XTRACEFD=` produces no further output at all. That is what makes this form
+  available where a save-and-restore, which has to unset, was not.
+
   **Marker schemes were tried and removed.** Matching the probe's own text, then a
   pid delivered through `PS4`: a `DEBUG` trap inherited under `set -T` runs inside
   the substitution and forged each in turn — `$BASH_COMMAND` reproduces the

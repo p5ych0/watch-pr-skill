@@ -635,7 +635,9 @@ plugin docs and open an issue.
 - **Your shell traces to stdout, and the loop moves it:** if you drive with
   `set -x` and a `BASH_XTRACEFD` that lands on standard output, setup reassigns it
   to `2` and leaves it there — you still see every trace line, on standard error,
-  where bash sends xtrace by default. It has to: inside `X="$(cmd)"` file
+  where bash sends xtrace by default, and your standard output is untouched: bash
+  closes the descriptor that variable named only when it is unset or emptied,
+  never on a reassignment. It has to: inside `X="$(cmd)"` file
   descriptor 1 *is* the capture, so a trace aimed there is read back as part of
   the value, and setup would refuse a checkout that is perfectly fine. A session
   tracing anywhere else — stderr, a log file on another descriptor — is left

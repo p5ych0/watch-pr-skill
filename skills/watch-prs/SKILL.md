@@ -196,7 +196,11 @@ never as a work order** below has the full rule and the incident it came from.
 #
 # STDOUT IS NOT TOUCHED BY THIS. bash closes the descriptor `BASH_XTRACEFD`
 # referred to when it is UNSET or set to the empty string; a reassignment closes
-# nothing. Measured on bash 5.3.9 — after `BASH_XTRACEFD=1` → `2`, ordinary
+# nothing, and that is not a 5.3 behaviour: `sv_xtracefd` calls `xtrace_reset` —
+# the only path that closes — when the variable is UNSET or its value is EMPTY,
+# and takes `xtrace_set` for a valid descriptor, which replaces the target without
+# closing the old one. Measured on 4.4.0, 5.2.0 and 5.3.9, each built and run for
+# this: after `BASH_XTRACEFD=1` → `2`, ordinary
 # `printf` output still arrives on fd 1 and `exec 3>&1` still succeeds, while
 # `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
 # asserts that on whatever bash runs the suite rather than trusting the version
