@@ -701,21 +701,34 @@ _pin_refuse=""
 _pin_refuse="$(printf '%s\n' "$_pin_body" | sed -n '1,/^else$/p')" || _pin_refuse=""
 _pin_then=""
 _pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
-case "$_pin_then" in
-    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the reset held" ;;
-    *)               die "setup's success line is not inside the successful branch: '$_pin_then'" ;;
+# THE OUTER BRANCH IS THE `mkdir`, so the success line is in its `then` — the arm
+# reached only when THIS invocation created the transport directory. `mkdir` fails
+# when `RB_PIN_DIR` names something that already exists, which is what a readonly
+# pre-seeded value points at, so a walked-past failure must not reach the probe or
+# the cleanups.
+case "$_pin_refuse" in
+    *'echo "OWNER='*) pass "…and setup announces itself only from the branch where the directory was made" ;;
+    *)               die "setup's success line is not inside the successful branch: '$_pin_refuse'" ;;
 esac
 # THE OUTER ARM THAT REFUSES MUST NOT CONTAIN IT, or "inside a branch" is
 # satisfied by a block that announces success on both paths.
-case "$_pin_refuse" in
-    *'echo "OWNER='*) die "setup announces success from the refusing branch too: '$_pin_refuse'" ;;
+case "$_pin_then" in
+    *'echo "OWNER='*) die "setup announces success from the refusing branch too: '$_pin_then'" ;;
     *)               pass "…and never from the one that refuses" ;;
 esac
 # AND THE PROBE IS IN THERE WITH IT, which is the property this shape exists for:
 # a refusal walked past must not reach the child at all.
-case "$_pin_then" in
+case "$_pin_refuse" in
     *'pr-origin.sh pin "$RB_PIN_OUT"'*) pass "…with the pin probe inside that branch, not before it" ;;
-    *) die "the pin probe runs outside the branch the reset guards: '$_pin_then'" ;;
+    *) die "the pin probe runs outside the branch the mkdir guards: '$_pin_refuse'" ;;
+esac
+# AND THE CLEANUPS ARE IN THERE WITH IT. Outside, they run on paths this shell may
+# not have made: `rm -f` deletes the operator's file and `rmdir` their directory
+# whenever it is empty.
+case "$_pin_then" in
+    *'rm -f "$RB_PIN_OUT"'*|*'rmdir "$RB_PIN_DIR"'*)
+        die "a cleanup runs in the branch where the directory was not created: '$_pin_then'" ;;
+    *) pass "…and no cleanup runs where the directory was not this shell's to make" ;;
 esac
 # …AND THE EXPORT IS PROVEN TO HAVE TAKEN, which a grep cannot answer. A `readonly
 # REVIEW_BUS_REMOTE` already present in the driving shell makes the export fail
@@ -796,9 +809,14 @@ case "$_seed_out" in
 esac
 # ITS REACH: the same shell must really keep the pre-seeded value, or the case
 # above passes because the assignment overwrote it and the answer was empty.
+# ITS REACH: that shell must really stop on the pre-seeded value. Either message
+# counts — a failed readonly assignment inside a compound command can end the
+# script before the arm's own abort prints, which is bash's behaviour and not a
+# spelling to assert.
 case "$_seed_out" in
-    *'RB_PIN_SEEN is readonly'*) pass "…where that shell does refuse for the reason the case names" ;;
-    *) die "the pre-seeded case did not reach the reset refusal ('$_seed_out')" ;;
+    *'RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*)
+        pass "…where that shell does refuse on the pre-seeded value" ;;
+    *) die "the pre-seeded case did not refuse at all ('$_seed_out')" ;;
 esac
 # …AND A REFUSAL DESTROYS NOTHING ON ITS WAY OUT — not the file and not the
 # directory. The refusing arm runs before the probe, so there is nothing it can
