@@ -242,18 +242,68 @@ RB_COPILOT_BOT='copilot-pull-request-reviewer[bot]'
 # `pr-close-round.sh` and `pr-copilot-phase.sh` — and this is precisely the rule
 # that must not be present in one of them and missing from the other.
 rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if there is one
-    local _l _found=""
-    while IFS= read -r _l || [ -n "$_l" ]; do
-        case "$_l" in
-            '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
-            '**Review-Pause-Acknowledged:**'*)
-                _found="$_l"; break ;;
+    # NO REDIRECTION, BECAUSE A REDIRECTION CAN FAIL AND THIS ANSWERS "CLEAN".
+    # The body was read through `<<EOF`, and a heredoc is backed by a TEMPORARY
+    # FILE: when one cannot be created the redirection fails, the loop never runs,
+    # and `return 1` says "no marker" about text nothing has looked at. Both
+    # callers read that as permission to post, so a control line would be
+    # published under the operator's identity because a filesystem filled up — the
+    # fail-open shape this repository forbids, where a failure is
+    # indistinguishable from a clean answer.
+    #
+    # IT IS NOT A BASH 3.2 PROBLEM, and saying so was wrong. Read from the
+    # sources: 4.4 has no pipe path at all and always writes a temporary file; 5.2
+    # and 5.3 use a pipe only while the body fits `HEREDOC_PIPESIZE` — the system
+    # pipe capacity, 4096 bytes on this machine — and fall back to a temporary
+    # file above it. A round summary is routinely larger than that.
+    #
+    # WHAT WAS MEASURED, AND WHAT IT SHOWED: an unwritable `TMPDIR` does not
+    # reproduce it on 4.4, 5.2 or 5.3, at 100 bytes or at 200 kB — because bash
+    # falls back to `/tmp` when `TMPDIR` is unusable (`get_sys_tmpdir`). That is a
+    # fact about the fallback, not about the backend, and it is why no fixture
+    # stages this: making temp-file creation fail means making it fail everywhere.
+    #
+    # MATCHED OVER THE WHOLE BODY, NOT PEELED A LINE AT A TIME. Peeling was the
+    # first shape and it is QUADRATIC: each iteration copies the entire remaining
+    # suffix twice, once for `%%` and once for `#`. Measured on this machine —
+    # 100 lines 8ms, 1,000 lines 0.7s, 5,000 lines 19s, 20,000 lines 295s — so a
+    # newline-heavy phase body stalls the round before anything can be posted,
+    # which is a worse failure than the one this function is for.
+    #
+    # THREE PATTERNS, EACH TESTED ONCE. `case` matches over the whole string, so
+    # the common answer — no marker — costs one pass per pattern and nothing else.
+    # The body is prefixed with a newline so a marker on the first line matches the
+    # same `\n<marker>` shape as one anywhere else, which is what makes "at the
+    # start of a line" a single pattern rather than a special case.
+    #
+    # STILL NO REDIRECTION AND NO `read`: `case` and `${…}` are handled by the
+    # parser, so there is no temporary file to fail underneath this and no name to
+    # shadow.
+    local _b="$1" _m _pre _hit="" _best="" _len _rest
+    local _nl='
+'
+    for _m in '**Review-Signoff:**' '**Review-Signoff-Revoked:**' \
+              '**Review-Pause-Acknowledged:**'; do
+        case "$_nl$_b" in
+            *"$_nl$_m"*) ;;
+            *) continue ;;
         esac
-    done <<EOF
-$1
-EOF
-    [ -n "$_found" ] || return 1
-    printf '%s\n' "$_found"
+        # THE EARLIEST OCCURRENCE OF THIS MARKER, by the length of what precedes
+        # it — `%%` is the shortest match, so this is the first one in the body.
+        _pre="$_nl$_b"
+        _pre="${_pre%%"$_nl$_m"*}"
+        _len=${#_pre}
+        if [ -z "$_best" ] || [ "$_len" -lt "$_best" ]; then
+            _best=$_len
+            _rest="$_nl$_b"
+            _rest="${_rest#*"$_nl$_m"}"
+            _hit="$_m${_rest%%"$_nl"*}"
+        fi
+    done
+    # THE FIRST ONE IN THE BODY WINS, not the first in the list: the author is told
+    # which line to fix, and a body carrying two must name the earlier.
+    [ -n "$_hit" ] || return 1
+    printf '%s\n' "$_hit"
     return 0
 }
 

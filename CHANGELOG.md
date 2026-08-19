@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.0.34] — 2026-08-19
+
+- **The control-line scan can no longer answer "clean" about text it never
+  read.** `rb_reserved_marker_line` is what stops a round summary or a phase body
+  quoting `**Review-Signoff:**`, `**Review-Signoff-Revoked:**` or
+  `**Review-Pause-Acknowledged:**` — quoting one CREATES the record, since the
+  readers scan the raw body and a fence does not hide a line that starts at column
+  zero.
+
+  It read its input through a heredoc, and a heredoc is backed by a temporary
+  file. When one cannot be created the redirection fails, the loop never runs, and
+  `return 1` reports "no marker" about text nothing has looked at — which both
+  callers treat as permission to post. A control line would then be published
+  under the operator's identity because a filesystem filled up: a failure
+  indistinguishable from a clean answer, which is the one shape this repository's
+  fail-closed rule forbids.
+
+  **It is not a bash 3.2 problem.** Read from the sources: 4.4 has no pipe path at
+  all and always writes a temporary file; 5.2 and 5.3 use a pipe only while the
+  body fits `HEREDOC_PIPESIZE` — the system pipe capacity, 4096 bytes here — and
+  fall back to a temporary file above it, which a round summary routinely
+  exceeds.
+
+  The redirection is removed rather than guarded: the body is matched with `case`
+  and sliced with `${…}`, so there is no temporary file to fail and no `read` to
+  shadow. Behaviour is unchanged in every case the suite already covered.
+
+  **Matched over the whole body, not peeled a line at a time.** Peeling was the
+  first shape and it is quadratic — each iteration copies the entire remaining
+  suffix twice, once for `%%` and once for `#`. Measured: 1,000 lines 0.7s, 5,000
+  lines 19s, 20,000 lines 295s, so a newline-heavy phase body stalled the round
+  before anything could be posted, which is a worse failure than the one this
+  function exists for. Three patterns tested once each over the whole string
+  instead: 2ms, 9ms and 39ms for the same bodies. The body is prefixed with a
+  newline so a marker on the first line matches the same shape as one anywhere
+  else, and the EARLIEST marker in the body wins rather than the first in the
+  list, so the author is told which line to fix.
+
+  What was measured is narrower than the first draft of this entry claimed: an
+  unwritable `TMPDIR` does not reproduce it on 4.4, 5.2 or 5.3 — each built and run,
+  at 100 bytes and at 200 kB — because bash falls back to `/tmp` when `TMPDIR` is
+  unusable. That is a fact about the fallback rather than the backend.
+
+  So the new cases are structural, and for a better reason than the version: the
+  failure cannot be staged from a fixture at all, since reproducing it means making
+  temp-file creation fail everywhere, which is not something a test may do to the
+  machine it runs on. What is asserted is the property that removes the
+  dependency — no redirection and no `read` in the function — with one behavioural
+  case that it still finds a marker with `TMPDIR` pointing nowhere.
+
 ## [2.0.33] — 2026-08-19
 
 - **The pin proof's boundary is written down where the proof is.** Three rounds of

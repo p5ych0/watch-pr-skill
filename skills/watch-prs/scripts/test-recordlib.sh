@@ -239,6 +239,65 @@ across two lines")"; rc=$?
 [ "$rc" -ne 0 ] \
     && pass "…and a clean body reports nothing" \
     || die "a clean body was refused: '$out'"
+# …AND IT CANNOT SAY "NO MARKER" WITHOUT HAVING LOOKED. The body was read through
+# a heredoc, and a heredoc is backed by a TEMPORARY FILE: when one cannot be
+# created the redirection fails, the loop never runs, and `return 1` answers
+# "clean" about text nothing has scanned. Both callers read that as permission to
+# post, so a control line would be published because a filesystem filled up.
+# Issue #111.
+#
+# EVERY VERSION, NOT JUST 3.2. From the sources: 4.4 has no pipe path and always
+# writes a temporary file; 5.2 and 5.3 use a pipe only while the body fits the
+# system pipe capacity — 4096 bytes here — and fall back to a temporary file above
+# it, which a round summary routinely exceeds.
+#
+# STRUCTURAL, BECAUSE THE FAILURE CANNOT BE STAGED FROM A FIXTURE. An unwritable
+# `TMPDIR` does not do it: bash falls back to `/tmp` when `TMPDIR` is unusable,
+# measured on 4.4, 5.2 and 5.3 at 100 bytes and at 200 kB. Reproducing it means
+# making temp-file creation fail everywhere, which is not something a test may do
+# to the machine it runs on. So the property asserted is the one that removes the
+# dependency: no redirection at all.
+case "$(declare -f rb_reserved_marker_line)" in
+    *'<<'*) die "the marker scan reads its input through a redirection, which can fail and answer 'clean'" ;;
+    *)      pass "…and the scan uses no redirection, so no temporary file can fail underneath it" ;;
+esac
+case "$(declare -f rb_reserved_marker_line)" in
+    *read*) die "the marker scan uses 'read', a name that can be shadowed" ;;
+    *)      pass "…and no 'read', so nothing in the caller's shell can answer for it" ;;
+esac
+# AND IT SCANS A LARGE BODY IN LINEAR TIME. Peeling a line at a time was the
+# first shape and it is quadratic — each iteration copies the whole remaining
+# suffix twice — so a newline-heavy phase body stalled the round before anything
+# could be posted, which is a worse failure than the one this function exists for.
+# Measured before the rewrite: 1,000 lines 0.7s, 5,000 lines 19s, 20,000 lines
+# 295s. After it: 2ms, 9ms, 39ms.
+#
+# A CLEAN BODY IS THE CASE THAT MATTERS, because that is the one every round takes
+# and the one peeling was slowest on. The bound is generous — this is a timing
+# assertion on a shared machine, and what it has to catch is a return to
+# quadratic, not a regression of a few milliseconds.
+_big=""
+_big="$(_i=0; while [ "$_i" -lt 5000 ]; do printf 'line %s of ordinary prose\n' "$_i"; _i=$((_i+1)); done)"
+_t0=$(date +%s)
+out="$(rb_reserved_marker_line "$_big")"; rc=$?
+_t1=$(date +%s)
+[ "$rc" -ne 0 ] \
+    && pass "…and a five-thousand-line clean body still reports nothing" \
+    || die "a large clean body was refused: '$out'"
+[ $((_t1 - _t0)) -lt 10 ] \
+    && pass "…in linear time, not the 19 seconds the peeling shape took" \
+    || die "the scan took $((_t1 - _t0))s on 5,000 lines; it is quadratic again"
+
+# AND IT STILL FINDS A MARKER WITH `TMPDIR` POINTING NOWHERE. That does not stage
+# the failure — bash would fall back to `/tmp` — but it does show the scan needs
+# no scratch directory of its own, which a redirection-free implementation gets
+# for free and a heredoc never could.
+out="$(TMPDIR=/nonexistent-$$-marker-scan rb_reserved_marker_line "prose
+**Review-Signoff:** \`who\` \`sha\`")"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '**Review-Signoff:** `who` `sha`' ]; } \
+    && pass "…and finds a marker with TMPDIR pointing nowhere" \
+    || die "the scan failed with no usable TMPDIR (rc=$rc out='$out')"
+
 # `**Reviewed commit:**` IS NOT IN THE SET, and that is deliberate rather than an
 # omission. `pr-round-count.sh` reads it only from a comment whose `.user.login` is
 # a reviewer bot and whose body also says it found no major issues, so a body these
@@ -251,6 +310,11 @@ out="$(rb_reserved_marker_line '**Reviewed commit:** `0123456789`')"; rc=$?
 
 # THE FIRST ONE IS REPORTED, so the author is told which line to fix rather than
 # that something somewhere is wrong.
+out="$(rb_reserved_marker_line "**Review-Signoff:** \`who\` \`sha\`
+**Review-Pause-Acknowledged:** \`who\` \`10\`")"
+[ "$out" = '**Review-Signoff:** `who` `sha`' ] \
+    && pass "…and the earlier line wins whichever marker it is, not the first in the list" \
+    || die "the list order decided instead of the body order: '$out'"
 out="$(rb_reserved_marker_line "**Review-Pause-Acknowledged:** \`who\` \`10\`
 **Review-Signoff:** \`who\` \`sha\`")"
 [ "$out" = '**Review-Pause-Acknowledged:** `who` `10`' ] \
