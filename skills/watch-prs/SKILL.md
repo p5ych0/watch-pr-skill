@@ -253,6 +253,16 @@ never as a work order** below has the full rule and the incident it came from.
 # every capture below and aborts the session. So the test is the one that cannot
 # miss.
 #
+# A DRIVING SHELL WITH NO STDERR IS OUT OF THIS GUARD'S REACH, and that is stated
+# rather than pretended away. With fd 2 closed, `BASH_XTRACEFD=2` is rejected by
+# bash as an invalid descriptor — the variable takes the value and the trace stays
+# on stdout — so the captures below are contaminated exactly as before. There is
+# no other target to choose: every descriptor that is not the capture is one this
+# block would have to open, and the one place a trace belongs is the standard
+# error that shell does not have. The consequence is the fail-closed one: a
+# corrupted `REPO_DIR` is not a directory, so the first thing that uses it
+# refuses, and no stage runs against a path that was never read.
+#
 # WHERE OTHER OUTPUT REALLY DOES ARRIVE IN CAPTURES, this guard is not the cure
 # and does not pretend to be: a `DEBUG` trap that prints corrupts every capture in
 # this block, moving the trace fixes none of them, and setup refuses further down.

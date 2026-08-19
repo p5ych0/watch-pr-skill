@@ -3901,6 +3901,23 @@ RB_TRACE_SAVED=\"\${BASH_XTRACEFD-}\"
 BASH_XTRACEFD=\$RB_TRACE_SAVED" \
         && die "the check passes a block that saves and restores the trace target; it proves nothing" \
         || pass "…where a save-and-restore under a new name does fail that check"
+    # A SHELL WITH NO STDERR IS OUT OF REACH, AND FAILS CLOSED. With fd 2 closed
+    # bash rejects `BASH_XTRACEFD=2` as an invalid descriptor, so the trace stays
+    # on stdout and the captures are contaminated exactly as before — there is no
+    # other target to choose, since the one place a trace belongs is the standard
+    # error that shell does not have. What must hold is that the corrupted value
+    # cannot pass for a path: it is not a directory, so the first use of it
+    # refuses.
+    _tr_noerr="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+        SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+            exec 2>&-
+            '"$_tr_guard"'
+            REPO_DIR="$(git rev-parse --show-toplevel)"
+            if [ -d "$REPO_DIR" ]; then builtin printf "USABLE\n"; else builtin printf "REFUSED\n"; fi')" || _tr_noerr=""
+    case "$_tr_noerr" in
+        *REFUSED*) pass "…and with stderr closed the guard cannot help, but the corrupted value is not a path" ;;
+        *) die "a shell with no stderr produced a usable REPO_DIR from a contaminated capture ('$_tr_noerr')" ;;
+    esac
     # AND UNDER A READONLY `PS4` THE GUARD STILL PROTECTS THE CAPTURE, which is
     # the direction that actually matters: the pid scheme went blind there,
     # leaving the trace on stdout and aborting a valid checkout.

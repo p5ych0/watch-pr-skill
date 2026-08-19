@@ -647,6 +647,10 @@ plugin docs and open an issue.
   at what comes back, so it is the destination that matters and not how you
   spelled it.
 
+  If your shell has no standard error at all — `exec 2>&-` — the loop cannot help
+  you: bash refuses to aim the trace at a closed descriptor, so it stays on
+  standard output and setup refuses, which is what it did before this existed.
+
   It can be wrong in one direction. A shell that writes into command
   substitutions by other means — a shadowed command, or an inherited `DEBUG` trap
   under `set -T` — looks the same as a trace arriving, so your tracing moves to

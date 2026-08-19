@@ -67,6 +67,15 @@
   Trading that for an unbounded regress of collision guards is the over-building
   this repository's rules warn against.
 
+  **A driving shell with no stderr is out of reach**, and that is stated rather
+  than pretended away: with fd 2 closed bash rejects `BASH_XTRACEFD=2` as an
+  invalid descriptor, the trace stays on stdout, and the captures are contaminated
+  exactly as before. There is no other target to choose — every descriptor that is
+  not the capture is one this block would have to open, and the place a trace
+  belongs is the standard error that shell does not have. It fails closed: a
+  corrupted `REPO_DIR` is not a directory, so the first use of it refuses, and
+  that is what the fixture asserts.
+
   **The accepted outcome, stated rather than left to be found:** in such a shell
   the operator's chosen trace destination becomes stderr for the rest of the
   session. `README.md` says so.
