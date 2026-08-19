@@ -3669,8 +3669,8 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ "$( PS4='"'"'$$:'"'"'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]; then' ] \
-    && pass "…and its first executable line tests whether a trace reaches a capture" \
+[ "$_first_exec" = 'RB_XTRACE_SAVED="${BASH_XTRACEFD-}"' ] \
+    && pass "…and its first executable line saves the trace target" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
 # function shadows it, so a guard written that way is absent in the one shell
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ "\$( PS4=/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^RB_XTRACE_SAVED=/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3934,6 +3934,30 @@ else
     case "$_tr_debug_reach" in
         *'FD=[2]'*) pass "…where a non-empty test in the same shell does move it" ;;
         *) die "the DEBUG trap did not reach the capture here; the case above proves nothing ('$_tr_debug_reach')" ;;
+    esac
+    # A TRAP CAN PRINT THE PID TOO, so no test on the captured bytes settles it —
+    # what settles it is that the block puts the target back. The restore runs on
+    # both paths out of setup, after every capture, so a probe that concluded
+    # wrongly leaves no residue in the operator's session.
+    _tr_restore="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n $RB_XTRACE_SAVED \]\]; then$/,/^fi$/p')"
+    case "$_tr_restore" in
+        *'BASH_XTRACEFD=$RB_XTRACE_SAVED'*) pass "…and the block restores the saved target" ;;
+        *) die "the setup block never restores the trace target: '$_tr_restore'" ;;
+    esac
+    _tr_pidtrap="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -T
+            trap "builtin printf \"%s:\" \"\$\$\"" DEBUG
+            set -x
+            '"$_tr_guard"'
+            '"$_tr_restore"'
+            trap - DEBUG
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_pidtrap=""
+    case "$_tr_pidtrap" in
+        *'FD=[7]'*) pass "…so even a trap printing the pid leaves the session's target as it was" ;;
+        *) die "a pid-printing DEBUG trap left the trace target moved ('$_tr_pidtrap')" ;;
     esac
     # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
     # with the `x` option off contaminates nothing, and the operator may have set

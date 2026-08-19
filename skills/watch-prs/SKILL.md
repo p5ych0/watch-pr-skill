@@ -250,6 +250,19 @@ never as a work order** below has the full rule and the incident it came from.
 # and must not pretend to be: a `DEBUG` trap that prints corrupts every capture in
 # this block, moving the trace fixes none of them, and setup refuses further down.
 # What it must not do is change a destination the operator chose on the way past.
+# AND WHATEVER IT DECIDES IS UNDONE AT THE END OF THIS BLOCK. That is what closes
+# the class rather than the case: an inherited `DEBUG` trap under `set -T` runs
+# inside the substitution and can print ANY bytes, the pid included, so no test on
+# what comes back can prove the trace put it there. A trap that prints also
+# corrupts every capture in this block on its own, which setup refuses further
+# down — so the residue of a mis-fire is not a wrong answer, it is a trace target
+# the operator did not choose. Bounding the change to this block removes that
+# residue whatever the probe concludes.
+#
+# AN EMPTY SAVE IS LEFT ALONE, and that is not an omission: `BASH_XTRACEFD` unset
+# means xtrace goes to stderr, which is what `2` does, so restoring by UNSETTING
+# would only close the descriptor. This value is set again rather than removed.
+RB_XTRACE_SAVED="${BASH_XTRACEFD-}"
 if [[ "$( PS4='$$:'; RB_TRACE_PROBE=1 )" = *"$$:"* ]]; then
     BASH_XTRACEFD=2
 fi
@@ -635,6 +648,13 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # already lying about its output. What survives a forged `echo` is the STATUS: the
 # branch still ends non-zero. Removing the dependency means not composing this
 # message here, which is #84 along with `git` and `bash`.
+# THE TRACE TARGET GOES BACK BEFORE THE PIN IS PROVEN, which is after the last
+# command substitution in this block and before either way out of it. From here
+# the operator's own choice is the right one — including where the probe moved it
+# for something that turned out not to be a trace at all.
+if [[ -n $RB_XTRACE_SAVED ]]; then
+    BASH_XTRACEFD=$RB_XTRACE_SAVED
+fi
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
 # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading

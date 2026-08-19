@@ -39,9 +39,18 @@
   produce a value none of them holds. `PS4` is set inside the subshell, so the
   operator's own trace format is unchanged.
 
-  In both of those states the operator's captures are corrupted by something this
-  guard cannot fix, and setup refuses further down. What it must not do is change
-  a destination they chose on the way past.
+  **And whatever the probe concludes is undone before the block ends.** That is
+  what closes the class rather than the case: an inherited `DEBUG` trap runs inside
+  the substitution and can print any bytes, the pid included, so no test on what
+  comes back can prove the trace put it there. A trap that prints corrupts every
+  capture in the block on its own, which setup refuses further down — so the
+  residue of a mis-fire was never a wrong answer, it was a trace target the
+  operator did not choose. The value is saved before the probe and set back after
+  the last substitution, on both paths out.
+
+  An empty save is left alone rather than unset: `BASH_XTRACEFD` unset means xtrace
+  goes to stderr, which is what `2` does, and unsetting it would close that
+  descriptor.
 
   Comparing the variable to `1` was tried and is wrong by omission twice over.
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a string compare misses

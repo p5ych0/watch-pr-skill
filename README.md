@@ -644,7 +644,8 @@ plugin docs and open an issue.
   trace running there is nothing to contaminate, and your chosen destination is
   left alone. Setup decides by running one command inside a capture and looking at
   what comes back, so it is the destination that matters and not how you spelled
-  it.
+  it — and it puts your setting back before setup finishes, so nothing about your
+  tracing outlives the loop's own startup.
 - **`@codex` answers with a setup link instead of reviewing:** the connector is
   not linked for this account. Link it at
   [chatgpt.com/codex/cloud/settings/connectors](https://chatgpt.com/codex/cloud/settings/connectors).

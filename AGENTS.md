@@ -76,7 +76,11 @@ that block is judged against both:
   contains. Anything else writing to stdout there is otherwise indistinguishable
   from a trace that arrived: a shadowed `:`, a `DEBUG` trap inherited under
   `set -T`, and a trap echoing `$BASH_COMMAND` reproduces the probe's own text
-  exactly. All three moved a destination the operator had chosen — it moves the destination rather than disabling
+  exactly. All three moved a destination the operator had chosen. No content test
+  settles it outright, since an inherited trap can print any bytes at all — so the
+  block also SAVES the target before the probe and sets it back after its last
+  substitution, on both paths out, which bounds a wrong conclusion to the block
+  instead of leaving it in the session. It moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
   closes the shell's stdout. `set +x` is wrong here twice over: it takes the
