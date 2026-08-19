@@ -265,6 +265,29 @@ case "$(declare -f rb_reserved_marker_line)" in
     *read*) die "the marker scan uses 'read', a name that can be shadowed" ;;
     *)      pass "…and no 'read', so nothing in the caller's shell can answer for it" ;;
 esac
+# AND IT SCANS A LARGE BODY IN LINEAR TIME. Peeling a line at a time was the
+# first shape and it is quadratic — each iteration copies the whole remaining
+# suffix twice — so a newline-heavy phase body stalled the round before anything
+# could be posted, which is a worse failure than the one this function exists for.
+# Measured before the rewrite: 1,000 lines 0.7s, 5,000 lines 19s, 20,000 lines
+# 295s. After it: 2ms, 9ms, 39ms.
+#
+# A CLEAN BODY IS THE CASE THAT MATTERS, because that is the one every round takes
+# and the one peeling was slowest on. The bound is generous — this is a timing
+# assertion on a shared machine, and what it has to catch is a return to
+# quadratic, not a regression of a few milliseconds.
+_big=""
+_big="$(_i=0; while [ "$_i" -lt 5000 ]; do printf 'line %s of ordinary prose\n' "$_i"; _i=$((_i+1)); done)"
+_t0=$(date +%s)
+out="$(rb_reserved_marker_line "$_big")"; rc=$?
+_t1=$(date +%s)
+[ "$rc" -ne 0 ] \
+    && pass "…and a five-thousand-line clean body still reports nothing" \
+    || die "a large clean body was refused: '$out'"
+[ $((_t1 - _t0)) -lt 10 ] \
+    && pass "…in linear time, not the 19 seconds the peeling shape took" \
+    || die "the scan took $((_t1 - _t0))s on 5,000 lines; it is quadratic again"
+
 # AND IT STILL FINDS A MARKER WITH `TMPDIR` POINTING NOWHERE. That does not stage
 # the failure — bash would fall back to `/tmp` — but it does show the scan needs
 # no scratch directory of its own, which a redirection-free implementation gets
@@ -287,6 +310,11 @@ out="$(rb_reserved_marker_line '**Reviewed commit:** `0123456789`')"; rc=$?
 
 # THE FIRST ONE IS REPORTED, so the author is told which line to fix rather than
 # that something somewhere is wrong.
+out="$(rb_reserved_marker_line "**Review-Signoff:** \`who\` \`sha\`
+**Review-Pause-Acknowledged:** \`who\` \`10\`")"
+[ "$out" = '**Review-Signoff:** `who` `sha`' ] \
+    && pass "…and the earlier line wins whichever marker it is, not the first in the list" \
+    || die "the list order decided instead of the body order: '$out'"
 out="$(rb_reserved_marker_line "**Review-Pause-Acknowledged:** \`who\` \`10\`
 **Review-Signoff:** \`who\` \`sha\`")"
 [ "$out" = '**Review-Pause-Acknowledged:** `who` `10`' ] \

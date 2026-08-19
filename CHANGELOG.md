@@ -23,10 +23,20 @@
   fall back to a temporary file above it, which a round summary routinely
   exceeds.
 
-  The redirection is removed rather than guarded. The body is peeled with
-  parameter expansions — the same removal `SKILL.md`'s phase parser used before
-  #89 deleted it — so there is no temporary file to fail and no `read` to shadow.
-  Behaviour is unchanged in every case the suite already covered.
+  The redirection is removed rather than guarded: the body is matched with `case`
+  and sliced with `${…}`, so there is no temporary file to fail and no `read` to
+  shadow. Behaviour is unchanged in every case the suite already covered.
+
+  **Matched over the whole body, not peeled a line at a time.** Peeling was the
+  first shape and it is quadratic — each iteration copies the entire remaining
+  suffix twice, once for `%%` and once for `#`. Measured: 1,000 lines 0.7s, 5,000
+  lines 19s, 20,000 lines 295s, so a newline-heavy phase body stalled the round
+  before anything could be posted, which is a worse failure than the one this
+  function exists for. Three patterns tested once each over the whole string
+  instead: 2ms, 9ms and 39ms for the same bodies. The body is prefixed with a
+  newline so a marker on the first line matches the same shape as one anywhere
+  else, and the EARLIEST marker in the body wins rather than the first in the
+  list, so the author is told which line to fix.
 
   What was measured is narrower than the first draft of this entry claimed: an
   unwritable `TMPDIR` does not reproduce it on 4.4, 5.2 or 5.3 — each built and run,

@@ -263,25 +263,48 @@ rb_reserved_marker_line() {   # <text> ; prints the first reserved line, 0 if th
     # fact about the fallback, not about the backend, and it is why no fixture
     # stages this: making temp-file creation fail means making it fail everywhere.
     #
-    # PEELED WITH EXPANSIONS, which is the same removal `SKILL.md`'s phase parser
-    # used: `${…%%…}` and `${…#…}` are handled by the parser, so there is no
-    # redirection to fail and no `read` to shadow. The empty-input case returns 1
-    # having looked at everything there was.
-    local _rest="$1" _line _nl='
+    # MATCHED OVER THE WHOLE BODY, NOT PEELED A LINE AT A TIME. Peeling was the
+    # first shape and it is QUADRATIC: each iteration copies the entire remaining
+    # suffix twice, once for `%%` and once for `#`. Measured on this machine —
+    # 100 lines 8ms, 1,000 lines 0.7s, 5,000 lines 19s, 20,000 lines 295s — so a
+    # newline-heavy phase body stalls the round before anything can be posted,
+    # which is a worse failure than the one this function is for.
+    #
+    # THREE PATTERNS, EACH TESTED ONCE. `case` matches over the whole string, so
+    # the common answer — no marker — costs one pass per pattern and nothing else.
+    # The body is prefixed with a newline so a marker on the first line matches the
+    # same `\n<marker>` shape as one anywhere else, which is what makes "at the
+    # start of a line" a single pattern rather than a special case.
+    #
+    # STILL NO REDIRECTION AND NO `read`: `case` and `${…}` are handled by the
+    # parser, so there is no temporary file to fail underneath this and no name to
+    # shadow.
+    local _b="$1" _m _pre _hit="" _best="" _len _rest
+    local _nl='
 '
-    while [ -n "$_rest" ]; do
-        case "$_rest" in
-            *"$_nl"*) _line="${_rest%%"$_nl"*}"; _rest="${_rest#*"$_nl"}" ;;
-            *)        _line="$_rest"; _rest="" ;;
+    for _m in '**Review-Signoff:**' '**Review-Signoff-Revoked:**' \
+              '**Review-Pause-Acknowledged:**'; do
+        case "$_nl$_b" in
+            *"$_nl$_m"*) ;;
+            *) continue ;;
         esac
-        case "$_line" in
-            '**Review-Signoff:**'*|'**Review-Signoff-Revoked:**'*|\
-            '**Review-Pause-Acknowledged:**'*)
-                printf '%s\n' "$_line"
-                return 0 ;;
-        esac
+        # THE EARLIEST OCCURRENCE OF THIS MARKER, by the length of what precedes
+        # it — `%%` is the shortest match, so this is the first one in the body.
+        _pre="$_nl$_b"
+        _pre="${_pre%%"$_nl$_m"*}"
+        _len=${#_pre}
+        if [ -z "$_best" ] || [ "$_len" -lt "$_best" ]; then
+            _best=$_len
+            _rest="$_nl$_b"
+            _rest="${_rest#*"$_nl$_m"}"
+            _hit="$_m${_rest%%"$_nl"*}"
+        fi
     done
-    return 1
+    # THE FIRST ONE IN THE BODY WINS, not the first in the list: the author is told
+    # which line to fix, and a body carrying two must name the earlier.
+    [ -n "$_hit" ] || return 1
+    printf '%s\n' "$_hit"
+    return 0
 }
 
 # ── WHAT REQUESTS A REVIEW ─────────────────────────────────────────────────

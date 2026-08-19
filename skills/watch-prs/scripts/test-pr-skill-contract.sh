@@ -1925,8 +1925,11 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
 # the docs said it refused — the exact drift this exists to prevent. The set is
 # read out of the `case` arms now, so membership and cardinality both come from
 # the rule.
-_mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'\*" "$SCRIPT_DIR/recordlib.sh" \
-    | sed "s/^'\*\*//; s/\*\*'\*$//" | sort -u)" || true
+# READ FROM THE `for` LIST THAT DEFINES THEM, which is where the rule moved when
+# the scan stopped peeling line by line. Anchored on the quoted marker literals
+# rather than on the loop's shape, so a reformat does not silently empty this.
+_mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'" "$SCRIPT_DIR/recordlib.sh" \
+    | sed "s/^'\*\*//; s/\*\*'$//" | sort -u)" || true
 _mk_n="$(printf '%s\n' "$_mk_set" | grep -c . )" || _mk_n=0
 [ "$_mk_n" -eq 3 ] \
     && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
