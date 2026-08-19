@@ -708,35 +708,15 @@ esac
 # LIFTED AND RUN, in a child that already holds the readonly. Describing this was
 # what let it through: the export reads correctly at a glance, and its failure is
 # visible only in what the variable holds afterwards.
-# THE PIN CASES RUN INSIDE A CHECKOUT, because the proof now asks a child to read
-# origin and compares the two children's answers. A scratch directory with no
-# repository makes that read fail, which is a refusal for the right reason and the
-# wrong case — the ordinary-shell case would then pass while proving nothing.
-RB_PINREPO="$(mktemp_d)" || die "no scratch directory for the pin checkout"
-( cd "$RB_PINREPO" && git init -q . && git remote add origin 'git@github.com:acme/widget.git' ) >/dev/null 2>&1 \
-    || die "could not build the pin checkout"
-export RB_PINREPO
 _pin_block=""
-_pin_block="$(awk '/^RB_PIN_REF_DIR=/, /^fi$/' "$SKILL")" || _pin_block=""
+_pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
 { [ -n "$_pin_block" ] \
-  && case "$_pin_block" in *'[[ $RB_PIN_SEEN = "$RB_PIN_REF" ]]'*) true ;; *) false ;; esac \
-  && case "$_pin_block" in *'pr-origin.sh read "$RB_PIN_REF_DIR/ref"'*) true ;; *) false ;; esac \
-  && case "$_pin_block" in *'export REVIEW_BUS_REMOTE='*) true ;; *) false ;; esac \
+  && case "$_pin_block" in *'[[ $RB_PIN_SEEN = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
   && case "$_pin_block" in *'exit 1'*) true ;; *) false ;; esac; } \
     && pass "the pin's export and its proof lift out of SKILL.md together" \
     || die "the pin block is truncated or has lost its postcondition: '$_pin_block'"
-# THE REFERENCE READ COMES FIRST, and that ORDER is what anchors it: a function
-# named `export` runs arbitrary code at the export line, `cd` among it, and one
-# that moves this shell into a checkout with the forged origin makes both children
-# agree. Read before it, no function has run yet.
-_pin_ref_ln="$(printf '%s\n' "$_pin_block" | grep -n 'pr-origin.sh read' | head -1 | cut -d: -f1)"
-_pin_exp_ln="$(printf '%s\n' "$_pin_block" | grep -n '^export REVIEW_BUS_REMOTE=' | head -1 | cut -d: -f1)"
-{ [ -n "$_pin_ref_ln" ] && [ -n "$_pin_exp_ln" ] && [ "$_pin_ref_ln" -lt "$_pin_exp_ln" ]; } \
-    && pass "…with the reference read before the export, so no function has run when it happens" \
-    || die "the reference read follows the export (ref=$_pin_ref_ln exp=$_pin_exp_ln); a cd-ing export would move it"
 _ro_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
-        cd "$RB_PINREPO"
         readonly REVIEW_BUS_REMOTE=""
         RB_REMOTE="git@github.com:acme/widget.git"
         RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
@@ -766,7 +746,6 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" 'BASH_FUNC_export%%
 _noexp_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_export%%=() { eval "${1}"; return 0; }' bash -c '
-        cd "$RB_PINREPO"
         RB_REMOTE="git@github.com:acme/widget.git"
         RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
@@ -774,56 +753,10 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 [ "$_noexp_rc" -ne 0 ] \
     && pass "…and an export that assigns without exporting is caught by asking a child" \
     || die "the pin passed while no child could see it; every stage would route by the current directory"
-# …AND AN `export` THAT MUTATES ITS OPERAND IS THE CASE A COMPARISON AGAINST A
-# SHELL VARIABLE CANNOT SEE AT ALL. This forger exports a repository of its own
-# choosing AND rewrites the variable the proof used to compare against, so forged
-# equals forged and the equality agreed — setup announcing a pin every later stage
-# would follow to the wrong repository. Choosing a different variable name is no
-# answer: any name written in `SKILL.md` is a name this function's author has
-# read. The proof asks a second child for origin instead, and no function in this
-# shell can alter what that child says.
-_mut_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
-    'BASH_FUNC_export%%=() { RB_REMOTE="git@github.com:WRONG/other.git"; builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }' bash -c '
-        cd "$RB_PINREPO"
-        RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
-        '"$_pin_block"'
-    ' >/dev/null 2>&1 || _mut_rc=$?
-[ "$_mut_rc" -ne 0 ] \
-    && pass "…and an export that MUTATES the compared value is caught by asking the repository" \
-    || die "a mutating export pinned the session to a repository of its own choosing"
-# …AND ONE THAT `cd`s AS WELL IS THE STRONGER FORM OF THE SAME ATTACK. A function
-# named `export` runs arbitrary code, so it can pin a forged remote AND move this
-# shell into a checkout whose origin IS that remote — after which both children
-# agree, because they inherit the cwd it left them in. Only the ORDER separates
-# them: the reference read happens before the export line, where no function has
-# run and the cwd is still the operator's own checkout.
-RB_PINDECOY="$(mktemp_d)" || die "no scratch directory for the decoy checkout"
-( cd "$RB_PINDECOY" && git init -q . && git remote add origin 'git@github.com:WRONG/other.git' ) >/dev/null 2>&1 \
-    || die "could not build the decoy checkout"
-export RB_PINDECOY
-_cdmut_rc=0
-env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
-    'BASH_FUNC_export%%=() { builtin cd "$RB_PINDECOY"; RB_REMOTE="git@github.com:WRONG/other.git"; builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }' bash -c '
-        cd "$RB_PINREPO"
-        RB_REMOTE="git@github.com:acme/widget.git"
-        RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
-        '"$_pin_block"'
-    ' >/dev/null 2>&1 || _cdmut_rc=$?
-[ "$_cdmut_rc" -ne 0 ] \
-    && pass "…and one that also cds into a checkout with that origin is caught by the order" \
-    || die "an export that moved the shell pinned the session to the decoy repository"
-# THE DECOY MUST REALLY LOOK LIKE THE FORGERY, or the case above passes because
-# the two children disagreed for some other reason.
-[ "$(cd "$RB_PINDECOY" && git remote get-url origin 2>/dev/null)" = 'git@github.com:WRONG/other.git' ] \
-    && pass "…where the decoy checkout does carry the forged origin" \
-    || die "the decoy checkout has no origin; the case above proves nothing"
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
 _ok_rc=0
 env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
-        cd "$RB_PINREPO"
         RB_REMOTE="git@github.com:acme/widget.git"
         RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
         '"$_pin_block"'
@@ -1011,12 +944,6 @@ esac
 # validates what it returns — an absolute path to a directory that exists — and
 # because nothing between here and there reassigns it.
 [ -n "$_forge_dir" ] && rm -rf "$_forge_dir"
-# THE PIN CHECKOUT GOES WITH THEM. The cleanup probe near the end of this file
-# runs the whole fixture with `TMPDIR` pointed at a scratch tree and fails if
-# anything is left in it, so a checkout that outlives its cases is reported as the
-# leak it is — which is how this one was caught.
-[ -n "$RB_PINREPO" ] && rm -rf "$RB_PINREPO"
-[ -n "${RB_PINDECOY:-}" ] && rm -rf "$RB_PINDECOY"
 unset RB_TMPBASE
 # …AND THE STATUS IS TAKEN. A call whose failure is ignored closes nothing and
 # says so to nobody, and the next step reads the missing signoff as absent rather

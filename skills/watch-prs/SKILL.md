@@ -700,30 +700,6 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # already lying about its output. What survives a forged `echo` is the STATUS: the
 # branch still ends non-zero. Removing the dependency means not composing this
 # message here, which is #84 along with `git` and `bash`.
-# THE REFERENCE READ HAPPENS BEFORE `export`, AND THAT ORDER IS THE ANCHOR. A
-# function named `export` runs arbitrary code at the line below, and `cd` is
-# something it can do: one that pins a forged remote AND moves this shell into a
-# checkout with that origin makes both children agree, because they inherit the
-# cwd it left them in. Read here, no function has run yet — the value comes from
-# the checkout the operator actually started in.
-#
-# ANOTHER CHILD, NOT ANOTHER VARIABLE, for what it reads. `pr-origin.sh read` is
-# reached by path and started privileged, so it derives origin from the checkout
-# rather than from anything this shell holds, and no function here can alter what
-# it says.
-RB_PIN_REF_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-[[ $RB_PIN_REF_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
-    || { echo "ABORT: RB_PIN_REF_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
-/usr/bin/env mkdir -m 700 "$RB_PIN_REF_DIR" \
-    || { echo "ABORT: could not create a private directory for the pin reference read"; exit 1; }
-RB_PIN_REF=
-[[ -z $RB_PIN_REF ]] \
-    || { /usr/bin/env rmdir "$RB_PIN_REF_DIR"; echo "ABORT: RB_PIN_REF is readonly in this shell; the pin proof would compare against a value no child produced"; exit 1; }
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_PIN_REF_DIR/ref" \
-    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-        && RB_PIN_REF="$(<"/dev/fd/9")"; } 9<"$RB_PIN_REF_DIR/ref"
-/usr/bin/env rm -f "$RB_PIN_REF_DIR/ref"
-/usr/bin/env rmdir "$RB_PIN_REF_DIR"
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
 # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading
@@ -794,41 +770,43 @@ RB_PIN_SEEN=
 # announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
 # derived its identity from wherever the session happened to stand.
 #
-# COMPARED AGAINST A SECOND CHILD'S ANSWER, NOT AGAINST A SHELL VARIABLE. That is
-# what closes the rest of the class rather than another guard.
+# WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because three rounds
+# of review walked up to it and it is cheaper to state than to rediscover. #102.
 #
-# `export` IS A NAME, and one that MUTATES its operand defeats a comparison
-# against `$RB_REMOTE` completely:
+# IT PROVES A CHILD INHERITED THE PIN, which is the failure it was built for: an
+# `export` that assigns without setting the export attribute leaves this shell
+# holding the right value while every helper holds none, and a `cd` into a second
+# checkout then retargets every stage. That is #80, it is an ACCIDENT rather than
+# an attack, and asking a real child is what catches it.
+#
+# IT DOES NOT PROVE ANYTHING AGAINST A FUNCTION IN THIS SHELL, and no comparison
+# written here can. `export` is a name, and one that MUTATES its operand —
 #
 #     export() { RB_REMOTE='git@github.com:WRONG/other.git'
 #                builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
 #
-# `rb_identity` has already derived `OWNER` and `REPO` from the real origin, so
-# setup announces the right repository; the child inherits the forged remote and
-# reports it; and the equality compares forged with forged and AGREES. Measured.
-# Choosing a different variable name does not help — any name written in this file
-# is a name the function's author has read.
+# — makes the child report the forged value and this line compare forged with
+# forged. Measured. A SECOND `pr-origin.sh read` was built to compare against the
+# repository instead, and it is not in this file because it bought exactly one
+# thing: an attacker who knew one variable name and not the other. The same
+# function rewrites both; it can also `cd` first, so a later read agrees with the
+# forgery, and an earlier one is just another variable. Every value this shell
+# holds is nameable, and the function runs at a point of its own choosing — so
+# there is no ordering and no extra child that makes the comparison mean more than
+# the shell it runs in. `SKILL.md` itself is a file such a shell can edit, which is
+# the same boundary `pr-origin.sh` § WHAT THIS DOES NOT CLOSE and #91 draw.
 #
-# SO THE PROOF ASKS THE WORLD AGAIN INSTEAD. `pr-origin.sh read` is a real child,
-# reached by path and started privileged, and it derives origin from the checkout
-# rather than from anything in this shell — so no function here can alter what it
-# says. The pin is proved by two children AGREEING: one reports the
-# `REVIEW_BUS_REMOTE` a stage will actually inherit, the other reports the origin a
-# stage would fall back to. A forged pin disagrees with the checkout; an absent one
-# is empty and disagrees with everything.
-#
-# AND THAT SUBSUMES THE SHADOWED-`exit` HALF. Every refusal above ends in `exit`,
-# which a function can neuter into a `return` — so a refused transport check
-# carries on. What it carries on to is this proof, and a session that walked past
-# a refusal has no valid pin to show it: the comparison is against the repository
-# itself, not against a variable the same shell was free to write. Gating each of
-# those refusals structurally was the alternative, and it is a restructure of the
-# whole block to re-derive a fact this one line already establishes. #102.
-# NON-EMPTY ON BOTH SIDES, because two empties agree. A helper that could not
-# start leaves this empty, and a pin that never arrived leaves the other empty;
-# neither is a proof, and `"" = ""` is the success this file has already been
-# caught reporting once.
-if [[ -n $RB_PIN_SEEN ]] && [[ -n $RB_PIN_REF ]] && [[ $RB_PIN_SEEN = "$RB_PIN_REF" ]]; then
+# WHAT IT DOES DO ABOUT THE SHADOWED `exit` is narrower and real: every refusal
+# above ends in `exit`, which a function can neuter into a `return`, so a refused
+# transport check carries on — to here, with `RB_REMOTE` still empty. The
+# non-emptiness below is what stops that reaching the success line, and it is why
+# the test is not equality alone.
+# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here. A
+# refusal walked past with `exit` shadowed leaves `RB_REMOTE` empty, the pin probe
+# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
+# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
+# derived its identity from wherever the session happened to stand.
+if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
     echo "ABORT: the repository pin did not take; every stage would route by the current directory"

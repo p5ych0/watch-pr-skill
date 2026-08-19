@@ -2,45 +2,41 @@
 
 ## [2.0.33] — 2026-08-19
 
-- **The repository pin is proved against the repository, not against a shell
-  variable.** A function named `export` that mutates its operand defeated the old
-  proof completely:
+- **The pin proof's boundary is written down where the proof is.** Three rounds of
+  review walked up to it from three directions, and it is cheaper to state than to
+  rediscover.
+
+  What the proof establishes is that a CHILD inherited the pin — the failure it
+  was built for, where an `export` that assigns without setting the export
+  attribute leaves the driving shell holding the right value while every helper
+  holds none, and a `cd` into a second checkout then retargets every stage. That
+  is an accident rather than an attack, and asking a real child is what catches
+  it.
+
+  What it cannot establish is anything against a function in that shell. `export`
+  is a name, and one that mutates its operand makes the child report a forged
+  remote and the comparison compare forged with forged:
 
   ```bash
   export() { RB_REMOTE='git@github.com:WRONG/other.git'
              builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
   ```
 
-  `rb_identity` has already derived `OWNER` and `REPO` from the real origin, so
-  setup announces the right repository; the child inherits the forged remote and
-  reports it; and the equality compares forged with forged and agrees. Every later
-  stage — a signoff, a revocation, a review request, a merge — then addresses
-  whatever repository that function named. Measured.
+  A second `pr-origin.sh read`, comparing against the repository rather than
+  against a variable, was built for this and is **not** in the file: it bought
+  exactly one thing, an attacker who knew one variable name and not the other. The
+  same function rewrites both. It can also `cd` first, so a later read agrees with
+  the forgery, and an earlier read is just another variable. Every value that shell
+  holds is nameable and the function runs at a point of its own choosing, so no
+  ordering and no extra child makes the comparison mean more than the shell it runs
+  in — and `SKILL.md` is a file such a shell can edit, which is the boundary
+  `pr-origin.sh` § WHAT THIS DOES NOT CLOSE and #91 already draw.
 
-  Choosing a different variable name is no answer, since any name written in
-  `SKILL.md` is a name that function's author has read. So the proof asks the
-  world again instead: a second `pr-origin.sh read`, a real child reached by path
-  and started privileged, derives origin from the checkout — **before the export
-  line**, which is the anchor. That function runs arbitrary code, `cd` among it,
-  so one that pins a forged remote AND moves the shell into a checkout with that
-  origin makes both children agree; read first, no function has run and the cwd is
-  still the operator's own. The pin is then proved by the two children AGREEING — one reporting the `REVIEW_BUS_REMOTE` a stage
-  will actually inherit, the other the origin a stage would fall back to. Nothing
-  in the driving shell can alter what either says. Both sides must be non-empty,
-  because two empties agree.
-
-  **That subsumes the shadowed-`exit` half of the same issue.** Every refusal in
-  the setup block ends in `exit`, which a function can neuter into a `return`, so
-  a refused transport check carries on — to this proof, which a session that
-  walked past a refusal cannot satisfy: the comparison is against the repository
-  itself, not against a variable the same shell was free to write. Gating each of
-  those refusals structurally was the alternative, and it is a restructure of the
-  whole block to re-derive a fact one line now establishes.
-
-  `test-pr-skill-contract.sh` runs the lifted pin block inside a real checkout —
-  the proof reads origin now, so a scratch directory with no repository refuses
-  for the right reason in the wrong case — and adds the mutating-`export` forger
-  alongside the existing ones. It fails against the previous comparison.
+  The narrow thing the proof does do about a shadowed `exit` is stated too: every
+  refusal in the block ends in `exit`, which a function can neuter into a `return`,
+  so a refused transport check carries on — to a comparison where `RB_REMOTE` is
+  still empty. The non-emptiness test is what stops that reaching the success line,
+  and it is why the check is not equality alone.
 
 ## [2.0.32] — 2026-08-19
 
