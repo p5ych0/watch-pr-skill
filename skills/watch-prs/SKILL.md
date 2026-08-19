@@ -744,11 +744,11 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # may remove it: the `mkdir` below is what proves this shell did, so its arms
 # remove the directory and everything outside them removes nothing at all.
 #
-# THREE EXITS FROM THAT BRANCH, and each cleans up exactly what it should: the two
-# refusals inside it `rmdir` the directory they know is ours, the probe's own arm
-# removes the file and then the directory, and the `else` — a `mkdir` that failed
-# — removes nothing, because a failure there means the path was already something,
-# and something is not ours.
+# ONE ARM REMOVES IT, AND ONLY ONE: the arm where the `mkdir` succeeded, which is
+# the only place this shell is known to have created it. Every refusal fires
+# BEFORE that `mkdir` — the assignments are proved first — so there is nothing for
+# them to clean up, and a `mkdir` that failed means the path was already
+# something, and something is not ours.
 RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
     || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
@@ -771,14 +771,27 @@ RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 # and something is not ours. Only the final arm, where the directory is
 # demonstrably this shell's, cleans up.
 RB_PIN_OUT="$RB_PIN_DIR/pin"
+# WRITABILITY IS PROVED WITH TWO UNEQUAL VALUES, because `readonly RB_PIN_SEEN=''`
+# defeats a single one: the reset assignment fails, the value is already empty, and
+# `[[ -z … ]]` agrees — so the probe runs, and the assignment that would store the
+# child's answer fails INSIDE the compound command, which can end the shell before
+# either cleanup. The file and the directory are then left behind, and the pin is
+# never proved. Two values no readonly can hold in turn is the only test that
+# distinguishes "empty because we set it" from "empty and unwritable".
+RB_PIN_SEEN=probe-a
+RB_PIN_WRITABLE=no
+[[ $RB_PIN_SEEN = probe-a ]] && RB_PIN_WRITABLE=yes
+RB_PIN_SEEN=probe-b
+[[ $RB_PIN_SEEN = probe-b ]] || RB_PIN_WRITABLE=no
 RB_PIN_SEEN=
+[[ -z $RB_PIN_SEEN ]] || RB_PIN_WRITABLE=no
 if [[ $RB_PIN_OUT != "$RB_PIN_DIR/pin" ]]; then
     echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"
     exit 1
     # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
     # the block's status is then the only signal left.
     [[ -n "" ]]
-elif [[ -n $RB_PIN_SEEN ]]; then
+elif [[ $RB_PIN_WRITABLE != yes ]]; then
     echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
     exit 1
     [[ -n "" ]]

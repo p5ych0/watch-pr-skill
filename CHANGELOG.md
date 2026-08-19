@@ -53,6 +53,14 @@
   place where a walked-past refusal produces a plausible answer instead of an
   absent one.
 
+  **`RB_PIN_SEEN`'s writability is proved with two unequal values.** `readonly
+  RB_PIN_SEEN=''` defeats a single emptiness test: the reset assignment fails, the
+  value is already empty, and the test agrees — so the probe ran, and the
+  assignment that stores the child's answer then failed inside the compound
+  command, which can end the shell before either cleanup and leave the file and
+  the directory behind. Two values no readonly can hold in turn is what
+  distinguishes "empty because we set it" from "empty and unwritable".
+
   **The assignments are proved before anything is created.** They were inside the
   `mkdir` arm, which leaks: a failed readonly assignment can end the shell where it
   stands — bash's own behaviour, and what the reset fixture observes — and by then
@@ -67,14 +75,13 @@
   `rm -f` deleted a `pin` of theirs if one was there, and `rmdir` took the
   directory.
 
-  **Whose the directory is decides who may remove it.** Inside that branch the
-  `mkdir` has proved this shell created it, so the two inner refusals remove it
-  and leave nothing behind. Outside — the arms reached only when a variable was
-  pre-seeded READONLY, which no ordinary shell does, so every postcondition above
-  may equally have been walked past — nothing is removed at all: `RB_PIN_OUT` and
-  `RB_PIN_DIR` can name the operator's own file and directory, `rm -f` deletes the
-  file, and `rmdir` deletes the directory whenever it is empty, which an
-  operator's often is.
+  **Whose the directory is decides who may remove it.** Exactly one arm removes
+  it: the one where the `mkdir` succeeded, which is the only place this shell is
+  known to have created it. Every refusal fires before that `mkdir` — the
+  assignments are proved first — so there is nothing for a refusal to clean up,
+  and none of them tries: `RB_PIN_OUT` and `RB_PIN_DIR` can name the operator's own
+  file and directory, `rm -f` deletes the file, and `rmdir` deletes the directory
+  whenever it is empty, which an operator's often is.
 
   An earlier draft of this entry claimed `rmdir` "removes an empty directory or
   fails, so it cannot destroy anything". That is wrong: deleting an empty
@@ -86,19 +93,30 @@
   must NOT appear in the arm that refuses — or "inside a branch" is satisfied by
   announcing success on both — and the probe must be in there with it. Plus the
   combined state itself, run end to end, with its own reach probe asserting that
-  shell really does keep the pre-seeded value. And a sentinel: with `RB_PIN_OUT`
-  pre-seeded readonly onto a file this block never made, that file must still be
-  there afterwards, and their empty directory beside it — with that run required
-  to refuse non-zero and say so, since deleting the outer `else` would otherwise
-  leave both survival checks green while setup finished silently; that no cleanup
-  appears in the arm where the directory was not this shell's to make, and that
-  both inner refusals do remove it; and that the reset refusal is an ARM with its
-  own abort, asserted structurally because on this bash the failed readonly
-  assignment ends the run before that arm is evaluated — so the behavioural case
-  alone would stay green with the arm deleted. All twelve fail against the shape
-  each replaces. The branch's four arms are lifted by their own headers and
-  checked one at a time, since a count over the whole conditional is satisfied by
-  two cleanups in one arm and none in another.
+  shell really does keep the pre-seeded value.
+
+  A sentinel: a `watch-pr.*` directory and a `pin` file the block never made,
+  pre-seeded readonly as `RB_PIN_DIR` and `RB_PIN_OUT` so the two earlier arms
+  pass and the `mkdir` arm is the one that fires — that run must refuse non-zero
+  with the mkdir's own message, and both must still be there afterwards. Named any
+  other way the first arm was selected, `mkdir` was never attempted, and breaking
+  its refusal left the case green.
+
+  `readonly RB_PIN_SEEN=''` must be refused and must leave the transport parent
+  empty, which is what refusing before the `mkdir` buys.
+
+  And structurally: the branch's four arms are lifted by their own headers and
+  checked one at a time — a count over the whole conditional is satisfied by two
+  cleanups in one arm and none in another — with the success line and the probe
+  only in the work arm, no cleanup in any refusal, both cleanups in the work arm,
+  the assignments proved before the branch, the writability probe using two
+  unequal values, and the reset refusal carrying its own abort. That last one is
+  structural because on this bash the failed readonly assignment ends the run
+  before the arm is evaluated, so a behavioural case alone would stay green with
+  the arm deleted.
+
+  Each fails against the shape it replaces; the largest single mutation — moving
+  the assignments back inside the `mkdir` arm — turns eight red.
 
 ## [2.0.32] — 2026-08-19
 

@@ -709,9 +709,9 @@ _pin_then="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _pin_then=""
 # up — a failed readonly assignment can end the shell where it stands, which would
 # otherwise leave the directory behind with nobody to remove it.
 _arm_out=""
-_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ -n $RB_PIN_SEEN/p')" || _arm_out=""
+_arm_out="$(printf '%s\n' "$_pin_body" | sed -n '/^if \[\[ $RB_PIN_OUT != /,/^elif \[\[ $RB_PIN_WRITABLE/p')" || _arm_out=""
 _arm_seen=""
-_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ -n $RB_PIN_SEEN \]\]; then$/,/^elif ! /p')" || _arm_seen=""
+_arm_seen="$(printf '%s\n' "$_pin_body" | sed -n '/^elif \[\[ $RB_PIN_WRITABLE != yes \]\]; then$/,/^elif ! /p')" || _arm_seen=""
 _arm_mkdir=""
 _arm_mkdir="$(printf '%s\n' "$_pin_body" | sed -n '/^elif ! .*mkdir /,/^else$/p')" || _arm_mkdir=""
 _arm_work=""
@@ -856,8 +856,21 @@ esac
 # green with that arm deleted. A shell that CONTINUES past the failed assignment
 # — the behaviour `CLAUDE.md` records as depending on where the assignment sits —
 # would then reach the probe and certify the stale value.
+# THE WRITABILITY PROBE IS TWO UNEQUAL VALUES, because `readonly RB_PIN_SEEN=''`
+# defeats a single one: the reset fails, the value is already empty, and an
+# emptiness test agrees — so the probe runs and the assignment that would store the
+# child's answer fails inside the compound command, which can end the shell before
+# either cleanup, leaving the file and the directory behind.
+case "$_pin_pre" in
+    *'RB_PIN_SEEN=probe-a'*) ;;
+    *) die "the writability probe does not use a first value: '$_pin_pre'" ;;
+esac
+case "$_pin_pre" in
+    *'RB_PIN_SEEN=probe-b'*) pass "…and writability is proved with two unequal values, not one emptiness test" ;;
+    *) die "the writability probe does not use a second value; readonly RB_PIN_SEEN='' would pass it" ;;
+esac
 case "$_pin_refuse" in
-    *'elif [[ -n $RB_PIN_SEEN ]]; then'*) pass "…and the reset refusal is an arm of that branch" ;;
+    *'elif [[ $RB_PIN_WRITABLE != yes ]]; then'*) pass "…and the reset refusal is an arm of that branch" ;;
     *) die "the reset refusal is not an arm; a shell that continues past the failed assignment would reach the probe" ;;
 esac
 # ITS REACH: that shell must really stop on the pre-seeded value. Either message
@@ -889,40 +902,69 @@ esac
 # carry. With `mktemp_d` failing and an inherited `RB_TMPBASE`, the guard passed
 # and this block wrote into, and then `rm -rf`'d, a path nobody here allocated.
 if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
-_sentinel="$_forge_dir/sentinel"
+# NAMED `watch-pr.*` UNDER THE TRANSPORT PARENT, and with a matching `RB_PIN_OUT`,
+# so the two earlier arms pass their checks and the `mkdir` arm is the one that
+# fires. Pre-seeded onto a mismatching path the FIRST arm was selected, `mkdir` was
+# never attempted, and breaking its refusal left this case green.
+_sentinel="$_forge_dir/watch-pr.sentinel"
 mkdir -p "$_sentinel"
-printf 'DO NOT DELETE\n' > "$_sentinel/keep"
-mkdir -p "$_sentinel/emptydir"
+printf 'DO NOT DELETE\n' > "$_sentinel/pin"
 _sent_rc=0
 _sent_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
     'BASH_FUNC_exit%%=() { return 0; }' bash -c '
         RB_REMOTE="git@github.com:acme/widget.git"
         RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
-        readonly RB_PIN_OUT="'"$_sentinel"'/keep"
-        readonly RB_PIN_DIR="'"$_sentinel"'/emptydir"
-        readonly RB_PIN_SEEN="git@github.com:acme/widget.git"
+        readonly RB_PIN_DIR="'"$_sentinel"'"
+        readonly RB_PIN_OUT="'"$_sentinel"'/pin"
         '"$_pin_block"'
     ' 2>&1)" || _sent_rc=$?
 # THE REFUSAL ITSELF, not only the survival. `RB_PIN_DIR` names a directory that
 # already exists, so `mkdir` fails and the outer `else` is the whole fail-closed
 # path — delete it and both survival checks stay green while setup finishes with
 # no diagnostic at all.
-{ [ "$_sent_rc" -ne 0 ] && case "$_sent_out" in *ABORT:*) true ;; *) false ;; esac; } \
-    && pass "…where a mkdir onto an existing directory refuses, non-zero and saying so" \
-    || die "a failed mkdir did not refuse (rc=$_sent_rc out='$_sent_out')"
+{ [ "$_sent_rc" -ne 0 ] \
+  && case "$_sent_out" in *'ABORT: could not create a private directory'*) true ;; *) false ;; esac; } \
+    && pass "…where a mkdir onto an existing directory takes the mkdir refusal, non-zero and saying so" \
+    || die "a failed mkdir did not take its own refusal (rc=$_sent_rc out='$_sent_out')"
 case "$_sent_out" in
     *'OWNER='*) die "a failed mkdir reached the success line ('$_sent_out')" ;;
     *) pass "…and never reaches the success line" ;;
 esac
-[ -s "$_sentinel/keep" ] \
+[ -s "$_sentinel/pin" ] \
     && pass "…and a refusal on a pre-seeded readonly path leaves the operator's file alone" \
     || die "the refusing arm deleted a file it never created"
 # AND THE DIRECTORY TOO. `rmdir` removes an EMPTY directory, and an operator's
 # directory often is one — so "it can only fail" was the wrong claim.
-[ -d "$_sentinel/emptydir" ] \
-    && pass "…and their empty directory, which rmdir would have removed" \
+[ -d "$_sentinel" ] \
+    && pass "…and their directory, which rmdir would have removed" \
     || die "the refusing arm removed a directory it never created"
 rm -rf "$_sentinel"
+fi
+# …AND `readonly RB_PIN_SEEN=''` REFUSES BEFORE ANYTHING IS CREATED. The reset
+# assignment fails and the value is already empty, so an emptiness test agreed and
+# the probe ran — then the assignment that stores the child's answer failed inside
+# the compound command, which can end the shell before either cleanup, leaving the
+# file and the `watch-pr.*` directory behind. Two unequal probe values tell that
+# state apart from a variable this shell just emptied.
+if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
+_emptyro="$_forge_dir/emptyro"
+mkdir -p "$_emptyro"
+_ero_rc=0
+_ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
+        RB_REMOTE="git@github.com:acme/widget.git"
+        RB_TMPPARENT="'"$_emptyro"'"
+        readonly RB_PIN_SEEN=""
+        '"$_pin_block"'
+    ' 2>&1)" || _ero_rc=$?
+{ [ "$_ero_rc" -ne 0 ] \
+  && case "$_ero_out" in *'ABORT: RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+    && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
+    || die "readonly RB_PIN_SEEN='' was not refused (rc=$_ero_rc out='$_ero_out')"
+# AND IT LEFT NOTHING BEHIND, which is what refusing before the `mkdir` buys.
+[ -z "$(ls -A "$_emptyro" 2>/dev/null)" ] \
+    && pass "…leaving no transport directory behind, because it refused before creating one" \
+    || die "the empty-readonly refusal left something in the transport parent: $(ls -A "$_emptyro")"
+rm -rf "$_emptyro"
 fi
 # …AND THE ORDINARY CASE STILL PASSES THROUGH. A block that aborted unconditionally
 # would satisfy both cases above while stopping every session.
