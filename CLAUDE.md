@@ -455,6 +455,26 @@ the rules it is judged by — and it is also why nothing installs them. A user w
 updates the plugin receives no part of them, so a release for a change to one
 would be exactly the unobservable release this boundary exists to prevent.
 
+**A comment-only change to an installed script IS a release**, and that is the
+one case the two sentences above pull in opposite directions on. Two required
+reviewers reached opposite verdicts on the same file in #97 — Codex reading "a
+change to what is installed", Copilot reading "a change nobody can observe" — so
+the rule now says which wins, and why.
+
+The installed bytes are what decides it. A comment in a shipped script is not
+decoration here: this file records that *a comment that argues against the code
+beside it is an instruction, and it will be followed*, and the helpers are
+commented as arguments for why the code has the shape it has. A user who diffs
+their installed plugin sees a changed file, and every changed installed file must
+have a version that names it. "Observable" is also not decidable at review time,
+which is what turned #97 into two rounds; "did an installed file change" is.
+
+The entry then has no failure to explain, and it must not invent one. Say what
+the comment now records and which misreading it prevents — that is the
+user-facing content of a comment-only change, and it is why this case is on the
+release side while a faster fixture is not: the fixture changes nothing a user
+installs.
+
 That is the settled practice, not a new allowance: #42, #44 and #47 were
 test-only and #40 was documentation-only, all four merged with no bump and clean
 from both reviewers. It is written down because the rule above, read alone, says
