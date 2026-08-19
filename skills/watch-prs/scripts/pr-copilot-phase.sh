@@ -511,20 +511,20 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
 CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
 [[ $CODEX_STILL_RC -eq 0 ]] \
     || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
-# A REVOCATION IS THE ONE THIS GAP ADMITS. `pr-signoff.sh` reports `sha=none
-# reason=revoked` when the newest record for this reviewer is a revocation —
-# status 1, which is also "none recorded", so the REASON is what tells them apart.
-# "None recorded" is the ordinary state here and must not refuse.
-SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
-case "$SIGNOFF_NOW_RC" in
-    0|1) ;;
-    *) echo "ABORT: could not read the signoff record before recording (rc=$SIGNOFF_NOW_RC); nothing posted"; exit 1 ;;
-esac
-case "$SIGNOFF_NOW" in
-    *reason=revoked*)
-        echo "ABORT: this phase was reopened while the checks were proving — a revocation is the newest record. Recording a signoff now would supersede it; nothing posted"
-        exit 1 ;;
-esac
+# NO REVOCATION CHECK HERE, AND THAT IS A DEFERRAL RATHER THAN AN OVERSIGHT. A
+# revocation landing in this window is the case #115 was filed for, and refusing
+# on one was the first fix — it is not in this file because it breaks the
+# legitimate path: the fault-tolerance pass posts its revocation BEFORE requesting
+# the review, so that revocation is still the newest record when the new clean
+# verdict arrives, and an unconditional refusal means a reopened phase can never
+# record its replacement signoff at all.
+#
+# TELLING THE TWO APART NEEDS THE RECORDS TO CARRY TIME, which they do not yet: a
+# revocation this pass is ANSWERING landed before the verdict, and one that would
+# CANCEL it landed after — and `pr-signoff.sh` omits `at=` on a revocation, so two
+# of them compare equal, and at second resolution even a timestamp is not enough
+# without the comment id. That is #37's remaining defect, and it has to land
+# first. Until it does, this stage narrows the window rather than closing it.
 # AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
 # move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
 # clean and says nothing about the move. Reading the head first and posting third

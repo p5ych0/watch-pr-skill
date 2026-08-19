@@ -39,6 +39,10 @@ printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
 [ -f "$W/move-head-on-probe" ] && cat "$W/move-head-on-probe" > "$W/head.out"
 case "${1:-}" in
     verdict)   _n=$(( $(cat "$W/verdict.n" 2>/dev/null || echo 0) + 1 )); printf '%s' "$_n" > "$W/verdict.n"
+               # A PUSH CAN LAND DURING A LATER PROBE TOO, after the first head
+               # re-read has already passed — which is the window the read before
+               # the post exists for.
+               [ "$_n" -ge 2 ] && [ -f "$W/move-head-late" ] && cat "$W/move-head-late" > "$W/head.out"
                if [ "$_n" -ge 2 ] && [ -f "$W/verdict.2.rc" ]; then
                    cat "$W/verdict.2.out" 2>/dev/null; exit "$(cat "$W/verdict.2.rc")"
                fi
@@ -58,9 +62,6 @@ chmod +x "$DIR/pr-review-state.sh"
 cat > "$DIR/pr-signoff.sh" <<'SIGNSH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
-# A PUSH CAN LAND DURING THIS PROBE TOO, and it is the window the head re-read
-# before the post exists for — the earlier re-read has already passed by here.
-[ -f "$W/move-head-on-signoff" ] && cat "$W/move-head-on-signoff" > "$W/head.out"
 # A SECOND ANSWER, FOR THE SECOND ASK. The phase is proved twice — once up front
 # and once immediately before the mutations — and the whole question is what
 # happens when another session changes something in between. `.2` is that change.
@@ -242,24 +243,22 @@ nothing_posted "…with no signoff recorded"
 # signoff and a clean verdict and requests Copilot underneath a reopened phase.
 # #115.
 #
-# THE REVOCATION IS THE ONE THIS GAP ADMITS. `record` reads the signoff ONCE — the
-# new check — so this is `signoff.out` rather than the stub's `.2` second answer,
-# which belongs to `open`'s repeated proofs.
+# THE REVOCATION IN THAT WINDOW IS NOT REFUSED HERE, and that is a deferral rather
+# than an omission. The first fix refused on one and broke the legitimate path: the
+# fault-tolerance pass posts its revocation BEFORE requesting the review, so it is
+# still the newest record when the new clean verdict arrives — an unconditional
+# refusal means a reopened phase can never record its replacement signoff.
+#
+# TELLING THEM APART NEEDS THE RECORDS TO CARRY TIME, which is #37's remaining
+# defect and has to land first. What this asserts meanwhile is that the legitimate
+# case works: a revocation already on the PR, with a clean verdict, still records.
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
-    && pass "a revocation landing before the post stops the record" \
-    || die "a revocation in the window gave '${got}'"
-nothing_posted "…with no signoff recorded, so it cannot supersede the revocation"
-# AND "NONE RECORDED" IS THE ORDINARY STATE HERE, which must not refuse: nothing
-# has been recorded yet, and the whole point of this stage is to record it.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.out"
-printf '1\n' > "$W/signoff.rc"
-got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
-    && pass "…while no record at all is the ordinary state and records normally" \
-    || die "an absent signoff was treated as a revocation: '${got}'"
+    && pass "a reopened phase with a clean verdict records its replacement signoff" \
+    || die "a pre-existing revocation blocked the reopened phase: '${got}'"
+
 # A PUSH IN THE SAME WINDOW, which the head re-read catches. `move-head-on-probe`
 # fires on the FIRST verdict call, so this is a push landing before the CI gate.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
@@ -270,9 +269,10 @@ got="$(run record 7 "$TMP/body.md")"
 nothing_posted "…with no signoff recorded"
 # A PUSH DURING THE LATER PROBES, which the FIRST re-read cannot catch: it has
 # already passed, and the verdict is pinned to `$CODEX_SHA` so it stays clean and
-# says nothing about the move. Only re-reading the head last closes it. The signoff
-# stub moves it, so the change lands after the head check and before the post.
-world; printf '%s\n' "$OTHER40" > "$W/move-head-on-signoff"
+# says nothing about the move. Only re-reading the head last closes it. The
+# verdict stub moves it on its SECOND call — the one after the CI gate — so the
+# change lands after the first head check and before the post.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-late"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
     && pass "…and one landing during the later probes stops it as well" \

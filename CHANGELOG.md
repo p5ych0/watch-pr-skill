@@ -14,33 +14,38 @@
   the reopening. A later `open` then finds a current signoff and a clean verdict
   and requests Copilot underneath a phase somebody had just reopened.
 
-  Four checks now sit immediately before the post, the same ones `open` makes and
-  for the same reason: none of them requires the head to have moved, so none
-  subsumes another. The head is still the signed sha, Codex's live verdict on it
-  is still clean, no revocation is the newest record for that reviewer — and the
-  head again, LAST. That last read is not redundant: each of the others is a
-  network call, so the head can move DURING one of them, and the verdict is pinned
-  to the signed sha so it stays clean and says nothing about the move. Reading the
-  head first and posting fourth would leave the same window one probe narrower.
+  Three checks now sit immediately before the post: the head is still the signed
+  sha, Codex's live verdict on it is still clean, and the head again, LAST. That
+  last read is not redundant — the verdict lookup is a network call, so the head
+  can move during it, and the verdict is pinned to the signed sha so it stays clean
+  and says nothing about the move. Reading the head only first would leave the same
+  window one probe narrower.
 
-  The revocation is what this gap actually admits; the head and verdict reads are
-  cheap and cover a push or a dismissal landing in the same window.
+  **Refusing on the revocation itself is deferred, and that is a correction to this
+  change rather than a limit of it.** It was the first fix and it breaks the
+  legitimate path: the fault-tolerance pass posts its revocation BEFORE requesting
+  the review, so that revocation is still the newest record when the new clean
+  verdict arrives — an unconditional refusal means a reopened phase can never
+  record its replacement signoff at all.
+
+  Telling the two apart needs the records to carry time, and they do not yet: a
+  revocation this pass is ANSWERING landed before the verdict, one that would
+  CANCEL it landed after, and `pr-signoff.sh` omits `at=` on a revocation so two
+  compare equal — at second resolution even a timestamp needs the comment id
+  beside it. That is #37's remaining defect and it has to land first, so this
+  stage narrows the window rather than closing it, and says so where the check
+  would have gone.
 
   "None recorded" is the ordinary state here — nothing has been recorded yet, and
   recording it is the point — so the check distinguishes it from a revocation by
   the reason rather than by the status, which is 1 for both. A case asserts it
   records normally.
 
-  Five cases, each leaving nothing posted where it refuses: a revocation, a push
-  before the CI gate, a push during the later probes — which only the final head
-  read catches — and a withdrawn verdict. Those four fail against the previous
-  stage.
-
-  The fifth is a compatibility guard rather than a regression test, and saying so
-  matters: before this change `record` never queried `pr-signoff.sh` at all, so
-  the ordinary absent-record case passes on the old stage too. What it protects is
-  the new check refusing a state it must not — "none recorded" is where every
-  first phase starts.
+  Three cases leave nothing posted where they refuse — a push before the CI gate,
+  a push during the later probes which only the final head read catches, and a
+  withdrawn verdict — and all three fail against the previous stage. A fourth
+  guards the legitimate path: a revocation already on the PR with a clean verdict
+  must still record, which is the reopened phase completing.
 
 ## [2.0.35] — 2026-08-19
 
