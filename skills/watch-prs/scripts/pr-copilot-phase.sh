@@ -520,12 +520,14 @@ CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$
 # verdict arrives, and an unconditional refusal means a reopened phase can never
 # record its replacement signoff at all.
 #
-# TELLING THE TWO APART NEEDS THE RECORDS TO CARRY TIME, which they do not yet: a
-# revocation this pass is ANSWERING landed before the verdict, and one that would
-# CANCEL it landed after — and `pr-signoff.sh` omits `at=` on a revocation, so two
-# of them compare equal, and at second resolution even a timestamp is not enough
-# without the comment id. That is #37's remaining defect, and it has to land
-# first. Until it does, this stage narrows the window rather than closing it.
+# TELLING THE TWO APART IS ORDERING: a revocation this pass is ANSWERING landed
+# before the verdict, and one that would CANCEL it landed after.
+#
+# THE RECORDS CAN NOW SAY WHICH. `pr-signoff.sh` reports `at=` and `id=` on a
+# revocation, and `pr-review-state.sh review-at` answers from the comment channel
+# as well as the reviews — #117, landed. What is still deferred is the
+# INTEGRATION: this stage does not yet compare the two, and #115 is that change.
+# Until it does, this stage narrows the window rather than closing it.
 # AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
 # move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
 # clean and says nothing about the move. Reading the head first and posting third

@@ -256,9 +256,11 @@ nothing_posted "…with no signoff recorded"
 # still the newest record when the new clean verdict arrives — an unconditional
 # refusal means a reopened phase can never record its replacement signoff.
 #
-# TELLING THEM APART NEEDS THE RECORDS TO CARRY TIME, which is #37's remaining
-# defect and has to land first. What this asserts meanwhile is that the legitimate
-# case works: a revocation already on the PR, with a clean verdict, still records.
+# TELLING THEM APART IS ORDERING, and the records carry it now — #117 landed
+# `at=` and `id=` on a revocation and taught `review-at` the comment channel.
+# What is still deferred is comparing them here, which is #115. What this asserts
+# meanwhile is that the legitimate case works: a revocation already on the PR,
+# with a clean verdict, still records.
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"

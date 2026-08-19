@@ -115,6 +115,15 @@ world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"ha
 case_is 2 "unreadable" "…and so is a body that is not a string"
 world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":null,"createdAt":"2026-01-02T00:00:00Z","databaseId":1,"body":"x"}]}}}}}' > "$TMP/out"
 case_is 2 "unreadable" "…and an association that is not a string"
+# …AND A NODE WITH EVERY OTHER FIELD BUT NO USABLE `databaseId`. The `{}` case
+# above already fails several older checks, so it says nothing about this one:
+# removing the id rule left the suite green. A record that cannot be ORDERED is
+# not a record this tool can act on — a revocation has to be placed against a
+# verdict, and `createdAt` alone is second-resolution. #117.
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","body":"x"}]}}}}}' > "$TMP/out"
+case_is 2 "unreadable" "…and a node carrying everything but an id cannot be ordered"
+world; printf '{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"authorAssociation":"OWNER","createdAt":"2026-01-02T00:00:00Z","databaseId":"9001","body":"x"}]}}}}}' > "$TMP/out"
+case_is 2 "unreadable" "…nor one whose id is a string rather than a number"
 
 # ── the LAST one wins, so a phase can be reopened ──────────────────────────
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$OLD\`" \
