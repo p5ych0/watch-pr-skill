@@ -653,9 +653,9 @@ plugin docs and open an issue.
   standard output and setup refuses, which is what it did before this existed.
 
   **The one exception, and the reason for that "normally".** The check can be
-  wrong in one direction: a shell that writes into command substitutions by other
-  means — a shadowed command, or an inherited `DEBUG` trap under
-  `set -T` — looks the same as a trace arriving, so your tracing moves to standard
+  wrong in one direction: a shell with an inherited `DEBUG` trap under `set -T`
+  that prints writes into command substitutions of its own accord, which looks the
+  same as a trace arriving, so your tracing moves to standard
   error even though it was not in the way, log file target included. Putting it back afterwards was
   built and removed: a startup file can make the variables that would remember it
   `readonly` and steer the restore somewhere of its own choosing. In that shell

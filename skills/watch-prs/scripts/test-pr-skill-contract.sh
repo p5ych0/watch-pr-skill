@@ -3680,6 +3680,12 @@ _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^``
 # used, so a scan over the raw text finds that spelling in the prose arguing
 # against it and reports the defect the prose exists to prevent.
 _setup_code="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#')"
+# ANY `set +…`, NOT ONE SPELLING. `set +x` and `set +o xtrace` do the same thing,
+# and a check for the first stays green for the second — while every behavioural
+# case here lifts the guard alone and would miss a disabling line placed after it.
+_tr_setminus="$(printf '%s\n' "$_setup_code" | grep -c '^[[:space:]]*set[[:space:]]*+' || true)"
+[ "$_tr_setminus" -eq 0 ] \
+    || die "setup turns a shell option off; disabling tracing is what this forbids"
 case "$_setup_code" in
     *'set +x'*) die "setup disables tracing through a shadowable name" ;;
     *'BASH_XTRACEFD=2'*) pass "…and moves the trace by assignment rather than disabling it" ;;
@@ -3775,6 +3781,19 @@ else
             *'rev-parse'*) pass "…while the operator's trace still arrives, on stderr" ;;
             *) die "the trace was silenced rather than moved ('$_tr_err')" ;;
         esac
+        # AND TRACING IS STILL ON AFTERWARDS, which is the behavioural half of
+        # the structural scan above: `set +x`, `set +o xtrace` and anything else
+        # that turns the option off all show up here as a missing `x` in `$-`, so
+        # no spelling has to be enumerated.
+        _tr_still="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" \
+            SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c '
+                '"$_tr_guard"'
+                '"$_tr_block"'
+                case $- in *x*) builtin printf "TRACING=[on]\n" ;; *) builtin printf "TRACING=[off]\n" ;; esac' 2>/dev/null)" || _tr_still=""
+        case "$_tr_still" in
+            *'TRACING=[on]'*) pass "…and the x option is still set after the block runs" ;;
+            *) die "setup turned the operator's tracing off ('$_tr_still')" ;;
+        esac
         # AND A SHADOWED `set` CHANGES NOTHING, which is the whole reason the guard is
         # an assignment. `set +x` in this position would be a call to that function,
         # leaving the trace on fd 1 and the capture corrupted — in exactly the shell
@@ -3856,8 +3875,23 @@ else
             *) die "$_label — the trace landed somewhere nobody named ('$_out')" ;;
         esac
     }
-    tr_hostile "a printing ':' leaves the trace on a named descriptor" \
-        ':() { builtin printf marker; }'
+    # A SHADOWED COMMAND CANNOT REACH THIS PROBE AT ALL, so its case is the
+    # strict one: the probe runs no command, and an assignment supplies no name
+    # for a function to take, so the target must be untouched rather than merely
+    # named.
+    _tr_shadow_only="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -x
+            :() { builtin printf marker; }
+            printf() { builtin printf marker; }
+            '"$_tr_guard"'
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_shadow_only=""
+    case "$_tr_shadow_only" in
+        *'FD=[7]'*) pass "a shadowed command cannot reach the probe, so the target is untouched" ;;
+        *) die "a shadowed command reached the assignment-only probe ('$_tr_shadow_only')" ;;
+    esac
     tr_hostile "…and so does a DEBUG trap printing a marker" \
         'set -T; trap "builtin printf marker" DEBUG'
     tr_hostile "…and one echoing \$BASH_COMMAND, which reproduces the probe exactly" \

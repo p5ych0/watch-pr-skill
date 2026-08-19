@@ -61,8 +61,9 @@
   block writes can be pre-seeded with the value it was going to write.
 
   What the restore bought was tidiness after a mis-fire, and a mis-fire needs
-  something else writing into that capture — a shadowed command, or a `DEBUG` trap
-  inherited under `set -T`. Such a shell has already corrupted every capture in
+  something else writing into that capture, and only an inherited `DEBUG` trap
+  under `set -T` can: the probe runs no command, so there is no function for a
+  shadowed name to supply. Such a shell has already corrupted every capture in
   the block, so setup refuses further down and the session ends either way.
   Trading that for an unbounded regress of collision guards is the over-building
   this repository's rules warn against.
@@ -78,7 +79,7 @@
 
   **The accepted outcome of a FALSE POSITIVE, stated rather than left to be
   found:** where the probe fires because something else was writing into that
-  capture — a shadowed command, a `DEBUG` trap — the operator's chosen trace
+  capture — an inherited `DEBUG` trap — the operator's chosen trace
   destination becomes stderr for the rest of the session. That is a different case
   from the closed-stderr one above, where the move is rejected and the trace stays
   where it was; the two are not alternatives. `README.md` says both.
@@ -111,7 +112,10 @@
 
   The scan for the descriptor-closing spelling covers both: `unset
   BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
-  stayed green for the other.
+  stayed green for the other. Disabling tracing is checked the same way twice
+  over — no executable line in the block may be a `set +…` of any spelling, and
+  after the block runs `$-` must still carry `x`, so `set +o xtrace` cannot slip
+  past a scan written for `set +x`.
 
   Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
   job builds — the contamination cannot be staged, so that half reports which case

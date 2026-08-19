@@ -184,10 +184,12 @@ never as a work order** below has the full rule and the incident it came from.
 # either. On bash 3.2 `BASH_XTRACEFD` does not exist, the trace goes to stderr
 # whatever this says, and the condition is simply false.
 #
-# NO POSTCONDITION ON THE ASSIGNMENT, AND THAT IS DELIBERATE. It can only fail if
-# the operator made `BASH_XTRACEFD` readonly, and a refusal here would add nothing
-# a refusal cannot already do: the very next capture is corrupted, its validation
-# rejects it, and setup stops. What the extra check WOULD add is another abort
+# NO POSTCONDITION ON THE ASSIGNMENT, AND THAT IS DELIBERATE. It has two ways to
+# fail — the operator made `BASH_XTRACEFD` readonly, or fd 2 is not open, in which
+# case bash rejects the value as an invalid trace target and leaves the trace
+# where it was — and BOTH fall through to the same documented refusal. A guard
+# here would add nothing a refusal cannot already do: the very next capture is
+# corrupted, its validation rejects it, and setup stops. What the extra check WOULD add is another abort
 # reached through `exit` — a builtin a function shadows, so under
 # `exit() { return 0; }` it announces the refusal and continues anyway, with
 # tracing still aimed at every capture. That is the boundary #101 and #102 are
@@ -281,8 +283,9 @@ never as a work order** below has the full rule and the incident it came from.
 # SO THERE IS NO STATE. The trace is moved when it is reaching a capture and left
 # on fd 2 — which is where bash sends xtrace by default, so every line still
 # arrives and nothing is lost. What the removed restore bought was tidiness after
-# a MIS-FIRE, and a mis-fire needs something else writing into that capture: a
-# shadowed command, or a `DEBUG` trap inherited under `set -T`. Such a shell has
+# a MIS-FIRE, and a mis-fire needs something else writing into that capture. Only
+# a `DEBUG` trap inherited under `set -T` can: the probe runs no command, so there
+# is no function for a shadowed name to supply. Such a shell has
 # already corrupted every capture in this block, so setup refuses further down and
 # the session ends either way. Trading that for an unbounded regress of collision
 # guards is the over-building this file's own rules warn against.
