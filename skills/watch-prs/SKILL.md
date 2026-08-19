@@ -184,14 +184,25 @@ never as a work order** below has the full rule and the incident it came from.
 # either. On bash 3.2 `BASH_XTRACEFD` does not exist, the trace goes to stderr
 # whatever this says, and the condition is simply false.
 #
-# THE ASSIGNMENT IS PROVEN BY READING IT BACK, because a failed assignment does
-# not report failure: a readonly `BASH_XTRACEFD` prints its complaint and the list
-# still reports success. Refusing here names the cause; letting it through means
-# every capture below is corrupted and the abort names an innocent path.
+# NO POSTCONDITION ON THE ASSIGNMENT, AND THAT IS DELIBERATE. It can only fail if
+# the operator made `BASH_XTRACEFD` readonly, and a refusal here would add nothing
+# a refusal cannot already do: the very next capture is corrupted, its validation
+# rejects it, and setup stops. What the extra check WOULD add is another abort
+# reached through `exit` — a builtin a function shadows, so under
+# `exit() { return 0; }` it announces the refusal and continues anyway, with
+# tracing still aimed at every capture. That is the boundary #101 and #102 are
+# open on, and it is not one this line should quietly take a position on. The
+# guard is removed rather than hardened.
+#
+# STDOUT IS NOT TOUCHED BY THIS. bash closes the descriptor `BASH_XTRACEFD`
+# referred to when it is UNSET or set to the empty string; a reassignment closes
+# nothing. Measured on bash 5.3.9 — after `BASH_XTRACEFD=1` → `2`, ordinary
+# `printf` output still arrives on fd 1 and `exec 3>&1` still succeeds, while
+# `BASH_XTRACEFD=` produces no further output at all. `test-pr-skill-contract.sh`
+# asserts that on whatever bash runs the suite rather than trusting the version
+# this was measured on.
 if [[ ${BASH_XTRACEFD-} = 1 ]]; then
     BASH_XTRACEFD=2
-    [[ $BASH_XTRACEFD = 2 ]] \
-        || { echo "ABORT: BASH_XTRACEFD is readonly and points at stdout; every value read here would carry the shell's own trace"; exit 1; }
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #

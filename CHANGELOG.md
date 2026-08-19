@@ -33,10 +33,19 @@
 
   **And it never unsets the variable**, which is the operation that would be
   unsafe: bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset
-  or set to the empty string. Measured on bash 5 — `BASH_XTRACEFD=2` leaves fd 1
-  open and the capture clean, `BASH_XTRACEFD=` kills the shell's stdout outright.
-  Reassignment does not close anything, which is what makes this form available at
-  all.
+  or set to the empty string. Measured on bash 5.3.9 — after `BASH_XTRACEFD=1` →
+  `2`, ordinary `printf` output still reaches fd 1 and `exec 3>&1` still succeeds,
+  while `BASH_XTRACEFD=` produces no further output at all. Reassignment closes
+  nothing, which is what makes this form available where the save/restore
+  manoeuvre was not; the suite asserts it on whatever bash runs it rather than on
+  the build it was measured against.
+
+  **No postcondition on the assignment, deliberately.** It can only fail against a
+  readonly `BASH_XTRACEFD`, and a refusal there adds nothing a refusal cannot
+  already do — the next capture is corrupted and its own validation stops setup.
+  What it would add is another abort reached through `exit`, which a function
+  shadows; that is #101 and #102's open boundary, and this line does not take a
+  position on it.
 
   The origin read was never affected and still is not: its value arrives in a
   file read with `$(<"$path")`, and a redirection-only substitution executes
