@@ -81,6 +81,25 @@ unrelated note blocks a PR that is not responsible for it.
 Pre-existing problems in code the PR touches are a judgement call: in scope if
 the PR changes behaviour around them, out of scope if it merely moves lines.
 
+## Releases: which changes bump the version
+
+This repository ships as a Claude Code plugin, so `version` in
+`.claude-plugin/plugin.json` and a `CHANGELOG.md` entry accompany a change to
+**what is installed** — the scripts under `skills/watch-prs/`, `SKILL.md`, or the
+manifests. A change confined to `skills/watch-prs/scripts/test-*.sh`, to
+authoring documentation, or to the reviewer instruction files (`AGENTS.md`,
+`CLAUDE.md`, this file) produces **no** release and must not bump the version.
+Nothing installs the reviewer files — you and Codex read them from the pull
+request's base ref — so a bump for one would be a version nobody can observe.
+
+**A comment-only change to an installed script IS a release.** This was decided
+after you and Codex reached opposite verdicts on the same file in #97: the
+installed bytes changed, and every changed installed file must have a version
+that names it. Do not file a finding asking for the bump or the entry to be
+removed because nothing observable changed — "did an installed file change" is
+the test, not "can a user notice". Its entry has no failure to explain, so it
+says what the comment now records and which misreading it prevents.
+
 ## What counts as a blocking finding
 
 Attachable to a line in this PR's diff, with the problem, its impact, and a
