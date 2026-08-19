@@ -3669,7 +3669,7 @@ _setup_block="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^`
 # whole fixture before any of these assertions run. `awk` reading `$SKILL`
 # directly has no pipe to break.
 _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^```$/{exit} f&&!/^[[:space:]]*#/&&NF{print;exit}' "$SKILL")"
-[ "$_first_exec" = 'if [[ -n "$( : )" ]]; then' ] \
+[ "$_first_exec" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then' ] \
     && pass "…and its first executable line tests whether a trace reaches a capture" \
     || die "setup runs a substitution before moving the trace (first line: '$_first_exec')"
 # AN ASSIGNMENT AND A RESERVED WORD, NOT `set +x`. `set` is a builtin and a
@@ -3739,7 +3739,7 @@ else
     esac
     # THE GUARD AS SETUP WRITES IT, lifted rather than retyped — a retyped copy proves
     # that some line works, not that the one that ships does.
-    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( : )" \]\]; then$/,/^fi$/p')"
+    _tr_guard="$(printf '%s\n' "$_setup_block" | sed -n '/^if \[\[ -n "\$( RB_TRACE_PROBE=1 )" \]\]; then$/,/^fi$/p')"
     case "$_tr_guard" in
         *'BASH_XTRACEFD=2'*) pass "…and the guard lifts out of the block with it" ;;
         *) die "the guard could not be lifted: '$_tr_guard'" ;;
@@ -3817,6 +3817,41 @@ else
             && pass "…and BASH_XTRACEFD='$_tr_spell' is caught as the descriptor it is" \
             || die "BASH_XTRACEFD='$_tr_spell' left the capture corrupted ('$_tr_alt_v')"
     done
+    # AND A PRINTING COMMAND CANNOT MAKE THE PROBE FIRE. The probe runs inside a
+    # capture, so anything that writes to stdout there looks exactly like a trace
+    # that arrived. `$( : )` was the first spelling and a driving shell with
+    # `:() { printf marker; }` moved a destination the operator had chosen; an
+    # assignment has no name to take and no output of its own.
+    _tr_shadowed_probe="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS \
+        CLAUDE_PLUGIN_ROOT="$_tr_dir/plug" bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -x
+            :() { printf marker; }
+            printf() { builtin printf marker; }
+            echo() { builtin echo marker; }
+            '"$_tr_guard"'
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_shadowed_probe=""
+    # THE PROBE'S OWN REACH: the same shell with `$( : )` in that position must
+    # move the target, or the case above passes against a shell where nothing
+    # could have fired.
+    _tr_colon="$(cd "$_tr_dir" && env -u BASH_ENV -u ENV -u SHELLOPTS bash -c '
+            exec 7>/dev/null
+            BASH_XTRACEFD=7
+            set -x
+            :() { builtin printf marker; }
+            if [[ -n "$( : )" ]]; then BASH_XTRACEFD=2; fi
+            set +x
+            builtin printf "FD=[%s]\n" "${BASH_XTRACEFD-unset}"' 2>/dev/null)" || _tr_colon=""
+    case "$_tr_colon" in
+        *'FD=[2]'*) pass "…where a ':' probe in the same shell does move it" ;;
+        *) die "a printing ':' did not move the target here; the case below proves nothing ('$_tr_colon')" ;;
+    esac
+    case "$_tr_shadowed_probe" in
+        *'FD=[7]'*) pass "…and a printing ':' cannot make the shipped probe fire" ;;
+        *) die "a shadowed command moved a trace target that was never near a capture ('$_tr_shadowed_probe')" ;;
+    esac
     # AND A SESSION THAT IS NOT TRACING KEEPS ITS CHOSEN TARGET. `BASH_XTRACEFD=1`
     # with the `x` option off contaminates nothing, and the operator may have set
     # it ready for a later `set -x`; moving it would redirect diagnostics they had

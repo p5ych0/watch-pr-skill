@@ -19,9 +19,14 @@
   abort naming a path the operator could see was fine.
 
   Setup now moves the trace off the capture before its first substitution:
-  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( : )" ]]` — a capture that comes back
-  holding this shell's own trace, which is the property itself rather than a proxy
-  for it.
+  `BASH_XTRACEFD=2`, guarded by `[[ -n "$( RB_TRACE_PROBE=1 )" ]]` — a capture that
+  comes back holding this shell's own trace, which is the property itself rather
+  than a proxy for it. The probe is an assignment because every command is a name:
+  `$( : )` was the first spelling, and a driving shell with `:() { printf marker; }`
+  made the capture non-empty through the function's own output, moving a
+  destination the operator had chosen. An assignment is handled by the parser and
+  produces no output of its own, so the only thing that can come back is the
+  trace.
 
   Comparing the variable to `1` was tried and is wrong by omission twice over.
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a string compare misses

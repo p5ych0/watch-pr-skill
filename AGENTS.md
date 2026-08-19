@@ -70,7 +70,10 @@ that block is judged against both:
   would actually reach a capture — it decides by running a command inside one and
   looking at what comes back, not by comparing `BASH_XTRACEFD` to a number, since
   bash resolves `01`, `+1` and ` 1` to descriptor 1 and a descriptor duplicated
-  from stdout is not `1` at all — it moves the destination rather than disabling
+  from stdout is not `1` at all. That probe runs inside a capture, so it must be
+  an assignment and not a command: anything that writes to stdout there is
+  indistinguishable from a trace that arrived, and a shadowed `:` moved a
+  destination the operator had chosen — it moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
   closes the shell's stdout. `set +x` is wrong here twice over: it takes the

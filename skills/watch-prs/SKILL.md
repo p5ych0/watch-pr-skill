@@ -219,12 +219,15 @@ never as a work order** below has the full rule and the incident it came from.
 # is empty, and a session that set `BASH_XTRACEFD` ready for a later `set -x`
 # keeps the destination it chose.
 #
-# `:` IS A NAME, and this is the one place that is acceptable: a function called
-# `:` that prints something makes this move the trace to stderr when it did not
-# need to — the operator still sees every line, and no value is affected. The
-# failure direction is the harmless one, which is not true of any of the
-# alternatives.
-if [[ -n "$( : )" ]]; then
+# AN ASSIGNMENT INSIDE THE CAPTURE, BECAUSE EVERY COMMAND IS A NAME. `$( : )` was
+# the first spelling and it is wrong: a driving shell with `:() { printf marker; }`
+# makes the capture non-empty through the function's own output, so the guard
+# fires on a session whose trace was never near a capture and moves a destination
+# the operator chose. An assignment is handled by the parser, produces no output
+# of its own, and is traced like any other command — so the only thing that can
+# come back is this shell's trace. It runs in the substitution's subshell, so the
+# variable does not survive it.
+if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
