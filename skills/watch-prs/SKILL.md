@@ -236,10 +236,207 @@ unset -f rb_identity 2>/dev/null \
 # `$REPO_DIR` IS STILL NEEDED, and for a different question: `pr-merge-range.sh`
 # inspects HISTORY, which is a tree rather than an identity, so the merge gate
 # keeps its own `cd`.
-RB_REMOTE="$(git remote get-url origin)" \
-    || { echo "ABORT: could not read origin to pin this session's repository"; exit 1; }
-[ -n "$RB_REMOTE" ] \
+# THE VALUE COMES BACK IN A FILE, NOT ON A DESCRIPTOR, and that is the third
+# mechanism this call has used. Stdout was first: a driving shell tracing to fd 1
+# writes its trace into the capture. fd 9 was second, with the redirections on a
+# group: it moved the problem to a caller tracing to fd 9, whose target the `9>&1`
+# then pointed at the capture. Moving the trace target instead was third and
+# worse — bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset,
+# so restoring it closed fd 2 and the next call in the session returned nothing.
+#
+# A path has none of those properties. The operator's tracing goes wherever it
+# already went, the helper writes where it was told, and there is no descriptor
+# for the two to collide over. Measured: `$(<file)` and `read` are both clean
+# under an inherited xtrace, because nothing executes inside them to be traced.
+#
+# `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. Written as `bash -p …` this
+# calls a function called `bash` if the driving shell has one — and such a function
+# writes a forged URL to the file it was handed and returns, with the helper never
+# running. A path cannot be shadowed. `/usr/bin/env` is the same one every script here already depends on
+# through its shebang, so it is not a new assumption; which `bash` it then finds is
+# a `PATH` question, and that is #91.
+#
+# `bash -p` STARTS THE FIRST INTERPRETER PROTECTED, and it has to be the first:
+# privileged mode is what stops `BASH_ENV` being sourced at all, so entering it
+# from inside a shell that has already run the hook is too late. A hook needs to
+# shadow nothing to win that race: one that writes the transport file and exits is
+# a complete attack. There is no fallback inside the helper: it is not executable,
+# it carries no re-exec, and a missing `-p` is refused — by then the hook has
+# already run, so nothing in the file can recover from it.
+#
+# READ THROUGH A HELPER, BY PATH, BECAUSE `git` IS A NAME. This was
+# `git remote get-url origin` here, and a function answering only
+# `remote get-url origin` forged the identity every stage is then addressed by —
+# successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
+# no function can stand in front of it, and `bash -p` means no startup hook is
+# sourced and no inherited function is imported in the first place. #84.
+# THE PATH IS BUILT, NOT CAPTURED. `RB_ORIGIN_OUT="$(mktemp …)"` is a command
+# substitution, and a driving shell tracing to fd 1 writes the trace of `mktemp`
+# into it — so the variable holds trace text and a path, and the helper cannot
+# open it. An expansion runs no command, so there is nothing to trace: `$$` is the
+# shell's own pid and `${TMPDIR:-/tmp}` its own variable.
+#
+# BOTH TRANSPORT FILES LIVE IN A DIRECTORY THIS SETUP CREATES, and that replaces
+# the trade an earlier round wrote down and accepted. `watch-pr-origin.$$` is
+# predictable from another account on the machine, so it could be pre-created as a
+# world-writable file or as a symlink; the helper would then truncate and write
+# through it, and the value read back at the line below — the one every later
+# signoff, revocation and review request is addressed by — would be whatever that
+# account left there. Calling it a public URL answered disclosure and left the
+# substitution and the follow-the-symlink write untouched.
+#
+# `mkdir` IS THE EXCLUSION, and `$RANDOM` only keeps it from being a nuisance.
+# `mkdir` fails if the name exists, so an account that guesses right gets nothing
+# — the candidate is passed over and the next one is tried, which is the
+# fail-closed half and the half that matters. It does not end the session: a
+# guessed name is a reason to use a different directory, not to stop. Three `$RANDOM` draws make guessing right unlikely enough
+# that nobody can hold the session open by squatting the name. `-m 700` is applied
+# by `mkdir` itself, so nothing can be placed in the directory between its creation
+# and its use, and both files below inherit that protection rather than each
+# needing its own.
+#
+# STILL AN EXPANSION, NOT A SUBSTITUTION. `$(mktemp -d)` would name the directory
+# in one line, and a driving shell tracing to fd 1 would put the trace of `mktemp`
+# inside the value. `$RANDOM` and `$$` are the shell's own, so there is nothing to
+# trace. `mkdir` runs through `/usr/bin/env` for the reason every other command in
+# this block does: a function called `mkdir` would otherwise answer, report
+# success, and leave the transport in a directory of its choosing.
+#
+# THE PARENT HAS TO BE ONE NOBODY ELSE CAN REPLACE THE DIRECTORY IN, and mode 700
+# does not give that. It protects what is INSIDE the directory; it says nothing
+# about the entry naming it. On a shared `TMPDIR` that another account can write
+# and search and that lacks the sticky bit, that account can watch for the name,
+# RENAME the directory without ever entering it, and put a writable one of its own
+# at the same path — after which the helper writes `origin` into the replacement
+# and the value read back is the attacker's. The random suffix stops the name
+# being pre-created and does nothing about it being observed and then replaced.
+#
+# WHO MAY RENAME THE DIRECTORY IS THE QUESTION, and the helper is what answers it.
+# Checking a path and then opening it are two operations on a name, and whoever
+# controls the directory controls what the name means in between — so a parent
+# another account can rename entries in is unusable however the file itself checks
+# out, because that account can leave the helper's own output in place for the
+# checks and swap the pathname before the read.
+#
+# WHICH IS NOT THE SAME AS "OWNED BY THIS USER". Root-owned and sticky — `/tmp` —
+# is safe: sticky means nobody may rename another account's entries, and the
+# entries above it belong to root, who can replace this script anyway. What is
+# NOT safe is an attacker-owned sticky directory, because sticky says nothing
+# about its OWNER renaming ours. Ownership and mode together decide that, and the
+# rule lives in `pr-origin.sh` where the whole ancestry is walked; the loop below
+# offers candidates and lets it answer.
+#
+# `$TMPDIR` FIRST, `$HOME` SECOND. Where `TMPDIR` is per-user this changes
+# nothing; where it is the shared `/tmp` the helper accepts it, because root owns
+# it and it is sticky. `HOME` is the fallback for the cases the helper refuses —
+# an attacker-owned `TMPDIR`, one made world-writable without the sticky bit, a
+# relative one, or a component of its ancestry that fails the same tests. What
+# neither covers is a home directory the operator has made writable by others,
+# which is stated here as the limit rather than left to be inferred.
+# ABSOLUTE, AND TESTED HERE RATHER THAN DISCOVERED LATER. The helper walks every
+# component of the output path to the root, which a relative path cannot be walked
+# to — so it refuses one. Without this test a relative but perfectly usable
+# `TMPDIR` such as `.tmp` was SELECTED here and refused there, and the session
+# aborted over a configuration that has a working fallback sitting next to it.
+# Requiring it in the candidate makes a relative `TMPDIR` fall through to `HOME`,
+# and a relative `HOME` refuse in these words rather than in the helper's.
+# CANDIDATES ARE OFFERED; THE HELPER DECIDES. The driver used to pick a parent
+# with its own tests and hand the result over — and the helper then walked the
+# whole path and refused for reasons the driver had never asked about. An owned
+# mode-0777 `TMPDIR` passed `-O` here and was rejected there, so a session with a
+# perfectly good `HOME` sitting behind it aborted. That is the same
+# selector-versus-helper mismatch the relative-path case had, and the fix that
+# does not reproduce it a third time is to stop deciding here: the safety rule
+# lives in ONE place, and this loop finds out by asking.
+#
+# `-d` AND ABSOLUTE ARE STILL TESTED, because they are about whether a candidate
+# can be TRIED at all: a relative path cannot be walked to the root, and a name
+# that is not a directory cannot hold a transport. Neither is a safety rule.
+RB_TMPDIR=
+# THE RESET IS PROVED, because the loop's exit test reads this variable. A
+# readonly `RB_TMPDIR` in the long-lived driving shell survives the clear AND the
+# assignment below, so the loop would break on a stale value, the non-empty test
+# after it would accept that value, and setup would open the stale directory's
+# `origin` instead of the one it had just verified.
+[[ -z $RB_TMPDIR ]] \
+    || { echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
+# THE LOOP VARIABLE IS PROVED ASSIGNABLE FIRST, because `for` cannot report that
+# it is not. A readonly `RB_TMPPARENT` in the long-lived driving shell makes every
+# iteration's assignment fail, so no candidate is ever tried and setup refuses
+# with a message about `TMPDIR` and `HOME` that describes neither — the operator
+# is sent to look at their environment for a variable that is fine. The probe
+# writes a value only this line writes and reads it back, which no readonly can
+# satisfy; the clear after it cannot fail once that has passed.
+# TWO UNEQUAL ASSIGNMENTS, because ONE proves nothing against a readonly holding
+# the probe's own value. `readonly RB_TMPPARENT=probe` in the driving shell makes
+# the failed assignment leave exactly what the postcondition expects, so the guard
+# passes and every `for` assignment then fails silently. No single value can be
+# ruled out; two that differ can, because a readonly cannot equal both.
+RB_TMPPARENT=probe-a
+[[ $RB_TMPPARENT = probe-a ]] \
+    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
+RB_TMPPARENT=probe-b
+[[ $RB_TMPPARENT = probe-b ]] \
+    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
+RB_TMPPARENT=
+for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
+    [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
+    RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+    [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
+    /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
+    # THE READ IS THE TEST. If the helper accepts this parent it has already
+    # written the value, so there is nothing to repeat; if it refuses, the reason
+    # is on stderr for the operator and this tries the next candidate.
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
+        RB_TMPDIR="$RB_TRY"
+        # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
+        # assignment that did not happen is what turns a readonly into a stale
+        # directory the rest of setup then trusts.
+        [[ $RB_TMPDIR = "$RB_TRY" ]] \
+            || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
+        break
+    fi
+    /usr/bin/env rm -f "$RB_TRY/origin"
+    /usr/bin/env rmdir "$RB_TRY"
+done
+[[ -n $RB_TMPDIR ]] \
+    || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
+RB_ORIGIN_OUT="$RB_TMPDIR/origin"
+[[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
+    || { /usr/bin/env rm -f "$RB_TMPDIR/origin"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
+RB_REMOTE=
+[[ -z $RB_REMOTE ]] \
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
+{ [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+    && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_OUT" \
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
+/usr/bin/env rm -f "$RB_ORIGIN_OUT"
+# THE DIRECTORY GOES HERE, WHILE THE LIST OF PLACES THAT WOULD HAVE TO REMOVE IT
+# IS STILL ONE LONG. It used to stand until the pin at the end of setup, which put
+# eight aborts between allocation and cleanup — an empty origin, a multi-line one,
+# an unparseable identity, a summary file that could not be created — and each of
+# them left a private `watch-pr.*` directory behind that nothing else can remove.
+# Adding `rmdir` to eight sites is the list-wrong-by-omission this repository has
+# a rule about; the transport is dead the moment its value has been read, so it is
+# removed the moment its value has been read, and every abort after this line has
+# nothing to clean up. The pin allocates its own directory later, for the same
+# reason and with the same lifetime.
+/usr/bin/env rmdir "$RB_TMPDIR"
+[[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+# THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
+# public information, so this is tidiness rather than secrecy — but the setup block
+# already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
+# leaves behind, so a second one that survives a refusal would be a leak the suite
+# reports and nobody meant.
+#
+# ONE LINE, OR IT IS NOT A REMOTE. Kept as the last check on a value the whole
+# session is addressed by. Nothing known still writes to this stream — that is
+# what the invocation form buys — so this now guards the unknown rather than the
+# tracing case it was added for.
+[[ $RB_REMOTE = "${RB_REMOTE%%'
+'*}" ]] \
+    || { echo "ABORT: the origin read returned more than one line; something is writing to its stdout ('$RB_REMOTE')"; exit 1; }
 # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
 # the same value the children will be pinned to, without depending on the export
 # having succeeded — so the two cannot disagree. The export itself is the last
@@ -345,16 +542,72 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # a new process sees it, so that is what is asked — and asking it also subsumes the
 # parent-side check, since a wrong value here is a wrong value there.
 #
-# `bash` AND `git` ARE STILL NAMES, and that is a known, filed limit rather than an
-# oversight: see #84. A function named `bash` runs in a shell copy that inherits
-# non-exported variables, so it can agree with a forged `export` while the real
-# stages — which exec through `#!/usr/bin/env bash` and resolve on `PATH` — inherit
-# nothing; a function named `git` forges the read above. Both are removed by
-# reading origin through a helper at an absolute path, which is that issue. Neither
-# is reachable without a shell that is already lying to itself, whereas what this
-# pin fixes needed no hostility at all: an ordinary `cd`.
-RB_PIN_SEEN="$(bash -c 'printf %s "${REVIEW_BUS_REMOTE-}"')" || RB_PIN_SEEN=''
-if [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+# ASKED THROUGH THE HELPER, NOT WITH `bash -c`. That was the first form and it was
+# a name: a function called `bash` runs in a shell copy which inherits NON-exported
+# variables, so it agreed the pin had arrived while the real stages — which exec
+# through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
+# helper is reached by path and is a real child, so its answer is the one the
+# stages will get. #84.
+# NO FALLBACK ON FAILURE, because `:` is a name. `… || : > "$RB_PIN_OUT"` called
+# whatever the operator's shell had defined as `:`, and one that wrote `$RB_REMOTE`
+# into that file made the equality below pass while the child probe had actually
+# failed.
+#
+# WHAT REPLACED IT IS NOT ANOTHER FALLBACK: THE FILE IS READ ONLY IF THE HELPER
+# SUCCEEDED. Relying on the truncation was relying on the helper having reached it,
+# and a helper that cannot start — missing, unreadable, or `env` unable to exec it —
+# never truncates anything. The status was ignored, so what got read was whatever
+# was at that path already, and it only had to equal `$RB_REMOTE` to report that a
+# child had inherited the pin when no child had run. Branching removes the
+# dependency on the file's contents rather than adding a guard over them; an
+# unset `RB_PIN_SEEN` cannot match a non-empty remote, so the failure lands on the
+# postcondition that is already here.
+#
+# WRITTEN AS `&&` RATHER THAN AS `if`, and that is structural, not style: the
+# postcondition below is lifted out of this file and executed by
+# `test-pr-skill-contract.sh`, which takes the block from here to the first `fi`
+# at column 0. An `if … else … fi` around this call ends the lift before the
+# postcondition, and every case built on it then runs against a truncated block —
+# nine assertions passed against nothing on the first attempt at this.
+# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE FOUR LINES LATER. The origin read
+# removed the first one as soon as it had its value; this is the second half of
+# that, and it is why no abort between the two has a directory to clean up. Same
+# parent, same rules, same lifetime.
+RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
+    || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
+/usr/bin/env mkdir -m 700 "$RB_PIN_DIR" \
+    || { echo "ABORT: could not create a private directory for the pin probe"; exit 1; }
+RB_PIN_OUT="$RB_PIN_DIR/pin"
+[[ $RB_PIN_OUT = "$RB_PIN_DIR/pin" ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
+RB_PIN_SEEN=
+# THE RESET IS PROVED TOO, and this is the case where it decides the answer. A
+# readonly `RB_PIN_SEEN` already holding the real origin survives both this line
+# and the assignment below it, so a child that inherited nothing reports nothing
+# and the equality still agrees — setup announces a pin that no helper will see.
+# Combined with an `export` that assigns without exporting, that is a session
+# whose every stage re-derives identity from wherever it later stands.
+[[ -z $RB_PIN_SEEN ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_DIR"; echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+        && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
+/usr/bin/env rm -f "$RB_PIN_OUT"
+/usr/bin/env rmdir "$RB_PIN_DIR"
+# NON-EMPTY AS WELL AS EQUAL, and the emptiness is the half that matters here.
+# Every refusal above ends in `exit`, and `exit` is a name: with one shadowed, a
+# refused transport check carries on with `RB_REMOTE` still empty, the pin probe
+# reports empty because no child was asked, and `"" = ""` SUCCEEDS — so setup
+# announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
+# derived its identity from wherever the session happened to stand.
+#
+# THIS IS NOT THE WHOLE OF THAT CLASS, and #102 has the rest: a shadowed `exit`
+# makes every refusal in this block non-terminal, and gating the remainder
+# structurally is a restructure rather than a line. What this closes is the
+# consequence — an empty pin can no longer reach the success line, whatever
+# walked past the refusal that should have stopped it.
+if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
     echo "ABORT: the repository pin did not take; every stage would route by the current directory"

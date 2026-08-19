@@ -1,5 +1,316 @@
 # Changelog
 
+## [2.0.29] — 2026-08-18
+
+- **The setup block read origin with `git` and proved its pin with `bash -c`, and
+  both are names.** A function answering only `remote get-url origin` forged the
+  identity every stage is then addressed by — successfully, with a plausible
+  value. A function called `bash` runs in a shell copy that inherits *non*-exported
+  variables, so combined with an `export` that assigns without setting the export
+  attribute it agreed the pin had arrived while every real helper — which execs
+  through `#!/usr/bin/env bash` and resolves on `PATH` — inherited nothing.
+
+  Both are now asked of `pr-origin.sh`, started by the caller as
+  `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the
+  value read back from that file. A path is
+  not a name, so no function can stand in front of it; privileged mode means
+  `BASH_ENV` and `ENV` are never sourced, shell functions are never imported from
+  the environment, and `SHELLOPTS` is ignored, so there is no hook to escape and
+  nothing inherited to clear; and `pin` is a real child, so what it sees is what
+  the stages will see.
+
+  Measured against the driver before and after: a forged `git` used to decide the
+  session's repository and now cannot, and an `export` that assigns without
+  exporting is caught by a child reporting it inherited nothing.
+
+  The value comes back **in a file the caller names**, and the caller reads it with
+  `$(<"$path")`. Two earlier mechanisms put it on a descriptor — stdout, then fd 9
+  — and each put it on a stream some caller traces to; moving `BASH_XTRACEFD` out
+  of the way instead was worse, because bash CLOSES the descriptor that variable
+  referred to when it is unset, so restoring it closed fd 2 and the next call in
+  the session returned nothing at all. A path cannot collide with a descriptor, and
+  a redirection-only substitution executes nothing for an inherited `xtrace` to
+  write into.
+
+  **The caller starts it privileged, through a path**: `/usr/bin/env bash -p`.
+  Written as `bash -p …` the call is a NAME — a function called `bash` in the
+  driving shell writes a forged URL to the transport file it was handed and
+  returns, without the helper running at all. `/usr/bin/env` is the same path every script
+  here already depends on through its shebang, so it is not a new assumption;
+  which `bash` it finds is a `PATH` question, and that is #91.
+
+  **Starting it privileged cannot be delegated:**
+  privileged mode is what stops `BASH_ENV` being sourced, so it has to be in force
+  before the helper's first line. A hook needs to shadow nothing to use the gap —
+  one that writes the transport file and exits is a complete attack. There is no
+  fallback inside the helper for a caller that forgets: by then the hook has run,
+  so a missing `-p` is refused rather than recovered from.
+
+  Privileged mode does not source `BASH_ENV` or `ENV`, does not import functions
+  from the environment, and ignores `SHELLOPTS` — measured, all three. That
+  replaced a re-exec whose marker the hook could set for itself, a
+  function sweep made of `unset`, `builtin`, `compgen` and `read` (each shadowable,
+  and each markable `readonly -f` so the clearing failed and the loop then *called*
+  it), and a `:` probe that ran before any of it. Every one was a name used to
+  escape names, and each round of review found the next; `-p` removes the question
+  rather than answering it again. The guard is `$-`, which is shell state a hook
+  cannot write — where the two guards before it, an environment marker and a
+  positional flag, were both forged.
+
+  What remains is stated in the script rather than left to be rediscovered: the
+  caller's half cannot be supplied from inside, so a caller that omits `bash -p`
+  is refused rather than recovered — a later entry in this release removed the
+  fallback hop that used to try; and a poisoned `PATH` forges every external
+  command, which is not this helper's to answer and is filed as #91. Both
+  need a shell already executing arbitrary code as the operator — which can edit
+  the helper instead.
+
+  **Both transport files live in a directory the setup creates**, rather than at
+  `${TMPDIR:-/tmp}/watch-pr-origin.$$`. A name derived from the pid is predictable
+  from another account on the same machine, so it could be pre-created as a
+  world-writable file or as a symlink; the helper truncates and writes through
+  whatever it is given, so the URL read back — the one every later signoff,
+  revocation and review request is addressed by — would have been that account's
+  choice. Reasoning that a remote URL is public answered disclosure and left the
+  substitution untouched. `mkdir` is the exclusion and is what fails closed: an
+  account that guesses the name gets nothing — the candidate is passed over and
+  the next is tried — instead of supplying the session a
+  repository, and three `$RANDOM` draws make guessing it unlikely enough that
+  nobody can hold a session open by squatting it. The directory is removed on
+  every exit from setup, including the two that refuse.
+
+  **A pin helper that cannot start is no longer read back.** The status of the
+  `pin` call was ignored on the grounds that the helper truncates the file before
+  writing — true, and silent about a helper that never reached the truncation
+  because it was missing or unreadable. What was read then was whatever stood at
+  that path, and since the path was reused for the life of the driving shell, a
+  value left by an interrupted earlier setup only had to match to report that a
+  child had inherited a pin no child had been asked for.
+
+  **The transport directory's parent has to be one nobody else can replace it
+  in**, which mode 700 does not give. That mode protects what is inside the
+  directory and says nothing about the entry naming it: where another account can
+  write the parent, it can observe the name, rename the directory without
+  entering it, and leave a writable one of its own at that path — after which the
+  value read back is theirs. The rule that answers this is stated further down in
+  this entry, where it settled: every component owned by this user or root. A
+  sticky parent was an intermediate answer and is NOT sufficient — sticky stops
+  one account renaming another's entries and does nothing about the directory's
+  owner renaming ours.
+
+  **Every cleanup is reached by path.** `rm` and `rmdir` are names, and each ran
+  between a value being obtained and that value being trusted: an
+  `rm() { RB_REMOTE='git@github.com:WRONG/other.git'; }` in the driving shell
+  replaced the pin immediately after the protected read, and one setting
+  `RB_PIN_SEEN` made the postcondition agree after a probe that had failed. The
+  helper cannot see either — it had already done its job.
+
+  **A transport directory other accounts can write is refused.** The caller can
+  test that the parent belongs to the operator; it cannot test whether the
+  operator left it open to others, because bash has no test for another account's
+  write bit — so an owned mode-0777 `TMPDIR` got through, and an account with
+  write there could replace the whole directory between the helper closing its
+  file and the caller opening it. Both of the caller's checks then pass, because
+  the planted file belongs to the operator too. The helper refuses a group- or
+  component ANYWHERE on the path to its output that another account controls —
+  not just the
+  directory holding it, which the caller creates mode 700 and which would
+  therefore always have passed, while an account with write on the directory
+  above it can rename that one after the check and leave a replacement at the
+  same name. What is required of each component is OWNERSHIP by this user or by
+  root, and not merely a mode: a sticky directory stops one account renaming
+  ANOTHER'S entries and does nothing about its owner renaming ours, so an
+  attacker-owned `1777` ancestor passed a permission-only test — and an
+  attacker-owned `0755` one is no better, since its owner can add the write bit
+  after the probe. Root is trusted because root can replace this script, the
+  `git` it runs and the shell interpreting it. Sticky remains the MODE exception,
+  and is why `/tmp` works: root owns it, and `1777` lets anyone create an entry
+  while letting nobody rename another account's.
+
+  **The path is checked as it is WRITTEN and as it RESOLVES**, because neither
+  covers the other. A lexical walk never sees the real ancestry — a `TMPDIR` of
+  `/home/me/t` pointing at `/srv/other/mine` checks `/home/me` and never
+  `/srv/other`, and the account that owns that one can replace `mine` after every
+  check has passed. Refusing symlinks instead is not available: macOS reaches its
+  own temporary directories through them. So the walk runs twice, over the written
+  path and over `cd -P`/`pwd -P`'s answer, and a path that cannot be resolved is a
+  refusal. The mode clause skips links, whose own mode is `0777` everywhere and
+  means nothing; the ownership clause applies to them exactly as to directories,
+  because whoever owns a link can repoint it.
+
+  **An empty pin can no longer reach setup's success line.** Every refusal in the
+  transport block ends in `exit`, and `exit` is a NAME: with one shadowed, a
+  refused check carried on with `RB_REMOTE` still empty, the probe reported empty
+  because no child had been asked, and `"" = ""` succeeded — so setup announced
+  success with no `REVIEW_BUS_REMOTE` at all and every later stage derived its
+  identity from wherever the session stood. The postcondition requires a non-empty
+  pin as well as an equal one. That is the consequence rather than the class;
+  #102 has the rest.
+
+  **An ACL is a permission the mode bits do not show.** On macOS a user-owned
+  `0700` directory can still grant another local account `add_file` and
+  `delete_child` through an extended ACL, and Linux POSIX ACLs do the same;
+  `find -perm` sees none of it, so every ownership and mode check passed while
+  that account could replace the directory. Any component carrying one is refused.
+  What is read is the MARKER, not the ACL's contents — reading those means
+  `getfacl` on one platform and `ls -e` on the other, two grammars and two new
+  ways to be wrong. Either mark counts: `ls -l` appends `+` for extended security
+  information and, on macOS, `@` for extended attributes — and a component
+  carrying BOTH shows `@` alone, so keying on `+` let an ACL granting another
+  account `delete_child` read as clean beside any xattr. `@` is ambiguous rather
+  than harmless. Coarse, and it fails closed.
+
+  The probe's status is taken, because `find` prints nothing when it fails and
+  empty output is what the walk reads as safe — so a component renamed during its
+  own probe would have been let through by that interference. Tested with
+  `find -prune -perm`, which is POSIX where `stat`'s flags are not, and run in
+  the helper rather than the driver because that process is privileged, so `find`
+  cannot be a shadowed name there.
+
+  **Git resolves the URL, and nothing in the helper second-guesses it.** Every
+  attempt to take a piece of that resolution into the script diverged from git's
+  own semantics, and the count is the evidence: a scalar read returning the LAST
+  of several URLs where `remote get-url` returns the first; a `--local` query
+  that cannot see the worktree scope; a hand-applied `insteadOf` re-deriving
+  longest-match; `ls-remote --get-url` resolving its operand as a remote NAME;
+  and then, from a two-call design that replayed extracted rewrite rules as `-c`
+  options, cross-scope ordering, `~`-includes lost with `HOME`, and a subsection
+  containing a space. Each fix was right about the case it named and produced the
+  next one, because what was being rebuilt is git's config machinery.
+
+  So there is one ordinary call — `git remote get-url origin`, under the
+  operator's own config, which is what `fetch` and `push` consult. What the
+  helper still decides is the environment it runs in: `env -i` with `PATH`,
+  `HOME`, `XDG_CONFIG_HOME` and the config variables carried back — the line the
+  next paragraph draws.
+
+  **Those are carried by prefix, not by name.** `${!GIT_CONFIG_@}` passes through
+  every set variable whose name begins `GIT_CONFIG_`, so the two file locations,
+  the system opt-out, the runtime family `GIT_CONFIG_COUNT` /
+  `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>`, `GIT_CONFIG_PARAMETERS` and
+  whatever git adds next all arrive. A list of three named the files and the
+  opt-out and missed both runtime channels — an operator whose `insteadOf` rule
+  arrives that way had it expanded by every ordinary command and dropped here,
+  pinning the session to the unexpanded alias. An indexed family cannot be
+  enumerated at all, so the shape changed rather than the list growing.
+
+  Setness comes with it: a name appears only if it is set, so `GIT_CONFIG_GLOBAL=`
+  is carried as empty rather than dropped. That matters because git defines these
+  by whether they are set and reads an empty path as no such file — an operator
+  exporting one empty has switched that source off, and a non-empty test silently
+  restored git's default file.
+
+  Shutting the operator's config out of the resolution was tried and removed. It
+  stopped a carried file contributing `[remote "origin"] url = …`, which does win
+  `get-url` — but the same file may carry `url.<base>.insteadOf`, which the helper
+  must honour, and a rewrite rule redirects the origin completely where an
+  injected URL only puts a second one in front. The stronger channel is
+  deliberately open, so closing the weaker one bought no guarantee and cost
+  agreement with git. That boundary is now recorded in the file's limits.
+
+  **Config location is carried; repository scope is not**, and the prefix is
+  where that line is drawn. A `GIT_CONFIG_*` variable says WHICH CONFIG the
+  operator's git reads — dropping one does not block a redirection, it makes the
+  helper read a different config from the session, so a rewrite the session
+  honours is invisible here. `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR` and the
+  rest say WHICH REPOSITORY, share no prefix with them, and go with `-i`.
+
+  The omission falls the safe way in each direction, and the two directions are
+  not the same. Outside the prefix, `env -i` drops what nobody listed, so a future
+  repository-scoping variable cannot redirect the read. Inside it, a future
+  `GIT_CONFIG_*` variable is carried unseen — which is not a hole this design can
+  close and not one it needs to: everything reachable through that prefix is
+  arbitrary config, and arbitrary config is already an accepted channel here.
+  Carrying a config file at all means a `url.<base>.insteadOf` rule in it can
+  redirect the origin completely, which is recorded in the helper's limits. What
+  would be a hole is git putting repository SCOPE behind the `GIT_CONFIG_` prefix;
+  no such variable exists, and one would be a change to what the prefix means
+  rather than a variable this list forgot.
+
+  **A global `insteadOf` rule is expanded again.** Emptying the environment to
+  shut out `GIT_DIR` also removed `HOME`, and `git remote get-url` is documented
+  to expand `url.<base>.insteadOf` — rules that live in the user's global config.
+  A checkout whose origin is `work:acme/widget.git` came back unexpanded with host
+  `work`, so setup refused a valid checkout or addressed the session at a host it
+  does not push to. `HOME` and `XDG_CONFIG_HOME` are carried through; everything
+  that redirects the repository still goes, and the list needs no maintaining
+  because the environment is emptied rather than filtered.
+
+  **The helper creates its output exclusively, and cannot be started
+  unprivileged.** `: > "$OUT"` opened with O_TRUNC and followed symlinks, so an
+  account able to replace the transport directory could leave a symlink there
+  pointing at any file the operator owns — the helper truncated that file and
+  wrote a remote URL into it, and the caller's `-O` check passed precisely BECAUSE
+  the target belonged to the operator. `umask 077` and `set -C` make the create
+  O_EXCL, which refuses a symlink whether or not its target exists and refuses a
+  pre-existing regular file too; the value is appended into the object just
+  created rather than redirected a second time, which keeps `>|` — the spelling
+  that overrides noclobber — out of the file entirely.
+
+  The fallback hop for a caller that forgot `bash -p` is gone, and so is the
+  executable bit. The hop advertised a recovery it could not perform: by the time
+  it ran, the caller's `BASH_ENV` hook had already executed in that process, and a
+  hook that writes a forged value and exits has finished before any line of the
+  helper. `bash` reads the file rather than execing it, so the documented
+  invocation is unaffected.
+
+  **The transport file is checked and read as ONE OPEN OBJECT.** Checking a path
+  and then opening it are two operations on a name, so whoever can write the
+  directory holding it — the owner of a mode-0777 `TMPDIR` this user owns, among
+  others — can leave the helper's own output in place for the checks and swap the
+  pathname before the read. The file is opened once with a redirection, which the
+  shell applies and no function can stand in front of, and both the `-O` proof and
+  the read are of `/dev/fd/9`. `-h` is deliberately absent: on Linux that path is
+  itself a symlink into `/proc`, and a path that was a symlink has already been
+  followed by the open.
+
+  **`GIT_DIR` pointed the read at another checkout.** Privileged mode refuses
+  startup files and inherited functions and keeps ordinary environment variables,
+  so a `GIT_DIR` exported by the driving session made the helper read a second
+  repository's origin while standing in this one — and every signoff, revocation
+  and review request then went to that project. The lookup runs under `env -i`
+  with `PATH` alone, rather than a list of `-u`s that is wrong the first time git
+  adds a variable; `GIT_CONFIG_GLOBAL` is covered by the same change and asserted
+  separately for that reason.
+
+  **Each transport directory now lives exactly as long as its value.** It used to
+  stand from allocation until the pin at the end of setup, putting eight aborts in
+  between — an empty origin, a multi-line one, an unparseable identity, a summary
+  file that could not be created — each leaving a private `watch-pr.*` nothing
+  else can remove. Adding cleanup to eight sites is a list wrong by omission; the
+  origin's directory goes as soon as its value has been read, and the pin
+  allocates its own.
+
+  **The transport directory's parent must be one this user owns.** Sticky was
+  accepted first and cannot be: it stops one account renaming *another's* entries
+  and does nothing about the directory's OWNER renaming ours, so an attacker-owned
+  mode-1777 `TMPDIR` passed. Checking the resulting file instead — `-O`, `-h`,
+  `-f`, on the grounds that nobody else can produce a file this user owns — was
+  the second answer and is not sufficient either: checking a path and then opening
+  it are two operations on a NAME, so the owner of the parent can leave the
+  helper's own output in place for the checks and swap the pathname before the
+  read. What decides it is who may RENAME an entry there, which is ownership and
+  mode together — and that is not the same as "owned by this user": a root-owned
+  sticky `/tmp` is safe, because sticky means nobody may rename another account's
+  entries and root can replace this script anyway. An attacker-owned sticky
+  directory is not, for the reason above.
+
+  The rule lives in one place, `pr-origin.sh`, which walks the whole ancestry;
+  the driver offers `TMPDIR` then `HOME` and lets the helper answer, because two
+  copies of a safety rule end a valid session wherever they disagree — which they
+  did, three times. The file checks stay as a cheap postcondition; they are no
+  longer what makes it safe. A home directory the operator has made writable by
+  others is the stated limit.
+
+  **A readonly transport variable no longer passes silently.** The driving shell
+  is long-lived, so `RB_ORIGIN_OUT` can already exist as a readonly naming a file
+  somebody else can write; the assignment failed, the variable kept the old path,
+  and the helper wrote a good value into a file an attacker could edit before the
+  read. Written as `RB_ORIGIN_OUT=… || abort` this still did not catch it:
+  measured on bash 5, a failed readonly assignment as the left side of an AND-OR
+  list does not fire the `||` — the list reports success and the variable keeps
+  its old value. Each of the four transport assignments is now proved by reading
+  the variable back.
 ## [2.0.28] — 2026-08-18
 
 - **The loader was verified by asking `type`, which is a name.** Ten helpers ran

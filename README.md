@@ -194,6 +194,10 @@ Running a helper **by hand** goes through its shebang instead, which is
 and BSD/macOS `env` supports it; on an older `env` the helper refuses to start
 rather than starting unprotected.
 
+`pr-origin.sh` is the exception, and cannot be run by hand at all: it is not
+executable, because the shell reading it has to be privileged from its first line
+and only the caller can arrange that.
+
 **Contributors need that `env`, users do not.** The plugin never depends on the
 shebang: the skill supplies `-p` on every call, and so does every call a helper
 makes to another helper. The test suite is the exception — it executes the
@@ -641,8 +645,13 @@ plugin docs and open an issue.
 - **`--add-reviewer @copilot` fails:** Copilot review is not available to the
   repository. That is not permission to skip the pass — decide explicitly.
 - **Reviews target the wrong repo:** identity derives from
-  `git remote get-url origin`, read **once at the start of the session** and
-  pinned into `REVIEW_BUS_REMOTE` for every helper. So start the session in the
+  `git remote get-url origin` — read by `pr-origin.sh`, **once at the start of the
+  session**, and pinned into `REVIEW_BUS_REMOTE` for every helper. (The read goes
+  through a helper, started as `/usr/bin/env bash -p`, rather than running `git` in
+  your shell:
+  a shell function called `git` would otherwise decide which project the session
+  posts to, and privileged mode is what stops a `BASH_ENV` startup file running
+  inside the helper at all.) So start the session in the
   intended checkout; changing directory afterwards no longer retargets anything,
   which is the point — the phase stages post signoffs, revocations and review
   requests, and a `cd` into a second checkout used to send those to whatever pull

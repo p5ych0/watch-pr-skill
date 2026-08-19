@@ -50,6 +50,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-copilot-phase.sh
         "$ROOT"/pr-findings.sh
         "$ROOT"/pr-watch.sh
+        "$ROOT"/pr-origin.sh
         "$ROOT"/pr-selfcheck.sh
         "$ROOT"/identitylib.sh
         "$ROOT"/loadlib.sh
@@ -580,15 +581,22 @@ set -e
 for sc in "$ROOT"/pr-*.sh; do
     [ -f "$sc" ] || continue
     _n="$(basename "$sc")"
-    # ONE NARROWED EXEMPTION, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every
+    # TWO NARROWED EXEMPTIONS, NAMED AND EXPLAINED. `pr-selfcheck.sh` clears every
     # inherited function on purpose — it re-execs into a clean shell and then
-    # removes what a startup hook may have left, which is the opposite of copying
-    # a loading rule, and `test-pr-selfcheck.sh` covers that block. Only the
-    # CLEARS are excused: skipping the file entirely excused its hand-SOURCING
-    # too, so it could have begun loading a library by hand with this guard still
-    # reporting that every runtime script goes through the loader.
+    # removes what a startup hook may have left, which is the opposite of copying a
+    # loading rule, and `test-pr-selfcheck.sh` covers that block.
+    #
+    # `pr-origin.sh` is exempt for a different reason and does no clearing at all:
+    # the caller starts it with `/usr/bin/env bash -p`, so no function is imported
+    # from the environment in the first place. It also loads no library, by design
+    # — it is the one helper the driving shell reaches before anything else is
+    # trusted, so it depends on nothing it would have to verify.
+    #
+    # Only the CLEARS are excused. Skipping either file entirely would excuse its
+    # hand-SOURCING too, so it could begin loading a library by hand with this
+    # guard still reporting that every runtime script goes through the loader.
     _only=""
-    [ "$_n" = pr-selfcheck.sh ] && _only=sources-only
+    case "$_n" in pr-selfcheck.sh|pr-origin.sh) _only=sources-only ;; esac
     rb_hand_loads "$sc" "$_only" && _hl=0 || _hl=$?
     case "$_hl" in
         0) echo "FAIL - $_n has its own copy of the loading rule again"; idfail=1 ;;
@@ -790,9 +798,26 @@ priv_missing=""
 for f in "$ROOT"/pr-*.sh; do
     _b="$(basename "$f")"
     [ "$_b" = pr-selfcheck.sh ] && continue
+    # `pr-origin.sh` IS THE SECOND EXEMPTION, and a narrower one. It is not
+    # executable at all, so a shebang is inert: nothing can start it except a
+    # caller naming an interpreter, and the documented caller names
+    # `/usr/bin/env bash -p`. A privileged shebang there would state a protection
+    # the file does not rely on and cannot enforce. Both halves are asserted
+    # below, so the exemption cannot quietly become a hole.
+    [ "$_b" = pr-origin.sh ] && continue
     head -n 1 "$f" | grep -qxF '#!/usr/bin/env -S bash -p' \
         || priv_missing="$priv_missing $_b"
 done
+if [ -f "$ROOT/pr-origin.sh" ]; then
+    [ ! -x "$ROOT/pr-origin.sh" ] \
+        && echo "ok   - …and pr-origin.sh is not executable, so only a named interpreter starts it" \
+        || { echo "FAIL - pr-origin.sh is executable; its shebang would become the entry point"; idfail=1; }
+    _po_out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+        bash "$ROOT/pr-origin.sh" read /dev/null 2>&1)"; _po_rc=$?
+    { [ "$_po_rc" -ne 0 ] && printf '%s' "$_po_out" | grep -q 'not privileged'; } \
+        && echo "ok   - …and it refuses an unprivileged interpreter by name" \
+        || { echo "FAIL - pr-origin.sh ran unprivileged (rc=$_po_rc out='$_po_out')"; idfail=1; }
+fi
 [ -z "$priv_missing" ] \
     && echo "ok   - every runtime helper asks for a privileged interpreter" \
     || { echo "FAIL - helper(s) without a privileged shebang:$priv_missing"; idfail=1; }

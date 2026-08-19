@@ -27,6 +27,7 @@ request cannot rewrite the rules it is judged by.
 | `skills/watch-prs/scripts/pr-copilot-phase.sh` | The Copilot phase end to end, in three stages with the operator's decision between them: `record` proves Codex clean on an exact head, proves that head's checks and writes the signoff onto the PR, then stops and asks; `open` runs only on the answer, and proves the phase is STILL open before it touches anything: the head is unmoved, Codex's live verdict on that sha is clean, and the recorded Codex signoff still names it — a revocation is how a phase is deliberately reopened, and GitHub serves the old clean verdict until the new pass reports. It re-enforces the round boundary too, because `record` publishes the signoff before pausing and a later session can resume straight into here; that is why `open` can return 3. All of it runs THREE times — up front, before the revocation, and again after it — because none of these need the head to move and the revocation is itself a mutation with the request still to come. The order is revoke, prove, baseline, request: the proof as late as it can be while the Copilot baseline stays last, which it must be or a pass landing meanwhile answers a request made after it. `close` is the other end: Copilot's verdict came back clean, so the second signoff is written down and the operator is asked what to do with two closed phases. It takes the Codex head as well as reading the current one, because whether those two shas are EQUAL is what decides which question gets asked — the fault-tolerance pass is offered only where the phase produced commits. It takes the reviewers mode too, since `codex-only` means no Copilot review was ever requested and there is nothing to record; saying so is not the same as skipping it. 0 recorded/opened/closed, 1 stopped, 3 paused. Every guard in it is a reserved-word test, not `[`: the stage dispatch decides which of three mutations runs, and the head-equality and verdict-status proofs decide whether a signoff is recorded at all — see #81. Was 176 lines in `SKILL.md`, and `close` a further 93 whose aborts all exited 0 — see #26, #78. |
 | `skills/watch-prs/scripts/pr-merge-gate.sh` | Every merge gate, evaluated immediately before merging and pinned to the head it checked. Takes a reviewers mode: `both`, or `codex-only` which requires the head to BE the reviewed commit. 0 merged, 1 blocked, 3 paused for the operator, 4 queued — a merge queue takes the request without landing it, and `gh` calls that success. Was 291 lines in `SKILL.md` — see #26. |
 | `skills/watch-prs/scripts/pr-watch.sh` | Blocks until a reviewer's verdict on the current head is actionable. 0 verdict in hand, 1 timed out, 2 unreadable, **4 the review carried only replies** — nothing to fix and no signoff, so the driver stops for the operator. That one has its own status because every caller branches on status: saying it in the record alone left `pr-close-round.sh` taking the 0 and closing the round. |
+| `skills/watch-prs/scripts/pr-origin.sh` | The session's repository, read where the driving shell's names cannot reach. `read` writes origin's URL to a file the caller names; `pin` writes `REVIEW_BUS_REMOTE` as a child process sees it to the same. Nothing goes to stdout and every reason goes to stderr, so a caller reads one stream and never sees the other — which is what lets the value be read with `$(<"$path")` whatever the shell is tracing. It exists because `SKILL.md`'s setup needed `git` and `bash -c`, and both are NAMES: a function answering only `remote get-url origin` forges the identity every stage is addressed by, and a function called `bash` runs in a shell copy that inherits NON-exported variables, so it agrees the pin arrived while the real helpers inherit nothing. Invoked as `/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_OUT"`, with the value read back from that file — a path rather than a name, because `bash -p …` alone is a name a function can take. **Privileged mode is what does the work**: it stops `BASH_ENV` and `ENV` being sourced, stops shell functions being imported from the environment, and makes `SHELLOPTS` ignored — so there is no hook to escape and nothing inherited to clear. It has to be the FIRST interpreter, since entering it from inside a shell that has already run the hook is too late and a hook needs to shadow nothing to use that gap. The value comes back in a file the caller names, read back with `$(<…)`: it travelled on stdout and then on fd 9, and each put it on a stream some caller traces to — and moving `BASH_XTRACEFD` aside instead closed fd 2 when it was restored, since bash closes the descriptor that variable referred to. `pin` is a real child, which is why its answer is the one that matters. Limits, stated in the file: a caller that omits `bash -p` is refused rather than recovered — there is no fallback hop and the file is not executable — and a poisoned `PATH` (#91). See #84. |
 | `skills/watch-prs/scripts/pr-selfcheck.sh` | The pre-push check over this plugin's own sources. The one helper NOT started privileged — see § The helpers are started privileged. |
 | `skills/watch-prs/scripts/recordlib.sh` | What a well-formed GitHub record is, which lines a reader honours as a control record, and what text requests a review — one definition each, sourced by every helper that reads the API or posts a caller-written body. |
 | `skills/watch-prs/scripts/clocklib.sh` | What "how much time has passed" means — one clock reader, with the guards a bare read has not got, sourced by `pr-watch.sh` and `pr-ci-gate.sh`. It exists because the gate used `$SECONDS`, a builtin no fixture can reach, so every deadline case in its suite raced real time; `date` is a command, so a fixture owns it. See #66. |
@@ -42,8 +43,16 @@ monitor, no bus directory, and no systemd unit.
 
 ## The helpers are started privileged
 
-Every `pr-*.sh` except `pr-selfcheck.sh` begins `#!/usr/bin/env -S bash -p`, and
-refuses if `$-` does not contain `p`.
+Every `pr-*.sh` except `pr-selfcheck.sh` and `pr-origin.sh` begins
+`#!/usr/bin/env -S bash -p`, and every one of them refuses if `$-` does not
+contain `p`.
+
+`pr-origin.sh` is the narrower of the two exceptions: it is **not executable**,
+so a shebang is inert — nothing can start it but a caller naming an interpreter,
+and the documented caller names `/usr/bin/env bash -p`. Giving it a privileged
+shebang would state a protection the file does not rely on and cannot enforce.
+`test-pr-identity.sh` asserts both halves, so the exception cannot quietly become
+an executable entry point.
 
 **This is the answer to a whole class, and it replaces answering it one name at a
 time.** An ordinary `#!/usr/bin/env bash` SOURCES `BASH_ENV`, IMPORTS functions
@@ -99,7 +108,7 @@ category; do not "fix" a script into a stricter mode.
 | Mode | Scripts | Why |
 | --- | --- | --- |
 | `set -euo pipefail` | one-shot commands | Abort on the first failed step. |
-| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh`, `pr-ci-state.sh`, `pr-ci-gate.sh`, `pr-merge-gate.sh`, `pr-signoff.sh`, `pr-close-round.sh`, `pr-copilot-phase.sh`, `pr-selfcheck.sh` | **`-e` is forbidden here.** Subcommands use exit codes as control flow and several `gh` probes "fail" as normal operation; `pr-selfcheck.sh` is in this row because a `grep` that matches nothing exits 1 as its normal answer. |
+| `set -uo pipefail` | `pr-review-state.sh`, `pr-merge-range.sh`, `pr-round-count.sh`, `pr-findings.sh`, `pr-watch.sh`, `pr-ci-state.sh`, `pr-ci-gate.sh`, `pr-merge-gate.sh`, `pr-signoff.sh`, `pr-close-round.sh`, `pr-copilot-phase.sh`, `pr-origin.sh`, `pr-selfcheck.sh` | **`-e` is forbidden here.** Subcommands use exit codes as control flow and several `gh` probes "fail" as normal operation; `pr-selfcheck.sh` is in this row because a `grep` that matches nothing exits 1 as its normal answer. |
 
 - **Intentional no-op branches use an explicit `return 0`.** A bare `return`
   after a failed test inherits that test's exit status 1; under strict mode with
@@ -168,6 +177,20 @@ rediscovering them.
   inherited" is a claim about every route into the process.** `function 'a*b'` is
   rejected and `env 'BASH_FUNC_a*b%%=…'` is imported. Never remove a guard on the
   strength of one route.
+- **An assignment's status cannot be taken.** Measured on bash 5: a failed
+  readonly assignment written as `VAR=value || { abort; }` does not fire the `||`
+  — it prints its complaint and the list reports SUCCESS, with the variable
+  keeping its old value. So the form that looks like it takes the status is the
+  one case where there is no status to take, and the guard reads correctly while
+  catching nothing. Prove an assignment by reading the variable back with `[[`.
+
+  Whether the shell then CONTINUES is a separate question with a surprising
+  answer, and it is not the one to build on: the same failure ends the script when
+  the assignment shares a line with what follows it (`readonly V=a; V=b; echo`
+  exits 1 and never echoes) and does not when they are on separate lines. Neither
+  the `||` nor the standalone form is what decides it. Do not write a guard that
+  depends on either behaviour; write the postcondition, which holds in every
+  case.
 - **A comment that argues against the code beside it is an instruction**, and it
   will be followed.
 
@@ -326,6 +349,21 @@ rediscovering them.
   into `.sh` files, where every existing check covers it for free. Until then one
   narrow lift, by anchored `grep` and with no grammar, covers the merge-gate
   condition that made the gap visible.
+
+  **Behavioural differences count too, not only parsing, and this one recurs.**
+  Three examples from a single pull request: bash 5 traces a simple command BEFORE
+  applying its redirections while bash 3.2.57 applies them first; a hook's `set --`
+  reaches a script's positional parameters on bash 5 but not on 3.2.57; and a
+  `BASH_ENV` hook can read those parameters as `$2` on bash 5 and cannot on 3.2.57.
+  Both times a fixture written from the newer behaviour alone passed locally and
+  turned `macos-shell` red on a change that was correct — the second and third
+  times *after* this paragraph existed. Attack fixtures are the recurring shape:
+  the defence holds on both shells, and only the attack's ROUTE differs.
+
+  So: **assert the invariant, not the version's route to it.** "The forged value
+  never comes out" holds on both; "the run refuses" holds on one. Where the two
+  genuinely differ, accept either outcome by name and say which happened, rather
+  than requiring the one the local shell produces.
 
   **Do not build a text scanner for this.** One was, and it is why this bullet is
   short: 2,200 lines and fifty-two review rounds, every round answering one finding
