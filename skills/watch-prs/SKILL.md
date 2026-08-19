@@ -770,12 +770,54 @@ RB_PIN_SEEN=
 # announced success with no `REVIEW_BUS_REMOTE` at all, and every later stage
 # derived its identity from wherever the session happened to stand.
 #
-# THIS IS NOT THE WHOLE OF THAT CLASS, and #102 has the rest: a shadowed `exit`
-# makes every refusal in this block non-terminal, and gating the remainder
-# structurally is a restructure rather than a line. What this closes is the
-# consequence — an empty pin can no longer reach the success line, whatever
-# walked past the refusal that should have stopped it.
-if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
+# COMPARED AGAINST A SECOND CHILD'S ANSWER, NOT AGAINST A SHELL VARIABLE. That is
+# what closes the rest of the class rather than another guard.
+#
+# `export` IS A NAME, and one that MUTATES its operand defeats a comparison
+# against `$RB_REMOTE` completely:
+#
+#     export() { RB_REMOTE='git@github.com:WRONG/other.git'
+#                builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
+#
+# `rb_identity` has already derived `OWNER` and `REPO` from the real origin, so
+# setup announces the right repository; the child inherits the forged remote and
+# reports it; and the equality compares forged with forged and AGREES. Measured.
+# Choosing a different variable name does not help — any name written in this file
+# is a name the function's author has read.
+#
+# SO THE PROOF ASKS THE WORLD AGAIN INSTEAD. `pr-origin.sh read` is a real child,
+# reached by path and started privileged, and it derives origin from the checkout
+# rather than from anything in this shell — so no function here can alter what it
+# says. The pin is proved by two children AGREEING: one reports the
+# `REVIEW_BUS_REMOTE` a stage will actually inherit, the other reports the origin a
+# stage would fall back to. A forged pin disagrees with the checkout; an absent one
+# is empty and disagrees with everything.
+#
+# AND THAT SUBSUMES THE SHADOWED-`exit` HALF. Every refusal above ends in `exit`,
+# which a function can neuter into a `return` — so a refused transport check
+# carries on. What it carries on to is this proof, and a session that walked past
+# a refusal has no valid pin to show it: the comparison is against the repository
+# itself, not against a variable the same shell was free to write. Gating each of
+# those refusals structurally was the alternative, and it is a restructure of the
+# whole block to re-derive a fact this one line already establishes. #102.
+RB_PIN_REF_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_PIN_REF_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
+    || { echo "ABORT: RB_PIN_REF_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
+/usr/bin/env mkdir -m 700 "$RB_PIN_REF_DIR" \
+    || { echo "ABORT: could not create a private directory for the pin reference read"; exit 1; }
+RB_PIN_REF=
+[[ -z $RB_PIN_REF ]] \
+    || { /usr/bin/env rmdir "$RB_PIN_REF_DIR"; echo "ABORT: RB_PIN_REF is readonly in this shell; the pin proof would compare against a value no child produced"; exit 1; }
+/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_PIN_REF_DIR/ref" \
+    && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+        && RB_PIN_REF="$(<"/dev/fd/9")"; } 9<"$RB_PIN_REF_DIR/ref"
+/usr/bin/env rm -f "$RB_PIN_REF_DIR/ref"
+/usr/bin/env rmdir "$RB_PIN_REF_DIR"
+# NON-EMPTY ON BOTH SIDES, because two empties agree. A helper that could not
+# start leaves this empty, and a pin that never arrived leaves the other empty;
+# neither is a proof, and `"" = ""` is the success this file has already been
+# caught reporting once.
+if [[ -n $RB_PIN_SEEN ]] && [[ -n $RB_PIN_REF ]] && [[ $RB_PIN_SEEN = "$RB_PIN_REF" ]]; then
     echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
 else
     echo "ABORT: the repository pin did not take; every stage would route by the current directory"

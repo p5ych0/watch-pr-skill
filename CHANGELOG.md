@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.0.33] — 2026-08-19
+
+- **The repository pin is proved against the repository, not against a shell
+  variable.** A function named `export` that mutates its operand defeated the old
+  proof completely:
+
+  ```bash
+  export() { RB_REMOTE='git@github.com:WRONG/other.git'
+             builtin export REVIEW_BUS_REMOTE="$RB_REMOTE"; }
+  ```
+
+  `rb_identity` has already derived `OWNER` and `REPO` from the real origin, so
+  setup announces the right repository; the child inherits the forged remote and
+  reports it; and the equality compares forged with forged and agrees. Every later
+  stage — a signoff, a revocation, a review request, a merge — then addresses
+  whatever repository that function named. Measured.
+
+  Choosing a different variable name is no answer, since any name written in
+  `SKILL.md` is a name that function's author has read. So the proof asks the
+  world again instead: a second `pr-origin.sh read`, a real child reached by path
+  and started privileged, derives origin from the checkout, and the pin is proved
+  by the two children AGREEING — one reporting the `REVIEW_BUS_REMOTE` a stage
+  will actually inherit, the other the origin a stage would fall back to. Nothing
+  in the driving shell can alter what either says. Both sides must be non-empty,
+  because two empties agree.
+
+  **That subsumes the shadowed-`exit` half of the same issue.** Every refusal in
+  the setup block ends in `exit`, which a function can neuter into a `return`, so
+  a refused transport check carries on — to this proof, which a session that
+  walked past a refusal cannot satisfy: the comparison is against the repository
+  itself, not against a variable the same shell was free to write. Gating each of
+  those refusals structurally was the alternative, and it is a restructure of the
+  whole block to re-derive a fact one line now establishes.
+
+  `test-pr-skill-contract.sh` runs the lifted pin block inside a real checkout —
+  the proof reads origin now, so a scratch directory with no repository refuses
+  for the right reason in the wrong case — and adds the mutating-`export` forger
+  alongside the existing ones. It fails against the previous comparison.
+
 ## [2.0.32] — 2026-08-19
 
 - **The driver no longer parses a record to learn the signed-off head.** All
