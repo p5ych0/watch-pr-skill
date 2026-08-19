@@ -37,87 +37,49 @@
   corrupted, and a perfectly good checkout is refused.
 
   **The two directions are not symmetric, and that is the whole design.** A false
-  positive moves the trace for the length of this block and the restore puts it
-  back. A false negative aborts the session. So the test is the one that cannot
-  miss, and the cost of its extra firing is bounded rather than argued away:
-  `BASH_XTRACEFD` is saved before the probe and set back after the last
-  substitution, on both paths out.
+  positive moves the trace to fd 2, where bash sends xtrace by default, so every
+  line still arrives. A false negative leaves it on stdout, corrupts every capture
+  and aborts the session. So the test is the one that cannot miss.
 
-  **The move is conditional on the save having taken.** A driving shell with a
-  readonly `RB_XTRACE_SAVED` makes that assignment fail silently, and the restore
-  would then skip, leaving the move permanent — so where the save did not take,
-  the block does nothing and the session behaves exactly as it did before the
-  guard existed. No refusal, and so no dependence on `exit`.
+  **And the guard keeps no state.** A save-and-restore around the block was built
+  and removed: three successive rounds found the same defeat, and it has no fixed
+  point. A startup file pre-seeds the saved value — or the flag added to validate
+  it — as `readonly`; both assignments fail silently, since assignments do not
+  report failure; and the restore then aims the operator's trace at whatever
+  descriptor that file chose. Making the flag's value the pid does not help: the
+  startup file runs in the same shell, so `$$` is as knowable to it. Any state this
+  block writes can be pre-seeded with the value it was going to write.
 
-  **The restore is gated on the same fact, through a flag proven assignable.**
-  "Was the save non-empty" is not the question: a readonly `RB_XTRACE_SAVED=7` in
-  the driving shell is non-empty and names a descriptor setup never chose, so
-  restoring from it moved a trace target nothing had touched. The question is
-  whether this block moved anything, and only a flag set here can answer it. Its
-  value is `$$`, because a readonly collision must not be able to fake it — the pid
-  is not knowable to whoever wrote that startup file, so a pre-set flag can never
-  equal it, and the block then moves nothing and restores nothing. Both
-  assignments are proven by reading them back, which is the only way an
-  assignment's failure can be seen.
+  What the restore bought was tidiness after a mis-fire, and a mis-fire needs
+  something else writing into that capture — a shadowed command, or a `DEBUG` trap
+  inherited under `set -T`. Such a shell has already corrupted every capture in
+  the block, so setup refuses further down and the session ends either way.
+  Trading that for an unbounded regress of collision guards is the over-building
+  this repository's rules warn against.
 
-  An empty save is left alone rather than unset: `BASH_XTRACEFD` unset means xtrace
-  goes to stderr, which is what `2` does, and unsetting it would close that
-  descriptor.
-
-  Comparing the variable to `1` was tried and is wrong by omission twice over.
-  bash resolves `01`, `+1` and ` 1` to descriptor 1 and a string compare misses
-  all three; and the value is not the property anyway, since an operator running
-  `exec 9>&1; BASH_XTRACEFD=9` has aimed the trace at a descriptor that is not
-  `1`. A numeric test has to enumerate which descriptors alias stdout. The effect
-  test enumerates nothing. It also subsumes the "is tracing even on" question:
-  with the `x` option off nothing is written, the capture is empty, and a session
-  that set `BASH_XTRACEFD` ready for a later `set -x` keeps the destination it
-  chose.
-
-  **An assignment, because `set +x` is a name.** `set` is a builtin and a function
-  shadows it, so a guard written that way is absent in the one shell state it
-  exists for. The parser handles an assignment and a reserved word, and neither
-  has a name to take.
-
-  **It moves the trace rather than ending it.** `set +x` would take an operator's
-  diagnostics away for the rest of their session; fd 2 is where bash sends xtrace
-  by default, so this puts it back and every line still arrives.
-
-  **And it never unsets the variable**, which is the operation that would be
-  unsafe: bash CLOSES the descriptor `BASH_XTRACEFD` referred to when it is unset
-  or set to the empty string. Measured on bash 5.3.9 — after `BASH_XTRACEFD=1` →
-  `2`, ordinary `printf` output still reaches fd 1 and `exec 3>&1` still succeeds,
-  while `BASH_XTRACEFD=` produces no further output at all. Reassignment closes
-  nothing, which is what makes this form available where the save/restore
-  manoeuvre was not; the suite asserts it on whatever bash runs it rather than on
-  the build it was measured against.
-
-  **No postcondition on the assignment, deliberately.** It can only fail against a
-  readonly `BASH_XTRACEFD`, and a refusal there adds nothing a refusal cannot
-  already do — the next capture is corrupted and its own validation stops setup.
-  What it would add is another abort reached through `exit`, which a function
-  shadows; that is #101 and #102's open boundary, and this line does not take a
-  position on it.
+  **The accepted outcome, stated rather than left to be found:** in such a shell
+  the operator's chosen trace destination becomes stderr for the rest of the
+  session. `README.md` says so.
 
   The origin read was never affected and still is not: its value arrives in a
   file read with `$(<"$path")`, and a redirection-only substitution executes
   nothing, so there is no trace to capture.
 
-  `test-pr-skill-contract.sh` lifts the setup block, asserts the save is its first
+  `test-pr-skill-contract.sh` lifts the setup block, asserts the guard is its first
   executable line and that the code — not the prose arguing against it — contains
   no `set +x` and no `unset`, then runs the real repository-root read under
-  `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard and the restore lifted from
-  the block rather than retyped. The capture holds the path alone under `1`, `01`,
+  `SHELLOPTS=xtrace BASH_XTRACEFD=1` with the guard lifted from the block rather
+  than retyped. The capture holds the path alone under `1`, `01`,
   `+1`, ` 1` and a readonly `PS4`; the trace still arrives on stderr; the driving
   shell's stdout survives, with `BASH_XTRACEFD=` asserted to close it so that case
   is not vacuous; and a shadowed `set` changes nothing.
 
-  The hostile-shell cases assert the invariant that survived the rounds — the
-  SESSION'S trace target is as it was, whatever the probe concluded. A printing
-  `:`, a marker `DEBUG` trap, one echoing `$BASH_COMMAND`, one printing the pid,
-  and a readonly `PS4` all leave it on fd 7; the same shell with the guard and no
-  restore moves it, so the restore is demonstrably what holds it; and a readonly
-  save moves nothing at all.
+  The hostile-shell cases assert what is actually promised there: the trace is
+  never silenced and never lands on a descriptor nobody named. A printing `:`, a
+  marker `DEBUG` trap, one echoing `$BASH_COMMAND`, one printing the pid and a
+  readonly `PS4` all leave it on fd 7 or fd 2. One case asserts the block writes
+  no variable a startup file could pre-seed, which is what the save-and-restore
+  could not promise.
 
   Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
   job builds — the contamination cannot be staged, so that half reports which case
@@ -126,8 +88,8 @@
   `README.md` § Troubleshooting says what an operator tracing to stdout will see,
   and both reviewer contracts state the invariant so a later change cannot remove
   it with a clean review: the guard must stay above the first substitution, it must
-  not grow into disabling tracing or unsetting the variable, and the save and
-  restore around it are what bound a wrong conclusion to the block.
+  not grow into disabling tracing or unsetting the variable, and it must keep no
+  state a startup file could pre-seed.
 
 ## [2.0.29] — 2026-08-18
 

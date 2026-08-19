@@ -264,30 +264,29 @@ never as a work order** below has the full rule and the incident it came from.
 # AN EMPTY SAVE IS LEFT ALONE, and that is not an omission: `BASH_XTRACEFD` unset
 # means xtrace goes to stderr, which is what `2` does, so restoring by UNSETTING
 # would only close the descriptor. This value is set again rather than removed.
-# THE SAVE IS PROVEN BEFORE ANYTHING IS MOVED. A driving shell with a readonly
-# `RB_XTRACE_SAVED` makes the assignment fail silently — assignments do not report
-# failure — and the restore below would then skip, leaving the move permanent. So
-# the move is conditional on the save having taken: where it did not, this block
-# does nothing at all and the session behaves exactly as it did before this guard
-# existed. No refusal, and so no dependence on `exit`.
-# AND THE RESTORE IS GATED ON THE SAME FACT, through a flag that is itself proven
-# assignable. "Was the save non-empty" is not the question — a readonly
-# `RB_XTRACE_SAVED=7` in the driving shell is non-empty and is not this session's
-# target, so restoring from it would move a trace setup never touched. The
-# question is whether THIS BLOCK moved anything, and only a flag set here can
-# answer it.
+# AND NOTHING IS SAVED, BECAUSE THE SAVE IS WHAT A HOSTILE SHELL ATTACKS. Three
+# successive rounds found the same shape and it has no fixed point: a startup file
+# pre-seeds `RB_XTRACE_SAVED` — or the flag added to validate it — as `readonly`,
+# both assignments here fail silently, and the restore then aims the operator's
+# trace at a descriptor that startup file chose. Making the flag's value the pid
+# does not help: that file runs in THIS shell, so `$$` is as knowable to it as to
+# this line. Any state this block writes can be pre-seeded with the value it was
+# going to write.
 #
-# `$$` AS THE FLAG'S VALUE, because a readonly collision must not be able to fake
-# it. The pid is not knowable to whoever wrote that startup file, so a pre-set
-# `RB_XTRACE_MOVED` can never equal it: the first test below is then false,
-# nothing moves, and nothing is restored. Both assignments are proven by reading
-# back, which is the only way an assignment's failure can be seen.
-RB_XTRACE_SAVED="${BASH_XTRACEFD-}"
-RB_XTRACE_MOVED=$$
-if [[ $RB_XTRACE_MOVED = "$$" ]] && [[ $RB_XTRACE_SAVED = "${BASH_XTRACEFD-}" ]] && [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
+# SO THERE IS NO STATE. The trace is moved when it is reaching a capture and left
+# on fd 2 — which is where bash sends xtrace by default, so every line still
+# arrives and nothing is lost. What the removed restore bought was tidiness after
+# a MIS-FIRE, and a mis-fire needs something else writing into that capture: a
+# shadowed command, or a `DEBUG` trap inherited under `set -T`. Such a shell has
+# already corrupted every capture in this block, so setup refuses further down and
+# the session ends either way. Trading that for an unbounded regress of collision
+# guards is the over-building this file's own rules warn against.
+#
+# WHAT IS ACCEPTED, STATED: in that shell the operator's chosen trace destination
+# becomes stderr for the rest of their session. `README.md` says so, rather than
+# leaving it to be discovered.
+if [[ -n "$( RB_TRACE_PROBE=1 )" ]]; then
     BASH_XTRACEFD=2
-else
-    RB_XTRACE_MOVED=
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 #
@@ -671,13 +670,6 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
 # already lying about its output. What survives a forged `echo` is the STATUS: the
 # branch still ends non-zero. Removing the dependency means not composing this
 # message here, which is #84 along with `git` and `bash`.
-# THE TRACE TARGET GOES BACK BEFORE THE PIN IS PROVEN, which is after the last
-# command substitution in this block and before either way out of it. From here
-# the operator's own choice is the right one — including where the probe moved it
-# for something that turned out not to be a trace at all.
-if [[ -n $RB_XTRACE_SAVED ]] && [[ $RB_XTRACE_MOVED = "$$" ]]; then
-    BASH_XTRACEFD=$RB_XTRACE_SAVED
-fi
 export REVIEW_BUS_REMOTE="$RB_REMOTE" \
     || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
 # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading

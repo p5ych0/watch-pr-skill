@@ -76,13 +76,16 @@ that block is judged against both:
   `$BASH_COMMAND` and one printing `$$` can each put anything into that capture, so
   no marker proves provenance — and every sharper marker adds a way to MISS, which
   is the harmful direction, since a miss leaves the trace on stdout and aborts a
-  valid checkout. The two directions are not symmetric. What makes the loose test
-  safe is that the block SAVES the target before the probe and sets it back after
-  its last substitution, on both paths out, and moves nothing at all if the save
-  did not take. The restore is keyed on a flag this block sets — not on the saved
-  value being non-empty, since a readonly collision in the driving shell is
-  non-empty and names a descriptor setup never chose. Removing any of those is a
-  finding. It moves the destination rather than disabling
+  valid checkout, where a false positive only sends the trace to stderr — which is
+  where bash sends it by default. The two directions are not symmetric.
+
+  Do NOT ask it to save and restore the target either. That was built and removed:
+  a startup file pre-seeds the saved value, or the flag validating it, as
+  `readonly`, both assignments fail silently, and the restore aims the trace
+  wherever that file chose. The pid does not help as a flag value — that file runs
+  in the same shell. **Any state this block writes can be pre-seeded with the value
+  it was going to write**, so the guard keeps none, and a change that adds some
+  back is a finding. It moves the destination rather than disabling
   tracing, and it never unsets or empties `BASH_XTRACEFD` — bash closes the
   descriptor that variable named when it is unset or emptied, so that spelling
   closes the shell's stdout. `set +x` is wrong here twice over: it takes the
