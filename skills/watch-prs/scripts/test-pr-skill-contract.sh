@@ -873,8 +873,12 @@ esac
 # GUARDED ON THE SCRATCH TREE EXISTING, like the forger cases: the probe at the
 # end of this file re-runs it with `mktemp` stubbed, where there is no tree — and
 # a `:?` here would kill the run with a message that probe does not expect.
-if [ -n "${RB_TMPBASE:-}" ]; then
-_sentinel="$RB_TMPBASE/sentinel"
+# GUARDED ON `_forge_dir`, THE VALIDATED ALLOCATION, not on `RB_TMPBASE` — which
+# this fixture exports FROM it and which an invoking environment may already
+# carry. With `mktemp_d` failing and an inherited `RB_TMPBASE`, the guard passed
+# and this block wrote into, and then `rm -rf`'d, a path nobody here allocated.
+if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
+_sentinel="$_forge_dir/sentinel"
 mkdir -p "$_sentinel"
 printf 'DO NOT DELETE\n' > "$_sentinel/keep"
 mkdir -p "$_sentinel/emptydir"

@@ -737,10 +737,18 @@ export REVIEW_BUS_REMOTE="$RB_REMOTE" \
 # at column 0. An `if … else … fi` around this call ends the lift before the
 # postcondition, and every case built on it then runs against a truncated block —
 # nine assertions passed against nothing on the first attempt at this.
-# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE FOUR LINES LATER. The origin read
-# removed the first one as soon as it had its value; this is the second half of
-# that, and it is why no abort between the two has a directory to clean up. Same
-# parent, same rules, same lifetime.
+# ITS OWN DIRECTORY, ALLOCATED HERE AND GONE ON EVERY PATH OUT OF THE BRANCH
+# BELOW. The origin read removed the first one as soon as it had its value; this
+# is the second half of that. Same parent, same rules, same lifetime — but the
+# lifetime is now a branch rather than four lines, because WHO MADE IT decides who
+# may remove it: the `mkdir` below is what proves this shell did, so its arms
+# remove the directory and everything outside them removes nothing at all.
+#
+# THREE EXITS FROM THAT BRANCH, and each cleans up exactly what it should: the two
+# refusals inside it `rmdir` the directory they know is ours, the probe's own arm
+# removes the file and then the directory, and the `else` — a `mkdir` that failed
+# — removes nothing, because a failure there means the path was already something,
+# and something is not ours.
 RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
     || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
