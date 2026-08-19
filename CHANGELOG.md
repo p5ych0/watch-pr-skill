@@ -26,7 +26,14 @@
 
   Both the status and the shape are checked at every read — all three, including
   the Copilot one, where status 0 with something that is not 40 hex would have
-  read as "no signoff" and sent the operator back through a phase that is closed. `sha` prints 40 hex or
+  read as "no signoff" and sent the operator back through a phase that is closed.
+  That refusal is the FIRST ARM of the branch it protects rather than a guard
+  before it: written as its own `if … exit`, a shadowed `exit` returns and
+  execution falls into the selection, which is the outcome the check exists to
+  prevent. As an arm, a malformed sha selects it and neither phase arm can run on
+  that value. The tests in it are `[[`, since `[` is a command a function can take
+  the place of — one returning false skips a validation, one returning true
+  selects an arm the values do not justify. `sha` prints 40 hex or
   nothing, so the shape check cannot currently fail — which is the point: this
   value is what every gate in step 8 is pinned to, and it does not rest on one
   helper's promise.

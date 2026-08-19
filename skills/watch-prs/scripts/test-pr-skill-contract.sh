@@ -2274,16 +2274,44 @@ printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" 
 # rejects the exact state the second stop exists in, and sends the operator back
 # through a Codex phase for nothing.
 printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh sha N "\$COPILOT_BOT"' \
-    && printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SIGNOFF_RC" -eq 0' \
+    && printf '%s' "$resume_blk" | grep -q '\$COPILOT_SIGNOFF_RC -eq 0' \
     && pass "…and a resume after the Copilot phase is told apart from one before it" \
     || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"
 # THE HEAD CHECK IS THE BRANCH CONDITION ITSELF now, rather than a test inside the
 # post-Copilot arm. It has to be: a stale Copilot signoff naming an older commit
 # used to SELECT that arm and then fail its own head check, reporting that neither
 # phase was closed when the Codex one plainly was.
-printf '%s' "$resume_blk" | grep -q '"\$COPILOT_SHA" = "\$RESUMED_HEAD"' \
+printf '%s' "$resume_blk" | grep -q '\$COPILOT_SHA = "\$RESUMED_HEAD"' \
     && pass "…and the post-Copilot arm is chosen only when Copilot signed THIS head" \
     || die "a stale Copilot signoff still selects the post-Copilot arm"
+# THE MALFORMED CASE IS AN ARM OF THAT BRANCH, NOT A GUARD BEFORE IT. Written as
+# its own `if … exit`, a shadowed `exit` returns and execution falls into the
+# selection, where a malformed value reads as "no Copilot signoff" — the outcome
+# the check exists to prevent. As an arm it is structural: a malformed sha selects
+# it, so neither of the others can run on that value whatever has been done to the
+# builtins. Asserted by RUNNING the branch, because the shape is the property and
+# a grep agrees with both spellings.
+_res_arm="$(COPILOT_SIGNOFF_RC=0 COPILOT_SHA=notasha RESUMED_HEAD=notasha bash -c '
+    exit() { return 0; }
+    echo() { return 0; }
+    RX_SHA40="^[0-9a-f]{40}$"
+    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
+    if [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
+        builtin printf "REFUSED\n"
+    elif [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && [[ $COPILOT_SHA = "$RESUMED_HEAD" ]]; then
+        builtin printf "POST-COPILOT\n"
+    else
+        builtin printf "PRE-COPILOT\n"
+    fi' 2>&1)" || true
+case "$_res_arm" in
+    REFUSED*) pass "…and a malformed sha selects the refusal arm, not either phase" ;;
+    *) die "a malformed Copilot sha selected a phase arm ('$_res_arm')" ;;
+esac
+# AND `SKILL.md` USES THAT SHAPE. The run above proves the shape works; this
+# proves the document has it, and the two together are what the arm is for.
+printf '%s' "$resume_blk" | grep -q 'elif \[\[ \$COPILOT_SIGNOFF_RC -eq 0 \]\]' \
+    && pass "…and SKILL.md branches with elif, so the refusal is an arm rather than a guard" \
+    || die "the malformed-sha refusal is a guard before the branch, which a shadowed exit walks past"
 
 # ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
 # Entering the Copilot phase a second time — after a Codex pass that came back

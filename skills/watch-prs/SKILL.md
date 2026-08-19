@@ -1777,16 +1777,31 @@ esac
 # this it would be read as "no signoff" and send the operator back through a phase
 # that is closed — or, if the head read were malformed the same way, SELECT the
 # post-Copilot arm on two values that match only because both are wrong.
-if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
-    echo "ABORT: the recorded Copilot signoff did not yield a full 40-hex sha ('$COPILOT_SHA')"; exit 0
-fi
+#
+# IT IS THE FIRST ARM OF THE BRANCH, NOT A GUARD BEFORE IT, and that is the
+# difference between a refusal and a wish. Written as its own `if … exit`, a
+# shadowed `exit` returns and execution falls into the selection below, where a
+# malformed value is read as "no Copilot signoff" — the outcome the check exists
+# to prevent. As an arm it is structural: a malformed sha SELECTS this arm, so
+# neither of the others can run on it whatever has been done to the builtins.
+#
+# `[[` THROUGHOUT, because `[` is a command a function can take the place of. One
+# returning false skips a validation written with it; one returning true selects
+# an arm the values do not justify.
 # THE BRANCH TURNS ON WHICH SIGNOFF DESCRIBES THE HEAD, not on whether a Copilot
 # record exists at all. After "another Codex pass" produced fixes, the NEW Codex
 # signoff names the current head while an older Copilot signoff still names the
 # previous one — and choosing the post-Copilot path merely because that historical
 # record exists then reported that neither phase was closed, sending the operator
 # through a review nobody needed.
-if [ "$COPILOT_SIGNOFF_RC" -eq 0 ] && [ "$COPILOT_SHA" = "$RESUMED_HEAD" ]; then
+if [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
+    echo "ABORT: the recorded Copilot signoff did not yield a full 40-hex sha ('$COPILOT_SHA')"
+    exit 0
+    # THE LAST WORD IS A RESERVED ONE, for the same reason it is in the record
+    # block: with `echo` and `exit` both shadowed this arm says nothing and
+    # returns 0, and the block's status is the only signal left.
+    [[ -n "" ]]
+elif [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && [[ $COPILOT_SHA = "$RESUMED_HEAD" ]]; then
     # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
     # than the head; the gate is what proves the delta is Copilot-only. What must
     # still hold is the COPILOT signoff, on the head being merged.
