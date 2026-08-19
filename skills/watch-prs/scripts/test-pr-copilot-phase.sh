@@ -58,6 +58,9 @@ chmod +x "$DIR/pr-review-state.sh"
 cat > "$DIR/pr-signoff.sh" <<'SIGNSH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$CALLS"
+# A PUSH CAN LAND DURING THIS PROBE TOO, and it is the window the head re-read
+# before the post exists for — the earlier re-read has already passed by here.
+[ -f "$W/move-head-on-signoff" ] && cat "$W/move-head-on-signoff" > "$W/head.out"
 # A SECOND ANSWER, FOR THE SECOND ASK. The phase is proved twice — once up front
 # and once immediately before the mutations — and the whole question is what
 # happens when another session changes something in between. `.2` is that change.
@@ -257,12 +260,23 @@ got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while no record at all is the ordinary state and records normally" \
     || die "an absent signoff was treated as a revocation: '${got}'"
-# A PUSH IN THE SAME WINDOW, which the head re-read catches.
+# A PUSH IN THE SAME WINDOW, which the head re-read catches. `move-head-on-probe`
+# fires on the FIRST verdict call, so this is a push landing before the CI gate.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
     && pass "…and a push landing in that window stops it too" \
     || die "a moved head gave '${got}'"
+nothing_posted "…with no signoff recorded"
+# A PUSH DURING THE LATER PROBES, which the FIRST re-read cannot catch: it has
+# already passed, and the verdict is pinned to `$CODEX_SHA` so it stays clean and
+# says nothing about the move. Only re-reading the head last closes it. The signoff
+# stub moves it, so the change lands after the head check and before the post.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-on-signoff"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+    && pass "…and one landing during the later probes stops it as well" \
+    || die "a head moved during the signoff probe gave '${got}'"
 nothing_posted "…with no signoff recorded"
 # A DISMISSAL IN THE SAME WINDOW, which the verdict re-read catches. `.2` again:
 # the first check is the one before the CI gate, the second the one before the post.

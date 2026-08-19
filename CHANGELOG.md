@@ -14,21 +14,33 @@
   the reopening. A later `open` then finds a current signoff and a clean verdict
   and requests Copilot underneath a phase somebody had just reopened.
 
-  Three checks now sit immediately before the post, the same ones `open` makes and
+  Four checks now sit immediately before the post, the same ones `open` makes and
   for the same reason: none of them requires the head to have moved, so none
   subsumes another. The head is still the signed sha, Codex's live verdict on it
-  is still clean, and no revocation is the newest record for that reviewer. That
-  last one is what this gap actually admits; the other two are cheap and cover a
-  push or a dismissal landing in the same window.
+  is still clean, no revocation is the newest record for that reviewer — and the
+  head again, LAST. That last read is not redundant: each of the others is a
+  network call, so the head can move DURING one of them, and the verdict is pinned
+  to the signed sha so it stays clean and says nothing about the move. Reading the
+  head first and posting fourth would leave the same window one probe narrower.
+
+  The revocation is what this gap actually admits; the head and verdict reads are
+  cheap and cover a push or a dismissal landing in the same window.
 
   "None recorded" is the ordinary state here — nothing has been recorded yet, and
   recording it is the point — so the check distinguishes it from a revocation by
   the reason rather than by the status, which is 1 for both. A case asserts it
   records normally.
 
-  Four cases, each leaving nothing posted where it refuses: a revocation, a push,
-  a withdrawn verdict, and the ordinary absent record. All fail against the
-  previous stage.
+  Five cases, each leaving nothing posted where it refuses: a revocation, a push
+  before the CI gate, a push during the later probes — which only the final head
+  read catches — and a withdrawn verdict. Those four fail against the previous
+  stage.
+
+  The fifth is a compatibility guard rather than a regression test, and saying so
+  matters: before this change `record` never queried `pr-signoff.sh` at all, so
+  the ordinary absent-record case passes on the old stage too. What it protects is
+  the new check refusing a state it must not — "none recorded" is where every
+  first phase starts.
 
 ## [2.0.35] — 2026-08-19
 

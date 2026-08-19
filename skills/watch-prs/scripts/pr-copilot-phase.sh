@@ -525,6 +525,15 @@ case "$SIGNOFF_NOW" in
         echo "ABORT: this phase was reopened while the checks were proving — a revocation is the newest record. Recording a signoff now would supersede it; nothing posted"
         exit 1 ;;
 esac
+# AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
+# move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
+# clean and says nothing about the move. Reading the head first and posting third
+# leaves exactly the window this stage exists to close, one probe narrower. This
+# is the last thing before the write.
+FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
+[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \
