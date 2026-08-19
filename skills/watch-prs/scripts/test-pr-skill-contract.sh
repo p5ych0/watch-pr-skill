@@ -3683,9 +3683,23 @@ _setup_code="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#')"
 # ANY `set +…`, NOT ONE SPELLING. `set +x` and `set +o xtrace` do the same thing,
 # and a check for the first stays green for the second — while every behavioural
 # case here lifts the guard alone and would miss a disabling line placed after it.
-_tr_setminus="$(printf '%s\n' "$_setup_code" | grep -c '^[[:space:]]*set[[:space:]]*+' || true)"
-[ "$_tr_setminus" -eq 0 ] \
+# UNANCHORED, because `set` need not begin the line: `[[ 1 ]] && set +o xtrace`
+# and `if x; then set +x; fi` both turn tracing off from the middle of one.
+tr_no_set_minus() {   # tr_no_set_minus <code> ; 0 if no `set +…` appears
+    local _n
+    # `grep -E`, NOT `\b`. Word boundaries are a GNU extension: BSD `grep` can
+    # match `\b` literally, so the pattern would find nothing and the check would
+    # pass everything — fail-open, on the platform the suite exists to cover.
+    _n="$(printf '%s\n' "$1" | grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' || true)"
+    [ "$_n" -eq 0 ]
+}
+tr_no_set_minus "$_setup_code" \
     || die "setup turns a shell option off; disabling tracing is what this forbids"
+# THE MUTATION IT IS MEANT TO CATCH, run against the check itself.
+tr_no_set_minus "$_setup_code
+[[ 1 ]] && set +o xtrace" \
+    && die "the scan passes a block that disables tracing mid-line; it proves nothing" \
+    || pass "…and a 'set +o xtrace' anywhere on a line does fail that scan"
 case "$_setup_code" in
     *'set +x'*) die "setup disables tracing through a shadowable name" ;;
     *'BASH_XTRACEFD=2'*) pass "…and moves the trace by assignment rather than disabling it" ;;
@@ -3844,8 +3858,10 @@ else
             || die "BASH_XTRACEFD='$_tr_spell' left the capture corrupted ('$_tr_alt_v')"
     done
     # ── WHAT A HOSTILE SHELL CAN PUT IN THAT CAPTURE, AND WHAT IS ACCEPTED.
-    # The probe runs inside a substitution, so a shadowed command or an inherited
-    # `DEBUG` trap can write into it and look exactly like a trace that arrived.
+    # The probe runs inside a substitution, so an inherited `DEBUG` trap can write
+    # into it and look exactly like a trace that arrived. A shadowed command
+    # cannot — the probe is an assignment and runs nothing — which is why that
+    # case is asserted strictly above and these are not.
     # Marker schemes were tried against each — the probe's own text, then a pid
     # delivered through `PS4` — and each was forged by the next trap, while every
     # sharper marker added a way to MISS, which is the direction that aborts a

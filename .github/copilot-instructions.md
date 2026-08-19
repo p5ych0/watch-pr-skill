@@ -96,12 +96,16 @@ that block is judged against both:
 - **And nothing more than that may change.** The guard fires only where a trace
   would actually reach a capture — it decides by running a command inside one and
   looking at what comes back, not by comparing `BASH_XTRACEFD` to a number, since
-  bash resolves `01`, `+1` and ` 1` to descriptor 1 and a descriptor duplicated
-  from stdout is not `1` at all. That probe runs inside a capture, so it must be
-  an assignment and not a command. Do NOT ask it to identify the trace by its
-  content: a shadowed `:`, a `DEBUG` trap inherited under `set -T`, one echoing
-  `$BASH_COMMAND` and one printing `$$` can each put anything into that capture, so
-  no marker proves provenance — and every sharper marker adds a way to MISS, which
+  bash resolves `01`, `+1` and ` 1` to descriptor 1 and a comparison has to
+  enumerate the spellings. (A descriptor duplicated from stdout is a different
+  matter and is NOT a case against the number: `exec 9>&1; BASH_XTRACEFD=9` keeps
+  fd 9 on the terminal while a substitution replaces fd 1 with its pipe, so that
+  trace never enters a capture and must be left alone — which the effect test does
+  by construction.) That probe runs inside a capture, so it must be an assignment
+  and not a command — an assignment runs nothing, so a shadowed name has no way in
+  at all. Do NOT ask it to identify the trace by its content: a `DEBUG` trap
+  inherited under `set -T`, one echoing `$BASH_COMMAND` and one printing `$$` can
+  each put anything into that capture, so no marker proves provenance — and every sharper marker adds a way to MISS, which
   is the harmful direction, since a miss leaves the trace on stdout and aborts a
   valid checkout, where a false positive only sends the trace to stderr — which is
   where bash sends it by default. The two directions are not symmetric.

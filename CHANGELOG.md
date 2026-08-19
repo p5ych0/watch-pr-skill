@@ -98,9 +98,11 @@
   is not vacuous; and a shadowed `set` changes nothing.
 
   The hostile-shell cases assert what is actually promised there: the trace is
-  never silenced and never lands on a descriptor nobody named. A printing `:`, a
-  marker `DEBUG` trap, one echoing `$BASH_COMMAND`, one printing the pid and a
-  readonly `PS4` all leave it on fd 7 or fd 2. And the guard is asserted to BE its
+  never silenced and never lands on a descriptor nobody named. A marker `DEBUG`
+  trap, one echoing `$BASH_COMMAND`, one printing the pid and a readonly `PS4` all
+  leave it on fd 7 or fd 2 — the trap cases may fire, and that is the accepted
+  false positive. A shadowed `:` has its own, stricter case: the probe runs no
+  command, so it cannot fire at all and the target must be untouched. And the guard is asserted to BE its
   three lines rather than merely to avoid two retired variable names — a list of
   spellings is wrong the first time a new one is written, and `RB_TRACE_SAVED`
   would have passed a scan for `RB_XTRACE_SAVED` while reintroducing exactly what
@@ -112,10 +114,13 @@
 
   The scan for the descriptor-closing spelling covers both: `unset
   BASH_XTRACEFD` and `BASH_XTRACEFD=` do the same thing, and a check for one
-  stayed green for the other. Disabling tracing is checked the same way twice
-  over — no executable line in the block may be a `set +…` of any spelling, and
-  after the block runs `$-` must still carry `x`, so `set +o xtrace` cannot slip
-  past a scan written for `set +x`.
+  stayed green for the other. Disabling tracing is checked twice over — no
+  executable line in the whole block may contain a `set +…`, anchored nowhere so
+  that `[[ 1 ]] && set +o xtrace` is caught mid-line, and after the guard and the
+  lifted read run, `$-` must still carry `x`. The scan is run against that exact
+  mutation, which must fail it. The pattern is a portable ERE rather than `\b`,
+  which BSD `grep` can match literally — a word boundary that finds nothing would
+  pass everything.
 
   Where the shell has no `BASH_XTRACEFD` — bash 3.2.57, which the `macos-shell`
   job builds — the contamination cannot be staged, so that half reports which case
