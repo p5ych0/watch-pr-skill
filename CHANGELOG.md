@@ -65,8 +65,9 @@
   combined state itself, run end to end, with its own reach probe asserting that
   shell really does keep the pre-seeded value. And a sentinel: with `RB_PIN_OUT`
   pre-seeded readonly onto a file this block never made, that file must still be
-  there afterwards, and their empty directory beside it. All six fail against the
-  shape each replaces.
+  there afterwards, and their empty directory beside it; and that no cleanup
+  appears in the arm where the directory was not this shell's to make. All eight
+  fail against the shape each replaces.
 
 ## [2.0.32] — 2026-08-19
 
