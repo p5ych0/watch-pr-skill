@@ -147,6 +147,13 @@ rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "ABORT:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" 2>&1 || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON"; exit 1; }
+# THE SESSION'S IDENTITY IS KEPT, because `rb_identity` runs again below against
+# origin's PUSH url and overwrites these. Copied here once, before anything can
+# move them, so the comparison is against what this session was pinned to rather
+# than against whatever the last parse produced.
+RB_PIN_HOST="$HOST"; RB_PIN_OWNER="$OWNER"; RB_PIN_REPO="$REPO"
+{ [ "$RB_PIN_HOST" = "$HOST" ] && [ "$RB_PIN_OWNER" = "$OWNER" ] && [ "$RB_PIN_REPO" = "$REPO" ]; } \
+    || { echo "ABORT: the pinned identity could not be captured; one of RB_PIN_HOST/OWNER/REPO is readonly."; exit 1; }
 COPILOT_BOT="$RB_COPILOT_BOT"
 
 # THE STAGE IS FIRST AND HAS NO DEFAULT. A default is the whole defect back: a
@@ -175,6 +182,139 @@ case "$WHO" in
     *) echo "ABORT: '$WHO' is not a reviewer this loop drives (expected $RB_CODEX_BOT or $RB_COPILOT_BOT)"; exit 1 ;;
 esac
 [ -n "$SUMMARY_FILE" ] || { echo "ABORT: a summary file is required"; exit 1; }
+# WHAT `git push` WOULD PUSH IS NOT THIS PR UNLESS SOMEBODY CHECKS. A bare
+# `git push` sends whatever branch the checkout happens to be on, and this stage
+# is given a PR number and a reviewer — it was never told which branch that PR is
+# for, and never asked.
+#
+# IT PUSHED `main`. Driving #118's round from a checkout sitting on `main` — a
+# `git checkout` had failed because a second worktree held the feature branch, so
+# the shell stayed put — the gate pushed the default branch. An unreviewed commit
+# went straight to `main`, and the round was lost besides: the CI gate then waited
+# for checks on a head the PR still did not have. Two failures from one missing
+# question. #119.
+#
+# ASKED OF THE PR, ANSWERED FROM THE CHECKOUT, AND COMPARED WITH A RESERVED WORD.
+# A DETACHED HEAD HAS NO BRANCH and is refused too: `git push` from one pushes
+# nothing useful, and "nothing useful" is not a state to guess about when the next
+# step waits for a head to appear.
+# THE REFSPEC IS THE PROTECTION; THE BRANCH CHECK IS THE EXPLANATION. A bare
+# `git push` leaves BOTH destination inputs to configuration: `push.default` and
+# `branch.<n>.remote` decide the repository, and `remote.<n>.push` can supply
+# refspecs that update other refs — an ahead `main` among them — however the
+# current branch is named. So checking the name and then pushing bare is a guard
+# over a call that can still go elsewhere, which is the shape this repository
+# keeps deleting.
+#
+# `git push origin HEAD:refs/heads/<branch>` names the repository and the one ref
+# it may write, so no configuration can widen it. The branch comparison stays
+# because it is what TELLS THE OPERATOR they are in the wrong worktree — the case
+# that caused #119 — rather than pushing their work to a branch they did not mean
+# and reporting success.
+#
+# `RB_PUSH_REFSPEC` IS SET HERE AND USED AT BOTH PUSH SITES, so the two cannot
+# drift: one of them being bare is exactly the defect, and a value computed once
+# cannot be half-applied.
+rb_push_is_the_prs() {
+    local _want _cross _pair _pushurl _have
+    # ONE CALL FOR BOTH FACTS, joined by a TAB. A git ref name cannot contain a
+    # space or any control character — `git check-ref-format` forbids them — so a
+    # tab cannot appear in `headRefName` and cannot shift the field. That is the
+    # test this repository applies to any delimiter, and it is why two values may
+    # share one line here where three identity fields may not.
+    _pair=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefName,isCrossRepository \
+        --jq '.headRefName + "\t" + (.isCrossRepository | tostring)' 2>/dev/null) \
+        || { echo "ABORT: could not read the PR's head branch; refusing to push blind."; return 1; }
+    _want="${_pair%%$'\t'*}"
+    _cross="${_pair#*$'\t'}"
+    [ -n "$_want" ] || { echo "ABORT: the PR reports no head branch; refusing to push blind."; return 1; }
+    # THE API SAYS WHETHER IT IS A FORK; THIS DOES NOT COMPARE NAMES. Comparing
+    # `headRepositoryOwner/headRepository` with `$OWNER/$REPO` was the first
+    # version and it is wrong on casing: a pinned `git@github.com:Acme/widget.git`
+    # addresses the same repository the API returns as `acme/widget`, and a
+    # case-sensitive test called every such PR a fork and refused every push.
+    # Lower-casing needs a name — `tr`, or a bash 4 expansion this suite's 3.2 job
+    # does not have — so the comparison is removed rather than fixed:
+    # `isCrossRepository` is the same question asked of the thing that knows.
+    case "$_cross" in
+        false) ;;
+        true) echo "ABORT: PR $PR is from a fork; this loop does not push to forks."; return 1 ;;
+        *) echo "ABORT: could not tell whether PR $PR is from a fork (got '$_cross'); refusing to push blind."; return 1 ;;
+    esac
+    # AND `origin` HAS TO BE THE PINNED REPOSITORY, because it is a NAME the
+    # checkout resolves. `remote.origin.pushurl` can send it somewhere else
+    # entirely, and a second checkout can define `origin` as another project — so
+    # the branch and fork checks above would pass while the commit landed in a
+    # repository nobody asked about and the PR stayed unchanged.
+    #
+    # PARSED BY THE ONE PARSER, not by a second copy. `rb_identity` is what turns
+    # a remote into HOST/OWNER/REPO, and a second implementation here is the
+    # duplication this repository has already deleted four times. It runs in a
+    # SUBSHELL with the push URL pinned, so its globals cannot leak back, and the
+    # answer comes out as the subshell's STATUS rather than as three values
+    # serialised through one string — which is the delimiter problem `CLAUDE.md`
+    # records for exactly this parser.
+    # EVERY PUSH URL, NOT THE FIRST. `origin` may carry several `pushurl` entries
+    # and `git push origin` sends to ALL of them — so validating one and pushing to
+    # the name put the commit in every other configured repository too, which is
+    # the hole this check was added to close, reached by the second entry.
+    # `--all` is what returns them; the loop below refuses unless every one is the
+    # pinned repository, so a mirror of it still works and a mixed destination
+    # does not.
+    _pushurl=$(git remote get-url --push --all origin 2>/dev/null) \
+        || { echo "ABORT: could not read origin's push URLs; refusing to push blind."; return 1; }
+    [ -n "$_pushurl" ] || { echo "ABORT: origin has no push URL; refusing to push blind."; return 1; }
+    #
+    # COMPARED CASE-INSENSITIVELY, because casing is not a different repository:
+    # `git@github.com:Acme/Widget.git` and `acme/widget` address the same thing,
+    # and a fetch URL and a push URL written with different capitalisation are one
+    # operator's inconsistency rather than a redirection. Comparing them exactly
+    # refused every push in that configuration — the same defect this round
+    # removed from the fork check, one level over.
+    #
+    # `shopt` IS SAFE HERE, and that is a fact about this file rather than a
+    # general licence: every helper starts `bash -p`, which imports no functions,
+    # so no builtin in it can be shadowed. That is what #101 and #83 settled. It
+    # is set inside the SUBSHELL, so the option does not outlive the comparison.
+    # PEELED WITH EXPANSIONS, so there is no `read` and no redirection: `--all`
+    # prints one URL per line, and a heredoc here is a temporary file that can
+    # fail — the fail-open shape #111 removed from the marker scan.
+    local _rest="$_pushurl" _u _nl='
+'
+    while [ -n "$_rest" ]; do
+        case "$_rest" in
+            *"$_nl"*) _u="${_rest%%"$_nl"*}"; _rest="${_rest#*"$_nl"}" ;;
+            *)        _u="$_rest"; _rest="" ;;
+        esac
+        [ -n "$_u" ] || continue
+        ( shopt -s nocasematch
+          REVIEW_BUS_REMOTE="$_u"; REVIEW_BUS_OWNER=''; REVIEW_BUS_REPO=''
+          rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
+            || { echo "ABORT: origin pushes to '$_u', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
+    done
+    # THE FULL REF, STRIPPED HERE. `--short` is not the branch name: it shortens
+    # only as far as stays UNAMBIGUOUS, so a branch that shares its name with a tag
+    # comes back as `heads/release/2.0` while GitHub reports `release/2.0` — and
+    # the comparison below then refused a checkout that was already on the PR's
+    # branch, with no way to close the round at all. Reproduced on git 2.55.
+    #
+    # `refs/heads/` IS REMOVED AS A PREFIX, not matched loosely: `${_have#refs/heads/}`
+    # takes it only from the front, so a branch legitimately called
+    # `refs/heads/something` is not silently rewritten.
+    _have=$(git symbolic-ref --quiet HEAD 2>/dev/null) \
+        || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
+    case "$_have" in
+        refs/heads/*) _have="${_have#refs/heads/}" ;;
+        *) echo "ABORT: HEAD points at '$_have', which is not a branch; a push here would not reach PR $PR."; return 1 ;;
+    esac
+    [[ $_have = "$_want" ]] \
+        || { echo "ABORT: this checkout is on '$_have' and PR $PR is for '$_want'; refusing to push the wrong branch."; return 1; }
+    RB_PUSH_REFSPEC="HEAD:refs/heads/$_want"
+    [[ $RB_PUSH_REFSPEC = "HEAD:refs/heads/$_want" ]] \
+        || { echo "ABORT: RB_PUSH_REFSPEC is readonly in this shell; the push destination cannot be pinned."; return 1; }
+    return 0
+}
+
 # AUTO-REVIEW DECIDES THE ORDERING, so an unrecognised value is refused rather
 # than assumed. Guessing wrong here does not fail loudly — it closes the round in
 # the wrong order, which is only visible afterwards.
@@ -323,7 +463,8 @@ if [ "$AUTO_REVIEW" = no ]; then
     # Nothing is queued until the comment is posted, so the push can be proven
     # green first and the threads answered afterwards, with nothing yet requested.
     HEAD_PUSHED=$(git rev-parse HEAD) || { echo "ABORT: could not read the local head."; exit 1; }
-    git push || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
+    rb_push_is_the_prs || exit 1
+    git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
     echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
     exit 0
@@ -364,7 +505,8 @@ if [ "$WHO" != "$COPILOT_BOT" ]; then
     PUSH_BASE=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$WHO") \
         || { echo "ABORT: could not read the review id before the push."; exit 1; }
 fi
-git push || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
+rb_push_is_the_prs || exit 1
+git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; no review was queued and the fixes are not on the PR."; exit 1; }
 /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_BEFORE" || exit 1
 
 # THE PUSHED HEAD IS CONFIRMED, WITH RETRIES. The API can serve the previous head

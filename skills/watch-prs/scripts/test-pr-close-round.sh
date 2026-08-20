@@ -85,7 +85,18 @@ cat > "$TMP/bin/gh" <<'GHSH'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >> "$CALLS"
 case " $* " in
-    *" pr view "*)    # SEQUENCED, because the head MOVING is the whole subject of
+    *" pr view "*)    # WHICH BRANCH THE PR IS FOR is a different question from
+                      # which head it has, and the gate asks it before every push:
+                      # a bare `git push` sends whatever branch the checkout is on,
+                      # and this stage was never told which one that should be.
+                      # #119.
+                      case " $* " in
+                          # ONE CALL, TWO FACTS, joined by a tab — which a git ref
+                          # name cannot contain, so it cannot shift the field.
+                          *headRefName*) cat "$W/branch.out" 2>/dev/null
+                                         exit "$(cat "$W/branch.rc" 2>/dev/null || echo 0)" ;;
+                      esac
+                      # SEQUENCED, because the head MOVING is the whole subject of
                       # some cases: the pre-push read and the post-push read are
                       # the same call to this stub and must be able to differ.
                       if [ ! -f "$W/pushed" ] && [ -f "$W/head.before.out" ]
@@ -102,12 +113,30 @@ cat > "$TMP/bin/git" <<'GITSH'
 printf 'git %s\n' "$*" >> "$CALLS"
 case "$1 $2" in
     "rev-parse HEAD") cat "$W/local.out" 2>/dev/null; exit 0 ;;
+    # WHICH BRANCH THIS CHECKOUT IS ON. Empty with a non-zero status is a DETACHED
+    # HEAD, which the gate must refuse: a push from one reaches no PR, and the
+    # next step would wait for a head that never appears. #119.
+    "symbolic-ref --quiet")
+        # THE FULL REF, because `--short` shortens only as far as stays
+        # unambiguous: a branch sharing its name with a tag comes back as
+        # `heads/release/2.0` while GitHub reports `release/2.0`.
+        [ -s "$W/branch.local" ] || exit 1
+        cat "$W/branch.local"; exit 0 ;;
+    "remote get-url")
+        # `--all` PRINTS ONE URL PER LINE, and `git push <name>` sends to every
+        # one — so a fixture with a single URL says nothing about the second.
+        cat "$W/pushurl.out" 2>/dev/null
+        exit "$(cat "$W/pushurl.rc" 2>/dev/null || echo 0)" ;;
 esac
 # THE PUSH MARKS THE WORLD. Cases about "before or after the push" then key their
 # answers on the event itself rather than on a call count — a counter makes the
 # first call special whether or not it precedes the push, so a defect that MOVES a
 # call past the push still gets the first answer and looks correct.
-[ "$1" = push ] && { : > "$W/pushed"; exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"; }
+# THE PUSH'S ARGUMENTS ARE RECORDED, because a bare `git push` leaves both the
+# repository and the refspec to configuration — `push.default` and
+# `remote.<n>.push` can send it elsewhere however the branch is named. What
+# protects the destination is naming it. #119.
+[ "$1" = push ] && { printf '%s\n' "$*" > "$W/pushed"; exit "$(cat "$W/push.rc" 2>/dev/null || echo 0)"; }
 exit 0
 GITSH
 chmod +x "$TMP/bin/gh" "$TMP/bin/git"
@@ -116,16 +145,36 @@ world() {   # world ; the state in which a round closes cleanly
     W="$TMP/w"; rm -rf "$W"; mkdir -p "$W"; : > "$TMP/calls"
     printf '%s\n' "$HEAD40" > "$W/local.out"
     printf '%s\n' "$HEAD40" > "$W/head.out"
+    # THE CHECKOUT IS ON THE PR'S BRANCH, which is the ordinary state and the one
+    # every other case here assumes. The gate proves it before pushing, because a
+    # bare `git push` sends whatever branch the checkout is on. #119.
+    printf 'fix/the-branch\tfalse\n' > "$W/branch.out"
+    printf 'refs/heads/fix/the-branch\n' > "$W/branch.local"
+    # ORIGIN PUSHES WHERE THE SESSION IS PINNED. `origin` is a NAME the checkout
+    # resolves, and `remote.origin.pushurl` can send it elsewhere entirely — so
+    # the gate parses the effective push URL through `rb_identity` and compares it
+    # with the pinned identity. #119.
+    printf 'git@github.com:acme/widget.git\n' > "$W/pushurl.out"
     # THE REAL HELPER PRINTS A BARE ID — `42`, or `comment:42`. A stub returning a
     # structured line let the propagation cases pass on a value `pr-watch.sh`
     # rejects as `malformed_review_id`, which stops the NEXT round: the fixture was
     # agreeing with itself about a shape the real contract refuses.
     printf '42\n' > "$W/pr-review-state.out"
 }
+# THE FIXTURE PINS ITS OWN IDENTITY, WHICH MEANS CLEARING THE OVERRIDES TOO.
+# `rb_identity` honours `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` over anything it
+# derives, and the gate's push-URL proof clears both before parsing — so a
+# contributor with either exported saw the pinned identity and the parsed one
+# disagree, and every gate refused. The suite is self-contained or it is not.
+# `pr-selfcheck.sh` cannot clear these: `SKILL.md` exports `REVIEW_BUS_REMOTE` to
+# pin the session and the suite runs with that pin in the environment, so a
+# fixture whose subject is an env-driven override clears it itself.
 stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
     local out rc=0 st="$1"; shift
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         "$DIR/pr-close-round.sh" "$st" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
@@ -238,6 +287,7 @@ case_is 1 "not a full OID" "…and a malformed one is not a head" "$CODEXBOT" ye
 world; : > "$TMP/summary.md"
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'summary is empty'; } \
     && pass "an empty summary stops the round" \
@@ -248,6 +298,7 @@ grep -q 'git push' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and so does a summary file that is not there" \
@@ -354,6 +405,7 @@ grep -q 'pr-review-state.sh review-id' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'not a reviewer this loop drives'; } \
     && pass "an unrecognised reviewer is refused, by name" \
@@ -377,9 +429,157 @@ got="$(run "$COPILOTBOT" yes)"; rc="${got%%|*}"
 # whenever anything else did, and stop being about the pre-push read at all.
 world; printf 'the round summary\n' > "$TMP/summary.md"
 stage gate 7 "$COPILOTBOT" "$TMP/summary.md" yes >/dev/null
-[ "$(grep -c 'gh pr view' "$TMP/calls")" -eq 1 ] \
+# THE HEAD LOOKUPS, NOT EVERY `pr view`. The gate also asks which BRANCH the PR
+# is for before it pushes — a different question, made for a different reason —
+# so counting every `pr view` would move whenever that one did and stop being
+# about the pre-push head read at all.
+_hv="$(grep -c 'gh pr view.*headRefOid' "$TMP/calls" || true)"
+[ "$_hv" -eq 1 ] \
     && pass "…and the gate reads the head once, not twice, since the pre-push one is unused" \
-    || die "a Copilot gate made $(grep -c 'gh pr view' "$TMP/calls") head lookups"
+    || die "a Copilot gate made $_hv head lookups"
+
+# ── THE GATE PUSHES THE PR'S BRANCH, OR NOTHING ───────────────────────────
+#
+# A bare `git push` sends whatever branch the checkout is on, and this stage is
+# given a PR number and a reviewer — it was never told which branch that PR is
+# for, and never asked. Driving #118's round from a checkout sitting on `main`,
+# because a `git checkout` had failed and the shell stayed put, it pushed the
+# DEFAULT BRANCH: an unreviewed commit reached `main`, and the round was lost
+# besides, since the CI gate then waited for checks on a head the PR did not have.
+# #119.
+#
+# NOTHING PUSHED IS THE ASSERTION, in every refusal. A message alone would be
+# satisfied by a gate that complains and pushes anyway.
+nothing_pushed() {   # nothing_pushed <label>
+    [ -f "$W/pushed" ]         && die "$1 — but it pushed anyway"         || pass "$1"
+}
+# THE DESTINATION IS NAMED, NOT LEFT TO CONFIGURATION. A bare `git push` leaves
+# both inputs to config: `push.default` and `branch.<n>.remote` choose the
+# repository, and `remote.<n>.push` can supply refspecs that update other refs —
+# an ahead `main` among them — however the current branch is named. So the branch
+# comparison alone is a guard over a call that can still go elsewhere; what
+# protects the destination is naming it.
+for _m in no yes; do
+    world; printf 'the round summary\n' > "$TMP/summary.md"
+    stage gate 7 "$CODEXBOT" "$TMP/summary.md" "$_m" >/dev/null 2>&1
+    _pushargs="$(cat "$W/pushed" 2>/dev/null)"
+    [ "$_pushargs" = 'push origin HEAD:refs/heads/fix/the-branch' ] \
+        && pass "the gate names the repository and the one ref it may write ($_m mode)" \
+        || die "the $_m-mode gate left its destination to configuration: 'git $_pushargs'"
+done
+# A FORK'S BRANCH IS NOT OURS TO WRITE. `origin` pointed at a same-named branch of
+# THIS repository would put the round's fixes somewhere else entirely, and report
+# success.
+world; printf 'fix/the-branch\ttrue\n' > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'does not push to forks'; } \
+    && pass "…and a PR from a fork refuses rather than pushing at a same-named branch here" \
+    || die "a fork PR was pushed for: '${got}'"
+nothing_pushed "…with nothing pushed"
+# THE FORK ANSWER IS READ, NOT ASSUMED. A missing or unexpected value is "could
+# not tell", which is a refusal — the direction that matters, since the other one
+# pushes at a repository nobody named.
+world; printf 'fix/the-branch\n' > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not tell whether'; } \
+    && pass "…and an answer that says neither refuses rather than assuming same-repository" \
+    || die "a missing cross-repository answer was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
+# ── `origin` IS A NAME THE CHECKOUT RESOLVES ──────────────────────────────
+# `remote.origin.pushurl` can send it to another repository entirely, and a
+# second checkout can define `origin` as a different project — so the branch and
+# fork checks pass while the commit lands somewhere nobody asked about and the PR
+# stays unchanged. The effective push URL is parsed by `rb_identity`, the one
+# parser, and compared with the pinned identity. #119.
+world; printf 'git@github.com:someone/other.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push elsewhere'; } \
+    && pass "…and an origin whose push URL is another repository refuses" \
+    || die "a redirected origin was pushed to: '${got}'"
+nothing_pushed "…with nothing pushed"
+# CASING IS NOT A FORK. `git@github.com:Acme/widget.git` addresses the same
+# repository the API calls `acme/widget`, and a case-sensitive comparison of the
+# two called every such PR a fork and refused every push — which is why the fork
+# question is asked of the API instead of derived from names.
+world; printf 'git@github.com:Acme/Widget.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while a differently-cased pinned origin still closes the round" \
+    || die "casing was treated as a different repository: '${got}'"
+# A SECOND `pushurl` GETS THE COMMIT TOO. `git push origin` sends to every
+# configured push URL, so validating the first and pushing to the name put the
+# round's fixes in whatever the second names.
+world; printf 'git@github.com:acme/widget.git\ngit@github.com:someone/other.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'someone/other'; } \
+    && pass "…and a second push URL naming another repository refuses, though the first is right" \
+    || die "a second push URL was pushed to: '${got}'"
+nothing_pushed "…with nothing pushed"
+# A MIRROR OF THE SAME REPOSITORY STILL WORKS, or the check above is satisfied by
+# refusing every multi-URL remote rather than by reading them.
+world; printf 'git@github.com:acme/widget.git\nhttps://github.com/acme/widget.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while two URLs for the same repository still close the round" \
+    || die "a mirror of the pinned repository was refused: '${got}'"
+world; printf '1' > "$W/pushurl.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "origin's push URL"; } \
+    && pass "…and an unreadable push URL refuses rather than pushing blind" \
+    || die "an unreadable push URL was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
+for _m in no yes; do
+    world; printf 'refs/heads/some-other-branch
+' > "$W/branch.local"
+    got="$(run "$CODEXBOT" "$_m")"
+    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push the wrong branch'; }         && pass "a checkout on another branch refuses ($_m mode)"         || die "the wrong branch was pushed in $_m mode: '${got}'"
+    nothing_pushed "…with nothing pushed"
+done
+# A DETACHED HEAD HAS NO BRANCH, and a push from one reaches no PR — so the next
+# step would wait for a head that never appears. The stub reports that as an empty
+# answer with a non-zero status, which is what `git symbolic-ref` does.
+world; : > "$W/branch.local"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'detached HEAD'; }     && pass "…and a detached HEAD refuses rather than pushing nothing useful"     || die "a detached HEAD was pushed from: '${got}'"
+nothing_pushed "…with nothing pushed"
+# A BRANCH THAT SHARES ITS NAME WITH A TAG STILL CLOSES THE ROUND. `--short`
+# shortens only as far as stays UNAMBIGUOUS, so on such a branch it returns
+# `heads/release/2.0` while GitHub reports `release/2.0` — and the comparison then
+# refused a checkout that was already on the PR's branch, leaving no way to close
+# the round at all. Reproduced on git 2.55; the fix reads the full ref and strips
+# `refs/heads/`.
+world; printf 'refs/heads/release/2.0\n' > "$W/branch.local"
+printf 'release/2.0\tfalse\n' > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…and a branch sharing its name with a tag still closes the round" \
+    || die "an ambiguous branch name was refused: '${got}'"
+_pushargs="$(cat "$W/pushed" 2>/dev/null)"
+[ "$_pushargs" = 'push origin HEAD:refs/heads/release/2.0' ] \
+    && pass "…pushing to the branch GitHub named, not the disambiguated form" \
+    || die "the ambiguous name reached the refspec: 'git $_pushargs'"
+# AND A SYMBOLIC HEAD THAT IS NOT A BRANCH REFUSES. `refs/heads/` is stripped as a
+# PREFIX, so anything else — a ref outside that namespace — is not silently
+# rewritten into a branch name and pushed at.
+world; printf 'refs/remotes/origin/fix/the-branch\n' > "$W/branch.local"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'which is not a branch'; } \
+    && pass "…while a symbolic HEAD outside refs/heads refuses" \
+    || die "a non-branch symbolic HEAD was pushed from: '${got}'"
+nothing_pushed "…with nothing pushed"
+
+# AN UNREADABLE ANSWER IS A REFUSAL TOO. "Could not ask which branch" is not
+# "any branch will do", and this is the one that decides where a commit lands.
+world; printf '1' > "$W/branch.rc"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push blind'; }     && pass "…and an unreadable head branch refuses rather than pushing blind"     || die "an unreadable head branch was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
+# AND AN EMPTY ONE, which a 200 with a missing field produces — the same shape as
+# a successful read, and the reason a status check alone is not enough.
+world; : > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no head branch'; }     && pass "…and an empty one, which a 200 with a missing field looks like"     || die "an empty head branch was pushed past: '${got}'"
+nothing_pushed "…with nothing pushed"
 
 # THE PASS THE PUSH STARTED CAN TIME OUT, and that stops the round: its result
 # would otherwise answer the request made after it.
@@ -423,6 +623,8 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
     _auto="${_r%%|*}"; _want="${_r#*|}"
     got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF "$_want"; } \
         && pass "refused by name: $_want" \

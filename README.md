@@ -312,7 +312,17 @@ Then:
    remembered, and runs in **two stages with your thread replies between them**:
 
    - `gate <PR> <reviewer> <summary-file> <auto-review>` pushes and proves the
-     head is green, and reports it as `head=…`;
+     head is green, and reports it as `head=…`. **Run it from a checkout on that
+     PR's branch**: it names the ref it may write, proves every push URL of
+     `origin` is the repository the session is pinned to, and refuses — pushing
+     nothing — if any of that does not hold.
+
+     Two kinds of refusal, and only one is worth retrying. **Wrong branch or a
+     detached HEAD** is about where you are standing: switch to the worktree
+     holding the PR's branch and run it again, nothing has happened yet. **A fork
+     PR, or an `origin` that pushes elsewhere**, is not — running it again changes
+     nothing. A fork PR is outside what this loop drives, and where `origin`
+     pushes is your configuration to settle, not the loop's;
    - **then** reply to each thread with what changed, react 👍/👎, and resolve it;
    - `post <PR> <reviewer> <summary-file> <auto-review> <head>` re-proves the head
      has not moved, posts the summary and requests the next pass.

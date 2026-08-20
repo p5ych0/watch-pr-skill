@@ -1,5 +1,87 @@
 # Changelog
 
+## [2.0.38] — 2026-08-20
+
+- **The round gate pushed whatever branch the checkout was on.** `git push` with
+  no argument sends the current branch, and the stage is given a PR number and a
+  reviewer — it was never told which branch that PR is for, and never asked.
+
+  It pushed `main`. Driving a round from a checkout that was sitting on the
+  default branch — a `git checkout` had failed because a second worktree held the
+  feature branch, so the shell stayed put — the gate pushed `main`, putting an
+  unreviewed commit on it. The round was lost as well: the CI gate then waited for
+  checks on a head the PR still did not have, so the summary was never posted and
+  no review was requested. Two failures from one missing question.
+
+  **The destination is named now, rather than checked and then left to
+  configuration.** `git push origin HEAD:refs/heads/<branch>` names the remote and
+  the one ref it may write, so nothing in `push.default`, `branch.<n>.remote` or
+  `remote.<n>.push` can widen it.
+
+  **And `origin` is proved to be the pinned repository**, because it is a NAME the
+  checkout resolves: `remote.origin.pushurl` can send it elsewhere entirely, and a
+  second checkout can define `origin` as another project — so the branch and fork
+  checks would pass while the commit landed in a repository nobody asked about and
+  the PR stayed unchanged. The effective push URL goes through `rb_identity`, the
+  one parser, in a subshell so its globals cannot leak back, and the answer is the
+  subshell's status rather than three values serialised through one string.
+
+  That comparison is case-insensitive: `git@github.com:Acme/Widget.git` and
+  `acme/widget` address the same repository, and comparing them exactly refused
+  every push in that configuration. `shopt -s nocasematch` is safe in a helper for
+  a reason specific to these files — they start `bash -p`, which imports no
+  functions, so no builtin in them can be shadowed, which is what #101 and #83
+  settled — and it is set inside the subshell so the option does not outlive the
+  comparison.
+
+  **Whether the PR is from a fork is asked of the API**, not derived from names.
+  Comparing `headRepositoryOwner/headRepository` with the pinned owner and repo
+  was the first version, and it is wrong on casing in exactly the same way;
+  lower-casing needs a name — `tr`, or a bash 4 expansion the 3.2 job does not
+  have — so the comparison is removed rather than fixed. `isCrossRepository` is
+  the same question asked of the thing that knows, and an answer that is neither
+  `true` nor `false` is a refusal — a branch-name check followed by a bare push
+  is a guard over a call that can still go elsewhere, which is the shape this
+  repository keeps deleting.
+
+  The branch comparison stays for what it actually does: telling the operator they
+  are in the wrong worktree, which is the case that caused this, rather than
+  pushing their work somewhere they did not mean and reporting success. Both push
+  sites use one refspec computed once, because one of the two being bare is
+  exactly the defect.
+
+  **The branch is read from the full symbolic ref, not `--short`.** That option
+  shortens only as far as stays UNAMBIGUOUS, so a branch sharing its name with a
+  tag comes back as `heads/release/2.0` while GitHub reports `release/2.0` — and
+  the comparison then refused a checkout that was already on the PR's branch,
+  leaving no way to close the round at all. Reproduced on git 2.55.
+  `refs/heads/` is removed as a prefix, so a symbolic HEAD outside that namespace
+  refuses rather than being rewritten into a branch name and pushed at.
+
+  Ten refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  (where a push reaches no PR and the next step would wait for a head that never
+  appears), an unreadable answer, an empty one — which is what a 200 with a
+  missing field looks like, and why a status check alone is not enough — and a PR
+  from a **fork**, where `origin` pointed at a same-named branch would put the
+  round's fixes somewhere else entirely and report success; a cross-repository
+  answer that says neither; an `origin` whose push URL is another repository; and
+  a push URL that cannot be read at all; and a second push URL naming another
+  repository, though the first is right.
+
+  Twenty-three cases, all failing against the gate they replace, including two that
+  assert the push's arguments verbatim — one per mode, since a refspec applied to
+  only one site is the same defect halved.
+
+  `SKILL.md` and `README.md` tell the driver and the operator to run the gate from
+  the PR's checkout, and separate the two kinds of refusal: a wrong branch or a
+  detached HEAD is about where you are standing and is answered by moving worktree
+  and running it again, while a fork PR or a redirected `origin` is not — running
+  it again changes nothing, so those stop for the operator. Both reviewer files
+  carry the general rule, which is that a call that writes somewhere must name
+  where. The Copilot head-lookup count
+  now counts `headRefOid` reads specifically, since the branch read is a different
+  question asked for a different reason and would otherwise move that number.
+
 ## [2.0.37] — 2026-08-19
 
 - **The records now carry enough to order a revocation against a verdict**, which
