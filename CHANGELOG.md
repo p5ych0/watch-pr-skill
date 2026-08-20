@@ -21,6 +21,11 @@
   An unreadable reply time blocks rather than passing. Read as "no replies", the
   retracting reply it could not see is exactly what gets merged over.
 
+  And a timestamp of a shape nothing can place is a *third* answer, not the
+  second: a probe that exits 0 with something it did not mean is a read that
+  failed, and reporting it as "nobody signed this off" sent the operator to record
+  another signoff instead of looking at the probe.
+
   Closes #129, on #130's reader.
 
 ## [2.0.43] — 2026-08-20

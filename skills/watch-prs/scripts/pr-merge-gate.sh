@@ -395,8 +395,18 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
         1) pat="" ;;
         *) echo "merge blocked: could not read when $who's newest reply landed (rc=$prc)"; return 1 ;;
     esac
-    rb_answer_at "$rat" "$pat" || {
-        echo "merge blocked: $who has nothing on ${want:0:7} for a signoff to answer"; return 1; }
+    # THE TWO REFUSALS ARE DIFFERENT ANSWERS, and both block here — but they do not
+    # say the same thing. `1` is "neither channel has anything for a signoff to
+    # answer"; `2` is a timestamp of a shape nothing can place, which is a probe
+    # that exited 0 with something it did not mean, and telling the operator there
+    # is nothing to answer sends them looking in the wrong place.
+    local aarc=0
+    rb_answer_at "$rat" "$pat" || aarc=$?
+    case "$aarc" in
+        0) ;;
+        1) echo "merge blocked: $who has nothing on ${want:0:7} for a signoff to answer"; return 1 ;;
+        *) echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1 ;;
+    esac
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0
     rat="$RB_ANSWER_AT"
     case "$RB_VOUCH_REASON" in

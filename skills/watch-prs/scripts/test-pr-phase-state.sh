@@ -448,6 +448,26 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# A TIMESTAMP OF A SHAPE NOTHING CAN PLACE IS A FAILED READ, not an ordinary
+# unvouched review. A probe that exits 0 with something it did not mean — a
+# truncated or replaced helper — reported as "nobody signed this off" sends the
+# operator to record another signoff for a read that failed.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'whenever\n' > "$W/codex.at.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review time of another shape fails closed rather than reading as unvouched" \
+    || die "a malformed review time gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+    && die "…but it also told the operator to record a signoff" \
+    || pass "…and does not send the operator to record one"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex whenever
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so does a reply time of another shape" \
+    || die "a malformed reply time gave '${got}'"
+
 # A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT. The verdict is produced
 # by the COMMENTS on the review, and one added afterwards does not move the
 # review's `submitted_at`: review at T1, signoff at T2, retraction at T3, and

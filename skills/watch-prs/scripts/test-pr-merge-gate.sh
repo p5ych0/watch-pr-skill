@@ -441,6 +441,17 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
+# A TIMESTAMP OF A SHAPE NOTHING CAN PLACE is a probe that exited 0 with
+# something it did not mean, and it blocks — but not by telling the operator there
+# is nothing to answer, which sends them looking in the wrong place.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'whenever\n' > "$STUB_DIR/pr-review-state.review-at.out"
+case_is 1 "could not be placed in time" "a review time of another shape blocks, and says why"
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
+
 # ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
 # The verdict is produced by the COMMENTS on the review, and one added afterwards
 # does not move the review's `submitted_at`. Review at T1, signoff at T2,

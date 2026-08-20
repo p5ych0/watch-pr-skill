@@ -182,7 +182,17 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
         1) _pat="" ;;
         *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
     esac
-    rb_answer_at "$_rat" "$_pat" || { RB_VOUCH_REASON=nothing_to_answer; return 1; }
+    # THE TWO REFUSALS ARE DIFFERENT ANSWERS. `1` is "neither channel has anything
+    # for a signoff to answer", which is an ordinary state; `2` is a timestamp of a
+    # shape this cannot place, which is a probe that answered 0 with something it
+    # did not mean — a truncated or replaced helper — and reporting it as the first
+    # sends the operator to record another signoff for a read that failed.
+    rb_answer_at "$_rat" "$_pat"; _arc=$?
+    case "$_arc" in
+        0) ;;
+        1) RB_VOUCH_REASON=nothing_to_answer; return 1 ;;
+        *) RB_VOUCH_REASON=answer_time_unreadable; return 2 ;;
+    esac
     rb_signoff_answers "$_line" "$RB_ANSWER_AT" "$PR" "$1" "$2"
 }
 
