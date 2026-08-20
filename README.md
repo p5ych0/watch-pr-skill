@@ -359,7 +359,10 @@ Then:
      against *that exact sha*, proves its checks are green — and then proves the
      head and the verdict **again**, immediately before writing, because the
      checks gate waits and a push or a dismissal can land while it does. Either
-     stops the record with nothing posted. It writes the signoff onto the PR in
+     stops the record with nothing posted. So does a **revocation newer than that
+     verdict** — somebody reopened the phase while this was proving it, and
+     recording would supersede them; a revocation *older* than the verdict is the
+     one this pass is answering, and records normally. It writes the signoff onto the PR in
      the form `pr-signoff.sh` reads back. Then it stops
      and asks: merge on one reviewer's signoff, or open the second phase. You
      supply one paragraph on what the PR does and what the Codex phase changed;
