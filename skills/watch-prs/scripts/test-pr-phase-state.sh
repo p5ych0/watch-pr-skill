@@ -81,15 +81,6 @@ fi
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
 # about what was asked. A stub that printed nothing made every rc-0 path look
 # like the malformed-probe case, which is a case of its own below.
-# A DIFFERENT ANSWER ON A LATER CALL, where a case needs the world to change
-# between two reads of the SAME question — a review dismissed while its timestamps
-# are being fetched is exactly that.
-_vn=$(( $(cat "$W/$_w.verdict.n" 2>/dev/null || echo 0) + 1 ))
-printf '%s' "$_vn" > "$W/$_w.verdict.n"
-if [ -f "$W/$_w.verdict.$_vn.out" ]; then
-    cat "$W/$_w.verdict.$_vn.out"
-    exit "$(cat "$W/$_w.verdict.$_vn.rc" 2>/dev/null || echo 0)"
-fi
 if [ -f "$W/$_w.verdict.out" ]; then
     cat "$W/$_w.verdict.out"
 else
@@ -478,11 +469,12 @@ got="$(run 7)"
 # other, and each fix left the next — a sequential guard cannot close a gap
 # between sequential calls.
 #
-# `escape-snapshot` derives the id and both times from ONE pair of review reads
-# and refuses if anything moved, so those five belong to
-# `test-pr-review-state.sh`, which can actually make the world change between the
-# two reads. What stays here is the wiring: the helper asks once and tells the
-# three answers apart. #133.
+# `escape-snapshot` asks GraphQL, which returns the review AND its comments in one
+# response — consistent by construction, with no movement to compare — so those
+# five are not window cases any more. What they became lives in
+# `test-pr-review-state.sh`, which can hand that helper a malformed or truncated
+# response; what stays here is the wiring: ask once, and tell the three answers
+# apart. #133.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 printf '1\n' > "$W/codex.snap.rc"; : > "$W/codex.snap.out"
 got="$(run 7)"

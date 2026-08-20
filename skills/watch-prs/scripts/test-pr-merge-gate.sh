@@ -50,16 +50,9 @@ _out="\$STUB_DIR/\${_n}.out"; _rc="\$STUB_DIR/\${_n}.rc"
 # THE ARGUMENTS SELECT THE ANSWER where a case needs two different ones from the
 # same helper — the gate asks \`pr-review-state.sh\` about two reviewers and about
 # two shas, and a single canned reply cannot tell those apart.
-_key="\$_n"
 for _k in "\$@"; do
-    [ -f "\$STUB_DIR/\${_n}.\${_k}.out" ] && { _out="\$STUB_DIR/\${_n}.\${_k}.out"; _rc="\$STUB_DIR/\${_n}.\${_k}.rc"; _key="\${_n}.\${_k}"; break; }
+    [ -f "\$STUB_DIR/\${_n}.\${_k}.out" ] && { _out="\$STUB_DIR/\${_n}.\${_k}.out"; _rc="\$STUB_DIR/\${_n}.\${_k}.rc"; break; }
 done
-# AND A DIFFERENT ANSWER ON A LATER CALL, where a case needs the world to change
-# between two reads of the SAME question — a review dismissed while its timestamps
-# are being fetched is exactly that.
-_c="\$(cat "\$STUB_DIR/\$_key.n" 2>/dev/null || echo 0)"; _c=\$((_c + 1))
-printf '%s' "\$_c" > "\$STUB_DIR/\$_key.n"
-[ -f "\$STUB_DIR/\$_key.\$_c.out" ] && { _out="\$STUB_DIR/\$_key.\$_c.out"; _rc="\$STUB_DIR/\$_key.\$_c.rc"; }
 [ -f "\$_out" ] && cat "\$_out"
 exit "\$(cat "\$_rc" 2>/dev/null || echo 0)"
 STUB
@@ -469,11 +462,12 @@ case_is 1 "is not one this gate can read" "…and so does a reply time of anothe
 # reads to each other, and each fix left the next one — a sequential guard cannot
 # close a gap between sequential calls.
 #
-# `escape-snapshot` derives the id, the review's time and its newest reply's from
-# ONE pair of review reads and refuses if anything moved, so those five belong to
-# `test-pr-review-state.sh`, which can actually make the world change between the
-# two reads. What stays here is the wiring: the gate asks once and distinguishes
-# the three answers. #133.
+# `escape-snapshot` asks GraphQL, which returns the review AND its comments in one
+# response — consistent by construction, with no movement to compare — so those
+# five are not window cases any more. What they became lives in
+# `test-pr-review-state.sh`, which can hand that helper a malformed or truncated
+# response; what stays here is the wiring: ask once, and tell the three answers
+# apart. #133.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '1' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
 : > "$STUB_DIR/pr-review-state.escape-snapshot.out"
