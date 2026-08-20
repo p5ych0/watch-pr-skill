@@ -414,6 +414,12 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # …and the review trigger. Two callers must refuse it and a third writes
         # it deliberately, which is exactly the split that ends up wrong in one.
         /\*'"'"'@codex review'"'"'\*\)/ { print FILENAME ":" FNR ": review trigger" }
+        # …and the `PR_REVIEW_STATE` record shape. It was written out in
+        # `pr-merge-gate.sh` and `pr-watch.sh` and was MISSING from
+        # `pr-phase-state.sh`, which re-validated a recorded signoff on the exit
+        # status alone — so an rc-0 answer that was empty, or about another PR,
+        # reviewer or head, read as "the phase still stands". #126.
+        /\^PR_REVIEW_STATE pr=/          { print FILENAME ":" FNR ": review record shape" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -462,6 +468,14 @@ seen="$(scan_inline_rules "$DRIFT")"; drc5=$?
     && pass "…and catches a helper that re-implements the review trigger" \
     || die "the drift guard did not catch a planted trigger copy (rc=$drc5 out='$seen')"
 rm -f "$DRIFT/pr-trigger-copy.sh"
+{ printf '#!/usr/bin/env bash\n'
+  printf "rx='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'\n"
+} > "$DRIFT/pr-record-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
+{ [ "$drc6" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-record-copy.sh'; } \
+    && pass "…and catches a helper that re-implements the review-record shape" \
+    || die "the drift guard did not catch a planted record copy (rc=$drc6 out='$seen')"
+rm -f "$DRIFT/pr-record-copy.sh"
 
 # A helper whose name merely ENDS in the library's name is scanned, not exempted.
 # `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped
@@ -548,6 +562,70 @@ if [ -n "$trunc" ]; then
         || die "an inherited RB_COPILOT_BOT survived a truncated library (rc=$tr_rc '$tr_out')"
     rm -rf "$trunc"
 fi
+
+# ── WHAT A `PR_REVIEW_STATE` ANSWER IS ─────────────────────────────────────
+# The shape and the identity check were written out in `pr-merge-gate.sh` and
+# `pr-watch.sh` and were missing from `pr-phase-state.sh`. #126.
+H40=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+O40=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+BOT='chatgpt-codex-connector[bot]'
+rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT state=reviewed" state \
+    && [ "$RB_REC_PR" = 7 ] && [ "$RB_REC_SHA" = aaaaaaa ] \
+    && [ "$RB_REC_WHO" = "$BOT" ] && [ "$RB_REC_VALUE" = reviewed ] && [ -z "$RB_REC_TAIL" ] \
+    && pass "a state record parses into its five parts" \
+    || die "a well-formed state record did not parse (pr='$RB_REC_PR' sha='$RB_REC_SHA' who='$RB_REC_WHO' val='$RB_REC_VALUE' tail='$RB_REC_TAIL')"
+# THE TAIL IS RETURNED, NOT ACCEPTED: what may follow differs per question, so
+# each caller states its own rule. A library that swallowed it would accept any
+# field anyone ever appends.
+rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT verdict=clean findings=0" verdict \
+    && [ "$RB_REC_VALUE" = clean ] && [ "$RB_REC_TAIL" = " findings=0" ] \
+    && pass "…and a verdict record hands its tail back rather than accepting it" \
+    || die "the verdict tail was not returned (val='$RB_REC_VALUE' tail='$RB_REC_TAIL')"
+# THE FIELD IS NAMED BY THE CALLER, because the two questions have different ones
+# and a caller that got the other has asked something it is not about to read.
+rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT state=reviewed" verdict \
+    && die "a state record was accepted as a verdict" \
+    || pass "…and a record of the other field is refused"
+# ANCHORED AT BOTH ENDS. rc-0 noise such as `warning: cached state=none` passes a
+# substring match and takes a fallback path nobody's answer selected.
+rb_review_record "warning: cached PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT state=none" state \
+    && die "a record with text before it was accepted" \
+    || pass "…and noise before the record is refused"
+rb_review_record "" state \
+    && die "an empty line parsed as a record" \
+    || pass "…and an empty line is refused"
+# AND THE PARSE LEAVES NOTHING BEHIND when it fails: a caller that checked the
+# status and then read the variables would otherwise act on the PREVIOUS record.
+{ [ -z "$RB_REC_PR" ] && [ -z "$RB_REC_SHA" ] && [ -z "$RB_REC_WHO" ] \
+    && [ -z "$RB_REC_VALUE" ] && [ -z "$RB_REC_TAIL" ]; } \
+    && pass "…with every field cleared, so a failed parse cannot leave the last one standing" \
+    || die "a failed parse left values behind (pr='$RB_REC_PR' sha='$RB_REC_SHA')"
+# A WELL-FORMED LINE IS NOT AN ANSWER. The head is passed WHOLE and compared
+# against the record's own width, so the `${head:0:7}` every caller wrote is gone.
+rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT verdict=clean findings=0" verdict \
+    || die "the identity fixture's record did not parse"
+rb_review_record_is_about 7 "$BOT" "$H40" \
+    && pass "a record is about the pr, reviewer and head it names" \
+    || die "a matching record was rejected"
+rb_review_record_is_about 8 "$BOT" "$H40" \
+    && die "a record for another PR was accepted" \
+    || pass "…and not about another PR"
+rb_review_record_is_about 7 'copilot-pull-request-reviewer[bot]' "$H40" \
+    && die "a record for another reviewer was accepted" \
+    || pass "…nor another reviewer, compared as a string since the login ends in [bot]"
+rb_review_record_is_about 7 "$BOT" "$O40" \
+    && die "a record for another head was accepted" \
+    || pass "…nor another head"
+# THE FULL WIDTH IS COMPARED WHERE THE RECORD CARRIES IT, so a record that grew to
+# forty hex is not matched on its first seven.
+rb_review_record "PR_REVIEW_STATE pr=7 sha=$H40 reviewer=$BOT verdict=clean findings=0" verdict \
+    && rb_review_record_is_about 7 "$BOT" "$H40" \
+    && pass "…and a forty-hex record is compared at forty" \
+    || die "a forty-hex record did not match its own head"
+rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb reviewer=$BOT verdict=clean findings=0" verdict \
+    && rb_review_record_is_about 7 "$BOT" "$H40" \
+    && die "a forty-hex record matched on its first seven" \
+    || pass "…and one that only shares its first seven does not"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

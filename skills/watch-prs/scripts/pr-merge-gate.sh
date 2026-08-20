@@ -176,6 +176,8 @@ esac
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
 # as library data — so this would validate a signoff from whatever account that
 # variable named. `rb_load` clears before it sources, which is the whole point.
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
 CODEX_BOT="$RB_CODEX_BOT"; COPILOT_BOT="$RB_COPILOT_BOT"
@@ -231,12 +233,20 @@ fi
 # THE PATTERN LIVES IN A VARIABLE: Bash 3.2 cannot parse a `[[ =~ ]]` whose pattern
 # contains a parenthesis written inline, and this block runs in the operator's own
 # shell — which on macOS is that bash.
-RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)$'
-if [[ "$CODEX_HEAD_STATE" =~ $RX_STATE ]]; then
-    S_PR="${BASH_REMATCH[1]}"; S_SHA="${BASH_REMATCH[2]}"
-    S_WHO="${BASH_REMATCH[3]}"; CODEX_STATE="${BASH_REMATCH[4]}"
+# THROUGH `recordlib.sh`, because this shape was written out here and in
+# `pr-watch.sh` and was missing from `pr-phase-state.sh` — the duplication that
+# library exists to end. #126.
+if rb_review_record "$CODEX_HEAD_STATE" state; then
+    CODEX_STATE="$RB_REC_VALUE"
 else
     echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 1
+fi
+# NOTHING MAY FOLLOW THE VALUE on this question. The library returns the tail
+# rather than accepting it, because what may follow differs per question — a
+# `verdict` has a grammar of its own — and swallowing it centrally would accept
+# any field anyone ever appends.
+if [ -n "$RB_REC_TAIL" ]; then
+    echo "merge blocked: Codex head-state line has trailing text ('$CODEX_HEAD_STATE')"; exit 1
 fi
 # The record has to be ABOUT what was asked. A well-formed line is not the same
 # as an answer: a misrouted wrapper or a stale cache returning `pr=… sha=…
@@ -247,7 +257,7 @@ fi
 #
 # Compared as STRINGS, not with `=~`: `$CODEX_BOT` ends in `[bot]`, which a regex
 # reads as a character class.
-if [ "$S_PR" != "$PR" ] || [ "$S_WHO" != "$CODEX_BOT" ] || [ "$S_SHA" != "${HEAD_OID:0:7}" ]; then
+if ! rb_review_record_is_about "$PR" "$CODEX_BOT" "$HEAD_OID"; then
     echo "merge blocked: Codex head-state record is about something else ('$CODEX_HEAD_STATE')"; exit 1
 fi
 case "$CODEX_STATE" in
