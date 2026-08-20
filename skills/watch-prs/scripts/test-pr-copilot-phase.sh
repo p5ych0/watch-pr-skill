@@ -191,7 +191,8 @@ printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
 # the LATEST verdict on this sha, so a result landing between the cleanliness
 # proof and that read is the one it times — and the record would claim to answer
 # a verdict nobody proved. Re-proving cleanliness binds them; where it no longer
-# holds the field is dropped rather than written wrong.
+# holds the RECORD IS REFUSED, because cleanliness is a precondition for recording
+# at all rather than a value the record carries.
 # A PUSH DURING THE TIME PROBES IS CAUGHT, because the head read comes after
 # them. Both are pinned to `$CODEX_SHA`, so a head that moved while they ran
 # leaves them answering about a commit that is no longer the head — and the record

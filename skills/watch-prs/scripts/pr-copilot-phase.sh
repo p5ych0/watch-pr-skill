@@ -550,8 +550,10 @@ esac
 # the LATEST verdict on this sha across both channels, so a result landing between
 # the cleanliness proof and this read is the one it times — and the record would
 # then claim to answer a verdict nobody proved. Re-proving cleanliness immediately
-# after is what binds them; where it no longer holds, the field is dropped rather
-# than written wrong, and the ordering arm below still refuses on its own terms.
+# after is what binds them; where it no longer holds, the RECORD IS REFUSED — the
+# timestamp is a value the record carries or does not, but cleanliness is a
+# precondition for recording at all, and posting a signoff without the field for a
+# verdict that has stopped being clean is worse than never having looked.
 #
 # ONE SNAPSHOT WOULD BE BETTER THAN TWO ADJACENT READS, and that is #139: the
 # reader can answer "clean, and at this time" from one response, as
