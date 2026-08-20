@@ -11,26 +11,25 @@
   last probe is in flight. Five review rounds, one layer in each time, because a
   sequential guard cannot close a gap between sequential calls.
 
-  `pr-review-state.sh escape-snapshot` derives all of it from **one** pair of
-  review reads, with the comments counted, timed and classified between them, and
-  refuses if anything moved. `pr-merge-gate.sh` and `pr-phase-state.sh` ask once
-  and compare nothing: the id, the review's time and its newest reply's arrive
-  together or not at all.
+  **And no ordering of separate reads makes them one snapshot.** The REST
+  endpoints answer reviews and review comments apart: with the comments read last
+  a review dismissed afterwards is invisible, with the reviews read last a reply
+  posted afterwards is, and alternating a third time only moves the race.
+  `pr-review-state.sh escape-snapshot` asks GraphQL, which returns both in a
+  **single response** — consistent by construction, with nothing to compare.
 
-  The comments are re-read as well as the review, because `/reviews` cannot see a
-  comment: a retracting reply landing after they were counted leaves the id and the
-  `submitted_at` untouched, so comparing the review payload alone hands back the
-  older reply time as though nothing had moved. The order is
-  **reviews · comments · reviews · comments**, with the value most likely to move
-  read last — a reply landing at any point up to that read is refused, including
-  during the second `/reviews` call.
+  `pr-merge-gate.sh` and `pr-phase-state.sh` ask once: the id, the review's time
+  and its newest reply's arrive together or not at all. What is left is the gap
+  *after* the response, which no protocol can cover — a signoff answers what had
+  happened when it was written.
 
-  The last gap is not closable by any ordering, and the code says so rather than
-  guarding it again: GitHub has no transactional read across two resources, so a
-  change after the final call is indistinguishable from one after the helper
-  returns — which no protocol can cover, because a signoff answers what had
-  happened when it was written. What is guaranteed is that the answer is never
-  stale by *construction*: nothing the call could have seen is left out of it.
+  A truncated page is unreadable rather than "not that shape": the reviews are the
+  last hundred, so an earlier page could hold a draft that dominates, and a review
+  with more than a hundred comments would have its newest one cut off.
+
+  **`replies-at` is removed.** It shipped in 2.0.43 for exactly this consumer, and
+  leaving a second, weaker answer to the same question is leaving one a future
+  caller reaches for.
 
   What the callers do check is the SHAPE of that answer, through
   `rb_escape_snapshot`: peeled with expansions alone, a two-field line assigns the
