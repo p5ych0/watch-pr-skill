@@ -1,5 +1,60 @@
 # Changelog
 
+## [2.0.40] — 2026-08-20
+
+- **The recipe a resumed session runs is a script now, and it has a test.**
+  `SKILL.md` § *Resuming after a stop* was 112 lines of shell inside a Markdown
+  file — three arms and six refusals that nothing in the suite, `pr-selfcheck.sh`
+  or the bash 3.2 job could reach, because all of them stop at the edge of a
+  fenced block. It is `pr-phase-state.sh`, and `test-pr-phase-state.sh` executes
+  every one of those paths.
+
+  **Every abort in it exited 0**, because the driving shell must not die on a
+  refusal. So "the phase is not closed", "the signoff could not be read" and "this
+  ran correctly" were the same status to anything that read it, and a driver that
+  branched on the status could not tell them apart. The helper answers 0 for a
+  phase that still stands, 1 for one that does not, and 2 for an answer it could
+  not read — and that third one is neither of the others: read as "no signoff" it
+  repeats a phase, read as a signoff it skips a review nobody did.
+
+  What it decides is unchanged. Before the Copilot phase the head must *be* the
+  commit Codex signed; after it the head has advanced through Copilot fixes by
+  design, so the Copilot signoff is the one that must name the head — and the
+  branch turns on which signoff describes the head rather than on whether a
+  Copilot record exists, because a stale one naming an older commit used to select
+  the post-Copilot arm and then report that neither phase was closed.
+
+  The shape check on a resumed sha now goes through `recordlib.sh`'s
+  `is_full_sha`, so what a commit is has one definition here as everywhere else.
+
+  **No variable holds the status.** The driver read it as `cmd; RC=$?` and
+  branched on `$RC` — two ways for the distinction to be lost before it was used.
+  With `errexit` on, and this block is pasted into a script as often as it is
+  typed, a simple command that exits non-zero ends the shell *before* the
+  assignment; and a startup file that had already made that name readonly with the
+  value 0 made the assignment fail while leaving it at 0, sending a refused phase
+  through the continuation into the merge flow. A failed assignment does not even
+  fire an `||`, so there was no status to take. The helper runs as an `if`
+  condition, which is exempt from `errexit`, and its status is branched on in the
+  `else` where it is produced — so there is no variable to pre-seed.
+
+  **A refusal cannot fall into the continuation.** The driver's branch on the
+  helper's status runs in the operator's own shell, where `exit` is a builtin a
+  function can take the place of — and one that returns instead of exiting left
+  both refusal arms falling through into the sha read and everything after it, so
+  the distinction held right up to the point where it mattered. The continuation
+  lives inside the continue arm now, so there is nothing after the branch to fall
+  into, and each refusal arm ends in a reserved word.
+
+  **"Not clean" and "could not read it" are told apart**, which the recipe's
+  `-ne 0` test folded together. `pr-review-state.sh verdict` answers 1 for a
+  verdict that is not clean — a phase to reopen — and 2 for reviews it could not
+  read, which is not an answer about the phase at all; reported as the first, an
+  unreadable endpoint sent the operator to re-request a review nobody had
+  dismissed.
+
+  First of #26's sub-issues; #123.
+
 ## [2.0.39] — 2026-08-20
 
 - **A revocation that lands while `record` is proving no longer gets superseded.**

@@ -1827,117 +1827,71 @@ was reached with. This is the recipe that restores them. Run it before step 8, o
 before continuing into the Copilot phase.
 
 ```bash
-# THE STATUSES ARE DISTINGUISHED, because they mean different things and only one
-# of them is permission to continue:
+# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS. `record`
+# writes a signoff precisely so a later session can read it back, and this helper
+# is that reading: it takes the two signoffs and the head, selects which stop is
+# being resumed from, and re-validates the record that has to still stand — the
+# head must BE the Codex commit before the Copilot phase, and must be the COPILOT
+# commit after it, where the head has advanced through Copilot fixes by design.
 #
-#   0  a signoff exists — use the sha it names
-#   1  none recorded — the phase is NOT closed. Do not invent one; go and run it
-#   2  could not tell — fail closed. An unreadable answer is not "no signoff",
-#      and treating it as one repeats a phase; treating it as a signoff skips a
-#      review nobody did
-# `sha` ASKS FOR THE HEAD ALONE, so nothing here parses a record line. It was a
-# `sed`, and `sed` is a NAME: one that prints a plausible forty hex and exits 0
-# pins a merge to whatever it says, and a pipeline's status is lost besides. The
-# helper owns the shape and its suite covers it. Issue #89.
-CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
-case "$SIGNOFF_RC" in
-    0) ;;
-    1) echo "The Codex phase is not closed on this PR — there is no recorded signoff, or it was revoked. Run it before merging or opening the Copilot phase."; exit 0 ;;
-    *) echo "ABORT: could not read the signoff record (rc=$SIGNOFF_RC)"; exit 0 ;;
-esac
-# THE SHAPE IS CHECKED AS WELL AS THE STATUS. `sha` prints 40 hex or nothing, so
-# this cannot currently fail — which is the point: this value is what every gate
-# in step 8 is pinned to, and it is not left resting on one helper's promise.
-RX_SHA40='^[0-9a-f]{40}$'
-if ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
-    echo "ABORT: the recorded signoff did not yield a full 40-hex sha ('$CODEX_SHA')"; exit 0
-fi
-# THE RECORD IS HISTORY, NOT A CURRENT FACT. It says Codex was clean on that
-# commit when it was written — not that the commit is still the head, nor that the
-# review still stands. A dismissal, or a push while the stop was parked, leaves
-# the marker exactly as it was; continuing on it opens a Copilot phase against a
-# head Codex never approved, and the whole loop is spent before the merge gate
-# finally refuses.
+# IT WAS 112 LINES HERE, and nothing executed them: three arms and six refusals,
+# every abort exiting 0 so that "the phase is not closed" and "this ran correctly"
+# were the same status to anything that read it. Issues #123 and #26.
 #
-# So the resumed value is re-validated against the world as it is now, and BOTH
-# halves matter: the head must still be that commit, and the verdict must still
-# be clean on it.
-RESUMED_HEAD=$(gh pr view N --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not read the head to check the resumed signoff against"; exit 0; }
-# WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
-# answers are opposite. Before the Copilot phase, the Codex signoff is the only
-# thing licensing a merge, so the head must still BE that commit. AFTER it, the
-# head has advanced through Copilot fixes BY DESIGN — the merge gate accepts that
-# delta once it has checked the `Review-Phase: copilot` trailers — and demanding
-# equality there rejects the very state the second stop exists in.
+#   pr-phase-state.sh <pr>
 #
-# A recorded COPILOT signoff is what tells the two apart, and it is a fact on the
-# PR rather than a guess about the session.
-# 1 IS AN ANSWER HERE, not a refusal: "no Copilot signoff" is exactly what the
-# branch below is asking about, and `sha` leaves the value empty in that case, so
-# the empty string means the same thing it did when a `sed` matched nothing.
-COPILOT_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$COPILOT_BOT")"; COPILOT_SIGNOFF_RC=$?
-case "$COPILOT_SIGNOFF_RC" in
-    0|1) ;;
-    *) echo "ABORT: could not read the Copilot signoff record (rc=$COPILOT_SIGNOFF_RC)"; exit 0 ;;
-esac
-# THE SHAPE IS CHECKED HERE TOO, ON STATUS 0. Status 1 leaves the value empty and
-# that is an answer — "no Copilot signoff" is what the branch below is asking
-# about. Status 0 with something that is not 40 hex is not an answer, and without
-# this it would be read as "no signoff" and send the operator back through a phase
-# that is closed — or, if the head read were malformed the same way, SELECT the
-# post-Copilot arm on two values that match only because both are wrong.
+#     0  readable, and the record it names still stands
+#     1  stopped — the record on stdout says which: no signoff, a moved head, or a
+#        verdict that no longer stands
+#     2  unreadable — fail closed. NOT "no signoff"
 #
-# IT IS THE FIRST ARM OF THE BRANCH, NOT A GUARD BEFORE IT, and that is the
-# difference between a refusal and a wish. Written as its own `if … exit`, a
-# shadowed `exit` returns and execution falls into the selection below, where a
-# malformed value is read as "no Copilot signoff" — the outcome the check exists
-# to prevent. As an arm it is structural: a malformed sha SELECTS this arm, so
-# neither of the others can run on it whatever has been done to the builtins.
+# NO STATUS VARIABLE AT ALL, and that is the point of the shape below. Written as
+# `if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup file that
+# had already made that name readonly with the value 0 caused BOTH assignments to
+# fail while leaving it at 0 — and a helper that returned 1 or 2 was sent through
+# the continuation into the merge flow. A failed assignment does not even fire an
+# `||`, so there is no status to take; the answer is not to guard the variable but
+# to have none. The helper's status is branched on where it is produced.
 #
-# `[[` THROUGHOUT, because `[` is a command a function can take the place of. One
-# returning false skips a validation written with it; one returning true selects
-# an arm the values do not justify.
-# THE BRANCH TURNS ON WHICH SIGNOFF DESCRIBES THE HEAD, not on whether a Copilot
-# record exists at all. After "another Codex pass" produced fixes, the NEW Codex
-# signoff names the current head while an older Copilot signoff still names the
-# previous one — and choosing the post-Copilot path merely because that historical
-# record exists then reported that neither phase was closed, sending the operator
-# through a review nobody needed.
-if [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
-    echo "ABORT: the recorded Copilot signoff did not yield a full 40-hex sha ('$COPILOT_SHA')"
-    exit 0
-    # THE LAST WORD IS A RESERVED ONE, for the same reason it is in the record
-    # block: with `echo` and `exit` both shadowed this arm says nothing and
-    # returns 0, and the block's status is the only signal left.
-    [[ -n "" ]]
-elif [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && [[ $COPILOT_SHA = "$RESUMED_HEAD" ]]; then
-    # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
-    # than the head; the gate is what proves the delta is Copilot-only. What must
-    # still hold is the COPILOT signoff, on the head being merged.
-    RESUMED_VERDICT=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh verdict N "$COPILOT_BOT" "$COPILOT_SHA"); RESUMED_RC=$?
-    if [ "$RESUMED_RC" -ne 0 ]; then
-        echo "Copilot's recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
-        echo "Treat the Copilot phase as open: request a review before merging."
+# THE CONTINUATION IS THE `then` BRANCH, AND THAT IS STRUCTURAL TOO. This bash
+# runs in YOUR shell, which nothing here controls — `exit` is a builtin a function
+# can take the place of, and one that RETURNS instead of exiting leaves a refusal
+# falling straight through into whatever came after it. Nothing follows, so there
+# is nothing to fall into; and each refusal ENDS in a reserved word, so it reports
+# non-zero even with `echo` and `exit` both taken away.
+#
+# AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
+# your shell has `errexit` on — this block is pasted into one as often as it is
+# typed — a simple command that exits non-zero ends the shell before anything can
+# read its status, so the 1/2 distinction is lost at exactly the two statuses it
+# exists for. A command run as a CONDITION is exempt.
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
+    # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
+    # asks for the head alone, so nothing here parses a record line. The status
+    # AND the shape are checked, because neither covers the other and this value
+    # is what every gate below is measured against.
+    CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
+    RX_SHA40='^[0-9a-f]{40}$'
+    if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
+        echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
         exit 0
+        # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a
+        # function can shadow, and with both shadowed this branch says nothing and
+        # returns 0 — a failed read indistinguishable from a resumed phase.
+        # `[[ … ]]` is a reserved word, so the block ends non-zero whatever was
+        # done to the builtins.
+        [[ -n "" ]]
     fi
-    echo "Resumed after the Copilot phase: Codex on $CODEX_SHA, Copilot on $COPILOT_SHA, both still standing."
 else
-    # RESUMING BEFORE THE COPILOT PHASE — or in `codex-only`, where there will
-    # never be one. Nothing licenses a delta here, so the head must still BE the
-    # commit Codex signed.
-    if [ "$RESUMED_HEAD" != "$CODEX_SHA" ]; then
-        echo "The head has moved since that signoff (head=$RESUMED_HEAD signed=$CODEX_SHA)."
-        echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
-        exit 0
-    fi
-    RESUMED_VERDICT=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh verdict N "$CODEX_BOT" "$CODEX_SHA"); RESUMED_RC=$?
-    if [ "$RESUMED_RC" -ne 0 ]; then
-        echo "The recorded signoff no longer stands ($RESUMED_VERDICT) — a review can be dismissed after it was written."
-        echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
-        exit 0
-    fi
-    echo "Resumed: Codex signed off on $CODEX_SHA, and that still holds on the current head."
+    # `$?` HERE IS THE CONDITION'S, read before anything else can change it.
+    case $? in
+        1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."
+           exit 0
+           [[ -n "" ]] ;;
+        *) echo "ABORT: the phase could not be read. Do not merge on a phase nothing could establish."
+           exit 0
+           [[ -n "" ]] ;;
+    esac
 fi
 ```
 
