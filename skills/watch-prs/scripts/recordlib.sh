@@ -577,10 +577,17 @@ rb_answer_at() {   # <review-at> <replies-at>
 # EXACTLY THREE FIELDS, and the tab is what separates them, so the count is
 # checked rather than assumed. `[[ =~ ]]` with the pattern in a variable, because
 # bash 3.2 cannot parse one containing a parenthesis written inline.
+#
+# AND BOTH TIMES ARE CANONICAL UTC, not merely present. A successful snapshot is
+# always a replies-only review, so it always has both — and an EMPTY reply field
+# is the one shape `rb_answer_at` accepts as "that channel had nothing to say",
+# which is how a truncated helper hides a newer reply and lets the signoff vouch
+# on the review time alone.
 RB_SNAP_ID=''
 RB_SNAP_REVIEW_AT=''
 RB_SNAP_REPLY_AT=''
-RB_SNAP_RX='^([0-9]+)'$'\t''([^'$'\t'']*)'$'\t''([^'$'\t'']*)$'
+RB_SNAP_UTC='[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z'
+RB_SNAP_RX='^([0-9]+)'$'\t'"($RB_SNAP_UTC)"$'\t'"($RB_SNAP_UTC)\$"
 rb_escape_snapshot() {   # <line>
     RB_SNAP_ID=''; RB_SNAP_REVIEW_AT=''; RB_SNAP_REPLY_AT=''
     [[ "${1-}" =~ $RB_SNAP_RX ]] || return 1

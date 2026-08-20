@@ -36,7 +36,10 @@
   `rb_escape_snapshot`: peeled with expansions alone, a two-field line assigns the
   second value to both times, a four-field one hides a value, and a non-numeric id
   is dropped in silence — and the id is what proves the two times describe one
-  review.
+  review. Both times must be canonical UTC and present, because a successful
+  snapshot is always a replies-only review and therefore always has both — while an
+  *empty* reply field is the one shape the ordering rule accepts as "that channel
+  had nothing to say", which is how a truncated helper would hide a newer reply.
 
   The five cases that used to sit in the two callers move to the reader's own
   suite, which can make the world change between the two reads — where the callers

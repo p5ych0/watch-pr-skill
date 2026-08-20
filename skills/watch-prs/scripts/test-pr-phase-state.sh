@@ -513,6 +513,16 @@ got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
     && pass "…and so is one whose id is not an id" \
     || die "a snapshot with a non-numeric id was acted on: '${got}'"
+# AN EMPTY REPLY TIME IS THE DANGEROUS ONE: it is the one shape `rb_answer_at`
+# accepts as "that channel had nothing to say", so a truncated helper would hide
+# a newer reply and the phase would close on the review time alone.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '77\t2026-01-01T00:00:00Z\t\n' > "$W/codex.snap.out"
+printf '0\n' > "$W/codex.snap.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so is one with no reply time at all" \
+    || die "a snapshot with an empty reply time was acted on: '${got}'"
 
 # THE STOP NAMES BOTH TIMES, because `SKILL.md` promises the operator can see
 # which event moved — and a reason alone leaves them comparing timestamps by hand.

@@ -822,11 +822,14 @@ for _badsnap in "$(printf '2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z')" \
                 "$(printf '77\t2026-01-01T00:00:00Z')" \
                 "$(printf '77\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\textra')" \
                 "$(printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z')" \
+                "$(printf '77\t2026-01-01T00:00:00Z\t')" \
+                "$(printf '77\t\t2026-01-05T00:00:00Z')" \
+                "$(printf '77\t2026-01-01T00:00:00Z\twhenever')" \
                 "77 2026-01-01T00:00:00Z 2026-01-05T00:00:00Z" \
                 ""; do
     rb_escape_snapshot "$_badsnap" \
         && die "a malformed snapshot parsed: '$_badsnap'" \
-        || pass "…and a line without exactly three fields and a numeric id does not"
+        || pass "…and one without three fields, a numeric id and two canonical times does not"
 done
 # AND A FAILED PARSE LEAVES NOTHING BEHIND, so a caller that checked the status
 # and then read the fields cannot act on the previous snapshot.

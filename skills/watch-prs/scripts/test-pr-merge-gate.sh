@@ -451,15 +451,15 @@ printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
 # A TIMESTAMP OF A SHAPE NOTHING CAN PLACE is a snapshot field that arrived with
-# status 0 saying something it did not mean, and it blocks — but not by telling
-# the operator there is nothing to answer, which sends them looking in the wrong
-# place.
+# status 0 saying something it did not mean, and it blocks at the PARSE — the
+# shape of the answer is checked before any of it is used, so the gate never
+# reaches a comparison it cannot make.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 snapshot 77 whenever 2026-01-01T00:00:00Z
-case_is 1 "could not be placed in time" "a review time of another shape blocks, and says why"
+case_is 1 "is not one this gate can read" "a review time of another shape blocks, and says why"
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 snapshot 77 2026-01-01T00:00:00Z whenever
-case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
+case_is 1 "is not one this gate can read" "…and so does a reply time of another shape"
 
 # ── WHAT THE GATE NO LONGER DOES FOR ITSELF ────────────────────────────────
 # Five of this file's cases used to live here: an id that is stable but not an id,
@@ -495,6 +495,14 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$STUB_DIR/pr-review-state.escape-snapshot.out"
 printf '0' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
 case_is 1 "is not one this gate can read" "…and so is one whose id is not an id"
+# AN EMPTY REPLY TIME IS THE DANGEROUS ONE. A successful snapshot is always a
+# replies-only review, so it always has both times — and an empty reply field is
+# the one shape `rb_answer_at` accepts as "that channel had nothing to say",
+# which is how a truncated helper hides a newer reply.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '77\t2026-01-01T00:00:00Z\t\n' > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+printf '0' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+case_is 1 "is not one this gate can read" "…and so is one with no reply time at all"
 
 # ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
 # The verdict is produced by the COMMENTS on the review, and one added afterwards
