@@ -151,6 +151,16 @@ before() {
     lb="$(grep -n -- "$2" "$TMP/calls" | head -1 | cut -d: -f1)"
     { [ -n "$la" ] && [ -n "$lb" ] && [ "$la" -lt "$lb" ]; }
 }
+# `last_before <a> <b>` — the LAST a in the log is earlier than the FIRST b. The
+# plain `before` above cannot express this one: the head is read three times and
+# every read logs the same text, so its first match is the read at the top of the
+# stage and a probe that moved back ahead of the LAST read would still pass.
+last_before() {
+    local la lb
+    la="$(grep -n -- "$1" "$TMP/calls" | tail -1 | cut -d: -f1)"
+    lb="$(grep -n -- "$2" "$TMP/calls" | head -1 | cut -d: -f1)"
+    { [ -n "$la" ] && [ -n "$lb" ] && [ "$la" -lt "$lb" ]; }
+}
 
 # ── the phase advances at all ──────────────────────────────────────────────
 world; got="$(run record 7 "$TMP/body.md")"
@@ -278,6 +288,33 @@ got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "a reopened phase with a clean verdict records its replacement signoff" \
     || die "a pre-existing revocation blocked the reopened phase: '${got}'"
+# ── AND THE ORDERING PROOF IS THE LAST THING BEFORE THE WRITE ──────────────
+# WHICH OF THE TWO FINAL PROOFS GOES LAST IS ITSELF THE INVARIANT, and no case
+# above can see it: each asserts an ANSWER, and every one of them stays green with
+# the ordering probe moved back ahead of the final head read — which is where it
+# was written first.
+#
+# THE TWO POSITIONS ARE NOT INTERCHANGEABLE. A head that moves after its proof is
+# caught downstream: `open` re-reads it and refuses a head that is not the recorded
+# sha, so nothing is lost but a run. A revocation that lands after its proof is
+# destroyed by the signoff posted next, because the readers take the last record,
+# and no later stage can find it. The unrecoverable one goes last, and the window
+# it leaves is #122.
+#
+# THIS RUN IS THE ONE THAT REACHES BOTH PROBES: `world`'s revocation is older than
+# the verdict, so the ordering branch runs in full rather than short-circuiting.
+last_before 'gh pr view' 'pr-signoff.sh' \
+    && pass "…the final head read having come before the ordering probe" \
+    || die "the ordering probe ran before the last head read: $(cat "$TMP/calls")"
+last_before 'gh pr view' 'pr-review-state.sh review-at' \
+    && pass "…and before the verdict's time was read" \
+    || die "the verdict's time was read before the last head read: $(cat "$TMP/calls")"
+before 'pr-signoff.sh' 'gh pr comment' \
+    && pass "…with the ordering probe itself immediately before the write" \
+    || die "the signoff was posted before the ordering was proved: $(cat "$TMP/calls")"
+before 'pr-review-state.sh review-at' 'gh pr comment' \
+    && pass "…and the verdict's time read before it too" \
+    || die "the signoff was posted before the verdict's time was read: $(cat "$TMP/calls")"
 
 # …AND A REVOCATION LANDING AFTER THE VERDICT CANCELS IT, which is the state #115
 # is about: another session reopens the phase while the head is unchanged and
