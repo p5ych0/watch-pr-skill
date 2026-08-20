@@ -305,6 +305,15 @@ Then:
    head, and the merge gate accepts it *for that shape only*. If it was a finding,
    fix it and push — the head moves and the round is ordinary again. With no
    signoff recorded the gate refuses and says which of the two to do.
+
+   **And a later session honours the same answer.** `pr-phase-state.sh` used to
+   report that review as a dismissal, so resuming tomorrow sent you back to
+   request a review of a head you had already read and signed off — the deadlock
+   returning one stage earlier. It applies the same rule now, and it is the same
+   rule: the signoff must name that head and be recorded **after** the review, so
+   one written for an earlier clean pass on an unchanged head cannot vouch for a
+   later replies-only one. Where no signoff answers it, the stop says so by name
+   rather than calling it a dismissal.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**
    (`pr-round-count.sh <PR> <reviewer>`). Then hand the closing to

@@ -111,6 +111,7 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || {
     [[ $_rb_rc -eq 127 ]] && echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2
     exit 2; }
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_REVIEW_WATCH state=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
@@ -540,6 +541,7 @@ while :; do
             # `verdict=clean` with no `findings=0`, and — worse — a clean record
             # returned with rc 1, which PR_REVIEW_READY then announced as a
             # finished clean review and started the next phase on.
+            v_replies=0
             case "$v_field/$vrc" in
                 clean/0)    [ "$v_tail" = " findings=0" ] || v_field="" ;;
                 # `source=replies-only` is a THIRD shape, not a looser one: the
@@ -548,9 +550,20 @@ while :; do
                 # The tail is spelled out rather than made optional, because a
                 # trailing `.*` here would accept any field anyone ever appends —
                 # and this grammar exists to catch exactly that.
-                findings/1) [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]] \
-                                || [[ "$v_tail" =~ ^\ findings=[0-9]+\ source=replies-only$ ]] \
-                                || v_field="" ;;
+                findings/1) if [[ "$v_tail" =~ ^\ findings=[0-9]+$ ]]; then
+                                v_replies=0
+                            # THE SHAPE IS `recordlib.sh`'s, AND IT IS DECIDED HERE.
+                            # A record that DECLARES `source=replies-only` and does
+                            # not satisfy the shared predicate — `findings=0`, say —
+                            # is not an ordinary findings verdict; classified as one
+                            # it left the round closer acting on an answer nothing
+                            # had validated. Either it is that record or the verdict
+                            # is inconsistent. #125.
+                            elif rb_replies_only_line "$verdict" "$PR" "$WHO" "$head"; then
+                                v_replies=1
+                            else
+                                v_field=""
+                            fi ;;
                 none/1)     [[ "$v_tail" =~ ^\ reason=[a-z_]+$ ]] || v_field="" ;;
                 *)          v_field="" ;;
             esac
@@ -657,9 +670,12 @@ while :; do
                 # READY EITHER WAY — the verdict is in hand and the watch is over.
                 # The STATUS is what separates "act on this" from "somebody read
                 # this", because that is what callers branch on.
-                case "$v_tail" in
-                    *" source=replies-only") exit 4 ;;
-                esac
+                # DECIDED IN THE GRAMMAR ABOVE, and read here. Asked twice, the
+                # second ask could disagree with the first: a record that declared
+                # `source=replies-only` and failed the predicate passed the grammar
+                # as an ordinary findings verdict and then exited 0, so a caller
+                # branching on the status acted on an answer nothing had validated.
+                [ "$v_replies" -eq 1 ] && exit 4
                 exit 0
             fi
             ;;

@@ -433,6 +433,15 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # shape that actually occurred, in both places it occurred, and does not
         # claim to catch a reconstruction spelled some other way.
         /="PR_REVIEW_STATE pr=/           { print FILENAME ":" FNR ": review record rebuilt as a string" }
+        # …and the replies-only shape. Only the merge gate had it, and
+        # `pr-phase-state.sh` reported the same review as a dismissal — the
+        # deadlock the escape exists to end, one stage earlier. NO APOSTROPHE in
+        # this comment: the awk program is a single-quoted shell string, and one
+        # here ends it, leaving the rest of the scanner to the shell.
+        #
+        # The producer PRINTS this field and its line ends `" ;;`; a copy MATCHES
+        # it and ends `")`, which is what this looks for.
+        / source=replies-only["]\)/       { print FILENAME ":" FNR ": replies-only shape" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -508,6 +517,16 @@ seen="$(scan_inline_rules "$DRIFT")"; drc8=$?
     && pass "…while a helper that PRINTS a record is left alone" \
     || die "the drift guard flagged the producer (rc=$drc8 out='$seen')"
 rm -f "$DRIFT/pr-producer.sh"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'case "$rest" in\n'
+  printf '    *" source=replies-only") ;;\n'
+  printf 'esac\n'
+} > "$DRIFT/pr-replies-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc9=$?
+{ [ "$drc9" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-replies-copy.sh'; } \
+    && pass "…and a helper that re-implements the replies-only shape" \
+    || die "the drift guard did not catch a planted replies-only copy (rc=$drc9 out='$seen')"
+rm -f "$DRIFT/pr-replies-copy.sh"
 
 # A helper whose name merely ENDS in the library's name is scanned, not exempted.
 # `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped
@@ -658,6 +677,93 @@ rb_review_record "PR_REVIEW_STATE pr=7 sha=aaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     && rb_review_record_is_about 7 "$BOT" "$H40" \
     && die "a forty-hex record matched on its first seven" \
     || pass "…and one that only shares its first seven does not"
+
+# ── THE ONE VERDICT AN OPERATOR CAN ANSWER FOR ─────────────────────────────
+# The shape and the ordering were the merge gate's alone, and `pr-phase-state.sh`
+# reported the same review as a dismissal. #125.
+RO="PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT verdict=findings findings=1 source=replies-only"
+rb_replies_only_line "$RO" 7 "$BOT" "$H40" \
+    && pass "a replies-only record is recognised" \
+    || die "a well-formed replies-only record was not recognised"
+rb_replies_only_line "$RO" 8 "$BOT" "$H40" \
+    && die "a replies-only record for another PR was accepted" \
+    || pass "…and not one about another PR"
+rb_replies_only_line "$RO" 7 "$BOT" "$O40" \
+    && die "a replies-only record for another head was accepted" \
+    || pass "…nor another head"
+# MATCHED IN FULL. A `*` between `findings=` and the suffix accepted an empty
+# count and any field anyone appended, and this shape can authorise a merge.
+for _bad in "verdict=findings findings= source=replies-only" \
+            "verdict=findings findings=1 extra=x source=replies-only" \
+            "verdict=findings findings=0 source=replies-only" \
+            "verdict=findings findings=1 source=replies-only trailing" \
+            "verdict=clean findings=0"; do
+    rb_replies_only_line "PR_REVIEW_STATE pr=7 sha=aaaaaaa reviewer=$BOT $_bad" 7 "$BOT" "$H40" \
+        && die "the replies-only shape accepted '$_bad'" \
+        || pass "…and refuses '$_bad'"
+done
+# A HEAD IS NOT A MOMENT: the signoff must be NEWER than the review it answers,
+# or one recorded for an earlier clean review vouches for a later replies-only one.
+SO="PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40"
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
+    && pass "a signoff recorded after the review answers it" \
+    || die "a newer signoff did not vouch (reason='$RB_VOUCH_REASON')"
+rb_signoff_answers "$SO" 2026-01-03T00:00:00Z 7 "$BOT" "$H40" \
+    && die "a signoff older than the review vouched for it" \
+    || { [ "$RB_VOUCH_REASON" = not_after ] \
+        && pass "…and one recorded before it does not, saying so" \
+        || die "an older signoff gave reason '$RB_VOUCH_REASON'"; }
+# EQUAL IS NOT NEWER: second-resolution timestamps cannot order a tie, and this is
+# permission to merge.
+rb_signoff_answers "$SO" 2026-01-02T00:00:00Z 7 "$BOT" "$H40" \
+    && die "a same-second signoff was ordered" \
+    || pass "…and a tie cannot be ordered, so it refuses"
+# THE WHOLE RECORD IS PARSED, NOT ITS SUFFIX. Reading the sha with `${line##*sha=}`
+# and looking for a shaped `at=` accepts any rc-0 line that ENDS in the right
+# commit, so a truncated, cached or misrouted record for another PR or another
+# reviewer authorised the merge.
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 "$BOT" "$O40" \
+    && die "a signoff naming another head vouched" \
+    || { [ "$RB_VOUCH_REASON" = other_head ] \
+        && pass "…and one naming another head does not" \
+        || die "another head gave reason '$RB_VOUCH_REASON'"; }
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 8 "$BOT" "$H40" \
+    && die "a signoff for another PR vouched" \
+    || { [ "$RB_VOUCH_REASON" = other_pr ] \
+        && pass "…nor one for another PR" \
+        || die "another PR gave reason '$RB_VOUCH_REASON'"; }
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 'copilot-pull-request-reviewer[bot]' "$H40" \
+    && die "a signoff for another reviewer vouched" \
+    || { [ "$RB_VOUCH_REASON" = other_reviewer ] \
+        && pass "…nor one for another reviewer with the same head" \
+        || die "another reviewer gave reason '$RB_VOUCH_REASON'"; }
+rb_signoff_answers "$SO" "" 7 "$BOT" "$H40" \
+    && die "a signoff vouched with no review to answer" \
+    || { [ "$RB_VOUCH_REASON" = no_review ] \
+        && pass "…and there must be a review for it to answer" \
+        || die "an absent review gave reason '$RB_VOUCH_REASON'"; }
+# A LINE MISSING A FIELD IS NOT A RECORD. `${line#*at=}` on one WITHOUT `at=`
+# returns the whole line, and `%% *` then takes its first word — a value that is
+# not a time; parsing the record instead refuses it as unreadable.
+for _badrec in "PR_SIGNOFF pr=7 reviewer=$BOT id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=yesterday id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=aaaaaaa" \
+               "warning PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=none reason=revoked"; do
+    rb_signoff_answers "$_badrec" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
+        && die "a malformed signoff vouched: '$_badrec'" \
+        || { [ "$RB_VOUCH_REASON" = signoff_malformed ] \
+            && pass "…and refuses a record it cannot read: '${_badrec#PR_SIGNOFF }'" \
+            || die "'$_badrec' gave reason '$RB_VOUCH_REASON'"; }
+done
+# CANONICAL UTC ON THE REVIEW'S SIDE TOO, because these are compared as STRINGS
+# and that is the time order only for this shape.
+rb_signoff_answers "$SO" tomorrow 7 "$BOT" "$H40" \
+    && die "a review time of another shape was compared" \
+    || { [ "$RB_VOUCH_REASON" = review_untimed ] \
+        && pass "…and a review time of another shape refuses rather than sorting somewhere" \
+        || die "an unshaped review time gave reason '$RB_VOUCH_REASON'"; }
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

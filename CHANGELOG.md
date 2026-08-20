@@ -1,5 +1,53 @@
 # Changelog
 
+## [2.0.42] — 2026-08-20
+
+- **A resumed session no longer reopens a phase the operator already answered.**
+  A review whose comments are all replies reports `verdict=findings` with
+  `source=replies-only`: there is nothing to fix and it is not a signoff, so
+  `pr-review-state.sh verdict` exits 1 — the same status as a dismissal. Only the
+  record tells them apart, and `pr-phase-state.sh` did not look: it reported the
+  review as withdrawn and sent the operator to request a review of a head they had
+  already read and signed off. That is the deadlock the escape exists to end,
+  arriving one stage earlier than the merge gate where the escape lived.
+
+  **The rule is in `recordlib.sh` now.** `rb_replies_only_line` is what that
+  record looks like — matched in full, because a `*` between `findings=` and the
+  suffix accepted an empty count and any field anyone appended, and this shape can
+  authorise a merge. `rb_signoff_answers` is what "this signoff answers that
+  review" means: it must name the head and be recorded strictly **after** the
+  review, since one written for an earlier clean review on an unchanged head would
+  otherwise vouch for a later replies-only one nobody read. Equal is a refusal —
+  second-resolution timestamps cannot order a tie, and this is permission to merge
+  or to close a phase.
+
+  Neither fetches anything. The callers read the records with their own error
+  prefixes and their own statuses; what they share is the rule.
+
+  A third copy turned up when the rule moved: `pr-watch.sh` asked the same
+  question as a `case` on the tail to decide its status 4. It asks the library
+  now, and the drift guard fails on a helper that re-implements the shape.
+
+  The phase helper says which of the two it found: a replies-only review nobody
+  signed off reports `*_replies_only_unvouched` and names why, rather than calling
+  it a dismissal — and an **unreadable** probe is a third answer again, reported as
+  `*_vouch_unreadable` with status 2, because folding it into "nobody signed this
+  off" tells the operator to record a signoff they may already have recorded.
+
+  **The whole signoff record is parsed, not its suffix.** Reading the sha with
+  `${line##*sha=}` and looking for a shaped `at=` accepts any rc-0 line that *ends*
+  in the right commit, so a truncated, cached or misrouted record for another PR or
+  another reviewer authorised the merge. A revocation fails it too, and should.
+
+  **`pr-watch.sh` decides the shape once.** A record that declared
+  `source=replies-only` and failed the shared predicate — `findings=0`, say — was
+  classified as an ordinary findings verdict and exited 0, so a caller branching on
+  the status acted on an answer nothing had validated. Either it is that record or
+  the verdict is inconsistent.
+
+  What remains is #129: the signoff is ordered against the *review*, and a reply
+  added after it does not move the review's timestamp.
+
 ## [2.0.41] — 2026-08-20
 
 - **A verdict record is checked, not just the status it came with.**

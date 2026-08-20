@@ -292,8 +292,15 @@ out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interva
 # optional, so a field nobody agreed on is still refused — a trailing `.*` here
 # would accept anything anyone ever appends, which is what this check exists to
 # stop.
+# THE ZERO-COUNT NEAR MISS IS THE ONE THAT MATTERED. A replies-only review HAS
+# comments, so `findings=0 source=replies-only` is a different record — and the
+# grammar used to accept it as an ordinary findings verdict and exit 0, where the
+# shared predicate refuses it. A caller branching on the status then acted on an
+# answer nothing had validated. #125.
 for badtail in 'verdict=findings findings=1 source=whatever' \
                'verdict=findings findings=1 source=replies-only extra=1' \
+               'verdict=findings findings=0 source=replies-only' \
+               'verdict=findings findings= source=replies-only' \
                'verdict=findings findings=1 replies-only'; do
     seq_set reviewed
     out="$(VERDICT="$badtail" VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?

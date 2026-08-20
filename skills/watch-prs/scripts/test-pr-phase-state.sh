@@ -41,8 +41,15 @@ case " $* " in
     *"copilot-pull-request-reviewer"*)    _w=copilot ;;
     *)                                    _w=other ;;
 esac
-[ -f "$W/$_w.sha" ] && cat "$W/$_w.sha"
-exit "$(cat "$W/$_w.rc" 2>/dev/null || echo 0)"
+# TWO QUESTIONS, TWO ANSWERS. `sha` asks for the head alone; the bare form asks
+# for the whole record, which is what the replies-only escape reads for its `at=`.
+# A stub serving one to both would make the escape's ordering test unreachable.
+if [ "${1:-}" = sha ]; then
+    [ -f "$W/$_w.sha" ] && cat "$W/$_w.sha"
+    exit "$(cat "$W/$_w.rc" 2>/dev/null || echo 0)"
+fi
+[ -f "$W/$_w.record" ] && cat "$W/$_w.record"
+exit "$(cat "$W/$_w.record.rc" 2>/dev/null || echo 1)"
 SIGNSH
 chmod +x "$DIR/pr-signoff.sh"
 cat > "$DIR/pr-review-state.sh" <<'STATESH'
@@ -53,6 +60,13 @@ case " $* " in
     *"copilot-pull-request-reviewer"*) _w=copilot ;;
     *)                                 _w=other ;;
 esac
+# `review-at` IS A DIFFERENT QUESTION FROM `verdict`, and the replies-only escape
+# asks both about the same reviewer. Keyed on the subcommand as well, so one
+# cannot answer for the other.
+if [ "${1:-}" = review-at ]; then
+    [ -f "$W/$_w.at.out" ] && cat "$W/$_w.at.out"
+    exit "$(cat "$W/$_w.at.rc" 2>/dev/null || echo 0)"
+fi
 # A REAL CLEAN RECORD BY DEFAULT, built from the arguments it was asked with —
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
 # about what was asked. A stub that printed nothing made every rc-0 path look
@@ -83,6 +97,23 @@ world() {   # world ; a PR whose Codex phase is closed on the current head
     # not a refusal, and the default world is the one before that phase has run.
     : > "$W/copilot.sha"
     printf '1\n' > "$W/copilot.rc"
+    # NO SIGNOFF RECORD by default: the escape below is the exception, not the
+    # ordinary path, and a world that vouched by default would hide every case
+    # that depends on its absence.
+    printf '1\n' > "$W/codex.record.rc"
+    printf '1\n' > "$W/copilot.record.rc"
+    printf '2026-01-01T00:00:00Z\n' > "$W/codex.at.out"
+    printf '2026-01-01T00:00:00Z\n' > "$W/copilot.at.out"
+}
+replies_only() {   # replies_only <codex|copilot> <bot> <sha> ; only replies on that head
+    printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only\n' \
+        "$(printf '%s' "$3" | cut -c1-7)" "$2" > "$W/$1.verdict.out"
+    printf '1\n' > "$W/$1.verdict.rc"
+}
+vouched() {   # vouched <codex|copilot> <bot> <sha> [at] ; an operator answered it
+    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
+        "$2" "${4:-2026-01-02T00:00:00Z}" "$3" > "$W/$1.record"
+    printf '0\n' > "$W/$1.record.rc"
 }
 run() {   # run [args…] ; prints "<rc>|<output>"
     local out rc=0
@@ -338,6 +369,122 @@ got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_misaddressed'; } \
     && pass "…and one about another head there too" \
     || die "the post-Copilot arm accepted a record for another head: '${got}'"
+
+# ── THE ONE VERDICT AN OPERATOR CAN ANSWER FOR ─────────────────────────────
+# A review whose comments are ALL replies reports `verdict=findings` with
+# `source=replies-only`: nothing to fix and not a signoff, so `verdict` exits 1
+# the same as for a dismissal — the STATUS cannot tell them apart, only the
+# record can. Reported as a dismissal it sends a resumed session to reopen a
+# phase the operator has already answered, which is the deadlock the escape
+# exists to end. The merge gate had it; this helper did not. #125.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+    && pass "a replies-only review the operator signed off still reads as a closed phase" \
+    || die "a vouched replies-only review was read as a dismissal: '${got}'"
+# WITHOUT THAT RECORD IT REFUSES, and says which of the two it was. Absence is not
+# a disagreement, but here the signoff is the AUTHORITY rather than a cross-check.
+world; replies_only codex "$CODEXBOT" "$HEAD40"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "…and one nobody signed off refuses, naming what it was" \
+    || die "an unvouched replies-only review gave '${got}'"
+# THE RENDERED MESSAGE, not only the reason field. The commonest unvouched case —
+# nothing recorded at all — returned without setting a reason, so the prose the
+# operator reads named an empty pair of brackets.
+printf '%s' "${got#*|}" | grep -qF '(no_signoff)' \
+    && pass "…and the prose says why rather than leaving empty brackets" \
+    || die "the unvouched stop rendered without a reason: '${got#*|}'"
+printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+    && die "…but it called it a dismissal as well" \
+    || pass "…rather than reporting it as a dismissal"
+# A HEAD IS NOT A MOMENT. A signoff recorded for an earlier CLEAN review on an
+# unchanged head would vouch for a later replies-only review nobody read, so the
+# record must be NEWER than the review it answers.
+world; replies_only codex "$CODEXBOT" "$HEAD40"
+vouched codex "$CODEXBOT" "$HEAD40" 2025-12-31T00:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "…and one recorded before the review does not answer it" \
+    || die "a stale signoff vouched for a later review: '${got}'"
+# EQUAL IS NOT NEWER: second-resolution timestamps cannot order a tie, and this is
+# permission to close a phase.
+world; replies_only codex "$CODEXBOT" "$HEAD40"
+vouched codex "$CODEXBOT" "$HEAD40" 2026-01-01T00:00:00Z
+got="$(run 7)"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and one recorded in the same second cannot be ordered, so it refuses" \
+    || die "a same-second signoff vouched: '${got}'"
+# AND IT MUST NAME THIS HEAD.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$OTHER40"
+got="$(run 7)"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and one naming another commit does not answer this review" \
+    || die "a signoff for another head vouched: '${got}'"
+# THE SAME ON THE OTHER ARM. A rule missing from one of two arms is this
+# repository's recurring shape, and this one IS that shape one level up: the
+# escape existed in the merge gate and not here.
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"; vouched copilot "$COPILOTBOT" "$HEAD40"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+    && pass "…and the post-Copilot arm honours it too" \
+    || die "the post-Copilot arm read a vouched replies-only review as a dismissal: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
+    && pass "…and refuses an unvouched one there as well" \
+    || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# AN UNREADABLE PROBE IS NOT "NOBODY SIGNED IT OFF". Folded together, an
+# unreadable read tells the operator to record a signoff they may already have
+# recorded, and hides a broken read behind an ordinary-looking refusal. Both
+# probes, on both arms.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; printf '2\n' > "$W/codex.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "an unreadable signoff probe fails closed rather than reading as unvouched" \
+    || die "an unreadable signoff probe gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+    && die "…but it also told the operator to record a signoff" \
+    || pass "…and does not send the operator to record one"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.at.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so does an unreadable review time" \
+    || die "an unreadable review time gave '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"; printf '2\n' > "$W/copilot.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_vouch_unreadable'; } \
+    && pass "…on the post-Copilot arm too" \
+    || die "the post-Copilot arm folded an unreadable probe into unvouched: '${got}'"
+# A SIGNOFF FOR ANOTHER REVIEWER DOES NOT VOUCH, even with the same head: the
+# whole record is read, not its suffix.
+world; replies_only codex "$CODEXBOT" "$HEAD40"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+    "$COPILOTBOT" "$HEAD40" > "$W/codex.record"
+printf '0\n' > "$W/codex.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "…and a signoff naming another reviewer does not vouch" \
+    || die "another reviewer's signoff vouched: '${got}'"
+
+# A VERDICT THAT IS NOT THAT SHAPE IS STILL A DISMISSAL. The escape is narrow: it
+# applies to `source=replies-only` and to nothing else, however many findings a
+# review reports.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=2\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+printf '1\n' > "$W/codex.verdict.rc"
+vouched codex "$CODEXBOT" "$HEAD40"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_withdrawn'; } \
+    && pass "…while a review with findings is a dismissal, signoff or no signoff" \
+    || die "the escape widened past replies-only: '${got}'"
 
 # ── EACH ARM RE-VALIDATES ITS OWN REVIEWER, NOT THE OTHER ──────────────────
 # The post-Copilot arm must not ask about Codex: its signoff is older than the
