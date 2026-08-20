@@ -598,6 +598,22 @@ main() {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
+        # AND THE SNAPSHOT AGAIN, because the comments were fetched for a review
+        # this call has already stopped looking at. Dismissed or superseded in
+        # between, the answer describes the OLD review's replies while presenting
+        # itself as the current one — and a consumer ordering an operator signoff
+        # against it lets one recorded between the old replies and the new vouch
+        # for a verdict nobody read. `merge_verdict` re-checks for exactly this
+        # reason; this is the same pair of fetches.
+        local rsnap2
+        rsnap2="$(head_review_snapshot "$pr" "$who" "$head")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        [ "$rsnap2" = "$rsnap" ] || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
+            return 2
+        }
         # A REVIEW WITH NO COMMENTS IS AN ANSWER TOO.
         [ -n "$rat" ] || return 1
         # AND THE SHAPE, because every consumer compares this as a STRING and that

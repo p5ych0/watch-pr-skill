@@ -885,5 +885,40 @@ out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
 
+# ── `replies-at` RE-CHECKS THE SNAPSHOT TOO ────────────────────────────────
+# The comments are fetched for a review the call has already stopped looking at.
+# Dismissed or superseded in between, the answer describes the OLD review's
+# replies while presenting itself as the current one — and a consumer ordering an
+# operator signoff against it lets one recorded between the old replies and the
+# new vouch for a verdict nobody read.
+cat > "$TMP/bin/gh" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *"/reviews/"*"/comments"*)
+     printf '[{"user":{"login":"$BOT"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z","in_reply_to_id":8001}]' ;;
+  *"/issues/"*"/comments"*) printf '[]' ;;
+  *"/reviews"*)
+     if [ ! -e "$TMP/seen2" ]; then
+        : > "$TMP/seen2"
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":61}]'
+     else
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":62}]'
+     fi ;;
+  *"pr view"*) printf '%s' "$HEAD40" ;;
+  *) printf '{}' ;;
+esac
+SH
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/seen2"
+out="$(run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+    && pass "replies-at: a review that changes between the two reads is refused" \
+    || die "replies-at answered from a review that moved (rc=$rc '$out')"
+rm -f "$TMP/seen2"
+out="$(run replies-at 7 "$BOT" 2>/dev/null)"; rc=$?
+[ -z "$out" ] \
+    && pass "…with nothing on stdout, which a substitution would have captured" \
+    || die "the changed-snapshot answer printed '$out' on stdout"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

@@ -19,6 +19,12 @@
   an empty read: a `--paginate` run that prints a page and then fails on a later
   one still *parses*, and the answer would be a maximum over half the comments.
 
+  And the review snapshot is read **again** afterwards, because the comments were
+  fetched for a review the call has already stopped looking at: dismissed or
+  superseded in between, the answer describes the old review's replies while
+  presenting itself as the current one. `merge_verdict` re-checks for the same
+  reason, on the same pair of fetches.
+
   No consumer yet — #129 wires it, and lands next. #130.
 
 ## [2.0.42] — 2026-08-20
