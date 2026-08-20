@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.48] — 2026-08-20
+
+- **A revocation is no longer lost under the signoff that superseded it.** The
+  readers took the *last* record, so a revocation posted while `record` was
+  proving — the way a phase is deliberately reopened — was overwritten by the
+  signoff written next, and a later session found a current signoff and a clean
+  verdict and opened Copilot underneath a phase somebody had reopened. `record`
+  could narrow that window but never close it: its own write is what erases the
+  evidence.
+
+  The signoff says which verdict it answers, so **time decides instead**: a
+  signoff stands only if no revocation is newer than that verdict. One belonging
+  *before* it is the fault-tolerance pass being answered and is correctly ignored;
+  one belonging *after* it correctly reopens the phase. Neither answer depends on
+  which comment landed first.
+
+  **Every fallback is the rule that existed before.** A signoff carrying `none` —
+  every record written before 2.0.47 — has nothing to compare; equal times cannot
+  be ordered, because `created_at` is second-resolution and the two records come
+  from different resources; an unreadable revocation time cannot be placed. In all
+  three, position decides, so no pull request in flight changes meaning.
+
+  Where the revocation wins, the record printed is **its** time and **its** id:
+  callers order records against each other by exactly those fields, so naming the
+  signoff's comment would point at one that is not being acted on.
+
+  Closes #122, on #135's record and #137's writer. #140.
+
 ## [2.0.47] — 2026-08-20
 
 - **The signoff `record` posts now says which verdict it answers.** It already

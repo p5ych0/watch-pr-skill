@@ -67,6 +67,43 @@ case_is() {   # case_is <want rc> <needle> <label> [reviewer]
 world() { printf '0' > "$TMP/rc"; }
 
 # ── a signoff is found ─────────────────────────────────────────────────────
+# ── A SIGNOFF STANDS ONLY IF NO REVOCATION IS NEWER THAN ITS VERDICT ───────
+# Position alone says the last record wins, which is why a revocation landing
+# while `record` was proving is superseded by the signoff written next — the
+# signoff is posted AFTER it. The writer cannot close that window, because its own
+# write erases the evidence. The record says which verdict it answers, so time can
+# decide instead. #140, closing #122.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+case_is 1 "reason=revoked" "a revocation newer than the verdict reopens the phase, though a signoff followed it"
+# AND THE RECORD PRINTED IS THE REVOCATION'S, id included: callers order records
+# against each other by exactly those fields, so naming the signoff's comment
+# would point at one that is not being acted on.
+case_is 1 "id=101" "…and the record it prints is the revocation's, not the signoff's"
+# AND ONE OLDER THAN THE VERDICT IS THE PASS THIS SIGNOFF IS ANSWERING. The
+# fault-tolerance pass posts its revocation BEFORE requesting the review, so that
+# record is older than the verdict that comes back — refusing there would stop a
+# reopened phase recording its replacement signoff at all.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…while one older than the verdict is the pass it answers, and the signoff stands"
+# EQUAL CANNOT BE ORDERED, so position decides — which is the answer that existed
+# before this rule.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-02T00:00:00Z\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…and one made in the same second falls back to position"
+# A SIGNOFF WITH NO VERDICT TIME KEEPS TODAY'S RULE EXACTLY. Every record written
+# before #137 is one, and inventing an answer would be worse than position.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 0 "sha=$SHA" "…and a signoff carrying no verdict time is decided by position, as before"
+# THE NEWEST REVOCATION IS THE ONE COMPARED, even where an older one sits under it.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+case_is 1 "reason=revoked" "…and a revocation under two signoffs still reopens the phase"
+
+# ── a signoff is found ─────────────────────────────────────────────────────
 # THE VERDICT TIME THE SIGNOFF ANSWERS, as a THIRD backticked field. Readers take
 # the LAST record, so a revocation posted after a signoff supersedes it whatever
 # it was about — and the writer cannot close that window, because its own write is
