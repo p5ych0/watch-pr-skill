@@ -626,7 +626,15 @@ does not carry one, and reported as `verdict-at=none` there, so the record keeps
 one shape. A value that is present and is **not** a time is refused —
 `status=error reason=bad_verdict_at`, status `2` — in every mode, including the
 head-alone one: a record whose ordering value cannot be placed is not one to
-resume a phase on. Those last two are different on purpose: "asked, there is none" is an
+resume a phase on.
+
+**And the reader orders by it.** A signoff stands only if no revocation is newer
+than the verdict it answers — so a revocation posted while the phase was proving,
+and then overwritten by the signoff, still reopens the phase. A revocation in the **same second** as the verdict
+reopens it too: the timestamps cannot be ordered, and treating that as "the
+signoff stands" is the answer this rule exists to stop. Where there is nothing to
+compare — a signoff carrying no verdict time, or a revocation whose own time
+cannot be read — the last record wins exactly as it did before. Those last two are different on purpose: "asked, there is none" is an
 answer, and "could not ask" is not.
 
 `pr-signoff.sh sha <pr> <reviewer>` answers the same question with the head

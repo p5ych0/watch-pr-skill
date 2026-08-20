@@ -173,7 +173,7 @@ esac
 # The walk is the merge gate's, for the same reasons: every cursor already
 # requested is remembered so a cycle of any length stops rather than hanging, and
 # any incomplete traversal is an ERROR rather than the answer so far.
-SHA=""; SIGNED_AT=""; SIGNED_ID=""; VERDICT_AT=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
+SHA=""; SIGNED_AT=""; SIGNED_ID=""; VERDICT_AT=""; REVOKED_AT=""; REVOKED_ID=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
 while :; do
     PAGE=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
         -F cursor="$CURSOR" -f query='query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
@@ -274,19 +274,38 @@ while :; do
                    # with status 0 — a phase reading as closed on stale evidence.
                    elif ($m[3] | type) == "string" then "BADREC\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    else empty end
-               ] | last // ""
+               ] as $recs
+             # TWO ANSWERS, NOT ONE. The last record is what position gives; the
+             # last REVOCATION is what time needs, and it can sit UNDER a later
+             # signoff — which is exactly the record #122 is about: a revocation
+             # posted while `record` was proving, then superseded by the signoff it
+             # was meant to stop. Both travel back, separated by a unit separator,
+             # which no field here can contain.
+             | ($recs | last // "") + "\u001f" + ([ $recs[] | select(startswith("REVOKED")) ] | last // "")
           end') || { OK=0; break; }
     # THE LAST RECORD ANYWHERE WINS, so a later page supersedes an earlier one and
     # a phase can be reopened by saying so.
     # `<sha-or-REVOKED>\t<createdAt>`; the timestamp travels with the record so the
     # caller never has to guess which of two comments it is holding.
-    [ -n "$FOUND" ] && {
-        SHA="${FOUND%%$'\t'*}"
-        _rest="${FOUND#*$'\t'}"
+    _us=$(printf '\037')
+    _last="${FOUND%%"$_us"*}"
+    _lastrev="${FOUND#*"$_us"}"
+    [ -n "$_last" ] && {
+        SHA="${_last%%$'\t'*}"
+        _rest="${_last#*$'\t'}"
         SIGNED_AT="${_rest%%$'\t'*}"
         _rest="${_rest#*$'\t'}"
         SIGNED_ID="${_rest%%$'\t'*}"
         VERDICT_AT="${_rest#*$'\t'}"
+    }
+    # THE NEWEST REVOCATION ANYWHERE, kept even where a later signoff outranks it
+    # by position. A page with none leaves the previous page's, because pages run
+    # oldest to newest and the answer is the newest one seen.
+    [ -n "$_lastrev" ] && {
+        _rest="${_lastrev#*$'\t'}"
+        REVOKED_AT="${_rest%%$'\t'*}"
+        _rest="${_rest#*$'\t'}"
+        REVOKED_ID="${_rest%%$'\t'*}"
     }
     HAS_NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage') || { OK=0; break; }
     case "$HAS_NEXT" in
@@ -349,6 +368,50 @@ if [ "$VERDICT_AT" = unreadable ]; then
         echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
     fi
     exit 2
+fi
+# ── A SIGNOFF STANDS ONLY IF NO REVOCATION IS NEWER THAN ITS VERDICT ───────
+#
+# Position alone says the last record wins, and that is why a revocation landing
+# while `record` was proving is superseded by the signoff written next: the
+# signoff is posted AFTER it, so it is last. The writer cannot close that window,
+# because its own write is what erases the evidence — #115 and #121 narrowed it and
+# neither could remove it.
+#
+# THE RECORD SAYS WHICH VERDICT IT ANSWERS, so time can decide instead: a
+# revocation NEWER than that verdict reopened the phase, and one older is the
+# fault-tolerance pass this signoff is answering. Neither answer depends on which
+# comment landed first. #140, closing #122.
+#
+# EQUAL IS NOT OLDER, AND UNORDERABLE IS NOT PERMISSION. `created_at` is
+# second-resolution and the two records come from different resources, so their ids
+# cannot break the tie — and falling back to position there gives "the signoff
+# stands", which is the fail-OPEN answer this rule exists to stop. A revocation in
+# the same second as the verdict reopens the phase, exactly as `record` refuses to
+# write over one. The cost is a rerun where the phase legitimately answered a
+# same-second revocation; the cost the other way is a merge on a withdrawn review.
+#
+# WHERE THERE IS NOTHING TO COMPARE, POSITION DECIDES, and that is today's rule
+# unchanged: a signoff carrying `none` — every record written before #137 — has no
+# verdict to order against, and a revocation whose own time cannot be read cannot
+# be placed. Neither is an unordered pair; both are an absent question, and
+# inventing an answer would be worse than position. No pull request in flight
+# changes meaning, because none of their signoffs carries the field.
+if [ "$SHA" != REVOKED ] && [ "$SHA" != BADREC ] && [ -n "$SHA" ]; then
+    case "$VERDICT_AT" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+            case "$REVOKED_AT" in
+                [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
+                    if [ ! "$REVOKED_AT" \< "$VERDICT_AT" ]; then
+                        # THE REVOCATION IS THE RECORD NOW, so the record printed is
+                        # ITS time and ITS id. Reporting the signoff's would name a
+                        # comment that is not the one being acted on, and callers
+                        # order records against each other by exactly these fields.
+                        SHA=REVOKED
+                        SIGNED_AT="$REVOKED_AT"
+                        SIGNED_ID="$REVOKED_ID"
+                    fi ;;
+            esac ;;
+    esac
 fi
 # A MARKER THAT PARSED AS NEITHER is not a record to look past. It was the newest
 # one on the PR, so skipping it hands the answer to an older signoff.
