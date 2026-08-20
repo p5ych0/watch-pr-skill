@@ -561,40 +561,21 @@ FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq
 # comment, and a review when the verdict was one — so their ids are not comparable
 # and cannot break the tie. Refusing costs a rerun once the clock has moved;
 # recording would supersede a reopening somebody meant.
-RB_REVOKED_AT=""
-SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
-case "$SIGNOFF_NOW_RC" in
+# THE READ THAT DECIDES IT IS THE LAST REMOTE READ THERE IS. Asking once and then
+# fetching the verdict's time re-opened the window one level down: a March
+# revocation posted while `review-at` returned February was compared as the
+# January one the first ask saw, and the signoff went out over it. So the first
+# ask is only the TRIGGER — whether an ordering question exists at all, and it is
+# what keeps `review-at` out of the ordinary phase, where a reader failing there
+# would stop a run with no revocation to order against — and the record COMPARED
+# is read again afterwards, with nothing but the write behind it.
+RB_TRIGGER=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); RB_TRIGGER_RC=$?
+case "$RB_TRIGGER_RC" in
     0|1) ;;
-    *) echo "ABORT: could not read the signoff record before recording (rc=$SIGNOFF_NOW_RC); nothing posted"; exit 1 ;;
+    *) echo "ABORT: could not read the signoff record before recording (rc=$RB_TRIGGER_RC); nothing posted"; exit 1 ;;
 esac
-case "$SIGNOFF_NOW" in
-    *reason=revoked*)
-        # THE FIELD HAS TO BE THERE BEFORE IT IS PEELED. `${…##*at=}` on a record
-        # WITHOUT `at=` returns the whole line, and `%% *` then takes its first
-        # word — `PR_SIGNOFF` — which is a non-empty value that is not a time, and
-        # sorts below every real timestamp. That reads as "the revocation is older
-        # than the verdict", which is the one answer that records over a
-        # reopening.
-        case "$SIGNOFF_NOW" in
-            *" at="*) ;;
-            *) echo "ABORT: a revocation is the newest record and carries no time ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
-        esac
-        # PEELED FROM THE RECORD, whose field order `pr-signoff.sh` fixes as
-        # `at=`, `id=`, `sha=` — so `at=` is followed by a space and the next
-        # field, and this takes exactly that value.
-        RB_REVOKED_AT="${SIGNOFF_NOW##* at=}"
-        RB_REVOKED_AT="${RB_REVOKED_AT%% *}"
-        # AND IT HAS TO BE A TIME. These are compared as STRINGS, which is the
-        # time order only for canonical UTC — a value of another shape sorts
-        # somewhere arbitrary, and one sorting low is again the answer that
-        # records over a reopening. `recordlib.sh` enforces the shape on the way
-        # in; this is the caller refusing to act on one it cannot place.
-        case "$RB_REVOKED_AT" in
-            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-            *) echo "ABORT: a revocation is the newest record and its time is unreadable ('$RB_REVOKED_AT'); nothing posted"; exit 1 ;;
-        esac ;;
-esac
-if [[ -n $RB_REVOKED_AT ]]; then
+case "$RB_TRIGGER" in
+*reason=revoked*)
     RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") \
         || { echo "ABORT: a revocation is the newest record and the verdict's time could not be read; nothing posted"; exit 1; }
     # THE SAME SHAPE TEST ON THE OTHER SIDE, and for the same reason: an empty
@@ -605,9 +586,46 @@ if [[ -n $RB_REVOKED_AT ]]; then
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
         *) echo "ABORT: a revocation is the newest record and no verdict on $CODEX_SHA has a readable time ('$RB_VERDICT_AT'); nothing posted"; exit 1 ;;
     esac
+    SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
+    case "$SIGNOFF_NOW_RC" in
+        0|1) ;;
+        *) echo "ABORT: could not re-read the signoff record before recording (rc=$SIGNOFF_NOW_RC); nothing posted"; exit 1 ;;
+    esac
+    # AND IT HAS TO STILL BE A REVOCATION. If the newest record changed to
+    # something else while the verdict's time was being fetched, this stage
+    # cannot place what it was about to act on — and a rerun costs one round trip,
+    # where guessing costs the reopening. The ordinary phase does not come through
+    # here at all: it never entered this branch.
+    case "$SIGNOFF_NOW" in
+        *reason=revoked*) ;;
+        *) echo "ABORT: the newest record changed while the verdict's time was read ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
+    esac
+    # THE FIELD HAS TO BE THERE BEFORE IT IS PEELED. `${…##*at=}` on a record
+    # WITHOUT `at=` returns the whole line, and `%% *` then takes its first
+    # word — `PR_SIGNOFF` — which is a non-empty value that is not a time, and
+    # sorts below every real timestamp. That reads as "the revocation is older
+    # than the verdict", which is the one answer that records over a reopening.
+    case "$SIGNOFF_NOW" in
+        *" at="*) ;;
+        *) echo "ABORT: a revocation is the newest record and carries no time ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
+    esac
+    # PEELED FROM THE RECORD, whose field order `pr-signoff.sh` fixes as `at=`,
+    # `id=`, `sha=` — so `at=` is followed by a space and the next field, and this
+    # takes exactly that value.
+    RB_REVOKED_AT="${SIGNOFF_NOW##* at=}"
+    RB_REVOKED_AT="${RB_REVOKED_AT%% *}"
+    # AND IT HAS TO BE A TIME. These are compared as STRINGS, which is the time
+    # order only for canonical UTC — a value of another shape sorts somewhere
+    # arbitrary, and one sorting low is again the answer that records over a
+    # reopening. `recordlib.sh` enforces the shape on the way in; this is the
+    # caller refusing to act on one it cannot place.
+    case "$RB_REVOKED_AT" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        *) echo "ABORT: a revocation is the newest record and its time is unreadable ('$RB_REVOKED_AT'); nothing posted"; exit 1 ;;
+    esac
     [[ $RB_REVOKED_AT < $RB_VERDICT_AT ]] \
-        || { echo "ABORT: this phase was reopened — the revocation at $RB_REVOKED_AT is not older than the verdict at $RB_VERDICT_AT. Recording a signoff now would supersede it; nothing posted"; exit 1; }
-fi
+        || { echo "ABORT: this phase was reopened — the revocation at $RB_REVOKED_AT is not older than the verdict at $RB_VERDICT_AT. Recording a signoff now would supersede it; nothing posted"; exit 1; } ;;
+esac
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \

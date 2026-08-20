@@ -161,6 +161,15 @@ last_before() {
     lb="$(grep -n -- "$2" "$TMP/calls" | head -1 | cut -d: -f1)"
     { [ -n "$la" ] && [ -n "$lb" ] && [ "$la" -lt "$lb" ]; }
 }
+# `last_after <a> <b>` — the LAST a in the log is later than the LAST b. The probe
+# that decides the ordering is read twice and both reads log the same text, so
+# only the last of them says which side of the verdict's time it fell on.
+last_after() {
+    local la lb
+    la="$(grep -n -- "$1" "$TMP/calls" | tail -1 | cut -d: -f1)"
+    lb="$(grep -n -- "$2" "$TMP/calls" | tail -1 | cut -d: -f1)"
+    { [ -n "$la" ] && [ -n "$lb" ] && [ "$la" -gt "$lb" ]; }
+}
 
 # ── the phase advances at all ──────────────────────────────────────────────
 world; got="$(run record 7 "$TMP/body.md")"
@@ -399,6 +408,73 @@ got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while an ordinary phase never reads it, so it cannot fail there" \
     || die "the ordinary phase asked for the verdict's time: '${got}'"
+
+# ── THE RECORD COMPARED IS READ AFTER THE VERDICT'S TIME, NOT BEFORE IT ────
+# ASKING ONCE AND THEN FETCHING THE TIME RE-OPENED THE WINDOW ONE LEVEL DOWN. The
+# first ask is the TRIGGER — whether there is an ordering question at all, which
+# is what keeps `review-at` out of the ordinary phase — and it is stale the moment
+# the fetch begins. A revocation posted DURING that fetch is the case: compared as
+# the record the first ask saw, it is ordered as the older one and the signoff
+# goes out over it.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=910 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-03-03T00:00:00Z id=911 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.2.out"
+printf '1\n' > "$W/signoff.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+    && pass "a revocation landing while the verdict's time is read is the one compared" \
+    || die "a revocation posted during the fetch was ordered as the stale one: '${got}'"
+nothing_posted "…with no signoff recorded over it"
+# AND IF THE NEWEST RECORD IS NO LONGER A REVOCATION, this stage cannot place what
+# it was about to act on. A rerun costs one round trip; guessing costs the
+# reopening. The ordinary phase never comes through here — it did not enter the
+# branch.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=912 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-03-03T00:00:00Z id=913 sha=%s\n' \
+    "$CODEXBOT" "$HEAD40" > "$W/signoff.2.out"
+printf '0\n' > "$W/signoff.2.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the newest record changed'; } \
+    && pass "…and a newest record that stopped being a revocation refuses" \
+    || die "a changed record was acted on anyway: '${got}'"
+nothing_posted "…with no signoff recorded"
+# THE POSITION ITSELF, which no answer above asserts: both reads log the same
+# text, so only the LAST one distinguishes the order this case exists for.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=914 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] || die "the ordering case did not record: '${got}'"
+last_after 'pr-signoff.sh' 'pr-review-state.sh review-at' \
+    && pass "…the record compared having been read after the verdict's time" \
+    || die "the compared record was read before the verdict's time: $(cat "$TMP/calls")"
+last_before 'pr-signoff.sh' 'gh pr comment' \
+    && pass "…and nothing but the write behind it" \
+    || die "the signoff was posted before the record was re-read: $(cat "$TMP/calls")"
+
+# ── AND NEITHER READ MAY FAIL QUIETLY ──────────────────────────────────────
+# AN UNREADABLE SIGNOFF PROBE IS NOT "NO REVOCATION". Both reads are checked,
+# because they fail independently: the trigger decides whether the ordering
+# question is asked at all, and the re-read decides the answer.
+world; printf '2\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not read the signoff record'; } \
+    && pass "an unreadable signoff probe stops the record rather than reading as no revocation" \
+    || die "an unreadable signoff probe gave '${got}'"
+nothing_posted "…with no signoff recorded"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=915 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+printf '2\n' > "$W/signoff.2.rc"; : > "$W/signoff.2.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not re-read the signoff record'; } \
+    && pass "…and so does an unreadable re-read, which is the one the comparison uses" \
+    || die "an unreadable re-read gave '${got}'"
+nothing_posted "…with no signoff recorded"
 
 # A PUSH IN THE SAME WINDOW, which the head re-read catches. `move-head-on-probe`
 # fires on the FIRST verdict call, so this is a push landing before the CI gate.

@@ -40,6 +40,17 @@
   Nine cases, and the verdict's time is asked for only when a revocation is
   standing — a reader that failed there would otherwise stop every ordinary phase.
 
+  **The record compared is read after the verdict's time, not before it.** Asking
+  once and then fetching the time re-opened the same window one level down: a
+  revocation posted *during* that fetch was compared as the stale record the first
+  ask saw, and the signoff went out over it. The first read is only the trigger for
+  whether an ordering question exists at all — which is what keeps `review-at` out
+  of the ordinary phase — and the record the comparison uses is read again
+  afterwards, with nothing but the write behind it. A newest record that stopped
+  being a revocation in that window is a refusal too: this stage cannot place what
+  it was about to act on, and a rerun costs a round trip where guessing costs the
+  reopening.
+
   **The ordering proof is the last thing before the write**, ahead of the final
   head re-read, because the two residues are not alike. A head that moves after
   its proof is caught downstream: `open` re-reads it and refuses a head that is
