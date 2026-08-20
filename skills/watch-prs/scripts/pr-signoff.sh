@@ -266,6 +266,13 @@ while :; do
                  | (if $m[0] != null and ($m[2] | type) == "string" then "unreadable" else $v end) as $v
                  | if $m[0] != null then "REVOKED\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    elif ($m[2] | type) == "string" then $m[2] + "\t" + $c + "\t" + ($i | tostring) + "\t" + $v
+                   # A SIGNOFF WITHOUT A SHA BUT WITH A THIRD FIELD is a record
+                   # that failed to parse, not one to pass over: the sha capture
+                   # demands 40 hex, so a value in that position which is not one
+                   # lands in the verdict field instead. Discarded, the marker
+                   # stops being the newest record and an OLDER signoff is returned
+                   # with status 0 — a phase reading as closed on stale evidence.
+                   elif ($m[3] | type) == "string" then "BADREC\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    else empty end
                ] | last // ""
           end') || { OK=0; break; }
@@ -341,6 +348,12 @@ if [ "$VERDICT_AT" = unreadable ]; then
     else
         echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
     fi
+    exit 2
+fi
+# A MARKER THAT PARSED AS NEITHER is not a record to look past. It was the newest
+# one on the PR, so skipping it hands the answer to an older signoff.
+if [ "$SHA" = BADREC ]; then
+    echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=signoff_without_sha" >&2
     exit 2
 fi
 if [ "$SHA" = REVOKED ]; then

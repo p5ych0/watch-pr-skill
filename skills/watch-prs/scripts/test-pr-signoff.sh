@@ -131,6 +131,13 @@ case_is 2 "reason=bad_verdict_at" "…and an overlong verdict time is refused, n
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
                 "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`\`" > "$TMP/out"
 case_is 2 "reason=bad_verdict_at" "…and so is an empty one"
+# A SIGNOFF WITHOUT A SHA is a record that failed to parse, not one to look past.
+# The sha capture demands 40 hex, so a value in that position which is not one
+# lands in the verdict field instead — and discarded, the marker stops being the
+# newest record and an OLDER signoff is returned with status 0.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`2026-01-02T00:00:00Z\`" > "$TMP/out"
+case_is 2 "reason=signoff_without_sha" "a signoff with no sha is refused, not skipped past"
 # AND A VALUE THERE THAT IS FORTY LOWERCASE HEX is captured as the optional SHA
 # rather than as the time, and the revocation branch ignores a sha — so the record
 # would read as one carrying no time at all, and a present but unplaceable value
