@@ -523,11 +523,76 @@ CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$
 # TELLING THE TWO APART IS ORDERING: a revocation this pass is ANSWERING landed
 # before the verdict, and one that would CANCEL it landed after.
 #
-# THE RECORDS CAN NOW SAY WHICH. `pr-signoff.sh` reports `at=` and `id=` on a
-# revocation, and `pr-review-state.sh review-at` answers from the comment channel
-# as well as the reviews — #117, landed. What is still deferred is the
-# INTEGRATION: this stage does not yet compare the two, and #115 is that change.
-# Until it does, this stage narrows the window rather than closing it.
+# THE RECORDS SAY WHICH, since #117: `pr-signoff.sh` reports `at=` on a revocation
+# and `pr-review-state.sh review-at` reports when the verdict landed, answering
+# from the comment channel as well as the reviews — Codex delivers a clean pass
+# either way.
+#
+# SO THE RULE IS: the phase is reopened when the newest revocation is LATER than
+# the verdict being signed off, and only then. Earlier, and this pass is the
+# answer to it — refusing there is what stopped a reopened phase recording its
+# replacement signoff at all.
+#
+# BOTH TIMESTAMPS ARE CANONICAL UTC, which `recordlib.sh` enforces on every record
+# either side, so the string order is the time order and no date arithmetic is
+# needed. A parse here would be a second definition of a rule those validators
+# already hold.
+#
+# EQUAL IS A REFUSAL, and it is the one case this cannot decide: `created_at` is
+# second-resolution, and the two records come from DIFFERENT resources — an issue
+# comment, and a review when the verdict was one — so their ids are not comparable
+# and cannot break the tie. Refusing costs a rerun once the clock has moved;
+# recording would supersede a reopening somebody meant.
+RB_REVOKED_AT=""
+SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
+case "$SIGNOFF_NOW_RC" in
+    0|1) ;;
+    *) echo "ABORT: could not read the signoff record before recording (rc=$SIGNOFF_NOW_RC); nothing posted"; exit 1 ;;
+esac
+case "$SIGNOFF_NOW" in
+    *reason=revoked*)
+        # THE FIELD HAS TO BE THERE BEFORE IT IS PEELED. `${…##*at=}` on a record
+        # WITHOUT `at=` returns the whole line, and `%% *` then takes its first
+        # word — `PR_SIGNOFF` — which is a non-empty value that is not a time, and
+        # sorts below every real timestamp. That reads as "the revocation is older
+        # than the verdict", which is the one answer that records over a
+        # reopening.
+        case "$SIGNOFF_NOW" in
+            *" at="*) ;;
+            *) echo "ABORT: a revocation is the newest record and carries no time ('$SIGNOFF_NOW'); nothing posted"; exit 1 ;;
+        esac
+        # PEELED FROM THE RECORD, whose field order `pr-signoff.sh` fixes as
+        # `at=`, `id=`, `sha=` — so `at=` is followed by a space and the next
+        # field, and this takes exactly that value.
+        RB_REVOKED_AT="${SIGNOFF_NOW##* at=}"
+        RB_REVOKED_AT="${RB_REVOKED_AT%% *}"
+        # AND IT HAS TO BE A TIME. These are compared as STRINGS, which is the
+        # time order only for canonical UTC — a value of another shape sorts
+        # somewhere arbitrary, and one sorting low is again the answer that
+        # records over a reopening. `recordlib.sh` enforces the shape on the way
+        # in; this is the caller refusing to act on one it cannot place.
+        case "$RB_REVOKED_AT" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+            *) echo "ABORT: a revocation is the newest record and its time is unreadable ('$RB_REVOKED_AT'); nothing posted"; exit 1 ;;
+        esac ;;
+esac
+if [[ -n $RB_REVOKED_AT ]]; then
+    RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") \
+        || { echo "ABORT: a revocation is the newest record and the verdict's time could not be read; nothing posted"; exit 1; }
+    # AN UNTIMED VERDICT CANNOT BE ORDERED EITHER, so it is refused rather than
+    # assumed newer. Empty means no verdict was found for this head at all, which
+    # with a revocation standing is precisely the state that must not record.
+    # THE SAME SHAPE TEST ON THE OTHER SIDE, and for the same reason: an empty
+    # answer means no verdict on this head was found at all, and any other shape
+    # cannot be ordered. Either, with a revocation standing, is the state that
+    # must not record.
+    case "$RB_VERDICT_AT" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        *) echo "ABORT: a revocation is the newest record and no verdict on $CODEX_SHA has a readable time ('$RB_VERDICT_AT'); nothing posted"; exit 1 ;;
+    esac
+    [[ $RB_REVOKED_AT < $RB_VERDICT_AT ]] \
+        || { echo "ABORT: this phase was reopened — the revocation at $RB_REVOKED_AT is not older than the verdict at $RB_VERDICT_AT. Recording a signoff now would supersede it; nothing posted"; exit 1; }
+fi
 # AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
 # move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
 # clean and says nothing about the move. Reading the head first and posting third

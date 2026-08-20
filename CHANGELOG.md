@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.0.39] — 2026-08-20
+
+- **A revocation that lands while `record` is proving no longer gets superseded.**
+  Another session posts `Review-Signoff-Revoked` while the head is unchanged and
+  GitHub still serves the old clean verdict, so the head and verdict re-reads pass
+  — and the signoff written next takes precedence, because the readers take the
+  last record. A later `open` then requests Copilot underneath a phase somebody
+  deliberately reopened.
+
+  **It is refused by ORDER, not by presence.** Refusing on any revocation was
+  tried and breaks the legitimate path: the fault-tolerance pass posts its
+  revocation *before* requesting the review, so that record is newest when the new
+  clean verdict arrives — this pass is answering it, and an unconditional refusal
+  meant a reopened phase could never record its replacement signoff at all. The
+  rule is that the phase is reopened when the newest revocation is **later** than
+  the verdict being signed off, and only then.
+
+  Both timestamps are canonical UTC, which `recordlib.sh` enforces on every record
+  either side, so the string order is the time order and no date arithmetic is
+  needed — a parse here would be a second definition of a rule those validators
+  already hold.
+
+  **Equal is a refusal**, and it is the one case this cannot decide: `created_at`
+  is second-resolution, and the two records come from different resources — an
+  issue comment, and a review when the verdict was one — so their ids are not
+  comparable and cannot break the tie. Refusing costs a rerun once the clock has
+  moved; recording would supersede a reopening somebody meant.
+
+  **A missing or oddly-shaped time is a refusal too**, on either side, and that is
+  not defensive padding: these are compared as strings, so a value of another
+  shape sorts somewhere arbitrary — and one sorting low reads as "the revocation
+  is older", which is exactly the answer that records over a reopening. The
+  field's presence is checked before it is peeled, because `${…##*at=}` on a
+  record without `at=` returns the whole line and `%% *` then yields
+  `PR_SIGNOFF`, a non-empty value that is not a time and sorts below every real
+  one.
+
+  Nine cases, and the verdict's time is asked for only when a revocation is
+  standing — a reader that failed there would otherwise stop every ordinary phase.
+
 ## [2.0.38] — 2026-08-20
 
 - **The round gate pushed whatever branch the checkout was on.** `git push` with

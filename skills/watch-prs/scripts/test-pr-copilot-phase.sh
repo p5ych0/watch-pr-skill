@@ -48,6 +48,11 @@ case "${1:-}" in
                fi
                cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
+    review-at) # WHEN THE VERDICT LANDED, which is what a revocation is ORDERED
+               # against: one posted BEFORE it is the pass answering it, one
+               # posted after would cancel it. #115.
+               cat "$W/review-at.out" 2>/dev/null
+               exit "$(cat "$W/review-at.rc" 2>/dev/null || echo 0)" ;;
     review-id) # THE BASELINE IS READ ONCE, LAST. A pass that lands during the
                # probes must not be the value handed to `--after-review`, so the
                # fixture can change what this returns after the revocation.
@@ -123,7 +128,12 @@ world() {   # world ; the state in which the phase advances cleanly
     printf '%s\n' "$HEAD40" > "$W/head.out"
     printf 'PR_REVIEW_STATE verdict=clean findings=0\n' > "$W/verdict.out"
     printf '42\n' > "$W/review-id.out"
-    printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
+    printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=901 sha=%s\n' \
+        "$CODEXBOT" "$HEAD40" > "$W/signoff.out"
+    # THE VERDICT LANDED AFTER THE REVOCATION IN `world`, which is the LEGITIMATE
+    # shape: the fault-tolerance pass posts its revocation and then requests the
+    # review, so a pass that comes back clean is answering it. #115.
+    printf '2026-02-02T00:00:00Z\n' > "$W/review-at.out"
     printf 'the paragraph about what changed\n' > "$TMP/body.md"
 }
 run() {   # run <stage> [args…] ; prints "<rc>|<output>"
@@ -261,12 +271,97 @@ nothing_posted "…with no signoff recorded"
 # What is still deferred is comparing them here, which is #115. What this asserts
 # meanwhile is that the legitimate case works: a revocation already on the PR,
 # with a clean verdict, still records.
-world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=901 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "a reopened phase with a clean verdict records its replacement signoff" \
     || die "a pre-existing revocation blocked the reopened phase: '${got}'"
+
+# …AND A REVOCATION LANDING AFTER THE VERDICT CANCELS IT, which is the state #115
+# is about: another session reopens the phase while the head is unchanged and
+# GitHub still serves the old clean verdict, so both head reads and the verdict
+# check pass. Recording here would SUPERSEDE that revocation, because the readers
+# take the last record, and a later `open` would request Copilot underneath a
+# phase somebody had deliberately reopened.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-03-03T00:00:00Z id=902 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+    && pass "a revocation newer than the verdict stops the record" \
+    || die "a cancelling revocation was recorded over: '${got}'"
+nothing_posted "…with no signoff recorded, so it cannot supersede the revocation"
+# EQUAL IS A REFUSAL, and it is the one case this cannot decide: `created_at` is
+# second-resolution and the two records come from different resources, so their
+# ids are not comparable. Refusing costs a rerun once the clock has moved.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-02-02T00:00:00Z id=903 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+    && pass "…and one at the same second refuses, since nothing here can order them" \
+    || die "a same-second revocation was recorded over: '${got}'"
+nothing_posted "…with no signoff recorded"
+# A REVOCATION WITH NO TIME CANNOT BE ORDERED, and a record this stage cannot
+# place is not one to record over. `pr-signoff.sh` has carried `at=` on one since
+# #117, so this is a record from something else.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'carries no time'; } \
+    && pass "…and an untimed revocation refuses rather than being assumed older" \
+    || die "an untimed revocation was recorded over: '${got}'"
+nothing_posted "…with no signoff recorded"
+# …AND A TIME OF ANOTHER SHAPE IS REFUSED RATHER THAN COMPARED. These are ordered
+# as STRINGS, which is the time order only for canonical UTC — a value of another
+# shape sorts somewhere arbitrary, and one sorting low reads as "the revocation is
+# older", which is the answer that records over a reopening.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=yesterday id=906 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'its time is unreadable'; } \
+    && pass "…and a revocation time of another shape refuses rather than sorting low" \
+    || die "an unshaped revocation time was compared: '${got}'"
+nothing_posted "…with no signoff recorded"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=907 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"; printf 'soon\n' > "$W/review-at.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'readable time'; } \
+    && pass "…and the same on the verdict's side" \
+    || die "an unshaped verdict time was compared: '${got}'"
+nothing_posted "…with no signoff recorded"
+
+# AND AN UNREADABLE OR UNTIMED VERDICT IS A REFUSAL TOO: with a revocation
+# standing, "no verdict on this head has a time" is exactly the state that must
+# not record.
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=904 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"; printf '2\n' > "$W/review-at.rc"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "verdict's time could not be read"; } \
+    && pass "…and an unreadable verdict time refuses with a revocation standing" \
+    || die "an unreadable verdict time was recorded over: '${got}'"
+nothing_posted "…with no signoff recorded"
+world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=905 sha=none reason=revoked\n' \
+    "$CODEXBOT" > "$W/signoff.out"
+printf '1\n' > "$W/signoff.rc"; : > "$W/review-at.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'readable time'; } \
+    && pass "…and an empty one, which is 'no verdict on this head at all'" \
+    || die "an untimed verdict was recorded over: '${got}'"
+nothing_posted "…with no signoff recorded"
+# AND WITH NO REVOCATION THE VERDICT'S TIME IS NEVER ASKED FOR, because there is
+# nothing to order it against — a reader that failed here would stop every
+# ordinary phase.
+world; printf '2\n' > "$W/review-at.rc"
+got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while an ordinary phase never reads it, so it cannot fail there" \
+    || die "the ordinary phase asked for the verdict's time: '${got}'"
 
 # A PUSH IN THE SAME WINDOW, which the head re-read catches. `move-head-on-probe`
 # fires on the FIRST verdict call, so this is a push landing before the CI gate.

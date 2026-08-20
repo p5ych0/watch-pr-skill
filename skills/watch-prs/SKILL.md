@@ -1668,7 +1668,9 @@ fi
 
 **STOP — the next phase is the operator's decision.** `record` has proved Codex
 clean on an exact head, proved that head's checks, re-proved the head and the
-verdict immediately before writing — the CI gate WAITS, so a push or a dismissal
+verdict immediately before writing — and, where a revocation is the newest
+record, proved it is OLDER than that verdict, so this pass is answering a
+reopening rather than superseding one — the CI gate WAITS, so a push or a dismissal
 can land in that window and either stops the record with nothing posted — and
 written the signoff onto the PR. What happens next is not the loop's call to
 make:
