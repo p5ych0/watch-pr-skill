@@ -570,6 +570,36 @@ done
 # probes correctly describing the old head, and announcing that as READY advances
 # the driver on a review of code that is no longer there.
 #
+# ── A FULL-WIDTH RECORD IS ACCEPTED ────────────────────────────────────────
+# The identity check compares the record at ITS OWN WIDTH now, rather than
+# against a `${head:0:7}` this script cut. Every other record in this file is
+# seven hex, so a caller pinned back to seven would pass the whole suite —
+# `test-recordlib.sh` proves what the library accepts and nothing about what this
+# script asks it. #126.
+cat > "$TMP/wide.sh" <<SH
+#!/usr/bin/env bash
+[ "\$1" = "head" ] && { printf '%s\n' "\$HEAD40"; exit 0; }
+head="\$4"
+if [ "\$1" = "verdict" ]; then
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "\$2" "\$head" "\$3"
+    exit 0
+fi
+printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s state=reviewed\n' "\$2" "\$head" "\$3"
+exit 0
+SH
+chmod +x "$TMP/wide.sh"
+out="$(PR_WATCH_STATE_SCRIPT="$TMP/wide.sh" HEAD40="$HEAD40" \
+        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
+printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    && pass "a state and verdict carrying the full forty-hex head are accepted" \
+    || die "a full-width record was not accepted (rc=$rc): $out"
+printf '%s' "$out" | grep -q 'verdict=clean' \
+    && pass "…and the clean verdict is what it reports" \
+    || die "the full-width verdict was not reported: $out"
+printf '%s' "$out" | grep -q 'identity_mismatch' \
+    && die "a full-width record was read as being about another head: $out" \
+    || pass "…with no identity mismatch, since the width grew rather than the check weakening"
+
 # Written without mkstub, which owns the `head` answer — this stub needs its own.
 cat > "$TMP/moving.sh" <<SH
 #!/usr/bin/env bash

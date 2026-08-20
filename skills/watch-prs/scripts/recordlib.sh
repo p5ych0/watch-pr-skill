@@ -332,3 +332,90 @@ rb_review_trigger() {   # <text> ; 0 requests a pass, 1 does not, 2 could not te
     esac
     return 1
 }
+
+# ── WHAT A `PR_REVIEW_STATE` ANSWER IS ─────────────────────────────────────
+#
+# `pr-review-state.sh` answers on stdout in one line, and its exit STATUS is not
+# the whole answer: a wrapper that truncates stdout, a stale cache, or a misrouted
+# call leaves an rc of 0 with a line about another PR, another reviewer or an
+# older head — and each of the three callers acts on it as though it were about
+# what they asked.
+#
+# THE SHAPE AND THE IDENTITY WERE WRITTEN OUT TWICE, in `pr-merge-gate.sh` and
+# `pr-watch.sh`, and MISSING FROM THE THIRD: `pr-phase-state.sh` re-validated a
+# recorded signoff on the status alone. That is the shape this library exists
+# for — every field check in it started as two or three copies and every one was
+# found missing from at least one. #126.
+#
+# THEY SET RATHER THAN PRINT, like `rb_identity`: five values through one string
+# makes any delimiter a value can contain, and a reviewer login is arbitrary text.
+RB_REC_PR=''
+RB_REC_SHA=''
+RB_REC_WHO=''
+RB_REC_VALUE=''
+RB_REC_TAIL=''
+# THE PATTERN LIVES IN A VARIABLE. Bash 3.2 cannot parse a `[[ =~ ]]` whose
+# pattern contains a parenthesis written inline, and one of these callers runs in
+# the operator's own shell — which on macOS is that bash.
+RB_REC_RX_HEAD='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) '
+
+# rb_review_record <line> <field> ; 0 parsed, 1 not a record of that shape
+#
+# THE WHOLE RECORD, ANCHORED AT BOTH ENDS, not the last `<field>=` token: rc-0
+# noise such as `warning: cached state=none` passes a substring match and takes a
+# fallback path nobody's answer selected. The FIELD IS NAMED by the caller because
+# the two questions have different fields — `state=` and `verdict=` — and a caller
+# that got the other one has asked something it is not about to interpret.
+#
+# THE TAIL IS RETURNED, NOT ACCEPTED. What may follow the value differs per
+# question, so each caller states its own rule: `state` allows nothing after it,
+# and `verdict` has a grammar of its own. Swallowing it here would accept any
+# field anyone ever appends, which is what these checks exist to catch.
+rb_review_record() {   # <line> <field>
+    RB_REC_PR=''; RB_REC_SHA=''; RB_REC_WHO=''; RB_REC_VALUE=''; RB_REC_TAIL=''
+    local _rx
+    case "${2-}" in
+        ""|*[!a-z]*) return 1 ;;
+    esac
+    _rx="$RB_REC_RX_HEAD${2}"'=([a-z]+)(.*)$'
+    [[ "${1-}" =~ $_rx ]] || return 1
+    RB_REC_PR="${BASH_REMATCH[1]}"
+    RB_REC_SHA="${BASH_REMATCH[2]}"
+    RB_REC_WHO="${BASH_REMATCH[3]}"
+    RB_REC_VALUE="${BASH_REMATCH[4]}"
+    RB_REC_TAIL="${BASH_REMATCH[5]}"
+    return 0
+}
+
+# rb_review_record_is_about <pr> <reviewer> <head-oid> ; 0 yes, 1 no
+#
+# A WELL-FORMED LINE IS NOT AN ANSWER. A record for another PR, another reviewer
+# or an older head matches the shape above perfectly, and the failure it causes is
+# silent: the merge gate took the `none` fallback and merged on a recorded signoff
+# while the reviewer actually had a body-only CHANGES_REQUESTED on the head, which
+# leaves no thread for the unresolved-thread gate to catch.
+#
+# THE HEAD IS PASSED WHOLE and compared against the record's own width. The field
+# is a seven-hex prefix today; every caller wrote `${head:0:7}` at the call site,
+# which is a second place for the width to be wrong — and a record that grew to
+# forty hex would have been matched on its first seven.
+#
+# WHAT THAT DOES NOT DO IS RESOLVE A PREFIX COLLISION. A seven-hex record is
+# compared at seven, so two heads sharing that prefix both satisfy it; only a
+# record carrying more can tell them apart, and none does today. The comparison is
+# as strong as the record, and no stronger.
+#
+# WHAT IT DOES FIX is the other collision: comparing a record to ANOTHER RECORD's
+# field cannot tell two commits apart at all when their prefixes agree, while
+# comparing both to the one resolved oid this call pinned at least measures them
+# against the same thing.
+#
+# COMPARED AS STRINGS, never with `=~`: a reviewer login ends in `[bot]`, which a
+# regex reads as a character class.
+rb_review_record_is_about() {   # <pr> <reviewer> <head-oid>
+    [ -n "$RB_REC_SHA" ] || return 1
+    [ "$RB_REC_PR" = "${1-}" ] || return 1
+    [ "$RB_REC_WHO" = "${2-}" ] || return 1
+    [ "$RB_REC_SHA" = "${3:0:${#RB_REC_SHA}}" ] || return 1
+    return 0
+}

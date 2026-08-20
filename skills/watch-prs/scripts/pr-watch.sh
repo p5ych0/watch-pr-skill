@@ -110,6 +110,8 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || {
     _rb_rc=$?
     [[ $_rb_rc -eq 127 ]] && echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2
     exit 2; }
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_REVIEW_WATCH state=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -363,7 +365,6 @@ while :; do
             "$PR" "$WHO" "$hrc" "$(q "$head")"
         exit 2
     fi
-    want_sha="${head:0:7}"
 
     remaining_s; rrc=$?; rem="$REMAINING"
     [ "$rrc" -eq 2 ] && timed_out
@@ -399,11 +400,18 @@ while :; do
     # It is not a Bash 4 construct by name — it is a PARSING difference, which no
     # list of constructs would contain. The `macos-shell` CI job is what found it,
     # by running the suite rather than by reading it.
-    rx_state='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)$'
-    if [[ "$line" =~ $rx_state ]]; then
-        r_pr="${BASH_REMATCH[1]}"; r_sha="${BASH_REMATCH[2]}"
-        r_who="${BASH_REMATCH[3]}"; state="${BASH_REMATCH[4]}"
+    # THROUGH `recordlib.sh`, because this shape was written out here and in
+    # `pr-merge-gate.sh` and was missing from `pr-phase-state.sh`. #126.
+    if rb_review_record "$line" state; then
+        state="$RB_REC_VALUE"
     else
+        printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable detail=%s\n' "$PR" "$WHO" "$(q "$line")"
+        exit 2
+    fi
+    # NOTHING MAY FOLLOW THE VALUE on this question. The library returns the tail
+    # rather than accepting it, because what may follow differs per question — the
+    # verdict below has a grammar of its own.
+    if [ -n "$RB_REC_TAIL" ]; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable detail=%s\n' "$PR" "$WHO" "$(q "$line")"
         exit 2
     fi
@@ -416,7 +424,7 @@ while :; do
     # Including the sha, which is now the head this poll pinned both probes to —
     # so a record about any other commit is rejected outright rather than merely
     # cross-checked against the other record.
-    if [ "$r_pr" != "$PR" ] || [ "$r_who" != "$WHO" ] || [ "$r_sha" != "$want_sha" ]; then
+    if ! rb_review_record_is_about "$PR" "$WHO" "$head"; then
         printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=record_identity_mismatch detail=%s\n' \
             "$PR" "$WHO" "$(q "$line")"
         exit 2
@@ -510,10 +518,8 @@ while :; do
             # An exact field, not a glob: `*verdict=clean*` also matched
             # `verdict=cleaned` and any line merely quoting the word, and
             # PR_REVIEW_READY is the actionable signal under Monitor.
-            rx_verdict='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) verdict=([a-z]+)(.*)$'
-            if [[ "$verdict" =~ $rx_verdict ]]; then
-                v_pr="${BASH_REMATCH[1]}"; v_sha="${BASH_REMATCH[2]}"
-                v_who="${BASH_REMATCH[3]}"; v_field="${BASH_REMATCH[4]}"; v_tail="${BASH_REMATCH[5]}"
+            if rb_review_record "$verdict" verdict; then
+                v_field="$RB_REC_VALUE"; v_tail="$RB_REC_TAIL"
             else
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=unparseable_verdict detail=%s\n' \
                     "$PR" "$WHO" "$(q "$verdict")"
@@ -524,7 +530,7 @@ while :; do
             # records to each other could not tell two commits apart when their
             # seven-hex prefixes collided; comparing both to the 40-hex OID this
             # poll resolved cannot.
-            if [ "$v_pr" != "$PR" ] || [ "$v_who" != "$WHO" ] || [ "$v_sha" != "$want_sha" ]; then
+            if ! rb_review_record_is_about "$PR" "$WHO" "$head"; then
                 printf 'PR_REVIEW_WATCH pr=%s reviewer=%s state=error reason=verdict_identity_mismatch detail=%s\n' \
                     "$PR" "$WHO" "$(q "$verdict")"
                 exit 2

@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.0.41] — 2026-08-20
+
+- **A verdict record is checked, not just the status it came with.**
+  `pr-review-state.sh` answers in one line, and its exit status is not the whole
+  answer: a wrapper that truncates stdout, a stale cache or a misrouted call
+  leaves an rc of 0 with a line about another PR, another reviewer or an older
+  head. `pr-merge-gate.sh` and `pr-watch.sh` each validated the shape and the
+  identity; `pr-phase-state.sh` did neither, so an rc-0 answer that was empty or
+  about something else read as "the phase still stands" — and that answer
+  licenses a merge exactly as the gates' do.
+
+  **The rule is in `recordlib.sh` now, not in a third copy.** Every field check
+  in that library started as two or three inline copies and every one was found
+  missing from at least one; a third regex here would be the same defect at a
+  larger scale. `rb_review_record` parses the line for a **named** field — the two
+  questions have different ones, and a caller that got the other has asked
+  something it is not about to read — and hands the tail back rather than
+  accepting it, because what may follow differs per question and swallowing it
+  centrally would accept any field anyone ever appends.
+
+  `rb_review_record_is_about` takes the head **whole** and compares it at the
+  record's own width, so the `${head:0:7}` each caller used to write — a second
+  place for the width to be wrong — is gone, and a record that grew to forty hex
+  would be compared at forty rather than matched on its first seven. It does not
+  resolve a prefix collision: a seven-hex record is compared at seven, and only a
+  wider record could tell two heads sharing that prefix apart.
+
+  **The merge gate's two literal reconstructions go too.** It did not carry a
+  regex — it rebuilt the line it expected, `sha=${2:0:7}` and all, and compared
+  against that. A second definition written as a string is invisible to a scan for
+  a regex, and it pinned the width where every other caller did not.
+
+  The tail is the caller's rule and `pr-phase-state.sh` states it: `verdict=clean`
+  with the `findings=0` truncated away is not a clean answer, and read as one it
+  closed the phase on a record that was cut short. Spelled out rather than made
+  optional, so a field nobody defined is refused too.
+
+  The drift guard in `test-recordlib.sh` fails if a helper re-implements the shape
+  inline.
+
 ## [2.0.40] — 2026-08-20
 
 - **The recipe a resumed session runs is a script now, and it has a test.**

@@ -124,6 +124,8 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_PHASE status=error" || {
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted as
 # library data — so the phase would be read under whatever account that variable
 # named, which is the wrong-reviewer answer with no sign that anything was wrong.
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_PHASE status=error" || exit 2
@@ -244,7 +246,29 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
     # own contract says 2 means unreadable everywhere else in it.
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); VERDICT_RC=$?
     case "$VERDICT_RC" in
-        0) ;;
+        0) # THE RECORD, NOT ONLY THE STATUS. A probe that exits 0 while printing
+           # nothing, or a line about another PR, reviewer or head, is not an
+           # answer about this phase — and acting on the status alone turns a
+           # malformed probe into permission to continue. The two gates beside
+           # this one validate; this did not. #126.
+           if ! rb_review_record "$VERDICT" verdict; then
+               echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_unparseable" >&2; exit 2
+           fi
+           if ! rb_review_record_is_about "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
+               echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_misaddressed" >&2; exit 2
+           fi
+           if [[ $RB_REC_VALUE != clean ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_not_clean" >&2; exit 2
+           fi
+           # AND THE TAIL, which the library hands back rather than accepting —
+           # what may follow a value differs per question, so the rule is the
+           # caller's. `verdict=clean` with the `findings=0` truncated away is not
+           # a clean answer, and read as one it closes the phase on a record that
+           # was cut short. Spelled out rather than made optional: a trailing
+           # `.*` accepts any field anyone ever appends.
+           if [[ $RB_REC_TAIL != " findings=0" ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_truncated" >&2; exit 2
+           fi ;;
         1) echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
            echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
            echo "Treat the Copilot phase as open: request a review before merging."
@@ -266,7 +290,25 @@ else
     # THE SAME THREE, for the same reason.
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); VERDICT_RC=$?
     case "$VERDICT_RC" in
-        0) ;;
+        0) # THE SAME THREE, on the other arm.
+           if ! rb_review_record "$VERDICT" verdict; then
+               echo "PR_PHASE pr=$PR status=error reason=codex_verdict_unparseable" >&2; exit 2
+           fi
+           if ! rb_review_record_is_about "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
+               echo "PR_PHASE pr=$PR status=error reason=codex_verdict_misaddressed" >&2; exit 2
+           fi
+           if [[ $RB_REC_VALUE != clean ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=codex_verdict_not_clean" >&2; exit 2
+           fi
+           # AND THE TAIL, which the library hands back rather than accepting —
+           # what may follow a value differs per question, so the rule is the
+           # caller's. `verdict=clean` with the `findings=0` truncated away is not
+           # a clean answer, and read as one it closes the phase on a record that
+           # was cut short. Spelled out rather than made optional: a trailing
+           # `.*` accepts any field anyone ever appends.
+           if [[ $RB_REC_TAIL != " findings=0" ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=codex_verdict_truncated" >&2; exit 2
+           fi ;;
         1) echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
            echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
            echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."

@@ -53,7 +53,15 @@ case " $* " in
     *"copilot-pull-request-reviewer"*) _w=copilot ;;
     *)                                 _w=other ;;
 esac
-[ -f "$W/$_w.verdict.out" ] && cat "$W/$_w.verdict.out"
+# A REAL CLEAN RECORD BY DEFAULT, built from the arguments it was asked with —
+# `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
+# about what was asked. A stub that printed nothing made every rc-0 path look
+# like the malformed-probe case, which is a case of its own below.
+if [ -f "$W/$_w.verdict.out" ]; then
+    cat "$W/$_w.verdict.out"
+else
+    printf 'PR_REVIEW_STATE pr=%s sha=%s reviewer=%s verdict=clean findings=0\n' "$2" "$(printf '%s' "${4:-}" | cut -c1-7)" "$3"
+fi
 exit "$(cat "$W/$_w.verdict.rc" 2>/dev/null || echo 0)"
 STATESH
 chmod +x "$DIR/pr-review-state.sh"
@@ -230,6 +238,106 @@ got="$(run 7)"
 printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
     && die "…but it reported that phase as reopened as well" \
     || pass "…without telling the operator to re-request that one either"
+
+# ── A FULL-WIDTH RECORD IS ACCEPTED ON BOTH ARMS ───────────────────────────
+# The identity check compares the record at ITS OWN WIDTH rather than against a
+# seven-hex cut this script makes. Every other record here is seven hex, so a
+# caller pinned back to seven would pass the whole file — `test-recordlib.sh`
+# proves what the library accepts and nothing about what this helper asks it, and
+# the regression would be a valid phase refused. #126.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$HEAD40" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+    && pass "a verdict carrying the full forty-hex head is accepted before the Copilot phase" \
+    || die "a full-width verdict was refused: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$HEAD40" "$COPILOTBOT" > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+    && pass "…and after it, on the arm where the Copilot signoff is the one that must hold" \
+    || die "a full-width verdict was refused on the post-Copilot arm: '${got}'"
+
+# ── THE RECORD IS VALIDATED, NOT ONLY THE STATUS ───────────────────────────
+# A probe that exits 0 while printing nothing, or a line about another PR,
+# reviewer or head, is not an answer about this phase — and acting on the status
+# alone turns a malformed probe into permission to continue. The two gates beside
+# this helper validate; this one did not. #126.
+world; : > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_unparseable'; } \
+    && pass "an rc-0 verdict with no record refuses rather than reading as clean" \
+    || die "an empty rc-0 verdict gave '${got}'"
+world; printf 'PR_REVIEW_STATE pr=8 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+    && pass "…and one about another PR refuses" \
+    || die "a record for another PR was accepted: '${got}'"
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$COPILOTBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+    && pass "…and one about another reviewer refuses" \
+    || die "a record for another reviewer was accepted: '${got}'"
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$(printf '%s' "$OTHER40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+    && pass "…and one about another head refuses" \
+    || die "a record for another head was accepted: '${got}'"
+# THE VALUE TOO, since rc 0 and `verdict=findings` disagree and only the record
+# says which the reviewer meant.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=3\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_not_clean'; } \
+    && pass "…and an rc-0 record that is not clean refuses" \
+    || die "a non-clean rc-0 record was accepted: '${got}'"
+# THE TAIL AS WELL AS THE VALUE. `verdict=clean` with the `findings=0` truncated
+# away is not a clean answer, and read as one it closes the phase on a record
+# that was cut short. The library hands the tail back rather than accepting it,
+# so this rule is the caller's to state.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+    && pass "…and a clean record with its findings count truncated away refuses" \
+    || die "a truncated clean record was accepted: '${got}'"
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0 extra=1\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+    && pass "…and one carrying a field nobody defined refuses too" \
+    || die "an extended clean record was accepted: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$COPILOTBOT" > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_truncated'; } \
+    && pass "…and the post-Copilot arm refuses a truncated clean record as well" \
+    || die "the post-Copilot arm accepted a truncated clean record: '${got}'"
+
+# AND THE SAME ON THE OTHER ARM, where the Copilot signoff is the one that must
+# hold — a rule missing from one of two arms is this repository's recurring shape.
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+: > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_unparseable'; } \
+    && pass "…and the post-Copilot arm refuses an rc-0 verdict with no record" \
+    || die "the post-Copilot arm accepted an empty rc-0 verdict: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$(printf '%s' "$OTHER40" | cut -c1-7)" "$COPILOTBOT" > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_misaddressed'; } \
+    && pass "…and one about another head there too" \
+    || die "the post-Copilot arm accepted a record for another head: '${got}'"
 
 # ── EACH ARM RE-VALIDATES ITS OWN REVIEWER, NOT THE OTHER ──────────────────
 # The post-Copilot arm must not ask about Codex: its signoff is older than the

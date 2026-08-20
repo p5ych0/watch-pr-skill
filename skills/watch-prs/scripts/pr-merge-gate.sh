@@ -176,6 +176,8 @@ esac
 # check, and an exported `RB_COPILOT_BOT` from the environment is then accepted
 # as library data — so this would validate a signoff from whatever account that
 # variable named. `rb_load` clears before it sources, which is the whole point.
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
 CODEX_BOT="$RB_CODEX_BOT"; COPILOT_BOT="$RB_COPILOT_BOT"
@@ -231,12 +233,20 @@ fi
 # THE PATTERN LIVES IN A VARIABLE: Bash 3.2 cannot parse a `[[ =~ ]]` whose pattern
 # contains a parenthesis written inline, and this block runs in the operator's own
 # shell — which on macOS is that bash.
-RX_STATE='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)$'
-if [[ "$CODEX_HEAD_STATE" =~ $RX_STATE ]]; then
-    S_PR="${BASH_REMATCH[1]}"; S_SHA="${BASH_REMATCH[2]}"
-    S_WHO="${BASH_REMATCH[3]}"; CODEX_STATE="${BASH_REMATCH[4]}"
+# THROUGH `recordlib.sh`, because this shape was written out here and in
+# `pr-watch.sh` and was missing from `pr-phase-state.sh` — the duplication that
+# library exists to end. #126.
+if rb_review_record "$CODEX_HEAD_STATE" state; then
+    CODEX_STATE="$RB_REC_VALUE"
 else
     echo "merge blocked: Codex head-state line is unparseable ('$CODEX_HEAD_STATE')"; exit 1
+fi
+# NOTHING MAY FOLLOW THE VALUE on this question. The library returns the tail
+# rather than accepting it, because what may follow differs per question — a
+# `verdict` has a grammar of its own — and swallowing it centrally would accept
+# any field anyone ever appends.
+if [ -n "$RB_REC_TAIL" ]; then
+    echo "merge blocked: Codex head-state line has trailing text ('$CODEX_HEAD_STATE')"; exit 1
 fi
 # The record has to be ABOUT what was asked. A well-formed line is not the same
 # as an answer: a misrouted wrapper or a stale cache returning `pr=… sha=…
@@ -247,7 +257,7 @@ fi
 #
 # Compared as STRINGS, not with `=~`: `$CODEX_BOT` ends in `[bot]`, which a regex
 # reads as a character class.
-if [ "$S_PR" != "$PR" ] || [ "$S_WHO" != "$CODEX_BOT" ] || [ "$S_SHA" != "${HEAD_OID:0:7}" ]; then
+if ! rb_review_record_is_about "$PR" "$CODEX_BOT" "$HEAD_OID"; then
     echo "merge blocked: Codex head-state record is about something else ('$CODEX_HEAD_STATE')"; exit 1
 fi
 case "$CODEX_STATE" in
@@ -347,21 +357,28 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
 # the record is ever compared, so it asks this instead; the PROOF that an operator
 # vouched stays where the records are checked in full.
 replies_only_line() {   # replies_only_line <reviewer> <sha> <line> ; 0 if that shape
-    # MATCHED IN FULL, LIKE EVERY OTHER RECORD HERE. A `*` between `findings=` and
-    # the suffix accepted an empty count and any field anyone appended —
-    # `findings= source=replies-only`, or `findings=1 extra=x` — and this shape
-    # bypasses the status gate and can authorise a merge, so it is the last place
-    # to be relaxed about a wildcard.
+    # THE SHAPE AND THE IDENTITY THROUGH `recordlib.sh`, like every other record
+    # here. This used to REBUILD the expected line — `sha=${2:0:7}` and all — which
+    # is a second definition of what a record is written as a string rather than as
+    # a regex, and therefore invisible to the drift guard until it was taught to
+    # look. It also pinned the width: a record that carried forty hex was accepted
+    # by every other caller and rejected here.
     #
-    # The prefix is compared as a LITERAL, never interpolated into a regex: these
-    # logins end in `[bot]`, which a regex reads as a character class.
-    local prefix="PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=findings findings="
-    local rest="${3#"$prefix"}"
-    [ "$rest" != "$3" ] || return 1
+    # THE TAIL IS STILL THIS FUNCTION'S. The library hands it back precisely
+    # because what may follow a value differs per question, and a `*` between
+    # `findings=` and the suffix accepted an empty count and any field anyone
+    # appended — `findings= source=replies-only`, or `findings=1 extra=x`. This
+    # shape bypasses the status gate and can authorise a merge, so it is the last
+    # place to be relaxed about a wildcard.
+    rb_review_record "$3" verdict || return 1
+    rb_review_record_is_about "$PR" "$1" "$2" || return 1
+    [ "$RB_REC_VALUE" = findings ] || return 1
+    local rest="$RB_REC_TAIL"
     case "$rest" in
-        *" source=replies-only") ;;
+        " findings="*" source=replies-only") ;;
         *) return 1 ;;
     esac
+    rest="${rest# findings=}"
     local n="${rest% source=replies-only}"
     case "$n" in
         ""|*[!0-9]*) return 1 ;;
@@ -445,9 +462,17 @@ fi
 # passed as Codex's signoff and the gate merged without ever proving the named
 # reviewer approved the commit being merged.
 #
-# Every field is known here, so this is a literal string comparison rather than a
-# pattern — `[ = ]`, not `[[ == ]]`, because the bot logins end in `[bot]` and
-# `[[ ]]` would read that as a character class on the right-hand side.
+# THE SHAPE COMES FROM `recordlib.sh` AND THE COMPARISONS ARE LITERAL. This used
+# to REBUILD the expected line and compare against it, which is a second
+# definition of what a record is — written as a string, so no scan for a regex
+# would ever find it — and it pinned the sha to seven hex where every other caller
+# accepts seven to forty. The parse and the identity check are the library's now;
+# what stays here is the VALUE and the TAIL, because what may follow a value
+# differs per question and this gate is the last place to be relaxed about it.
+#
+# Every comparison that remains is a literal string one — `[ = ]`, not
+# `[[ == ]]` — because the bot logins end in `[bot]` and `[[ ]]` would read that
+# as a character class on the right-hand side.
 # Copilot's record is required in the two-reviewer mode and absent by definition
 # in the other; the LIST changes rather than the checking.
 #
@@ -459,8 +484,18 @@ set -- "$CODEX_BOT|$CODEX_EFFECTIVE_SHA|$CODEX_VERDICT"
 [ "$REVIEWERS" = codex-only ] || set -- "$@" "$COPILOT_BOT|$HEAD_OID|$COPILOT_VERDICT"
 for SPEC in "$@"; do
     V_WHO="${SPEC%%|*}"; V_REST="${SPEC#*|}"; V_SHA="${V_REST%%|*}"; V_LINE="${V_REST#*|}"
-    V_WANT="PR_REVIEW_STATE pr=$PR sha=${V_SHA:0:7} reviewer=$V_WHO verdict=clean findings=0"
-    if [ "$V_LINE" != "$V_WANT" ]; then
+    # THROUGH `recordlib.sh` RATHER THAN REBUILT. Comparing against a line this
+    # gate assembled is a second definition of what a record is — one written as a
+    # string, so no scan for a regex would ever find it — and it pinned the sha to
+    # seven hex, which every other caller does not.
+    V_OK=1
+    rb_review_record "$V_LINE" verdict || V_OK=0
+    [ "$V_OK" -eq 0 ] || rb_review_record_is_about "$PR" "$V_WHO" "$V_SHA" || V_OK=0
+    [ "$V_OK" -eq 0 ] || [ "$RB_REC_VALUE" = clean ] || V_OK=0
+    # THE TAIL IS THIS GATE'S RULE, spelled out rather than made optional: a
+    # trailing `.*` accepts any field anyone ever appends.
+    [ "$V_OK" -eq 0 ] || [ "$RB_REC_TAIL" = " findings=0" ] || V_OK=0
+    if [ "$V_OK" -ne 1 ]; then
         # THE ONE VERDICT AN OPERATOR CAN ANSWER FOR. A review whose comments are
         # ALL replies says `source=replies-only`: there is nothing for
         # `pr-findings.sh` to list and it is not a signoff, because a verdict
