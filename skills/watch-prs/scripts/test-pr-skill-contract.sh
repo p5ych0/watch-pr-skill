@@ -1982,6 +1982,31 @@ if [ -f "$CLAUDEMD" ]; then
     [ -z "$manifest_missing" ] \
         && pass "CLAUDE.md's What-ships table lists every runtime helper" \
         || die "runtime helpers missing from the shipping manifest:$manifest_missing"
+    # ── AND THE STRICT-MODE TABLE, for the same reason and by the same means ──
+    # That table is the repository's source of truth for which mode a script is
+    # in, and `-e` is FORBIDDEN in the `set -uo pipefail` row: every helper there
+    # uses non-zero statuses as control flow, so a later cleanup applying `-e` on
+    # the table's authority would terminate them before a status could be handled.
+    # A helper missing from it is not a documentation gap, it is a script the
+    # table implicitly consents to being "fixed".
+    #
+    # DERIVED FROM THE DIRECTORY, like the manifest above, because #124 added a
+    # helper to one table and not the other — and a hand-kept list is missing the
+    # next one by construction.
+    #
+    # SCOPED TO THE ROW, not the section: every helper is named in the What-ships
+    # table too, so a section-wide grep passes against a row with a helper deleted.
+    strict_row="$(awk '/^\| .set -uo pipefail. \|/' "$CLAUDEMD")"
+    [ -n "$strict_row" ] || die "CLAUDE.md has no 'set -uo pipefail' row to check"
+    strict_missing=""
+    for h in "$SCRIPT_DIR"/pr-*.sh; do
+        [ -e "$h" ] || continue
+        b="$(basename "$h")"
+        printf '%s' "$strict_row" | grep -q "$b" || strict_missing="$strict_missing $b"
+    done
+    [ -z "$strict_missing" ] \
+        && pass "…and its strict-mode table says which mode each of them is in" \
+        || die "runtime helpers missing from the strict-mode table:$strict_missing"
 fi
 
 # ── every git probe takes its status ──────────────────────────────────────
