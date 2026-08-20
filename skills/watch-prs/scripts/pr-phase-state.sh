@@ -159,12 +159,13 @@ RB_VOUCH_REPLIES_AT=''
 # recorded, and hides a broken read behind an ordinary-looking refusal — which is
 # the fail-closed rule this helper states everywhere else.
 #
-# AND WHAT THE SIGNOFF HAS TO ANSWER COMES FROM ONE SNAPSHOT. This used to ask
+# AND WHAT THE SIGNOFF HAS TO ANSWER COMES FROM ONE RESPONSE. This used to ask
 # which review it was, when it landed, when its newest reply did and what the
 # verdict was, as four probes bound by re-reading each — and every fix left the
 # next window, because a sequential guard cannot close a gap between sequential
-# calls. `escape-snapshot` derives all of it from one pair of review reads and
-# refuses if anything moved, so nothing here compares anything. #133.
+# calls, and no ordering of separate REST reads makes reviews and their comments
+# one snapshot. `escape-snapshot` asks GraphQL, which returns both in a SINGLE
+# response — consistent by construction — so nothing here compares anything. #133.
 RB_VOUCH_REVIEW_AT=''
 RB_VOUCH_REPLIES_AT=''
 rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>

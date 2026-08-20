@@ -612,7 +612,16 @@ main() {
                        or (.author | type) != "object" or (.author.login | type) != "string"
                        or (.commit | type) != "object" or (.commit.oid | type) != "string"
                        or (.state | type) != "string"
-                       or (.submittedAt != null and (.submittedAt | type) != "string"))
+                       # THE CANONICAL SHAPE, NOT MERELY A STRING. The sort below
+                       # decides which review is authoritative, and a string that
+                       # is not a time sorts SOMEWHERE — "0000" sorts under every
+                       # real timestamp, so a malformed newer review hands the
+                       # decision to an older replies-only review, whose own time
+                       # then passes the only shape check there was.
+                       #
+                       # NO APOSTROPHE IN THIS COMMENT: the jq program is a
+                       # single-quoted shell string, and one here ends it.
+                       or (.submittedAt != null and (.submittedAt | canonical_utc | not)))
               then error("bad review node")
               else
                 [ $r.nodes[]

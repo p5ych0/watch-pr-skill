@@ -816,9 +816,14 @@ esac
 SH
     chmod +x "$TMP/bin/gh"
 }
-gql_review() {   # gql_review <state> <submitted_at> <id> <comments-json>
-    printf '[{"databaseId":%s,"submittedAt":"%s","state":"%s","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":%s}}]' \
-        "$3" "$2" "$1" "$BOT" "$HEAD40" "$4"
+gql_review() {   # gql_review <state> <submitted_at|null> <id> <comments-json>
+    # `null` UNQUOTED, because a draft carries a JSON null and a quoted "null" is
+    # a string that is not a time — a different case, and one the validator now
+    # refuses rather than treating as an unsubmitted review.
+    local _at="\"$2\""
+    [ "$2" = null ] && _at=null
+    printf '[{"databaseId":%s,"submittedAt":%s,"state":"%s","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":%s}}]' \
+        "$3" "$_at" "$1" "$BOT" "$HEAD40" "$4"
 }
 gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
     '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}},
@@ -906,6 +911,18 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
     && pass "…and a malformed NEWER review is unreadable, not filtered past" \
     || die "a malformed newer review was discarded (rc=$rc out='$out')"
+# AND THE TIME IS CHECKED FOR SHAPE, NOT MERELY FOR BEING A STRING. The sort
+# decides which review is authoritative, and a string that is not a time sorts
+# SOMEWHERE — `"0000"` sorts under every real timestamp, so a malformed newer
+# review hands the decision to an older replies-only one, whose own time then
+# passes the only shape check there was.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"0000","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a newer review whose time is not a time cannot hand the decision to an older one" \
+    || die "a low-sorting malformed time selected an older review (rc=$rc out='$out')"
+
 # THE SAME FOR A REPLY LINK. A `replyTo` that is a string or an array is not null,
 # so a presence test reads it as a REPLY — and a set of rows nothing could
 # classify then produces a valid snapshot, which is a merge on a finding/reply

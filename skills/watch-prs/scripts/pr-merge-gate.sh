@@ -377,13 +377,15 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
     # escape fetch with their own error prefixes and their own statuses; what they
     # share is what "this signoff answers that review" MEANS. #125.
     #
-    # AND WHAT IT ANSWERS COMES FROM ONE SNAPSHOT. This used to ask four
+    # AND WHAT IT ANSWERS COMES FROM ONE RESPONSE. This used to ask four
     # questions — which review, its time, its newest reply, and the verdict
     # again — as four probes, each re-read to catch a change during the previous
     # one. Every fix left the next window, because a sequential guard cannot close
     # a gap between sequential calls; #132 spent five rounds one layer in each
-    # time. `escape-snapshot` derives all of it from one pair of review reads and
-    # refuses if anything moved, so there is nothing here to compare. #133.
+    # time, and no ordering of separate REST reads makes reviews and their
+    # comments one snapshot. `escape-snapshot` asks GraphQL, which returns both in
+    # a SINGLE response — consistent by construction — so there is nothing here to
+    # compare and no protocol here to get wrong. #133.
     local who="$1" want="$2" line rc=0 snap src=0 rat pat
     line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
