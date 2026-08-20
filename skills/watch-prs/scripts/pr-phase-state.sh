@@ -211,9 +211,14 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     # did not mean — a truncated or replaced helper — and reporting it as the first
     # sends the operator to record another signoff for a read that failed.
     rb_answer_at "$_rat" "$_pat"; _arc=$?
+    # BOTH ABSENT IS IMPOSSIBLE HERE, not merely uninformative. The id above is a
+    # numeric one, so a submitted review exists — and every submitted review has a
+    # validated `submitted_at`. Two silent probes in THIS context mean a read
+    # failed, and reporting it as "nothing to answer" tells the operator to record
+    # another signoff for a review that is plainly there.
     case "$_arc" in
         0) ;;
-        1) RB_VOUCH_REASON=nothing_to_answer; return 1 ;;
+        1) RB_VOUCH_REASON=no_times_for_a_recorded_review; return 2 ;;
         *) RB_VOUCH_REASON=answer_time_unreadable; return 2 ;;
     esac
     # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
@@ -224,6 +229,22 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     # any of it. Each probe re-checks ITSELF; the verdict is what binds them.
     local _vagain _vgrc=0
     _vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$1" "$2"); _vgrc=$?
+    # AND THE REPLY TIME AGAIN. The id and the verdict can BOTH be unchanged while
+    # the replies move: a reply added after `replies-at` returned and another
+    # deleted before this read leaves the comment count — and therefore the
+    # serialised verdict — exactly as it was.
+    local _pat2 _pat2rc=0
+    _pat2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$1" "$2") || _pat2rc=$?
+    case "$_pat2rc" in
+        0) ;;
+        1) [ -z "$_pat2" ] || { RB_VOUCH_REASON=replies_at_unreadable; return 2; }
+           _pat2="" ;;
+        *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
+    esac
+    if [ "$_pat2" != "$_pat" ]; then
+        RB_VOUCH_REASON=replies_moved
+        return 2
+    fi
     local _rid2 _rid2rc=0
     _rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _rid2rc=$?
     case "$_rid2" in

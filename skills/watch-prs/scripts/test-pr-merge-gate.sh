@@ -464,6 +464,18 @@ printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
 
+# THE REPLIES CAN MOVE WITHOUT THE COUNT MOVING. One reply added after
+# `replies-at` returned and another deleted before the re-read leaves the comment
+# count — and therefore the serialised verdict, and the review id — exactly as
+# they were. Only the reply time itself shows it.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-01T06:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.2.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.2.rc"
+case_is 1 "moved while its timestamps were being read" \
+    "replies that move without changing the count cannot be vouched over"
+
 # AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
 # exiting 0 with the same word on both reads is a STABLE value that tells two
 # reviews apart no better than the verdict did.
@@ -536,10 +548,20 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "newest reply landed" "…and an unreadable reply time blocks rather than passing"
 
-# And a head with no submitted review has nothing for a signoff to answer.
+# And a head with no submitted review is refused where the review is IDENTIFIED,
+# which is before either time is read: a replies-only verdict comes from a review,
+# so there is always one to name.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+: > "$STUB_DIR/pr-review-state.review-id.out"
+case_is 1 "which copilot-pull-request-reviewer[bot] review is authoritative" \
+    "…and a head with no identified review cannot be vouched for"
+# TWO SILENT TIME PROBES ARE IMPOSSIBLE once the review IS identified: it is
+# submitted, so it has a validated `submitted_at`. Saying "there is nothing to
+# answer" would send the operator to look at a review that is plainly there.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 : > "$STUB_DIR/pr-review-state.review-at.out"
-case_is 1 "for a signoff to answer" "…and a head with no review cannot be vouched for"
+case_is 1 "neither its time nor its newest reply could be read" \
+    "…and a recorded review with no readable times is a failed read, not an absence"
 
 # ── WHY THE COPILOT REVOCATION IS POSTED UNCONDITIONALLY ───────────────────
 # `pr-copilot-phase.sh open` revokes on EVERY entry, including the first, where

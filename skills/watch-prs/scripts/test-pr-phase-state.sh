@@ -82,6 +82,13 @@ if [ "${1:-}" = review-id ]; then
     exit "$(cat "$W/$_w.rid.rc" 2>/dev/null || echo 0)"
 fi
 if [ "${1:-}" = replies-at ]; then
+    # COUNTED, because the reply time is read twice: the replies can move without
+    # the comment count moving, which leaves the verdict and the review id alike.
+    _pn=$(( $(cat "$W/$_w.replies.n" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$_pn" > "$W/$_w.replies.n"
+    if [ -f "$W/$_w.replies.$_pn.out" ]; then
+        cat "$W/$_w.replies.$_pn.out"; exit "$(cat "$W/$_w.replies.$_pn.rc" 2>/dev/null || echo 0)"
+    fi
     [ -f "$W/$_w.replies.out" ] && cat "$W/$_w.replies.out"
     exit "$(cat "$W/$_w.replies.rc" 2>/dev/null || echo 1)"
 fi
@@ -471,6 +478,28 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# THE REPLIES CAN MOVE WITHOUT THE COUNT MOVING. One reply added after
+# `replies-at` returned and another deleted before the re-read leaves the comment
+# count — and therefore the serialised verdict, and the review id — exactly as
+# they were.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-01T06:00:00Z
+printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.2.out"
+printf '0\n' > "$W/codex.replies.2.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "replies that move without changing the count cannot be vouched over" \
+    || die "a moved reply set was vouched over: '${got}'"
+# TWO SILENT TIME PROBES ARE IMPOSSIBLE once the review IS identified: it is
+# submitted, so it has a validated `submitted_at`. Reporting that as "nothing to
+# answer" tells the operator to record another signoff for a review plainly there.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+: > "$W/codex.at.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and a recorded review with no readable times is a failed read, not an absence" \
+    || die "two silent time probes were reported as nothing to answer: '${got}'"
+
 # AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
 # exiting 0 with the same word on both reads is a STABLE value that tells two
 # reviews apart no better than the verdict did.

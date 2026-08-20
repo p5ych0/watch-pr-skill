@@ -15,7 +15,10 @@
   a review with no comments has only the first and a reply after the review has the
   second. Only the **reply** time may be absent, and absent is not zero: it means
   that channel had nothing to say. Both absent is a refusal, because there is then
-  nothing for a signoff to answer at all; a reply time with no review time is
+  nothing for a signoff to answer at all — and in the escape's own context that is
+  a *failed read* rather than an absence, since the review has already been
+  identified by a numeric id and every submitted review has a validated
+  `submitted_at`; a reply time with no review time is
   unreadable rather than a deadline of its own; and a value of a shape it cannot
   place is a third status again rather than something to sort.
 
@@ -45,6 +48,11 @@
   The id is checked for SHAPE on both reads, not merely for being non-empty: a
   replaced helper exiting 0 with the same word twice is a stable value that
   identifies nothing, and the two reads then agree exactly as the verdicts did.
+
+  **The reply time is re-read too**, because the id and the verdict can both be
+  unchanged while the replies move: one added after `replies-at` returned and
+  another deleted before the re-read leaves the comment count — and therefore the
+  serialised verdict — exactly as it was.
 
   **The verdict is re-read afterwards, bound to the deadline just computed.** The
   two time probes are separate calls: a review dismissed after `review-at` returns

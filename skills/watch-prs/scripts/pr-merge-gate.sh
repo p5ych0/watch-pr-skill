@@ -424,10 +424,15 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     # that exited 0 with something it did not mean, and telling the operator there
     # is nothing to answer sends them looking in the wrong place.
     local aarc=0
+    # BOTH ABSENT IS IMPOSSIBLE HERE, not merely uninformative. The id above is a
+    # numeric one, so a submitted review exists — and every submitted review has a
+    # validated `submitted_at`, which `review-at` reports. Two silent probes in
+    # THIS context therefore mean a read failed, and saying "there is nothing to
+    # answer" sends the operator to look at a review that is plainly there.
     rb_answer_at "$rat" "$pat" || aarc=$?
     case "$aarc" in
         0) ;;
-        1) echo "merge blocked: $who has nothing on ${want:0:7} for a signoff to answer"; return 1 ;;
+        1) echo "merge blocked: $who's review on ${want:0:7} is recorded but neither its time nor its newest reply could be read"; return 1 ;;
         *) echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1 ;;
     esac
     # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
@@ -441,6 +446,22 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     # identical means the review that produced it is still the authoritative one.
     local vagain vgrc=0
     vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$who" "$want"); vgrc=$?
+    # AND THE REPLY TIME AGAIN. The id and the verdict can BOTH be unchanged while
+    # the replies move: a reply added after `replies-at` returned and another
+    # deleted before this read leaves the comment count — and therefore the
+    # serialised verdict — exactly as it was. Only the reply time itself shows it.
+    local pat2 pat2rc=0
+    pat2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$who" "$want") || pat2rc=$?
+    case "$pat2rc" in
+        0) ;;
+        1) [ -z "$pat2" ] || { echo "merge blocked: $who's reply probe reported no replies and printed one anyway ('$pat2')"; return 1; }
+           pat2="" ;;
+        *) echo "merge blocked: could not re-read when $who's newest reply landed (rc=$pat2rc)"; return 1 ;;
+    esac
+    if [ "$pat2" != "$pat" ]; then
+        echo "merge blocked: $who's replies on ${want:0:7} moved while its timestamps were being read ('$pat' then '$pat2')"
+        return 1
+    fi
     local rid2 rid2rc=0
     rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || rid2rc=$?
     case "$rid2" in
