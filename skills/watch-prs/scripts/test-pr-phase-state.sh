@@ -389,6 +389,12 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
     && pass "…and one nobody signed off refuses, naming what it was" \
     || die "an unvouched replies-only review gave '${got}'"
+# THE RENDERED MESSAGE, not only the reason field. The commonest unvouched case —
+# nothing recorded at all — returned without setting a reason, so the prose the
+# operator reads named an empty pair of brackets.
+printf '%s' "${got#*|}" | grep -qF '(no_signoff)' \
+    && pass "…and the prose says why rather than leaving empty brackets" \
+    || die "the unvouched stop rendered without a reason: '${got#*|}'"
 printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
     && die "…but it called it a dismissal as well" \
     || pass "…rather than reporting it as a dismissal"

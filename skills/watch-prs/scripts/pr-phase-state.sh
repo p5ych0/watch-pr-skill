@@ -150,16 +150,23 @@ rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; ex
 # the fail-closed rule this helper states everywhere else.
 rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
     local _line _rc=0 _rat _arc=0
+    # CLEARED HERE TOO, not only inside the library predicate: the two early
+    # returns below never reach it, and a stale value from a previous call would
+    # be printed as this call's reason.
+    RB_VOUCH_REASON=""
     _line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$1" 2>&1) || _rc=$?
     # 1 IS AN ANSWER — nothing is recorded, so nothing vouches. Anything else is a
     # read that failed.
     case "$_rc" in
         0) ;;
-        1) return 1 ;;
-        *) return 2 ;;
+        # AND IT SAYS SO. The reason is what the stop below prints, and the
+        # commonest unvouched case — nothing recorded at all — reached it having
+        # set nothing, so the message named an empty pair of brackets.
+        1) RB_VOUCH_REASON=no_signoff; return 1 ;;
+        *) RB_VOUCH_REASON=unreadable; return 2 ;;
     esac
     _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
-    [ "$_arc" -eq 0 ] || return 2
+    [ "$_arc" -eq 0 ] || { RB_VOUCH_REASON=review_at_unreadable; return 2; }
     rb_signoff_answers "$_line" "$_rat" "$PR" "$1" "$2"
 }
 
