@@ -40,6 +40,14 @@
   Nine cases, and the verdict's time is asked for only when a revocation is
   standing — a reader that failed there would otherwise stop every ordinary phase.
 
+  **The ordering proof is the last thing before the write**, ahead of the final
+  head re-read, because the two residues are not alike. A head that moves after
+  its proof is caught downstream: `open` re-reads it and refuses a head that is
+  not the recorded sha, so nothing is lost but a run. A revocation that lands
+  after its proof is destroyed by the signoff posted next — the readers take the
+  last record — and no later stage can find it. The unrecoverable one goes last.
+  What remains after that is #122, and it is not closable as a pre-write check.
+
 ## [2.0.38] — 2026-08-20
 
 - **The round gate pushed whatever branch the checkout was on.** `git push` with

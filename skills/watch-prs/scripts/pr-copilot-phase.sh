@@ -500,10 +500,10 @@ esac
 # and a clean verdict and requests Copilot underneath a phase somebody had
 # reopened.
 #
-# THE HEAD, THE VERDICT, AND THE HEAD AGAIN. Not the same set `open` makes — that
-# one includes the recorded signoff, and refusing on a revocation is deferred here
-# for the reason written below. These are the two facts that can be established
-# without ordering records, plus a second read of the head because the verdict
+# THE HEAD, THE VERDICT, THE HEAD AGAIN, AND THE ORDERING. Not the same set `open`
+# makes — that one reads the recorded signoff and takes the last record, which is
+# the wrong question here: the record this stage must not supersede may be older
+# than a signoff already on the PR. The head is read twice because the verdict
 # lookup between them is a network call. #115.
 RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
     || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
@@ -512,11 +512,29 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
 CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
 [[ $CODEX_STILL_RC -eq 0 ]] \
     || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
-# NO REVOCATION CHECK HERE, AND THAT IS A DEFERRAL RATHER THAN AN OVERSIGHT. A
-# revocation landing in this window is the case #115 was filed for, and refusing
-# on one was the first fix — it is not in this file because it breaks the
-# legitimate path: the fault-tolerance pass posts its revocation BEFORE requesting
-# the review, so that revocation is still the newest record when the new clean
+# AND THE HEAD AGAIN. Each probe above is a network call, so the head can move
+# DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
+# clean and says nothing about the move.
+#
+# THE ORDERING PROOF GOES AFTER THIS ONE, and which of the two is last is not
+# arbitrary. Both leave a window between the proof and the write, and the two
+# residues are not alike: a head that moves in it is caught downstream, because
+# `open` re-reads the head and refuses when it is not the recorded sha — nothing
+# is lost but a run. A revocation that lands in it is NOT, because the signoff
+# posted next supersedes it and the readers take the last record: the evidence
+# that the phase was reopened is gone, and no later stage can find it. The
+# unrecoverable one is therefore the one proved last. #122 is the residue that
+# remains.
+FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
+[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
+
+# AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
+# this window is the case #115 was filed for, and refusing on ANY revocation was
+# the first fix — it is not what this does, because it breaks the legitimate
+# path: the fault-tolerance pass posts its revocation BEFORE requesting the
+# review, so that revocation is still the newest record when the new clean
 # verdict arrives, and an unconditional refusal means a reopened phase can never
 # record its replacement signoff at all.
 #
@@ -579,9 +597,6 @@ esac
 if [[ -n $RB_REVOKED_AT ]]; then
     RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") \
         || { echo "ABORT: a revocation is the newest record and the verdict's time could not be read; nothing posted"; exit 1; }
-    # AN UNTIMED VERDICT CANNOT BE ORDERED EITHER, so it is refused rather than
-    # assumed newer. Empty means no verdict was found for this head at all, which
-    # with a revocation standing is precisely the state that must not record.
     # THE SAME SHAPE TEST ON THE OTHER SIDE, and for the same reason: an empty
     # answer means no verdict on this head was found at all, and any other shape
     # cannot be ordered. Either, with a revocation standing, is the state that
@@ -593,15 +608,6 @@ if [[ -n $RB_REVOKED_AT ]]; then
     [[ $RB_REVOKED_AT < $RB_VERDICT_AT ]] \
         || { echo "ABORT: this phase was reopened — the revocation at $RB_REVOKED_AT is not older than the verdict at $RB_VERDICT_AT. Recording a signoff now would supersede it; nothing posted"; exit 1; }
 fi
-# AND THE HEAD ONCE MORE, LAST. Each probe above is a network call, so the head can
-# move DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
-# clean and says nothing about the move. Reading the head first and posting third
-# leaves exactly the window this stage exists to close, one probe narrower. This
-# is the last thing before the write.
-FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
-[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
-    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
 
 SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
     "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \

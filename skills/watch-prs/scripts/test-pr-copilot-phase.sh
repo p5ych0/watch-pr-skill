@@ -260,17 +260,17 @@ nothing_posted "…with no signoff recorded"
 # signoff and a clean verdict and requests Copilot underneath a reopened phase.
 # #115.
 #
-# THE REVOCATION IN THAT WINDOW IS NOT REFUSED HERE, and that is a deferral rather
-# than an omission. The first fix refused on one and broke the legitimate path: the
-# fault-tolerance pass posts its revocation BEFORE requesting the review, so it is
-# still the newest record when the new clean verdict arrives — an unconditional
-# refusal means a reopened phase can never record its replacement signoff.
+# A REVOCATION IN THAT WINDOW IS REFUSED BY ORDER, NOT BY PRESENCE. The first fix
+# refused on any revocation and broke the legitimate path: the fault-tolerance pass
+# posts its revocation BEFORE requesting the review, so it is still the newest
+# record when the new clean verdict arrives — an unconditional refusal means a
+# reopened phase can never record its replacement signoff.
 #
-# TELLING THEM APART IS ORDERING, and the records carry it now — #117 landed
-# `at=` and `id=` on a revocation and taught `review-at` the comment channel.
-# What is still deferred is comparing them here, which is #115. What this asserts
-# meanwhile is that the legitimate case works: a revocation already on the PR,
-# with a clean verdict, still records.
+# TELLING THEM APART IS ORDERING, and the records carry it — #117 landed `at=` and
+# `id=` on a revocation and taught `review-at` the comment channel; #115 compares
+# them. The cases below cover both sides of that comparison and every shape it
+# cannot order. This first one is the legitimate case: a revocation already on the
+# PR, OLDER than the clean verdict, still records.
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-01T00:00:00Z id=901 sha=none reason=revoked\n' \
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
