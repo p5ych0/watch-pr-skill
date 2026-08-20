@@ -16,11 +16,18 @@
   one belonging *after* it correctly reopens the phase. Neither answer depends on
   which comment landed first.
 
-  **Every fallback is the rule that existed before.** A signoff carrying `none` —
-  every record written before 2.0.47 — has nothing to compare; equal times cannot
-  be ordered, because `created_at` is second-resolution and the two records come
-  from different resources; an unreadable revocation time cannot be placed. In all
-  three, position decides, so no pull request in flight changes meaning.
+  **Equal is not older, and unorderable is not permission.** `created_at` is
+  second-resolution and the two records come from different resources, so falling
+  back to position on a tie would give *"the signoff stands"* — the fail-open answer
+  this rule exists to stop. A revocation in the same second as the verdict reopens
+  the phase, exactly as `record` refuses to write over one.
+
+  **Where there is nothing to compare, position decides**, and that is the rule
+  that existed before: a signoff carrying `none` — every record written before
+  2.0.47 — has no verdict to order against, and a revocation whose own time cannot
+  be read cannot be placed. Neither is an unordered pair; both are an absent
+  question. No pull request in flight changes meaning, because none of their
+  signoffs carries the field.
 
   Where the revocation wins, the record printed is **its** time and **its** id:
   callers order records against each other by exactly those fields, so naming the

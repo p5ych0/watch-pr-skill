@@ -382,18 +382,26 @@ fi
 # fault-tolerance pass this signoff is answering. Neither answer depends on which
 # comment landed first. #140, closing #122.
 #
-# EVERY FALLBACK IS TODAY'S RULE. A signoff carrying `none` — every record written
-# before #137 — has nothing to compare, and inventing an answer would be worse than
-# position. Equal times cannot be ordered: `created_at` is second-resolution and the
-# two records come from different resources, so their ids cannot break the tie. An
-# unreadable revocation time cannot be placed. In all three, position decides, so no
-# pull request in flight changes meaning.
+# EQUAL IS NOT OLDER, AND UNORDERABLE IS NOT PERMISSION. `created_at` is
+# second-resolution and the two records come from different resources, so their ids
+# cannot break the tie — and falling back to position there gives "the signoff
+# stands", which is the fail-OPEN answer this rule exists to stop. A revocation in
+# the same second as the verdict reopens the phase, exactly as `record` refuses to
+# write over one. The cost is a rerun where the phase legitimately answered a
+# same-second revocation; the cost the other way is a merge on a withdrawn review.
+#
+# WHERE THERE IS NOTHING TO COMPARE, POSITION DECIDES, and that is today's rule
+# unchanged: a signoff carrying `none` — every record written before #137 — has no
+# verdict to order against, and a revocation whose own time cannot be read cannot
+# be placed. Neither is an unordered pair; both are an absent question, and
+# inventing an answer would be worse than position. No pull request in flight
+# changes meaning, because none of their signoffs carries the field.
 if [ "$SHA" != REVOKED ] && [ "$SHA" != BADREC ] && [ -n "$SHA" ]; then
     case "$VERDICT_AT" in
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
             case "$REVOKED_AT" in
                 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z)
-                    if [ "$REVOKED_AT" \> "$VERDICT_AT" ]; then
+                    if [ ! "$REVOKED_AT" \< "$VERDICT_AT" ]; then
                         # THE REVOCATION IS THE RECORD NOW, so the record printed is
                         # ITS time and ITS id. Reporting the signoff's would name a
                         # comment that is not the one being acted on, and callers

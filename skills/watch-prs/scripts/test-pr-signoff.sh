@@ -87,11 +87,14 @@ case_is 1 "id=101" "…and the record it prints is the revocation's, not the sig
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
                 "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
 case_is 0 "sha=$SHA" "…while one older than the verdict is the pass it answers, and the signoff stands"
-# EQUAL CANNOT BE ORDERED, so position decides — which is the answer that existed
-# before this rule.
+# EQUAL IS NOT OLDER, AND UNORDERABLE IS NOT PERMISSION. Falling back to position
+# there gives "the signoff stands", which is the fail-OPEN answer this rule exists
+# to stop — so a revocation in the same second as the verdict reopens the phase,
+# exactly as `record` refuses to write over one. The cost is a rerun; the cost the
+# other way is a merge on a withdrawn review.
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
                 "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-02T00:00:00Z\`" > "$TMP/out"
-case_is 0 "sha=$SHA" "…and one made in the same second falls back to position"
+case_is 1 "reason=revoked" "…and one made in the same second reopens it rather than being ordered"
 # A SIGNOFF WITH NO VERDICT TIME KEEPS TODAY'S RULE EXACTLY. Every record written
 # before #137 is one, and inventing an answer would be worse than position.
 world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" \
