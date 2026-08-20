@@ -895,6 +895,34 @@ out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
 [ -z "$out" ] \
     && pass "…with nothing on stdout, which a substitution would have captured" \
     || die "the unreadable answer printed '$out'"
+# EVERY NODE IS VALIDATED BEFORE ANY IS FILTERED. A `select` over a malformed
+# node DISCARDS it, and discarding a NEWER review leaves an older replies-only one
+# as the latest — so a signoff newer than that older review closes the phase over
+# a review nothing could read. "This response is not trustworthy" and "that review
+# is not mine" are the two answers this has to keep apart.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":null,"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$HEAD40" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a malformed NEWER review is unreadable, not filtered past" \
+    || die "a malformed newer review was discarded (rc=$rc out='$out')"
+# THE SAME FOR A REPLY LINK. A `replyTo` that is a string or an array is not null,
+# so a presence test reads it as a REPLY — and a set of rows nothing could
+# classify then produces a valid snapshot, which is a merge on a finding/reply
+# relationship that was never read.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":"8001"}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a reply link that is not an object is unreadable, not a reply" \
+    || die "a malformed reply link was classified (rc=$rc out='$out')"
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":"8001"}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and neither is one whose id is not a number" \
+    || die "a reply link with a non-numeric id was classified (rc=$rc out='$out')"
+
 # ANOTHER REVIEWER'S REVIEW ON THE SAME HEAD IS NOT THIS ONE.
 gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
     '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')"

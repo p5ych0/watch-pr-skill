@@ -601,11 +601,23 @@ main() {
                  or ($r.pageInfo.hasPreviousPage | type) != "boolean"
               then error("bad shape")
               elif $r.pageInfo.hasPreviousPage then error("truncated reviews")
+              # EVERY NODE IS VALIDATED BEFORE ANY IS FILTERED. A `select` over a
+              # malformed node DISCARDS it, and discarding a newer review leaves an
+              # older replies-only one as the latest — so a signoff newer than THAT
+              # one closes the phase over a review nothing could read. "This
+              # response is not trustworthy" and "that review is not mine" are the
+              # two answers this must keep apart.
+              elif any($r.nodes[];
+                       type != "object"
+                       or (.author | type) != "object" or (.author.login | type) != "string"
+                       or (.commit | type) != "object" or (.commit.oid | type) != "string"
+                       or (.state | type) != "string"
+                       or (.submittedAt != null and (.submittedAt | type) != "string"))
+              then error("bad review node")
               else
                 [ $r.nodes[]
-                  | select(type == "object")
-                  | select((.author | type) == "object" and .author.login == $who)
-                  | select((.commit | type) == "object" and .commit.oid == $h) ] as $mine
+                  | select(.author.login == $who)
+                  | select(.commit.oid == $h) ] as $mine
                 | if ($mine | length) == 0 then "none"
                   # THE SAME DOMINANCE RULES the state snapshot applies: a draft in
                   # flight means the pass is not finished, whatever an older
@@ -625,7 +637,18 @@ main() {
                       elif $latest.comments.pageInfo.hasNextPage then error("truncated comments")
                       else
                         $latest.comments.nodes as $c
-                        | if any($c[]; type != "object" or (.createdAt | canonical_utc | not))
+                        # AND EVERY COMMENT ROW, INCLUDING ITS REPLY LINK. A
+                        # `replyTo` that is a string or an array is not null, so a
+                        # presence test reads it as a REPLY — and a set of rows
+                        # nothing could classify then produces a valid snapshot,
+                        # which is a merge on a finding/reply relationship that was
+                        # never read.
+                        | if any($c[];
+                                 type != "object"
+                                 or (.createdAt | canonical_utc | not)
+                                 or (.replyTo != null
+                                     and ((.replyTo | type) != "object"
+                                          or (.replyTo.databaseId | type) != "number")))
                           then error("bad comment row")
                           # NO COMMENTS IS A DIFFERENT RECORD, and a comment that
                           # OPENS a thread is a finding rather than a reply — not a
