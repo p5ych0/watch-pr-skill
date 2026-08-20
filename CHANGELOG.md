@@ -41,8 +41,12 @@
   had nothing to say", which is how a truncated helper would hide a newer reply.
 
   The five cases that used to sit in the two callers move to the reader's own
-  suite, which can make the world change between the two reads — where the callers
-  could only stub each probe and hope the ordering was the one that mattered.
+  suite, and change with the contract: they were windows between probes, and what
+  they became is a single response that is malformed or truncated — a review node
+  whose author, commit, state or time cannot be read, a comment whose reply link
+  cannot, a page that was cut off. Every node is validated **before** any is
+  filtered, because discarding a malformed *newer* review leaves an older
+  replies-only one as the latest and its signoff then closes the phase.
 
   Closes #133.
 

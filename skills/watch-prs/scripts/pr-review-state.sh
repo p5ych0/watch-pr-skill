@@ -610,7 +610,11 @@ main() {
               elif any($r.nodes[];
                        type != "object"
                        or (.author | type) != "object" or (.author.login | type) != "string"
-                       or (.commit | type) != "object" or (.commit.oid | type) != "string"
+                       # AND THE OID IS A COMMIT, through the shared predicate. A
+                       # string that is not one — a truncated head, say — passes a
+                       # type check and is then DISCARDED by the head filter, which
+                       # hands the decision to an older replies-only review.
+                       or (.commit | type) != "object" or (.commit.oid | full_sha | not)
                        or (.state | type) != "string"
                        # THE CANONICAL SHAPE, NOT MERELY A STRING. The sort below
                        # decides which review is authoritative, and a string that

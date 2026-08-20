@@ -911,6 +911,17 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
     && pass "…and a malformed NEWER review is unreadable, not filtered past" \
     || die "a malformed newer review was discarded (rc=$rc out='$out')"
+# AND THE COMMIT OID IS A COMMIT, not merely a string. A truncated head passes a
+# type check and is then DISCARDED by the head filter, which hands the decision to
+# an older replies-only review — the same route as a malformed time, through a
+# different field.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"aaaaaaa"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$BOT" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a newer review whose commit is not a commit cannot be filtered past" \
+    || die "a truncated oid was discarded (rc=$rc out='$out')"
+
 # AND THE TIME IS CHECKED FOR SHAPE, NOT MERELY FOR BEING A STRING. The sort
 # decides which review is authoritative, and a string that is not a time sorts
 # SOMEWHERE — `"0000"` sorts under every real timestamp, so a malformed newer
