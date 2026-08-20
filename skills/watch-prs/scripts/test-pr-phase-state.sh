@@ -435,6 +435,12 @@ got="$(run 7)"
 printf '%s' "${got#*|}" | grep -qF '(no_signoff)' \
     && pass "…and the prose says why rather than leaving empty brackets" \
     || die "the unvouched stop rendered without a reason: '${got#*|}'"
+# AND NOTHING MORE THAN THAT. With no signoff recorded, neither timestamp has been
+# read — so a deadline line there says `newer than ? … (none) … (none)`, which is
+# noise beside a message that already named the case.
+printf '%s' "${got#*|}" | grep -qF 'It has to be newer than' \
+    && die "…but it printed a deadline it never computed: '${got#*|}'" \
+    || pass "…and prints no deadline where none was computed"
 printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
     && die "…but it called it a dismissal as well" \
     || pass "…rather than reporting it as a dismissal"

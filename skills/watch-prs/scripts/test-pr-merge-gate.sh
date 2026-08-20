@@ -532,6 +532,19 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "its newest reply (2026-01-03T00:00:00Z)" "…and the refusal names the reply, not the review"
+# THE SAME ON CODEX'S SIDE. The two reviewers reach this loop through different
+# specs — Codex on `$CODEX_EFFECTIVE_SHA`, Copilot on the head — so a rule proved
+# on one of them is not proved on the other, which is the shape this repository
+# keeps paying for.
+world; replies_only "$CODEXBOT"; vouched "$CODEXBOT"
+printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "cannot be an answer to it" "…and a later reply refuses on Codex's side too"
+world; replies_only "$CODEXBOT"; vouched "$CODEXBOT"
+printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 0 "merged" "…while an earlier one still merges there"
+
 # AND ONE BEFORE IT STILL MERGES, or the rule would only ever refuse.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"

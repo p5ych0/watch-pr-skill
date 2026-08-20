@@ -412,7 +412,11 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
                if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=copilot_replies_only_unvouched"
                    echo "Copilot's review of $COPILOT_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
-                   echo "It has to be newer than ${RB_ANSWER_AT:-?} — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
+                   # ONLY WHERE A DEADLINE WAS COMPUTED. `rb_phase_vouched` returns
+                   # before reading either time when nothing is recorded at all —
+                   # the commonest case — and printing `newer than ? … (none) …
+                   # (none)` there is noise where the line above already said it.
+                   [ -n "$RB_ANSWER_AT" ] && echo "It has to be newer than $RB_ANSWER_AT — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
                    echo "Read the comment and record a signoff for that head, or request a review."
                    exit 1
                fi
@@ -467,7 +471,11 @@ else
                if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=codex_replies_only_unvouched"
                    echo "Codex's review of $CODEX_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
-                   echo "It has to be newer than ${RB_ANSWER_AT:-?} — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
+                   # ONLY WHERE A DEADLINE WAS COMPUTED. `rb_phase_vouched` returns
+                   # before reading either time when nothing is recorded at all —
+                   # the commonest case — and printing `newer than ? … (none) …
+                   # (none)` there is noise where the line above already said it.
+                   [ -n "$RB_ANSWER_AT" ] && echo "It has to be newer than $RB_ANSWER_AT — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
                    echo "Read the comment and record a signoff for that head, or request a review."
                    exit 1
                fi
