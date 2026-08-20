@@ -22,9 +22,18 @@
 # be mistaken for a value: it is not 40 hex, and the status says why. The statuses
 # are unchanged, because they are what the callers already branch on.
 #
-# THE DEFAULT OUTPUT IS UNCHANGED, deliberately: the resume path prints the whole
-# record in its abort messages, and `test-pr-skill-contract.sh` asserts on that
-# shape.
+# THE DEFAULT OUTPUT IS THE WHOLE RECORD:
+#
+#   PR_SIGNOFF pr=<n> reviewer=<login> verdict-at=<utc|none> at=<utc> id=<n> sha=<40hex>
+#
+# and a revocation is the same line with `sha=none reason=revoked`. `verdict-at=`
+# is the time of the VERDICT the signoff answers, and it is always present — as
+# `none` where the record does not carry one, which every record written before
+# #135 does not. The field order is load-bearing: callers peel the sha with
+# `${line##*sha=}` and the record time with `${line#* at=}`, so nothing may follow
+# the sha and nothing preceded by a SPACE may spell `at=` before the real one.
+# `verdict-at=` cannot, because the character before those three letters is a
+# hyphen.
 #
 # WHY THIS EXISTS
 #
@@ -164,7 +173,7 @@ esac
 # The walk is the merge gate's, for the same reasons: every cursor already
 # requested is remembered so a cycle of any length stops rather than hanging, and
 # any incomplete traversal is an ERROR rather than the answer so far.
-SHA=""; SIGNED_AT=""; SIGNED_ID=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
+SHA=""; SIGNED_AT=""; SIGNED_ID=""; VERDICT_AT=""; CURSOR=null; RS=$(printf '\036'); SEEN="${RS}null${RS}"; OK=1
 while :; do
     PAGE=$(gh api --hostname "$HOST" graphql -F number="$PR" -f owner="$OWNER" -f repo="$REPO" \
         -F cursor="$CURSOR" -f query='query($owner:String!,$repo:String!,$number:Int!,$cursor:String){
@@ -216,14 +225,54 @@ while :; do
                  # unchanged head — leaves the old signoff standing, and a resumed
                  # session would read the reopened phase as closed. A revocation
                  # is a record too, and the last record wins.
-                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?[[:space:]]*$")]
-                          | last // ["","",""])
+                 # A THIRD BACKTICKED FIELD, OPTIONAL, carrying WHEN THE VERDICT LANDED
+                 # that this signoff answers. Readers take the LAST record, so a
+                 # revocation posted after a signoff supersedes it whatever it was
+                 # about — and the writer cannot close that window, because its own
+                 # write is what erases the evidence. A signoff that says which
+                 # verdict it answers lets a reader order a revocation against THAT
+                 # rather than against comment order. #135, for #122.
+                 #
+                 # OPTIONAL BECAUSE EVERY EXISTING RECORD PREDATES IT. A reader
+                 # that required it would report every signoff on every open PR as
+                 # malformed, which is the fail-closed direction turned into a
+                 # denial of service.
+                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]*)`)?[[:space:]]*$")]
+                          | last // ["","","",""])
                  | select(.[1] == $who)
                  # A revocation carries no sha and a signoff must; anything else
                  # is a malformed line rather than either.
                  | . as $m
-                 | if $m[0] != null then "REVOKED\t" + $c + "\t" + ($i | tostring)
-                   elif ($m[2] | type) == "string" then $m[2] + "\t" + $c + "\t" + ($i | tostring)
+                 # AND A VERDICT TIME THAT IS PRESENT MUST BE READABLE. `none` is
+                 # the absent case and travels as itself; anything that is neither
+                 # is a record this cannot place, which is not one to act on.
+                 #
+                 # CAPTURED WITHOUT A LENGTH BOUND AND WITHOUT A MINIMUM, and
+                 # judged afterwards. Either restriction makes a value the pattern
+                 # dislikes fail the WHOLE marker rather than classify it — the
+                 # line then matches nothing, `last` returns an OLDER record, and a
+                 # deliberately reopened phase reads as closed. An overlong value
+                 # and an EMPTY one are the same defect twice, and a value this
+                 # cannot place has to be visible in order to be refused.
+                 | (if $m[3] == null then "none"
+                    elif ($m[3] | canonical_utc) then $m[3]
+                    else "unreadable" end) as $v
+                 # A REVOCATION HAS NO SHA, so its verdict time is the SECOND
+                 # backticked field rather than the third — and a value there that happens to be forty
+                 # lowercase hex is captured as the SHA instead, which the
+                 # revocation branch ignores. The record then reads as one carrying
+                 # no time at all, so a present but unplaceable value is accepted
+                 # as a legacy record. A sha capture ON A REVOCATION is that value.
+                 | (if $m[0] != null and ($m[2] | type) == "string" then "unreadable" else $v end) as $v
+                 | if $m[0] != null then "REVOKED\t" + $c + "\t" + ($i | tostring) + "\t" + $v
+                   elif ($m[2] | type) == "string" then $m[2] + "\t" + $c + "\t" + ($i | tostring) + "\t" + $v
+                   # A SIGNOFF WITHOUT A SHA BUT WITH A THIRD FIELD is a record
+                   # that failed to parse, not one to pass over: the sha capture
+                   # demands 40 hex, so a value in that position which is not one
+                   # lands in the verdict field instead. Discarded, the marker
+                   # stops being the newest record and an OLDER signoff is returned
+                   # with status 0 — a phase reading as closed on stale evidence.
+                   elif ($m[3] | type) == "string" then "BADREC\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    else empty end
                ] | last // ""
           end') || { OK=0; break; }
@@ -235,7 +284,9 @@ while :; do
         SHA="${FOUND%%$'\t'*}"
         _rest="${FOUND#*$'\t'}"
         SIGNED_AT="${_rest%%$'\t'*}"
-        SIGNED_ID="${_rest#*$'\t'}"
+        _rest="${_rest#*$'\t'}"
+        SIGNED_ID="${_rest%%$'\t'*}"
+        VERDICT_AT="${_rest#*$'\t'}"
     }
     HAS_NEXT=$(printf '%s' "$PAGE" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage') || { OK=0; break; }
     case "$HAS_NEXT" in
@@ -272,14 +323,44 @@ fi
 # compare equal, so one replaced by another could not be told from the original.
 # #117.
 #
-# THE FIELD ORDER IS `at=`, `id=`, THEN `sha=`, and it is not cosmetic: every
-# caller reads the sha with `${line##*sha=}`, so a field appended after it would be
-# swallowed into the value.
+# THE FIELD ORDER IS `verdict-at=`, `at=`, `id=`, THEN `sha=`, and it is not
+# cosmetic: every caller reads the sha with `${line##*sha=}`, so a field appended
+# after it would be swallowed into the value — and `at=` is peeled with
+# `${line#* at=}`, which `verdict-at=` cannot be mistaken for, because the
+# character before those three letters is a hyphen rather than a space.
+#
+# `verdict-at=` IS ALWAYS PRESENT, as `none` where the record does not carry one.
+# A field that is sometimes absent makes the record two shapes, and every reader
+# would need to know which one it was holding.
+# A VERDICT TIME THIS COULD NOT READ IS NOT A RECORD TO ACT ON, AND THAT IS
+# DECIDED BEFORE ANY MODE RETURNS. `none` says the signoff does not carry one,
+# which every record written before #135 does not; `unreadable` says it carries
+# something that is not a time, and a reader ordering a revocation against that
+# would place it somewhere arbitrary.
+#
+# BEFORE THE `sha` MODE AND BEFORE THE REVOCATION BRANCH, both of which return
+# early: `sha` handed the head back with status 0, so `SKILL.md` and
+# `pr-phase-state.sh` read a malformed record as a closed phase, and a revocation
+# exited 1 as an ordinary one.
+if [ "$VERDICT_AT" = unreadable ]; then
+    if [ "$MODE" = sha ]; then
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
+    else
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
+    fi
+    exit 2
+fi
+# A MARKER THAT PARSED AS NEITHER is not a record to look past. It was the newest
+# one on the PR, so skipping it hands the answer to an older signoff.
+if [ "$SHA" = BADREC ]; then
+    echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=signoff_without_sha" >&2
+    exit 2
+fi
 if [ "$SHA" = REVOKED ]; then
     if [ "$MODE" = sha ]; then
-        echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT id=$SIGNED_ID sha=none reason=revoked" >&2
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO verdict-at=$VERDICT_AT at=$SIGNED_AT id=$SIGNED_ID sha=none reason=revoked" >&2
     else
-        echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT id=$SIGNED_ID sha=none reason=revoked"
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO verdict-at=$VERDICT_AT at=$SIGNED_AT id=$SIGNED_ID sha=none reason=revoked"
     fi
     exit 1
 fi
@@ -299,9 +380,10 @@ fi
 _why="$(sha_reason "$SHA")" || {
     echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=$_why sha=$SHA" >&2
     exit 2; }
-# `at=` COMES BEFORE `sha=`, and that is not cosmetic: every caller reads the sha
-# with `${line##*sha=}`, so a field appended after it would be swallowed into the
-# value and the gate would compare a sha against a sha-plus-timestamp.
+# `verdict-at=` AND `at=` COME BEFORE `sha=`, and that is not cosmetic: every
+# caller reads the sha with `${line##*sha=}`, so a field appended after it would be
+# swallowed into the value and the gate would compare a sha against a
+# sha-plus-timestamp.
 # THE SHA ALONE, VALIDATED, AND ON ITS OWN LINE. It has been through
 # `sha_reason` above, so what leaves here in this mode is 40 hex or nothing at
 # all — there is no record shape left for a caller to get wrong.
@@ -309,5 +391,5 @@ if [ "$MODE" = sha ]; then
     echo "$SHA"
     exit 0
 fi
-echo "PR_SIGNOFF pr=$PR reviewer=$WHO at=$SIGNED_AT id=$SIGNED_ID sha=$SHA"
+echo "PR_SIGNOFF pr=$PR reviewer=$WHO verdict-at=$VERDICT_AT at=$SIGNED_AT id=$SIGNED_ID sha=$SHA"
 exit 0

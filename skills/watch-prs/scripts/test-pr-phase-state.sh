@@ -128,7 +128,7 @@ replied_at() {   # replied_at <codex|copilot> <time> ; the newest reply landed t
     snapshot "$1" 77 2026-01-01T00:00:00Z "$2"
 }
 vouched() {   # vouched <codex|copilot> <bot> <sha> [at] ; an operator answered it
-    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
+    printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=%s id=901 sha=%s\n' \
         "$2" "${4:-2026-01-02T00:00:00Z}" "$3" > "$W/$1.record"
     printf '0\n' > "$W/$1.record.rc"
 }
@@ -604,7 +604,7 @@ got="$(run 7)"
 # A SIGNOFF FOR ANOTHER REVIEWER DOES NOT VOUCH, even with the same head: the
 # whole record is read, not its suffix.
 world; replies_only codex "$CODEXBOT" "$HEAD40"
-printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$COPILOTBOT" "$HEAD40" > "$W/codex.record"
 printf '0\n' > "$W/codex.record.rc"
 got="$(run 7)"

@@ -704,7 +704,7 @@ for _bad in "verdict=findings findings= source=replies-only" \
 done
 # A HEAD IS NOT A MOMENT: the signoff must be NEWER than the review it answers,
 # or one recorded for an earlier clean review vouches for a later replies-only one.
-SO="PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40"
+SO="PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=$H40"
 rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
     && pass "a signoff recorded after the review answers it" \
     || die "a newer signoff did not vouch (reason='$RB_VOUCH_REASON')"
@@ -745,12 +745,14 @@ rb_signoff_answers "$SO" "" 7 "$BOT" "$H40" \
 # A LINE MISSING A FIELD IS NOT A RECORD. `${line#*at=}` on one WITHOUT `at=`
 # returns the whole line, and `%% *` then takes its first word — a value that is
 # not a time; parsing the record instead refuses it as unreadable.
-for _badrec in "PR_SIGNOFF pr=7 reviewer=$BOT id=901 sha=$H40" \
-               "PR_SIGNOFF pr=7 reviewer=$BOT at=yesterday id=901 sha=$H40" \
-               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z sha=$H40" \
-               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=aaaaaaa" \
-               "warning PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40" \
-               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=none reason=revoked"; do
+for _badrec in "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=yesterday id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=2026-01-02T00:00:00Z sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=aaaaaaa" \
+               "warning PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=none reason=revoked" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT verdict-at=whenever at=2026-01-02T00:00:00Z id=901 sha=$H40"; do
     rb_signoff_answers "$_badrec" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
         && die "a malformed signoff vouched: '$_badrec'" \
         || { [ "$RB_VOUCH_REASON" = signoff_malformed ] \

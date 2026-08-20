@@ -485,7 +485,10 @@ rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
 #
 # THE REASON IS SET RATHER THAN PRINTED, so each caller says it in its own words.
 RB_VOUCH_REASON=''
-RB_SIGNOFF_RX='^PR_SIGNOFF pr=([0-9]+) reviewer=([^[:space:]]+) at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) id=([0-9]+) sha=([0-9a-f]{40})$'
+# `verdict-at=` IS PART OF THE SHAPE, and `none` is one of its values: the field
+# is always present and says `none` where the record does not carry a time, so
+# this reader has one shape to match rather than two. #135.
+RB_SIGNOFF_RX='^PR_SIGNOFF pr=([0-9]+) reviewer=([^[:space:]]+) verdict-at=(none|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) id=([0-9]+) sha=([0-9a-f]{40})$'
 rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
     RB_VOUCH_REASON=''
     local _at
@@ -495,12 +498,12 @@ rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
     # review it never saw. A REVOCATION fails here too, and should: `sha=none`
     # is not a commit, and a revocation vouches for nothing.
     [[ "${1-}" =~ $RB_SIGNOFF_RX ]] || { RB_VOUCH_REASON=signoff_malformed; return 1; }
-    _at="${BASH_REMATCH[3]}"
+    _at="${BASH_REMATCH[4]}"
     [ "${BASH_REMATCH[1]}" = "${3-}" ] || { RB_VOUCH_REASON=other_pr; return 1; }
     # COMPARED AS A STRING, never with `=~`: a reviewer login ends in `[bot]`,
     # which a regex reads as a character class.
     [ "${BASH_REMATCH[2]}" = "${4-}" ] || { RB_VOUCH_REASON=other_reviewer; return 1; }
-    [ "${BASH_REMATCH[5]}" = "${5-}" ] || { RB_VOUCH_REASON=other_head; return 1; }
+    [ "${BASH_REMATCH[6]}" = "${5-}" ] || { RB_VOUCH_REASON=other_head; return 1; }
     case "${2-}" in
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
         "") RB_VOUCH_REASON=no_review; return 1 ;;

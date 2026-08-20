@@ -353,7 +353,7 @@ replies_only() {   # replies_only <bot> ; that reviewer left only replies on the
 # The fixture carries the real order so it proves the real parse.
 vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
     printf '0' > "$STUB_DIR/pr-signoff.rc"
-    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
+    printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=%s id=901 sha=%s\n' \
         "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
     # THE SNAPSHOT THE GATE ORDERS AGAINST: the review id, when the review landed,
     # and when its newest reply did, all from one read. It is one file because the
@@ -436,11 +436,11 @@ case_is 1 "not one this gate can read" "…and a record with no timestamp is ref
 # the right commit: a truncated, cached or misrouted record for another PR or
 # another reviewer authorised the merge.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'PR_SIGNOFF pr=8 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+printf 'PR_SIGNOFF pr=8 reviewer=%s verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$COPILOTBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…and a signoff record for another PR does not vouch"
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
 # A TIMESTAMP OF A SHAPE NOTHING CAN PLACE is a snapshot field that arrived with

@@ -67,6 +67,89 @@ case_is() {   # case_is <want rc> <needle> <label> [reviewer]
 world() { printf '0' > "$TMP/rc"; }
 
 # ── a signoff is found ─────────────────────────────────────────────────────
+# THE VERDICT TIME THE SIGNOFF ANSWERS, as a THIRD backticked field. Readers take
+# the LAST record, so a revocation posted after a signoff supersedes it whatever
+# it was about — and the writer cannot close that window, because its own write is
+# what erases the evidence. A signoff saying WHICH verdict it answers lets a
+# reader order a revocation against that rather than against comment order. #135,
+# for #122.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+case_is 0 "verdict-at=2026-01-01T00:00:00Z" "a signoff carrying the verdict time reports it"
+case_is 0 "sha=$SHA" "…and still reports the sha it signs off"
+# OPTIONAL, BECAUSE EVERY EXISTING RECORD PREDATES IT. A reader that required it
+# would report every signoff on every open PR as malformed, which is the
+# fail-closed direction turned into a denial of service.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 0 "verdict-at=none" "…and one without it says so rather than being malformed"
+# A VALUE THAT IS NOT A TIME IS NEITHER. A reader ordering a revocation against it
+# would place that revocation somewhere arbitrary, and the low end of arbitrary is
+# "the revocation is older", which is the answer that records over a reopening.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`whenever\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…while one that is not a time is refused, not compared"
+# THE FIELD ORDER SURVIVES THE TWO PEELS EVERY CALLER USES: the sha is read with
+# `${line##*sha=}` and the record time with `${line#* at=}`, and `verdict-at=`
+# must be mistakeable for neither. The character before those three letters is a
+# hyphen rather than a space, which is what keeps the second one honest.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+got="$(run "$BOT")"; line="${got#*|}"
+[ "${line##*sha=}" = "$SHA" ] \
+    && pass "…and the sha still peels off the end cleanly" \
+    || die "the sha peel took '${line##*sha=}'"
+# ASSERTED AS AN EQUALITY, not as "it is not the verdict time": if the record ever
+# loses its space-delimited ` at=` field, that peel returns the WHOLE line and
+# `%% *` reduces it to `PR_SIGNOFF` — which is also not the verdict time, so an
+# inequality passes while the ordering `pr-copilot-phase.sh` depends on is broken.
+_at="${line#* at=}"; _at="${_at%% *}"
+[ "$_at" = 2026-01-02T00:00:00Z ] \
+    && pass "…and the record time peel takes the record time, not the verdict time" \
+    || die "'\${line#* at=}' took '$_at'"
+# A REVOCATION CARRIES IT TOO, since a phase reopened by one is a record a reader
+# has to place in time exactly as it places a signoff — and it CARRIES NO SHA, so its verdict time is the SECOND backticked field
+# rather than the third — the sha group is optional and a time is not 40 hex, so
+# the pattern falls through to the field that holds one.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
+case_is 1 "reason=revoked" "a revocation is still a revocation with a verdict time on it"
+case_is 1 "verdict-at=2026-02-02T00:00:00Z" "…and reports the verdict time it carries"
+# AN OVERLONG VALUE MUST BE VISIBLE IN ORDER TO BE REFUSED. Bounded, the field
+# makes the WHOLE marker fail to match — the line then matches nothing, `last`
+# returns an OLDER record, and a deliberately reopened phase reads as closed.
+# `seq` IS ABSENT ON STOCK macOS, and this file runs without `-e`: a failed inner
+# substitution leaves `printf` with no operands and produces a SINGLE `x`, so the
+# case still gets `bad_verdict_at` while exercising nothing. `%065d` needs no
+# command at all, and the length is asserted rather than assumed.
+_long="$(printf '%065d' 0 | tr 0 x)"
+[ "${#_long}" -eq 65 ] \
+    && pass "the overlong fixture is actually longer than the bound it tests" \
+    || die "the overlong fixture is ${#_long} characters, not 65"
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$_long\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…and an overlong verdict time is refused, not skipped past"
+# AN EMPTY VALUE IS THE SAME DEFECT AT THE OTHER END. A minimum in the capture
+# makes it fail the whole marker, so `last` returns the older signoff and the
+# reopened phase reads as closed.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…and so is an empty one"
+# A SIGNOFF WITHOUT A SHA is a record that failed to parse, not one to look past.
+# The sha capture demands 40 hex, so a value in that position which is not one
+# lands in the verdict field instead — and discarded, the marker stops being the
+# newest record and an OLDER signoff is returned with status 0.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff:** \`$BOT\` \`2026-01-02T00:00:00Z\`" > "$TMP/out"
+case_is 2 "reason=signoff_without_sha" "a signoff with no sha is refused, not skipped past"
+# AND A VALUE THERE THAT IS FORTY LOWERCASE HEX is captured as the optional SHA
+# rather than as the time, and the revocation branch ignores a sha — so the record
+# would read as one carrying no time at all, and a present but unplaceable value
+# would be accepted as a legacy record.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…while a revocation carrying a sha-shaped value is refused"
+# THE CHECK RUNS BEFORE EITHER EARLY RETURN. `sha` mode handed the head back with
+# status 0, so `SKILL.md` and `pr-phase-state.sh` read a malformed record as a
+# closed phase; a revocation exited 1 as an ordinary one.
+# `sha` MODE IS ASSERTED FURTHER DOWN, where its runner is defined.
+
+
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
 case_is 0 "sha=$SHA" "a signoff from the repository's owner is read back"
 world; comments "COLLABORATOR|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
@@ -297,6 +380,17 @@ got="$(sha_run)"
 { [ "${got%%|*}" = 0 ] && [ "$(printf '%s' "$got" | cut -d'|' -f2)" = "$SHA" ]; } \
     && pass "sha prints the recorded head and nothing else" \
     || die "sha gave '$got'"
+# AND IT REFUSES AN UNREADABLE VERDICT TIME, which the check must run BEFORE this
+# mode returns: handing the head back with status 0 makes `SKILL.md` and
+# `pr-phase-state.sh` read a malformed record as a closed phase.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`whenever\`" > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "$got" | cut -d'|' -f3 | grep -qF 'reason=bad_verdict_at'; } \
+    && pass "…and refuses a record whose verdict time is not a time" \
+    || die "sha accepted a malformed verdict time: '$got'"
+[ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ] \
+    && pass "…printing no head at all" \
+    || die "sha printed a head for a malformed record: '$got'"
 # NOTHING OF THE RECORD SHAPE REACHES STDOUT, or a caller shape-checking the
 # result would still be parsing a line — which is the whole point of the mode.
 case "$(printf '%s' "$got" | cut -d'|' -f2)" in
