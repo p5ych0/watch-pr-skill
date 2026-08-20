@@ -5,7 +5,7 @@
 - **A signoff can now say which verdict it answers.** Readers take the *last*
   record, so a revocation posted after a signoff supersedes it whatever it was
   about — and the writer cannot close that window, because its own write is what
-  erases the evidence. `**Review-Signoff:**` takes an optional fourth backticked
+  erases the evidence. `**Review-Signoff:**` takes an optional **third** backticked
   field, the time of the verdict being signed off, and `pr-signoff.sh` reports it
   as `verdict-at=`. A reader can then order a revocation against *that* rather
   than against comment order.
@@ -20,8 +20,7 @@
   It is the first field of the record, before `at=`, `id=` and `sha=`: callers
   peel the sha with `${line##*sha=}` and the record time with `${line#* at=}`, and
   the character before `verdict-at=`'s three letters is a hyphen rather than a
-  space, so neither peel can take it. A revocation carries it in the second
-  backticked field, having no sha.
+  space, so neither peel can take it. A revocation carries it in the SECOND backticked field, having no sha.
 
   The shared reader knows the field: `recordlib.sh`'s signoff pattern accepts it,
   so the replies-only escape still recognises an operator's signoff. A fixture

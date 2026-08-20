@@ -616,7 +616,7 @@ a verdict cancels it. The id is there because `createdAt` is second-resolution
 and two records made in the same second compare equal.
 
 **A signoff can also say which verdict it answers.** The marker takes an optional
-fourth backticked field — the time of the verdict being signed off — and the
+**third** backticked field — the time of the verdict being signed off — and the
 record reports it as `verdict-at=`. Readers take the *last* record, so a
 revocation posted after a signoff supersedes it whatever it was about; a signoff
 that names its verdict lets a reader order a revocation against **that** rather

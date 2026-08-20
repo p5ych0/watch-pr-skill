@@ -225,7 +225,7 @@ while :; do
                  # unchanged head — leaves the old signoff standing, and a resumed
                  # session would read the reopened phase as closed. A revocation
                  # is a record too, and the last record wins.
-                 # A FOURTH FIELD, OPTIONAL, carrying WHEN THE VERDICT LANDED
+                 # A THIRD BACKTICKED FIELD, OPTIONAL, carrying WHEN THE VERDICT LANDED
                  # that this signoff answers. Readers take the LAST record, so a
                  # revocation posted after a signoff supersedes it whatever it was
                  # about — and the writer cannot close that window, because its own
@@ -237,7 +237,7 @@ while :; do
                  # that required it would report every signoff on every open PR as
                  # malformed, which is the fail-closed direction turned into a
                  # denial of service.
-                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]+)`)?[[:space:]]*$")]
+                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]*)`)?[[:space:]]*$")]
                           | last // ["","","",""])
                  | select(.[1] == $who)
                  # A revocation carries no sha and a signoff must; anything else
@@ -247,17 +247,18 @@ while :; do
                  # the absent case and travels as itself; anything that is neither
                  # is a record this cannot place, which is not one to act on.
                  #
-                 # CAPTURED WITHOUT A LENGTH BOUND, and judged afterwards. A bound
-                 # makes an overlong value fail the WHOLE marker rather than
-                 # classify it — the line then matches nothing, `last` returns an
-                 # OLDER record, and a deliberately reopened phase reads as closed.
-                 # A value this cannot place has to be visible in order to be
-                 # refused.
+                 # CAPTURED WITHOUT A LENGTH BOUND AND WITHOUT A MINIMUM, and
+                 # judged afterwards. Either restriction makes a value the pattern
+                 # dislikes fail the WHOLE marker rather than classify it — the
+                 # line then matches nothing, `last` returns an OLDER record, and a
+                 # deliberately reopened phase reads as closed. An overlong value
+                 # and an EMPTY one are the same defect twice, and a value this
+                 # cannot place has to be visible in order to be refused.
                  | (if $m[3] == null then "none"
                     elif ($m[3] | canonical_utc) then $m[3]
                     else "unreadable" end) as $v
                  # A REVOCATION HAS NO SHA, so its verdict time is the SECOND
-                 # backticked field — and a value there that happens to be forty
+                 # backticked field rather than the third — and a value there that happens to be forty
                  # lowercase hex is captured as the SHA instead, which the
                  # revocation branch ignores. The record then reads as one carrying
                  # no time at all, so a present but unplaceable value is accepted

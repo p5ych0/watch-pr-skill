@@ -67,7 +67,7 @@ case_is() {   # case_is <want rc> <needle> <label> [reviewer]
 world() { printf '0' > "$TMP/rc"; }
 
 # ── a signoff is found ─────────────────────────────────────────────────────
-# THE VERDICT TIME THE SIGNOFF ANSWERS, as a fourth backticked field. Readers take
+# THE VERDICT TIME THE SIGNOFF ANSWERS, as a THIRD backticked field. Readers take
 # the LAST record, so a revocation posted after a signoff supersedes it whatever
 # it was about — and the writer cannot close that window, because its own write is
 # what erases the evidence. A signoff saying WHICH verdict it answers lets a
@@ -114,9 +114,23 @@ case_is 1 "verdict-at=2026-02-02T00:00:00Z" "…and reports the verdict time it 
 # AN OVERLONG VALUE MUST BE VISIBLE IN ORDER TO BE REFUSED. Bounded, the field
 # makes the WHOLE marker fail to match — the line then matches nothing, `last`
 # returns an OLDER record, and a deliberately reopened phase reads as closed.
+# `seq` IS ABSENT ON STOCK macOS, and this file runs without `-e`: a failed inner
+# substitution leaves `printf` with no operands and produces a SINGLE `x`, so the
+# case still gets `bad_verdict_at` while exercising nothing. `%065d` needs no
+# command at all, and the length is asserted rather than assumed.
+_long="$(printf '%065d' 0 | tr 0 x)"
+[ "${#_long}" -eq 65 ] \
+    && pass "the overlong fixture is actually longer than the bound it tests" \
+    || die "the overlong fixture is ${#_long} characters, not 65"
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
-                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$(printf 'x%.0s' $(seq 1 65))\`" > "$TMP/out"
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$_long\`" > "$TMP/out"
 case_is 2 "reason=bad_verdict_at" "…and an overlong verdict time is refused, not skipped past"
+# AN EMPTY VALUE IS THE SAME DEFECT AT THE OTHER END. A minimum in the capture
+# makes it fail the whole marker, so `last` returns the older signoff and the
+# reopened phase reads as closed.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…and so is an empty one"
 # AND A VALUE THERE THAT IS FORTY LOWERCASE HEX is captured as the optional SHA
 # rather than as the time, and the revocation branch ignores a sha — so the record
 # would read as one carrying no time at all, and a present but unplaceable value
