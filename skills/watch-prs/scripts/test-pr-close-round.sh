@@ -120,6 +120,8 @@ case "$1 $2" in
         [ -s "$W/branch.local" ] || exit 1
         cat "$W/branch.local"; exit 0 ;;
     "remote get-url")
+        # `--all` PRINTS ONE URL PER LINE, and `git push <name>` sends to every
+        # one — so a fixture with a single URL says nothing about the second.
         cat "$W/pushurl.out" 2>/dev/null
         exit "$(cat "$W/pushurl.rc" 2>/dev/null || echo 0)" ;;
 esac
@@ -156,10 +158,20 @@ world() {   # world ; the state in which a round closes cleanly
     # agreeing with itself about a shape the real contract refuses.
     printf '42\n' > "$W/pr-review-state.out"
 }
+# THE FIXTURE PINS ITS OWN IDENTITY, WHICH MEANS CLEARING THE OVERRIDES TOO.
+# `rb_identity` honours `REVIEW_BUS_OWNER` and `REVIEW_BUS_REPO` over anything it
+# derives, and the gate's push-URL proof clears both before parsing — so a
+# contributor with either exported saw the pinned identity and the parsed one
+# disagree, and every gate refused. The suite is self-contained or it is not.
+# `pr-selfcheck.sh` cannot clear these: `SKILL.md` exports `REVIEW_BUS_REMOTE` to
+# pin the session and the suite runs with that pin in the environment, so a
+# fixture whose subject is an env-driven override clears it itself.
 stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
     local out rc=0 st="$1"; shift
     out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         "$DIR/pr-close-round.sh" "$st" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
@@ -272,6 +284,7 @@ case_is 1 "not a full OID" "…and a malformed one is not a head" "$CODEXBOT" ye
 world; : > "$TMP/summary.md"
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'summary is empty'; } \
     && pass "an empty summary stops the round" \
@@ -282,6 +295,7 @@ grep -q 'git push' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and so does a summary file that is not there" \
@@ -388,6 +402,7 @@ grep -q 'pr-review-state.sh review-id' "$TMP/calls" \
 world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'not a reviewer this loop drives'; } \
     && pass "an unrecognised reviewer is refused, by name" \
@@ -488,6 +503,22 @@ got="$(run "$CODEXBOT" no)"
 [ "${got%%|*}" = 0 ] \
     && pass "…while a differently-cased pinned origin still closes the round" \
     || die "casing was treated as a different repository: '${got}'"
+# A SECOND `pushurl` GETS THE COMMIT TOO. `git push origin` sends to every
+# configured push URL, so validating the first and pushing to the name put the
+# round's fixes in whatever the second names.
+world; printf 'git@github.com:acme/widget.git\ngit@github.com:someone/other.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'someone/other'; } \
+    && pass "…and a second push URL naming another repository refuses, though the first is right" \
+    || die "a second push URL was pushed to: '${got}'"
+nothing_pushed "…with nothing pushed"
+# A MIRROR OF THE SAME REPOSITORY STILL WORKS, or the check above is satisfied by
+# refusing every multi-URL remote rather than by reading them.
+world; printf 'git@github.com:acme/widget.git\nhttps://github.com/acme/widget.git\n' > "$W/pushurl.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…while two URLs for the same repository still close the round" \
+    || die "a mirror of the pinned repository was refused: '${got}'"
 world; printf '1' > "$W/pushurl.rc"
 got="$(run "$CODEXBOT" no)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "origin's push URL"; } \
@@ -563,6 +594,8 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
     _auto="${_r%%|*}"; _want="${_r#*|}"
     got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+        REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF "$_want"; } \
         && pass "refused by name: $_want" \

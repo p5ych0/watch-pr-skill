@@ -1317,11 +1317,20 @@ hard-coded answer — one recipe here, two orders there:
 #     3  paused   — a round boundary. Decide with the operator
 #
 # RUN `gate` FROM A CHECKOUT ON THIS PR'S BRANCH. It pushes, and a push has to go
-# somewhere: it names the repository and the one ref it may write, and refuses —
-# having pushed nothing — if this checkout is on another branch, on a detached
-# HEAD, or if the PR is from a fork. That refusal is a 1 with the reason on
-# stdout, and the answer is to move to the right worktree and run it again; the
-# round is untouched.
+# somewhere: it names the ref it may write, proves every push URL of `origin` is
+# the pinned repository, and refuses — having pushed nothing — if any of that does
+# not hold. Every refusal is a 1 with the reason on stdout and the round
+# untouched.
+#
+# TWO KINDS OF REFUSAL, AND ONLY ONE IS RETRYABLE:
+#
+#   · THIS CHECKOUT — on another branch, or on a detached HEAD. Move to the
+#     worktree holding the PR's branch and run it again. Nothing has happened;
+#   · THIS PR — it is from a FORK, or `origin` pushes somewhere that is not the
+#     pinned repository. Running it again changes nothing, because neither is
+#     about where you are standing. STOP and put it to the operator: a fork PR is
+#     outside what this loop drives, and a redirected `origin` is a configuration
+#     decision that is not the loop's to make.
 #
 # IT IS A REFUSAL BECAUSE THE ALTERNATIVE HAPPENED. A bare `git push` sends
 # whatever branch the checkout is on, and a round driven from a checkout left on

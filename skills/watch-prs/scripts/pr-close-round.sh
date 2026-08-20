@@ -254,8 +254,15 @@ rb_push_is_the_prs() {
     # answer comes out as the subshell's STATUS rather than as three values
     # serialised through one string — which is the delimiter problem `CLAUDE.md`
     # records for exactly this parser.
-    _pushurl=$(git remote get-url --push origin 2>/dev/null) \
-        || { echo "ABORT: could not read origin's push URL; refusing to push blind."; return 1; }
+    # EVERY PUSH URL, NOT THE FIRST. `origin` may carry several `pushurl` entries
+    # and `git push origin` sends to ALL of them — so validating one and pushing to
+    # the name put the commit in every other configured repository too, which is
+    # the hole this check was added to close, reached by the second entry.
+    # `--all` is what returns them; the loop below refuses unless every one is the
+    # pinned repository, so a mirror of it still works and a mixed destination
+    # does not.
+    _pushurl=$(git remote get-url --push --all origin 2>/dev/null) \
+        || { echo "ABORT: could not read origin's push URLs; refusing to push blind."; return 1; }
     [ -n "$_pushurl" ] || { echo "ABORT: origin has no push URL; refusing to push blind."; return 1; }
     #
     # COMPARED CASE-INSENSITIVELY, because casing is not a different repository:
@@ -269,10 +276,22 @@ rb_push_is_the_prs() {
     # general licence: every helper starts `bash -p`, which imports no functions,
     # so no builtin in it can be shadowed. That is what #101 and #83 settled. It
     # is set inside the SUBSHELL, so the option does not outlive the comparison.
-    ( shopt -s nocasematch
-      REVIEW_BUS_REMOTE="$_pushurl"; REVIEW_BUS_OWNER=''; REVIEW_BUS_REPO=''
-      rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
-        || { echo "ABORT: origin pushes to '$_pushurl', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
+    # PEELED WITH EXPANSIONS, so there is no `read` and no redirection: `--all`
+    # prints one URL per line, and a heredoc here is a temporary file that can
+    # fail — the fail-open shape #111 removed from the marker scan.
+    local _rest="$_pushurl" _u _nl='
+'
+    while [ -n "$_rest" ]; do
+        case "$_rest" in
+            *"$_nl"*) _u="${_rest%%"$_nl"*}"; _rest="${_rest#*"$_nl"}" ;;
+            *)        _u="$_rest"; _rest="" ;;
+        esac
+        [ -n "$_u" ] || continue
+        ( shopt -s nocasematch
+          REVIEW_BUS_REMOTE="$_u"; REVIEW_BUS_OWNER=''; REVIEW_BUS_REPO=''
+          rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
+            || { echo "ABORT: origin pushes to '$_u', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
+    done
     _have=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) \
         || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
     [[ $_have = "$_want" ]] \
