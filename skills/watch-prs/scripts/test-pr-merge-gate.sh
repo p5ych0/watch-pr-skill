@@ -50,9 +50,16 @@ _out="\$STUB_DIR/\${_n}.out"; _rc="\$STUB_DIR/\${_n}.rc"
 # THE ARGUMENTS SELECT THE ANSWER where a case needs two different ones from the
 # same helper — the gate asks \`pr-review-state.sh\` about two reviewers and about
 # two shas, and a single canned reply cannot tell those apart.
+_key="\$_n"
 for _k in "\$@"; do
-    [ -f "\$STUB_DIR/\${_n}.\${_k}.out" ] && { _out="\$STUB_DIR/\${_n}.\${_k}.out"; _rc="\$STUB_DIR/\${_n}.\${_k}.rc"; break; }
+    [ -f "\$STUB_DIR/\${_n}.\${_k}.out" ] && { _out="\$STUB_DIR/\${_n}.\${_k}.out"; _rc="\$STUB_DIR/\${_n}.\${_k}.rc"; _key="\${_n}.\${_k}"; break; }
 done
+# AND A DIFFERENT ANSWER ON A LATER CALL, where a case needs the world to change
+# between two reads of the SAME question — a review dismissed while its timestamps
+# are being fetched is exactly that.
+_c="\$(cat "\$STUB_DIR/\$_key.n" 2>/dev/null || echo 0)"; _c=\$((_c + 1))
+printf '%s' "\$_c" > "\$STUB_DIR/\$_key.n"
+[ -f "\$STUB_DIR/\$_key.\$_c.out" ] && { _out="\$STUB_DIR/\$_key.\$_c.out"; _rc="\$STUB_DIR/\$_key.\$_c.rc"; }
 [ -f "\$_out" ] && cat "\$_out"
 exit "\$(cat "\$_rc" 2>/dev/null || echo 0)"
 STUB
@@ -451,6 +458,19 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
+
+# ── THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED ────────────
+# The two time probes are separate calls. A review dismissed after `review-at`
+# returns and before `replies-at` runs leaves the second reading a stable — but
+# dismissed — snapshot, so the deadline describes a review that no longer
+# authorises anything, while the replies-only line being answered was fetched
+# before any of it. Each probe re-checks itself; nothing bound them together.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=dismissed\n' \
+    "${HEAD40:0:7}" "$COPILOTBOT" > "$STUB_DIR/pr-review-state.$COPILOTBOT.2.out"
+printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.2.rc"
+case_is 1 "changed while its timestamps were being read" \
+    "a review dismissed while its timestamps were read cannot be vouched for"
 
 # ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
 # The verdict is produced by the COMMENTS on the review, and one added afterwards

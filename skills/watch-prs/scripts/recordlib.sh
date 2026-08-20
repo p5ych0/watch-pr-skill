@@ -544,10 +544,19 @@ rb_answer_at() {   # <review-at> <replies-at>
     if [ -z "${1-}" ] && [ -z "${2-}" ]; then
         return 1
     fi
+    # A REPLY WITHOUT A REVIEW IS NOT A SNAPSHOT, IT IS A CONTRADICTION. Replies
+    # hang off a SUBMITTED review, and every submitted review has a validated
+    # `submitted_at` — so the reader that answers with a reply time has, by
+    # construction, selected a review the other reader must also have found. An
+    # empty review time beside a present reply time therefore means one of them
+    # was truncated or replaced, and taking the reply as the whole deadline is
+    # what hides the later review: a signoff posted after that reply but before
+    # the review was submitted would be accepted as answering it.
+    if [ -z "${1-}" ]; then
+        return 2
+    fi
     if [ -z "${2-}" ]; then
         RB_ANSWER_AT="${1-}"
-    elif [ -z "${1-}" ]; then
-        RB_ANSWER_AT="${2-}"
     elif [ "${1-}" \> "${2-}" ]; then
         RB_ANSWER_AT="${1-}"
     else

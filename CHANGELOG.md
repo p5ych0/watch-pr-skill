@@ -32,6 +32,20 @@
   answered with a timestamp that was not the review's. Both times are printed, so
   which one moved is visible.
 
+  **The verdict is re-read afterwards, bound to the deadline just computed.** The
+  two time probes are separate calls: a review dismissed after `review-at` returns
+  and before `replies-at` runs leaves the second reading a stable — but
+  dismissed — snapshot, so the deadline describes a review that no longer
+  authorises anything while the replies-only line being answered was fetched
+  before any of it. Each probe re-checks *itself*; the verdict is what binds them.
+
+  **A reply time with no review time is a contradiction, not a deadline.** Replies
+  hang off a submitted review and every submitted review has a validated
+  `submitted_at`, so the reader that answers with a reply time has selected a
+  review the other reader must also have found. Taking the reply alone was what
+  hid a later review: a signoff posted after that reply but before the review was
+  submitted would have been accepted as answering it.
+
   `SKILL.md` says to record the signoff *after* reading, and the reviewer contracts
   say that a reply posted later restarts that clock — which is one more reason to
   put a clean verdict in the review body, where it needs no answer at all.

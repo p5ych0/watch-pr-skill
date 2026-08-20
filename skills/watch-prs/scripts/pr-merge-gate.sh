@@ -371,11 +371,11 @@ rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may
     [ "$3" -eq 1 ] && replies_only_line "$1" "$2" "$4" && return 0
     return 1
 }
-signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
+signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only on a positive record
     # THE RECORDS ARE READ HERE AND THE RULE IS THE LIBRARY'S. Both callers of the
     # escape fetch with their own error prefixes and their own statuses; what they
     # share is what "this signoff answers that review" MEANS. #125.
-    local who="$1" want="$2" line rc=0 rat arc=0
+    local who="$1" want="$2" verdict_line="$3" line rc=0 rat arc=0
     line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
@@ -407,6 +407,21 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
         1) echo "merge blocked: $who has nothing on ${want:0:7} for a signoff to answer"; return 1 ;;
         *) echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1 ;;
     esac
+    # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
+    # probes are separate calls: a review dismissed after `review-at` returns and
+    # before `replies-at` runs leaves the second reading a stable — but dismissed —
+    # snapshot, so the deadline describes a review that no longer authorises
+    # anything while the replies-only line this vouch is answering was fetched
+    # before any of it. Each probe re-checks ITSELF; nothing bound them together.
+    #
+    # THE VERDICT IS WHAT BINDS THEM, because it is the thing the escape acts on:
+    # identical means the review that produced it is still the authoritative one.
+    local vagain vgrc=0
+    vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$who" "$want"); vgrc=$?
+    if [ "$vgrc" -ne 1 ] || [ "$vagain" != "$verdict_line" ]; then
+        echo "merge blocked: $who's verdict on ${want:0:7} changed while its timestamps were being read"
+        return 1
+    fi
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0
     case "$RB_VOUCH_REASON" in
         other_head|other_pr|other_reviewer) ;;   # a record about something else; not this gate's to explain
@@ -522,7 +537,7 @@ for SPEC in "$@"; do
         # past a reviewer.
         if replies_only_line "$V_WHO" "$V_SHA" "$V_LINE"; then
             # AND THE RECORD MUST BE THERE. Absence is not permission.
-            if signoff_vouches "$V_WHO" "$V_SHA"; then
+            if signoff_vouches "$V_WHO" "$V_SHA" "$V_LINE"; then
                 echo "note: $V_WHO left only replies on ${V_SHA:0:7}; merging on the signoff an operator recorded for that head after reading them"
             else
                 echo "merge blocked: $V_WHO left only replies on ${V_SHA:0:7} and no operator has recorded a signoff for that head — read the reply and record one, or fix what it says and push"

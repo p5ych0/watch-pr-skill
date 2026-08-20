@@ -149,12 +149,16 @@ rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; ex
 # signed this off" tells the operator to record a signoff they may already have
 # recorded, and hides a broken read behind an ordinary-looking refusal — which is
 # the fail-closed rule this helper states everywhere else.
-rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
+RB_VOUCH_REVIEW_AT=''
+RB_VOUCH_REPLIES_AT=''
+rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     local _line _rc=0 _rat _arc=0
     # CLEARED HERE TOO, not only inside the library predicate: the two early
     # returns below never reach it, and a stale value from a previous call would
     # be printed as this call's reason.
     RB_VOUCH_REASON=""
+    RB_VOUCH_REVIEW_AT=""
+    RB_VOUCH_REPLIES_AT=""
     _line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$1" 2>&1) || _rc=$?
     # 1 IS AN ANSWER — nothing is recorded, so nothing vouches. Anything else is a
     # read that failed.
@@ -193,6 +197,23 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
         1) RB_VOUCH_REASON=nothing_to_answer; return 1 ;;
         *) RB_VOUCH_REASON=answer_time_unreadable; return 2 ;;
     esac
+    # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
+    # probes are separate calls: a review dismissed after `review-at` returns and
+    # before `replies-at` runs leaves the second reading a stable — but dismissed —
+    # snapshot, so the deadline describes a review that no longer authorises
+    # anything, while the replies-only line this vouch is answering was read before
+    # any of it. Each probe re-checks ITSELF; the verdict is what binds them.
+    local _vagain _vgrc=0
+    _vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$1" "$2"); _vgrc=$?
+    if [ "$_vgrc" -ne 1 ] || [ "$_vagain" != "$3" ]; then
+        RB_VOUCH_REASON=verdict_changed
+        return 2
+    fi
+    # THE TIMES TRAVEL WITH THE ANSWER, because the stop below is what the operator
+    # reads and "it does not answer this review" without saying WHEN leaves them
+    # comparing timestamps by hand. `SKILL.md` promises both.
+    RB_VOUCH_REVIEW_AT="$_rat"
+    RB_VOUCH_REPLIES_AT="$_pat"
     rb_signoff_answers "$_line" "$RB_ANSWER_AT" "$PR" "$1" "$2"
 }
 
@@ -338,13 +359,14 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            # comments are all replies does not, when the operator has recorded a
            # signoff that answers it.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
-               rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA"; RB_VOUCH_RC=$?
+               rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA" "$VERDICT"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
                    echo "PR_PHASE pr=$PR status=error reason=copilot_vouch_unreadable" >&2; exit 2
                fi
                if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=copilot_replies_only_unvouched"
                    echo "Copilot's review of $COPILOT_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
+                   echo "It has to be newer than ${RB_ANSWER_AT:-?} — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
                    echo "Read the comment and record a signoff for that head, or request a review."
                    exit 1
                fi
@@ -392,13 +414,14 @@ else
            fi ;;
         1) # THE SAME TWO ANSWERS, on the other arm.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
-               rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA"; RB_VOUCH_RC=$?
+               rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA" "$VERDICT"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
                    echo "PR_PHASE pr=$PR status=error reason=codex_vouch_unreadable" >&2; exit 2
                fi
                if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=codex_replies_only_unvouched"
                    echo "Codex's review of $CODEX_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
+                   echo "It has to be newer than ${RB_ANSWER_AT:-?} — the latest of that review (${RB_VOUCH_REVIEW_AT:-none}) and its newest reply (${RB_VOUCH_REPLIES_AT:-none})."
                    echo "Read the comment and record a signoff for that head, or request a review."
                    exit 1
                fi

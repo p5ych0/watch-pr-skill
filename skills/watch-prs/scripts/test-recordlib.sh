@@ -781,10 +781,16 @@ rb_answer_at 2026-01-05T00:00:00Z "" \
     && [ "$RB_ANSWER_AT" = 2026-01-05T00:00:00Z ] \
     && pass "…and an absent reply leaves the review" \
     || die "an absent reply lost the review (got '$RB_ANSWER_AT')"
-rb_answer_at "" 2026-01-03T00:00:00Z \
-    && [ "$RB_ANSWER_AT" = 2026-01-03T00:00:00Z ] \
-    && pass "…and an absent review leaves the reply" \
-    || die "an absent review lost the reply (got '$RB_ANSWER_AT')"
+# A REPLY WITHOUT A REVIEW IS A CONTRADICTION, NOT AN ANSWER. Replies hang off a
+# SUBMITTED review and every submitted review has a validated `submitted_at`, so
+# the reader that answered with a reply time selected a review the other reader
+# must also have found. Taking the reply as the whole deadline is what hides the
+# later review: a signoff posted after that reply but before the review was
+# submitted would be accepted as answering it.
+rb_answer_at "" 2026-01-03T00:00:00Z
+[ "$?" -eq 2 ] && [ -z "$RB_ANSWER_AT" ] \
+    && pass "…while a reply with no review is unreadable, not a deadline of its own" \
+    || die "a reply without a review produced '$RB_ANSWER_AT'"
 # BOTH ABSENT IS A REFUSAL, because there is then nothing for a signoff to answer.
 rb_answer_at "" ""
 [ "$?" -eq 1 ] && [ -z "$RB_ANSWER_AT" ] \

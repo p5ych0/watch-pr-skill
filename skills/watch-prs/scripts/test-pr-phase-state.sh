@@ -77,6 +77,15 @@ fi
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
 # about what was asked. A stub that printed nothing made every rc-0 path look
 # like the malformed-probe case, which is a case of its own below.
+# A DIFFERENT ANSWER ON A LATER CALL, where a case needs the world to change
+# between two reads of the SAME question — a review dismissed while its timestamps
+# are being fetched is exactly that.
+_vn=$(( $(cat "$W/$_w.verdict.n" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$_vn" > "$W/$_w.verdict.n"
+if [ -f "$W/$_w.verdict.$_vn.out" ]; then
+    cat "$W/$_w.verdict.$_vn.out"
+    exit "$(cat "$W/$_w.verdict.$_vn.rc" 2>/dev/null || echo 0)"
+fi
 if [ -f "$W/$_w.verdict.out" ]; then
     cat "$W/$_w.verdict.out"
 else
@@ -448,6 +457,29 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED. The two time
+# probes are separate calls, and a review dismissed between them leaves the second
+# reading a stable — but dismissed — snapshot: the deadline then describes a review
+# that no longer authorises anything, while the replies-only line being answered
+# was read before any of it.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=dismissed\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.2.out"
+printf '1\n' > "$W/codex.verdict.2.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review dismissed while its timestamps were read cannot close the phase" \
+    || die "a dismissal between the two time probes was vouched over: '${got}'"
+# THE STOP NAMES BOTH TIMES, because `SKILL.md` promises the operator can see
+# which event moved — and a reason alone leaves them comparing timestamps by hand.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ printf '%s' "${got#*|}" | grep -qF 'that review (2026-01-01T00:00:00Z)' \
+    && printf '%s' "${got#*|}" | grep -qF 'newest reply (2026-01-03T00:00:00Z)'; } \
+    && pass "…and the stop names the review and the reply, so which one moved is visible" \
+    || die "the stop did not name both times: '${got#*|}'"
+
 # A TIMESTAMP OF A SHAPE NOTHING CAN PLACE IS A FAILED READ, not an ordinary
 # unvouched review. A probe that exits 0 with something it did not mean — a
 # truncated or replaced helper — reported as "nobody signed this off" sends the
