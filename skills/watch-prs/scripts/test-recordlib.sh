@@ -765,5 +765,46 @@ rb_signoff_answers "$SO" tomorrow 7 "$BOT" "$H40" \
         && pass "…and a review time of another shape refuses rather than sorting somewhere" \
         || die "an unshaped review time gave reason '$RB_VOUCH_REASON'"; }
 
+# ── WHAT A SIGNOFF HAS TO BE NEWER THAN ────────────────────────────────────
+# The review is one moment and the newest reply is another, and either can be the
+# last thing that happened. Ordering against the review alone let a signoff
+# recorded between it and a retracting reply vouch over a reply nobody read. #129.
+rb_answer_at 2026-01-01T00:00:00Z 2026-01-03T00:00:00Z \
+    && [ "$RB_ANSWER_AT" = 2026-01-03T00:00:00Z ] \
+    && pass "the later of a review and a reply is what a signoff must answer" \
+    || die "the reply did not win when it was later (got '$RB_ANSWER_AT')"
+rb_answer_at 2026-01-05T00:00:00Z 2026-01-03T00:00:00Z \
+    && [ "$RB_ANSWER_AT" = 2026-01-05T00:00:00Z ] \
+    && pass "…in both directions, so the reply is not simply preferred" \
+    || die "the review did not win when it was later (got '$RB_ANSWER_AT')"
+rb_answer_at 2026-01-05T00:00:00Z "" \
+    && [ "$RB_ANSWER_AT" = 2026-01-05T00:00:00Z ] \
+    && pass "…and an absent reply leaves the review" \
+    || die "an absent reply lost the review (got '$RB_ANSWER_AT')"
+# A REPLY WITHOUT A REVIEW IS A CONTRADICTION, NOT AN ANSWER. Replies hang off a
+# SUBMITTED review and every submitted review has a validated `submitted_at`, so
+# the reader that answered with a reply time selected a review the other reader
+# must also have found. Taking the reply as the whole deadline is what hides the
+# later review: a signoff posted after that reply but before the review was
+# submitted would be accepted as answering it.
+rb_answer_at "" 2026-01-03T00:00:00Z
+[ "$?" -eq 2 ] && [ -z "$RB_ANSWER_AT" ] \
+    && pass "…while a reply with no review is unreadable, not a deadline of its own" \
+    || die "a reply without a review produced '$RB_ANSWER_AT'"
+# BOTH ABSENT IS A REFUSAL, because there is then nothing for a signoff to answer.
+rb_answer_at "" ""
+[ "$?" -eq 1 ] && [ -z "$RB_ANSWER_AT" ] \
+    && pass "…and with neither there is nothing to answer" \
+    || die "two absent times produced '$RB_ANSWER_AT'"
+# A SHAPE IT CANNOT PLACE IS A DIFFERENT STATUS AGAIN, because the comparison is a
+# STRING one: a value of another shape sorts somewhere arbitrary, and one sorting
+# low would let a signoff older than the conversation vouch for it.
+rb_answer_at yesterday 2026-01-03T00:00:00Z
+[ "$?" -eq 2 ] && pass "…and a review time of another shape is refused, not sorted" \
+    || die "an unshaped review time was accepted"
+rb_answer_at 2026-01-01T00:00:00Z tomorrow
+[ "$?" -eq 2 ] && pass "…on the reply's side too" \
+    || die "an unshaped reply time was accepted"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

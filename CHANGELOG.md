@@ -1,5 +1,79 @@
 # Changelog
 
+## [2.0.44] — 2026-08-20
+
+- **A reply added after an operator's signoff is no longer merged over.** The
+  replies-only escape ordered the signoff against when the *review* landed, and
+  the verdict is produced by the review's **comments** — one added afterwards does
+  not move its `submitted_at`. Review at T1, operator reads the reply and signs
+  off at T2, someone posts a retracting reply at T3: `T2 > T1` still held, so the
+  signoff still vouched and the merge went through over a reply nobody read. The
+  resumed phase closed on it too.
+
+  What a signoff must now be newer than is the **later** of the two moments, which
+  is `rb_answer_at` in `recordlib.sh` — either can be the last thing that happened,
+  a review with no comments has only the first and a reply after the review has the
+  second. Only the **reply** time may be absent, and absent is not zero: it means
+  that channel had nothing to say. Both absent is a refusal, because there is then
+  nothing for a signoff to answer at all — and in the escape's own context that is
+  a *failed read* rather than an absence, since the review has already been
+  identified by a numeric id and every submitted review has a validated
+  `submitted_at`; a reply time with no review time is
+  unreadable rather than a deadline of its own; and a value of a shape it cannot
+  place is a third status again rather than something to sort.
+
+  An unreadable reply time blocks rather than passing. Read as "no replies", the
+  retracting reply it could not see is exactly what gets merged over — and a probe
+  that reports *no replies* while printing one is refused rather than having its
+  output discarded, since a discarded timestamp newer than the signoff is that
+  same reply.
+
+  And a timestamp of a shape nothing can place is a *third* answer, not the
+  second: a probe that exits 0 with something it did not mean is a read that
+  failed, and reporting it as "nobody signed this off" sent the operator to record
+  another signoff instead of looking at the probe.
+
+  The refusal names the **conversation**, not the review: the deadline is the later
+  of the two, so a signoff that *is* newer than the review can still fail here, and
+  saying "the review at <T>" pointed the operator at an event they had already
+  answered with a timestamp that was not the review's. Both times are printed, so
+  which one moved is visible.
+
+  **The deadline is bound to one review.** Both callers read the review id before
+  the timestamps and again with the verdict, because a verdict record carries no
+  id: a second replies-only review with the same finding count, submitted on the
+  same head, serialises byte-for-byte identically, and a binding that compared
+  only the verdict accepted the old review's timestamps for the new one.
+
+  The id is checked for SHAPE on both reads, not merely for being non-empty: a
+  replaced helper exiting 0 with the same word twice is a stable value that
+  identifies nothing, and the two reads then agree exactly as the verdicts did.
+
+  **The reply time is re-read too**, because the id and the verdict can both be
+  unchanged while the replies move: one added after `replies-at` returned and
+  another deleted before the re-read leaves the comment count — and therefore the
+  serialised verdict — exactly as it was.
+
+  **The verdict is re-read afterwards, bound to the deadline just computed.** The
+  two time probes are separate calls: a review dismissed after `review-at` returns
+  and before `replies-at` runs leaves the second reading a stable — but
+  dismissed — snapshot, so the deadline describes a review that no longer
+  authorises anything while the replies-only line being answered was fetched
+  before any of it. Each probe re-checks *itself*; the verdict is what binds them.
+
+  **A reply time with no review time is a contradiction, not a deadline.** Replies
+  hang off a submitted review and every submitted review has a validated
+  `submitted_at`, so the reader that answers with a reply time has selected a
+  review the other reader must also have found. Taking the reply alone was what
+  hid a later review: a signoff posted after that reply but before the review was
+  submitted would have been accepted as answering it.
+
+  `SKILL.md` says to record the signoff *after* reading, and the reviewer contracts
+  say that a reply posted later restarts that clock — which is one more reason to
+  put a clean verdict in the review body, where it needs no answer at all.
+
+  Closes #129, on #130's reader.
+
 ## [2.0.43] — 2026-08-20
 
 - **`pr-review-state.sh replies-at` — when the newest reply landed.** A

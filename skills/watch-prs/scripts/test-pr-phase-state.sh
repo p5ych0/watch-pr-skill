@@ -67,10 +67,44 @@ if [ "${1:-}" = review-at ]; then
     [ -f "$W/$_w.at.out" ] && cat "$W/$_w.at.out"
     exit "$(cat "$W/$_w.at.rc" 2>/dev/null || echo 0)"
 fi
+# WHEN THE NEWEST REPLY LANDED, which is a different moment again — and the
+# ordinary answer is 1 with nothing, meaning that channel had nothing to say.
+# WHICH REVIEW IS AUTHORITATIVE, counted so a case can replace it between the two
+# reads: a verdict record carries no review id, and a second replies-only review
+# with the same finding count serialises identically.
+if [ "${1:-}" = review-id ]; then
+    _rn=$(( $(cat "$W/$_w.rid.n" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$_rn" > "$W/$_w.rid.n"
+    if [ -f "$W/$_w.rid.$_rn.out" ]; then
+        cat "$W/$_w.rid.$_rn.out"; exit "$(cat "$W/$_w.rid.$_rn.rc" 2>/dev/null || echo 0)"
+    fi
+    [ -f "$W/$_w.rid.out" ] && cat "$W/$_w.rid.out"
+    exit "$(cat "$W/$_w.rid.rc" 2>/dev/null || echo 0)"
+fi
+if [ "${1:-}" = replies-at ]; then
+    # COUNTED, because the reply time is read twice: the replies can move without
+    # the comment count moving, which leaves the verdict and the review id alike.
+    _pn=$(( $(cat "$W/$_w.replies.n" 2>/dev/null || echo 0) + 1 ))
+    printf '%s' "$_pn" > "$W/$_w.replies.n"
+    if [ -f "$W/$_w.replies.$_pn.out" ]; then
+        cat "$W/$_w.replies.$_pn.out"; exit "$(cat "$W/$_w.replies.$_pn.rc" 2>/dev/null || echo 0)"
+    fi
+    [ -f "$W/$_w.replies.out" ] && cat "$W/$_w.replies.out"
+    exit "$(cat "$W/$_w.replies.rc" 2>/dev/null || echo 1)"
+fi
 # A REAL CLEAN RECORD BY DEFAULT, built from the arguments it was asked with —
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
 # about what was asked. A stub that printed nothing made every rc-0 path look
 # like the malformed-probe case, which is a case of its own below.
+# A DIFFERENT ANSWER ON A LATER CALL, where a case needs the world to change
+# between two reads of the SAME question — a review dismissed while its timestamps
+# are being fetched is exactly that.
+_vn=$(( $(cat "$W/$_w.verdict.n" 2>/dev/null || echo 0) + 1 ))
+printf '%s' "$_vn" > "$W/$_w.verdict.n"
+if [ -f "$W/$_w.verdict.$_vn.out" ]; then
+    cat "$W/$_w.verdict.$_vn.out"
+    exit "$(cat "$W/$_w.verdict.$_vn.rc" 2>/dev/null || echo 0)"
+fi
 if [ -f "$W/$_w.verdict.out" ]; then
     cat "$W/$_w.verdict.out"
 else
@@ -102,6 +136,8 @@ world() {   # world ; a PR whose Codex phase is closed on the current head
     # that depends on its absence.
     printf '1\n' > "$W/codex.record.rc"
     printf '1\n' > "$W/copilot.record.rc"
+    printf '77\n' > "$W/codex.rid.out"
+    printf '77\n' > "$W/copilot.rid.out"
     printf '2026-01-01T00:00:00Z\n' > "$W/codex.at.out"
     printf '2026-01-01T00:00:00Z\n' > "$W/copilot.at.out"
 }
@@ -109,6 +145,10 @@ replies_only() {   # replies_only <codex|copilot> <bot> <sha> ; only replies on 
     printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only\n' \
         "$(printf '%s' "$3" | cut -c1-7)" "$2" > "$W/$1.verdict.out"
     printf '1\n' > "$W/$1.verdict.rc"
+}
+replied_at() {   # replied_at <codex|copilot> <time> ; the newest reply landed then
+    printf '%s\n' "$2" > "$W/$1.replies.out"
+    printf '0\n' > "$W/$1.replies.rc"
 }
 vouched() {   # vouched <codex|copilot> <bot> <sha> [at] ; an operator answered it
     printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
@@ -395,6 +435,12 @@ got="$(run 7)"
 printf '%s' "${got#*|}" | grep -qF '(no_signoff)' \
     && pass "…and the prose says why rather than leaving empty brackets" \
     || die "the unvouched stop rendered without a reason: '${got#*|}'"
+# AND NOTHING MORE THAN THAT. With no signoff recorded, neither timestamp has been
+# read — so a deadline line there says `newer than ? … (none) … (none)`, which is
+# noise beside a message that already named the case.
+printf '%s' "${got#*|}" | grep -qF 'It has to be newer than' \
+    && die "…but it printed a deadline it never computed: '${got#*|}'" \
+    || pass "…and prints no deadline where none was computed"
 printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
     && die "…but it called it a dismissal as well" \
     || pass "…rather than reporting it as a dismissal"
@@ -438,6 +484,149 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# THE REPLIES CAN MOVE WITHOUT THE COUNT MOVING. One reply added after
+# `replies-at` returned and another deleted before the re-read leaves the comment
+# count — and therefore the serialised verdict, and the review id — exactly as
+# they were.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-01T06:00:00Z
+printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.2.out"
+printf '0\n' > "$W/codex.replies.2.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "replies that move without changing the count cannot be vouched over" \
+    || die "a moved reply set was vouched over: '${got}'"
+# TWO SILENT TIME PROBES ARE IMPOSSIBLE once the review IS identified: it is
+# submitted, so it has a validated `submitted_at`. Reporting that as "nothing to
+# answer" tells the operator to record another signoff for a review plainly there.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+: > "$W/codex.at.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and a recorded review with no readable times is a failed read, not an absence" \
+    || die "two silent time probes were reported as nothing to answer: '${got}'"
+
+# AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
+# exiting 0 with the same word on both reads is a STABLE value that tells two
+# reviews apart no better than the verdict did.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'warning\n' > "$W/codex.rid.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review id of another shape is refused, not treated as stable" \
+    || die "a malformed review id was accepted: '${got}'"
+# AND ABSENCE HAS TO BE SILENT.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.out"
+printf '1\n' > "$W/codex.replies.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and a reply probe that says none while printing one is refused" \
+    || die "a printing absence was discarded: '${got}'"
+
+# A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
+# replies-only review with the same finding count on the same head serialises
+# byte-for-byte identically, so comparing only the verdict accepts the OLD
+# review's timestamps for the new one. The review id is what tells them apart.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '78\n' > "$W/codex.rid.2.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a same-shaped review submitted in that window cannot close the phase" \
+    || die "a same-shaped replacement was vouched over: '${got}'"
+# AND AN UNREADABLE ID IS NOT A MISSING SIGNOFF EITHER.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.rid.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and an unreadable review id fails closed" \
+    || die "an unreadable review id gave '${got}'"
+
+# THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED. The two time
+# probes are separate calls, and a review dismissed between them leaves the second
+# reading a stable — but dismissed — snapshot: the deadline then describes a review
+# that no longer authorises anything, while the replies-only line being answered
+# was read before any of it.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=dismissed\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.2.out"
+printf '1\n' > "$W/codex.verdict.2.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review dismissed while its timestamps were read cannot close the phase" \
+    || die "a dismissal between the two time probes was vouched over: '${got}'"
+# THE STOP NAMES BOTH TIMES, because `SKILL.md` promises the operator can see
+# which event moved — and a reason alone leaves them comparing timestamps by hand.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ printf '%s' "${got#*|}" | grep -qF 'that review (2026-01-01T00:00:00Z)' \
+    && printf '%s' "${got#*|}" | grep -qF 'newest reply (2026-01-03T00:00:00Z)'; } \
+    && pass "…and the stop names the review and the reply, so which one moved is visible" \
+    || die "the stop did not name both times: '${got#*|}'"
+
+# A TIMESTAMP OF A SHAPE NOTHING CAN PLACE IS A FAILED READ, not an ordinary
+# unvouched review. A probe that exits 0 with something it did not mean — a
+# truncated or replaced helper — reported as "nobody signed this off" sends the
+# operator to record another signoff for a read that failed.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'whenever\n' > "$W/codex.at.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review time of another shape fails closed rather than reading as unvouched" \
+    || die "a malformed review time gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+    && die "…but it also told the operator to record a signoff" \
+    || pass "…and does not send the operator to record one"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex whenever
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so does a reply time of another shape" \
+    || die "a malformed reply time gave '${got}'"
+
+# A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT. The verdict is produced
+# by the COMMENTS on the review, and one added afterwards does not move the
+# review's `submitted_at`: review at T1, signoff at T2, retraction at T3, and
+# ordered against the review alone `T2 > T1` still held. #129.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "a reply landing after the signoff is not answered by it" \
+    || die "a later reply was vouched over: '${got}'"
+# AND ONE BEFORE IT STILL CLOSES THE PHASE, or the rule would only ever refuse.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-01T12:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+    && pass "…while one that landed before it still does" \
+    || die "an earlier reply blocked the phase: '${got}'"
+# EQUAL IS NOT NEWER HERE EITHER.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-02T00:00:00Z
+got="$(run 7)"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and one in the same second cannot be ordered" \
+    || die "a same-second reply was ordered: '${got}'"
+# AN UNREADABLE REPLY TIME IS NOT "NO REPLIES": read as one, the retracting reply
+# it could not see is exactly what the phase closes over.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.replies.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and an unreadable reply time fails closed" \
+    || die "an unreadable reply time gave '${got}'"
+# THE SAME ON THE OTHER ARM.
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"; vouched copilot "$COPILOTBOT" "$HEAD40"
+replied_at copilot 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
+    && pass "…and the post-Copilot arm orders against the reply too" \
+    || die "the post-Copilot arm vouched over a later reply: '${got}'"
+
 # AN UNREADABLE PROBE IS NOT "NOBODY SIGNED IT OFF". Folded together, an
 # unreadable read tells the operator to record a signoff they may already have
 # recorded, and hides a broken read behind an ordinary-looking refusal. Both
