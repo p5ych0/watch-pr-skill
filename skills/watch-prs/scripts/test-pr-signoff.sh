@@ -365,6 +365,31 @@ got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc
 { [ "$rc" -eq 0 ] && printf '%s' "$got" | grep -qF "sha=$SHA"; } \
     && pass "a signoff buried under a page of later comments is still found" \
     || die "the walk stopped at one page (rc=$rc '$got')"
+# THE REVOCATION ON PAGE ONE, THE SIGNOFF ON PAGE TWO. The candidate has to
+# survive a page that carries none: pages run oldest to newest, so a later page
+# with no revocation must not erase the one an earlier page found — and that is
+# the shape #122 is about, with the signoff written after the revocation it would
+# otherwise supersede.
+world; rm -f "$TMP/page"
+page true '"c1"' "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out.1"
+page false 'null' "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out.2"
+got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
+    GH_PAGE="$TMP/page" LAST_PAGE=2 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'reason=revoked'; } \
+    && pass "a revocation on an earlier page still reopens the phase" \
+    || die "the earlier page's revocation was forgotten (rc=$rc '$got')"
+# AND ONE OLDER THAN THE VERDICT STILL DOES NOT, across pages either.
+world; rm -f "$TMP/page"
+page true '"c1"' "OWNER|**Review-Signoff-Revoked:** \`$BOT\`" > "$TMP/out.1"
+page false 'null' "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-02-02T00:00:00Z\`" > "$TMP/out.2"
+got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
+    GH_PAGE="$TMP/page" LAST_PAGE=2 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && printf '%s' "$got" | grep -qF "sha=$SHA"; } \
+    && pass "…while one older than the verdict leaves the signoff standing across pages" \
+    || die "an earlier page's older revocation reopened the phase (rc=$rc '$got')"
+
 # A CURSOR CYCLE STOPS RATHER THAN HANGING. A stale page can claim another page
 # while handing back a cursor already used; a gate that never answers is worse
 # than one that refuses.

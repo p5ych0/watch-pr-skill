@@ -1028,7 +1028,14 @@ forbidden. So the operator's answer has to become state:
 - **it was a clean verdict** — record the signoff for that reviewer and head, the
   same `**Review-Signoff:**` line step 7 writes — reviewer and head in backticks,
   and optionally a third field, the time of the verdict being signed off, which
-  the phase adds when it can read it. The merge gate accepts it *for
+  the phase adds when it can read it. **That third field is what a later
+  revocation is ordered against**: a signoff stands only if no revocation is newer
+  than the verdict it answers, so one posted while the phase was proving still
+  reopens the phase even though the signoff was written after it. A revocation in
+  the same second reopens it too, because the two cannot be ordered and treating
+  that as "the signoff stands" is the answer the rule exists to stop. Where there
+  is nothing to compare — no third field, or a revocation whose own time cannot be
+  read — the last record wins, as it always did. The merge gate accepts it *for
   this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
   that head merges, and says so in its output. A review with real findings is not
   a question anyone was asked, so a signoff never carries one.
