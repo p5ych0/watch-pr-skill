@@ -1845,50 +1845,54 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# THE CONTINUATION LIVES INSIDE THE `0)` ARM, AND THAT IS STRUCTURAL. This bash
-# runs in YOUR shell, which nothing here controls — `exit` is a builtin a
-# function can take the place of, and one that RETURNS instead of exiting leaves
-# a refusal arm falling straight through the `esac` into whatever came after it.
-# Written that way, the 1/2 distinction above held right up to the point where it
-# mattered and then continued anyway. Nothing follows the `esac`, so there is
-# nothing to fall into; and each refusal arm still ENDS in a reserved word, so it
-# reports non-zero even with `echo` and `exit` both taken away.
+# NO STATUS VARIABLE AT ALL, and that is the point of the shape below. Written as
+# `if …; then RC=0; else RC=$?; fi` and then a `case "$RC"`, a startup file that
+# had already made that name readonly with the value 0 caused BOTH assignments to
+# fail while leaving it at 0 — and a helper that returned 1 or 2 was sent through
+# the continuation into the merge flow. A failed assignment does not even fire an
+# `||`, so there is no status to take; the answer is not to guard the variable but
+# to have none. The helper's status is branched on where it is produced.
 #
-# AS AN `if` CONDITION, NOT `cmd; RC=$?`. If your shell has `errexit` on — this
-# block is pasted into one as often as it is typed — a simple command that exits
-# non-zero ends the shell BEFORE the assignment, so the 1/2 distinction is lost
-# at exactly the two statuses it exists for, and the stop it should have printed
-# never appears. A command run as a CONDITION is exempt from `errexit`, which is
-# what makes the status reachable at all.
+# THE CONTINUATION IS THE `then` BRANCH, AND THAT IS STRUCTURAL TOO. This bash
+# runs in YOUR shell, which nothing here controls — `exit` is a builtin a function
+# can take the place of, and one that RETURNS instead of exiting leaves a refusal
+# falling straight through into whatever came after it. Nothing follows, so there
+# is nothing to fall into; and each refusal ENDS in a reserved word, so it reports
+# non-zero even with `echo` and `exit` both taken away.
+#
+# AND IT IS A CONDITION, NOT a simple command whose status is read afterwards. If
+# your shell has `errexit` on — this block is pasted into one as often as it is
+# typed — a simple command that exits non-zero ends the shell before anything can
+# read its status, so the 1/2 distinction is lost at exactly the two statuses it
+# exists for. A command run as a CONDITION is exempt.
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
-    PHASE_RC=0
+    # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
+    # asks for the head alone, so nothing here parses a record line. The status
+    # AND the shape are checked, because neither covers the other and this value
+    # is what every gate below is measured against.
+    CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
+    RX_SHA40='^[0-9a-f]{40}$'
+    if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
+        echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
+        exit 0
+        # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a
+        # function can shadow, and with both shadowed this branch says nothing and
+        # returns 0 — a failed read indistinguishable from a resumed phase.
+        # `[[ … ]]` is a reserved word, so the block ends non-zero whatever was
+        # done to the builtins.
+        [[ -n "" ]]
+    fi
 else
-    PHASE_RC=$?
-fi
-case "$PHASE_RC" in
-    0) # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
-       # asks for the head alone, so nothing here parses a record line. The status
-       # AND the shape are checked, because neither covers the other and this
-       # value is what every gate below is measured against.
-       CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
-       RX_SHA40='^[0-9a-f]{40}$'
-       if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
-           echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
+    # `$?` HERE IS THE CONDITION'S, read before anything else can change it.
+    case $? in
+        1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."
            exit 0
-           # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a
-           # function can shadow, and with both shadowed this branch says nothing
-           # and returns 0 — a failed read indistinguishable from a resumed phase.
-           # `[[ … ]]` is a reserved word, so the block ends non-zero whatever was
-           # done to the builtins.
-           [[ -n "" ]]
-       fi ;;
-    1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."
-       exit 0
-       [[ -n "" ]] ;;
-    *) echo "ABORT: the phase could not be read (rc=$PHASE_RC). Do not merge on a phase nothing could establish."
-       exit 0
-       [[ -n "" ]] ;;
-esac
+           [[ -n "" ]] ;;
+        *) echo "ABORT: the phase could not be read. Do not merge on a phase nothing could establish."
+           exit 0
+           [[ -n "" ]] ;;
+    esac
+fi
 ```
 
 ### Then: the gate

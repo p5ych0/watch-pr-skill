@@ -2535,93 +2535,26 @@ resume_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
 printf '%s' "$resume_blk" | grep -qF 'pr-phase-state.sh N' \
     && pass "the resume recipe reads the phase off the PR through pr-phase-state.sh" \
     || die "the resume recipe does not call pr-phase-state.sh"
-printf '%s' "$resume_blk" | grep -qF 'PHASE_RC=$?' \
-    && pass "…taking its status on the same line" \
-    || die "the resume recipe ignores the phase helper's status"
-# THE THREE ANSWERS, EACH ITS OWN ARM. `0` continues, `1` stops on the record the
-# helper printed, and anything else is unreadable — which is NOT "no signoff", and
-# a `case` with only the first two arms would fall through to the continue.
-_phase_arms="$(printf '%s' "$resume_blk" | awk '/^case "\$PHASE_RC" in/{f=1} f{print} /^esac$/{if(f)exit}')"
-{ printf '%s' "$_phase_arms" | grep -qE '^ *0\)' \
-    && printf '%s' "$_phase_arms" | grep -qE '^ *1\)' \
-    && printf '%s' "$_phase_arms" | grep -qE '^ *\*\)'; } \
-    && pass "…and tells continue, stopped and unreadable apart" \
-    || die "the resume recipe does not distinguish the phase helper's three answers: '$_phase_arms'"
-# AND NONE OF THE LIFTED LOGIC GREW BACK. The behaviour is the helper's; a second
-# copy here would be one nothing runs, which is the state #26 exists to end.
+# NO STATUS VARIABLE HOLDS THE ANSWER, and that is not a style point. Written as
+# `if …; then RC=0; else RC=$?; fi` with a `case "$RC"` after it, a startup file
+# that had already made that name readonly with the value 0 made BOTH assignments
+# fail while leaving it at 0 — and a helper that returned 1 or 2 was sent through
+# the continuation into the merge flow. `CLAUDE.md` records that a failed
+# assignment does not even fire an `||`, so there is no status to take: the answer
+# is to have no variable, and this asserts the absence rather than a guard.
 case "$resume_blk" in
-    *RESUMED_HEAD*|*COPILOT_SIGNOFF_RC*)
-        die "the resume recipe re-implements the phase selection that moved to pr-phase-state.sh" ;;
-    *) pass "…and no copy of the phase selection is left in the document" ;;
+    *PHASE_RC*) die "the resume recipe holds the phase status in a variable, which a readonly pre-seed defeats" ;;
+    *) pass "…with no status variable between the helper and the decision" ;;
 esac
-
-# ── AND A REFUSAL ARM CANNOT FALL INTO THE CONTINUATION ────────────────────
-# THIS BASH RUNS IN THE OPERATOR'S OWN SHELL, which nothing here controls: `exit`
-# is a builtin a function can take the place of, and one that RETURNS instead of
-# exiting leaves a refusal arm falling straight through the `esac` into whatever
-# came after it. The 1/2 distinction then holds right up to the point where it
-# matters and continues anyway.
-#
-# THE ANSWER IS STRUCTURAL, so it is asserted by RUNNING the document's own branch
-# rather than by grepping for a spelling: the continuation lives inside the `0)`
-# arm, so there is nothing after the `esac` to fall into. `RB_SCRIPTS` points at a
-# directory whose `pr-signoff.sh` prints a marker — if a refusal arm reaches the
-# continuation, the marker appears.
-# ── AND THE STATUS SURVIVES AN `errexit` SHELL ─────────────────────────────
-# `cmd; RC=$?` ends a shell with `errexit` on BEFORE the assignment, so the 1/2
-# distinction is lost at exactly the two statuses it exists for and the stop it
-# should have printed never appears. A command run as a CONDITION is exempt.
-# Asserted by RUNNING the document's own lines under `set -e` with the helper
-# unreachable: the refusal arm has to be reached and to say so.
-_ph_call="$(printf '%s' "$resume_blk" | awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-phase-state\.sh/{f=1} f{print} /^fi$/{if(f)exit}')"
-[ -n "$_ph_call" ] || die "the phase-state call could not be lifted from the resume recipe"
-_ph_case="$(printf '%s' "$resume_blk" | awk '/^case "\$PHASE_RC" in/{f=1} f{print} /^esac$/{if(f)exit}')"
-[ -n "$_ph_case" ] || die "the phase branch could not be lifted from the resume recipe"
-_ph_e="$(RB_SCRIPTS=/nonexistent/rb-phase-probe CODEX_BOT=somebody bash -c '
-    set -e
-    '"$_ph_call"'
-    '"$_ph_case"'' 2>&1)" || true
-case "$_ph_e" in
-    *"the phase could not be read"*) pass "…and an errexit shell still reaches the refusal arm" ;;
-    *) die "under set -e the phase status never reached the branch ('$_ph_e')" ;;
-esac
-# NOTHING IS CREATED FOR THIS, and that is deliberate: a scratch directory here
-# would be the FIRST one this file takes, and the `mktemp` probe further down
-# re-runs the whole file expecting it to stop at the counter fixture's guard with
-# that guard's words. The marker is a path that does not exist — the continuation
-# runs `bash "$RB_SCRIPTS"/pr-signoff.sh`, which names the path it could not open,
-# and stderr is captured. A refusal arm never reaches it, so the path never
-# appears.
-_ph_probe=/nonexistent/rb-phase-probe
-# THE CONTROL FIRST, because "the marker never appeared" is also what a probe that
-# cannot reach the continuation at all looks like — and that passes against any
-# structure, including the broken one.
-_ph_ok="$(RB_SCRIPTS="$_ph_probe" CODEX_BOT=somebody PHASE_RC=0 bash -c '
-    exit() { return 0; }
-    echo() { return 0; }
-    '"$_ph_case"'' 2>&1)" || true
-case "$_ph_ok" in
-    *"$_ph_probe/pr-signoff.sh"*) pass "the phase branch's continue arm reaches the sha read" ;;
-    *) die "the phase-branch probe never reaches the continuation, so it proves nothing ('$_ph_ok')" ;;
-esac
-# `&& _ph_st=0 || _ph_st=$?`, NOT `; _ph_st=$?`: this file runs under `set -e`,
-# where an assignment whose command substitution exits non-zero terminates the
-# script — and the whole point of these two cases is that it does exit non-zero.
-# Written the plain way the suite stopped here and reported PASS on everything
-# before it, which is the silent-truncation failure this file exists to catch.
-for _ph_rc in 1 2; do
-    _ph_out="$(RB_SCRIPTS="$_ph_probe" CODEX_BOT=somebody PHASE_RC="$_ph_rc" bash -c '
-        exit() { return 0; }
-        echo() { return 0; }
-        '"$_ph_case"'' 2>&1)" && _ph_st=0 || _ph_st=$?
-    case "$_ph_out" in
-        *"$_ph_probe/pr-signoff.sh"*) die "with exit shadowed, the rc=$_ph_rc arm fell through into the continuation" ;;
-        *) pass "…and with exit shadowed, rc=$_ph_rc does not reach it" ;;
-    esac
-    [ "$_ph_st" -ne 0 ] \
-        && pass "…reporting non-zero from the reserved word that ends the arm" \
-        || die "the rc=$_ph_rc arm reported success with exit shadowed"
-done
+# THE THREE ANSWERS, EACH ITS OWN BRANCH: the `then` continues, and the `else`
+# reads the condition's `$?` into a `case` that tells 1 from anything else. A
+# `case` with only the first arm would fall through to the continue.
+_ph_else="$(printf '%s' "$resume_blk" | awk '/^else$/{f=1; next} /^fi$/{if(f)exit} f')"
+{ printf '%s' "$_ph_else" | grep -qF 'case $? in' \
+    && printf '%s' "$_ph_else" | grep -qE '^ *1\)' \
+    && printf '%s' "$_ph_else" | grep -qE '^ *\*\)'; } \
+    && pass "…and tells stopped from unreadable where the status is produced" \
+    || die "the resume recipe does not distinguish the phase helper's refusals: '$_ph_else'"
 
 # ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
 # Entering the Copilot phase a second time — after a Codex pass that came back
@@ -3478,6 +3411,70 @@ TMP_CL="$(mktemp_d)" || {
 # left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
 # `mktemp_d` has already established the path is non-empty, absolute and not `/`.
 trap 'rm -rf "$TMP_CL"' EXIT
+
+# ── THE RESUME RECIPE'S PHASE BRANCH, EXECUTED ─────────────────────────────
+# The assertions beside the recipe itself are about SHAPE. These run the
+# document's own lines — lifted whole, so a regression arrives in the probe — with
+# a stubbed helper, and check what actually happens for each status it can return.
+#
+# TO THE END OF THE BLOCK, not to the first `fi`. The shape this replaced put the
+# decision in a `case` AFTER the `if`, and a lift that stopped at the `fi` took
+# only the half that reads the status — so the continuation was unreachable in the
+# probe and every case below passed vacuously against exactly the regression they
+# exist to catch. This is the last thing in the fenced block, so there is nothing
+# after it to take by accident.
+#
+# HERE RATHER THAN BESIDE THEM, because a stub directory is a scratch directory,
+# and the `mktemp` probe further down re-runs this whole file expecting it to stop
+# at the counter fixture's guard above with that guard's words. `TMP_CL` is that
+# guard's directory, so nothing new is taken.
+_ph_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
+                sec && /^```bash$/ {inb=1; next}
+                inb && /^```$/ {exit}
+                inb' "$SKILL" \
+    | awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-phase-state\.sh/{f=1} f{print}')"
+[ -n "$_ph_blk" ] || die "the phase branch could not be lifted from the resume recipe"
+_ph_dir="$TMP_CL/phase"; mkdir -p "$_ph_dir"
+# ON STDERR, because the continuation CAPTURES this helper's stdout into
+# `CODEX_SHA` — a marker printed there is assigned, not observed.
+printf '#!/usr/bin/env bash\nprintf "CONTINUED\\n" >&2\n' > "$_ph_dir/pr-signoff.sh"
+chmod +x "$_ph_dir/pr-signoff.sh"
+ph_run() {   # ph_run <helper status> <extra shell prelude> ; prints the output
+    printf '#!/usr/bin/env bash\nexit %s\n' "$1" > "$_ph_dir/pr-phase-state.sh"
+    chmod +x "$_ph_dir/pr-phase-state.sh"
+    RB_SCRIPTS="$_ph_dir" CODEX_BOT=somebody bash -c "$2"'
+    '"$_ph_blk" 2>&1 || true
+}
+# THE CONTROL FIRST, because "the marker never appeared" is also what a probe that
+# cannot reach the continuation at all looks like — and that passes against any
+# structure, including every broken one below.
+case "$(ph_run 0 ':')" in
+    *CONTINUED*) pass "the phase branch reaches the sha read when the helper says the phase stands" ;;
+    *) die "the phase-branch probe never reaches the continuation, so it proves nothing" ;;
+esac
+for _ph_rc in 1 2; do
+    # WITH `exit` SHADOWED, which is what a refusal falling through looks like:
+    # one that RETURNS leaves the branch running on into whatever came after it.
+    case "$(ph_run "$_ph_rc" 'exit() { return 0; }; echo() { return 0; }')" in
+        *CONTINUED*) die "with exit shadowed, status $_ph_rc reached the continuation" ;;
+        *) pass "…and status $_ph_rc does not reach it even with exit shadowed" ;;
+    esac
+    # UNDER `errexit`, where a simple command's non-zero status ends the shell
+    # before anything can read it.
+    case "$(ph_run "$_ph_rc" 'set -e')" in
+        *"the phase"*) pass "…and an errexit shell still reaches the refusal for status $_ph_rc" ;;
+        *) die "under set -e, status $_ph_rc never reached the refusal" ;;
+    esac
+    # AND WITH THE STATUS NAME ALREADY READONLY. The shape this replaced held the
+    # answer in `PHASE_RC`, and a startup file that had made that name readonly
+    # with the value 0 made both assignments fail while leaving it at 0 — sending a
+    # refused phase through the continuation. With no variable there is nothing to
+    # pre-seed, and this is what says so.
+    case "$(ph_run "$_ph_rc" 'readonly PHASE_RC=0')" in
+        *CONTINUED*) die "a readonly PHASE_RC=0 sent status $_ph_rc through the continuation" ;;
+        *) pass "…and a readonly PHASE_RC=0 cannot send status $_ph_rc through it" ;;
+    esac
+done
 
 # The stop is exercised, not merely written. The dangerous case is not "mktemp
 # failed" — a plain failure is caught by any status check — it is a `mktemp` that
