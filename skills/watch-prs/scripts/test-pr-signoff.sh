@@ -107,6 +107,16 @@ world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
                 "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
 case_is 1 "reason=revoked" "a revocation is still a revocation with a verdict time on it"
 case_is 1 "verdict-at=2026-02-02T00:00:00Z" "…and reports the verdict time it carries"
+# AND A VALUE THERE THAT IS FORTY LOWERCASE HEX is captured as the optional SHA
+# rather than as the time, and the revocation branch ignores a sha — so the record
+# would read as one carrying no time at all, and a present but unplaceable value
+# would be accepted as a legacy record.
+world; comments "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…while a revocation carrying a sha-shaped value is refused"
+# THE CHECK RUNS BEFORE EITHER EARLY RETURN. `sha` mode handed the head back with
+# status 0, so `SKILL.md` and `pr-phase-state.sh` read a malformed record as a
+# closed phase; a revocation exited 1 as an ordinary one.
+# `sha` MODE IS ASSERTED FURTHER DOWN, where its runner is defined.
 
 
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
@@ -339,6 +349,17 @@ got="$(sha_run)"
 { [ "${got%%|*}" = 0 ] && [ "$(printf '%s' "$got" | cut -d'|' -f2)" = "$SHA" ]; } \
     && pass "sha prints the recorded head and nothing else" \
     || die "sha gave '$got'"
+# AND IT REFUSES AN UNREADABLE VERDICT TIME, which the check must run BEFORE this
+# mode returns: handing the head back with status 0 makes `SKILL.md` and
+# `pr-phase-state.sh` read a malformed record as a closed phase.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`whenever\`" > "$TMP/out"
+got="$(sha_run)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "$got" | cut -d'|' -f3 | grep -qF 'reason=bad_verdict_at'; } \
+    && pass "…and refuses a record whose verdict time is not a time" \
+    || die "sha accepted a malformed verdict time: '$got'"
+[ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ] \
+    && pass "…printing no head at all" \
+    || die "sha printed a head for a malformed record: '$got'"
 # NOTHING OF THE RECORD SHAPE REACHES STDOUT, or a caller shape-checking the
 # result would still be parsing a line — which is the whole point of the mode.
 case "$(printf '%s' "$got" | cut -d'|' -f2)" in

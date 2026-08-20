@@ -23,6 +23,16 @@
   space, so neither peel can take it. A revocation carries it in the second
   backticked field, having no sha.
 
+  The shared reader knows the field: `recordlib.sh`'s signoff pattern accepts it,
+  so the replies-only escape still recognises an operator's signoff. A fixture
+  that stubs `pr-signoff.sh` with a record shape the real one no longer emits is
+  how that would have gone unnoticed, and both callers' stubs carry the new shape.
+
+  A **revocation** carries the field in the second backticked position, having no
+  sha — and a value there that happens to be forty lowercase hex is captured as a
+  sha, which a revocation cannot have, so that record is refused rather than read
+  as one carrying no time.
+
   Nothing writes or reads it yet — the writer and the readers are the next two
   steps. #135, for #122.
 

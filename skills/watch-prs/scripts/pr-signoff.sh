@@ -240,6 +240,13 @@ while :; do
                  | (if $m[3] == null then "none"
                     elif ($m[3] | canonical_utc) then $m[3]
                     else "unreadable" end) as $v
+                 # A REVOCATION HAS NO SHA, so its verdict time is the SECOND
+                 # backticked field — and a value there that happens to be forty
+                 # lowercase hex is captured as the SHA instead, which the
+                 # revocation branch ignores. The record then reads as one carrying
+                 # no time at all, so a present but unplaceable value is accepted
+                 # as a legacy record. A sha capture ON A REVOCATION is that value.
+                 | (if $m[0] != null and ($m[2] | type) == "string" then "unreadable" else $v end) as $v
                  | if $m[0] != null then "REVOKED\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    elif ($m[2] | type) == "string" then $m[2] + "\t" + $c + "\t" + ($i | tostring) + "\t" + $v
                    else empty end
@@ -301,6 +308,24 @@ fi
 # `verdict-at=` IS ALWAYS PRESENT, as `none` where the record does not carry one.
 # A field that is sometimes absent makes the record two shapes, and every reader
 # would need to know which one it was holding.
+# A VERDICT TIME THIS COULD NOT READ IS NOT A RECORD TO ACT ON, AND THAT IS
+# DECIDED BEFORE ANY MODE RETURNS. `none` says the signoff does not carry one,
+# which every record written before #135 does not; `unreadable` says it carries
+# something that is not a time, and a reader ordering a revocation against that
+# would place it somewhere arbitrary.
+#
+# BEFORE THE `sha` MODE AND BEFORE THE REVOCATION BRANCH, both of which return
+# early: `sha` handed the head back with status 0, so `SKILL.md` and
+# `pr-phase-state.sh` read a malformed record as a closed phase, and a revocation
+# exited 1 as an ordinary one.
+if [ "$VERDICT_AT" = unreadable ]; then
+    if [ "$MODE" = sha ]; then
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
+    else
+        echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at" >&2
+    fi
+    exit 2
+fi
 if [ "$SHA" = REVOKED ]; then
     if [ "$MODE" = sha ]; then
         echo "PR_SIGNOFF pr=$PR reviewer=$WHO verdict-at=$VERDICT_AT at=$SIGNED_AT id=$SIGNED_ID sha=none reason=revoked" >&2
@@ -335,14 +360,6 @@ _why="$(sha_reason "$SHA")" || {
 if [ "$MODE" = sha ]; then
     echo "$SHA"
     exit 0
-fi
-# A VERDICT TIME THIS COULD NOT READ IS NOT A RECORD TO ACT ON. `none` says the
-# signoff does not carry one, which every record written before #135 does not;
-# `unreadable` says it carries something that is not a time, and a reader ordering
-# a revocation against that would place it somewhere arbitrary.
-if [ "$VERDICT_AT" = unreadable ]; then
-    echo "PR_SIGNOFF pr=$PR reviewer=$WHO status=error reason=bad_verdict_at sha=$SHA" >&2
-    exit 2
 fi
 echo "PR_SIGNOFF pr=$PR reviewer=$WHO verdict-at=$VERDICT_AT at=$SIGNED_AT id=$SIGNED_ID sha=$SHA"
 exit 0
