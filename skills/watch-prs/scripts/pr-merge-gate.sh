@@ -462,9 +462,17 @@ fi
 # passed as Codex's signoff and the gate merged without ever proving the named
 # reviewer approved the commit being merged.
 #
-# Every field is known here, so this is a literal string comparison rather than a
-# pattern — `[ = ]`, not `[[ == ]]`, because the bot logins end in `[bot]` and
-# `[[ ]]` would read that as a character class on the right-hand side.
+# THE SHAPE COMES FROM `recordlib.sh` AND THE COMPARISONS ARE LITERAL. This used
+# to REBUILD the expected line and compare against it, which is a second
+# definition of what a record is — written as a string, so no scan for a regex
+# would ever find it — and it pinned the sha to seven hex where every other caller
+# accepts seven to forty. The parse and the identity check are the library's now;
+# what stays here is the VALUE and the TAIL, because what may follow a value
+# differs per question and this gate is the last place to be relaxed about it.
+#
+# Every comparison that remains is a literal string one — `[ = ]`, not
+# `[[ == ]]` — because the bot logins end in `[bot]` and `[[ ]]` would read that
+# as a character class on the right-hand side.
 # Copilot's record is required in the two-reviewer mode and absent by definition
 # in the other; the LIST changes rather than the checking.
 #

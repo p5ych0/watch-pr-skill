@@ -357,6 +357,33 @@ vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 case_is 0 "left only replies" "a replies-only verdict merges on the signoff an operator recorded"
 
+# ── A FULL-WIDTH RECORD IS ACCEPTED, THROUGH THIS GATE ─────────────────────
+# The gate used to REBUILD the line it expected with `sha=${…:0:7}`, so a record
+# carrying the forty-hex OID — which every other caller accepts — was refused
+# here. `test-recordlib.sh` proves the library accepts it; that says nothing about
+# the two tail rules this file owns, and a regression in either would leave a
+# valid merge blocked with the suite green. #126.
+world
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0' "$HEAD40" "$CODEXBOT" \
+    > "$STUB_DIR/pr-review-state.$CODEXBOT.out"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0' "$HEAD40" "$COPILOTBOT" \
+    > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+case_is 0 "merged" "a clean verdict carrying the full forty-hex head merges"
+# AND THE OTHER TAIL RULE, on the path that can authorise a merge on an operator's
+# word rather than on a clean verdict.
+world
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only' \
+    "$HEAD40" "$COPILOTBOT" > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
+printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
+vouched "$COPILOTBOT"
+case_is 0 "left only replies" "…and a full-width replies-only record still merges on the recorded signoff"
+# THE IDENTITY IS STILL CHECKED AT FULL WIDTH. A forty-hex record for another
+# commit must not pass merely because the comparison grew wider.
+world
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0' "$OLD40" "$CODEXBOT" \
+    > "$STUB_DIR/pr-review-state.$CODEXBOT.out"
+case_is 1 "did not return an exact clean record" "…while a full-width record for another head is refused"
+
 # WITHOUT THAT RECORD IT REFUSES. `signoff_contradicts` answers "does a record
 # disagree", and nothing recorded is not a disagreement — so reusing it here would
 # have merged a replies-only head that no human ever read.
