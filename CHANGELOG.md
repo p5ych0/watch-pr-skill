@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.47] — 2026-08-20
+
+- **The signoff `record` posts now says which verdict it answers.** It already
+  read that time to order a standing revocation against it; it asks on every path
+  now and writes it into the marker, so a reader can order a *later* revocation
+  against the verdict rather than against comment order — the window this stage
+  cannot close itself, because its own write is what erases the evidence.
+
+  **Its absence never stops the record.** The field is optional precisely so an
+  unreadable probe degrades to a signoff without one, which reads back exactly as
+  every record written before it does. A signoff that cannot be ordered against a
+  revocation is the state that already existed; a phase that cannot close because
+  a probe failed is worse, and this stage stopping is the expensive failure. It
+  says so on stdout rather than degrading in silence.
+
+  With a revocation standing the time is *not* optional — there it decides whether
+  recording supersedes a reopening — and that arm still refuses.
+
+  The marker is composed as two shapes rather than one with an empty pair of
+  backticks: an empty field is a value `pr-signoff.sh` refuses, so writing one
+  would make the record this stage just posted unreadable to the next reader.
+
+  Nothing reads the field yet. #137, for #122.
+
 ## [2.0.46] — 2026-08-20
 
 - **A signoff can now say which verdict it answers.** Readers take the *last*

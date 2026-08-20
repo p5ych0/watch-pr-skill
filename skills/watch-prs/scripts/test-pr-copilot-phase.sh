@@ -181,6 +181,16 @@ printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
     || die "the operator stop does not say how to resume: '${got#*|}'"
 
 # ── WHAT IT POSTS IS THE RECORD SOMETHING LATER READS BACK ─────────────────
+# THE MARKER CARRIES THE VERDICT TIME, as its third backticked field: a reader can
+# then order a revocation against the VERDICT rather than against comment order,
+# which is the window this stage cannot close itself — its own write is what
+# erases the evidence. #137, for #122.
+world; got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] || die "the ordinary record did not post: '${got}'"
+posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\` \`2026-02-02T00:00:00Z\`" \
+    && pass "the signoff marker carries the time of the verdict it answers" \
+    || die "the marker does not carry the verdict time: '$(posted)'"
+
 # The marker's format is `pr-signoff.sh`'s: the name and the sha in backticks, on
 # a line of their own. Composed here rather than left to the caller's prose,
 # because a marker one character off signs nothing off and still looks posted.
@@ -388,7 +398,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"; printf '2\n' > "$W/review-at.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "verdict's time could not be read"; } \
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no verdict on'; } \
     && pass "…and an unreadable verdict time refuses with a revocation standing" \
     || die "an unreadable verdict time was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -400,14 +410,26 @@ got="$(run record 7 "$TMP/body.md")"
     && pass "…and an empty one, which is 'no verdict on this head at all'" \
     || die "an untimed verdict was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
-# AND WITH NO REVOCATION THE VERDICT'S TIME IS NEVER ASKED FOR, because there is
-# nothing to order it against — a reader that failed here would stop every
-# ordinary phase.
+# AND WITH NO REVOCATION ITS ABSENCE DOES NOT STOP THE RECORD. The time is asked
+# for on every path now, because the signoff CARRIES it — but the field is
+# optional, so an unreadable probe degrades to a record without one, which reads
+# back exactly as every record written before #135 does. A signoff that cannot be
+# ordered against a revocation is the state we already live in; a phase that
+# cannot close because a probe failed is worse. #137.
 world; printf '2\n' > "$W/review-at.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
-    && pass "…while an ordinary phase never reads it, so it cannot fail there" \
-    || die "the ordinary phase asked for the verdict's time: '${got}'"
+    && pass "…while an unreadable verdict time does not stop an ordinary phase" \
+    || die "an unreadable verdict time stopped the record: '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'will not carry one' \
+    && pass "…and it says the signoff carries none, rather than degrading in silence" \
+    || die "the record was posted without a verdict time and did not say so: '${got#*|}'"
+posted | grep -qF '**Review-Signoff:**' \
+    && pass "…with the marker still posted" \
+    || die "no signoff marker was posted: '$(posted)'"
+posted | grep -qE '\*\*Review-Signoff:\*\* `[^`]+` `[0-9a-f]{40}` `' \
+    && die "…but it carried an empty verdict field, which pr-signoff.sh refuses" \
+    || pass "…and no empty third field, which the reader would refuse"
 
 # ── THE RECORD COMPARED IS READ AFTER THE VERDICT'S TIME, NOT BEFORE IT ────
 # ASKING ONCE AND THEN FETCHING THE TIME RE-OPENED THE WINDOW ONE LEVEL DOWN. The
