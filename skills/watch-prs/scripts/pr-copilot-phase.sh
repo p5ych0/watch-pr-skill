@@ -538,6 +538,50 @@ FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq
 # verdict arrives, and an unconditional refusal means a reopened phase can never
 # record its replacement signoff at all.
 #
+# WHEN THE VERDICT LANDED, READ BEFORE THE RECORD IS, AND USED TWICE. The signoff
+# carries it, so a reader can order a revocation against the VERDICT rather than
+# against comment order — this stage cannot close that window itself, because its
+# own write is what erases the evidence. #137, for #122.
+#
+# BEFORE THE TRIGGER, NOT BETWEEN IT AND THE WRITE. Read after it, this call sits
+# between the last look at the signoff record and the post — so a revocation
+# landing during it is superseded on the ORDINARY path, where nothing had looked
+# since. That is a window this change would have ADDED, and moving the read
+# removes it rather than guarding it: the revoked arm below re-reads the record
+# anyway, and the ordinary path once again has nothing between its last look and
+# its write.
+#
+# AND ITS ABSENCE NEVER STOPS THE RECORD. The field is optional precisely so an
+# unreadable probe degrades to a record without it, which reads back exactly as
+# every record written before #135 does. A signoff that cannot be ordered against
+# a revocation is the state we already live in; a phase that cannot close because
+# a transient API failure is worse, and this stage stopping is the expensive
+# failure.
+RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") || RB_VERDICT_AT=""
+case "$RB_VERDICT_AT" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) [[ -z $RB_VERDICT_AT ]] || echo "note: the verdict time on $CODEX_SHA read as '$RB_VERDICT_AT', which is not a time; the signoff will not carry one"
+       RB_VERDICT_AT="" ;;
+esac
+# AND IT HAS TO DESCRIBE THE VERDICT THAT WAS PROVED CLEAN. `review-at` reports
+# the LATEST verdict on this sha across both channels, so a result landing between
+# the cleanliness proof and this read is the one it times — and the record would
+# then claim to answer a verdict nobody proved. Re-proving cleanliness immediately
+# after is what binds them; where it no longer holds, the field is dropped rather
+# than written wrong, and the ordering arm below still refuses on its own terms.
+#
+# ONE SNAPSHOT WOULD BE BETTER THAN TWO ADJACENT READS, and that is #139: the
+# reader can answer "clean, and at this time" from one response, as
+# `escape-snapshot` does for the replies-only escape.
+if [[ -n $RB_VERDICT_AT ]]; then
+    RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
+    if [[ $RB_STILL_CLEAN_RC -ne 0 ]]; then
+        echo "note: the verdict on $CODEX_SHA moved while its time was read ($RB_STILL_CLEAN); the signoff will not carry one"
+        RB_VERDICT_AT=""
+    fi
+fi
+[[ -n $RB_VERDICT_AT ]] || echo "note: no readable verdict time for $CODEX_SHA; the signoff will not carry one, and a later revocation cannot be ordered against it"
+
 # TELLING THE TWO APART IS ORDERING: a revocation this pass is ANSWERING landed
 # before the verdict, and one that would CANCEL it landed after.
 #
@@ -574,27 +618,6 @@ case "$RB_TRIGGER_RC" in
     0|1) ;;
     *) echo "ABORT: could not read the signoff record before recording (rc=$RB_TRIGGER_RC); nothing posted"; exit 1 ;;
 esac
-# WHEN THE VERDICT LANDED, READ ONCE AND USED TWICE. The signoff carries it, so a
-# reader can order a revocation against the VERDICT rather than against comment
-# order — this stage cannot close that window itself, because its own write is
-# what erases the evidence. #137, for #122.
-#
-# AND ITS ABSENCE NEVER STOPS THE RECORD. The field is optional precisely so an
-# unreadable probe degrades to a record without it, which reads back exactly as
-# every record written before #135 does. A signoff that cannot be ordered against
-# a revocation is the state we already live in; a phase that cannot close because
-# a probe failed is worse, and this stage stopping is the expensive failure.
-#
-# WITH A REVOCATION STANDING IT IS A DIFFERENT QUESTION, and the arm below asks
-# it: there the time is what decides whether recording supersedes a reopening, so
-# an unreadable one must stop.
-RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") || RB_VERDICT_AT=""
-case "$RB_VERDICT_AT" in
-    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-    *) [[ -z $RB_VERDICT_AT ]] || echo "note: the verdict time on $CODEX_SHA read as '$RB_VERDICT_AT', which is not a time; the signoff will not carry one"
-       RB_VERDICT_AT="" ;;
-esac
-[[ -n $RB_VERDICT_AT ]] || echo "note: no readable verdict time for $CODEX_SHA; the signoff will not carry one, and a later revocation cannot be ordered against it"
 case "$RB_TRIGGER" in
 *reason=revoked*)
     # WITH A REVOCATION STANDING THE TIME IS NOT OPTIONAL. Above it is a value the

@@ -22,6 +22,21 @@
   backticks: an empty field is a value `pr-signoff.sh` refuses, so writing one
   would make the record this stage just posted unreadable to the next reader.
 
+  **The read happens before the record is looked at, not between that look and the
+  write.** Placed after, it would sit where nothing had looked at the signoff
+  record since — so a revocation landing during it is superseded on the ordinary
+  path, a window this change would have *added*. Moving the read removes it: the
+  revoked arm re-reads the record anyway, and the ordinary path again has nothing
+  between its last look and its write.
+
+  **And the time has to describe the verdict that was proved clean.** `review-at`
+  reports the latest verdict on the sha, so a result arriving between the
+  cleanliness proof and that read is the one it times — and the record would claim
+  to answer a verdict nobody proved. Cleanliness is re-proved immediately after,
+  and where it no longer holds the field is dropped rather than written wrong.
+  #139 is the removal: one reader answering "clean, and at this time" from one
+  response.
+
   Nothing reads the field yet. #137, for #122.
 
 ## [2.0.46] — 2026-08-20

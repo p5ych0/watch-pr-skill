@@ -43,6 +43,12 @@ case "${1:-}" in
                # re-read has already passed — which is the window the read before
                # the post exists for.
                [ "$_n" -ge 2 ] && [ -f "$W/move-head-late" ] && cat "$W/move-head-late" > "$W/head.out"
+               # `.3` IS THE READ THAT BINDS THE TIME TO A CLEAN VERDICT, after
+               # the recheck and the re-proof — a result landing between the
+               # cleanliness proof and the time read is what it exists to catch.
+               if [ "$_n" -ge 3 ] && [ -f "$W/verdict.3.rc" ]; then
+                   cat "$W/verdict.3.out" 2>/dev/null; exit "$(cat "$W/verdict.3.rc")"
+               fi
                if [ "$_n" -ge 2 ] && [ -f "$W/verdict.2.rc" ]; then
                    cat "$W/verdict.2.out" 2>/dev/null; exit "$(cat "$W/verdict.2.rc")"
                fi
@@ -181,6 +187,21 @@ printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
     || die "the operator stop does not say how to resume: '${got#*|}'"
 
 # ── WHAT IT POSTS IS THE RECORD SOMETHING LATER READS BACK ─────────────────
+# AND IT HAS TO DESCRIBE THE VERDICT THAT WAS PROVED CLEAN. `review-at` reports
+# the LATEST verdict on this sha, so a result landing between the cleanliness
+# proof and that read is the one it times — and the record would claim to answer
+# a verdict nobody proved. Re-proving cleanliness binds them; where it no longer
+# holds the field is dropped rather than written wrong.
+world; printf '1\n' > "$W/verdict.3.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.3.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'moved while its time was read'; } \
+    && pass "a verdict that moved after being proved clean drops the field rather than timing the wrong one" \
+    || die "a moved verdict gave '${got}'"
+posted | grep -qE '\*\*Review-Signoff:\*\* `[^`]+` `[0-9a-f]{40}` `' \
+    && die "…but the signoff carried that verdict's time anyway" \
+    || pass "…and the signoff carries no verdict time"
+
 # THE MARKER CARRIES THE VERDICT TIME, as its third backticked field: a reader can
 # then order a revocation against the VERDICT rather than against comment order,
 # which is the window this stage cannot close itself — its own write is what

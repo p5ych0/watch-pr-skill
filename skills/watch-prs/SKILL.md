@@ -1026,7 +1026,9 @@ the watch returns 4 again, there is no thread to resolve, and re-requesting is
 forbidden. So the operator's answer has to become state:
 
 - **it was a clean verdict** — record the signoff for that reviewer and head, the
-  same `**Review-Signoff:**` line step 7 writes. The merge gate accepts it *for
+  same `**Review-Signoff:**` line step 7 writes — reviewer and head in backticks,
+  and optionally a third field, the time of the verdict being signed off, which
+  the phase adds when it can read it. The merge gate accepts it *for
   this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
   that head merges, and says so in its output. A review with real findings is not
   a question anyone was asked, so a signoff never carries one.
