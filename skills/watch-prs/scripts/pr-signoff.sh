@@ -22,9 +22,18 @@
 # be mistaken for a value: it is not 40 hex, and the status says why. The statuses
 # are unchanged, because they are what the callers already branch on.
 #
-# THE DEFAULT OUTPUT IS UNCHANGED, deliberately: the resume path prints the whole
-# record in its abort messages, and `test-pr-skill-contract.sh` asserts on that
-# shape.
+# THE DEFAULT OUTPUT IS THE WHOLE RECORD:
+#
+#   PR_SIGNOFF pr=<n> reviewer=<login> verdict-at=<utc|none> at=<utc> id=<n> sha=<40hex>
+#
+# and a revocation is the same line with `sha=none reason=revoked`. `verdict-at=`
+# is the time of the VERDICT the signoff answers, and it is always present — as
+# `none` where the record does not carry one, which every record written before
+# #135 does not. The field order is load-bearing: callers peel the sha with
+# `${line##*sha=}` and the record time with `${line#* at=}`, so nothing may follow
+# the sha and nothing preceded by a SPACE may spell `at=` before the real one.
+# `verdict-at=` cannot, because the character before those three letters is a
+# hyphen.
 #
 # WHY THIS EXISTS
 #
@@ -228,7 +237,7 @@ while :; do
                  # that required it would report every signoff on every open PR as
                  # malformed, which is the fail-closed direction turned into a
                  # denial of service.
-                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]{1,64})`)?[[:space:]]*$")]
+                 | (.body | [scan("(?m)^\\*\\*Review-Signoff(-Revoked)?:\\*\\* `([^`\n]{1,200})`(?: `([0-9a-f]{40})`)?(?: `([^`\n]+)`)?[[:space:]]*$")]
                           | last // ["","","",""])
                  | select(.[1] == $who)
                  # A revocation carries no sha and a signoff must; anything else
@@ -237,6 +246,13 @@ while :; do
                  # AND A VERDICT TIME THAT IS PRESENT MUST BE READABLE. `none` is
                  # the absent case and travels as itself; anything that is neither
                  # is a record this cannot place, which is not one to act on.
+                 #
+                 # CAPTURED WITHOUT A LENGTH BOUND, and judged afterwards. A bound
+                 # makes an overlong value fail the WHOLE marker rather than
+                 # classify it — the line then matches nothing, `last` returns an
+                 # OLDER record, and a deliberately reopened phase reads as closed.
+                 # A value this cannot place has to be visible in order to be
+                 # refused.
                  | (if $m[3] == null then "none"
                     elif ($m[3] | canonical_utc) then $m[3]
                     else "unreadable" end) as $v

@@ -95,10 +95,14 @@ got="$(run "$BOT")"; line="${got#*|}"
 [ "${line##*sha=}" = "$SHA" ] \
     && pass "…and the sha still peels off the end cleanly" \
     || die "the sha peel took '${line##*sha=}'"
+# ASSERTED AS AN EQUALITY, not as "it is not the verdict time": if the record ever
+# loses its space-delimited ` at=` field, that peel returns the WHOLE line and
+# `%% *` reduces it to `PR_SIGNOFF` — which is also not the verdict time, so an
+# inequality passes while the ordering `pr-copilot-phase.sh` depends on is broken.
 _at="${line#* at=}"; _at="${_at%% *}"
-[ "$_at" != 2026-01-01T00:00:00Z ] \
-    && pass "…and the record time peel does not take the verdict time" \
-    || die "'\${line#* at=}' took the verdict time"
+[ "$_at" = 2026-01-02T00:00:00Z ] \
+    && pass "…and the record time peel takes the record time, not the verdict time" \
+    || die "'\${line#* at=}' took '$_at'"
 # A REVOCATION CARRIES IT TOO, since a phase reopened by one is a record a reader
 # has to place in time exactly as it places a signoff — and it CARRIES NO SHA, so its verdict time is the SECOND backticked field
 # rather than the third — the sha group is optional and a time is not 40 hex, so
@@ -107,6 +111,12 @@ world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
                 "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
 case_is 1 "reason=revoked" "a revocation is still a revocation with a verdict time on it"
 case_is 1 "verdict-at=2026-02-02T00:00:00Z" "…and reports the verdict time it carries"
+# AN OVERLONG VALUE MUST BE VISIBLE IN ORDER TO BE REFUSED. Bounded, the field
+# makes the WHOLE marker fail to match — the line then matches nothing, `last`
+# returns an OLDER record, and a deliberately reopened phase reads as closed.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`$(printf 'x%.0s' $(seq 1 65))\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…and an overlong verdict time is refused, not skipped past"
 # AND A VALUE THERE THAT IS FORTY LOWERCASE HEX is captured as the optional SHA
 # rather than as the time, and the revocation branch ignores a sha — so the record
 # would read as one carrying no time at all, and a present but unplaceable value
