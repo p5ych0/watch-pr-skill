@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.0.47] — 2026-08-20
+
+- **The signoff `record` posts now says which verdict it answers.** It already
+  read that time to order a standing revocation against it; it asks on every path
+  now and writes it into the marker, so a reader can order a *later* revocation
+  against the verdict rather than against comment order — the window this stage
+  cannot close itself, because its own write is what erases the evidence.
+
+  **Its absence never stops the record.** The field is optional precisely so an
+  unreadable probe degrades to a signoff without one, which reads back exactly as
+  every record written before it does. A signoff that cannot be ordered against a
+  revocation is the state that already existed; a phase that cannot close because
+  a probe failed is worse, and this stage stopping is the expensive failure. It
+  says so on stdout rather than degrading in silence.
+
+  With a revocation standing the time is *not* optional — there it decides whether
+  recording supersedes a reopening — and that arm still refuses.
+
+  The marker is composed as two shapes rather than one with an empty pair of
+  backticks: an empty field is a value `pr-signoff.sh` refuses, so writing one
+  would make the record this stage just posted unreadable to the next reader.
+
+  **The read happens before the record is looked at, not between that look and the
+  write.** Placed after, it would sit where nothing had looked at the signoff
+  record since — so a revocation landing during it is superseded on the ordinary
+  path, a window this change would have *added*. Moving the read removes it: the
+  revoked arm re-reads the record anyway, and the ordinary path again has nothing
+  between its last look and its write.
+
+  **And the time has to describe the verdict that was proved clean.** `review-at`
+  reports the latest verdict on the sha, so a result arriving between the
+  cleanliness proof and that read is the one it times — and the record would claim
+  to answer a verdict nobody proved. Cleanliness is re-proved immediately after,
+  and where it no longer holds the record is **refused**, not written without the
+  field: cleanliness is a precondition for recording at all, while the timestamp is
+  a value the record carries or does not, and dropping only the timestamp would
+  post a signoff for a verdict that is no longer clean — worse than never having
+  looked. The proof runs even where the time itself could not be read, because
+  that failed read is a network call a blocking result can land during.
+
+  The head is read **after** those two probes rather than before them. Both are
+  pinned to the sha being signed off, so a push landing in either leaves them
+  answering about a commit that is no longer the head — and the head check, read
+  first, had confirmed a head the probes then outlived.
+
+  #139 is the removal: one reader answering "clean, and at this time" from one
+  response.
+
+  Nothing reads the field yet. #137, for #122.
+
 ## [2.0.46] — 2026-08-20
 
 - **A signoff can now say which verdict it answers.** Readers take the *last*

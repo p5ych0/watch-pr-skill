@@ -43,6 +43,12 @@ case "${1:-}" in
                # re-read has already passed — which is the window the read before
                # the post exists for.
                [ "$_n" -ge 2 ] && [ -f "$W/move-head-late" ] && cat "$W/move-head-late" > "$W/head.out"
+               # `.3` IS THE READ THAT BINDS THE TIME TO A CLEAN VERDICT, after
+               # the recheck and the re-proof — a result landing between the
+               # cleanliness proof and the time read is what it exists to catch.
+               if [ "$_n" -ge 3 ] && [ -f "$W/verdict.3.rc" ]; then
+                   cat "$W/verdict.3.out" 2>/dev/null; exit "$(cat "$W/verdict.3.rc")"
+               fi
                if [ "$_n" -ge 2 ] && [ -f "$W/verdict.2.rc" ]; then
                    cat "$W/verdict.2.out" 2>/dev/null; exit "$(cat "$W/verdict.2.rc")"
                fi
@@ -144,6 +150,16 @@ run() {   # run <stage> [args…] ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 posted() { cat "$W/posted" 2>/dev/null; }
+# DEFINED BESIDE `posted`, NOT BESIDE ITS FIRST USE. This file runs under
+# `set -uo pipefail` WITHOUT `-e`, so a call before the definition prints
+# `command not found` and carries on — the case then asserts nothing and the run
+# can still end PASS, which is the "a failing probe looks like a clean phase"
+# shape the whole file exists to catch.
+nothing_posted() {   # nothing_posted <label>
+    [ -s "$W/posted" ] \
+        && die "$1 — but the signoff was posted anyway" \
+        || pass "$1"
+}
 # `before <a> <b>` — a happened earlier in the call log than b.
 before() {
     local la lb
@@ -181,6 +197,53 @@ printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
     || die "the operator stop does not say how to resume: '${got#*|}'"
 
 # ── WHAT IT POSTS IS THE RECORD SOMETHING LATER READS BACK ─────────────────
+# AND IT HAS TO DESCRIBE THE VERDICT THAT WAS PROVED CLEAN. `review-at` reports
+# the LATEST verdict on this sha, so a result landing between the cleanliness
+# proof and that read is the one it times — and the record would claim to answer
+# a verdict nobody proved. Re-proving cleanliness binds them; where it no longer
+# holds the RECORD IS REFUSED, because cleanliness is a precondition for recording
+# at all rather than a value the record carries.
+# A PUSH DURING THE TIME PROBES IS CAUGHT, because the head read comes after
+# them. Both are pinned to `$CODEX_SHA`, so a head that moved while they ran
+# leaves them answering about a commit that is no longer the head — and the record
+# would name it.
+world; printf '%s\n' "$OTHER40" > "$W/move-head-late"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+    && pass "a push landing during the verdict-time probes stops the record" \
+    || die "a push during the time probes gave '${got}'"
+nothing_posted "…with no signoff naming the commit it outlived"
+
+# CLEANLINESS IS A PRECONDITION, NOT A VALUE THE RECORD CARRIES. Dropping only
+# the timestamp would post a signoff for a verdict that is no longer clean, which
+# is worse than never having looked.
+world; printf '1\n' > "$W/verdict.3.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.3.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+    && pass "a verdict that stopped being clean while its time was read stops the record" \
+    || die "a moved verdict gave '${got}'"
+nothing_posted "…with no signoff recorded for it"
+# AND THE PROOF RUNS EVEN WHERE THE TIME DID NOT COME BACK, because the failed
+# read is itself a network call a blocking result can land during.
+world; printf '2\n' > "$W/review-at.rc"; printf '1\n' > "$W/verdict.3.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.3.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+    && pass "…and it runs even when the time itself could not be read" \
+    || die "an unreadable time skipped the clean re-proof: '${got}'"
+nothing_posted "…with nothing posted there either"
+
+# THE MARKER CARRIES THE VERDICT TIME, as its third backticked field: a reader can
+# then order a revocation against the VERDICT rather than against comment order,
+# which is the window this stage cannot close itself — its own write is what
+# erases the evidence. #137, for #122.
+world; got="$(run record 7 "$TMP/body.md")"
+[ "${got%%|*}" = 0 ] || die "the ordinary record did not post: '${got}'"
+posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\` \`2026-02-02T00:00:00Z\`" \
+    && pass "the signoff marker carries the time of the verdict it answers" \
+    || die "the marker does not carry the verdict time: '$(posted)'"
+
 # The marker's format is `pr-signoff.sh`'s: the name and the sha in backticks, on
 # a line of their own. Composed here rather than left to the caller's prose,
 # because a marker one character off signs nothing off and still looks posted.
@@ -235,11 +298,6 @@ grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
 # A failed probe must never be indistinguishable from a clean phase: the signoff
 # is what a later session trusts, so recording one that was not proven is the
 # failure this whole file exists to prevent.
-nothing_posted() {   # nothing_posted <label>
-    [ -s "$W/posted" ] \
-        && die "$1 — but the signoff was posted anyway" \
-        || pass "$1"
-}
 world; printf '1\n' > "$W/verdict.rc"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'Codex is not clean on the sha being recorded'; } \
@@ -315,9 +373,9 @@ got="$(run record 7 "$TMP/body.md")"
 last_before 'gh pr view' 'pr-signoff.sh' \
     && pass "…the final head read having come before the ordering probe" \
     || die "the ordering probe ran before the last head read: $(cat "$TMP/calls")"
-last_before 'gh pr view' 'pr-review-state.sh review-at' \
-    && pass "…and before the verdict's time was read" \
-    || die "the verdict's time was read before the last head read: $(cat "$TMP/calls")"
+last_after 'gh pr view' 'pr-review-state.sh review-at' \
+    && pass "…and after the verdict's time was read, which it is pinned past" \
+    || die "the last head read came before the verdict time probes: $(cat "$TMP/calls")"
 before 'pr-signoff.sh' 'gh pr comment' \
     && pass "…with the ordering probe itself immediately before the write" \
     || die "the signoff was posted before the ordering was proved: $(cat "$TMP/calls")"
@@ -388,7 +446,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"; printf '2\n' > "$W/review-at.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "verdict's time could not be read"; } \
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no verdict on'; } \
     && pass "…and an unreadable verdict time refuses with a revocation standing" \
     || die "an unreadable verdict time was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -400,14 +458,26 @@ got="$(run record 7 "$TMP/body.md")"
     && pass "…and an empty one, which is 'no verdict on this head at all'" \
     || die "an untimed verdict was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
-# AND WITH NO REVOCATION THE VERDICT'S TIME IS NEVER ASKED FOR, because there is
-# nothing to order it against — a reader that failed here would stop every
-# ordinary phase.
+# AND WITH NO REVOCATION ITS ABSENCE DOES NOT STOP THE RECORD. The time is asked
+# for on every path now, because the signoff CARRIES it — but the field is
+# optional, so an unreadable probe degrades to a record without one, which reads
+# back exactly as every record written before #135 does. A signoff that cannot be
+# ordered against a revocation is the state we already live in; a phase that
+# cannot close because a probe failed is worse. #137.
 world; printf '2\n' > "$W/review-at.rc"
 got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
-    && pass "…while an ordinary phase never reads it, so it cannot fail there" \
-    || die "the ordinary phase asked for the verdict's time: '${got}'"
+    && pass "…while an unreadable verdict time does not stop an ordinary phase" \
+    || die "an unreadable verdict time stopped the record: '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'will not carry one' \
+    && pass "…and it says the signoff carries none, rather than degrading in silence" \
+    || die "the record was posted without a verdict time and did not say so: '${got#*|}'"
+posted | grep -qF '**Review-Signoff:**' \
+    && pass "…with the marker still posted" \
+    || die "no signoff marker was posted: '$(posted)'"
+posted | grep -qE '\*\*Review-Signoff:\*\* `[^`]+` `[0-9a-f]{40}` `' \
+    && die "…but it carried an empty verdict field, which pr-signoff.sh refuses" \
+    || pass "…and no empty third field, which the reader would refuse"
 
 # ── THE RECORD COMPARED IS READ AFTER THE VERDICT'S TIME, NOT BEFORE IT ────
 # ASKING ONCE AND THEN FETCHING THE TIME RE-OPENED THE WINDOW ONE LEVEL DOWN. The

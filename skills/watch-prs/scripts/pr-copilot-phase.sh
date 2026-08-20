@@ -512,8 +512,69 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
 CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
 [[ $CODEX_STILL_RC -eq 0 ]] \
     || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
-# AND THE HEAD AGAIN. Each probe above is a network call, so the head can move
-# DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
+
+# AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
+# this window is the case #115 was filed for, and refusing on ANY revocation was
+# the first fix — it is not what this does, because it breaks the legitimate
+# path: the fault-tolerance pass posts its revocation BEFORE requesting the
+# review, so that revocation is still the newest record when the new clean
+# verdict arrives, and an unconditional refusal means a reopened phase can never
+# record its replacement signoff at all.
+#
+# WHEN THE VERDICT LANDED, READ BEFORE THE RECORD IS, AND USED TWICE. The signoff
+# carries it, so a reader can order a revocation against the VERDICT rather than
+# against comment order — this stage cannot close that window itself, because its
+# own write is what erases the evidence. #137, for #122.
+#
+# BEFORE THE TRIGGER, NOT BETWEEN IT AND THE WRITE. Read after it, this call sits
+# between the last look at the signoff record and the post — so a revocation
+# landing during it is superseded on the ORDINARY path, where nothing had looked
+# since. That is a window this change would have ADDED, and moving the read
+# removes it rather than guarding it: the revoked arm below re-reads the record
+# anyway, and the ordinary path once again has nothing between its last look and
+# its write.
+#
+# AND ITS ABSENCE NEVER STOPS THE RECORD. The field is optional precisely so an
+# unreadable probe degrades to a record without it, which reads back exactly as
+# every record written before #135 does. A signoff that cannot be ordered against
+# a revocation is the state we already live in; a phase that cannot close because
+# a transient API failure is worse, and this stage stopping is the expensive
+# failure.
+RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") || RB_VERDICT_AT=""
+case "$RB_VERDICT_AT" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    *) [[ -z $RB_VERDICT_AT ]] || echo "note: the verdict time on $CODEX_SHA read as '$RB_VERDICT_AT', which is not a time; the signoff will not carry one"
+       RB_VERDICT_AT="" ;;
+esac
+# AND IT HAS TO DESCRIBE THE VERDICT THAT WAS PROVED CLEAN. `review-at` reports
+# the LATEST verdict on this sha across both channels, so a result landing between
+# the cleanliness proof and this read is the one it times — and the record would
+# then claim to answer a verdict nobody proved. Re-proving cleanliness immediately
+# after is what binds them; where it no longer holds, the RECORD IS REFUSED — the
+# timestamp is a value the record carries or does not, but cleanliness is a
+# precondition for recording at all, and posting a signoff without the field for a
+# verdict that has stopped being clean is worse than never having looked.
+#
+# ONE SNAPSHOT WOULD BE BETTER THAN TWO ADJACENT READS, and that is #139: the
+# reader can answer "clean, and at this time" from one response, as
+# `escape-snapshot` does for the replies-only escape.
+# AND IT IS PROVED CLEAN AGAIN AFTERWARDS, WHETHER OR NOT THE TIME CAME BACK.
+# This read is a network call in a place that had none, so a blocking result can
+# land during it — and dropping only the timestamp would post a signoff for a
+# verdict that is no longer clean, which is worse than never having looked. The
+# CLEANLINESS is a precondition for recording at all; the timestamp is a value the
+# record carries or does not, and the two are not the same question.
+RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
+[[ $RB_STILL_CLEAN_RC -eq 0 ]] \
+    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RB_STILL_CLEAN); nothing posted"; exit 1; }
+[[ -n $RB_VERDICT_AT ]] || echo "note: no readable verdict time for $CODEX_SHA; the signoff will not carry one, and a later revocation cannot be ordered against it"
+
+# AND THE HEAD AGAIN, AFTER THE TIME PROBES. Each probe above is a network call,
+# so the head can move DURING one of them — and the two added for the verdict time
+# are pinned to `$CODEX_SHA`, so a push landing in either leaves them answering
+# about a commit that is no longer the head. Read before them, this check confirmed
+# a head that the probes then outlived. Every remote read that can be outlived is
+# now behind it, and the signoff-record read that follows is the last of all — and the verdict is pinned to `$CODEX_SHA`, so it stays
 # clean and says nothing about the move.
 #
 # THE ORDERING PROOF GOES AFTER THIS ONE, and which of the two is last is not
@@ -530,14 +591,6 @@ FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq
 [[ $FINAL_HEAD = "$CODEX_SHA" ]] \
     || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
 
-# AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
-# this window is the case #115 was filed for, and refusing on ANY revocation was
-# the first fix — it is not what this does, because it breaks the legitimate
-# path: the fault-tolerance pass posts its revocation BEFORE requesting the
-# review, so that revocation is still the newest record when the new clean
-# verdict arrives, and an unconditional refusal means a reopened phase can never
-# record its replacement signoff at all.
-#
 # TELLING THE TWO APART IS ORDERING: a revocation this pass is ANSWERING landed
 # before the verdict, and one that would CANCEL it landed after.
 #
@@ -576,16 +629,13 @@ case "$RB_TRIGGER_RC" in
 esac
 case "$RB_TRIGGER" in
 *reason=revoked*)
-    RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") \
-        || { echo "ABORT: a revocation is the newest record and the verdict's time could not be read; nothing posted"; exit 1; }
-    # THE SAME SHAPE TEST ON THE OTHER SIDE, and for the same reason: an empty
-    # answer means no verdict on this head was found at all, and any other shape
-    # cannot be ordered. Either, with a revocation standing, is the state that
-    # must not record.
-    case "$RB_VERDICT_AT" in
-        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-        *) echo "ABORT: a revocation is the newest record and no verdict on $CODEX_SHA has a readable time ('$RB_VERDICT_AT'); nothing posted"; exit 1 ;;
-    esac
+    # WITH A REVOCATION STANDING THE TIME IS NOT OPTIONAL. Above it is a value the
+    # record carries or does not; here it is what decides whether recording
+    # supersedes a reopening, and an empty answer means no verdict on this head
+    # was found at all. Either, with a revocation standing, is the state that must
+    # not record.
+    [[ -n $RB_VERDICT_AT ]] \
+        || { echo "ABORT: a revocation is the newest record and no verdict on $CODEX_SHA has a readable time; nothing posted"; exit 1; }
     SIGNOFF_NOW=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); SIGNOFF_NOW_RC=$?
     case "$SIGNOFF_NOW_RC" in
         0|1) ;;
@@ -627,8 +677,19 @@ case "$RB_TRIGGER" in
         || { echo "ABORT: this phase was reopened — the revocation at $RB_REVOKED_AT is not older than the verdict at $RB_VERDICT_AT. Recording a signoff now would supersede it; nothing posted"; exit 1; } ;;
 esac
 
-SUMMARY="$(printf '## Codex phase complete\n\n**Review-Signoff:** `%s` `%s`\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
-    "$RB_CODEX_BOT" "$CODEX_SHA" "$CODEX_SHA" "$BODY")" \
+# THE MARKER CARRIES THE VERDICT TIME WHERE THERE IS ONE, as its third backticked
+# field. Composed as two shapes rather than one with an empty pair of backticks:
+# an empty field is a value `pr-signoff.sh` refuses, so writing one would make the
+# record this stage just posted unreadable to the next reader. #137.
+if [[ -n $RB_VERDICT_AT ]]; then
+    RB_MARKER="$(printf '**Review-Signoff:** `%s` `%s` `%s`' "$RB_CODEX_BOT" "$CODEX_SHA" "$RB_VERDICT_AT")" \
+        || { echo "ABORT: could not compose the signoff marker."; exit 1; }
+else
+    RB_MARKER="$(printf '**Review-Signoff:** `%s` `%s`' "$RB_CODEX_BOT" "$CODEX_SHA")" \
+        || { echo "ABORT: could not compose the signoff marker."; exit 1; }
+fi
+SUMMARY="$(printf '## Codex phase complete\n\n%s\n\nCodex signed off on `%s`.\n\n%s\n\nFix commits from here carry a `Review-Phase: copilot` trailer, which is how the merge gate knows the head advanced only through Copilot fixes and that Codex'"'"'s signoff still covers it.\n' \
+    "$RB_MARKER" "$CODEX_SHA" "$BODY")" \
     || { echo "ABORT: could not compose the phase summary."; exit 1; }
 
 gh pr comment "$PR" --repo "$HOST/$OWNER/$REPO" --body "$SUMMARY" \

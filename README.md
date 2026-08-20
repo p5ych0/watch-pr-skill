@@ -603,7 +603,8 @@ asks:
   cost a revocation and a round for a verdict that cannot differ.
 
 Both stops are **resumable**. Each signoff is recorded on the pull request as a
-`**Review-Signoff:**` comment naming the reviewer and the exact head, so a
+`**Review-Signoff:**` comment naming the reviewer, the exact head, and — where
+the phase could read it — the time of the verdict it answers, so a
 decision that arrives tomorrow — or on another machine — costs nothing that was
 already done. `pr-signoff.sh <pr> <reviewer>` reads it back, printing the whole
 record — reviewer, the verdict time it answers, timestamp, comment id and head —
