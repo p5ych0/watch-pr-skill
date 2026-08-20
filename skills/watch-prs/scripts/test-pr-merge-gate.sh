@@ -346,6 +346,10 @@ case_is 1 "copilot=1" "a non-clean Copilot verdict blocks"
 # a human — and without this the stop was where it ENDED: the verdict could never
 # become clean, so this gate blocked forever. A deadlock traded for a permanent
 # pause is not a fix.
+snapshot() {   # snapshot <review-id> <review-at> <newest-reply-at>
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3" > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+    printf '0' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+}
 replies_only() {   # replies_only <bot> ; that reviewer left only replies on the head
     printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only' \
         "${HEAD40:0:7}" "$1" > "$STUB_DIR/pr-review-state.$1.out"
@@ -358,19 +362,12 @@ vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
     printf '0' > "$STUB_DIR/pr-signoff.rc"
     printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
         "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
-    # WHICH REVIEW IT IS, so the two time probes can be bound to one of them: a
-    # verdict record carries no review id, and a second replies-only review with
-    # the same finding count serialises identically.
-    printf '77\n' > "$STUB_DIR/pr-review-state.review-id.out"
-    printf '0' > "$STUB_DIR/pr-review-state.review-id.rc"
-    # WHEN THE REVIEW LANDED, so "newer than" can be decided at all.
-    printf '2026-01-01T00:00:00Z\n' > "$STUB_DIR/pr-review-state.review-at.out"
-    # AND WHEN THE NEWEST REPLY DID. Empty with status 1 is the ordinary answer —
-    # "nothing to order against from that channel" — and it has to be a file of its
-    # own, or the stub falls through to the REVIEWER key and hands back the verdict
-    # record as a timestamp. #129.
-    : > "$STUB_DIR/pr-review-state.replies-at.out"
-    printf '1' > "$STUB_DIR/pr-review-state.replies-at.rc"
+    # THE SNAPSHOT THE GATE ORDERS AGAINST: the review id, when the review landed,
+    # and when its newest reply did, all from one read. It is one file because the
+    # gate makes one call — which is the whole of #133 — and it has to be a file of
+    # its own, or the stub falls through to the REVIEWER key and hands back the
+    # verdict record as a snapshot.
+    snapshot 77 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z
 }
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 case_is 0 "left only replies" "a replies-only verdict merges on the signoff an operator recorded"
@@ -453,67 +450,39 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
-# A TIMESTAMP OF A SHAPE NOTHING CAN PLACE is a probe that exited 0 with
-# something it did not mean, and it blocks — but not by telling the operator there
-# is nothing to answer, which sends them looking in the wrong place.
+# A TIMESTAMP OF A SHAPE NOTHING CAN PLACE is a snapshot field that arrived with
+# status 0 saying something it did not mean, and it blocks — but not by telling
+# the operator there is nothing to answer, which sends them looking in the wrong
+# place.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'whenever\n' > "$STUB_DIR/pr-review-state.review-at.out"
+snapshot 77 whenever 2026-01-01T00:00:00Z
 case_is 1 "could not be placed in time" "a review time of another shape blocks, and says why"
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z whenever
 case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
 
-# THE REPLIES CAN MOVE WITHOUT THE COUNT MOVING. One reply added after
-# `replies-at` returned and another deleted before the re-read leaves the comment
-# count — and therefore the serialised verdict, and the review id — exactly as
-# they were. Only the reply time itself shows it.
+# ── WHAT THE GATE NO LONGER DOES FOR ITSELF ────────────────────────────────
+# Five of this file's cases used to live here: an id that is stable but not an id,
+# replies that move without the comment count moving, a probe that reports no
+# replies while printing one, a same-shaped replacement review, and a dismissal
+# between two time probes. Each was a window left by binding four sequential
+# reads to each other, and each fix left the next one — a sequential guard cannot
+# close a gap between sequential calls.
+#
+# `escape-snapshot` derives the id, the review's time and its newest reply's from
+# ONE pair of review reads and refuses if anything moved, so those five belong to
+# `test-pr-review-state.sh`, which can actually make the world change between the
+# two reads. What stays here is the wiring: the gate asks once and distinguishes
+# the three answers. #133.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-01T06:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
-printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.2.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.2.rc"
-case_is 1 "moved while its timestamps were being read" \
-    "replies that move without changing the count cannot be vouched over"
-
-# AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
-# exiting 0 with the same word on both reads is a STABLE value that tells two
-# reviews apart no better than the verdict did.
+printf '1' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+: > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+case_is 1 "no replies-only review on aaaaaaa for a signoff to answer" \
+    "a head whose review is not the escape's shape cannot be vouched for"
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'warning\n' > "$STUB_DIR/pr-review-state.review-id.out"
-case_is 1 "which copilot-pull-request-reviewer[bot] review is authoritative" \
-    "a review id of another shape is refused, not treated as stable"
-# AND ABSENCE HAS TO BE SILENT. A probe that prints a timestamp and then returns
-# the documented absence status leaves a value this arm would discard — and if it
-# is newer than the signoff, discarding it is the reply that gets merged over.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '1' > "$STUB_DIR/pr-review-state.replies-at.rc"
-case_is 1 "printed one anyway" "…and a reply probe that says none while printing one is refused"
-
-# A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
-# replies-only review with the same finding count, submitted on the same head,
-# serialises byte-for-byte identically — so a binding that compares only the
-# verdict accepts the OLD review's timestamps for the new one, and a signoff that
-# predates the new review merges. The review id is what tells them apart.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '78\n' > "$STUB_DIR/pr-review-state.review-id.2.out"
-printf '0' > "$STUB_DIR/pr-review-state.review-id.2.rc"
-case_is 1 "changed while its timestamps were being read" \
-    "a same-shaped review submitted in that window cannot be vouched for"
-
-# ── THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED ────────────
-# The two time probes are separate calls. A review dismissed after `review-at`
-# returns and before `replies-at` runs leaves the second reading a stable — but
-# dismissed — snapshot, so the deadline describes a review that no longer
-# authorises anything, while the replies-only line being answered was fetched
-# before any of it. Each probe re-checks itself; nothing bound them together.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=dismissed\n' \
-    "${HEAD40:0:7}" "$COPILOTBOT" > "$STUB_DIR/pr-review-state.$COPILOTBOT.2.out"
-printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.2.rc"
-case_is 1 "changed while its timestamps were being read" \
-    "a review dismissed while its timestamps were read cannot be vouched for"
+printf '2' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+: > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+case_is 1 "as one snapshot" "…and a snapshot that could not be read is not an absence"
 
 # ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
 # The verdict is produced by the COMMENTS on the review, and one added afterwards
@@ -521,60 +490,37 @@ case_is 1 "changed while its timestamps were being read" \
 # retraction at T3: ordered against the review alone, `T2 > T1` still held and the
 # merge went through over a reply nobody read. #129.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-03T00:00:00Z
 case_is 1 "cannot be an answer to it" "a reply landing after the signoff is not answered by it"
 # AND THE REFUSAL NAMES THE RIGHT EVENT. The deadline is the LATER of the two, so
 # this signoff IS newer than the review — calling the deadline "the review" points
 # the operator at something they have already answered, with a timestamp that is
 # not the review's.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-03T00:00:00Z
 case_is 1 "its newest reply (2026-01-03T00:00:00Z)" "…and the refusal names the reply, not the review"
 # THE SAME ON CODEX'S SIDE. The two reviewers reach this loop through different
 # specs — Codex on `$CODEX_EFFECTIVE_SHA`, Copilot on the head — so a rule proved
 # on one of them is not proved on the other, which is the shape this repository
 # keeps paying for.
 world; replies_only "$CODEXBOT"; vouched "$CODEXBOT"
-printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-03T00:00:00Z
 case_is 1 "cannot be an answer to it" "…and a later reply refuses on Codex's side too"
 world; replies_only "$CODEXBOT"; vouched "$CODEXBOT"
-printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-01T12:00:00Z
 case_is 0 "merged" "…while an earlier one still merges there"
 
 # AND ONE BEFORE IT STILL MERGES, or the rule would only ever refuse.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-01T12:00:00Z
 case_is 0 "merged" "…while one that landed before it still does"
 # EQUAL IS NOT NEWER HERE EITHER: second-resolution timestamps cannot order a tie.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2026-01-02T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
-printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+snapshot 77 2026-01-01T00:00:00Z 2026-01-02T00:00:00Z
 case_is 1 "cannot be an answer to it" "…and one in the same second cannot be ordered"
-# AN UNREADABLE REPLY TIME IS NOT "NO REPLIES". Read as one, the retracting reply
-# it could not see is exactly what gets merged over.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf '2' > "$STUB_DIR/pr-review-state.replies-at.rc"
-case_is 1 "newest reply landed" "…and an unreadable reply time blocks rather than passing"
 
-# And a head with no submitted review is refused where the review is IDENTIFIED,
-# which is before either time is read: a replies-only verdict comes from a review,
-# so there is always one to name.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-: > "$STUB_DIR/pr-review-state.review-id.out"
-case_is 1 "which copilot-pull-request-reviewer[bot] review is authoritative" \
-    "…and a head with no identified review cannot be vouched for"
-# TWO SILENT TIME PROBES ARE IMPOSSIBLE once the review IS identified: it is
-# submitted, so it has a validated `submitted_at`. Saying "there is nothing to
-# answer" would send the operator to look at a review that is plainly there.
-world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-: > "$STUB_DIR/pr-review-state.review-at.out"
-case_is 1 "neither its time nor its newest reply could be read" \
-    "…and a recorded review with no readable times is a failed read, not an absence"
+# A head whose review is not the escape's shape — no review, one with findings,
+# one dismissed — is refused by the snapshot itself, which is the case above.
 
 # ── WHY THE COPILOT REVOCATION IS POSTED UNCONDITIONALLY ───────────────────
 # `pr-copilot-phase.sh open` revokes on EVERY entry, including the first, where

@@ -274,6 +274,39 @@ clean_comment_for_head() {
 # fetches let a review that changed in between be judged on one snapshot and
 # counted on another - a COMMENTED read followed by a DISMISSED one counted the
 # withdrawn review's zero comments and reported clean.
+# THE AUTHORITATIVE REVIEW AND WHEN IT LANDED, from ONE payload.
+#
+# `head_review_snapshot` answers the state and the id; the escape also needs the
+# time, and taking it from a second call is where the review and its time can
+# disagree. This is that snapshot plus `submitted_at`, and it answers only about
+# a `reviewed` head — the escape has nothing to say about any other state.
+#
+#   prints `<id>TAB<submitted_at>`, or `none`; returns 2 when the read failed.
+escape_review_snapshot() {
+    local pr="$1" who="$2" head="$3" reviews out
+    reviews=$(reviewer_reviews "$pr" "$who") || return 2
+    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
+        if type != "array" then error("bad shape")
+        else
+          [ .[] | select(.commit_id == $h) ] as $mine
+          | ( [ $mine[] | select(.submitted_at != null) ]
+              | sort_by(.submitted_at) | last ) as $latest
+          # THE SAME DOMINANCE RULES as the state snapshot: an unsubmitted draft
+          # means the pass is not finished, whatever an older submitted review
+          # says, and only APPROVED or COMMENTED is a review this can act on.
+          | if ($mine | length) == 0 then "none"
+            elif any($mine[]; .state == "PENDING" or .submitted_at == null) then "none"
+            elif $latest == null then "none"
+            elif ($latest.state == "APPROVED" or $latest.state == "COMMENTED")
+                 and ($latest.submitted_at | canonical_utc)
+            then (($latest.id | tostring) + "\t" + $latest.submitted_at)
+            else "none"
+            end
+        end' 2>/dev/null)" || return 2
+    [ -n "$out" ] || return 2
+    printf '%s' "$out"
+}
+
 head_review_snapshot() {
     local pr="$1" who="$2" head="$3" reviews out cid
     reviews=$(reviewer_reviews "$pr" "$who") || return 2
@@ -451,8 +484,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id|review-at|replies-at) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id|review-at|replies-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|review-at|replies-at|escape-snapshot) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|review-at|replies-at|escape-snapshot} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -625,6 +658,84 @@ main() {
             *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
         esac
         printf '%s\n' "$rat"
+        return 0
+    fi
+
+    # ── THE REPLIES-ONLY ESCAPE, FROM ONE SNAPSHOT ─────────────────────────
+    #
+    # The escape has to know four things about ONE review: which review it is,
+    # that its comments are all replies, when it landed, and when its newest reply
+    # did. Asked as four probes and bound by re-reading each, every fix left the
+    # next window — #132 spent five review rounds on it, one layer in each time,
+    # because a sequential guard cannot close a gap between sequential calls.
+    #
+    # SO NOTHING IS COMPARED BY THE CALLER. This derives all four from one pair of
+    # review reads with the comments counted, timed and classified between them,
+    # and refuses if anything moved. The caller acts on the answer or does not act.
+    # #133.
+    #
+    #   0  <review-id> TAB <review-at> TAB <newest-reply-at>
+    #   1  not that shape — no review, not `reviewed`, no comments, or a comment
+    #      that OPENS a thread, which is a finding rather than a reply
+    #   2  unreadable
+    if [ "$cmd" = "escape-snapshot" ]; then
+        local esnap1 esnap2 eid eat ecomments eparts ecount eopens erat
+        # ONE READ, THREE VALUES. `head_review_snapshot` answers state and id from
+        # a `reviewer_reviews` payload; the submitted time comes from the same
+        # payload here rather than from a second call, which is where the review
+        # and its time could disagree.
+        esnap1="$(escape_review_snapshot "$pr" "$who" "$head")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        case "$esnap1" in
+            none) return 1 ;;
+        esac
+        eid="${esnap1%%$'\t'*}"; eat="${esnap1#*$'\t'}"
+        case "$eid" in
+            ""|*[!0-9]*) return 1 ;;
+        esac
+        ecomments=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$eid/comments" --paginate 2>/dev/null) || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        # COUNT, OPENS AND NEWEST TIME IN ONE PASS over rows validated by the same
+        # rule that counts them elsewhere. Three separate passes could disagree
+        # about which rows they were describing.
+        eparts="$(printf '%s' "$ecomments" | jq -s -r "$RECORDLIB_JQ"'
+            pages_or_error
+            | [.[][]] as $rows
+            | if any($rows[]; valid_review_comment | not)
+              then error("malformed review comment")
+              else "\([$rows[]] | length):\([$rows[] | select(opens_a_thread)] | length):\([$rows[] | .created_at] | sort | last // "")"
+              end' 2>/dev/null)" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        ecount="${eparts%%:*}"; eopens="${eparts#*:}"; erat="${eopens#*:}"; eopens="${eopens%%:*}"
+        case "$ecount" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
+        case "$eopens" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
+        # AND THE SNAPSHOT AGAIN, because the count, the times and the id must all
+        # describe the same review at the same moment. This is the only comparison
+        # in the escape, and it is here rather than in two callers.
+        esnap2="$(escape_review_snapshot "$pr" "$who" "$head")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        [ "$esnap2" = "$esnap1" ] || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
+            return 2
+        }
+        # A REPLIES-ONLY REVIEW HAS COMMENTS AND NONE OF THEM OPENS A THREAD. A
+        # comment that opens one is a finding, which is not a question an operator
+        # was asked; no comments at all is a different record again.
+        [ "$ecount" -ge 1 ] 2>/dev/null || return 1
+        [ "$eopens" -eq 0 ] 2>/dev/null || return 1
+        case "$erat" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
+        esac
+        printf '%s\t%s\t%s\n' "$eid" "$eat" "$erat"
         return 0
     fi
 

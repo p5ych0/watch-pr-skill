@@ -382,6 +382,72 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
     && pass "…and a malformed row refuses rather than being skipped" \
     || die "a malformed comment row gave (rc=$rc out='$out')"
 
+# ── `escape-snapshot` — FOUR FACTS ABOUT ONE REVIEW ────────────────────────
+# The replies-only escape has to know which review it is, that its comments are
+# all replies, when it landed and when its newest reply did. Asked as four probes
+# and bound by re-reading each, every fix left the next window — #132 spent five
+# rounds on it. This derives all four from one pair of review reads with the
+# comments counted, timed and classified between them. #133.
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
+mk_comments 42 2026-01-05T00:00:00Z 2026-01-09T00:00:00Z
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = "$(printf '42\t2026-01-01T00:00:00Z\t2026-01-09T00:00:00Z')" ]; } \
+    && pass "escape-snapshot: the id, the review time and the newest reply, from one read" \
+    || die "escape-snapshot gave (rc=$rc out='$out')"
+# A COMMENT THAT OPENS A THREAD IS A FINDING, not a reply — and a finding is not a
+# question an operator was asked, so this is not the escape's shape.
+printf '[{"user":{"login":"%s"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z"}]' "$BOT" \
+    > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…a comment that opens a thread is not that shape" \
+    || die "an opening comment was reported as replies-only (rc=$rc out='$out')"
+# NO COMMENTS AT ALL IS A DIFFERENT RECORD AGAIN.
+printf '[]' > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…nor is a review with no comments" \
+    || die "an empty review was reported as replies-only (rc=$rc out='$out')"
+# AND NEITHER IS A HEAD WITH NO SUBMITTED REVIEW.
+printf '[]' > "$TMP/reviews.json"; printf '[]' > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_FIXTURE_DIR="$TMP" run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…nor a head with no submitted review" \
+    || die "no review was reported as replies-only (rc=$rc out='$out')"
+# A DISMISSED REVIEW IS NOT ONE THIS CAN ACT ON.
+mk_reviews DISMISSED '"2026-01-01T00:00:00Z"' 42
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "…nor a dismissed one" \
+    || die "a dismissed review was reported as replies-only (rc=$rc out='$out')"
+# AN UNREADABLE COMMENTS FETCH FAILS CLOSED, with nothing on stdout: a caller
+# captures this in a substitution.
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
+mk_comments 42 2026-01-05T00:00:00Z
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and an unreadable comments fetch is 2" \
+    || die "an unreadable fetch gave (rc=$rc out='$out')"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
+        run escape-snapshot 7 "$BOT" 2>/dev/null)"
+[ -z "$out" ] \
+    && pass "…with nothing on stdout" \
+    || die "the unreadable answer printed '$out'"
+# A MALFORMED ROW IS A PAYLOAD, NOT A COMMENT.
+printf '[{"user":{"login":"%s"},"id":9001,"created_at":"whenever","body":"x","in_reply_to_id":8001}]' "$BOT" \
+    > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a malformed row refuses rather than being skipped" \
+    || die "a malformed row gave (rc=$rc out='$out')"
+
 # ── `review-at` FAILS CLOSED ON AN UNREADABLE FETCH ───────────────────────
 # The merge gate orders records against this value, so an empty answer read as
 # "no verdict on this head" lets a signoff recorded for an earlier clean review
@@ -884,6 +950,41 @@ out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
+
+# ── `escape-snapshot` RE-CHECKS THE SNAPSHOT TOO ───────────────────────────
+# The comments are counted, timed and classified for a review this call has
+# already stopped looking at. Dismissed or superseded in between, the id, the
+# count and the times describe the old review while presenting themselves as the
+# current answer — and there is no second reader to catch it, because catching it
+# is what this snapshot exists for.
+cat > "$TMP/bin/gh" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *"/reviews/"*"/comments"*)
+     printf '[{"user":{"login":"$BOT"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z","in_reply_to_id":8001}]' ;;
+  *"/issues/"*"/comments"*) printf '[]' ;;
+  *"/reviews"*)
+     if [ ! -e "$TMP/seen3" ]; then
+        : > "$TMP/seen3"
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":71}]'
+     else
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-02T00:00:00Z","id":72}]'
+     fi ;;
+  *"pr view"*) printf '%s' "$HEAD40" ;;
+  *) printf '{}' ;;
+esac
+SH
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/seen3"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+    && pass "escape-snapshot: a review that changes between the two reads is refused" \
+    || die "escape-snapshot answered from a review that moved (rc=$rc '$out')"
+rm -f "$TMP/seen3"
+out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
+[ -z "$out" ] \
+    && pass "…with nothing on stdout" \
+    || die "the changed-snapshot answer printed '$out'"
 
 # ── `replies-at` RE-CHECKS THE SNAPSHOT TOO ────────────────────────────────
 # The comments are fetched for a review the call has already stopped looking at.

@@ -69,28 +69,13 @@ if [ "${1:-}" = review-at ]; then
 fi
 # WHEN THE NEWEST REPLY LANDED, which is a different moment again — and the
 # ordinary answer is 1 with nothing, meaning that channel had nothing to say.
-# WHICH REVIEW IS AUTHORITATIVE, counted so a case can replace it between the two
-# reads: a verdict record carries no review id, and a second replies-only review
-# with the same finding count serialises identically.
-if [ "${1:-}" = review-id ]; then
-    _rn=$(( $(cat "$W/$_w.rid.n" 2>/dev/null || echo 0) + 1 ))
-    printf '%s' "$_rn" > "$W/$_w.rid.n"
-    if [ -f "$W/$_w.rid.$_rn.out" ]; then
-        cat "$W/$_w.rid.$_rn.out"; exit "$(cat "$W/$_w.rid.$_rn.rc" 2>/dev/null || echo 0)"
-    fi
-    [ -f "$W/$_w.rid.out" ] && cat "$W/$_w.rid.out"
-    exit "$(cat "$W/$_w.rid.rc" 2>/dev/null || echo 0)"
-fi
-if [ "${1:-}" = replies-at ]; then
-    # COUNTED, because the reply time is read twice: the replies can move without
-    # the comment count moving, which leaves the verdict and the review id alike.
-    _pn=$(( $(cat "$W/$_w.replies.n" 2>/dev/null || echo 0) + 1 ))
-    printf '%s' "$_pn" > "$W/$_w.replies.n"
-    if [ -f "$W/$_w.replies.$_pn.out" ]; then
-        cat "$W/$_w.replies.$_pn.out"; exit "$(cat "$W/$_w.replies.$_pn.rc" 2>/dev/null || echo 0)"
-    fi
-    [ -f "$W/$_w.replies.out" ] && cat "$W/$_w.replies.out"
-    exit "$(cat "$W/$_w.replies.rc" 2>/dev/null || echo 1)"
+# THE SNAPSHOT THE ESCAPE ORDERS AGAINST: the review id, when the review landed,
+# and when its newest reply did, all from one read. It is one answer because the
+# helper makes one call — which is the whole of #133 — so the cases that used to
+# move a review between two probes belong to `test-pr-review-state.sh` now.
+if [ "${1:-}" = escape-snapshot ]; then
+    [ -f "$W/$_w.snap.out" ] && cat "$W/$_w.snap.out"
+    exit "$(cat "$W/$_w.snap.rc" 2>/dev/null || echo 1)"
 fi
 # A REAL CLEAN RECORD BY DEFAULT, built from the arguments it was asked with —
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
@@ -136,10 +121,12 @@ world() {   # world ; a PR whose Codex phase is closed on the current head
     # that depends on its absence.
     printf '1\n' > "$W/codex.record.rc"
     printf '1\n' > "$W/copilot.record.rc"
-    printf '77\n' > "$W/codex.rid.out"
-    printf '77\n' > "$W/copilot.rid.out"
-    printf '2026-01-01T00:00:00Z\n' > "$W/codex.at.out"
-    printf '2026-01-01T00:00:00Z\n' > "$W/copilot.at.out"
+    snapshot codex 77 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z
+    snapshot copilot 77 2026-01-01T00:00:00Z 2026-01-01T00:00:00Z
+}
+snapshot() {   # snapshot <codex|copilot> <review-id> <review-at> <newest-reply-at>
+    printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$W/$1.snap.out"
+    printf '0\n' > "$W/$1.snap.rc"
 }
 replies_only() {   # replies_only <codex|copilot> <bot> <sha> ; only replies on that head
     printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only\n' \
@@ -147,8 +134,7 @@ replies_only() {   # replies_only <codex|copilot> <bot> <sha> ; only replies on 
     printf '1\n' > "$W/$1.verdict.rc"
 }
 replied_at() {   # replied_at <codex|copilot> <time> ; the newest reply landed then
-    printf '%s\n' "$2" > "$W/$1.replies.out"
-    printf '0\n' > "$W/$1.replies.rc"
+    snapshot "$1" 77 2026-01-01T00:00:00Z "$2"
 }
 vouched() {   # vouched <codex|copilot> <bot> <sha> [at] ; an operator answered it
     printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
@@ -484,77 +470,32 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
-# THE REPLIES CAN MOVE WITHOUT THE COUNT MOVING. One reply added after
-# `replies-at` returned and another deleted before the re-read leaves the comment
-# count — and therefore the serialised verdict, and the review id — exactly as
-# they were.
+# ── WHAT THIS HELPER NO LONGER DOES FOR ITSELF ─────────────────────────────
+# Five cases used to live here: an id that is stable but not an id, replies that
+# move without the comment count moving, a probe reporting no replies while
+# printing one, a same-shaped replacement review, and a dismissal between two
+# time probes. Each was a window left by binding four sequential reads to each
+# other, and each fix left the next — a sequential guard cannot close a gap
+# between sequential calls.
+#
+# `escape-snapshot` derives the id and both times from ONE pair of review reads
+# and refuses if anything moved, so those five belong to
+# `test-pr-review-state.sh`, which can actually make the world change between the
+# two reads. What stays here is the wiring: the helper asks once and tells the
+# three answers apart. #133.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-replied_at codex 2026-01-01T06:00:00Z
-printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.2.out"
-printf '0\n' > "$W/codex.replies.2.rc"
+printf '1\n' > "$W/codex.snap.rc"; : > "$W/codex.snap.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "a review the snapshot does not recognise as the escape's shape cannot vouch" \
+    || die "a non-escape snapshot gave '${got}'"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.snap.rc"; : > "$W/codex.snap.out"
 got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "replies that move without changing the count cannot be vouched over" \
-    || die "a moved reply set was vouched over: '${got}'"
-# TWO SILENT TIME PROBES ARE IMPOSSIBLE once the review IS identified: it is
-# submitted, so it has a validated `submitted_at`. Reporting that as "nothing to
-# answer" tells the operator to record another signoff for a review plainly there.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-: > "$W/codex.at.out"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "…and a recorded review with no readable times is a failed read, not an absence" \
-    || die "two silent time probes were reported as nothing to answer: '${got}'"
+    && pass "…and a snapshot that could not be read is not an absence" \
+    || die "an unreadable snapshot gave '${got}'"
 
-# AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
-# exiting 0 with the same word on both reads is a STABLE value that tells two
-# reviews apart no better than the verdict did.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf 'warning\n' > "$W/codex.rid.out"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "a review id of another shape is refused, not treated as stable" \
-    || die "a malformed review id was accepted: '${got}'"
-# AND ABSENCE HAS TO BE SILENT.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.out"
-printf '1\n' > "$W/codex.replies.rc"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "…and a reply probe that says none while printing one is refused" \
-    || die "a printing absence was discarded: '${got}'"
-
-# A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
-# replies-only review with the same finding count on the same head serialises
-# byte-for-byte identically, so comparing only the verdict accepts the OLD
-# review's timestamps for the new one. The review id is what tells them apart.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf '78\n' > "$W/codex.rid.2.out"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "a same-shaped review submitted in that window cannot close the phase" \
-    || die "a same-shaped replacement was vouched over: '${got}'"
-# AND AN UNREADABLE ID IS NOT A MISSING SIGNOFF EITHER.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf '2\n' > "$W/codex.rid.rc"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "…and an unreadable review id fails closed" \
-    || die "an unreadable review id gave '${got}'"
-
-# THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED. The two time
-# probes are separate calls, and a review dismissed between them leaves the second
-# reading a stable — but dismissed — snapshot: the deadline then describes a review
-# that no longer authorises anything, while the replies-only line being answered
-# was read before any of it.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s state=dismissed\n' \
-    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.2.out"
-printf '1\n' > "$W/codex.verdict.2.rc"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "a review dismissed while its timestamps were read cannot close the phase" \
-    || die "a dismissal between the two time probes was vouched over: '${got}'"
 # THE STOP NAMES BOTH TIMES, because `SKILL.md` promises the operator can see
 # which event moved — and a reason alone leaves them comparing timestamps by hand.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
@@ -570,7 +511,7 @@ got="$(run 7)"
 # truncated or replaced helper — reported as "nobody signed this off" sends the
 # operator to record another signoff for a read that failed.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf 'whenever\n' > "$W/codex.at.out"
+snapshot codex 77 whenever 2026-01-01T00:00:00Z
 got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
     && pass "a review time of another shape fails closed rather than reading as unvouched" \
@@ -579,7 +520,7 @@ printf '%s' "${got#*|}" | grep -qF 'unvouched' \
     && die "…but it also told the operator to record a signoff" \
     || pass "…and does not send the operator to record one"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-replied_at codex whenever
+snapshot codex 77 2026-01-01T00:00:00Z whenever
 got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
     && pass "…and so does a reply time of another shape" \
@@ -611,12 +552,6 @@ got="$(run 7)"
     || die "a same-second reply was ordered: '${got}'"
 # AN UNREADABLE REPLY TIME IS NOT "NO REPLIES": read as one, the retracting reply
 # it could not see is exactly what the phase closes over.
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf '2\n' > "$W/codex.replies.rc"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "…and an unreadable reply time fails closed" \
-    || die "an unreadable reply time gave '${got}'"
 # THE SAME ON THE OTHER ARM.
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
@@ -639,12 +574,6 @@ got="$(run 7)"
 printf '%s' "${got#*|}" | grep -qF 'unvouched' \
     && die "…but it also told the operator to record a signoff" \
     || pass "…and does not send the operator to record one"
-world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
-printf '2\n' > "$W/codex.at.rc"
-got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
-    && pass "…and so does an unreadable review time" \
-    || die "an unreadable review time gave '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 replies_only copilot "$COPILOTBOT" "$HEAD40"; printf '2\n' > "$W/copilot.record.rc"

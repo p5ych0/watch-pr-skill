@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.45] — 2026-08-20
+
+- **The replies-only escape asks one question instead of four.** It has to know
+  which review it is, that its comments are all replies, when it landed and when
+  its newest reply did. Asked as four probes and bound by re-reading each, every
+  fix left the next window — a dismissal between two of them, a same-shaped
+  replacement invisible to a verdict comparison, an id that is stable but not an
+  id, replies that move without the comment count moving, a reply moving while the
+  last probe is in flight. Five review rounds, one layer in each time, because a
+  sequential guard cannot close a gap between sequential calls.
+
+  `pr-review-state.sh escape-snapshot` derives all of it from **one** pair of
+  review reads, with the comments counted, timed and classified between them, and
+  refuses if anything moved. `pr-merge-gate.sh` and `pr-phase-state.sh` ask once
+  and compare nothing: the id, the review's time and its newest reply's arrive
+  together or not at all.
+
+  The five cases that used to sit in the two callers move to the reader's own
+  suite, which can make the world change between the two reads — where the callers
+  could only stub each probe and hope the ordering was the one that mattered.
+
+  Closes #133.
+
 ## [2.0.44] — 2026-08-20
 
 - **A reply added after an operator's signoff is no longer merged over.** The
