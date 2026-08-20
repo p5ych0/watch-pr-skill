@@ -180,6 +180,7 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_escape_snapshot "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
@@ -392,10 +393,14 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
         1) echo "merge blocked: $who has no replies-only review on ${want:0:7} for a signoff to answer"; return 1 ;;
         *) echo "merge blocked: could not read $who's review on ${want:0:7} as one snapshot (rc=$src)"; return 1 ;;
     esac
-    # `<id>TAB<review-at>TAB<newest-reply-at>`, and the id is not needed here: it
-    # exists so the snapshot can prove the other two describe ONE review, which it
-    # has already done. Peeled with expansions, so nothing is split on a value.
-    rat="${snap#*$'\t'}"; pat="${rat#*$'\t'}"; rat="${rat%%$'\t'*}"
+    # `<id>TAB<review-at>TAB<newest-reply-at>`, PARSED rather than peeled. Peeling
+    # with `${…#…}` alone assigns the second value to both times when a field is
+    # missing and hides one when there is an extra, and drops a non-numeric id in
+    # silence — the id being what proves the two times describe ONE review. The
+    # rule is `recordlib.sh`'s, because both callers read the same answer.
+    rb_escape_snapshot "$snap" || {
+        echo "merge blocked: $who's review snapshot on ${want:0:7} is not one this gate can read ('$snap')"; return 1; }
+    rat="$RB_SNAP_REVIEW_AT"; pat="$RB_SNAP_REPLY_AT"
     rb_answer_at "$rat" "$pat" || {
         echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1; }
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0

@@ -128,6 +128,7 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_PHASE status=error" || ex
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_escape_snapshot "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || exit 2
@@ -191,10 +192,12 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
         1) RB_VOUCH_REASON=not_the_escape_shape; return 1 ;;
         *) RB_VOUCH_REASON=snapshot_unreadable; return 2 ;;
     esac
-    # `<id>TAB<review-at>TAB<newest-reply-at>`, and the id is not needed here: it
-    # exists so the snapshot can prove the other two describe ONE review, which it
-    # has already done. Peeled with expansions, so nothing is split on a value.
-    _rat="${_snap#*$'\t'}"; _pat="${_rat#*$'\t'}"; _rat="${_rat%%$'\t'*}"
+    # `<id>TAB<review-at>TAB<newest-reply-at>`, PARSED rather than peeled. Peeling
+    # with `${…#…}` alone assigns the second value to both times when a field is
+    # missing and hides one when there is an extra, and drops a non-numeric id in
+    # silence — the id being what proves the two times describe ONE review.
+    rb_escape_snapshot "$_snap" || { RB_VOUCH_REASON=snapshot_malformed; return 2; }
+    _rat="$RB_SNAP_REVIEW_AT"; _pat="$RB_SNAP_REPLY_AT"
     rb_answer_at "$_rat" "$_pat"; _src=$?
     case "$_src" in
         0) ;;

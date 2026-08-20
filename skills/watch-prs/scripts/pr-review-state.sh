@@ -274,6 +274,26 @@ clean_comment_for_head() {
 # fetches let a review that changed in between be judged on one snapshot and
 # counted on another - a COMMENTED read followed by a DISMISSED one counted the
 # withdrawn review's zero comments and reported clean.
+# WHAT A REVIEW'S COMMENTS ARE, as one value: `<count>:<that opened a thread>:<newest created_at>`.
+#
+# ONE PASS over rows validated by the same rule that counts them elsewhere. Three
+# separate passes could disagree about which rows they were describing — and this
+# value is compared against itself to decide whether the comments moved, so a
+# disagreement inside it would be invisible.
+escape_comment_tuple() {   # <pr> <review-id>
+    local pr="$1" rid="$2" raw out
+    raw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$rid/comments" --paginate 2>/dev/null) || return 2
+    out="$(printf '%s' "$raw" | jq -s -r "$RECORDLIB_JQ"'
+        pages_or_error
+        | [.[][]] as $rows
+        | if any($rows[]; valid_review_comment | not)
+          then error("malformed review comment")
+          else "\([$rows[]] | length):\([$rows[] | select(opens_a_thread)] | length):\([$rows[] | .created_at] | sort | last // "")"
+          end' 2>/dev/null)" || return 2
+    [ -n "$out" ] || return 2
+    printf '%s' "$out"
+}
+
 # THE AUTHORITATIVE REVIEW AND WHEN IT LANDED, from ONE payload.
 #
 # `head_review_snapshot` answers the state and the id; the escape also needs the
@@ -679,7 +699,7 @@ main() {
     #      that OPENS a thread, which is a finding rather than a reply
     #   2  unreadable
     if [ "$cmd" = "escape-snapshot" ]; then
-        local esnap1 esnap2 eid eat ecomments eparts ecount eopens erat
+        local esnap1 esnap2 eid eat eparts eparts2 ecount eopens erat
         # ONE READ, THREE VALUES. `head_review_snapshot` answers state and id from
         # a `reviewer_reviews` payload; the submitted time comes from the same
         # payload here rather than from a second call, which is where the review
@@ -695,29 +715,27 @@ main() {
         case "$eid" in
             ""|*[!0-9]*) return 1 ;;
         esac
-        ecomments=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$eid/comments" --paginate 2>/dev/null) || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
-            return 2
-        }
-        # COUNT, OPENS AND NEWEST TIME IN ONE PASS over rows validated by the same
-        # rule that counts them elsewhere. Three separate passes could disagree
-        # about which rows they were describing.
-        eparts="$(printf '%s' "$ecomments" | jq -s -r "$RECORDLIB_JQ"'
-            pages_or_error
-            | [.[][]] as $rows
-            | if any($rows[]; valid_review_comment | not)
-              then error("malformed review comment")
-              else "\([$rows[]] | length):\([$rows[] | select(opens_a_thread)] | length):\([$rows[] | .created_at] | sort | last // "")"
-              end' 2>/dev/null)" || {
+        eparts="$(escape_comment_tuple "$pr" "$eid")" || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
         ecount="${eparts%%:*}"; eopens="${eparts#*:}"; erat="${eopens#*:}"; eopens="${eopens%%:*}"
         case "$ecount" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
         case "$eopens" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
-        # AND THE SNAPSHOT AGAIN, because the count, the times and the id must all
-        # describe the same review at the same moment. This is the only comparison
-        # in the escape, and it is here rather than in two callers.
+        # AND BOTH READS AGAIN, because the count, the times and the id must all
+        # describe the same review at the same moment — and `/reviews` cannot see a
+        # comment. A retracting reply landing after the comments were counted
+        # leaves the id and the `submitted_at` untouched, so comparing the review
+        # payload alone returns the OLDER reply time as though nothing had moved.
+        # The comments are re-read and their derived tuple compared too.
+        eparts2="$(escape_comment_tuple "$pr" "$eid")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        [ "$eparts2" = "$eparts" ] || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
+            return 2
+        }
         esnap2="$(escape_review_snapshot "$pr" "$who" "$head")" || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2

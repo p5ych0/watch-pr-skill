@@ -483,6 +483,18 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
 : > "$STUB_DIR/pr-review-state.escape-snapshot.out"
 case_is 1 "as one snapshot" "…and a snapshot that could not be read is not an absence"
+# AND A SNAPSHOT THAT IS NOT ONE. Peeled rather than parsed, a line with two
+# fields assigns the second value to both times and a line with four hides one;
+# a non-numeric id — the thing that proves the two times describe ONE review — is
+# dropped in silence.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+printf '0' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+case_is 1 "is not one this gate can read" "a snapshot missing its review id is refused"
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$STUB_DIR/pr-review-state.escape-snapshot.out"
+printf '0' > "$STUB_DIR/pr-review-state.escape-snapshot.rc"
+case_is 1 "is not one this gate can read" "…and so is one whose id is not an id"
 
 # ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
 # The verdict is produced by the COMMENTS on the review, and one added afterwards

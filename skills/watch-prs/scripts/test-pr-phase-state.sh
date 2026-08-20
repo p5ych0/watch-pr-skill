@@ -495,6 +495,24 @@ got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
     && pass "…and a snapshot that could not be read is not an absence" \
     || die "an unreadable snapshot gave '${got}'"
+# AND A SNAPSHOT THAT IS NOT ONE. Peeled rather than parsed, a line with two
+# fields assigns the second value to both times and a line with four hides one;
+# a non-numeric id — the thing that proves the two times describe ONE review — is
+# dropped in silence.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$W/codex.snap.out"
+printf '0\n' > "$W/codex.snap.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and a snapshot missing its review id is refused" \
+    || die "a two-field snapshot was acted on: '${got}'"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$W/codex.snap.out"
+printf '0\n' > "$W/codex.snap.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so is one whose id is not an id" \
+    || die "a snapshot with a non-numeric id was acted on: '${got}'"
 
 # THE STOP NAMES BOTH TIMES, because `SKILL.md` promises the operator can see
 # which event moved — and a reason alone leaves them comparing timestamps by hand.

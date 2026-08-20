@@ -565,3 +565,27 @@ rb_answer_at() {   # <review-at> <replies-at>
     fi
     return 0
 }
+
+# rb_escape_snapshot <line> ; 0 parsed, 1 not that shape
+#
+# WHAT `pr-review-state.sh escape-snapshot` ANSWERS, read once and read the same
+# way by both callers. Peeled with `${…#…}` alone, a line with two fields assigns
+# the SECOND value to both times and a line with four hides one — and a non-numeric
+# first field is silently discarded, which is the id that proves the two times
+# describe one review.
+#
+# EXACTLY THREE FIELDS, and the tab is what separates them, so the count is
+# checked rather than assumed. `[[ =~ ]]` with the pattern in a variable, because
+# bash 3.2 cannot parse one containing a parenthesis written inline.
+RB_SNAP_ID=''
+RB_SNAP_REVIEW_AT=''
+RB_SNAP_REPLY_AT=''
+RB_SNAP_RX='^([0-9]+)'$'\t''([^'$'\t'']*)'$'\t''([^'$'\t'']*)$'
+rb_escape_snapshot() {   # <line>
+    RB_SNAP_ID=''; RB_SNAP_REVIEW_AT=''; RB_SNAP_REPLY_AT=''
+    [[ "${1-}" =~ $RB_SNAP_RX ]] || return 1
+    RB_SNAP_ID="${BASH_REMATCH[1]}"
+    RB_SNAP_REVIEW_AT="${BASH_REMATCH[2]}"
+    RB_SNAP_REPLY_AT="${BASH_REMATCH[3]}"
+    return 0
+}

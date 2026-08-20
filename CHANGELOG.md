@@ -17,6 +17,17 @@
   and compare nothing: the id, the review's time and its newest reply's arrive
   together or not at all.
 
+  The comments are re-read as well as the review, because `/reviews` cannot see a
+  comment: a retracting reply landing after they were counted leaves the id and the
+  `submitted_at` untouched, so comparing the review payload alone hands back the
+  older reply time as though nothing had moved.
+
+  What the callers do check is the SHAPE of that answer, through
+  `rb_escape_snapshot`: peeled with expansions alone, a two-field line assigns the
+  second value to both times, a four-field one hides a value, and a non-numeric id
+  is dropped in silence — and the id is what proves the two times describe one
+  review.
+
   The five cases that used to sit in the two callers move to the reader's own
   suite, which can make the world change between the two reads — where the callers
   could only stub each probe and hope the ordering was the one that mattered.

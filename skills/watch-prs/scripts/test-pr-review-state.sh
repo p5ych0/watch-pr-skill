@@ -986,6 +986,39 @@ out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
     && pass "…with nothing on stdout" \
     || die "the changed-snapshot answer printed '$out'"
 
+# AND `/reviews` CANNOT SEE A COMMENT. A retracting reply landing after the
+# comments were counted leaves the review id and its `submitted_at` untouched, so
+# comparing the review payload alone returns the OLDER reply time as though
+# nothing had moved — which is the reply a signoff then vouches over.
+cat > "$TMP/bin/gh" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *"/reviews/"*"/comments"*)
+     if [ ! -e "$TMP/seen4" ]; then
+        : > "$TMP/seen4"
+        printf '[{"user":{"login":"$BOT"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z","in_reply_to_id":8001}]'
+     else
+        printf '[{"user":{"login":"$BOT"},"id":9002,"body":"y","created_at":"2026-01-09T00:00:00Z","in_reply_to_id":8001}]'
+     fi ;;
+  *"/issues/"*"/comments"*) printf '[]' ;;
+  *"/reviews"*)
+     printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":73}]' ;;
+  *"pr view"*) printf '%s' "$HEAD40" ;;
+  *) printf '{}' ;;
+esac
+SH
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/seen4"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+    && pass "…and a reply landing while the review payload stays put is refused" \
+    || die "a comment change under a stable review was answered from (rc=$rc '$out')"
+rm -f "$TMP/seen4"
+out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
+[ -z "$out" ] \
+    && pass "…with nothing on stdout" \
+    || die "the changed-comments answer printed '$out'"
+
 # ── `replies-at` RE-CHECKS THE SNAPSHOT TOO ────────────────────────────────
 # The comments are fetched for a review the call has already stopped looking at.
 # Dismissed or superseded in between, the answer describes the OLD review's

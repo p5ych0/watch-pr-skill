@@ -806,5 +806,33 @@ rb_answer_at 2026-01-01T00:00:00Z tomorrow
 [ "$?" -eq 2 ] && pass "…on the reply's side too" \
     || die "an unshaped reply time was accepted"
 
+# ── WHAT AN ESCAPE SNAPSHOT IS ─────────────────────────────────────────────
+# Both callers read the same answer, and peeling it with `${…#…}` alone assigned
+# the SECOND value to both times when a field was missing, hid one when there was
+# an extra, and dropped a non-numeric id in silence — the id being what proves the
+# two times describe one review. #133.
+SNAP="$(printf '77\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z')"
+rb_escape_snapshot "$SNAP" \
+    && [ "$RB_SNAP_ID" = 77 ] \
+    && [ "$RB_SNAP_REVIEW_AT" = 2026-01-01T00:00:00Z ] \
+    && [ "$RB_SNAP_REPLY_AT" = 2026-01-05T00:00:00Z ] \
+    && pass "an escape snapshot parses into its three fields" \
+    || die "a well-formed snapshot did not parse (id='$RB_SNAP_ID' review='$RB_SNAP_REVIEW_AT' reply='$RB_SNAP_REPLY_AT')"
+for _badsnap in "$(printf '2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z')" \
+                "$(printf '77\t2026-01-01T00:00:00Z')" \
+                "$(printf '77\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\textra')" \
+                "$(printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z')" \
+                "77 2026-01-01T00:00:00Z 2026-01-05T00:00:00Z" \
+                ""; do
+    rb_escape_snapshot "$_badsnap" \
+        && die "a malformed snapshot parsed: '$_badsnap'" \
+        || pass "…and a line without exactly three fields and a numeric id does not"
+done
+# AND A FAILED PARSE LEAVES NOTHING BEHIND, so a caller that checked the status
+# and then read the fields cannot act on the previous snapshot.
+{ [ -z "$RB_SNAP_ID" ] && [ -z "$RB_SNAP_REVIEW_AT" ] && [ -z "$RB_SNAP_REPLY_AT" ]; } \
+    && pass "…with every field cleared" \
+    || die "a failed snapshot parse left values behind (id='$RB_SNAP_ID')"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"
