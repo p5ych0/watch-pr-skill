@@ -23,7 +23,14 @@
   `rb_review_record_is_about` takes the head **whole** and compares it at the
   record's own width, so the `${head:0:7}` each caller used to write — a second
   place for the width to be wrong — is gone, and a record that grew to forty hex
-  would be compared at forty rather than matched on its first seven.
+  would be compared at forty rather than matched on its first seven. It does not
+  resolve a prefix collision: a seven-hex record is compared at seven, and only a
+  wider record could tell two heads sharing that prefix apart.
+
+  **The merge gate's two literal reconstructions go too.** It did not carry a
+  regex — it rebuilt the line it expected, `sha=${2:0:7}` and all, and compared
+  against that. A second definition written as a string is invisible to a scan for
+  a regex, and it pinned the width where every other caller did not.
 
   The tail is the caller's rule and `pr-phase-state.sh` states it: `verdict=clean`
   with the `findings=0` truncated away is not a clean answer, and read as one it

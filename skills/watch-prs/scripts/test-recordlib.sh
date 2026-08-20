@@ -420,6 +420,19 @@ scan_inline_rules() {   # <dir> ; prints offenders; 2 if the scan failed
         # status alone — so an rc-0 answer that was empty, or about another PR,
         # reviewer or head, read as "the phase still stands". #126.
         /\^PR_REVIEW_STATE pr=/          { print FILENAME ":" FNR ": review record shape" }
+        # …AND THE SAME RULE WRITTEN AS A STRING. `pr-merge-gate.sh` did not carry
+        # a regex: it REBUILT the line it expected — `local prefix="PR_REVIEW_STATE
+        # pr=$PR sha=${2:0:7} …"` — and compared against that. A scan for a regex
+        # never sees it, and it pinned the sha to seven hex where every other
+        # caller accepted seven to forty.
+        #
+        # AN ASSIGNMENT, NOT AN EMISSION, and that is the whole of what this can
+        # tell apart: `pr-review-state.sh` PRODUCES these lines with `echo` and
+        # must keep doing so. Separating a producer from a reconstructor by reading
+        # text is the unbounded scanner CLAUDE.md records twice; this catches the
+        # shape that actually occurred, in both places it occurred, and does not
+        # claim to catch a reconstruction spelled some other way.
+        /="PR_REVIEW_STATE pr=/           { print FILENAME ":" FNR ": review record rebuilt as a string" }
     ' "$dir"/pr-*.sh 2>"$errf")" || rc=$?
     msg="$(cat "$errf" 2>/dev/null)"; mrc=$?
     rm -f "$errf" 2>/dev/null
@@ -476,6 +489,25 @@ seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
     && pass "…and catches a helper that re-implements the review-record shape" \
     || die "the drift guard did not catch a planted record copy (rc=$drc6 out='$seen')"
 rm -f "$DRIFT/pr-record-copy.sh"
+{ printf '#!/usr/bin/env bash\n'
+  printf 'want="PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=clean findings=0"\n'
+} > "$DRIFT/pr-rebuild-copy.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc7=$?
+{ [ "$drc7" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-rebuild-copy.sh'; } \
+    && pass "…and one that rebuilds the record as a string rather than a regex" \
+    || die "the drift guard did not catch a planted rebuild (rc=$drc7 out='$seen')"
+rm -f "$DRIFT/pr-rebuild-copy.sh"
+# THE PRODUCER IS NOT A COPY. `pr-review-state.sh` writes these lines with `echo`
+# and must keep doing so; a guard that could not tell the two apart would be
+# unusable rather than strict.
+{ printf '#!/usr/bin/env bash\n'
+  printf 'echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=clean findings=0"\n'
+} > "$DRIFT/pr-producer.sh"
+seen="$(scan_inline_rules "$DRIFT")"; drc8=$?
+{ [ "$drc8" -eq 0 ] && ! printf '%s' "$seen" | grep -q 'pr-producer.sh'; } \
+    && pass "…while a helper that PRINTS a record is left alone" \
+    || die "the drift guard flagged the producer (rc=$drc8 out='$seen')"
+rm -f "$DRIFT/pr-producer.sh"
 
 # A helper whose name merely ENDS in the library's name is scanned, not exempted.
 # `pr-recordlib.sh` is matched by the `pr-*.sh` glob and would have been skipped

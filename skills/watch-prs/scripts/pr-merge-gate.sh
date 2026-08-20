@@ -357,21 +357,28 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
 # the record is ever compared, so it asks this instead; the PROOF that an operator
 # vouched stays where the records are checked in full.
 replies_only_line() {   # replies_only_line <reviewer> <sha> <line> ; 0 if that shape
-    # MATCHED IN FULL, LIKE EVERY OTHER RECORD HERE. A `*` between `findings=` and
-    # the suffix accepted an empty count and any field anyone appended —
-    # `findings= source=replies-only`, or `findings=1 extra=x` — and this shape
-    # bypasses the status gate and can authorise a merge, so it is the last place
-    # to be relaxed about a wildcard.
+    # THE SHAPE AND THE IDENTITY THROUGH `recordlib.sh`, like every other record
+    # here. This used to REBUILD the expected line — `sha=${2:0:7}` and all — which
+    # is a second definition of what a record is written as a string rather than as
+    # a regex, and therefore invisible to the drift guard until it was taught to
+    # look. It also pinned the width: a record that carried forty hex was accepted
+    # by every other caller and rejected here.
     #
-    # The prefix is compared as a LITERAL, never interpolated into a regex: these
-    # logins end in `[bot]`, which a regex reads as a character class.
-    local prefix="PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=findings findings="
-    local rest="${3#"$prefix"}"
-    [ "$rest" != "$3" ] || return 1
+    # THE TAIL IS STILL THIS FUNCTION'S. The library hands it back precisely
+    # because what may follow a value differs per question, and a `*` between
+    # `findings=` and the suffix accepted an empty count and any field anyone
+    # appended — `findings= source=replies-only`, or `findings=1 extra=x`. This
+    # shape bypasses the status gate and can authorise a merge, so it is the last
+    # place to be relaxed about a wildcard.
+    rb_review_record "$3" verdict || return 1
+    rb_review_record_is_about "$PR" "$1" "$2" || return 1
+    [ "$RB_REC_VALUE" = findings ] || return 1
+    local rest="$RB_REC_TAIL"
     case "$rest" in
-        *" source=replies-only") ;;
+        " findings="*" source=replies-only") ;;
         *) return 1 ;;
     esac
+    rest="${rest# findings=}"
     local n="${rest% source=replies-only}"
     case "$n" in
         ""|*[!0-9]*) return 1 ;;
@@ -469,8 +476,18 @@ set -- "$CODEX_BOT|$CODEX_EFFECTIVE_SHA|$CODEX_VERDICT"
 [ "$REVIEWERS" = codex-only ] || set -- "$@" "$COPILOT_BOT|$HEAD_OID|$COPILOT_VERDICT"
 for SPEC in "$@"; do
     V_WHO="${SPEC%%|*}"; V_REST="${SPEC#*|}"; V_SHA="${V_REST%%|*}"; V_LINE="${V_REST#*|}"
-    V_WANT="PR_REVIEW_STATE pr=$PR sha=${V_SHA:0:7} reviewer=$V_WHO verdict=clean findings=0"
-    if [ "$V_LINE" != "$V_WANT" ]; then
+    # THROUGH `recordlib.sh` RATHER THAN REBUILT. Comparing against a line this
+    # gate assembled is a second definition of what a record is — one written as a
+    # string, so no scan for a regex would ever find it — and it pinned the sha to
+    # seven hex, which every other caller does not.
+    V_OK=1
+    rb_review_record "$V_LINE" verdict || V_OK=0
+    [ "$V_OK" -eq 0 ] || rb_review_record_is_about "$PR" "$V_WHO" "$V_SHA" || V_OK=0
+    [ "$V_OK" -eq 0 ] || [ "$RB_REC_VALUE" = clean ] || V_OK=0
+    # THE TAIL IS THIS GATE'S RULE, spelled out rather than made optional: a
+    # trailing `.*` accepts any field anyone ever appends.
+    [ "$V_OK" -eq 0 ] || [ "$RB_REC_TAIL" = " findings=0" ] || V_OK=0
+    if [ "$V_OK" -ne 1 ]; then
         # THE ONE VERDICT AN OPERATOR CAN ANSWER FOR. A review whose comments are
         # ALL replies says `source=replies-only`: there is nothing for
         # `pr-findings.sh` to list and it is not a signoff, because a verdict

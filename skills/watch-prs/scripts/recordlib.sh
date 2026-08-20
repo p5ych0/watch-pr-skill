@@ -397,10 +397,18 @@ rb_review_record() {   # <line> <field>
 #
 # THE HEAD IS PASSED WHOLE and compared against the record's own width. The field
 # is a seven-hex prefix today; every caller wrote `${head:0:7}` at the call site,
-# which is a second place for the width to be wrong. Comparing the record to the
-# PINNED oid rather than to another record's field is deliberate too: two records
-# compared to each other cannot tell two commits apart when their prefixes
-# collide, and both compared to the resolved oid can.
+# which is a second place for the width to be wrong — and a record that grew to
+# forty hex would have been matched on its first seven.
+#
+# WHAT THAT DOES NOT DO IS RESOLVE A PREFIX COLLISION. A seven-hex record is
+# compared at seven, so two heads sharing that prefix both satisfy it; only a
+# record carrying more can tell them apart, and none does today. The comparison is
+# as strong as the record, and no stronger.
+#
+# WHAT IT DOES FIX is the other collision: comparing a record to ANOTHER RECORD's
+# field cannot tell two commits apart at all when their prefixes agree, while
+# comparing both to the one resolved oid this call pinned at least measures them
+# against the same thing.
 #
 # COMPARED AS STRINGS, never with `=~`: a reviewer login ends in `[bot]`, which a
 # regex reads as a character class.
