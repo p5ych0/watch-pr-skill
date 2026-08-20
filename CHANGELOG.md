@@ -13,10 +13,11 @@
   What a signoff must now be newer than is the **later** of the two moments, which
   is `rb_answer_at` in `recordlib.sh` — either can be the last thing that happened,
   a review with no comments has only the first and a reply after the review has the
-  second. Either may be absent, and absent is not zero: it means that channel had
-  nothing to say. Both absent is a refusal, because there is then nothing for a
-  signoff to answer at all, and a value of a shape it cannot place is a third
-  status again rather than something to sort.
+  second. Only the **reply** time may be absent, and absent is not zero: it means
+  that channel had nothing to say. Both absent is a refusal, because there is then
+  nothing for a signoff to answer at all; a reply time with no review time is
+  unreadable rather than a deadline of its own; and a value of a shape it cannot
+  place is a third status again rather than something to sort.
 
   An unreadable reply time blocks rather than passing. Read as "no replies", the
   retracting reply it could not see is exactly what gets merged over.
@@ -31,6 +32,12 @@
   saying "the review at <T>" pointed the operator at an event they had already
   answered with a timestamp that was not the review's. Both times are printed, so
   which one moved is visible.
+
+  **The deadline is bound to one review.** Both callers read the review id before
+  the timestamps and again with the verdict, because a verdict record carries no
+  id: a second replies-only review with the same finding count, submitted on the
+  same head, serialises byte-for-byte identically, and a binding that compared
+  only the verdict accepted the old review's timestamps for the new one.
 
   **The verdict is re-read afterwards, bound to the deadline just computed.** The
   two time probes are separate calls: a review dismissed after `review-at` returns

@@ -378,6 +378,17 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     local who="$1" want="$2" verdict_line="$3" line rc=0 rat arc=0
     line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
+    # WHICH REVIEW THIS IS, BEFORE ANY OF ITS TIMES ARE READ. A verdict record
+    # carries no review id, so a SECOND replies-only review with the same finding
+    # count, submitted on the same head, serialises byte-for-byte identically to
+    # the first — and a binding that compares only the verdict accepts the old
+    # review's timestamps for the new one, letting a signoff that predates it
+    # merge. Dismissal is the visible case; a same-shaped replacement is not.
+    local rid1 ridrc=0
+    rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || ridrc=$?
+    if [ "$ridrc" -ne 0 ] || [ -z "$rid1" ]; then
+        echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc)"; return 1
+    fi
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
     # AND WHEN THE NEWEST REPLY LANDED, which is a different moment. This verdict
@@ -418,8 +429,11 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     # identical means the review that produced it is still the authoritative one.
     local vagain vgrc=0
     vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$who" "$want"); vgrc=$?
-    if [ "$vgrc" -ne 1 ] || [ "$vagain" != "$verdict_line" ]; then
-        echo "merge blocked: $who's verdict on ${want:0:7} changed while its timestamps were being read"
+    local rid2 rid2rc=0
+    rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || rid2rc=$?
+    if [ "$vgrc" -ne 1 ] || [ "$vagain" != "$verdict_line" ] \
+       || [ "$rid2rc" -ne 0 ] || [ "$rid2" != "$rid1" ]; then
+        echo "merge blocked: $who's review on ${want:0:7} changed while its timestamps were being read"
         return 1
     fi
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0

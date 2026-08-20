@@ -170,6 +170,16 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
         1) RB_VOUCH_REASON=no_signoff; return 1 ;;
         *) RB_VOUCH_REASON=unreadable; return 2 ;;
     esac
+    # WHICH REVIEW THIS IS, BEFORE ANY OF ITS TIMES ARE READ. A verdict record
+    # carries no review id, so a SECOND replies-only review with the same finding
+    # count, submitted on the same head, serialises byte-for-byte identically —
+    # and a binding that compares only the verdict accepts the OLD review's
+    # timestamps for the new one.
+    local _rid1 _ridrc=0
+    _rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _ridrc=$?
+    if [ "$_ridrc" -ne 0 ] || [ -z "$_rid1" ]; then
+        RB_VOUCH_REASON=review_id_unreadable; return 2
+    fi
     _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
     [ "$_arc" -eq 0 ] || { RB_VOUCH_REASON=review_at_unreadable; return 2; }
     # AND WHEN THE NEWEST REPLY LANDED. A replies-only verdict is produced by the
@@ -205,8 +215,11 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     # any of it. Each probe re-checks ITSELF; the verdict is what binds them.
     local _vagain _vgrc=0
     _vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$1" "$2"); _vgrc=$?
-    if [ "$_vgrc" -ne 1 ] || [ "$_vagain" != "$3" ]; then
-        RB_VOUCH_REASON=verdict_changed
+    local _rid2 _rid2rc=0
+    _rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _rid2rc=$?
+    if [ "$_vgrc" -ne 1 ] || [ "$_vagain" != "$3" ] \
+       || [ "$_rid2rc" -ne 0 ] || [ "$_rid2" != "$_rid1" ]; then
+        RB_VOUCH_REASON=review_changed
         return 2
     fi
     # THE TIMES TRAVEL WITH THE ANSWER, because the stop below is what the operator

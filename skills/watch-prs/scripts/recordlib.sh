@@ -522,9 +522,10 @@ rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
 # and either can be the last thing that happened — a review with no comments has
 # only the first, and a reply after the review has the second.
 #
-# EITHER MAY BE ABSENT, and absent is not zero: it means that channel had nothing
-# to say. Both absent is a refusal, because there is then nothing for a signoff to
-# answer at all.
+# ONLY THE REPLY TIME MAY BE ABSENT, and absent is not zero: it means that
+# channel had nothing to say. Both absent is a refusal, because there is then
+# nothing for a signoff to answer at all — and a reply time with NO review time is
+# unreadable rather than a deadline of its own, for the reason given below.
 #
 # CANONICAL UTC, CHECKED HERE, because the comparison is a STRING one and that is
 # the time order only for this shape. A value of another shape sorts somewhere

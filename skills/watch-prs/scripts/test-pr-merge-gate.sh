@@ -358,6 +358,11 @@ vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
     printf '0' > "$STUB_DIR/pr-signoff.rc"
     printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
         "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+    # WHICH REVIEW IT IS, so the two time probes can be bound to one of them: a
+    # verdict record carries no review id, and a second replies-only review with
+    # the same finding count serialises identically.
+    printf '77\n' > "$STUB_DIR/pr-review-state.review-id.out"
+    printf '0' > "$STUB_DIR/pr-review-state.review-id.rc"
     # WHEN THE REVIEW LANDED, so "newer than" can be decided at all.
     printf '2026-01-01T00:00:00Z\n' > "$STUB_DIR/pr-review-state.review-at.out"
     # AND WHEN THE NEWEST REPLY DID. Empty with status 1 is the ordinary answer —
@@ -458,6 +463,17 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
+
+# A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
+# replies-only review with the same finding count, submitted on the same head,
+# serialises byte-for-byte identically — so a binding that compares only the
+# verdict accepts the OLD review's timestamps for the new one, and a signoff that
+# predates the new review merges. The review id is what tells them apart.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '78\n' > "$STUB_DIR/pr-review-state.review-id.2.out"
+printf '0' > "$STUB_DIR/pr-review-state.review-id.2.rc"
+case_is 1 "changed while its timestamps were being read" \
+    "a same-shaped review submitted in that window cannot be vouched for"
 
 # ── THE VERDICT IS RE-READ, BOUND TO THE DEADLINE JUST COMPUTED ────────────
 # The two time probes are separate calls. A review dismissed after `review-at`
