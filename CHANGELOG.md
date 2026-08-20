@@ -50,22 +50,27 @@
   sites use one refspec computed once, because one of the two being bare is
   exactly the defect.
 
-  Eight refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  Nine refusals, each leaving nothing pushed — a different branch, a detached HEAD
   (where a push reaches no PR and the next step would wait for a head that never
   appears), an unreadable answer, an empty one — which is what a 200 with a
   missing field looks like, and why a status check alone is not enough — and a PR
   from a **fork**, where `origin` pointed at a same-named branch would put the
   round's fixes somewhere else entirely and report success; a cross-repository
   answer that says neither; an `origin` whose push URL is another repository; and
-  a push URL that cannot be read at all.
+  a push URL that cannot be read at all; and a second push URL naming another
+  repository, though the first is right.
 
-  Eighteen cases, all failing against the gate they replace, including two that
+  Twenty cases, all failing against the gate they replace, including two that
   assert the push's arguments verbatim — one per mode, since a refspec applied to
   only one site is the same defect halved.
 
   `SKILL.md` and `README.md` tell the driver and the operator to run the gate from
-  the PR's checkout and what the refusal means; both reviewer files carry the
-  general rule, which is that a call that writes somewhere must name where. The Copilot head-lookup count
+  the PR's checkout, and separate the two kinds of refusal: a wrong branch or a
+  detached HEAD is about where you are standing and is answered by moving worktree
+  and running it again, while a fork PR or a redirected `origin` is not — running
+  it again changes nothing, so those stop for the operator. Both reviewer files
+  carry the general rule, which is that a call that writes somewhere must name
+  where. The Copilot head-lookup count
   now counts `headRefOid` reads specifically, since the branch read is a different
   question asked for a different reason and would otherwise move that number.
 
