@@ -451,8 +451,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id|review-at) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id|review-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|review-at|replies-at) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|review-at|replies-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -552,6 +552,63 @@ main() {
             at="$cat_"
         fi
         printf '%s\n' "$at"
+        return 0
+    fi
+
+    # WHEN THE NEWEST REPLY LANDED, which is a different moment from when the
+    # review did. A replies-only verdict is produced by the COMMENTS on a review,
+    # and one added afterwards does not move the review's `submitted_at` — so an
+    # operator signoff ordered against `review-at` alone still vouched over a
+    # retracting reply nobody read. #130, for #129.
+    if [ "$cmd" = "replies-at" ]; then
+        local rsnap rid rraw rat
+        rsnap="$(head_review_snapshot "$pr" "$who" "$head")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        rid="${rsnap#*$'\t'}"
+        # NO REVIEW IS AN ANSWER, NOT A FAILURE — and so is a verdict that arrived
+        # as an issue COMMENT, which carries no review comments by construction:
+        # there is nothing for a reply to be attached to. Both report 1, which the
+        # caller reads as "nothing to order against" rather than as a broken read.
+        case "$rid" in
+            ""|comment:*) return 1 ;;
+            *[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
+        esac
+        # THE FETCH'S STATUS ON ITS OWN LINE, as everywhere else here. `pages_or_error`
+        # below already refuses an EMPTY read, so a fetch that fails silently is
+        # caught either way — but one that prints a page and then fails on a later
+        # one is not: what it printed parses, and the answer would be a maximum
+        # over half the comments. An incomplete snapshot presented as a complete
+        # one is the shape #113 was, and the status is what sees it.
+        rraw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$rid/comments" --paginate 2>/dev/null) || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        # EVERY ROW IS VALIDATED FIRST, by the same rule that counts them. A row
+        # this cannot read is a payload, not a comment, and taking a maximum over
+        # a set that contains one is an answer about something else.
+        rat="$(printf '%s' "$rraw" | jq -s -r "$RECORDLIB_JQ"'
+            pages_or_error
+            | [.[][]] as $rows
+            | if any($rows[]; valid_review_comment | not)
+              then error("malformed review comment")
+              else [ $rows[] | .created_at ] | sort | last // ""
+              end' 2>/dev/null)" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        # A REVIEW WITH NO COMMENTS IS AN ANSWER TOO.
+        [ -n "$rat" ] || return 1
+        # AND THE SHAPE, because every consumer compares this as a STRING and that
+        # is the time order only for canonical UTC. `valid_comment_record` enforces
+        # it on the way in; this is the boundary refusing to hand out a value it
+        # cannot place.
+        case "$rat" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
+        esac
+        printf '%s\n' "$rat"
         return 0
     fi
 
