@@ -150,6 +150,16 @@ run() {   # run <stage> [args…] ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 posted() { cat "$W/posted" 2>/dev/null; }
+# DEFINED BESIDE `posted`, NOT BESIDE ITS FIRST USE. This file runs under
+# `set -uo pipefail` WITHOUT `-e`, so a call before the definition prints
+# `command not found` and carries on — the case then asserts nothing and the run
+# can still end PASS, which is the "a failing probe looks like a clean phase"
+# shape the whole file exists to catch.
+nothing_posted() {   # nothing_posted <label>
+    [ -s "$W/posted" ] \
+        && die "$1 — but the signoff was posted anyway" \
+        || pass "$1"
+}
 # `before <a> <b>` — a happened earlier in the call log than b.
 before() {
     local la lb
@@ -288,11 +298,6 @@ grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
 # A failed probe must never be indistinguishable from a clean phase: the signoff
 # is what a later session trusts, so recording one that was not proven is the
 # failure this whole file exists to prevent.
-nothing_posted() {   # nothing_posted <label>
-    [ -s "$W/posted" ] \
-        && die "$1 — but the signoff was posted anyway" \
-        || pass "$1"
-}
 world; printf '1\n' > "$W/verdict.rc"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'Codex is not clean on the sha being recorded'; } \
