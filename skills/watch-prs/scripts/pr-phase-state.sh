@@ -177,9 +177,13 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     # timestamps for the new one.
     local _rid1 _ridrc=0
     _rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _ridrc=$?
-    if [ "$_ridrc" -ne 0 ] || [ -z "$_rid1" ]; then
-        RB_VOUCH_REASON=review_id_unreadable; return 2
-    fi
+    # THE SHAPE, NOT JUST NON-EMPTY. A replaced or wrapped helper exiting 0 with
+    # the same word on both reads is a STABLE value that identifies nothing, and a
+    # same-shaped replacement is invisible again.
+    case "$_rid1" in
+        ""|*[!0-9]*) RB_VOUCH_REASON=review_id_unreadable; return 2 ;;
+    esac
+    [ "$_ridrc" -eq 0 ] || { RB_VOUCH_REASON=review_id_unreadable; return 2; }
     _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
     [ "$_arc" -eq 0 ] || { RB_VOUCH_REASON=review_at_unreadable; return 2; }
     # AND WHEN THE NEWEST REPLY LANDED. A replies-only verdict is produced by the
@@ -191,9 +195,14 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     # comment and carries none. Only 2 is a read that failed.
     local _pat _prc=0
     _pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$1" "$2") || _prc=$?
+    # ABSENCE HAS TO BE SILENT. A wrapper that prints a partial answer and then
+    # returns the documented absence status leaves a timestamp on stdout that this
+    # arm would discard — and if it is newer than the signoff, discarding it is
+    # exactly the reply the phase closes over.
     case "$_prc" in
         0) ;;
-        1) _pat="" ;;
+        1) [ -z "$_pat" ] || { RB_VOUCH_REASON=replies_at_unreadable; return 2; }
+           _pat="" ;;
         *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
     esac
     # THE TWO REFUSALS ARE DIFFERENT ANSWERS. `1` is "neither channel has anything
@@ -217,8 +226,11 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
     _vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$1" "$2"); _vgrc=$?
     local _rid2 _rid2rc=0
     _rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _rid2rc=$?
+    case "$_rid2" in
+        ""|*[!0-9]*) _rid2="" ;;
+    esac
     if [ "$_vgrc" -ne 1 ] || [ "$_vagain" != "$3" ] \
-       || [ "$_rid2rc" -ne 0 ] || [ "$_rid2" != "$_rid1" ]; then
+       || [ "$_rid2rc" -ne 0 ] || [ -z "$_rid2" ] || [ "$_rid2" != "$_rid1" ]; then
         RB_VOUCH_REASON=review_changed
         return 2
     fi

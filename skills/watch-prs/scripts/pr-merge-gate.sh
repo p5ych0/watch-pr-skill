@@ -386,9 +386,15 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     # merge. Dismissal is the visible case; a same-shaped replacement is not.
     local rid1 ridrc=0
     rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || ridrc=$?
-    if [ "$ridrc" -ne 0 ] || [ -z "$rid1" ]; then
-        echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc)"; return 1
-    fi
+    # THE SHAPE, NOT JUST NON-EMPTY. A replaced or wrapped helper exiting 0 with
+    # the same word on both reads is a STABLE value that identifies nothing — the
+    # two reads then agree and a same-shaped replacement is invisible again, which
+    # is the defect this id exists to close.
+    case "$rid1" in
+        ""|*[!0-9]*) echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc, id='$rid1')"; return 1 ;;
+    esac
+    [ "$ridrc" -eq 0 ] || {
+        echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc)"; return 1; }
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
     # AND WHEN THE NEWEST REPLY LANDED, which is a different moment. This verdict
@@ -401,9 +407,15 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     # comment and carries none. Only 2 is a read that failed.
     local pat prc=0
     pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$who" "$want") || prc=$?
+    # ABSENCE HAS TO BE SILENT. A wrapper that prints a partial answer and then
+    # returns the documented absence status leaves a timestamp on stdout that this
+    # arm would discard — and if it is newer than the signoff, discarding it is
+    # exactly the reply that gets merged over.
     case "$prc" in
         0) ;;
-        1) pat="" ;;
+        1) [ -z "$pat" ] || {
+               echo "merge blocked: $who's reply probe reported no replies and printed one anyway ('$pat')"; return 1; }
+           pat="" ;;
         *) echo "merge blocked: could not read when $who's newest reply landed (rc=$prc)"; return 1 ;;
     esac
     # THE TWO REFUSALS ARE DIFFERENT ANSWERS, and both block here — but they do not
@@ -431,8 +443,11 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$who" "$want"); vgrc=$?
     local rid2 rid2rc=0
     rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || rid2rc=$?
+    case "$rid2" in
+        ""|*[!0-9]*) rid2="" ;;
+    esac
     if [ "$vgrc" -ne 1 ] || [ "$vagain" != "$verdict_line" ] \
-       || [ "$rid2rc" -ne 0 ] || [ "$rid2" != "$rid1" ]; then
+       || [ "$rid2rc" -ne 0 ] || [ -z "$rid2" ] || [ "$rid2" != "$rid1" ]; then
         echo "merge blocked: $who's review on ${want:0:7} changed while its timestamps were being read"
         return 1
     fi

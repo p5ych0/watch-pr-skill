@@ -471,6 +471,24 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
+# exiting 0 with the same word on both reads is a STABLE value that tells two
+# reviews apart no better than the verdict did.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf 'warning\n' > "$W/codex.rid.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "a review id of another shape is refused, not treated as stable" \
+    || die "a malformed review id was accepted: '${got}'"
+# AND ABSENCE HAS TO BE SILENT.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2026-01-03T00:00:00Z\n' > "$W/codex.replies.out"
+printf '1\n' > "$W/codex.replies.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and a reply probe that says none while printing one is refused" \
+    || die "a printing absence was discarded: '${got}'"
+
 # A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
 # replies-only review with the same finding count on the same head serialises
 # byte-for-byte identically, so comparing only the verdict accepts the OLD

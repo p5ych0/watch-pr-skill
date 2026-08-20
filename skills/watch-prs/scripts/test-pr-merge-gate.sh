@@ -464,6 +464,21 @@ printf 'whenever\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "could not be placed in time" "…and so does a reply time of another shape"
 
+# AN ID THAT IS NOT AN ID IDENTIFIES NOTHING. A replaced or wrapped helper
+# exiting 0 with the same word on both reads is a STABLE value that tells two
+# reviews apart no better than the verdict did.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'warning\n' > "$STUB_DIR/pr-review-state.review-id.out"
+case_is 1 "which copilot-pull-request-reviewer[bot] review is authoritative" \
+    "a review id of another shape is refused, not treated as stable"
+# AND ABSENCE HAS TO BE SILENT. A probe that prints a timestamp and then returns
+# the documented absence status leaves a value this arm would discard — and if it
+# is newer than the signoff, discarding it is the reply that gets merged over.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '1' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "printed one anyway" "…and a reply probe that says none while printing one is refused"
+
 # A SAME-SHAPED REPLACEMENT IS INVISIBLE TO THE VERDICT ALONE. A second
 # replies-only review with the same finding count, submitted on the same head,
 # serialises byte-for-byte identically — so a binding that compares only the

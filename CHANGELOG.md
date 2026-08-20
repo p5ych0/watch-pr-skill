@@ -20,7 +20,10 @@
   place is a third status again rather than something to sort.
 
   An unreadable reply time blocks rather than passing. Read as "no replies", the
-  retracting reply it could not see is exactly what gets merged over.
+  retracting reply it could not see is exactly what gets merged over — and a probe
+  that reports *no replies* while printing one is refused rather than having its
+  output discarded, since a discarded timestamp newer than the signoff is that
+  same reply.
 
   And a timestamp of a shape nothing can place is a *third* answer, not the
   second: a probe that exits 0 with something it did not mean is a read that
@@ -38,6 +41,10 @@
   id: a second replies-only review with the same finding count, submitted on the
   same head, serialises byte-for-byte identically, and a binding that compared
   only the verdict accepted the old review's timestamps for the new one.
+
+  The id is checked for SHAPE on both reads, not merely for being non-empty: a
+  replaced helper exiting 0 with the same word twice is a stable value that
+  identifies nothing, and the two reads then agree exactly as the verdicts did.
 
   **The verdict is re-read afterwards, bound to the deadline just computed.** The
   two time probes are separate calls: a review dismissed after `review-at` returns
