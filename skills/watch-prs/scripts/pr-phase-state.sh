@@ -236,13 +236,21 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
     # RESUMING AFTER THE COPILOT PHASE. The Codex signoff is deliberately older
     # than the head; the gate is what proves the delta is Copilot-only. What must
     # still hold is the COPILOT signoff, on the head being merged.
+    # THE THREE STATUSES ARE KEPT APART, because `-ne 0` folded two answers into
+    # one: `1` is "the verdict is not clean", which is a phase to reopen, and `2`
+    # is "the reviews could not be read", which is not an answer about the phase at
+    # all. Told apart only by that test, an unreadable API sent the operator to
+    # re-request a review that may never have been dismissed — and this helper's
+    # own contract says 2 means unreadable everywhere else in it.
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"); VERDICT_RC=$?
-    if [[ $VERDICT_RC -ne 0 ]]; then
-        echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
-        echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
-        echo "Treat the Copilot phase as open: request a review before merging."
-        exit 1
-    fi
+    case "$VERDICT_RC" in
+        0) ;;
+        1) echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
+           echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
+           echo "Treat the Copilot phase as open: request a review before merging."
+           exit 1 ;;
+        *) echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_unreadable rc=$VERDICT_RC" >&2; exit 2 ;;
+    esac
     echo "PR_PHASE pr=$PR state=after-copilot codex-sha=$CODEX_SHA copilot-sha=$COPILOT_SHA head=$HEAD"
     exit 0
 else
@@ -255,13 +263,16 @@ else
         echo "The Codex phase is NOT closed on this head: request a review of it before merging or opening the Copilot phase."
         exit 1
     fi
+    # THE SAME THREE, for the same reason.
     VERDICT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); VERDICT_RC=$?
-    if [[ $VERDICT_RC -ne 0 ]]; then
-        echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
-        echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
-        echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
-        exit 1
-    fi
+    case "$VERDICT_RC" in
+        0) ;;
+        1) echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
+           echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
+           echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
+           exit 1 ;;
+        *) echo "PR_PHASE pr=$PR status=error reason=codex_verdict_unreadable rc=$VERDICT_RC" >&2; exit 2 ;;
+    esac
     echo "PR_PHASE pr=$PR state=before-copilot codex-sha=$CODEX_SHA head=$HEAD"
     exit 0
 fi

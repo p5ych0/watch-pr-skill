@@ -27,6 +27,13 @@
   The shape check on a resumed sha now goes through `recordlib.sh`'s
   `is_full_sha`, so what a commit is has one definition here as everywhere else.
 
+  **"Not clean" and "could not read it" are told apart**, which the recipe's
+  `-ne 0` test folded together. `pr-review-state.sh verdict` answers 1 for a
+  verdict that is not clean — a phase to reopen — and 2 for reviews it could not
+  read, which is not an answer about the phase at all; reported as the first, an
+  unreadable endpoint sent the operator to re-request a review nobody had
+  dismissed.
+
   First of #26's sub-issues; #123.
 
 ## [2.0.39] — 2026-08-20

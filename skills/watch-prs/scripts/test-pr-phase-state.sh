@@ -206,6 +206,31 @@ got="$(run 7)"
     && pass "…and so does a Copilot verdict, on the arm where that is the one that must hold" \
     || die "a withdrawn Copilot verdict gave '${got}'"
 
+# ── "NOT CLEAN" AND "COULD NOT READ IT" ARE DIFFERENT ANSWERS ──────────────
+# `pr-review-state.sh verdict` documents 0 clean, 1 not clean, 2 unreadable, and a
+# `-ne 0` test folds the last two together. A dismissal is a phase to reopen; an
+# unreadable reviews endpoint is not an answer about the phase at all, and
+# reporting it as one sends the operator to re-request a review nobody dismissed.
+world; printf '2\n' > "$W/codex.verdict.rc"
+printf 'PR_REVIEW_STATE verdict=error reason=unreadable\n' > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_unreadable'; } \
+    && pass "an unreadable Codex verdict fails closed rather than reading as a dismissal" \
+    || die "an unreadable Codex verdict gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+    && die "…but it reported the phase as reopened as well" \
+    || pass "…and does not tell the operator to re-request a review"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf '2\n' > "$W/copilot.verdict.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_unreadable'; } \
+    && pass "…and so does an unreadable Copilot verdict, on the other arm" \
+    || die "an unreadable Copilot verdict gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+    && die "…but it reported that phase as reopened as well" \
+    || pass "…without telling the operator to re-request that one either"
+
 # ── EACH ARM RE-VALIDATES ITS OWN REVIEWER, NOT THE OTHER ──────────────────
 # The post-Copilot arm must not ask about Codex: its signoff is older than the
 # head by design, so a verdict lookup pinned to that sha proves nothing about what
