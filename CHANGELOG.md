@@ -22,7 +22,7 @@
   And the review snapshot is read **again** afterwards, because the comments were
   fetched for a review the call has already stopped looking at: dismissed or
   superseded in between, the answer describes the old review's replies while
-  presenting itself as the current one. `merge_verdict` re-checks for the same
+  presenting itself as the current one. `clean_verdict` re-checks for the same
   reason, on the same pair of fetches.
 
   No consumer yet — #129 wires it, and lands next. #130.

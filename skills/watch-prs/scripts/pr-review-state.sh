@@ -603,7 +603,7 @@ main() {
         # between, the answer describes the OLD review's replies while presenting
         # itself as the current one — and a consumer ordering an operator signoff
         # against it lets one recorded between the old replies and the new vouch
-        # for a verdict nobody read. `merge_verdict` re-checks for exactly this
+        # for a verdict nobody read. `clean_verdict` re-checks for exactly this
         # reason; this is the same pair of fetches.
         local rsnap2
         rsnap2="$(head_review_snapshot "$pr" "$who" "$head")" || {
