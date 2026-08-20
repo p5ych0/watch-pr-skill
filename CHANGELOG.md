@@ -30,7 +30,23 @@
 
   The phase helper says which of the two it found: a replies-only review nobody
   signed off reports `*_replies_only_unvouched` and names why, rather than calling
-  it a dismissal.
+  it a dismissal — and an **unreadable** probe is a third answer again, reported as
+  `*_vouch_unreadable` with status 2, because folding it into "nobody signed this
+  off" tells the operator to record a signoff they may already have recorded.
+
+  **The whole signoff record is parsed, not its suffix.** Reading the sha with
+  `${line##*sha=}` and looking for a shaped `at=` accepts any rc-0 line that *ends*
+  in the right commit, so a truncated, cached or misrouted record for another PR or
+  another reviewer authorised the merge. A revocation fails it too, and should.
+
+  **`pr-watch.sh` decides the shape once.** A record that declared
+  `source=replies-only` and failed the shared predicate — `findings=0`, say — was
+  classified as an ordinary findings verdict and exited 0, so a caller branching on
+  the status acted on an answer nothing had validated. Either it is that record or
+  the verdict is inconsistent.
+
+  What remains is #129: the signoff is ordered against the *review*, and a reply
+  added after it does not move the review's timestamp.
 
 ## [2.0.41] — 2026-08-20
 

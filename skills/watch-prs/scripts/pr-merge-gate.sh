@@ -379,14 +379,14 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
     [ "$rc" -eq 0 ] || return 1
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
-    rb_signoff_answers "$line" "$rat" "$want" && return 0
+    rb_signoff_answers "$line" "$rat" "$PR" "$who" "$want" && return 0
     case "$RB_VOUCH_REASON" in
-        other_head)      ;;   # the signoff names another commit; not this gate's to explain
-        signoff_untimed) echo "merge blocked: the $who signoff record carries no usable timestamp ('$line')" ;;
-        no_review)       echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer" ;;
-        review_untimed)  echo "merge blocked: when $who's review landed could not be read ('$rat')" ;;
-        not_after)       echo "merge blocked: the $who signoff was not recorded after the review at $rat — it cannot be an answer to it" ;;
-        *)               echo "merge blocked: the $who signoff does not answer the review on ${want:0:7}" ;;
+        other_head|other_pr|other_reviewer) ;;   # a record about something else; not this gate's to explain
+        signoff_malformed) echo "merge blocked: the $who signoff record is not one this gate can read ('$line')" ;;
+        no_review)         echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer" ;;
+        review_untimed)    echo "merge blocked: when $who's review landed could not be read ('$rat')" ;;
+        not_after)         echo "merge blocked: the $who signoff was not recorded after the review at $rat — it cannot be an answer to it" ;;
+        *)                 echo "merge blocked: the $who signoff does not answer the review on ${want:0:7}" ;;
     esac
     return 1
 }

@@ -705,45 +705,64 @@ done
 # A HEAD IS NOT A MOMENT: the signoff must be NEWER than the review it answers,
 # or one recorded for an earlier clean review vouches for a later replies-only one.
 SO="PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40"
-rb_signoff_answers "$SO" 2026-01-01T00:00:00Z "$H40" \
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
     && pass "a signoff recorded after the review answers it" \
     || die "a newer signoff did not vouch (reason='$RB_VOUCH_REASON')"
-rb_signoff_answers "$SO" 2026-01-03T00:00:00Z "$H40" \
+rb_signoff_answers "$SO" 2026-01-03T00:00:00Z 7 "$BOT" "$H40" \
     && die "a signoff older than the review vouched for it" \
     || { [ "$RB_VOUCH_REASON" = not_after ] \
         && pass "…and one recorded before it does not, saying so" \
         || die "an older signoff gave reason '$RB_VOUCH_REASON'"; }
 # EQUAL IS NOT NEWER: second-resolution timestamps cannot order a tie, and this is
 # permission to merge.
-rb_signoff_answers "$SO" 2026-01-02T00:00:00Z "$H40" \
+rb_signoff_answers "$SO" 2026-01-02T00:00:00Z 7 "$BOT" "$H40" \
     && die "a same-second signoff was ordered" \
     || pass "…and a tie cannot be ordered, so it refuses"
-rb_signoff_answers "$SO" 2026-01-01T00:00:00Z "$O40" \
+# THE WHOLE RECORD IS PARSED, NOT ITS SUFFIX. Reading the sha with `${line##*sha=}`
+# and looking for a shaped `at=` accepts any rc-0 line that ENDS in the right
+# commit, so a truncated, cached or misrouted record for another PR or another
+# reviewer authorised the merge.
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 "$BOT" "$O40" \
     && die "a signoff naming another head vouched" \
     || { [ "$RB_VOUCH_REASON" = other_head ] \
         && pass "…and one naming another head does not" \
         || die "another head gave reason '$RB_VOUCH_REASON'"; }
-rb_signoff_answers "$SO" "" "$H40" \
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 8 "$BOT" "$H40" \
+    && die "a signoff for another PR vouched" \
+    || { [ "$RB_VOUCH_REASON" = other_pr ] \
+        && pass "…nor one for another PR" \
+        || die "another PR gave reason '$RB_VOUCH_REASON'"; }
+rb_signoff_answers "$SO" 2026-01-01T00:00:00Z 7 'copilot-pull-request-reviewer[bot]' "$H40" \
+    && die "a signoff for another reviewer vouched" \
+    || { [ "$RB_VOUCH_REASON" = other_reviewer ] \
+        && pass "…nor one for another reviewer with the same head" \
+        || die "another reviewer gave reason '$RB_VOUCH_REASON'"; }
+rb_signoff_answers "$SO" "" 7 "$BOT" "$H40" \
     && die "a signoff vouched with no review to answer" \
     || { [ "$RB_VOUCH_REASON" = no_review ] \
         && pass "…and there must be a review for it to answer" \
         || die "an absent review gave reason '$RB_VOUCH_REASON'"; }
-# THE FIELD BEFORE THE PEEL. `${line#*at=}` on a record WITHOUT `at=` returns the
-# whole line, and `%% *` then takes its first word — a value that is not a time.
-rb_signoff_answers "PR_SIGNOFF pr=7 reviewer=$BOT id=901 sha=$H40" 2026-01-01T00:00:00Z "$H40" \
-    && die "an untimed signoff vouched" \
-    || { [ "$RB_VOUCH_REASON" = signoff_untimed ] \
-        && pass "…and an untimed signoff refuses rather than peeling the whole line" \
-        || die "an untimed signoff gave reason '$RB_VOUCH_REASON'"; }
-# CANONICAL UTC ON BOTH SIDES, because these are compared as STRINGS and that is
-# the time order only for this shape.
-rb_signoff_answers "PR_SIGNOFF pr=7 reviewer=$BOT at=yesterday id=901 sha=$H40" 2026-01-01T00:00:00Z "$H40" \
-    && die "a signoff time of another shape was compared" \
-    || pass "…and a time of another shape refuses rather than sorting somewhere"
-rb_signoff_answers "$SO" tomorrow "$H40" \
+# A LINE MISSING A FIELD IS NOT A RECORD. `${line#*at=}` on one WITHOUT `at=`
+# returns the whole line, and `%% *` then takes its first word — a value that is
+# not a time; parsing the record instead refuses it as unreadable.
+for _badrec in "PR_SIGNOFF pr=7 reviewer=$BOT id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=yesterday id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=aaaaaaa" \
+               "warning PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=$H40" \
+               "PR_SIGNOFF pr=7 reviewer=$BOT at=2026-01-02T00:00:00Z id=901 sha=none reason=revoked"; do
+    rb_signoff_answers "$_badrec" 2026-01-01T00:00:00Z 7 "$BOT" "$H40" \
+        && die "a malformed signoff vouched: '$_badrec'" \
+        || { [ "$RB_VOUCH_REASON" = signoff_malformed ] \
+            && pass "…and refuses a record it cannot read: '${_badrec#PR_SIGNOFF }'" \
+            || die "'$_badrec' gave reason '$RB_VOUCH_REASON'"; }
+done
+# CANONICAL UTC ON THE REVIEW'S SIDE TOO, because these are compared as STRINGS
+# and that is the time order only for this shape.
+rb_signoff_answers "$SO" tomorrow 7 "$BOT" "$H40" \
     && die "a review time of another shape was compared" \
     || { [ "$RB_VOUCH_REASON" = review_untimed ] \
-        && pass "…on the review's side too" \
+        && pass "…and a review time of another shape refuses rather than sorting somewhere" \
         || die "an unshaped review time gave reason '$RB_VOUCH_REASON'"; }
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi

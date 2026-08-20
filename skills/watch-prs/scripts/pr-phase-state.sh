@@ -142,13 +142,25 @@ rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; ex
 # THE RULE IS `recordlib.sh`'s AND THE FETCHING IS HERE, because the two callers
 # read these records with their own error prefixes and their own statuses; what
 # they share is what "this signoff answers that review" means.
-rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
+# 0 vouched · 1 no record answers it · 2 a probe could not be read
+#
+# THE THIRD STATUS IS NOT THE SECOND. Folding an unreadable probe into "nobody
+# signed this off" tells the operator to record a signoff they may already have
+# recorded, and hides a broken read behind an ordinary-looking refusal — which is
+# the fail-closed rule this helper states everywhere else.
+rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
     local _line _rc=0 _rat _arc=0
     _line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$1" 2>&1) || _rc=$?
-    [ "$_rc" -eq 0 ] || return 1
+    # 1 IS AN ANSWER — nothing is recorded, so nothing vouches. Anything else is a
+    # read that failed.
+    case "$_rc" in
+        0) ;;
+        1) return 1 ;;
+        *) return 2 ;;
+    esac
     _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
-    [ "$_arc" -eq 0 ] || return 1
-    rb_signoff_answers "$_line" "$_rat" "$2"
+    [ "$_arc" -eq 0 ] || return 2
+    rb_signoff_answers "$_line" "$_rat" "$PR" "$1" "$2"
 }
 
 PR="${1:-}"
@@ -293,7 +305,11 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            # comments are all replies does not, when the operator has recorded a
            # signoff that answers it.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
-               if ! rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA" "$VERDICT"; then
+               rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA"; RB_VOUCH_RC=$?
+               if [ "$RB_VOUCH_RC" -eq 2 ]; then
+                   echo "PR_PHASE pr=$PR status=error reason=copilot_vouch_unreadable" >&2; exit 2
+               fi
+               if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=copilot_replies_only_unvouched"
                    echo "Copilot's review of $COPILOT_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
                    echo "Read the comment and record a signoff for that head, or request a review."
@@ -343,7 +359,11 @@ else
            fi ;;
         1) # THE SAME TWO ANSWERS, on the other arm.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
-               if ! rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA" "$VERDICT"; then
+               rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA"; RB_VOUCH_RC=$?
+               if [ "$RB_VOUCH_RC" -eq 2 ]; then
+                   echo "PR_PHASE pr=$PR status=error reason=codex_vouch_unreadable" >&2; exit 2
+               fi
+               if [ "$RB_VOUCH_RC" -ne 0 ]; then
                    echo "PR_PHASE pr=$PR status=stopped reason=codex_replies_only_unvouched"
                    echo "Codex's review of $CODEX_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
                    echo "Read the comment and record a signoff for that head, or request a review."

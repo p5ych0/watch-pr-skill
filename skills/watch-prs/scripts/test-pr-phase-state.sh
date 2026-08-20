@@ -432,6 +432,42 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# AN UNREADABLE PROBE IS NOT "NOBODY SIGNED IT OFF". Folded together, an
+# unreadable read tells the operator to record a signoff they may already have
+# recorded, and hides a broken read behind an ordinary-looking refusal. Both
+# probes, on both arms.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; printf '2\n' > "$W/codex.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "an unreadable signoff probe fails closed rather than reading as unvouched" \
+    || die "an unreadable signoff probe gave '${got}'"
+printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+    && die "…but it also told the operator to record a signoff" \
+    || pass "…and does not send the operator to record one"
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.at.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and so does an unreadable review time" \
+    || die "an unreadable review time gave '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"; printf '2\n' > "$W/copilot.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_vouch_unreadable'; } \
+    && pass "…on the post-Copilot arm too" \
+    || die "the post-Copilot arm folded an unreadable probe into unvouched: '${got}'"
+# A SIGNOFF FOR ANOTHER REVIEWER DOES NOT VOUCH, even with the same head: the
+# whole record is read, not its suffix.
+world; replies_only codex "$CODEXBOT" "$HEAD40"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+    "$COPILOTBOT" "$HEAD40" > "$W/codex.record"
+printf '0\n' > "$W/codex.record.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "…and a signoff naming another reviewer does not vouch" \
+    || die "another reviewer's signoff vouched: '${got}'"
+
 # A VERDICT THAT IS NOT THAT SHAPE IS STILL A DISMISSAL. The escape is narrow: it
 # applies to `source=replies-only` and to nothing else, however many findings a
 # review reports.

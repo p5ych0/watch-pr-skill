@@ -461,7 +461,7 @@ rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
     return 0
 }
 
-# rb_signoff_answers <signoff-line> <review-at> <head-oid> ; 0 if it vouches
+# rb_signoff_answers <signoff-line> <review-at> <pr> <reviewer> <head-oid>
 #
 # A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
 # same sha does not say that: one recorded for an earlier CLEAN review on an
@@ -472,6 +472,12 @@ rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
 # ordered — and this is permission to merge or to close a phase, so an unorderable
 # pair is a refusal rather than a coin toss.
 #
+# AND THE WHOLE RECORD IS PARSED, not just its suffix. Reading the sha with
+# `${line##*sha=}` and looking for a shaped `at=` accepts any rc-0 line that ENDS
+# in the right commit — a truncated, cached or misrouted record for another PR or
+# another reviewer authorises the merge, which is the same "a well-formed line is
+# not an answer" failure `rb_review_record_is_about` exists for.
+#
 # NEITHER SIDE IS FETCHED HERE. The two callers read the records with their own
 # error prefixes and their own statuses; what they share is the RULE, and a
 # library that made the network calls would be answering a different question in
@@ -479,26 +485,22 @@ rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
 #
 # THE REASON IS SET RATHER THAN PRINTED, so each caller says it in its own words.
 RB_VOUCH_REASON=''
-rb_signoff_answers() {   # <signoff-line> <review-at> <head-oid>
+RB_SIGNOFF_RX='^PR_SIGNOFF pr=([0-9]+) reviewer=([^[:space:]]+) at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) id=([0-9]+) sha=([0-9a-f]{40})$'
+rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
     RB_VOUCH_REASON=''
     local _at
-    [ "${1##*sha=}" = "${3-}" ] || { RB_VOUCH_REASON=other_head; return 1; }
-    # THE FIELD BEFORE THE PEEL. `${line#*at=}` on a record WITHOUT `at=` returns
-    # the whole line, and `%% *` then takes its first word — a non-empty value
-    # that is not a time.
-    case "${1-}" in
-        *" at="*) ;;
-        *) RB_VOUCH_REASON=signoff_untimed; return 1 ;;
-    esac
-    _at="${1#* at=}"; _at="${_at%% *}"
-    # CANONICAL UTC ON BOTH SIDES, because these are compared as STRINGS and that
-    # is the time order only for this shape. A value of any other shape sorts
-    # somewhere arbitrary, and one sorting low reads as "the signoff is older",
-    # which refuses; one sorting high would vouch for a review it never saw.
-    case "$_at" in
-        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-        *) RB_VOUCH_REASON=signoff_untimed; return 1 ;;
-    esac
+    # CANONICAL UTC IS PART OF THE SHAPE, because the comparison below is a STRING
+    # one and that is the time order only for this spelling. A value of another
+    # shape sorts somewhere arbitrary, and one sorting high would vouch for a
+    # review it never saw. A REVOCATION fails here too, and should: `sha=none`
+    # is not a commit, and a revocation vouches for nothing.
+    [[ "${1-}" =~ $RB_SIGNOFF_RX ]] || { RB_VOUCH_REASON=signoff_malformed; return 1; }
+    _at="${BASH_REMATCH[3]}"
+    [ "${BASH_REMATCH[1]}" = "${3-}" ] || { RB_VOUCH_REASON=other_pr; return 1; }
+    # COMPARED AS A STRING, never with `=~`: a reviewer login ends in `[bot]`,
+    # which a regex reads as a character class.
+    [ "${BASH_REMATCH[2]}" = "${4-}" ] || { RB_VOUCH_REASON=other_reviewer; return 1; }
+    [ "${BASH_REMATCH[5]}" = "${5-}" ] || { RB_VOUCH_REASON=other_head; return 1; }
     case "${2-}" in
         [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
         "") RB_VOUCH_REASON=no_review; return 1 ;;

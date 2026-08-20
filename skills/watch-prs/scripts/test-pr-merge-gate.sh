@@ -349,7 +349,7 @@ replies_only() {   # replies_only <bot> ; that reviewer left only replies on the
 # The fixture carries the real order so it proves the real parse.
 vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
     printf '0' > "$STUB_DIR/pr-signoff.rc"
-    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s sha=%s\n' \
+    printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
         "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
     # WHEN THE REVIEW LANDED, so "newer than" can be decided at all.
     printf '2026-01-01T00:00:00Z\n' > "$STUB_DIR/pr-review-state.review-at.out"
@@ -417,10 +417,24 @@ case_is 1 "cannot be an answer to it" "a signoff older than the review does not 
 # merge permission is not a coin toss.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT" '2026-01-01T00:00:00Z'
 case_is 1 "cannot be an answer to it" "…and one recorded in the same second does not either"
-# A record with no usable timestamp is a refusal, not a pass.
+# A record with no usable timestamp is a refusal, not a pass — and the whole
+# record is what is read now, so a line missing a field is refused as a line this
+# gate cannot read rather than as one whose time it could not find.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$COPILOTBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
-case_is 1 "no usable timestamp" "…and a record with no timestamp is refused"
+case_is 1 "not one this gate can read" "…and a record with no timestamp is refused"
+# A WELL-FORMED LINE IS NOT AN ANSWER. Reading the sha off the END of the record
+# and looking for a shaped `at=` accepts any rc-0 line that happens to finish with
+# the right commit: a truncated, cached or misrouted record for another PR or
+# another reviewer authorised the merge.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'PR_SIGNOFF pr=8 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+    "$COPILOTBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "no operator has recorded a signoff for that head" "…and a signoff record for another PR does not vouch"
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+    "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
+case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
 # And a head with no submitted review has nothing for a signoff to answer.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 : > "$STUB_DIR/pr-review-state.review-at.out"
