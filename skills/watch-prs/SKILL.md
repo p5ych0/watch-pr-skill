@@ -1853,7 +1853,18 @@ before continuing into the Copilot phase.
 # mattered and then continued anyway. Nothing follows the `esac`, so there is
 # nothing to fall into; and each refusal arm still ENDS in a reserved word, so it
 # reports non-zero even with `echo` and `exit` both taken away.
-/usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; PHASE_RC=$?
+#
+# AS AN `if` CONDITION, NOT `cmd; RC=$?`. If your shell has `errexit` on — this
+# block is pasted into one as often as it is typed — a simple command that exits
+# non-zero ends the shell BEFORE the assignment, so the 1/2 distinction is lost
+# at exactly the two statuses it exists for, and the stop it should have printed
+# never appears. A command run as a CONDITION is exempt from `errexit`, which is
+# what makes the status reachable at all.
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
+    PHASE_RC=0
+else
+    PHASE_RC=$?
+fi
 case "$PHASE_RC" in
     0) # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
        # asks for the head alone, so nothing here parses a record line. The status

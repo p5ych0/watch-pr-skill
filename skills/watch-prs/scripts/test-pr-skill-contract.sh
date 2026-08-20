@@ -2567,8 +2567,24 @@ esac
 # arm, so there is nothing after the `esac` to fall into. `RB_SCRIPTS` points at a
 # directory whose `pr-signoff.sh` prints a marker — if a refusal arm reaches the
 # continuation, the marker appears.
+# ── AND THE STATUS SURVIVES AN `errexit` SHELL ─────────────────────────────
+# `cmd; RC=$?` ends a shell with `errexit` on BEFORE the assignment, so the 1/2
+# distinction is lost at exactly the two statuses it exists for and the stop it
+# should have printed never appears. A command run as a CONDITION is exempt.
+# Asserted by RUNNING the document's own lines under `set -e` with the helper
+# unreachable: the refusal arm has to be reached and to say so.
+_ph_call="$(printf '%s' "$resume_blk" | awk '/^if \/usr\/bin\/env bash -p "\$RB_SCRIPTS"\/pr-phase-state\.sh/{f=1} f{print} /^fi$/{if(f)exit}')"
+[ -n "$_ph_call" ] || die "the phase-state call could not be lifted from the resume recipe"
 _ph_case="$(printf '%s' "$resume_blk" | awk '/^case "\$PHASE_RC" in/{f=1} f{print} /^esac$/{if(f)exit}')"
 [ -n "$_ph_case" ] || die "the phase branch could not be lifted from the resume recipe"
+_ph_e="$(RB_SCRIPTS=/nonexistent/rb-phase-probe CODEX_BOT=somebody bash -c '
+    set -e
+    '"$_ph_call"'
+    '"$_ph_case"'' 2>&1)" || true
+case "$_ph_e" in
+    *"the phase could not be read"*) pass "…and an errexit shell still reaches the refusal arm" ;;
+    *) die "under set -e the phase status never reached the branch ('$_ph_e')" ;;
+esac
 # NOTHING IS CREATED FOR THIS, and that is deliberate: a scratch directory here
 # would be the FIRST one this file takes, and the `mktemp` probe further down
 # re-runs the whole file expecting it to stop at the counter fixture's guard with

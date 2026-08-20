@@ -27,6 +27,13 @@
   The shape check on a resumed sha now goes through `recordlib.sh`'s
   `is_full_sha`, so what a commit is has one definition here as everywhere else.
 
+  **The status survives an `errexit` shell.** The driver read it as
+  `cmd; PHASE_RC=$?`, and with `errexit` on — this block is pasted into a script
+  as often as it is typed — a simple command that exits non-zero ends the shell
+  *before* the assignment. The distinction was lost at exactly the two statuses
+  it exists for, and the stop it should have printed never appeared. Run as an
+  `if` condition it is exempt.
+
   **A refusal cannot fall into the continuation.** The driver's branch on the
   helper's status runs in the operator's own shell, where `exit` is a builtin a
   function can take the place of — and one that returns instead of exiting left
