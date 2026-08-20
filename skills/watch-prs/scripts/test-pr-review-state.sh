@@ -990,6 +990,12 @@ out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
 # comments were counted leaves the review id and its `submitted_at` untouched, so
 # comparing the review payload alone returns the OLDER reply time as though
 # nothing had moved — which is the reply a signoff then vouches over.
+#
+# THE READ ORDER IS WHAT DECIDES HOW LATE A REPLY CAN BE AND STILL BE SEEN. This
+# stub changes the comments on the SECOND comments request, which under
+# `reviews · comments · reviews · comments` is a reply landing during the second
+# `/reviews` call — the exact window a comments-then-reviews order left open, and
+# the last one any ordering can cover.
 cat > "$TMP/bin/gh" <<SH
 #!/usr/bin/env bash
 case "\$*" in

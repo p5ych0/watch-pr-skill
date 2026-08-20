@@ -20,7 +20,17 @@
   The comments are re-read as well as the review, because `/reviews` cannot see a
   comment: a retracting reply landing after they were counted leaves the id and the
   `submitted_at` untouched, so comparing the review payload alone hands back the
-  older reply time as though nothing had moved.
+  older reply time as though nothing had moved. The order is
+  **reviews · comments · reviews · comments**, with the value most likely to move
+  read last — a reply landing at any point up to that read is refused, including
+  during the second `/reviews` call.
+
+  The last gap is not closable by any ordering, and the code says so rather than
+  guarding it again: GitHub has no transactional read across two resources, so a
+  change after the final call is indistinguishable from one after the helper
+  returns — which no protocol can cover, because a signoff answers what had
+  happened when it was written. What is guaranteed is that the answer is never
+  stale by *construction*: nothing the call could have seen is left out of it.
 
   What the callers do check is the SHAPE of that answer, through
   `rb_escape_snapshot`: peeled with expansions alone, a two-field line assigns the

@@ -722,25 +722,39 @@ main() {
         ecount="${eparts%%:*}"; eopens="${eparts#*:}"; erat="${eopens#*:}"; eopens="${eopens%%:*}"
         case "$ecount" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
         case "$eopens" in ""|*[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;; esac
-        # AND BOTH READS AGAIN, because the count, the times and the id must all
-        # describe the same review at the same moment — and `/reviews` cannot see a
-        # comment. A retracting reply landing after the comments were counted
-        # leaves the id and the `submitted_at` untouched, so comparing the review
-        # payload alone returns the OLDER reply time as though nothing had moved.
-        # The comments are re-read and their derived tuple compared too.
-        eparts2="$(escape_comment_tuple "$pr" "$eid")" || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
-            return 2
-        }
-        [ "$eparts2" = "$eparts" ] || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
-            return 2
-        }
+        # AND BOTH READS AGAIN, WITH THE COMMENTS LAST. The count, the times and
+        # the id must all describe the same review at the same moment, and
+        # `/reviews` cannot see a comment: a reply landing after the comments were
+        # counted leaves the id and the `submitted_at` untouched, so comparing the
+        # review payload alone returns the OLDER reply time as though nothing had
+        # moved.
+        #
+        # THE ORDER IS reviews · comments · reviews · comments, and the last read
+        # is the one carrying the value most likely to move. A reply landing at any
+        # point up to it appears in the second comment tuple and is refused; one
+        # landing during the SECOND reviews request is caught for the same reason,
+        # which is the window a comments-then-reviews order left open.
+        #
+        # THERE IS NO ORDERING THAT CLOSES THE LAST GAP, and this is the end of
+        # that line rather than the next guard in it. GitHub has no transactional
+        # read across two resources, so a change after the final call is
+        # indistinguishable from one after this helper returns — which no protocol
+        # can cover, because a signoff answers what had happened when it was
+        # written. What this does guarantee is that the answer is never stale by
+        # CONSTRUCTION: nothing this call could have seen is left out of it.
         esnap2="$(escape_review_snapshot "$pr" "$who" "$head")" || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
         [ "$esnap2" = "$esnap1" ] || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
+            return 2
+        }
+        eparts2="$(escape_comment_tuple "$pr" "$eid")" || {
+            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
+            return 2
+        }
+        [ "$eparts2" = "$eparts" ] || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
             return 2
         }
