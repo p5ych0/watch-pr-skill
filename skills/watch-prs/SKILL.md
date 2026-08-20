@@ -1029,7 +1029,14 @@ forbidden. So the operator's answer has to become state:
   same `**Review-Signoff:**` line step 7 writes. The merge gate accepts it *for
   this shape only*: a `source=replies-only` verdict plus a recorded signoff naming
   that head merges, and says so in its output. A review with real findings is not
-  a question anyone was asked, so a signoff never carries one;
+  a question anyone was asked, so a signoff never carries one.
+
+  **RECORD IT AFTER READING, NOT BEFORE.** The signoff must be newer than the
+  LATEST of that review and its newest reply — a head is not a moment, and the
+  verdict here is produced by the replies rather than by the review. One recorded
+  before a later reply arrives does not answer that reply, and both the merge gate
+  and `pr-phase-state.sh` refuse it, naming the two times so you can see which one
+  moved. If a reply lands while you are deciding, read it and record again;
 - **it was a finding** — fix it and push. The head moves, the round is ordinary
   again, and nothing needs an override.
 

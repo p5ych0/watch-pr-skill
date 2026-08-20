@@ -408,13 +408,17 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
         *) echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1 ;;
     esac
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0
-    rat="$RB_ANSWER_AT"
     case "$RB_VOUCH_REASON" in
         other_head|other_pr|other_reviewer) ;;   # a record about something else; not this gate's to explain
         signoff_malformed) echo "merge blocked: the $who signoff record is not one this gate can read ('$line')" ;;
         no_review)         echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer" ;;
         review_untimed)    echo "merge blocked: when $who's review landed could not be read ('$rat')" ;;
-        not_after)         echo "merge blocked: the $who signoff was not recorded after the review at $rat — it cannot be an answer to it" ;;
+        # NAMED AS THE CONVERSATION, not as the review. The deadline is the LATER
+        # of the two, so a signoff that IS newer than the review can still fail
+        # here — and saying "the review at <T>" then points the operator at an
+        # event they have already answered, with a timestamp that is not the
+        # review's. Both are printed, so which one moved is visible.
+        not_after)         echo "merge blocked: the $who signoff was not recorded after ${RB_ANSWER_AT} — the latest of that review (${rat:-none}) and its newest reply (${pat:-none}), so it cannot be an answer to it" ;;
         *)                 echo "merge blocked: the $who signoff does not answer the review on ${want:0:7}" ;;
     esac
     return 1

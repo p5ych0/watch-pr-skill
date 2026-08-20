@@ -461,6 +461,14 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
 printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
 case_is 1 "cannot be an answer to it" "a reply landing after the signoff is not answered by it"
+# AND THE REFUSAL NAMES THE RIGHT EVENT. The deadline is the LATER of the two, so
+# this signoff IS newer than the review — calling the deadline "the review" points
+# the operator at something they have already answered, with a timestamp that is
+# not the review's.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "its newest reply (2026-01-03T00:00:00Z)" "…and the refusal names the reply, not the review"
 # AND ONE BEFORE IT STILL MERGES, or the rule would only ever refuse.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"

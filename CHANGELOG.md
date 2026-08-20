@@ -26,6 +26,16 @@
   failed, and reporting it as "nobody signed this off" sent the operator to record
   another signoff instead of looking at the probe.
 
+  The refusal names the **conversation**, not the review: the deadline is the later
+  of the two, so a signoff that *is* newer than the review can still fail here, and
+  saying "the review at <T>" pointed the operator at an event they had already
+  answered with a timestamp that was not the review's. Both times are printed, so
+  which one moved is visible.
+
+  `SKILL.md` says to record the signoff *after* reading, and the reviewer contracts
+  say that a reply posted later restarts that clock — which is one more reason to
+  put a clean verdict in the review body, where it needs no answer at all.
+
   Closes #129, on #130's reader.
 
 ## [2.0.43] — 2026-08-20

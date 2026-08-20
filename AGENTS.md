@@ -412,6 +412,13 @@ fix, and not a signoff. **Post a clean verdict as the review body, or as an issu
 comment — not as a reply on an existing thread.** A finding belongs in a comment
 that opens a thread, where the author can answer and resolve it.
 
+**And a reply you add later restarts that clock.** When the operator answers such
+a review with a recorded signoff, the loop requires that signoff to be newer than
+the LATEST of the review and its newest reply — so a reply posted after they
+answered is not covered by it, and the merge blocks until they read yours and
+record again. That is the correct outcome and the reason to prefer the review
+body: a clean verdict posted there needs no answer at all.
+
 ### Review statically — do not run anything
 
 **This is a read-only review. Do not set up an environment, install
