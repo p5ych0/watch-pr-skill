@@ -177,6 +177,8 @@ esac
 # as library data — so this would validate a signoff from whatever account that
 # variable named. `rb_load` clears before it sources, which is the whole point.
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
@@ -357,35 +359,11 @@ signoff_contradicts() {   # signoff_contradicts <reviewer> <sha the merge will u
 # the record is ever compared, so it asks this instead; the PROOF that an operator
 # vouched stays where the records are checked in full.
 replies_only_line() {   # replies_only_line <reviewer> <sha> <line> ; 0 if that shape
-    # THE SHAPE AND THE IDENTITY THROUGH `recordlib.sh`, like every other record
-    # here. This used to REBUILD the expected line — `sha=${2:0:7}` and all — which
-    # is a second definition of what a record is written as a string rather than as
-    # a regex, and therefore invisible to the drift guard until it was taught to
-    # look. It also pinned the width: a record that carried forty hex was accepted
-    # by every other caller and rejected here.
-    #
-    # THE TAIL IS STILL THIS FUNCTION'S. The library hands it back precisely
-    # because what may follow a value differs per question, and a `*` between
-    # `findings=` and the suffix accepted an empty count and any field anyone
-    # appended — `findings= source=replies-only`, or `findings=1 extra=x`. This
-    # shape bypasses the status gate and can authorise a merge, so it is the last
-    # place to be relaxed about a wildcard.
-    rb_review_record "$3" verdict || return 1
-    rb_review_record_is_about "$PR" "$1" "$2" || return 1
-    [ "$RB_REC_VALUE" = findings ] || return 1
-    local rest="$RB_REC_TAIL"
-    case "$rest" in
-        " findings="*" source=replies-only") ;;
-        *) return 1 ;;
-    esac
-    rest="${rest# findings=}"
-    local n="${rest% source=replies-only}"
-    case "$n" in
-        ""|*[!0-9]*) return 1 ;;
-    esac
-    # A replies-only review HAS comments; a zero count is a different record.
-    [ "$n" -ge 1 ] 2>/dev/null || return 1
-    return 0
+    # THE RULE IS `recordlib.sh`'s. It lived here alone, and `pr-phase-state.sh`
+    # reported the same review as a dismissal — sending a resumed session to
+    # reopen a phase the operator had already answered, which is the deadlock this
+    # escape exists to end, one stage earlier. #125.
+    rb_replies_only_line "$3" "$PR" "$1" "$2"
 }
 rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may read on
     [ "$3" -eq 0 ] && return 0
@@ -393,29 +371,24 @@ rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may
     return 1
 }
 signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
-    local who="$1" want="$2" line rc=0 at rat arc=0
+    # THE RECORDS ARE READ HERE AND THE RULE IS THE LIBRARY'S. Both callers of the
+    # escape fetch with their own error prefixes and their own statuses; what they
+    # share is what "this signoff answers that review" MEANS. #125.
+    local who="$1" want="$2" line rc=0 rat arc=0
     line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
-    [ "${line##*sha=}" = "$want" ] || return 1
-    # A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
-    # same sha does not say that: a signoff recorded for an earlier CLEAN review on
-    # an unchanged head would vouch for a later replies-only review that nobody
-    # read. So the record must be NEWER than the review it is answering.
-    at="${line#*at=}"; at="${at%% *}"
-    case "$at" in
-        ""|*[!0-9TZ:-]*) echo "merge blocked: the $who signoff record carries no usable timestamp ('$line')"; return 1 ;;
-    esac
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
-    [ -n "$rat" ] || { echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer"; return 1; }
-    # EQUAL IS NOT NEWER. GitHub timestamps are second-resolution, so a tie cannot
-    # be ordered — and this is merge permission, so an unorderable pair is a
-    # refusal rather than a coin toss. The same rule the verdict snapshot applies
-    # to a comment against a review.
-    [ "$at" \> "$rat" ] || {
-        echo "merge blocked: the $who signoff was recorded at $at, not after the review at $rat — it cannot be an answer to it"
-        return 1; }
-    return 0
+    rb_signoff_answers "$line" "$rat" "$want" && return 0
+    case "$RB_VOUCH_REASON" in
+        other_head)      ;;   # the signoff names another commit; not this gate's to explain
+        signoff_untimed) echo "merge blocked: the $who signoff record carries no usable timestamp ('$line')" ;;
+        no_review)       echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer" ;;
+        review_untimed)  echo "merge blocked: when $who's review landed could not be read ('$rat')" ;;
+        not_after)       echo "merge blocked: the $who signoff was not recorded after the review at $rat — it cannot be an answer to it" ;;
+        *)               echo "merge blocked: the $who signoff does not answer the review on ${want:0:7}" ;;
+    esac
+    return 1
 }
 signoff_contradicts "$CODEX_BOT" "$CODEX_SHA" || exit 1
 

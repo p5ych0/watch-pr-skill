@@ -111,6 +111,7 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_REVIEW_WATCH state=error" || {
     [[ $_rb_rc -eq 127 ]] && echo "PR_REVIEW_WATCH state=error reason=loadlib_empty" >&2
     exit 2; }
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_REVIEW_WATCH state=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_REVIEW_WATCH state=error" || exit 2
 rb_load "$_RB_SELF_DIR" clocklib rb_elapsed "PR_REVIEW_WATCH state=error" || exit 2
 
@@ -657,9 +658,11 @@ while :; do
                 # READY EITHER WAY — the verdict is in hand and the watch is over.
                 # The STATUS is what separates "act on this" from "somebody read
                 # this", because that is what callers branch on.
-                case "$v_tail" in
-                    *" source=replies-only") exit 4 ;;
-                esac
+                # THROUGH `recordlib.sh`, which owns what that record is. Asked
+                # here as a `case` on the tail, this was a third copy of the rule
+                # — and the one the drift guard found when the rule finally moved
+                # into the library. #125.
+                rb_replies_only_line "$verdict" "$PR" "$WHO" "$head" && exit 4
                 exit 0
             fi
             ;;

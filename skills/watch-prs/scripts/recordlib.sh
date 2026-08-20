@@ -419,3 +419,91 @@ rb_review_record_is_about() {   # <pr> <reviewer> <head-oid>
     [ "$RB_REC_SHA" = "${3:0:${#RB_REC_SHA}}" ] || return 1
     return 0
 }
+
+# ── THE ONE VERDICT AN OPERATOR CAN ANSWER FOR ─────────────────────────────
+#
+# A review whose comments are ALL replies reports `verdict=findings` with
+# `source=replies-only`: there is nothing for `pr-findings.sh` to list and it is
+# not a signoff, because a verdict followed by explanation and a verdict followed
+# by a retraction are the same text to anything that reads it. The loop stops and
+# a human reads the comment.
+#
+# WITHOUT AN ESCAPE THAT STOP IS THE END. The verdict can never become clean, so
+# no round closes and the merge gate blocks forever — a deadlock traded for a
+# permanent pause. The escape is the operator's own record: `pr-signoff.sh`
+# carries a head-bound statement from an OWNER, MEMBER or COLLABORATOR.
+#
+# IT WAS THE MERGE GATE'S ALONE, and `pr-phase-state.sh` reported the same review
+# as a dismissal and sent a resumed session to reopen a phase the operator had
+# already answered — the deadlock back, one stage earlier. #125.
+
+# rb_replies_only_line <line> <pr> <reviewer> <head-oid> ; 0 if that exact shape
+#
+# MATCHED IN FULL. A `*` between `findings=` and the suffix accepted an empty
+# count and any field anyone appended — `findings= source=replies-only`, or
+# `findings=1 extra=x` — and this shape bypasses the status gate and can authorise
+# a merge, so it is the last place to be relaxed about a wildcard.
+rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
+    rb_review_record "${1-}" verdict || return 1
+    rb_review_record_is_about "${2-}" "${3-}" "${4-}" || return 1
+    [ "$RB_REC_VALUE" = findings ] || return 1
+    case "$RB_REC_TAIL" in
+        " findings="*" source=replies-only") ;;
+        *) return 1 ;;
+    esac
+    local _n="${RB_REC_TAIL# findings=}"
+    _n="${_n% source=replies-only}"
+    case "$_n" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    # A replies-only review HAS comments; a zero count is a different record.
+    [ "$_n" -ge 1 ] 2>/dev/null || return 1
+    return 0
+}
+
+# rb_signoff_answers <signoff-line> <review-at> <head-oid> ; 0 if it vouches
+#
+# A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
+# same sha does not say that: one recorded for an earlier CLEAN review on an
+# unchanged head would vouch for a later replies-only review that nobody read. So
+# the record must be NEWER than the review it is answering.
+#
+# EQUAL IS NOT NEWER. GitHub timestamps are second-resolution, so a tie cannot be
+# ordered — and this is permission to merge or to close a phase, so an unorderable
+# pair is a refusal rather than a coin toss.
+#
+# NEITHER SIDE IS FETCHED HERE. The two callers read the records with their own
+# error prefixes and their own statuses; what they share is the RULE, and a
+# library that made the network calls would be answering a different question in
+# each of them.
+#
+# THE REASON IS SET RATHER THAN PRINTED, so each caller says it in its own words.
+RB_VOUCH_REASON=''
+rb_signoff_answers() {   # <signoff-line> <review-at> <head-oid>
+    RB_VOUCH_REASON=''
+    local _at
+    [ "${1##*sha=}" = "${3-}" ] || { RB_VOUCH_REASON=other_head; return 1; }
+    # THE FIELD BEFORE THE PEEL. `${line#*at=}` on a record WITHOUT `at=` returns
+    # the whole line, and `%% *` then takes its first word — a non-empty value
+    # that is not a time.
+    case "${1-}" in
+        *" at="*) ;;
+        *) RB_VOUCH_REASON=signoff_untimed; return 1 ;;
+    esac
+    _at="${1#* at=}"; _at="${_at%% *}"
+    # CANONICAL UTC ON BOTH SIDES, because these are compared as STRINGS and that
+    # is the time order only for this shape. A value of any other shape sorts
+    # somewhere arbitrary, and one sorting low reads as "the signoff is older",
+    # which refuses; one sorting high would vouch for a review it never saw.
+    case "$_at" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        *) RB_VOUCH_REASON=signoff_untimed; return 1 ;;
+    esac
+    case "${2-}" in
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        "") RB_VOUCH_REASON=no_review; return 1 ;;
+        *) RB_VOUCH_REASON=review_untimed; return 1 ;;
+    esac
+    [ "$_at" \> "${2-}" ] || { RB_VOUCH_REASON=not_after; return 1; }
+    return 0
+}

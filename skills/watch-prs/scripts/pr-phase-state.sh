@@ -125,11 +125,31 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_PHASE status=error" || {
 # library data — so the phase would be read under whatever account that variable
 # named, which is the wrong-reviewer answer with no sign that anything was wrong.
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "PR_PHASE status=error" || exit 2
 rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; exit 2; }
+
+# THE ONE VERDICT AN OPERATOR CAN ANSWER FOR. A review whose comments are ALL
+# replies reports `verdict=findings` with `source=replies-only`: nothing to fix
+# and not a signoff. Reported as a dismissal it sends a resumed session to reopen
+# a phase the operator has already answered — which is the deadlock the escape
+# exists to end, one stage earlier than the merge gate. #125.
+#
+# THE RULE IS `recordlib.sh`'s AND THE FETCHING IS HERE, because the two callers
+# read these records with their own error prefixes and their own statuses; what
+# they share is what "this signoff answers that review" means.
+rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
+    local _line _rc=0 _rat _arc=0
+    _line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$1" 2>&1) || _rc=$?
+    [ "$_rc" -eq 0 ] || return 1
+    _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
+    [ "$_arc" -eq 0 ] || return 1
+    rb_signoff_answers "$_line" "$_rat" "$2"
+}
 
 PR="${1:-}"
 case "$PR" in
@@ -269,10 +289,22 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            if [[ $RB_REC_TAIL != " findings=0" ]]; then
                echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_truncated" >&2; exit 2
            fi ;;
-        1) echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
-           echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
-           echo "Treat the Copilot phase as open: request a review before merging."
-           exit 1 ;;
+        1) # `1` IS TWO ANSWERS. A dismissal reopens the phase; a review whose
+           # comments are all replies does not, when the operator has recorded a
+           # signoff that answers it.
+           if rb_replies_only_line "$VERDICT" "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
+               if ! rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA" "$VERDICT"; then
+                   echo "PR_PHASE pr=$PR status=stopped reason=copilot_replies_only_unvouched"
+                   echo "Copilot's review of $COPILOT_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
+                   echo "Read the comment and record a signoff for that head, or request a review."
+                   exit 1
+               fi
+           else
+               echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
+               echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
+               echo "Treat the Copilot phase as open: request a review before merging."
+               exit 1
+           fi ;;
         *) echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_unreadable rc=$VERDICT_RC" >&2; exit 2 ;;
     esac
     echo "PR_PHASE pr=$PR state=after-copilot codex-sha=$CODEX_SHA copilot-sha=$COPILOT_SHA head=$HEAD"
@@ -309,10 +341,20 @@ else
            if [[ $RB_REC_TAIL != " findings=0" ]]; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_truncated" >&2; exit 2
            fi ;;
-        1) echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
-           echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
-           echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
-           exit 1 ;;
+        1) # THE SAME TWO ANSWERS, on the other arm.
+           if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
+               if ! rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA" "$VERDICT"; then
+                   echo "PR_PHASE pr=$PR status=stopped reason=codex_replies_only_unvouched"
+                   echo "Codex's review of $CODEX_SHA carried only replies, and no signoff of yours answers it ($RB_VOUCH_REASON)."
+                   echo "Read the comment and record a signoff for that head, or request a review."
+                   exit 1
+               fi
+           else
+               echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
+               echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
+               echo "Treat the Codex phase as open: request a review before merging or opening the Copilot phase."
+               exit 1
+           fi ;;
         *) echo "PR_PHASE pr=$PR status=error reason=codex_verdict_unreadable rc=$VERDICT_RC" >&2; exit 2 ;;
     esac
     echo "PR_PHASE pr=$PR state=before-copilot codex-sha=$CODEX_SHA head=$HEAD"
