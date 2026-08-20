@@ -259,6 +259,15 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            fi
            if [[ $RB_REC_VALUE != clean ]]; then
                echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_not_clean" >&2; exit 2
+           fi
+           # AND THE TAIL, which the library hands back rather than accepting —
+           # what may follow a value differs per question, so the rule is the
+           # caller's. `verdict=clean` with the `findings=0` truncated away is not
+           # a clean answer, and read as one it closes the phase on a record that
+           # was cut short. Spelled out rather than made optional: a trailing
+           # `.*` accepts any field anyone ever appends.
+           if [[ $RB_REC_TAIL != " findings=0" ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=copilot_verdict_truncated" >&2; exit 2
            fi ;;
         1) echo "PR_PHASE pr=$PR status=stopped reason=copilot_verdict_withdrawn"
            echo "Copilot's recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."
@@ -290,6 +299,15 @@ else
            fi
            if [[ $RB_REC_VALUE != clean ]]; then
                echo "PR_PHASE pr=$PR status=error reason=codex_verdict_not_clean" >&2; exit 2
+           fi
+           # AND THE TAIL, which the library hands back rather than accepting —
+           # what may follow a value differs per question, so the rule is the
+           # caller's. `verdict=clean` with the `findings=0` truncated away is not
+           # a clean answer, and read as one it closes the phase on a record that
+           # was cut short. Spelled out rather than made optional: a trailing
+           # `.*` accepts any field anyone ever appends.
+           if [[ $RB_REC_TAIL != " findings=0" ]]; then
+               echo "PR_PHASE pr=$PR status=error reason=codex_verdict_truncated" >&2; exit 2
            fi ;;
         1) echo "PR_PHASE pr=$PR status=stopped reason=codex_verdict_withdrawn"
            echo "The recorded signoff no longer stands ($VERDICT) — a review can be dismissed after it was written."

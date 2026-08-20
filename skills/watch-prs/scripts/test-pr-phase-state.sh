@@ -275,6 +275,31 @@ got="$(run 7)"
 { [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_not_clean'; } \
     && pass "…and an rc-0 record that is not clean refuses" \
     || die "a non-clean rc-0 record was accepted: '${got}'"
+# THE TAIL AS WELL AS THE VALUE. `verdict=clean` with the `findings=0` truncated
+# away is not a clean answer, and read as one it closes the phase on a record
+# that was cut short. The library hands the tail back rather than accepting it,
+# so this rule is the caller's to state.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+    && pass "…and a clean record with its findings count truncated away refuses" \
+    || die "a truncated clean record was accepted: '${got}'"
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0 extra=1\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+    && pass "…and one carrying a field nobody defined refuses too" \
+    || die "an extended clean record was accepted: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
+    "$(printf '%s' "$HEAD40" | cut -c1-7)" "$COPILOTBOT" > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_truncated'; } \
+    && pass "…and the post-Copilot arm refuses a truncated clean record as well" \
+    || die "the post-Copilot arm accepted a truncated clean record: '${got}'"
+
 # AND THE SAME ON THE OTHER ARM, where the Copilot signoff is the one that must
 # hold — a rule missing from one of two arms is this repository's recurring shape.
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"

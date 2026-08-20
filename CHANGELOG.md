@@ -25,6 +25,11 @@
   place for the width to be wrong — is gone, and a record that grew to forty hex
   would be compared at forty rather than matched on its first seven.
 
+  The tail is the caller's rule and `pr-phase-state.sh` states it: `verdict=clean`
+  with the `findings=0` truncated away is not a clean answer, and read as one it
+  closed the phase on a record that was cut short. Spelled out rather than made
+  optional, so a field nobody defined is refused too.
+
   The drift guard in `test-recordlib.sh` fails if a helper re-implements the shape
   inline.
 
