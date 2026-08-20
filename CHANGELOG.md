@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.46] — 2026-08-20
+
+- **A signoff can now say which verdict it answers.** Readers take the *last*
+  record, so a revocation posted after a signoff supersedes it whatever it was
+  about — and the writer cannot close that window, because its own write is what
+  erases the evidence. `**Review-Signoff:**` takes an optional fourth backticked
+  field, the time of the verdict being signed off, and `pr-signoff.sh` reports it
+  as `verdict-at=`. A reader can then order a revocation against *that* rather
+  than against comment order.
+
+  **Optional, because every existing record predates it.** A reader that required
+  it would report every signoff on every open PR as malformed, which is the
+  fail-closed direction turned into a denial of service. It is reported as `none`
+  where absent, so the record keeps one shape rather than two — and a value that
+  is present and is not a time is refused as `bad_verdict_at`, since a reader
+  ordering against it would place a revocation somewhere arbitrary.
+
+  It is the first field of the record, before `at=`, `id=` and `sha=`: callers
+  peel the sha with `${line##*sha=}` and the record time with `${line#* at=}`, and
+  the character before `verdict-at=`'s three letters is a hyphen rather than a
+  space, so neither peel can take it. A revocation carries it in the second
+  backticked field, having no sha.
+
+  Nothing writes or reads it yet — the writer and the readers are the next two
+  steps. #135, for #122.
+
 ## [2.0.45] — 2026-08-20
 
 - **The replies-only escape asks one question instead of four.** It has to know

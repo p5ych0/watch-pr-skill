@@ -67,6 +67,48 @@ case_is() {   # case_is <want rc> <needle> <label> [reviewer]
 world() { printf '0' > "$TMP/rc"; }
 
 # ── a signoff is found ─────────────────────────────────────────────────────
+# THE VERDICT TIME THE SIGNOFF ANSWERS, as a fourth backticked field. Readers take
+# the LAST record, so a revocation posted after a signoff supersedes it whatever
+# it was about — and the writer cannot close that window, because its own write is
+# what erases the evidence. A signoff saying WHICH verdict it answers lets a
+# reader order a revocation against that rather than against comment order. #135,
+# for #122.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+case_is 0 "verdict-at=2026-01-01T00:00:00Z" "a signoff carrying the verdict time reports it"
+case_is 0 "sha=$SHA" "…and still reports the sha it signs off"
+# OPTIONAL, BECAUSE EVERY EXISTING RECORD PREDATES IT. A reader that required it
+# would report every signoff on every open PR as malformed, which is the
+# fail-closed direction turned into a denial of service.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
+case_is 0 "verdict-at=none" "…and one without it says so rather than being malformed"
+# A VALUE THAT IS NOT A TIME IS NEITHER. A reader ordering a revocation against it
+# would place that revocation somewhere arbitrary, and the low end of arbitrary is
+# "the revocation is older", which is the answer that records over a reopening.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`whenever\`" > "$TMP/out"
+case_is 2 "reason=bad_verdict_at" "…while one that is not a time is refused, not compared"
+# THE FIELD ORDER SURVIVES THE TWO PEELS EVERY CALLER USES: the sha is read with
+# `${line##*sha=}` and the record time with `${line#* at=}`, and `verdict-at=`
+# must be mistakeable for neither. The character before those three letters is a
+# hyphen rather than a space, which is what keeps the second one honest.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:00:00Z\`" > "$TMP/out"
+got="$(run "$BOT")"; line="${got#*|}"
+[ "${line##*sha=}" = "$SHA" ] \
+    && pass "…and the sha still peels off the end cleanly" \
+    || die "the sha peel took '${line##*sha=}'"
+_at="${line#* at=}"; _at="${_at%% *}"
+[ "$_at" != 2026-01-01T00:00:00Z ] \
+    && pass "…and the record time peel does not take the verdict time" \
+    || die "'\${line#* at=}' took the verdict time"
+# A REVOCATION CARRIES IT TOO, since a phase reopened by one is a record a reader
+# has to place in time exactly as it places a signoff — and it CARRIES NO SHA, so its verdict time is the SECOND backticked field
+# rather than the third — the sha group is optional and a time is not 40 hex, so
+# the pattern falls through to the field that holds one.
+world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" \
+                "OWNER|**Review-Signoff-Revoked:** \`$BOT\` \`2026-02-02T00:00:00Z\`" > "$TMP/out"
+case_is 1 "reason=revoked" "a revocation is still a revocation with a verdict time on it"
+case_is 1 "verdict-at=2026-02-02T00:00:00Z" "…and reports the verdict time it carries"
+
+
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
 case_is 0 "sha=$SHA" "a signoff from the repository's owner is read back"
 world; comments "COLLABORATOR|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out"
