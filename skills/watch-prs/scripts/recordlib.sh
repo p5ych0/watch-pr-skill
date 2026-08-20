@@ -509,3 +509,49 @@ rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
     [ "$_at" \> "${2-}" ] || { RB_VOUCH_REASON=not_after; return 1; }
     return 0
 }
+
+# rb_answer_at <review-at> <replies-at> ; sets RB_ANSWER_AT to the later of them
+#
+# WHAT AN OPERATOR'S SIGNOFF HAS TO BE NEWER THAN. A replies-only verdict is
+# produced by the COMMENTS on a review, and a reply added afterwards does not move
+# the review's `submitted_at` — so ordering against the review alone let a signoff
+# recorded between the review and a retracting reply vouch over a reply nobody
+# read. Review at T1, signoff at T2, retraction at T3: `T2 > T1` still holds.
+#
+# THE LATER OF THE TWO, because the signoff has to answer the whole conversation
+# and either can be the last thing that happened — a review with no comments has
+# only the first, and a reply after the review has the second.
+#
+# EITHER MAY BE ABSENT, and absent is not zero: it means that channel had nothing
+# to say. Both absent is a refusal, because there is then nothing for a signoff to
+# answer at all.
+#
+# CANONICAL UTC, CHECKED HERE, because the comparison is a STRING one and that is
+# the time order only for this shape. A value of another shape sorts somewhere
+# arbitrary, and one sorting low would let a signoff older than the conversation
+# vouch for it.
+RB_ANSWER_AT=''
+rb_answer_at() {   # <review-at> <replies-at>
+    RB_ANSWER_AT=''
+    case "${1-}" in
+        ""|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        *) return 2 ;;
+    esac
+    case "${2-}" in
+        ""|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+        *) return 2 ;;
+    esac
+    if [ -z "${1-}" ] && [ -z "${2-}" ]; then
+        return 1
+    fi
+    if [ -z "${2-}" ]; then
+        RB_ANSWER_AT="${1-}"
+    elif [ -z "${1-}" ]; then
+        RB_ANSWER_AT="${2-}"
+    elif [ "${1-}" \> "${2-}" ]; then
+        RB_ANSWER_AT="${1-}"
+    else
+        RB_ANSWER_AT="${2-}"
+    fi
+    return 0
+}

@@ -179,6 +179,7 @@ esac
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
@@ -379,7 +380,25 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive 
     [ "$rc" -eq 0 ] || return 1
     rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
     [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
-    rb_signoff_answers "$line" "$rat" "$PR" "$who" "$want" && return 0
+    # AND WHEN THE NEWEST REPLY LANDED, which is a different moment. This verdict
+    # is produced by the COMMENTS on that review, and one added afterwards does not
+    # move the review's `submitted_at` — so ordering against the review alone let a
+    # signoff recorded between the review and a retracting reply vouch over a reply
+    # nobody read. #129.
+    #
+    # 1 IS AN ANSWER: no review, no comments, or a verdict that arrived as an issue
+    # comment and carries none. Only 2 is a read that failed.
+    local pat prc=0
+    pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$who" "$want") || prc=$?
+    case "$prc" in
+        0) ;;
+        1) pat="" ;;
+        *) echo "merge blocked: could not read when $who's newest reply landed (rc=$prc)"; return 1 ;;
+    esac
+    rb_answer_at "$rat" "$pat" || {
+        echo "merge blocked: $who has nothing on ${want:0:7} for a signoff to answer"; return 1; }
+    rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0
+    rat="$RB_ANSWER_AT"
     case "$RB_VOUCH_REASON" in
         other_head|other_pr|other_reviewer) ;;   # a record about something else; not this gate's to explain
         signoff_malformed) echo "merge blocked: the $who signoff record is not one this gate can read ('$line')" ;;

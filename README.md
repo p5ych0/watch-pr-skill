@@ -310,9 +310,11 @@ Then:
    report that review as a dismissal, so resuming tomorrow sent you back to
    request a review of a head you had already read and signed off — the deadlock
    returning one stage earlier. It applies the same rule now, and it is the same
-   rule: the signoff must name that head and be recorded **after** the review, so
-   one written for an earlier clean pass on an unchanged head cannot vouch for a
-   later replies-only one. Where no signoff answers it, the stop says so by name
+   rule: the signoff must name that head and be recorded **after** the
+   conversation it answers — the later of when the review landed and when the
+   newest reply did, so neither a signoff written for an earlier clean pass on an
+   unchanged head nor one predating a retracting reply can vouch for what came
+   next. Where no signoff answers it, the stop says so by name
    rather than calling it a dismissal.
 4. **Fix and close the round** — commit `fix(review): …`, run the **self-check**
    (`pr-selfcheck.sh`), **check the round boundary**

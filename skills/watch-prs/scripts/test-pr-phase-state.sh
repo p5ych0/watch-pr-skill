@@ -67,6 +67,12 @@ if [ "${1:-}" = review-at ]; then
     [ -f "$W/$_w.at.out" ] && cat "$W/$_w.at.out"
     exit "$(cat "$W/$_w.at.rc" 2>/dev/null || echo 0)"
 fi
+# WHEN THE NEWEST REPLY LANDED, which is a different moment again — and the
+# ordinary answer is 1 with nothing, meaning that channel had nothing to say.
+if [ "${1:-}" = replies-at ]; then
+    [ -f "$W/$_w.replies.out" ] && cat "$W/$_w.replies.out"
+    exit "$(cat "$W/$_w.replies.rc" 2>/dev/null || echo 1)"
+fi
 # A REAL CLEAN RECORD BY DEFAULT, built from the arguments it was asked with —
 # `verdict <pr> <who> <sha>` — so the ordinary world is one where the answer is
 # about what was asked. A stub that printed nothing made every rc-0 path look
@@ -109,6 +115,10 @@ replies_only() {   # replies_only <codex|copilot> <bot> <sha> ; only replies on 
     printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=1 source=replies-only\n' \
         "$(printf '%s' "$3" | cut -c1-7)" "$2" > "$W/$1.verdict.out"
     printf '1\n' > "$W/$1.verdict.rc"
+}
+replied_at() {   # replied_at <codex|copilot> <time> ; the newest reply landed then
+    printf '%s\n' "$2" > "$W/$1.replies.out"
+    printf '0\n' > "$W/$1.replies.rc"
 }
 vouched() {   # vouched <codex|copilot> <bot> <sha> [at] ; an operator answered it
     printf 'PR_SIGNOFF pr=7 reviewer=%s at=%s id=901 sha=%s\n' \
@@ -438,6 +448,48 @@ got="$(run 7)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
+# A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT. The verdict is produced
+# by the COMMENTS on the review, and one added afterwards does not move the
+# review's `submitted_at`: review at T1, signoff at T2, retraction at T3, and
+# ordered against the review alone `T2 > T1` still held. #129.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+    && pass "a reply landing after the signoff is not answered by it" \
+    || die "a later reply was vouched over: '${got}'"
+# AND ONE BEFORE IT STILL CLOSES THE PHASE, or the rule would only ever refuse.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-01T12:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+    && pass "…while one that landed before it still does" \
+    || die "an earlier reply blocked the phase: '${got}'"
+# EQUAL IS NOT NEWER HERE EITHER.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+replied_at codex 2026-01-02T00:00:00Z
+got="$(run 7)"
+[ "${got%%|*}" = 1 ] \
+    && pass "…and one in the same second cannot be ordered" \
+    || die "a same-second reply was ordered: '${got}'"
+# AN UNREADABLE REPLY TIME IS NOT "NO REPLIES": read as one, the retracting reply
+# it could not see is exactly what the phase closes over.
+world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
+printf '2\n' > "$W/codex.replies.rc"
+got="$(run 7)"
+{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+    && pass "…and an unreadable reply time fails closed" \
+    || die "an unreadable reply time gave '${got}'"
+# THE SAME ON THE OTHER ARM.
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+replies_only copilot "$COPILOTBOT" "$HEAD40"; vouched copilot "$COPILOTBOT" "$HEAD40"
+replied_at copilot 2026-01-03T00:00:00Z
+got="$(run 7)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
+    && pass "…and the post-Copilot arm orders against the reply too" \
+    || die "the post-Copilot arm vouched over a later reply: '${got}'"
+
 # AN UNREADABLE PROBE IS NOT "NOBODY SIGNED IT OFF". Folded together, an
 # unreadable read tells the operator to record a signoff they may already have
 # recorded, and hides a broken read behind an ordinary-looking refusal. Both

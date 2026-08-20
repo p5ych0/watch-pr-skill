@@ -353,6 +353,12 @@ vouched() {   # vouched <bot> [signed-at] ; an operator answered THIS review
         "$1" "${2:-2026-01-02T00:00:00Z}" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
     # WHEN THE REVIEW LANDED, so "newer than" can be decided at all.
     printf '2026-01-01T00:00:00Z\n' > "$STUB_DIR/pr-review-state.review-at.out"
+    # AND WHEN THE NEWEST REPLY DID. Empty with status 1 is the ordinary answer —
+    # "nothing to order against from that channel" — and it has to be a file of its
+    # own, or the stub falls through to the REVIEWER key and hands back the verdict
+    # record as a timestamp. #129.
+    : > "$STUB_DIR/pr-review-state.replies-at.out"
+    printf '1' > "$STUB_DIR/pr-review-state.replies-at.rc"
 }
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 case_is 0 "left only replies" "a replies-only verdict merges on the signoff an operator recorded"
@@ -435,10 +441,35 @@ world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 printf 'PR_SIGNOFF pr=7 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$CODEXBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…nor one for another reviewer with the same head"
+# ── A REPLY ADDED AFTER THE SIGNOFF IS NOT ANSWERED BY IT ──────────────────
+# The verdict is produced by the COMMENTS on the review, and one added afterwards
+# does not move the review's `submitted_at`. Review at T1, signoff at T2,
+# retraction at T3: ordered against the review alone, `T2 > T1` still held and the
+# merge went through over a reply nobody read. #129.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-03T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "cannot be an answer to it" "a reply landing after the signoff is not answered by it"
+# AND ONE BEFORE IT STILL MERGES, or the rule would only ever refuse.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-01T12:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 0 "merged" "…while one that landed before it still does"
+# EQUAL IS NOT NEWER HERE EITHER: second-resolution timestamps cannot order a tie.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2026-01-02T00:00:00Z\n' > "$STUB_DIR/pr-review-state.replies-at.out"
+printf '0' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "cannot be an answer to it" "…and one in the same second cannot be ordered"
+# AN UNREADABLE REPLY TIME IS NOT "NO REPLIES". Read as one, the retracting reply
+# it could not see is exactly what gets merged over.
+world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
+printf '2' > "$STUB_DIR/pr-review-state.replies-at.rc"
+case_is 1 "newest reply landed" "…and an unreadable reply time blocks rather than passing"
+
 # And a head with no submitted review has nothing for a signoff to answer.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
 : > "$STUB_DIR/pr-review-state.review-at.out"
-case_is 1 "nothing for a signoff to answer" "…and a head with no review cannot be vouched for"
+case_is 1 "for a signoff to answer" "…and a head with no review cannot be vouched for"
 
 # ── WHY THE COPILOT REVOCATION IS POSTED UNCONDITIONALLY ───────────────────
 # `pr-copilot-phase.sh open` revokes on EVERY entry, including the first, where

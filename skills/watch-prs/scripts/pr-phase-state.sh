@@ -127,6 +127,7 @@ rb_load "$_RB_SELF_DIR" recordlib is_full_sha "PR_PHASE status=error" || {
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || exit 2
@@ -167,7 +168,22 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
     esac
     _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
     [ "$_arc" -eq 0 ] || { RB_VOUCH_REASON=review_at_unreadable; return 2; }
-    rb_signoff_answers "$_line" "$_rat" "$PR" "$1" "$2"
+    # AND WHEN THE NEWEST REPLY LANDED. A replies-only verdict is produced by the
+    # COMMENTS on that review, and one added afterwards does not move the review's
+    # `submitted_at` — so the review alone let a signoff recorded between it and a
+    # retracting reply vouch over a reply nobody read. #129.
+    #
+    # 1 IS AN ANSWER: no review, no comments, or a verdict that arrived as an issue
+    # comment and carries none. Only 2 is a read that failed.
+    local _pat _prc=0
+    _pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$1" "$2") || _prc=$?
+    case "$_prc" in
+        0) ;;
+        1) _pat="" ;;
+        *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
+    esac
+    rb_answer_at "$_rat" "$_pat" || { RB_VOUCH_REASON=nothing_to_answer; return 1; }
+    rb_signoff_answers "$_line" "$RB_ANSWER_AT" "$PR" "$1" "$2"
 }
 
 PR="${1:-}"

@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.44] — 2026-08-20
+
+- **A reply added after an operator's signoff is no longer merged over.** The
+  replies-only escape ordered the signoff against when the *review* landed, and
+  the verdict is produced by the review's **comments** — one added afterwards does
+  not move its `submitted_at`. Review at T1, operator reads the reply and signs
+  off at T2, someone posts a retracting reply at T3: `T2 > T1` still held, so the
+  signoff still vouched and the merge went through over a reply nobody read. The
+  resumed phase closed on it too.
+
+  What a signoff must now be newer than is the **later** of the two moments, which
+  is `rb_answer_at` in `recordlib.sh` — either can be the last thing that happened,
+  a review with no comments has only the first and a reply after the review has the
+  second. Either may be absent, and absent is not zero: it means that channel had
+  nothing to say. Both absent is a refusal, because there is then nothing for a
+  signoff to answer at all, and a value of a shape it cannot place is a third
+  status again rather than something to sort.
+
+  An unreadable reply time blocks rather than passing. Read as "no replies", the
+  retracting reply it could not see is exactly what gets merged over.
+
+  Closes #129, on #130's reader.
+
 ## [2.0.43] — 2026-08-20
 
 - **`pr-review-state.sh replies-at` — when the newest reply landed.** A
