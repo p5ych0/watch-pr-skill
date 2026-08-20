@@ -20,7 +20,12 @@
   It is the first field of the record, before `at=`, `id=` and `sha=`: callers
   peel the sha with `${line##*sha=}` and the record time with `${line#* at=}`, and
   the character before `verdict-at=`'s three letters is a hyphen rather than a
-  space, so neither peel can take it. A revocation carries it in the SECOND backticked field, having no sha.
+  space, so neither peel can take it. A revocation carries it in the SECOND
+  backticked field, having no sha — and a signoff **without** a sha but carrying a
+  third field is refused as `signoff_without_sha` rather than skipped: the sha
+  capture demands 40 hex, so a value in that position which is not one lands in the
+  verdict field instead, and discarded, that marker stops being the newest record
+  and an older signoff is returned with status 0.
 
   The shared reader knows the field: `recordlib.sh`'s signoff pattern accepts it,
   so the replies-only escape still recognises an operator's signoff. A fixture
