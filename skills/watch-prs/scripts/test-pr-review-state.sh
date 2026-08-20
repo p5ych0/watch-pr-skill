@@ -293,95 +293,6 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
     && pass "…while a readable one still reports when the review landed" \
     || die "review-at broke the ordinary answer (rc=$rc out='$out')"
 
-# ── `replies-at` — WHEN THE NEWEST REPLY LANDED ────────────────────────────
-# A replies-only verdict is produced by the COMMENTS on a review, and one added
-# afterwards does not move the review's `submitted_at`. Ordering an operator's
-# signoff against `review-at` alone therefore let it vouch over a retracting reply
-# nobody read. #130, for #129.
-mk_comments() {   # mk_comments <id> <created_at>… ; comments on review 42
-    local id="$1"; shift
-    local out="[" sep="" n=1
-    for t in "$@"; do
-        out="$out$sep{\"id\":$((9000 + n)),\"user\":{\"login\":\"$BOT\"},\"created_at\":\"$t\",\"body\":\"x\",\"in_reply_to_id\":$((8000 + n))}"
-        sep=","; n=$((n + 1))
-    done
-    printf '%s]' "$out" > "$TMP/comments-$id.json"
-}
-mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
-mk_comments 42 2026-01-05T00:00:00Z 2026-01-09T00:00:00Z 2026-01-07T00:00:00Z
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-09T00:00:00Z' ]; } \
-    && pass "replies-at: the NEWEST reply is the answer, not the first or the last row" \
-    || die "replies-at did not take the newest (rc=$rc out='$out')"
-# ONE COMMENT IS STILL AN ANSWER.
-mk_comments 42 2026-01-05T00:00:00Z
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-05T00:00:00Z' ]; } \
-    && pass "…and a single comment reports its own time" \
-    || die "replies-at with one comment gave (rc=$rc out='$out')"
-# A REVIEW WITH NO COMMENTS IS 1, NOT AN ERROR AND NOT AN EMPTY 0. There is
-# nothing to order against, which is an answer.
-printf '[]' > "$TMP/comments-42.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
-    && pass "…a review with no comments answers 1 with nothing on stdout" \
-    || die "an empty review gave (rc=$rc out='$out')"
-# NO REVIEW AT ALL IS THE SAME ANSWER.
-printf '[]' > "$TMP/reviews.json"; printf '[]' > "$TMP/icomments.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
-        GH_FIXTURE_DIR="$TMP" run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
-    && pass "…and so does no review at all" \
-    || die "no review gave (rc=$rc out='$out')"
-# A VERDICT THAT ARRIVED AS AN ISSUE COMMENT CARRIES NO REVIEW COMMENTS by
-# construction: there is nothing for a reply to be attached to.
-printf '[{"id":9001,"user":{"login":"%s"},"created_at":"2026-02-02T00:00:00Z","body":"%s"}]' \
-    "$BOT" "$_icb" > "$TMP/icomments.json"
-printf '[]' > "$TMP/reviews.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
-        GH_FIXTURE_DIR="$TMP" run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
-    && pass "…and a comment-sourced verdict has no replies to report" \
-    || die "a comment-sourced verdict gave (rc=$rc out='$out')"
-# AN UNREADABLE FETCH FAILS CLOSED. `jq` on empty input exits 0 with no output, so
-# a status swallowed here reads as "no replies" — which is the answer that lets a
-# signoff vouch over one.
-mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
-    && pass "…while an unreadable comments fetch is 2, not 'no replies'" \
-    || die "an unreadable fetch gave (rc=$rc out='$out')"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
-        run replies-at 7 "$BOT" 2>/dev/null)"; rc=$?
-[ -z "$out" ] \
-    && pass "…with nothing on stdout, which a substitution would have captured" \
-    || die "the unreadable answer printed '$out' on stdout"
-# AND A FETCH THAT PRINTS A PAGE AND THEN FAILS is the case the STATUS catches
-# and the parse cannot: what it printed is well-formed, so the answer would be a
-# maximum over half the comments — an incomplete snapshot presented as a complete
-# one, which is precisely the shape #113 was.
-mk_comments 42 2026-01-05T00:00:00Z
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" \
-        GH_COMMENTS_PARTIAL="$TMP/comments-42.json" GH_COMMENTS_RC=1 \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
-    && pass "…and a fetch that printed a page and then failed is unreadable, not an answer" \
-    || die "a partial page was answered from (rc=$rc out='$out')"
-
-# A ROW THIS CANNOT READ IS A PAYLOAD, NOT A COMMENT. Taking a maximum over a set
-# containing one is an answer about something else.
-printf '[{"id":9001,"user":{"login":"%s"},"created_at":"whenever","body":"x"}]' "$BOT" \
-    > "$TMP/comments-42.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
-        run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
-    && pass "…and a malformed row refuses rather than being skipped" \
-    || die "a malformed comment row gave (rc=$rc out='$out')"
-
 # ── `review-at` FAILS CLOSED ON AN UNREADABLE FETCH ───────────────────────
 # The merge gate orders records against this value, so an empty answer read as
 # "no verdict on this head" lets a signoff recorded for an earlier clean review
@@ -885,40 +796,168 @@ out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
 
-# ── `replies-at` RE-CHECKS THE SNAPSHOT TOO ────────────────────────────────
-# The comments are fetched for a review the call has already stopped looking at.
-# Dismissed or superseded in between, the answer describes the OLD review's
-# replies while presenting itself as the current one — and a consumer ordering an
-# operator signoff against it lets one recorded between the old replies and the
-# new vouch for a verdict nobody read.
-cat > "$TMP/bin/gh" <<SH
+# ── `escape-snapshot` — ONE RESPONSE, NOT A PROTOCOL OVER TWO ──────────────
+# The escape has to know which review it is, that its comments are all replies,
+# when it landed and when its newest reply did. The REST endpoints answer reviews
+# and review comments separately, and NO ordering of separate reads makes them one
+# snapshot: with the comments read last a review dismissed afterwards is invisible,
+# with the reviews read last a reply posted afterwards is, and alternating a third
+# time only moves the race. GraphQL returns both in one response. #133.
+gql() {   # gql <reviews-json-array> ; a stub answering the escape query
+    printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":%s}}}}}' "$1" \
+        > "$TMP/gql.json"
+    cat > "$TMP/bin/gh" <<SH
 #!/usr/bin/env bash
 case "\$*" in
-  *"/reviews/"*"/comments"*)
-     printf '[{"user":{"login":"$BOT"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z","in_reply_to_id":8001}]' ;;
-  *"/issues/"*"/comments"*) printf '[]' ;;
-  *"/reviews"*)
-     if [ ! -e "$TMP/seen2" ]; then
-        : > "$TMP/seen2"
-        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":61}]'
-     else
-        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":62}]'
-     fi ;;
+  *graphql*) cat "$TMP/gql.json" ;;
   *"pr view"*) printf '%s' "$HEAD40" ;;
   *) printf '{}' ;;
 esac
 SH
-chmod +x "$TMP/bin/gh"
-rm -f "$TMP/seen2"
-out="$(run replies-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
-    && pass "replies-at: a review that changes between the two reads is refused" \
-    || die "replies-at answered from a review that moved (rc=$rc '$out')"
-rm -f "$TMP/seen2"
-out="$(run replies-at 7 "$BOT" 2>/dev/null)"; rc=$?
+    chmod +x "$TMP/bin/gh"
+}
+gql_review() {   # gql_review <state> <submitted_at|null> <id> <comments-json>
+    # `null` UNQUOTED, because a draft carries a JSON null and a quoted "null" is
+    # a string that is not a time — a different case, and one the validator now
+    # refuses rather than treating as an unsubmitted review.
+    local _at="\"$2\""
+    [ "$2" = null ] && _at=null
+    printf '[{"databaseId":%s,"submittedAt":%s,"state":"%s","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":%s}}]' \
+        "$3" "$_at" "$1" "$BOT" "$HEAD40" "$4"
+}
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}},
+      {"databaseId":9002,"createdAt":"2026-01-09T00:00:00Z","replyTo":{"databaseId":8001}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = "$(printf '42\t2026-01-01T00:00:00Z\t2026-01-09T00:00:00Z')" ]; } \
+    && pass "escape-snapshot: the id, the review time and the newest reply, from one response" \
+    || die "escape-snapshot gave (rc=$rc out='$out')"
+# A COMMENT THAT OPENS A THREAD IS A FINDING, not a reply — and a finding is not a
+# question an operator was asked, so this is not the escape's shape.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":null}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…a comment that opens a thread is not that shape" \
+    || die "an opening comment was reported as replies-only (rc=$rc out='$out')"
+# NO COMMENTS AT ALL IS A DIFFERENT RECORD AGAIN.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 '[]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…nor is a review with no comments" \
+    || die "an empty review was reported as replies-only (rc=$rc out='$out')"
+# AND NEITHER IS A HEAD WITH NO SUBMITTED REVIEW.
+gql '[]'
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…nor a head with no submitted review" \
+    || die "no review was reported as replies-only (rc=$rc out='$out')"
+# A DISMISSED REVIEW IS NOT ONE THIS CAN ACT ON, and neither is a draft in flight.
+gql "$(gql_review DISMISSED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "…nor a dismissed one" \
+    || die "a dismissed review was reported as replies-only (rc=$rc out='$out')"
+gql "$(gql_review PENDING null 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "…nor one with a draft still open on the head" \
+    || die "a pending review was reported as replies-only (rc=$rc out='$out')"
+# A TRUNCATED PAGE IS UNREADABLE, NOT "NOT THAT SHAPE". The reviews are the LAST
+# hundred, so an earlier page could hold a draft that dominates; a review with
+# more than a hundred comments would have its newest one cut off.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":true},"nodes":%s}}}}}' \
+    "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')" \
+    > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…while a truncated review page is unreadable" \
+    || die "a truncated review page gave (rc=$rc out='$out')"
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":true},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}}]}}}}}' \
+    "$BOT" "$HEAD40" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and so is a truncated comment page" \
+    || die "a truncated comment page gave (rc=$rc out='$out')"
+# A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`, and the partial
+# data would answer "not that shape" from a response that failed.
+printf '{"errors":[{"message":"nope"}],"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}}' \
+    > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a response carrying errors beside data is unreadable" \
+    || die "an errors-bearing response gave (rc=$rc out='$out')"
+# A COMMENT ROW THIS CANNOT READ IS A PAYLOAD, NOT A COMMENT.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"whenever","replyTo":{"databaseId":8001}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a comment row with an unreadable time refuses rather than being skipped" \
+    || die "a malformed comment row gave (rc=$rc out='$out')"
+out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
 [ -z "$out" ] \
     && pass "…with nothing on stdout, which a substitution would have captured" \
-    || die "the changed-snapshot answer printed '$out' on stdout"
+    || die "the unreadable answer printed '$out'"
+# EVERY NODE IS VALIDATED BEFORE ANY IS FILTERED. A `select` over a malformed
+# node DISCARDS it, and discarding a NEWER review leaves an older replies-only one
+# as the latest — so a signoff newer than that older review closes the phase over
+# a review nothing could read. "This response is not trustworthy" and "that review
+# is not mine" are the two answers this has to keep apart.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":null,"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$HEAD40" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a malformed NEWER review is unreadable, not filtered past" \
+    || die "a malformed newer review was discarded (rc=$rc out='$out')"
+# AND THE COMMIT OID IS A COMMIT, not merely a string. A truncated head passes a
+# type check and is then DISCARDED by the head filter, which hands the decision to
+# an older replies-only review — the same route as a malformed time, through a
+# different field.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"aaaaaaa"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$BOT" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a newer review whose commit is not a commit cannot be filtered past" \
+    || die "a truncated oid was discarded (rc=$rc out='$out')"
+
+# AND THE TIME IS CHECKED FOR SHAPE, NOT MERELY FOR BEING A STRING. The sort
+# decides which review is authoritative, and a string that is not a time sorts
+# SOMEWHERE — `"0000"` sorts under every real timestamp, so a malformed newer
+# review hands the decision to an older replies-only one, whose own time then
+# passes the only shape check there was.
+printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"0000","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
+    "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/gql.json"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a newer review whose time is not a time cannot hand the decision to an older one" \
+    || die "a low-sorting malformed time selected an older review (rc=$rc out='$out')"
+
+# THE SAME FOR A REPLY LINK. A `replyTo` that is a string or an array is not null,
+# so a presence test reads it as a REPLY — and a set of rows nothing could
+# classify then produces a valid snapshot, which is a merge on a finding/reply
+# relationship that was never read.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":"8001"}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a reply link that is not an object is unreadable, not a reply" \
+    || die "a malformed reply link was classified (rc=$rc out='$out')"
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":"8001"}}]')"
+out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and neither is one whose id is not a number" \
+    || die "a reply link with a non-numeric id was classified (rc=$rc out='$out')"
+
+# ANOTHER REVIEWER'S REVIEW ON THE SAME HEAD IS NOT THIS ONE.
+gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
+    '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')"
+out="$(run escape-snapshot 7 'copilot-pull-request-reviewer[bot]' 2>&1)"; rc=$?
+[ "$rc" -eq 1 ] \
+    && pass "…and a review by another reviewer is not this reviewer's" \
+    || die "another reviewer's review answered (rc=$rc out='$out')"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

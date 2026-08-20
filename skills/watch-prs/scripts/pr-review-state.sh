@@ -451,8 +451,8 @@ clean_verdict() {
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id|review-at|replies-at) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id|review-at|replies-at} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|review-at|escape-snapshot) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|review-at|escape-snapshot} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -555,76 +555,134 @@ main() {
         return 0
     fi
 
-    # WHEN THE NEWEST REPLY LANDED, which is a different moment from when the
-    # review did. A replies-only verdict is produced by the COMMENTS on a review,
-    # and one added afterwards does not move the review's `submitted_at` — so an
-    # operator signoff ordered against `review-at` alone still vouched over a
-    # retracting reply nobody read. #130, for #129.
-    if [ "$cmd" = "replies-at" ]; then
-        local rsnap rid rraw rat
-        rsnap="$(head_review_snapshot "$pr" "$who" "$head")" || {
+    if [ "$cmd" = "escape-snapshot" ]; then
+        # ONE SERVER RESPONSE, NOT A PROTOCOL OVER TWO. The REST endpoints answer
+        # reviews and review comments separately, and no ordering of separate
+        # reads makes them one snapshot: with the comments read last a review
+        # dismissed afterwards is invisible, with the reviews read last a reply
+        # posted afterwards is — and alternating a third time only moves the race.
+        # #132 spent five rounds discovering that one layer at a time.
+        #
+        # GraphQL returns both in a SINGLE response, so the review, its state, its
+        # time and its comments are consistent by construction and there is nothing
+        # to compare. What is left is the gap after the response, which no protocol
+        # can cover: a signoff answers what had happened when it was written.
+        local epage eanswer
+        epage=$(gh api --hostname "$HOST" graphql -F number="$pr" -f owner="$OWNER" -f repo="$REPO" \
+            -f query='query($owner:String!,$repo:String!,$number:Int!){
+              repository(owner:$owner,name:$repo){ pullRequest(number:$number){
+                reviews(last:100){ pageInfo{hasPreviousPage}
+                  nodes{ databaseId submittedAt state
+                         author{login} commit{oid}
+                         comments(first:100){ pageInfo{hasNextPage}
+                           nodes{ databaseId createdAt replyTo{databaseId} } } } }}}}' 2>/dev/null) || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
-        rid="${rsnap#*$'\t'}"
-        # NO REVIEW IS AN ANSWER, NOT A FAILURE — and so is a verdict that arrived
-        # as an issue COMMENT, which carries no review comments by construction:
-        # there is nothing for a reply to be attached to. Both report 1, which the
-        # caller reads as "nothing to order against" rather than as a broken read.
-        case "$rid" in
-            ""|comment:*) return 1 ;;
-            *[!0-9]*) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
-        esac
-        # THE FETCH'S STATUS ON ITS OWN LINE, as everywhere else here. `pages_or_error`
-        # below already refuses an EMPTY read, so a fetch that fails silently is
-        # caught either way — but one that prints a page and then fails on a later
-        # one is not: what it printed parses, and the answer would be a maximum
-        # over half the comments. An incomplete snapshot presented as a complete
-        # one is the shape #113 was, and the status is what sees it.
-        rraw=$(gh api --hostname "$HOST" "repos/$OWNER/$REPO/pulls/$pr/reviews/$rid/comments" --paginate 2>/dev/null) || {
+        # A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`, and the
+        # partial data passes every shape check below while omitting reviews — an
+        # answer of "not that shape" taken from a response that failed.
+        printf '%s' "$epage" | jq -e 'has("errors") | not' >/dev/null 2>&1 || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
-        # EVERY ROW IS VALIDATED FIRST, by the same rule that counts them. A row
-        # this cannot read is a payload, not a comment, and taking a maximum over
-        # a set that contains one is an answer about something else.
-        rat="$(printf '%s' "$rraw" | jq -s -r "$RECORDLIB_JQ"'
-            pages_or_error
-            | [.[][]] as $rows
-            | if any($rows[]; valid_review_comment | not)
-              then error("malformed review comment")
-              else [ $rows[] | .created_at ] | sort | last // ""
+        # THE WHOLE ANSWER IN ONE PROGRAM, because splitting it into passes over
+        # the same response is how two passes come to disagree about which rows
+        # they are describing.
+        #
+        # `error` FOR EVERY UNREADABLE STATE and a bare `none` for "not that
+        # shape": the two are different answers and only one of them is a failure.
+        # A truncated page is unreadable — the reviews are the LAST hundred, so an
+        # earlier page could hold a draft that dominates, and a review with more
+        # than a hundred comments would have its newest one cut off.
+        eanswer="$(printf '%s' "$epage" | jq -r --arg h "$head" --arg who "$who" "$RECORDLIB_JQ"'
+            .data.repository.pullRequest.reviews as $r
+            | if ($r | type) != "object" or ($r.nodes | type) != "array"
+                 or ($r.pageInfo.hasPreviousPage | type) != "boolean"
+              then error("bad shape")
+              elif $r.pageInfo.hasPreviousPage then error("truncated reviews")
+              # EVERY NODE IS VALIDATED BEFORE ANY IS FILTERED. A `select` over a
+              # malformed node DISCARDS it, and discarding a newer review leaves an
+              # older replies-only one as the latest — so a signoff newer than THAT
+              # one closes the phase over a review nothing could read. "This
+              # response is not trustworthy" and "that review is not mine" are the
+              # two answers this must keep apart.
+              elif any($r.nodes[];
+                       type != "object"
+                       or (.author | type) != "object" or (.author.login | type) != "string"
+                       # AND THE OID IS A COMMIT, through the shared predicate. A
+                       # string that is not one — a truncated head, say — passes a
+                       # type check and is then DISCARDED by the head filter, which
+                       # hands the decision to an older replies-only review.
+                       or (.commit | type) != "object" or (.commit.oid | full_sha | not)
+                       or (.state | type) != "string"
+                       # THE CANONICAL SHAPE, NOT MERELY A STRING. The sort below
+                       # decides which review is authoritative, and a string that
+                       # is not a time sorts SOMEWHERE — "0000" sorts under every
+                       # real timestamp, so a malformed newer review hands the
+                       # decision to an older replies-only review, whose own time
+                       # then passes the only shape check there was.
+                       #
+                       # NO APOSTROPHE IN THIS COMMENT: the jq program is a
+                       # single-quoted shell string, and one here ends it.
+                       or (.submittedAt != null and (.submittedAt | canonical_utc | not)))
+              then error("bad review node")
+              else
+                [ $r.nodes[]
+                  | select(.author.login == $who)
+                  | select(.commit.oid == $h) ] as $mine
+                | if ($mine | length) == 0 then "none"
+                  # THE SAME DOMINANCE RULES the state snapshot applies: a draft in
+                  # flight means the pass is not finished, whatever an older
+                  # submitted review says.
+                  elif any($mine[]; .state == "PENDING" or .submittedAt == null) then "none"
+                  else
+                    ( [ $mine[] | select(.submittedAt != null) ]
+                      | sort_by(.submittedAt) | last ) as $latest
+                    | if $latest == null then "none"
+                      elif ($latest.state != "APPROVED" and $latest.state != "COMMENTED") then "none"
+                      elif ($latest.submittedAt | canonical_utc | not) then error("bad review time")
+                      elif ($latest.databaseId | type) != "number" then error("bad review id")
+                      elif ($latest.comments | type) != "object"
+                           or ($latest.comments.nodes | type) != "array"
+                           or ($latest.comments.pageInfo.hasNextPage | type) != "boolean"
+                      then error("bad comments")
+                      elif $latest.comments.pageInfo.hasNextPage then error("truncated comments")
+                      else
+                        $latest.comments.nodes as $c
+                        # AND EVERY COMMENT ROW, INCLUDING ITS REPLY LINK. A
+                        # `replyTo` that is a string or an array is not null, so a
+                        # presence test reads it as a REPLY — and a set of rows
+                        # nothing could classify then produces a valid snapshot,
+                        # which is a merge on a finding/reply relationship that was
+                        # never read.
+                        | if any($c[];
+                                 type != "object"
+                                 or (.createdAt | canonical_utc | not)
+                                 or (.replyTo != null
+                                     and ((.replyTo | type) != "object"
+                                          or (.replyTo.databaseId | type) != "number")))
+                          then error("bad comment row")
+                          # NO COMMENTS IS A DIFFERENT RECORD, and a comment that
+                          # OPENS a thread is a finding rather than a reply — not a
+                          # question an operator was asked.
+                          elif ($c | length) == 0 then "none"
+                          elif any($c[]; .replyTo == null) then "none"
+                          else (($latest.databaseId | tostring) + "\t" + $latest.submittedAt
+                                + "\t" + ([ $c[] | .createdAt ] | sort | last))
+                          end
+                      end
+                    end
               end' 2>/dev/null)" || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
-        # AND THE SNAPSHOT AGAIN, because the comments were fetched for a review
-        # this call has already stopped looking at. Dismissed or superseded in
-        # between, the answer describes the OLD review's replies while presenting
-        # itself as the current one — and a consumer ordering an operator signoff
-        # against it lets one recorded between the old replies and the new vouch
-        # for a verdict nobody read. `clean_verdict` re-checks for exactly this
-        # reason; this is the same pair of fetches.
-        local rsnap2
-        rsnap2="$(head_review_snapshot "$pr" "$who" "$head")" || {
+        [ -n "$eanswer" ] || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
-        [ "$rsnap2" = "$rsnap" ] || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=review_state_changed" >&2
-            return 2
-        }
-        # A REVIEW WITH NO COMMENTS IS AN ANSWER TOO.
-        [ -n "$rat" ] || return 1
-        # AND THE SHAPE, because every consumer compares this as a STRING and that
-        # is the time order only for canonical UTC. `valid_comment_record` enforces
-        # it on the way in; this is the boundary refusing to hand out a value it
-        # cannot place.
-        case "$rat" in
-            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
-        esac
-        printf '%s\n' "$rat"
+        [ "$eanswer" != none ] || return 1
+        printf '%s\n' "$eanswer"
         return 0
     fi
 

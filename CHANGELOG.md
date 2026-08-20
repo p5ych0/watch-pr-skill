@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.0.45] — 2026-08-20
+
+- **The replies-only escape asks one question instead of four.** It has to know
+  which review it is, that its comments are all replies, when it landed and when
+  its newest reply did. Asked as four probes and bound by re-reading each, every
+  fix left the next window — a dismissal between two of them, a same-shaped
+  replacement invisible to a verdict comparison, an id that is stable but not an
+  id, replies that move without the comment count moving, a reply moving while the
+  last probe is in flight. Five review rounds, one layer in each time, because a
+  sequential guard cannot close a gap between sequential calls.
+
+  **And no ordering of separate reads makes them one snapshot.** The REST
+  endpoints answer reviews and review comments apart: with the comments read last
+  a review dismissed afterwards is invisible, with the reviews read last a reply
+  posted afterwards is, and alternating a third time only moves the race.
+  `pr-review-state.sh escape-snapshot` asks GraphQL, which returns both in a
+  **single response** — consistent by construction, with nothing to compare.
+
+  `pr-merge-gate.sh` and `pr-phase-state.sh` ask once: the id, the review's time
+  and its newest reply's arrive together or not at all. What is left is the gap
+  *after* the response, which no protocol can cover — a signoff answers what had
+  happened when it was written.
+
+  A truncated page is unreadable rather than "not that shape": the reviews are the
+  last hundred, so an earlier page could hold a draft that dominates, and a review
+  with more than a hundred comments would have its newest one cut off.
+
+  **`replies-at` is removed.** It shipped in 2.0.43 for exactly this consumer, and
+  leaving a second, weaker answer to the same question is leaving one a future
+  caller reaches for.
+
+  What the callers do check is the SHAPE of that answer, through
+  `rb_escape_snapshot`: peeled with expansions alone, a two-field line assigns the
+  second value to both times, a four-field one hides a value, and a non-numeric id
+  is dropped in silence — and the id is what proves the two times describe one
+  review. Both times must be canonical UTC and present, because a successful
+  snapshot is always a replies-only review and therefore always has both — while an
+  *empty* reply field is the one shape the ordering rule accepts as "that channel
+  had nothing to say", which is how a truncated helper would hide a newer reply.
+
+  The five cases that used to sit in the two callers move to the reader's own
+  suite, and change with the contract: they were windows between probes, and what
+  they became is a single response that is malformed or truncated — a review node
+  whose author, commit, state or time cannot be read, a comment whose reply link
+  cannot, a page that was cut off. Every node is validated **before** any is
+  filtered, because discarding a malformed *newer* review leaves an older
+  replies-only one as the latest and its signoff then closes the phase.
+
+  Closes #133.
+
 ## [2.0.44] — 2026-08-20
 
 - **A reply added after an operator's signoff is no longer merged over.** The

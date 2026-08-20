@@ -180,6 +180,7 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "merge blocked:" 2>&1 || exit
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "merge blocked:" 2>&1 || exit 1
+rb_load "$_RB_SELF_DIR" recordlib rb_escape_snapshot "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "merge blocked:" 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "merge blocked:" var 2>&1 || exit 1
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "merge blocked:" var 2>&1 || exit 1
@@ -371,113 +372,43 @@ rc_answered() {   # rc_answered <reviewer> <sha> <rc> <line> ; 0 if the gate may
     [ "$3" -eq 1 ] && replies_only_line "$1" "$2" "$4" && return 0
     return 1
 }
-signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only on a positive record
+signoff_vouches() {   # signoff_vouches <reviewer> <sha> ; 0 only on a positive record
     # THE RECORDS ARE READ HERE AND THE RULE IS THE LIBRARY'S. Both callers of the
     # escape fetch with their own error prefixes and their own statuses; what they
     # share is what "this signoff answers that review" MEANS. #125.
-    local who="$1" want="$2" verdict_line="$3" line rc=0 rat arc=0
+    #
+    # AND WHAT IT ANSWERS COMES FROM ONE RESPONSE. This used to ask four
+    # questions — which review, its time, its newest reply, and the verdict
+    # again — as four probes, each re-read to catch a change during the previous
+    # one. Every fix left the next window, because a sequential guard cannot close
+    # a gap between sequential calls; #132 spent five rounds one layer in each
+    # time, and no ordering of separate REST reads makes reviews and their
+    # comments one snapshot. `escape-snapshot` asks GraphQL, which returns both in
+    # a SINGLE response — consistent by construction — so there is nothing here to
+    # compare and no protocol here to get wrong. #133.
+    local who="$1" want="$2" line rc=0 snap src=0 rat pat
     line=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$who" 2>&1) || rc=$?
     [ "$rc" -eq 0 ] || return 1
-    # WHICH REVIEW THIS IS, BEFORE ANY OF ITS TIMES ARE READ. A verdict record
-    # carries no review id, so a SECOND replies-only review with the same finding
-    # count, submitted on the same head, serialises byte-for-byte identically to
-    # the first — and a binding that compares only the verdict accepts the old
-    # review's timestamps for the new one, letting a signoff that predates it
-    # merge. Dismissal is the visible case; a same-shaped replacement is not.
-    local rid1 ridrc=0
-    rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || ridrc=$?
-    # THE SHAPE, NOT JUST NON-EMPTY. A replaced or wrapped helper exiting 0 with
-    # the same word on both reads is a STABLE value that identifies nothing — the
-    # two reads then agree and a same-shaped replacement is invisible again, which
-    # is the defect this id exists to close.
-    case "$rid1" in
-        ""|*[!0-9]*) echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc, id='$rid1')"; return 1 ;;
-    esac
-    [ "$ridrc" -eq 0 ] || {
-        echo "merge blocked: could not read which $who review is authoritative on ${want:0:7} (rc=$ridrc)"; return 1; }
-    rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$who" "$want") || arc=$?
-    [ "$arc" -eq 0 ] || { echo "merge blocked: could not read when $who's review landed (rc=$arc)"; return 1; }
-    # AND WHEN THE NEWEST REPLY LANDED, which is a different moment. This verdict
-    # is produced by the COMMENTS on that review, and one added afterwards does not
-    # move the review's `submitted_at` — so ordering against the review alone let a
-    # signoff recorded between the review and a retracting reply vouch over a reply
-    # nobody read. #129.
-    #
-    # 1 IS AN ANSWER: no review, no comments, or a verdict that arrived as an issue
-    # comment and carries none. Only 2 is a read that failed.
-    local pat prc=0
-    pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$who" "$want") || prc=$?
-    # ABSENCE HAS TO BE SILENT. A wrapper that prints a partial answer and then
-    # returns the documented absence status leaves a timestamp on stdout that this
-    # arm would discard — and if it is newer than the signoff, discarding it is
-    # exactly the reply that gets merged over.
-    case "$prc" in
+    snap=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh escape-snapshot "$PR" "$who" "$want") || src=$?
+    case "$src" in
         0) ;;
-        1) [ -z "$pat" ] || {
-               echo "merge blocked: $who's reply probe reported no replies and printed one anyway ('$pat')"; return 1; }
-           pat="" ;;
-        *) echo "merge blocked: could not read when $who's newest reply landed (rc=$prc)"; return 1 ;;
+        1) echo "merge blocked: $who has no replies-only review on ${want:0:7} for a signoff to answer"; return 1 ;;
+        *) echo "merge blocked: could not read $who's review on ${want:0:7} as one snapshot (rc=$src)"; return 1 ;;
     esac
-    # THE TWO REFUSALS ARE DIFFERENT ANSWERS, and both block here — but they do not
-    # say the same thing. `1` is "neither channel has anything for a signoff to
-    # answer"; `2` is a timestamp of a shape nothing can place, which is a probe
-    # that exited 0 with something it did not mean, and telling the operator there
-    # is nothing to answer sends them looking in the wrong place.
-    local aarc=0
-    # BOTH ABSENT IS IMPOSSIBLE HERE, not merely uninformative. The id above is a
-    # numeric one, so a submitted review exists — and every submitted review has a
-    # validated `submitted_at`, which `review-at` reports. Two silent probes in
-    # THIS context therefore mean a read failed, and saying "there is nothing to
-    # answer" sends the operator to look at a review that is plainly there.
-    rb_answer_at "$rat" "$pat" || aarc=$?
-    case "$aarc" in
-        0) ;;
-        1) echo "merge blocked: $who's review on ${want:0:7} is recorded but neither its time nor its newest reply could be read"; return 1 ;;
-        *) echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1 ;;
-    esac
-    # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
-    # probes are separate calls: a review dismissed after `review-at` returns and
-    # before `replies-at` runs leaves the second reading a stable — but dismissed —
-    # snapshot, so the deadline describes a review that no longer authorises
-    # anything while the replies-only line this vouch is answering was fetched
-    # before any of it. Each probe re-checks ITSELF; nothing bound them together.
-    #
-    # THE VERDICT IS WHAT BINDS THEM, because it is the thing the escape acts on:
-    # identical means the review that produced it is still the authoritative one.
-    local vagain vgrc=0
-    vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$who" "$want"); vgrc=$?
-    # AND THE REPLY TIME AGAIN. The id and the verdict can BOTH be unchanged while
-    # the replies move: a reply added after `replies-at` returned and another
-    # deleted before this read leaves the comment count — and therefore the
-    # serialised verdict — exactly as it was. Only the reply time itself shows it.
-    local pat2 pat2rc=0
-    pat2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$who" "$want") || pat2rc=$?
-    case "$pat2rc" in
-        0) ;;
-        1) [ -z "$pat2" ] || { echo "merge blocked: $who's reply probe reported no replies and printed one anyway ('$pat2')"; return 1; }
-           pat2="" ;;
-        *) echo "merge blocked: could not re-read when $who's newest reply landed (rc=$pat2rc)"; return 1 ;;
-    esac
-    if [ "$pat2" != "$pat" ]; then
-        echo "merge blocked: $who's replies on ${want:0:7} moved while its timestamps were being read ('$pat' then '$pat2')"
-        return 1
-    fi
-    local rid2 rid2rc=0
-    rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$who" "$want") || rid2rc=$?
-    case "$rid2" in
-        ""|*[!0-9]*) rid2="" ;;
-    esac
-    if [ "$vgrc" -ne 1 ] || [ "$vagain" != "$verdict_line" ] \
-       || [ "$rid2rc" -ne 0 ] || [ -z "$rid2" ] || [ "$rid2" != "$rid1" ]; then
-        echo "merge blocked: $who's review on ${want:0:7} changed while its timestamps were being read"
-        return 1
-    fi
+    # `<id>TAB<review-at>TAB<newest-reply-at>`, PARSED rather than peeled. Peeling
+    # with `${…#…}` alone assigns the second value to both times when a field is
+    # missing and hides one when there is an extra, and drops a non-numeric id in
+    # silence — the id being what proves the two times describe ONE review. The
+    # rule is `recordlib.sh`'s, because both callers read the same answer.
+    rb_escape_snapshot "$snap" || {
+        echo "merge blocked: $who's review snapshot on ${want:0:7} is not one this gate can read ('$snap')"; return 1; }
+    rat="$RB_SNAP_REVIEW_AT"; pat="$RB_SNAP_REPLY_AT"
+    rb_answer_at "$rat" "$pat" || {
+        echo "merge blocked: when $who's review or newest reply landed could not be placed in time ('$rat' / '$pat')"; return 1; }
     rb_signoff_answers "$line" "$RB_ANSWER_AT" "$PR" "$who" "$want" && return 0
     case "$RB_VOUCH_REASON" in
         other_head|other_pr|other_reviewer) ;;   # a record about something else; not this gate's to explain
         signoff_malformed) echo "merge blocked: the $who signoff record is not one this gate can read ('$line')" ;;
-        no_review)         echo "merge blocked: $who has no submitted review on ${want:0:7}, so there is nothing for a signoff to answer" ;;
-        review_untimed)    echo "merge blocked: when $who's review landed could not be read ('$rat')" ;;
         # NAMED AS THE CONVERSATION, not as the review. The deadline is the LATER
         # of the two, so a signoff that IS newer than the review can still fail
         # here — and saying "the review at <T>" then points the operator at an
@@ -488,6 +419,7 @@ signoff_vouches() {   # signoff_vouches <reviewer> <sha> <verdict-line> ; 0 only
     esac
     return 1
 }
+
 signoff_contradicts "$CODEX_BOT" "$CODEX_SHA" || exit 1
 
 # ── CODEX-ONLY IS A REAL OPTION, AND IT COSTS SOMETHING ────────────────────
@@ -587,7 +519,7 @@ for SPEC in "$@"; do
         # past a reviewer.
         if replies_only_line "$V_WHO" "$V_SHA" "$V_LINE"; then
             # AND THE RECORD MUST BE THERE. Absence is not permission.
-            if signoff_vouches "$V_WHO" "$V_SHA" "$V_LINE"; then
+            if signoff_vouches "$V_WHO" "$V_SHA"; then
                 echo "note: $V_WHO left only replies on ${V_SHA:0:7}; merging on the signoff an operator recorded for that head after reading them"
             else
                 echo "merge blocked: $V_WHO left only replies on ${V_SHA:0:7} and no operator has recorded a signoff for that head — read the reply and record one, or fix what it says and push"

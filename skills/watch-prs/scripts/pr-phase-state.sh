@@ -128,6 +128,7 @@ rb_load "$_RB_SELF_DIR" recordlib rb_review_record "PR_PHASE status=error" || ex
 rb_load "$_RB_SELF_DIR" recordlib rb_replies_only_line "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_signoff_answers "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_answer_at "PR_PHASE status=error" || exit 2
+rb_load "$_RB_SELF_DIR" recordlib rb_escape_snapshot "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib rb_review_record_is_about "PR_PHASE status=error" || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "PR_PHASE status=error" var || exit 2
 rb_load "$_RB_SELF_DIR" recordlib RB_COPILOT_BOT "PR_PHASE status=error" var || exit 2
@@ -151,11 +152,27 @@ rb_identity || { echo "PR_PHASE status=error reason=$RB_IDENTITY_REASON" >&2; ex
 # the fail-closed rule this helper states everywhere else.
 RB_VOUCH_REVIEW_AT=''
 RB_VOUCH_REPLIES_AT=''
-rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
-    local _line _rc=0 _rat _arc=0
-    # CLEARED HERE TOO, not only inside the library predicate: the two early
-    # returns below never reach it, and a stale value from a previous call would
-    # be printed as this call's reason.
+# 0 vouched · 1 no record answers it · 2 a probe could not be read
+#
+# THE THIRD STATUS IS NOT THE SECOND. Folding an unreadable probe into "nobody
+# signed this off" tells the operator to record a signoff they may already have
+# recorded, and hides a broken read behind an ordinary-looking refusal — which is
+# the fail-closed rule this helper states everywhere else.
+#
+# AND WHAT THE SIGNOFF HAS TO ANSWER COMES FROM ONE RESPONSE. This used to ask
+# which review it was, when it landed, when its newest reply did and what the
+# verdict was, as four probes bound by re-reading each — and every fix left the
+# next window, because a sequential guard cannot close a gap between sequential
+# calls, and no ordering of separate REST reads makes reviews and their comments
+# one snapshot. `escape-snapshot` asks GraphQL, which returns both in a SINGLE
+# response — consistent by construction — so nothing here compares anything. #133.
+RB_VOUCH_REVIEW_AT=''
+RB_VOUCH_REPLIES_AT=''
+rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha>
+    local _line _rc=0 _snap _src=0 _rat _pat
+    # CLEARED HERE TOO, not only inside the library predicate: the early returns
+    # below never reach it, and a stale value from a previous call would be
+    # printed as this call's reason.
     RB_VOUCH_REASON=""
     RB_VOUCH_REVIEW_AT=""
     RB_VOUCH_REPLIES_AT=""
@@ -170,91 +187,24 @@ rb_phase_vouched() {   # rb_phase_vouched <reviewer> <sha> <verdict-line>
         1) RB_VOUCH_REASON=no_signoff; return 1 ;;
         *) RB_VOUCH_REASON=unreadable; return 2 ;;
     esac
-    # WHICH REVIEW THIS IS, BEFORE ANY OF ITS TIMES ARE READ. A verdict record
-    # carries no review id, so a SECOND replies-only review with the same finding
-    # count, submitted on the same head, serialises byte-for-byte identically —
-    # and a binding that compares only the verdict accepts the OLD review's
-    # timestamps for the new one.
-    local _rid1 _ridrc=0
-    _rid1=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _ridrc=$?
-    # THE SHAPE, NOT JUST NON-EMPTY. A replaced or wrapped helper exiting 0 with
-    # the same word on both reads is a STABLE value that identifies nothing, and a
-    # same-shaped replacement is invisible again.
-    case "$_rid1" in
-        ""|*[!0-9]*) RB_VOUCH_REASON=review_id_unreadable; return 2 ;;
-    esac
-    [ "$_ridrc" -eq 0 ] || { RB_VOUCH_REASON=review_id_unreadable; return 2; }
-    _rat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$1" "$2") || _arc=$?
-    [ "$_arc" -eq 0 ] || { RB_VOUCH_REASON=review_at_unreadable; return 2; }
-    # AND WHEN THE NEWEST REPLY LANDED. A replies-only verdict is produced by the
-    # COMMENTS on that review, and one added afterwards does not move the review's
-    # `submitted_at` — so the review alone let a signoff recorded between it and a
-    # retracting reply vouch over a reply nobody read. #129.
-    #
-    # 1 IS AN ANSWER: no review, no comments, or a verdict that arrived as an issue
-    # comment and carries none. Only 2 is a read that failed.
-    local _pat _prc=0
-    _pat=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$1" "$2") || _prc=$?
-    # ABSENCE HAS TO BE SILENT. A wrapper that prints a partial answer and then
-    # returns the documented absence status leaves a timestamp on stdout that this
-    # arm would discard — and if it is newer than the signoff, discarding it is
-    # exactly the reply the phase closes over.
-    case "$_prc" in
+    _snap=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh escape-snapshot "$PR" "$1" "$2") || _src=$?
+    case "$_src" in
         0) ;;
-        1) [ -z "$_pat" ] || { RB_VOUCH_REASON=replies_at_unreadable; return 2; }
-           _pat="" ;;
-        *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
+        1) RB_VOUCH_REASON=not_the_escape_shape; return 1 ;;
+        *) RB_VOUCH_REASON=snapshot_unreadable; return 2 ;;
     esac
-    # THE TWO REFUSALS ARE DIFFERENT ANSWERS. `1` is "neither channel has anything
-    # for a signoff to answer", which is an ordinary state; `2` is a timestamp of a
-    # shape this cannot place, which is a probe that answered 0 with something it
-    # did not mean — a truncated or replaced helper — and reporting it as the first
-    # sends the operator to record another signoff for a read that failed.
-    rb_answer_at "$_rat" "$_pat"; _arc=$?
-    # BOTH ABSENT IS IMPOSSIBLE HERE, not merely uninformative. The id above is a
-    # numeric one, so a submitted review exists — and every submitted review has a
-    # validated `submitted_at`. Two silent probes in THIS context mean a read
-    # failed, and reporting it as "nothing to answer" tells the operator to record
-    # another signoff for a review that is plainly there.
-    case "$_arc" in
+    # `<id>TAB<review-at>TAB<newest-reply-at>`, PARSED rather than peeled. Peeling
+    # with `${…#…}` alone assigns the second value to both times when a field is
+    # missing and hides one when there is an extra, and drops a non-numeric id in
+    # silence — the id being what proves the two times describe ONE review.
+    rb_escape_snapshot "$_snap" || { RB_VOUCH_REASON=snapshot_malformed; return 2; }
+    _rat="$RB_SNAP_REVIEW_AT"; _pat="$RB_SNAP_REPLY_AT"
+    rb_answer_at "$_rat" "$_pat"; _src=$?
+    case "$_src" in
         0) ;;
         1) RB_VOUCH_REASON=no_times_for_a_recorded_review; return 2 ;;
         *) RB_VOUCH_REASON=answer_time_unreadable; return 2 ;;
     esac
-    # AND THE VERDICT AGAIN, BOUND TO THE DEADLINE JUST COMPUTED. The two time
-    # probes are separate calls: a review dismissed after `review-at` returns and
-    # before `replies-at` runs leaves the second reading a stable — but dismissed —
-    # snapshot, so the deadline describes a review that no longer authorises
-    # anything, while the replies-only line this vouch is answering was read before
-    # any of it. Each probe re-checks ITSELF; the verdict is what binds them.
-    local _vagain _vgrc=0
-    _vagain=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$1" "$2"); _vgrc=$?
-    # AND THE REPLY TIME AGAIN. The id and the verdict can BOTH be unchanged while
-    # the replies move: a reply added after `replies-at` returned and another
-    # deleted before this read leaves the comment count — and therefore the
-    # serialised verdict — exactly as it was.
-    local _pat2 _pat2rc=0
-    _pat2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh replies-at "$PR" "$1" "$2") || _pat2rc=$?
-    case "$_pat2rc" in
-        0) ;;
-        1) [ -z "$_pat2" ] || { RB_VOUCH_REASON=replies_at_unreadable; return 2; }
-           _pat2="" ;;
-        *) RB_VOUCH_REASON=replies_at_unreadable; return 2 ;;
-    esac
-    if [ "$_pat2" != "$_pat" ]; then
-        RB_VOUCH_REASON=replies_moved
-        return 2
-    fi
-    local _rid2 _rid2rc=0
-    _rid2=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-id "$PR" "$1" "$2") || _rid2rc=$?
-    case "$_rid2" in
-        ""|*[!0-9]*) _rid2="" ;;
-    esac
-    if [ "$_vgrc" -ne 1 ] || [ "$_vagain" != "$3" ] \
-       || [ "$_rid2rc" -ne 0 ] || [ -z "$_rid2" ] || [ "$_rid2" != "$_rid1" ]; then
-        RB_VOUCH_REASON=review_changed
-        return 2
-    fi
     # THE TIMES TRAVEL WITH THE ANSWER, because the stop below is what the operator
     # reads and "it does not answer this review" without saying WHEN leaves them
     # comparing timestamps by hand. `SKILL.md` promises both.
@@ -405,7 +355,7 @@ elif [[ $COPILOT_RC -eq 0 ]] && [[ $COPILOT_SHA = "$HEAD" ]]; then
            # comments are all replies does not, when the operator has recorded a
            # signoff that answers it.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_COPILOT_BOT" "$COPILOT_SHA"; then
-               rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA" "$VERDICT"; RB_VOUCH_RC=$?
+               rb_phase_vouched "$RB_COPILOT_BOT" "$COPILOT_SHA"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
                    echo "PR_PHASE pr=$PR status=error reason=copilot_vouch_unreadable" >&2; exit 2
                fi
@@ -464,7 +414,7 @@ else
            fi ;;
         1) # THE SAME TWO ANSWERS, on the other arm.
            if rb_replies_only_line "$VERDICT" "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"; then
-               rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA" "$VERDICT"; RB_VOUCH_RC=$?
+               rb_phase_vouched "$RB_CODEX_BOT" "$CODEX_SHA"; RB_VOUCH_RC=$?
                if [ "$RB_VOUCH_RC" -eq 2 ]; then
                    echo "PR_PHASE pr=$PR status=error reason=codex_vouch_unreadable" >&2; exit 2
                fi
