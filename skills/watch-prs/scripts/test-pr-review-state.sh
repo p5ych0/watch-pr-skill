@@ -32,6 +32,13 @@ case "$1 ${2:-}" in
   *"api "*)
     case "$*" in
       *"/reviews/"*"/comments"*)
+        # A PARTIAL PAGE AND THEN A FAILURE. `--paginate` can print pages and
+        # then fail on a later one, and command substitution keeps what was
+        # printed — so a caller that checks only the parse sees a well-formed
+        # array and answers from half the data.
+        if [ -n "${GH_COMMENTS_PARTIAL:-}" ]; then
+          cat "$GH_COMMENTS_PARTIAL"; exit "${GH_COMMENTS_RC:-1}"
+        fi
         [ -n "${GH_COMMENTS_RC:-}" ] && exit "$GH_COMMENTS_RC"
         args="$*"; rid="${args##*/reviews/}"; rid="${rid%%/comments*}"
         if [ -n "${GH_FIXTURE_DIR:-}" ] && [ -f "$GH_FIXTURE_DIR/comments-$rid.json" ]; then
@@ -285,6 +292,95 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
 { [ "$rc" -eq 0 ] && [ "$out" = '2026-01-01T00:00:00Z' ]; } \
     && pass "…while a readable one still reports when the review landed" \
     || die "review-at broke the ordinary answer (rc=$rc out='$out')"
+
+# ── `replies-at` — WHEN THE NEWEST REPLY LANDED ────────────────────────────
+# A replies-only verdict is produced by the COMMENTS on a review, and one added
+# afterwards does not move the review's `submitted_at`. Ordering an operator's
+# signoff against `review-at` alone therefore let it vouch over a retracting reply
+# nobody read. #130, for #129.
+mk_comments() {   # mk_comments <id> <created_at>… ; comments on review 42
+    local id="$1"; shift
+    local out="[" sep="" n=1
+    for t in "$@"; do
+        out="$out$sep{\"id\":$((9000 + n)),\"user\":{\"login\":\"$BOT\"},\"created_at\":\"$t\",\"body\":\"x\",\"in_reply_to_id\":$((8000 + n))}"
+        sep=","; n=$((n + 1))
+    done
+    printf '%s]' "$out" > "$TMP/comments-$id.json"
+}
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
+mk_comments 42 2026-01-05T00:00:00Z 2026-01-09T00:00:00Z 2026-01-07T00:00:00Z
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-09T00:00:00Z' ]; } \
+    && pass "replies-at: the NEWEST reply is the answer, not the first or the last row" \
+    || die "replies-at did not take the newest (rc=$rc out='$out')"
+# ONE COMMENT IS STILL AN ANSWER.
+mk_comments 42 2026-01-05T00:00:00Z
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-05T00:00:00Z' ]; } \
+    && pass "…and a single comment reports its own time" \
+    || die "replies-at with one comment gave (rc=$rc out='$out')"
+# A REVIEW WITH NO COMMENTS IS 1, NOT AN ERROR AND NOT AN EMPTY 0. There is
+# nothing to order against, which is an answer.
+printf '[]' > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…a review with no comments answers 1 with nothing on stdout" \
+    || die "an empty review gave (rc=$rc out='$out')"
+# NO REVIEW AT ALL IS THE SAME ANSWER.
+printf '[]' > "$TMP/reviews.json"; printf '[]' > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_FIXTURE_DIR="$TMP" run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…and so does no review at all" \
+    || die "no review gave (rc=$rc out='$out')"
+# A VERDICT THAT ARRIVED AS AN ISSUE COMMENT CARRIES NO REVIEW COMMENTS by
+# construction: there is nothing for a reply to be attached to.
+printf '[{"id":9001,"user":{"login":"%s"},"created_at":"2026-02-02T00:00:00Z","body":"%s"}]' \
+    "$BOT" "$_icb" > "$TMP/icomments.json"
+printf '[]' > "$TMP/reviews.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_FIXTURE_DIR="$TMP" run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…and a comment-sourced verdict has no replies to report" \
+    || die "a comment-sourced verdict gave (rc=$rc out='$out')"
+# AN UNREADABLE FETCH FAILS CLOSED. `jq` on empty input exits 0 with no output, so
+# a status swallowed here reads as "no replies" — which is the answer that lets a
+# signoff vouch over one.
+mk_reviews COMMENTED '"2026-01-01T00:00:00Z"' 42
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…while an unreadable comments fetch is 2, not 'no replies'" \
+    || die "an unreadable fetch gave (rc=$rc out='$out')"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_COMMENTS_RC=1 \
+        run replies-at 7 "$BOT" 2>/dev/null)"; rc=$?
+[ -z "$out" ] \
+    && pass "…with nothing on stdout, which a substitution would have captured" \
+    || die "the unreadable answer printed '$out' on stdout"
+# AND A FETCH THAT PRINTS A PAGE AND THEN FAILS is the case the STATUS catches
+# and the parse cannot: what it printed is well-formed, so the answer would be a
+# maximum over half the comments — an incomplete snapshot presented as a complete
+# one, which is precisely the shape #113 was.
+mk_comments 42 2026-01-05T00:00:00Z
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" \
+        GH_COMMENTS_PARTIAL="$TMP/comments-42.json" GH_COMMENTS_RC=1 \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a fetch that printed a page and then failed is unreadable, not an answer" \
+    || die "a partial page was answered from (rc=$rc out='$out')"
+
+# A ROW THIS CANNOT READ IS A PAYLOAD, NOT A COMMENT. Taking a maximum over a set
+# containing one is an answer about something else.
+printf '[{"id":9001,"user":{"login":"%s"},"created_at":"whenever","body":"x"}]' "$BOT" \
+    > "$TMP/comments-42.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
+        run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and a malformed row refuses rather than being skipped" \
+    || die "a malformed comment row gave (rc=$rc out='$out')"
 
 # ── `review-at` FAILS CLOSED ON AN UNREADABLE FETCH ───────────────────────
 # The merge gate orders records against this value, so an empty answer read as
@@ -788,6 +884,41 @@ out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
+
+# ── `replies-at` RE-CHECKS THE SNAPSHOT TOO ────────────────────────────────
+# The comments are fetched for a review the call has already stopped looking at.
+# Dismissed or superseded in between, the answer describes the OLD review's
+# replies while presenting itself as the current one — and a consumer ordering an
+# operator signoff against it lets one recorded between the old replies and the
+# new vouch for a verdict nobody read.
+cat > "$TMP/bin/gh" <<SH
+#!/usr/bin/env bash
+case "\$*" in
+  *"/reviews/"*"/comments"*)
+     printf '[{"user":{"login":"$BOT"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z","in_reply_to_id":8001}]' ;;
+  *"/issues/"*"/comments"*) printf '[]' ;;
+  *"/reviews"*)
+     if [ ! -e "$TMP/seen2" ]; then
+        : > "$TMP/seen2"
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":61}]'
+     else
+        printf '[{"user":{"login":"$BOT"},"commit_id":"$HEAD40","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":62}]'
+     fi ;;
+  *"pr view"*) printf '%s' "$HEAD40" ;;
+  *) printf '{}' ;;
+esac
+SH
+chmod +x "$TMP/bin/gh"
+rm -f "$TMP/seen2"
+out="$(run replies-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+    && pass "replies-at: a review that changes between the two reads is refused" \
+    || die "replies-at answered from a review that moved (rc=$rc '$out')"
+rm -f "$TMP/seen2"
+out="$(run replies-at 7 "$BOT" 2>/dev/null)"; rc=$?
+[ -z "$out" ] \
+    && pass "…with nothing on stdout, which a substitution would have captured" \
+    || die "the changed-snapshot answer printed '$out' on stdout"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

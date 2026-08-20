@@ -1,5 +1,32 @@
 # Changelog
 
+## [2.0.43] — 2026-08-20
+
+- **`pr-review-state.sh replies-at` — when the newest reply landed.** A
+  replies-only verdict is produced by the *comments* on a review, and one added
+  afterwards does not move the review's `submitted_at`. An operator's signoff
+  ordered against `review-at` alone therefore still vouched when a retracting
+  reply had arrived between the review and the signoff — the reply nobody read
+  merged over.
+
+  Nothing reported that time, so nothing could compare against it. This adds it:
+  the maximum `created_at` over the same comments the replies-only decision
+  already fetches, validated by the same rule, with the three answers kept apart —
+  the time, "nothing to order against" (no review, no comments, or a verdict that
+  arrived as an issue comment and therefore carries none), and unreadable.
+
+  The fetch's status is taken on its own line even though `pages_or_error` refuses
+  an empty read: a `--paginate` run that prints a page and then fails on a later
+  one still *parses*, and the answer would be a maximum over half the comments.
+
+  And the review snapshot is read **again** afterwards, because the comments were
+  fetched for a review the call has already stopped looking at: dismissed or
+  superseded in between, the answer describes the old review's replies while
+  presenting itself as the current one. `clean_verdict` re-checks for the same
+  reason, on the same pair of fetches.
+
+  No consumer yet — #129 wires it, and lands next. #130.
+
 ## [2.0.42] — 2026-08-20
 
 - **A resumed session no longer reopens a phase the operator already answered.**
