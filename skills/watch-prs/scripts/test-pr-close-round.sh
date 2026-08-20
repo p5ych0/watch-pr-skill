@@ -117,6 +117,9 @@ case "$1 $2" in
     # HEAD, which the gate must refuse: a push from one reaches no PR, and the
     # next step would wait for a head that never appears. #119.
     "symbolic-ref --quiet")
+        # THE FULL REF, because `--short` shortens only as far as stays
+        # unambiguous: a branch sharing its name with a tag comes back as
+        # `heads/release/2.0` while GitHub reports `release/2.0`.
         [ -s "$W/branch.local" ] || exit 1
         cat "$W/branch.local"; exit 0 ;;
     "remote get-url")
@@ -146,7 +149,7 @@ world() {   # world ; the state in which a round closes cleanly
     # every other case here assumes. The gate proves it before pushing, because a
     # bare `git push` sends whatever branch the checkout is on. #119.
     printf 'fix/the-branch\tfalse\n' > "$W/branch.out"
-    printf 'fix/the-branch\n' > "$W/branch.local"
+    printf 'refs/heads/fix/the-branch\n' > "$W/branch.local"
     # ORIGIN PUSHES WHERE THE SESSION IS PINNED. `origin` is a NAME the checkout
     # resolves, and `remote.origin.pushurl` can send it elsewhere entirely — so
     # the gate parses the effective push URL through `rb_identity` and compares it
@@ -526,7 +529,7 @@ got="$(run "$CODEXBOT" no)"
     || die "an unreadable push URL was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
 for _m in no yes; do
-    world; printf 'some-other-branch
+    world; printf 'refs/heads/some-other-branch
 ' > "$W/branch.local"
     got="$(run "$CODEXBOT" "$_m")"
     { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push the wrong branch'; }         && pass "a checkout on another branch refuses ($_m mode)"         || die "the wrong branch was pushed in $_m mode: '${got}'"
@@ -539,6 +542,32 @@ world; : > "$W/branch.local"
 got="$(run "$CODEXBOT" no)"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'detached HEAD'; }     && pass "…and a detached HEAD refuses rather than pushing nothing useful"     || die "a detached HEAD was pushed from: '${got}'"
 nothing_pushed "…with nothing pushed"
+# A BRANCH THAT SHARES ITS NAME WITH A TAG STILL CLOSES THE ROUND. `--short`
+# shortens only as far as stays UNAMBIGUOUS, so on such a branch it returns
+# `heads/release/2.0` while GitHub reports `release/2.0` — and the comparison then
+# refused a checkout that was already on the PR's branch, leaving no way to close
+# the round at all. Reproduced on git 2.55; the fix reads the full ref and strips
+# `refs/heads/`.
+world; printf 'refs/heads/release/2.0\n' > "$W/branch.local"
+printf 'release/2.0\tfalse\n' > "$W/branch.out"
+got="$(run "$CODEXBOT" no)"
+[ "${got%%|*}" = 0 ] \
+    && pass "…and a branch sharing its name with a tag still closes the round" \
+    || die "an ambiguous branch name was refused: '${got}'"
+_pushargs="$(cat "$W/pushed" 2>/dev/null)"
+[ "$_pushargs" = 'push origin HEAD:refs/heads/release/2.0' ] \
+    && pass "…pushing to the branch GitHub named, not the disambiguated form" \
+    || die "the ambiguous name reached the refspec: 'git $_pushargs'"
+# AND A SYMBOLIC HEAD THAT IS NOT A BRANCH REFUSES. `refs/heads/` is stripped as a
+# PREFIX, so anything else — a ref outside that namespace — is not silently
+# rewritten into a branch name and pushed at.
+world; printf 'refs/remotes/origin/fix/the-branch\n' > "$W/branch.local"
+got="$(run "$CODEXBOT" no)"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'which is not a branch'; } \
+    && pass "…while a symbolic HEAD outside refs/heads refuses" \
+    || die "a non-branch symbolic HEAD was pushed from: '${got}'"
+nothing_pushed "…with nothing pushed"
+
 # AN UNREADABLE ANSWER IS A REFUSAL TOO. "Could not ask which branch" is not
 # "any branch will do", and this is the one that decides where a commit lands.
 world; printf '1' > "$W/branch.rc"

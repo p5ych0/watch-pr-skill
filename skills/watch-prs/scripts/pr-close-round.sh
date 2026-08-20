@@ -292,8 +292,21 @@ rb_push_is_the_prs() {
           rb_identity && [[ $HOST == "$RB_PIN_HOST" ]] && [[ $OWNER == "$RB_PIN_OWNER" ]] && [[ $REPO == "$RB_PIN_REPO" ]] ) \
             || { echo "ABORT: origin pushes to '$_u', which is not $RB_PIN_HOST/$RB_PIN_OWNER/$RB_PIN_REPO; refusing to push elsewhere."; return 1; }
     done
-    _have=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) \
+    # THE FULL REF, STRIPPED HERE. `--short` is not the branch name: it shortens
+    # only as far as stays UNAMBIGUOUS, so a branch that shares its name with a tag
+    # comes back as `heads/release/2.0` while GitHub reports `release/2.0` — and
+    # the comparison below then refused a checkout that was already on the PR's
+    # branch, with no way to close the round at all. Reproduced on git 2.55.
+    #
+    # `refs/heads/` IS REMOVED AS A PREFIX, not matched loosely: `${_have#refs/heads/}`
+    # takes it only from the front, so a branch legitimately called
+    # `refs/heads/something` is not silently rewritten.
+    _have=$(git symbolic-ref --quiet HEAD 2>/dev/null) \
         || { echo "ABORT: this checkout is not on a branch (detached HEAD); a push here would not reach PR $PR."; return 1; }
+    case "$_have" in
+        refs/heads/*) _have="${_have#refs/heads/}" ;;
+        *) echo "ABORT: HEAD points at '$_have', which is not a branch; a push here would not reach PR $PR."; return 1 ;;
+    esac
     [[ $_have = "$_want" ]] \
         || { echo "ABORT: this checkout is on '$_have' and PR $PR is for '$_want'; refusing to push the wrong branch."; return 1; }
     RB_PUSH_REFSPEC="HEAD:refs/heads/$_want"

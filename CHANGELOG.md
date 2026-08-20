@@ -50,7 +50,15 @@
   sites use one refspec computed once, because one of the two being bare is
   exactly the defect.
 
-  Nine refusals, each leaving nothing pushed — a different branch, a detached HEAD
+  **The branch is read from the full symbolic ref, not `--short`.** That option
+  shortens only as far as stays UNAMBIGUOUS, so a branch sharing its name with a
+  tag comes back as `heads/release/2.0` while GitHub reports `release/2.0` — and
+  the comparison then refused a checkout that was already on the PR's branch,
+  leaving no way to close the round at all. Reproduced on git 2.55.
+  `refs/heads/` is removed as a prefix, so a symbolic HEAD outside that namespace
+  refuses rather than being rewritten into a branch name and pushed at.
+
+  Ten refusals, each leaving nothing pushed — a different branch, a detached HEAD
   (where a push reaches no PR and the next step would wait for a head that never
   appears), an unreadable answer, an empty one — which is what a 200 with a
   missing field looks like, and why a status check alone is not enough — and a PR
@@ -60,7 +68,7 @@
   a push URL that cannot be read at all; and a second push URL naming another
   repository, though the first is right.
 
-  Twenty cases, all failing against the gate they replace, including two that
+  Twenty-three cases, all failing against the gate they replace, including two that
   assert the push's arguments verbatim — one per mode, since a refspec applied to
   only one site is the same defect halved.
 
