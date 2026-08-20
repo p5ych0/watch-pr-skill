@@ -1844,27 +1844,40 @@ before continuing into the Copilot phase.
 #     1  stopped — the record on stdout says which: no signoff, a moved head, or a
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
+#
+# THE CONTINUATION LIVES INSIDE THE `0)` ARM, AND THAT IS STRUCTURAL. This bash
+# runs in YOUR shell, which nothing here controls — `exit` is a builtin a
+# function can take the place of, and one that RETURNS instead of exiting leaves
+# a refusal arm falling straight through the `esac` into whatever came after it.
+# Written that way, the 1/2 distinction above held right up to the point where it
+# mattered and then continued anyway. Nothing follows the `esac`, so there is
+# nothing to fall into; and each refusal arm still ENDS in a reserved word, so it
+# reports non-zero even with `echo` and `exit` both taken away.
 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; PHASE_RC=$?
 case "$PHASE_RC" in
-    0) ;;
-    1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."; exit 0 ;;
-    *) echo "ABORT: the phase could not be read (rc=$PHASE_RC). Do not merge on a phase nothing could establish."; exit 0 ;;
+    0) # AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha`
+       # asks for the head alone, so nothing here parses a record line. The status
+       # AND the shape are checked, because neither covers the other and this
+       # value is what every gate below is measured against.
+       CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
+       RX_SHA40='^[0-9a-f]{40}$'
+       if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
+           echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
+           exit 0
+           # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a
+           # function can shadow, and with both shadowed this branch says nothing
+           # and returns 0 — a failed read indistinguishable from a resumed phase.
+           # `[[ … ]]` is a reserved word, so the block ends non-zero whatever was
+           # done to the builtins.
+           [[ -n "" ]]
+       fi ;;
+    1) echo "Stopping here: the phase is not what resuming assumed. The record above says which, and what to run instead."
+       exit 0
+       [[ -n "" ]] ;;
+    *) echo "ABORT: the phase could not be read (rc=$PHASE_RC). Do not merge on a phase nothing could establish."
+       exit 0
+       [[ -n "" ]] ;;
 esac
-# AND THE SHA THE GATE IS PINNED TO, by the same idiom step 7 uses: `sha` asks for
-# the head alone, so nothing here parses a record line. The status AND the shape
-# are checked, because neither covers the other and this value is what every gate
-# below is measured against.
-CODEX_SHA="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-signoff.sh sha N "$CODEX_BOT")"; SIGNOFF_RC=$?
-RX_SHA40='^[0-9a-f]{40}$'
-if [[ $SIGNOFF_RC -ne 0 ]] || ! [[ "$CODEX_SHA" =~ $RX_SHA40 ]]; then
-    echo "ABORT: the recorded Codex signoff did not read back as a sha (rc=$SIGNOFF_RC, sha='$CODEX_SHA')"
-    exit 0
-    # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
-    # can shadow, and with both shadowed this branch says nothing and returns 0 —
-    # a failed read indistinguishable from a resumed phase. `[[ … ]]` is a
-    # reserved word, so the block ends non-zero whatever was done to the builtins.
-    [[ -n "" ]]
-fi
 ```
 
 ### Then: the gate

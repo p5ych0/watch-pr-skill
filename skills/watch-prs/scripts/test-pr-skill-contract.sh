@@ -2530,6 +2530,58 @@ case "$resume_blk" in
     *) pass "…and no copy of the phase selection is left in the document" ;;
 esac
 
+# ── AND A REFUSAL ARM CANNOT FALL INTO THE CONTINUATION ────────────────────
+# THIS BASH RUNS IN THE OPERATOR'S OWN SHELL, which nothing here controls: `exit`
+# is a builtin a function can take the place of, and one that RETURNS instead of
+# exiting leaves a refusal arm falling straight through the `esac` into whatever
+# came after it. The 1/2 distinction then holds right up to the point where it
+# matters and continues anyway.
+#
+# THE ANSWER IS STRUCTURAL, so it is asserted by RUNNING the document's own branch
+# rather than by grepping for a spelling: the continuation lives inside the `0)`
+# arm, so there is nothing after the `esac` to fall into. `RB_SCRIPTS` points at a
+# directory whose `pr-signoff.sh` prints a marker — if a refusal arm reaches the
+# continuation, the marker appears.
+_ph_case="$(printf '%s' "$resume_blk" | awk '/^case "\$PHASE_RC" in/{f=1} f{print} /^esac$/{if(f)exit}')"
+[ -n "$_ph_case" ] || die "the phase branch could not be lifted from the resume recipe"
+# NOTHING IS CREATED FOR THIS, and that is deliberate: a scratch directory here
+# would be the FIRST one this file takes, and the `mktemp` probe further down
+# re-runs the whole file expecting it to stop at the counter fixture's guard with
+# that guard's words. The marker is a path that does not exist — the continuation
+# runs `bash "$RB_SCRIPTS"/pr-signoff.sh`, which names the path it could not open,
+# and stderr is captured. A refusal arm never reaches it, so the path never
+# appears.
+_ph_probe=/nonexistent/rb-phase-probe
+# THE CONTROL FIRST, because "the marker never appeared" is also what a probe that
+# cannot reach the continuation at all looks like — and that passes against any
+# structure, including the broken one.
+_ph_ok="$(RB_SCRIPTS="$_ph_probe" CODEX_BOT=somebody PHASE_RC=0 bash -c '
+    exit() { return 0; }
+    echo() { return 0; }
+    '"$_ph_case"'' 2>&1)" || true
+case "$_ph_ok" in
+    *"$_ph_probe/pr-signoff.sh"*) pass "the phase branch's continue arm reaches the sha read" ;;
+    *) die "the phase-branch probe never reaches the continuation, so it proves nothing ('$_ph_ok')" ;;
+esac
+# `&& _ph_st=0 || _ph_st=$?`, NOT `; _ph_st=$?`: this file runs under `set -e`,
+# where an assignment whose command substitution exits non-zero terminates the
+# script — and the whole point of these two cases is that it does exit non-zero.
+# Written the plain way the suite stopped here and reported PASS on everything
+# before it, which is the silent-truncation failure this file exists to catch.
+for _ph_rc in 1 2; do
+    _ph_out="$(RB_SCRIPTS="$_ph_probe" CODEX_BOT=somebody PHASE_RC="$_ph_rc" bash -c '
+        exit() { return 0; }
+        echo() { return 0; }
+        '"$_ph_case"'' 2>&1)" && _ph_st=0 || _ph_st=$?
+    case "$_ph_out" in
+        *"$_ph_probe/pr-signoff.sh"*) die "with exit shadowed, the rc=$_ph_rc arm fell through into the continuation" ;;
+        *) pass "…and with exit shadowed, rc=$_ph_rc does not reach it" ;;
+    esac
+    [ "$_ph_st" -ne 0 ] \
+        && pass "…reporting non-zero from the reserved word that ends the arm" \
+        || die "the rc=$_ph_rc arm reported success with exit shadowed"
+done
+
 # ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────
 # Entering the Copilot phase a second time — after a Codex pass that came back
 # clean without moving the head — leaves the previous Copilot signoff naming that

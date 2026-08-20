@@ -27,6 +27,14 @@
   The shape check on a resumed sha now goes through `recordlib.sh`'s
   `is_full_sha`, so what a commit is has one definition here as everywhere else.
 
+  **A refusal cannot fall into the continuation.** The driver's branch on the
+  helper's status runs in the operator's own shell, where `exit` is a builtin a
+  function can take the place of — and one that returns instead of exiting left
+  both refusal arms falling through into the sha read and everything after it, so
+  the distinction held right up to the point where it mattered. The continuation
+  lives inside the continue arm now, so there is nothing after the branch to fall
+  into, and each refusal arm ends in a reserved word.
+
   **"Not clean" and "could not read it" are told apart**, which the recipe's
   `-ne 0` test folded together. `pr-review-state.sh verdict` answers 1 for a
   verdict that is not clean — a phase to reopen — and 2 for reviews it could not
