@@ -436,7 +436,7 @@ case_is 1 "not one this gate can read" "…and a record with no timestamp is ref
 # the right commit: a truncated, cached or misrouted record for another PR or
 # another reviewer authorised the merge.
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
-printf 'PR_SIGNOFF pr=8 reviewer=%s at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
+printf 'PR_SIGNOFF pr=8 reviewer=%s verdict-at=none at=2026-01-02T00:00:00Z id=901 sha=%s\n' \
     "$COPILOTBOT" "$HEAD40" > "$STUB_DIR/pr-signoff.out"
 case_is 1 "no operator has recorded a signoff for that head" "…and a signoff record for another PR does not vouch"
 world; replies_only "$COPILOTBOT"; vouched "$COPILOTBOT"
