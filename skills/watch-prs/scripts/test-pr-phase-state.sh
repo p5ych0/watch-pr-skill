@@ -239,6 +239,27 @@ printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
     && die "…but it reported that phase as reopened as well" \
     || pass "…without telling the operator to re-request that one either"
 
+# ── A FULL-WIDTH RECORD IS ACCEPTED ON BOTH ARMS ───────────────────────────
+# The identity check compares the record at ITS OWN WIDTH rather than against a
+# seven-hex cut this script makes. Every other record here is seven hex, so a
+# caller pinned back to seven would pass the whole file — `test-recordlib.sh`
+# proves what the library accepts and nothing about what this helper asks it, and
+# the regression would be a valid phase refused. #126.
+world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$HEAD40" "$CODEXBOT" > "$W/codex.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+    && pass "a verdict carrying the full forty-hex head is accepted before the Copilot phase" \
+    || die "a full-width verdict was refused: '${got}'"
+world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
+printf '%s\n' "$OTHER40" > "$W/codex.sha"
+printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
+    "$HEAD40" "$COPILOTBOT" > "$W/copilot.verdict.out"
+got="$(run 7)"
+{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+    && pass "…and after it, on the arm where the Copilot signoff is the one that must hold" \
+    || die "a full-width verdict was refused on the post-Copilot arm: '${got}'"
+
 # ── THE RECORD IS VALIDATED, NOT ONLY THE STATUS ───────────────────────────
 # A probe that exits 0 while printing nothing, or a line about another PR,
 # reviewer or head, is not an answer about this phase — and acting on the status
