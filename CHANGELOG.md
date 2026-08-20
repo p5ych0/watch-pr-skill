@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.0.40] — 2026-08-20
+
+- **The recipe a resumed session runs is a script now, and it has a test.**
+  `SKILL.md` § *Resuming after a stop* was 112 lines of shell inside a Markdown
+  file — three arms and six refusals that nothing in the suite, `pr-selfcheck.sh`
+  or the bash 3.2 job could reach, because all of them stop at the edge of a
+  fenced block. It is `pr-phase-state.sh`, and `test-pr-phase-state.sh` executes
+  every one of those paths.
+
+  **Every abort in it exited 0**, because the driving shell must not die on a
+  refusal. So "the phase is not closed", "the signoff could not be read" and "this
+  ran correctly" were the same status to anything that read it, and a driver that
+  branched on the status could not tell them apart. The helper answers 0 for a
+  phase that still stands, 1 for one that does not, and 2 for an answer it could
+  not read — and that third one is neither of the others: read as "no signoff" it
+  repeats a phase, read as a signoff it skips a review nobody did.
+
+  What it decides is unchanged. Before the Copilot phase the head must *be* the
+  commit Codex signed; after it the head has advanced through Copilot fixes by
+  design, so the Copilot signoff is the one that must name the head — and the
+  branch turns on which signoff describes the head rather than on whether a
+  Copilot record exists, because a stale one naming an older commit used to select
+  the post-Copilot arm and then report that neither phase was closed.
+
+  The shape check on a resumed sha now goes through `recordlib.sh`'s
+  `is_full_sha`, so what a commit is has one definition here as everywhere else.
+
+  First of #26's sub-issues; #123.
+
 ## [2.0.39] — 2026-08-20
 
 - **A revocation that lands while `record` is proving no longer gets superseded.**

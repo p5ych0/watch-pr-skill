@@ -1258,7 +1258,13 @@ grep -q 'pr-round-count.sh' "$SKILL" \
 # What stays here is what belongs here: that the driver CALLS the gate, with the
 # arguments it needs, and distinguishes the three answers it can give.
 
-grep -qE 'verdict N "\$CODEX_BOT" +"\$CODEX_SHA"' "$SKILL" \
+# THE FALLBACK IS THE PHASE HELPER'S NOW (#123). The resume recipe was 112 lines
+# in this document and this asserted one of them; `pr-phase-state.sh` holds the
+# same check and `test-pr-phase-state.sh` RUNS it, on both arms and on every
+# refusal. A grep over `SKILL.md` would find nothing and would have to be deleted
+# or made vacuous — so it is the same invariant, asserted where it now lives.
+[ -x "$SCRIPT_DIR/pr-phase-state.sh" ] \
+    && grep -qF 'pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"' "$SCRIPT_DIR/pr-phase-state.sh" \
     && pass "…and falls back to the recorded signoff when it has not" \
     || die "there is no fallback to \$CODEX_SHA — the gate cannot pass after a Copilot fix"
 # CODEX_SHA has to be captured before the head moves; nothing else records it.
@@ -1298,10 +1304,14 @@ grep -qi 'precede the push' "$SKILL" \
 # driver ASKS, that it takes the status, that it checks the shape anyway, and that
 # no copy of the parser grew back. The behavioural coverage did not shrink — it
 # moved to the file that can run it, which is the whole point of the removal.
+# TWO, SINCE #123: the phase record in step 7 and the sha the gate is pinned to in
+# the resume path. The resume recipe's own two reads moved into
+# `pr-phase-state.sh`, which asks through the same helper and is covered by a
+# fixture that runs it.
 _sha_reads="$(grep -c 'pr-signoff.sh sha N' "$SKILL" || true)"
-[ "$_sha_reads" -eq 3 ] \
-    && pass "all three head reads ask pr-signoff.sh for the sha alone" \
-    || die "expected three 'pr-signoff.sh sha' reads in SKILL.md, found $_sha_reads"
+[ "$_sha_reads" -eq 2 ] \
+    && pass "both head reads ask pr-signoff.sh for the sha alone" \
+    || die "expected two 'pr-signoff.sh sha' reads in SKILL.md, found $_sha_reads"
 # NO RECORD PARSING LEFT, IN ANY SHAPE. A `sed` over `PR_SIGNOFF` was the second
 # form this took, and `sed` is a name: one that prints a plausible forty hex and
 # exits 0 pins a merge to whatever it says.
@@ -2478,115 +2488,46 @@ else
     pass "no GNU-only sort in the script-resolution fallback"
 fi
 
-# ── A RESUMED SIGNOFF IS RE-VALIDATED, NOT TRUSTED ─────────────────────────
-# The record says Codex WAS clean on that commit when it was written. It does not
-# say the commit is still the head, or that the review still stands — a dismissal
-# leaves the marker untouched. Continuing on it opens a Copilot phase against a
-# head Codex never approved, and spends the whole loop before the merge gate
-# refuses.
+# ── THE RESUME RECIPE'S OWN DECISIONS ARE TESTED IN `test-pr-phase-state.sh` ──
+#
+# Ten assertions used to live here, and six of them worked by LIFTING two branch
+# headers out of the document and executing them with trivial bodies under
+# shadowed builtins — because a fenced block cannot be run, and that was the
+# closest thing to running it available. Twenty-two cases now execute the helper
+# against stubbed signoffs, verdicts and heads: both arms, the malformed-sha arm,
+# the stale-Copilot selection, every unreadable status, and the two dismissals.
+# That is a strictly stronger claim, and it is why these are gone rather than
+# retargeted at the script. Issues #123 and #26.
+#
+# WHAT STAYS HERE IS THE WIRING: that the driver ASKS, and that it distinguishes
+# the three answers the helper can give. A resumed session that read `2` as `1`
+# would treat "could not tell" as "no signoff" and re-run a phase that is closed.
 resume_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
                    sec && /^```bash$/ {inb=1; next}
                    inb && /^```$/ {exit}
                    inb' "$SKILL")"
 [ -n "$resume_blk" ] || die "the resume recipe could not be extracted"
-printf '%s' "$resume_blk" | grep -q 'RESUMED_HEAD' \
-    && printf '%s' "$resume_blk" | grep -q '"\$RESUMED_HEAD" != "\$CODEX_SHA"' \
-    && pass "a resumed signoff is checked against the current head" \
-    || die "the resume recipe accepts a signoff for a head that has moved"
-printf '%s' "$resume_blk" | grep -q 'pr-review-state.sh verdict N "\$CODEX_BOT" "\$CODEX_SHA"' \
-    && pass "…and the verdict is re-read, because a review can be dismissed" \
-    || die "the resume recipe trusts a record that may have been withdrawn"
-# WHICH STOP IS BEING RESUMED FROM decides what "still valid" means, and the two
-# answers are opposite. Before the Copilot phase the Codex signoff is the only
-# thing licensing a merge, so the head must still BE that commit. AFTER it the
-# head has advanced through Copilot fixes BY DESIGN, and the merge gate accepts
-# that delta once it has checked the trailers — so demanding equality there
-# rejects the exact state the second stop exists in, and sends the operator back
-# through a Codex phase for nothing.
-printf '%s' "$resume_blk" | grep -q 'pr-signoff.sh sha N "\$COPILOT_BOT"' \
-    && printf '%s' "$resume_blk" | grep -q '\$COPILOT_SIGNOFF_RC -eq 0' \
-    && pass "…and a resume after the Copilot phase is told apart from one before it" \
-    || die "the resume recipe treats both stops alike, rejecting the post-Copilot one"
-# THE HEAD CHECK IS THE BRANCH CONDITION ITSELF now, rather than a test inside the
-# post-Copilot arm. It has to be: a stale Copilot signoff naming an older commit
-# used to SELECT that arm and then fail its own head check, reporting that neither
-# phase was closed when the Codex one plainly was.
-printf '%s' "$resume_blk" | grep -q '\$COPILOT_SHA = "\$RESUMED_HEAD"' \
-    && pass "…and the post-Copilot arm is chosen only when Copilot signed THIS head" \
-    || die "a stale Copilot signoff still selects the post-Copilot arm"
-# THE MALFORMED CASE IS AN ARM OF THAT BRANCH, NOT A GUARD BEFORE IT. Written as
-# its own `if … exit`, a shadowed `exit` returns and execution falls into the
-# selection, where a malformed value reads as "no Copilot signoff" — the outcome
-# the check exists to prevent. As an arm it is structural: a malformed sha selects
-# it, so neither of the others can run on that value whatever has been done to the
-# builtins. Asserted by RUNNING the branch, because the shape is the property and
-# a grep agrees with both spellings.
-_res_arm="$(COPILOT_SIGNOFF_RC=0 COPILOT_SHA=notasha RESUMED_HEAD=notasha bash -c '
-    exit() { return 0; }
-    echo() { return 0; }
-    RX_SHA40="^[0-9a-f]{40}$"
-    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
-    if [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && ! [[ $COPILOT_SHA =~ $RX_SHA40 ]]; then
-        builtin printf "REFUSED\n"
-    elif [[ $COPILOT_SIGNOFF_RC -eq 0 ]] && [[ $COPILOT_SHA = "$RESUMED_HEAD" ]]; then
-        builtin printf "POST-COPILOT\n"
-    else
-        builtin printf "PRE-COPILOT\n"
-    fi' 2>&1)" || true
-case "$_res_arm" in
-    REFUSED*) pass "…and a malformed sha selects the refusal arm, not either phase" ;;
-    *) die "a malformed Copilot sha selected a phase arm ('$_res_arm')" ;;
-esac
-# AND THE DOCUMENT'S OWN CONDITIONS ARE WHAT RUNS. The probe above is a copy, so
-# it proves the shape works and nothing about the shape `SKILL.md` has; a grep
-# proves a spelling and not a behaviour. So the two header lines are LIFTED and
-# executed with trivial bodies — a regression to `[ "$COPILOT_SHA" = … ]` then
-# arrives in the probe itself, and a `[` returning true selects the wrong arm.
-_res_if="$(printf '%s' "$resume_blk" | grep -m1 '^if .*COPILOT_SIGNOFF_RC')"
-_res_elif="$(printf '%s' "$resume_blk" | grep -m1 '^elif .*COPILOT_SIGNOFF_RC')"
-{ [ -n "$_res_if" ] && [ -n "$_res_elif" ]; } \
-    && pass "…and both branch headers lift out of the resume recipe" \
-    || die "the resume branch's headers could not be lifted (if='$_res_if' elif='$_res_elif')"
-# DISTINCT VALID SHAS, so the honest answer is the pre-Copilot arm: a stale
-# Copilot signoff names a commit that is not the head. With `[` shadowed to
-# return true, only a reserved-word equality still says so.
-_res_stale="$(COPILOT_SIGNOFF_RC=0 \
-    COPILOT_SHA=1111111111111111111111111111111111111111 \
-    RESUMED_HEAD=2222222222222222222222222222222222222222 bash -c '
-    [() { return 0; }
-    exit() { return 0; }
-    echo() { return 0; }
-    RX_SHA40="^[0-9a-f]{40}$"
-    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
-    '"$_res_if"'
-        builtin printf "REFUSED\n"
-    '"$_res_elif"'
-        builtin printf "POST-COPILOT\n"
-    else
-        builtin printf "PRE-COPILOT\n"
-    fi' 2>&1)" || true
-case "$_res_stale" in
-    PRE-COPILOT*) pass "…and a stale Copilot signoff cannot select the post-Copilot arm through a shadowed [" ;;
-    *) die "the resume branch chose '$_res_stale' for a signoff naming another commit" ;;
-esac
-# THE SAME LIFTED HEADERS ON A MALFORMED SHA, so the refusal arm is proved on the
-# document's condition rather than on a copy of it.
-_res_arm2="$(COPILOT_SIGNOFF_RC=0 COPILOT_SHA=notasha RESUMED_HEAD=notasha bash -c '
-    [() { return 0; }
-    exit() { return 0; }
-    echo() { return 0; }
-    RX_SHA40="^[0-9a-f]{40}$"
-    COPILOT_SIGNOFF_RC="$COPILOT_SIGNOFF_RC"; COPILOT_SHA="$COPILOT_SHA"; RESUMED_HEAD="$RESUMED_HEAD"
-    '"$_res_if"'
-        builtin printf "REFUSED\n"
-    '"$_res_elif"'
-        builtin printf "POST-COPILOT\n"
-    else
-        builtin printf "PRE-COPILOT\n"
-    fi' 2>&1)" || true
-case "$_res_arm2" in
-    REFUSED*) pass "…and SKILL.md's own condition sends a malformed sha to the refusal arm" ;;
-    *) die "SKILL.md's condition chose '$_res_arm2' for a malformed sha" ;;
+printf '%s' "$resume_blk" | grep -qF 'pr-phase-state.sh N' \
+    && pass "the resume recipe reads the phase off the PR through pr-phase-state.sh" \
+    || die "the resume recipe does not call pr-phase-state.sh"
+printf '%s' "$resume_blk" | grep -qF 'PHASE_RC=$?' \
+    && pass "…taking its status on the same line" \
+    || die "the resume recipe ignores the phase helper's status"
+# THE THREE ANSWERS, EACH ITS OWN ARM. `0` continues, `1` stops on the record the
+# helper printed, and anything else is unreadable — which is NOT "no signoff", and
+# a `case` with only the first two arms would fall through to the continue.
+_phase_arms="$(printf '%s' "$resume_blk" | awk '/^case "\$PHASE_RC" in/{f=1} f{print} /^esac$/{if(f)exit}')"
+{ printf '%s' "$_phase_arms" | grep -qE '^ *0\)' \
+    && printf '%s' "$_phase_arms" | grep -qE '^ *1\)' \
+    && printf '%s' "$_phase_arms" | grep -qE '^ *\*\)'; } \
+    && pass "…and tells continue, stopped and unreadable apart" \
+    || die "the resume recipe does not distinguish the phase helper's three answers: '$_phase_arms'"
+# AND NONE OF THE LIFTED LOGIC GREW BACK. The behaviour is the helper's; a second
+# copy here would be one nothing runs, which is the state #26 exists to end.
+case "$resume_blk" in
+    *RESUMED_HEAD*|*COPILOT_SIGNOFF_RC*)
+        die "the resume recipe re-implements the phase selection that moved to pr-phase-state.sh" ;;
+    *) pass "…and no copy of the phase selection is left in the document" ;;
 esac
 
 # ── REOPENING A PHASE REVOKES ITS SIGNOFF FIRST ────────────────────────────

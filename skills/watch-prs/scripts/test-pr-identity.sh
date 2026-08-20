@@ -46,6 +46,7 @@ FILES=( "$ROOT"/pr-review-state.sh
         "$ROOT"/pr-merge-range.sh
         "$ROOT"/pr-round-count.sh
         "$ROOT"/pr-signoff.sh
+        "$ROOT"/pr-phase-state.sh
         "$ROOT"/pr-close-round.sh
         "$ROOT"/pr-copilot-phase.sh
         "$ROOT"/pr-findings.sh

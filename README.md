@@ -432,7 +432,17 @@ Then:
    Codex is not re-run.
 
    The signoff is a comment on the PR rather than a shell variable, so closing
-   the terminal or changing machine does not lose it.
+   the terminal or changing machine does not lose it. **`pr-phase-state.sh <PR>`**
+   is how a later session reads it back: it takes both signoffs and the head,
+   works out which stop is being resumed from, and re-validates the record that
+   has to still hold — before the Copilot phase the head must *be* the commit
+   Codex signed; after it the head has advanced through Copilot fixes by design
+   and the Copilot signoff is the one that must name it. A review dismissed after
+   the marker was written, or a push landing while the stop was parked, leaves the
+   marker untouched, and this is what notices. It answers 0 for a phase that still
+   stands, 1 with the reason for one that does not, and 2 for an answer it could
+   not read — which is neither of the first two, because reading it as "no
+   signoff" repeats a phase and reading it as a signoff skips a review nobody did.
 6. **Merge gate.** On a clean signoff from both reviewers the skill re-checks
    everything against the *current* head — both verdicts, the reviewed range,
    unresolved threads, required checks — and merges pinned to that head with
