@@ -33,7 +33,18 @@
   reports the latest verdict on the sha, so a result arriving between the
   cleanliness proof and that read is the one it times — and the record would claim
   to answer a verdict nobody proved. Cleanliness is re-proved immediately after,
-  and where it no longer holds the field is dropped rather than written wrong.
+  and where it no longer holds the record is **refused**, not written without the
+  field: cleanliness is a precondition for recording at all, while the timestamp is
+  a value the record carries or does not, and dropping only the timestamp would
+  post a signoff for a verdict that is no longer clean — worse than never having
+  looked. The proof runs even where the time itself could not be read, because
+  that failed read is a network call a blocking result can land during.
+
+  The head is read **after** those two probes rather than before them. Both are
+  pinned to the sha being signed off, so a push landing in either leaves them
+  answering about a commit that is no longer the head — and the head check, read
+  first, had confirmed a head the probes then outlived.
+
   #139 is the removal: one reader answering "clean, and at this time" from one
   response.
 

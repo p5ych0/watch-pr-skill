@@ -512,23 +512,6 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
 CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
 [[ $CODEX_STILL_RC -eq 0 ]] \
     || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
-# AND THE HEAD AGAIN. Each probe above is a network call, so the head can move
-# DURING one of them — and the verdict is pinned to `$CODEX_SHA`, so it stays
-# clean and says nothing about the move.
-#
-# THE ORDERING PROOF GOES AFTER THIS ONE, and which of the two is last is not
-# arbitrary. Both leave a window between the proof and the write, and the two
-# residues are not alike: a head that moves in it is caught downstream, because
-# `open` re-reads the head and refuses when it is not the recorded sha — nothing
-# is lost but a run. A revocation that lands in it is NOT, because the signoff
-# posted next supersedes it and the readers take the last record: the evidence
-# that the phase was reopened is gone, and no later stage can find it. The
-# unrecoverable one is therefore the one proved last. #122 is the residue that
-# remains.
-FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
-    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
-[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
-    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
 
 # AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
 # this window is the case #115 was filed for, and refusing on ANY revocation was
@@ -573,14 +556,38 @@ esac
 # ONE SNAPSHOT WOULD BE BETTER THAN TWO ADJACENT READS, and that is #139: the
 # reader can answer "clean, and at this time" from one response, as
 # `escape-snapshot` does for the replies-only escape.
-if [[ -n $RB_VERDICT_AT ]]; then
-    RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
-    if [[ $RB_STILL_CLEAN_RC -ne 0 ]]; then
-        echo "note: the verdict on $CODEX_SHA moved while its time was read ($RB_STILL_CLEAN); the signoff will not carry one"
-        RB_VERDICT_AT=""
-    fi
-fi
+# AND IT IS PROVED CLEAN AGAIN AFTERWARDS, WHETHER OR NOT THE TIME CAME BACK.
+# This read is a network call in a place that had none, so a blocking result can
+# land during it — and dropping only the timestamp would post a signoff for a
+# verdict that is no longer clean, which is worse than never having looked. The
+# CLEANLINESS is a precondition for recording at all; the timestamp is a value the
+# record carries or does not, and the two are not the same question.
+RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
+[[ $RB_STILL_CLEAN_RC -eq 0 ]] \
+    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RB_STILL_CLEAN); nothing posted"; exit 1; }
 [[ -n $RB_VERDICT_AT ]] || echo "note: no readable verdict time for $CODEX_SHA; the signoff will not carry one, and a later revocation cannot be ordered against it"
+
+# AND THE HEAD AGAIN, AFTER THE TIME PROBES. Each probe above is a network call,
+# so the head can move DURING one of them — and the two added for the verdict time
+# are pinned to `$CODEX_SHA`, so a push landing in either leaves them answering
+# about a commit that is no longer the head. Read before them, this check confirmed
+# a head that the probes then outlived. Every remote read that can be outlived is
+# now behind it, and the signoff-record read that follows is the last of all — and the verdict is pinned to `$CODEX_SHA`, so it stays
+# clean and says nothing about the move.
+#
+# THE ORDERING PROOF GOES AFTER THIS ONE, and which of the two is last is not
+# arbitrary. Both leave a window between the proof and the write, and the two
+# residues are not alike: a head that moves in it is caught downstream, because
+# `open` re-reads the head and refuses when it is not the recorded sha — nothing
+# is lost but a run. A revocation that lands in it is NOT, because the signoff
+# posted next supersedes it and the readers take the last record: the evidence
+# that the phase was reopened is gone, and no later stage can find it. The
+# unrecoverable one is therefore the one proved last. #122 is the residue that
+# remains.
+FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null) \
+    || { echo "ABORT: could not re-read the head before posting; nothing posted"; exit 1; }
+[[ $FINAL_HEAD = "$CODEX_SHA" ]] \
+    || { echo "ABORT: the head moved to $FINAL_HEAD while the phase was being proved; nothing posted"; exit 1; }
 
 # TELLING THE TWO APART IS ORDERING: a revocation this pass is ANSWERING landed
 # before the verdict, and one that would CANCEL it landed after.
