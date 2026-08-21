@@ -266,9 +266,19 @@ clean_comment_for_head() {
     printf '%s' "$out"
 }
 
-# Print "<state>\t<review-id>" for THIS head from ONE reviews fetch, or fail (2).
+# Print "<state>\t<review-id>\t<submitted-at>" for THIS head from ONE reviews
+# fetch, or fail (2).
+#
 # The id is the authoritative latest submitted review the state was derived from,
-# and is empty unless the state is `reviewed`.
+# and is empty on `none` and `pending` — the states that name no review. The time
+# is that review's `submitted_at`, or the CLEAN COMMENT's `created_at` where the
+# comment channel won, and is empty wherever the id is or where the value is not
+# canonical UTC.
+#
+# THREE FIELDS, NOT TWO, since #139: a caller that has to ask a second time for
+# the time can be answered about a DIFFERENT review, and the id is what proves the
+# two describe one. Peel with `%%` and `#` on both separators — a caller taking
+# `${snap#*\t}` gets `id<TAB>time`, which is the reason `review-id` peels twice.
 #
 # State and id must come from the SAME snapshot. Deriving them from separate
 # fetches let a review that changed in between be judged on one snapshot and

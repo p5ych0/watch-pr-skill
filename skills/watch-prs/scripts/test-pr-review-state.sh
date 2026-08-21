@@ -751,7 +751,7 @@ printf '[{"id":9001,"user":{"login":"%s"},"created_at":"2026-04-04T00:00:00Z","b
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         GH_COMMENTS="$TMP/comments.json" run clean-at 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && [ "$out" = '2026-04-04T00:00:00Z' ]; } \
-    && pass "…and a clean verdict delivered as a comment answers with the comment's" \
+    && pass "…and a clean verdict delivered as a comment answers with that comment's time" \
     || die "clean-at ignored the comment channel (rc=$rc out='$out')"
 # A HEAD WITH FINDINGS IS 1, NOT AN ERROR AND NOT A TIME.
 printf '[]' > "$TMP/icomments.json"
