@@ -565,7 +565,9 @@ for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     # fatal, so `RB_TRY=probe-a` on its own kills the session before the test
     # after it can run. A subshell inherits the readonly attribute, so it fails
     # for exactly the same reason and answers exactly the same question, and its
-    # status is the answer; on the left of `||` it is exempt from `errexit` too.
+    # status is the answer. Tested by `if`, which is where the `errexit` exemption
+    # comes from as well: a command run as a CONDITION is exempt, so the probe can
+    # fail here without ending the session.
     # `readonly` is not what is being asked about here — whether THIS name can be
     # assigned is — so the status is the whole answer and no value has to be
     # compared. Bash's own complaint is left on stderr, because it names the

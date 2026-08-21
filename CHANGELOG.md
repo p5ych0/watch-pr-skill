@@ -22,13 +22,17 @@
   is fatal, so `RB_TRY=probe-a` on its own kills the session before the test after
   it can run — in exactly the state the probe exists to detect. A subshell
   inherits the readonly attribute, so it fails for the same reason and answers the
-  same question, and on the left of `||` it is exempt from `errexit`. Its status
-  is the whole answer, so no value has to be compared.
+  same question. Its status is the whole answer, so no value has to be compared —
+  and it is tested by `if`, which is where the `errexit` exemption comes from as
+  well, a command run as a condition being exempt.
 
-  It skips the candidate the way the two checks around it do, so the emptiness
-  test after the loop reports the failure — an abort from inside the loop would be
-  a statement a shadowed `exit` walks past into the very `mkdir` the probe exists
-  to stop.
+  The rest of the candidate is that `if`'s success arm rather than a
+  `|| continue` after it. `continue` is a *builtin*, and one replaced by a
+  function returning 0 takes the failure arm and then falls straight through to
+  the next line — the assignment fails, the stale traversal value passes the
+  prefix check, and `mkdir` runs outside the proven parent, which is the whole
+  defect. `if` is a reserved word and nothing can stand in for it, so the work is
+  somewhere a failed probe cannot reach.
 
   Found while fixing the same class in the session's working-directory
   allocation (2.0.51), where it was new code; this one was pre-existing, so it was

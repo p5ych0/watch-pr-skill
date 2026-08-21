@@ -2200,9 +2200,11 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # it. The probe is a subshell rather than a bare assignment because this bash runs
 # in the operator's long-lived shell: measured on bash 5, a failed readonly
 # assignment under `errexit` is fatal, so a standalone `RB_TRY=probe-a` ends the
-# session before the test after it can run. A subshell inherits the attribute,
-# fails for the same reason, and on the left of `||` is exempt from `errexit`.
-# #146.
+# session before the test after it can run. A subshell inherits the attribute and
+# fails for the same reason, and it is tested by `if` — which is where the
+# `errexit` exemption comes from too, a command run as a condition being exempt —
+# and whose success arm is the rest of the candidate, so a shadowed `continue`
+# has nothing to walk past. #146.
 _rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
 { [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
