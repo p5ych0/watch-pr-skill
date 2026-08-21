@@ -2194,6 +2194,91 @@ grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
 grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
     && pass "…under the parent the transport read already proved usable" \
     || die "the working directory is not built under the proven parent"
+# AND SO IS THE TRANSPORT CANDIDATE — IN A SUBSHELL. `RB_TRY`'s own check matches
+# a PREFIX, so a readonly value carrying `..` names a directory under a parent
+# nothing proved, and the origin every stage is addressed by would be read from
+# it. The probe is a subshell rather than a bare assignment because this bash runs
+# in the operator's long-lived shell: measured on bash 5, a failed readonly
+# assignment under `errexit` is fatal, so a standalone `RB_TRY=probe-a` ends the
+# session before the test after it can run. A subshell inherits the attribute and
+# fails for the same reason, and it is tested by `if` — which is where the
+# `errexit` exemption comes from too, a command run as a condition being exempt —
+# and whose success arm is the rest of the candidate, so a shadowed `continue`
+# has nothing to walk past. #146.
+_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+_rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
+{ [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
+    && pass "the transport candidate is probed in a subshell before its path is built" \
+    || die "RB_TRY is not probed in a subshell before the path is built (probe=$_rb_try_ln path=$_rb_try_path_ln)"
+grep -q '^    RB_TRY=probe-' "$SKILL" \
+    && die "RB_TRY is probed with a bare assignment; under errexit that ends the operator's shell" \
+    || pass "…and not with a bare assignment, which errexit makes fatal"
+grep -q '^    ( RB_TRY=probe-a ) || continue$' "$SKILL" \
+    && die "the RB_TRY probe falls through on a shadowed continue; put the candidate in its success arm" \
+    || pass "…and the candidate is the probe's success arm, not a shadowable continue after it"
+
+# …AND THE CONSEQUENCES ARE RUN, NOT ONLY MATCHED. The three greps above describe
+# a shape; what the fix claims is that a readonly `RB_TRY` carrying a traversal
+# value creates NOTHING under the parent it names, and that the operator's shell
+# survives to say so. Neither is visible in the text, and `errexit` plus a
+# shadowed `continue` is exactly the combination a syntax check cannot see.
+#
+# THE LOOP ALONE, extracted by its own header and `done`. Running the whole setup
+# block would need an origin, a repository and a plugin root; the loop needs a
+# parent directory and a `$RB_SCRIPTS` that refuses, which is what makes every
+# candidate fall to the bottom.
+_rb_loop="$(awk '/^for RB_TMPPARENT in /,/^done$/' "$SKILL")" || _rb_loop=""
+[ -n "$_rb_loop" ] \
+    && pass "the transport loop can be extracted for execution" \
+    || die "the transport loop could not be extracted; the behavioural case below proves nothing"
+# ITS OWN ALLOCATION, AND GUARDED ON IT. `$_forge_dir` looked like the tree to
+# reuse and is removed long before this point, so the whole case was SKIPPED — it
+# reported nothing and the mutation that should have turned it red turned nothing
+# red at all, which is the failure `CLAUDE.md` calls worse than no fixture.
+# The guard is on the validated allocation rather than on `RB_TMPBASE`, which this
+# fixture exports and an invoking environment may already carry; and it is a guard
+# rather than a `:?` because the probe at the end of this file re-runs everything
+# with `mktemp` stubbed, where there is no tree and an unguarded path under an
+# empty variable writes to `/parent`.
+_rb_bt=""
+_rb_bt="$(mktemp_d)" || _rb_bt=""
+if [ -n "$_rb_bt" ] && [ -d "$_rb_bt" ]; then
+mkdir -p "$_rb_bt/parent/watch-pr.anchor" "$_rb_bt/parent/attacker"
+printf '%s\n' "$_rb_loop" > "$_rb_bt/loop.sh"
+# `set -e` AND a shadowed `continue` AND the traversal value, together — each
+# alone is survivable and the combination is what the fix is about. `RB_SCRIPTS`
+# names nothing, so a candidate that got as far as the helper would be rejected
+# there; what must not happen is getting as far as `mkdir`.
+_rb_bt_out="$(run_limited 25 env TMPDIR="$_rb_bt/parent" bash --noprofile --norc -c '
+set -e
+continue() { return 0; }
+readonly RB_TRY="$TMPDIR/watch-pr.anchor/../attacker/session"
+RB_SCRIPTS=/nonexistent-rb-scripts
+. "$1"
+printf "SURVIVED rb_tmpdir=[%s]\\n" "${RB_TMPDIR:-}"' _ "$_rb_bt/loop.sh" 2>&1)"; _rb_bt_rc=$?
+printf '%s' "$_rb_bt_out" | grep -qF 'SURVIVED rb_tmpdir=[]' \
+    && pass "…a readonly RB_TRY under errexit leaves the operator's shell alive and no transport directory" \
+    || die "the readonly-RB_TRY case gave rc=$_rb_bt_rc '$_rb_bt_out'"
+# THE CONSEQUENCE, as an ABSENCE CHECK ALONGSIDE the survival one — and what it
+# cannot see is stated rather than implied, because that is the difference
+# between a fixture and a green tick.
+#
+# WHAT DISCRIMINATES IS THE LINE ABOVE. Measured against the unfixed shapes: a
+# bare `RB_TRY=probe-a` under `errexit` ends the shell, so no `SURVIVED` line is
+# printed and that assertion goes red. The absence check does not, and no
+# arrangement here makes it — measured on bash 5, a failed readonly assignment
+# inside this loop ends the shell before `mkdir` whether `errexit` is on or off
+# and whether the loop is sourced or run as a script, so the unfixed loop cannot
+# be made to create the directory on this shell at all. The check stays because
+# a run that survives AND creates it has failed in the way that matters, and only
+# this line would see that.
+_rb_bt_left="$(ls -A "$_rb_bt/parent/attacker" 2>/dev/null)" || _rb_bt_left='THE_SCAN_FAILED'
+[ -z "$_rb_bt_left" ] \
+    && pass "…and creates nothing under the parent the traversal value named" \
+    || die "the readonly-RB_TRY case created '$_rb_bt_left' under the attacker's parent"
+rm -rf "$_rb_bt" 2>/dev/null || true
+fi
+
 # AND THE NAME IS PROVEN ASSIGNABLE FIRST, WITH TWO VALUES. The shape check on the
 # built path matches a PREFIX, and a readonly value such as
 # `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while naming a
