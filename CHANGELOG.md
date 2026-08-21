@@ -32,6 +32,12 @@
   that same readonly makes the assignment fail outright, so the comparison is
   never reached.
 
+  That value is **mixed case**, and deliberately. `probe-a` is already lowercase,
+  so `declare -l` leaves it unchanged and a probe using it passes — then the real
+  assignment lowercases the path and setup fails somewhere else, about something
+  else. `Probe-A` survives no case transformation in either direction, and
+  `declare -i` cannot evaluate it at all.
+
   `RB_TRY` is the fourth site and keeps the subshell it got in 2.0.52 without the
   comparison: it is pre-existing here, so the transforming-attribute gap is filed
   as its own change rather than folded into this one.

@@ -561,11 +561,18 @@ RB_TMPDIR=
 # that same readonly makes the assignment fail outright, so the comparison is
 # never reached and the status is non-zero. #148.
 #
+# THE VALUE IS MIXED CASE, AND THAT IS THE POINT OF IT. `probe-a` is already
+# lowercase, so `declare -l` leaves it unchanged and the probe passes — then the
+# real assignment lowercases the path and setup fails somewhere else, about
+# something else. `Probe-A` survives no case transformation in either direction,
+# and `declare -i` cannot evaluate it at all, so one value covers every
+# transforming attribute this refusal claims to reject.
+#
 # AND THE REFUSAL NAMES BOTH ATTRIBUTES, because the probe now answers one
 # question — can this name hold what this line writes — and two attributes make
 # it "no". Saying only `readonly` sends the operator looking for one that is not
 # there.
-if ( RB_TMPPARENT=probe-a; [[ $RB_TMPPARENT = probe-a ]] ); then
+if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
     RB_TMPPARENT=
     for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
         [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
@@ -982,7 +989,7 @@ else
         # accepts. One value is enough: a readonly pre-seeded with the probe's own
         # value makes the subshell's assignment fail outright, so the comparison
         # is never reached. #148.
-        if { ( RB_WORK_DIR=probe-a; [[ $RB_WORK_DIR = probe-a ]] ) \
+        if { ( RB_WORK_DIR=Probe-A; [[ $RB_WORK_DIR = Probe-A ]] ) \
              || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
            && {
                 RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
@@ -1162,7 +1169,7 @@ WHO="$CODEX_BOT"
 # trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
-if { ( PRIOR_REVIEW=probe-a; [[ $PRIOR_REVIEW = probe-a ]] ) \
+if { ( PRIOR_REVIEW=Probe-A; [[ $PRIOR_REVIEW = Probe-A ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then

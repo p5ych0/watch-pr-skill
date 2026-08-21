@@ -1744,12 +1744,12 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
 # else — a status-only probe accepts that, and the request goes out with the
 # baseline rewritten. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=probe-a; \[\[ $PRIOR_REVIEW = probe-a \]\] )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=Probe-A; \[\[ $PRIOR_REVIEW = Probe-A \]\] )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
 { [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
     || die "PRIOR_REVIEW is not probed before the request (probe=$_rb_prp_ln request=$_rb_req_ln)"
-grep -q '^PRIOR_REVIEW=probe-' "$SKILL" \
+grep -q '^PRIOR_REVIEW=[Pp]robe-' "$SKILL" \
     && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
 
@@ -1785,7 +1785,7 @@ mkdir -p "$_rb_pb/parent" "$_rb_pb/bin"
 printf '#!/bin/sh\nprintf "git@github.com:acme/widget.git\\n" > "$2"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
 chmod +x "$_rb_pb/bin/pr-origin.sh"
 awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
-awk '/^if \( RB_TMPPARENT=probe-a;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
+awk '/^if \( RB_TMPPARENT=Probe-A;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
 # ONE HARNESS, THREE STATES. `readonly` with `errexit` is the regression this
 # change is about; `declare -i` is the half a status-only probe accepted, where
 # the assignment SUCCEEDS and stores `0`; and the ordinary state is the control
@@ -1803,7 +1803,11 @@ RB_PIN_SEEN=same; RB_REMOTE=same
 . "$1"
 printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 }
-for _rb_attr in 'readonly RB_TMPPARENT=probe-a' 'declare -i RB_TMPPARENT=0'; do
+# `declare -l` IS THE THIRD STATE, and it is why the probe value is mixed case.
+# `probe-a` is already lowercase, so a lowercase-transforming attribute leaves it
+# unchanged and a probe using it PASSES — then the real assignment lowercases the
+# path and setup fails somewhere else, about something else.
+for _rb_attr in 'readonly RB_TMPPARENT=Probe-A' 'declare -i RB_TMPPARENT=0' 'declare -l RB_TMPPARENT=x'; do
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
     printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
@@ -1831,7 +1835,7 @@ _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/par
 printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
     && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
     || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
-for _rb_attr in 'readonly RB_WORK_DIR=/tmp' 'declare -i RB_WORK_DIR=0'; do
+for _rb_attr in 'readonly RB_WORK_DIR=/tmp' 'declare -i RB_WORK_DIR=0' 'declare -l RB_WORK_DIR=x'; do
     _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
     printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
         && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
@@ -1851,7 +1855,7 @@ fi
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW=probe-a; \[\[ $PRIOR_REVIEW = probe-a \]\] )' "$SKILL" \
+grep -q '^if { ( PRIOR_REVIEW=Probe-A; \[\[ $PRIOR_REVIEW = Probe-A \]\] )' "$SKILL" \
     && pass "…and the probe is a condition whose success arm holds the request" \
     || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
