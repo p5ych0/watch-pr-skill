@@ -1722,6 +1722,20 @@ grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
 grep -q '^    PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
     && pass "…and the read-back is inside that branch, not after it" \
     || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
+# AND THE NAME IT READS INTO IS PROVEN ASSIGNABLE BEFORE THE REQUEST GOES OUT.
+# That read-back is a simple command: with `errexit` on and `PRIOR_REVIEW` already
+# readonly it fails and ends the shell — after the request has been POSTED, so the
+# pass is in flight and no watch is ever armed. Nothing after a mutation can undo
+# that; the question has to be asked before it, where the same failure costs a
+# stop and nothing else. Two unequal values, since one leaves a name pre-seeded
+# with exactly it looking assignable.
+_rb_prp_n=0
+grep -c '^PRIOR_REVIEW=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_prp_n="$(grep -c '^PRIOR_REVIEW=probe-[ab]$' "$SKILL")"
+_rb_prp_ln="$(grep -n '^PRIOR_REVIEW=probe-b$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
+{ [ "$_rb_prp_n" = 2 ] && [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
+    && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
+    || die "PRIOR_REVIEW is not probed before the request ($_rb_prp_n probes, probe=$_rb_prp_ln request=$_rb_req_ln)"
 
 
 # ── the round summary and the review request are ONE comment ───────────────

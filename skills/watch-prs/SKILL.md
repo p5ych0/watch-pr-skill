@@ -1062,6 +1062,26 @@ WHO="$CODEX_BOT"
 # from there into the wait for a review that was never requested. Ending the arm
 # in `[[ -n "" ]]` makes the LIST report non-zero, which nothing here reads. What
 # does hold is that the work sits inside the branch a refusal does not take.
+# AND THE NAME THAT WILL HOLD IT IS PROVEN ASSIGNABLE FIRST, BEFORE THE MUTATION.
+# The read-back below is a simple command: with `errexit` on and `PRIOR_REVIEW`
+# already readonly, it fails and ends your shell — but by then the request has
+# been POSTED, so the pass is in flight and no watch is ever armed. Nothing after
+# a mutation can undo that; the only place the question can be asked is before it,
+# where the same failure costs a stop and nothing else. Two unequal values,
+# because a name pre-seeded with exactly one of them leaves the postcondition
+# holding — the probe the working directory above uses, for the same reason.
+PRIOR_REVIEW=probe-a
+if [[ $PRIOR_REVIEW != probe-a ]]; then
+    echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."
+    exit 0
+    [[ -n "" ]]
+fi
+PRIOR_REVIEW=probe-b
+if [[ $PRIOR_REVIEW != probe-b ]]; then
+    echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."
+    exit 0
+    [[ -n "" ]]
+fi
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
     PRIOR_REVIEW="$(<"$PRIOR_FILE")"
     # AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it

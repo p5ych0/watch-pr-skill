@@ -78,9 +78,10 @@
   Two smaller things came with it. The review mode is refused **by name** —
   `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
   truthiness test silently took the manual path and posted a mention into an
-  automatic-review repository. And the baseline the watch is given is written
-  *after* the post, so a request that stopped leaves nothing to read as a baseline
-  for a request that was never made.
+  automatic-review repository. And the name the driver reads the baseline into is
+  proven assignable *before* the request goes out: a readonly one makes that
+  assignment fail after the mutation, which under `errexit` ends the shell with a
+  pass in flight and no watch armed.
 
 ## [2.0.50] — 2026-08-21
 
