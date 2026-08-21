@@ -916,40 +916,61 @@ WHO="$CODEX_BOT"
 #        path, where the trigger preceded us and there is nothing to capture
 #     1  stopped — nothing was posted
 #
-# WRITE THE ACCOUNT INTO THE HEREDOC: one paragraph on what this change does and
-# what to look at. It is inserted as DATA, so prose quoting a command line is
-# posted rather than executed — but a line reproducing one of the markers the
-# loop reads as a record CREATES that record, because this is posted under your
-# identity, and on the automatic path a quoted `@codex review` queues a second
-# pass over the same head. The script refuses both rather than publishing them.
+# WRITE THE ACCOUNT INTO `$SUMMARY_FILE` WITH YOUR FILE-WRITING TOOL, not from
+# this shell: one paragraph on what this change does and what to look at. It is
+# inserted as DATA, so prose quoting a command line is posted rather than
+# executed — but a line reproducing one of the markers the loop reads as a record
+# CREATES that record, because this is posted under your identity, and on the
+# automatic path a quoted `@codex review` queues a second pass over the same
+# head. The script refuses both rather than publishing them.
 #
-# THE BODY GOES STRAIGHT IN, WITH NO FILE AND NO `cat`. This bash runs in YOUR
-# shell, where `cat` is a NAME: a function by that name receives the heredoc and
-# writes whatever it likes to the redirection, so the account posted would be the
-# function's text rather than yours — and one that writes nothing and succeeds
-# stops a request that was fine. A heredoc redirected into the command is a
-# REDIRECTION the parser handles, so there is no name in it to take, no write to
-# check, and no file left over from a previous round to post as this one's.
+# THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE. A
+# heredoc splices it in: an account containing a line that is exactly the
+# delimiter ENDS the heredoc, and whatever follows is parsed by your long-lived
+# shell — and `EOF` is a line this loop's own accounts quote, out of a diff or a
+# finding. Choosing a rarer delimiter narrows that and does not close it, because
+# the body is not known when the delimiter is chosen. And writing the file from
+# here needs a command — `cat`, `printf` — which is a NAME your shell can replace,
+# so the account validated and posted would be the function's text. Your file tool
+# is neither: it does not go through this shell at all. `$SUMMARY_FILE` was
+# created empty at setup and the script refuses an empty body, so a write that
+# does not happen stops the request rather than posting nothing as this PR's
+# account.
+#
+# THE STATUS IS TAKEN AT THE INVOCATION, WITH NO VARIABLE TO HOLD IT. Written as
+# `…; REQ_RC=$?` it is lost twice over: with `errexit` on — this block is pasted
+# into such a shell as often as it is typed — a documented refusal ends the shell
+# at the assignment before anything can read the status, and without it a startup
+# file that has already made `REQ_RC` readonly `0` leaves the assignment failing
+# silently at the benign value, so a request that never happened is followed by a
+# wait for it. A command run as a CONDITION is exempt from `errexit`, and there is
+# no status variable left to seed.
 #
 # THE BASELINE IS THE ONE VALUE THAT OUTLIVES THIS STEP, and a child cannot
 # assign a variable here — so it comes back on stdout ALONE, with every reason on
 # stderr. Step 3's watch is given it.
-PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" <<'EOF'
-<one paragraph: what this change does and what to look at>
-EOF
-)"; REQ_RC=$?
-# THE STATUS AND THE SHAPE, because neither covers the other: empty is the
-# automatic path's correct answer and is indistinguishable from a lost value, so
-# the status is what says a request was made, and the shape is what says the
-# variable holds what the helper printed rather than whatever it already held.
-RX_PRIOR='^[0-9]*$'
-if [[ $REQ_RC -ne 0 ]] || ! [[ $PRIOR_REVIEW =~ $RX_PRIOR ]]; then
-    echo "ABORT: no review was requested (rc=$REQ_RC, baseline='$PRIOR_REVIEW'); do not enter the wait step."
+if ! PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE")"; then
+    echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
     exit 0
     # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
     # can shadow, and with both shadowed this branch says nothing and returns 0 —
     # a failed request indistinguishable from a posted one, which is the reading
     # that sends the driver into a wait for a review nobody asked for.
+    [[ -n "" ]]
+fi
+# AND THE VALUE IS READ BACK, BY MODE. The two paths have different correct
+# answers — an id on the manual path, EMPTY on the automatic one, where the
+# trigger preceded us — so one pattern accepting both accepts a lost value as the
+# automatic path's answer. Read back rather than assumed because a readonly
+# `PRIOR_REVIEW` in your shell makes the assignment above fail, which abandons the
+# `if` without either branch running: this check is what that falls into.
+RX_PRIOR='^[0-9]+$'
+if [[ $AUTO_REVIEW = yes ]]; then
+    RX_PRIOR='^$'
+fi
+if ! [[ $PRIOR_REVIEW =~ $RX_PRIOR ]]; then
+    echo "ABORT: the baseline read back as '$PRIOR_REVIEW', which is not what auto-review=$AUTO_REVIEW produces; do not enter the wait step."
+    exit 0
     [[ -n "" ]]
 fi
 ```

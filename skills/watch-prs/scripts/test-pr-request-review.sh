@@ -63,10 +63,11 @@ world() {   # world ; auto-review off, a readable baseline, a working post
 # contract: stdout carries the baseline or nothing, so a reason leaking onto it
 # is read by the driver as a review id.
 OUT="$TMP/out"; ERR="$TMP/err"
-# THE BODY ARRIVES ON STDIN, which is why the third argument is gone: the driver
-# redirects a heredoc straight in, so `SKILL.md` needs no `cat` and no file.
-# `$BODY_IN` is what this harness feeds through that redirection, and the case
-# that wants an unreadable body points it at a path that does not exist.
+# THE BODY ARRIVES ON STDIN, which is why the third argument is gone. The driver
+# redirects a file its own tool wrote, so `SKILL.md` needs no `cat` to write it
+# and no heredoc to carry it — a heredoc would splice the account into shell
+# source, where a line equal to the delimiter ends it. `$BODY_IN` is what this
+# harness feeds through that redirection.
 run() {   # run [args…] ; prints "<rc>", with stdout in $OUT and stderr in $ERR
     local rc=0
     (cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \

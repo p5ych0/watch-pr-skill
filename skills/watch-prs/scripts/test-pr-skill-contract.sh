@@ -1643,7 +1643,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
@@ -1658,7 +1658,26 @@ _rb_cat_n="$(grep -c 'cat > "\$SUMMARY_FILE"' "$SKILL")"
 [ "$_rb_cat_n" -le 1 ] \
     && pass "…with its body redirected in, so no shadowable name writes it" \
     || die "SKILL.md writes a body with cat $_rb_cat_n times; the opening request takes its body on stdin"
-grep -q 'if \[\[ $REQ_RC -ne 0 \]\]' "$SKILL" \
+# AND THE BODY IS NOT SPLICED INTO SHELL SOURCE AT ALL. A heredoc puts it there,
+# and an account containing a line that is exactly the delimiter ENDS the
+# heredoc — whatever follows is then parsed by the operator's long-lived shell.
+# `EOF` is a line this loop's own accounts quote, out of a diff or a finding, and
+# a rarer delimiter narrows that without closing it: the body is not known when
+# the delimiter is chosen. The driver's file tool writes the file instead, which
+# does not go through that shell.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
+    && die "the opening request takes its body from a heredoc; an account containing the delimiter would end it and the rest would be parsed as shell" \
+    || pass "…and its body is never spliced into shell source"
+# AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
+# lost twice: with `errexit` on, a documented refusal ends the shell at the
+# assignment before anything reads it; without it, a startup file that has already
+# made the name readonly `0` leaves the assignment failing silently at the benign
+# value, and a request that never happened is followed by a wait for it. A command
+# run as a condition is exempt from `errexit`, and there is no name left to seed.
+grep -q '^[^#]*REQ_RC=' "$SKILL" \
+    && die "the opening request's status goes through a variable; take it at the invocation" \
+    || pass "…and its status is taken at the invocation, with no variable to seed"
+grep -q 'if ! PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -1867,7 +1886,7 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
 # unrecognised value is refused by name, which `test-pr-request-review.sh`
 # executes. Asserted as the argument rather than as the branch, because the
 # branch is somewhere the suite can run it.
-grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <<' "$SKILL" \
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <' "$SKILL" \
     && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 

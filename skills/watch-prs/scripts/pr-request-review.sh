@@ -125,9 +125,16 @@ esac
 # redirection, so the account this script validates and posts would be the
 # function's text rather than the driver's; and one that writes nothing and
 # succeeds stops an otherwise valid request. `CLAUDE.md`: prefer REMOVING the
-# dependency over guarding it. A heredoc redirected straight into this command is
-# a redirection the parser handles — there is no command name in it to take, and
-# no file to write, check, or leave behind from a previous round.
+# dependency over guarding it.
+#
+# AND NOT FROM A HEREDOC IN THE DRIVER EITHER, which was the first answer. A
+# heredoc splices the account into shell source: an account containing a line
+# that is exactly the delimiter ENDS it, and whatever follows is parsed by that
+# long-lived shell — and `EOF` is a line this loop's own accounts quote, out of a
+# diff or a finding. A rarer delimiter narrows that without closing it, because
+# the body is not known when the delimiter is chosen. The driver writes the file
+# with its own file tool, which does not go through a shell at all, and redirects
+# it here — a redirection the parser handles, with no command name in it to take.
 #
 # READ WITH ITS STATUS TAKEN, before anything is posted. `$(cat)` inside the
 # argument swallows the reader's status, so a partial read still produces a
