@@ -1752,6 +1752,14 @@ _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' 
 grep -q '^PRIOR_REVIEW=[Pp]robe-' "$SKILL" \
     && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
+# AND ITS REFUSAL NAMES BOTH ATTRIBUTES. The other two probes have runtime cases
+# that read their message; this one cannot, because exercising it means POSTING a
+# request — so the wording is asserted textually, or reverting it to "readonly"
+# alone would leave every assertion here green while the operator was sent looking
+# for an attribute that is not there.
+grep -qF 'ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell' "$SKILL" \
+    && pass "…and its refusal names both attributes the probe rejects" \
+    || die "the PRIOR_REVIEW refusal does not name the transforming attribute; a declare -i name reads as a readonly"
 
 # …AND TWO OF THE THREE ARE RUN, not only matched. `PRIOR_REVIEW` is not among
 # them and that is stated rather than implied: exercising it means POSTING a
@@ -1820,7 +1828,28 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # `probe-a` is already lowercase, so a lowercase-transforming attribute leaves it
 # unchanged and a probe using it PASSES — then the real assignment lowercases the
 # path and setup fails somewhere else, about something else.
-for _rb_attr in 'readonly RB_TMPPARENT=Probe-A' 'declare -i RB_TMPPARENT=0' 'declare -l RB_TMPPARENT=x'; do
+#
+# AND IT IS BASH 4.0+, so this shell is ASKED rather than assumed. On the 3.2.57
+# path the attribute line itself fails, and under the harness's `set -e` the case
+# would die before reaching any refusal — reporting the probe broken on a shell
+# where the attribute it tests does not exist. The skip is announced rather than
+# silent: a case that quietly does not run is the coverage this file exists to
+# stop claiming.
+# ASKED WITH AN `if`, NOT AN `&&` LIST. Written as `( declare -l … ) && _rb_has_l=yes`
+# the list itself reports 1 on a shell without the attribute, and under this
+# file's `set -e` that ends the run — on exactly the 3.2.57 path the probe exists
+# to accommodate, which is the failure it was written to avoid.
+_rb_has_l=no
+if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
+[ "$_rb_has_l" = yes ] \
+    && pass "…and this shell has declare -l, so the lowercase-transforming state runs" \
+    || pass "…and this shell has no declare -l, so that state is skipped by name"
+_rb_attrs="readonly RB_TMPPARENT=Probe-A|declare -i RB_TMPPARENT=0"
+if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x"; fi
+_rb_rest="$_rb_attrs"
+while [ -n "$_rb_rest" ]; do
+    _rb_attr="${_rb_rest%%|*}"
+    case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
     printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
@@ -1848,7 +1877,12 @@ _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/par
 printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
     && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
     || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
-for _rb_attr in 'readonly RB_WORK_DIR=/tmp' 'declare -i RB_WORK_DIR=0' 'declare -l RB_WORK_DIR=x'; do
+_rb_attrs="readonly RB_WORK_DIR=/tmp|declare -i RB_WORK_DIR=0"
+if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_WORK_DIR=x"; fi
+_rb_rest="$_rb_attrs"
+while [ -n "$_rb_rest" ]; do
+    _rb_attr="${_rb_rest%%|*}"
+    case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
     printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
         && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
