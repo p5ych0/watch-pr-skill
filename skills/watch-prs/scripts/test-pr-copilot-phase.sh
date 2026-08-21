@@ -54,7 +54,12 @@ case "${1:-}" in
                fi
                cat "$W/verdict.out" 2>/dev/null
                exit "$(cat "$W/verdict.rc" 2>/dev/null || echo 0)" ;;
-    clean-at)  # CLEAN, AND WHEN, FROM ONE SNAPSHOT. `record` asked `verdict` and
+    clean-at)  # A PUSH CAN LAND DURING THIS PROBE, which is the window the head
+               # read AFTER it exists for: this call is pinned to the sha being
+               # signed off, so a head that moved while it ran leaves it answering
+               # about a commit that is no longer the head.
+               [ -f "$W/move-head-late" ] && cat "$W/move-head-late" > "$W/head.out"
+               # CLEAN, AND WHEN, FROM ONE SNAPSHOT. `record` asked `verdict` and
                # then `review-at`, and a result arriving between them was the one
                # `review-at` timed. 0 the time, 1 no clean verdict on this head,
                # 2 unreadable. #139.
@@ -246,8 +251,8 @@ got="$(run record 7 "$TMP/body.md")"
     || die "an unreadable clean-at gave '${got}'"
 # AND THAT RE-PROOF IS A REFUSAL WHERE IT COMES BACK NON-CLEAN.
 world; printf '2\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
-printf '1\n' > "$W/verdict.3.rc"
-printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.3.out"
+printf '1\n' > "$W/verdict.2.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.2.out"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
     && pass "…and a blocking verdict landing during that failed read still stops it" \
@@ -600,10 +605,11 @@ got="$(run record 7 "$TMP/body.md")"
     && pass "…and one landing during the later probes stops it as well" \
     || die "a head moved during the signoff probe gave '${got}'"
 nothing_posted "…with no signoff recorded"
-# A DISMISSAL IN THE SAME WINDOW, which the verdict re-read catches. `.2` again:
-# the first check is the one before the CI gate, the second the one before the post.
-world; printf 'PR_REVIEW_STATE verdict=findings findings=2\n' > "$W/verdict.2.out"
-printf '1\n' > "$W/verdict.2.rc"
+# A DISMISSAL IN THE SAME WINDOW, which `clean-at` catches: the check before the
+# CI gate is one call, and the one before the post is `clean-at` — which answers
+# 1 for "no clean verdict on this head", and this stage has already proved there
+# was one. #139 folded the separate re-read into it.
+world; printf '1\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean on'; } \
     && pass "…and a verdict withdrawn in that window stops it" \

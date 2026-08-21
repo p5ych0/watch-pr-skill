@@ -30,6 +30,11 @@
   pair this removes: nothing is being paired, because there is no time left to pair
   with.
 
+  The separate cleanliness probe before the write is **gone**: it asked `verdict`,
+  which is the question `clean-at` answers, so it established nothing the next call
+  does not — while adding a way to fail, since a transient failure on it aborted
+  the stage before reaching the arm that recovers from exactly that.
+
   Closes #139.
 
 ## [2.0.48] — 2026-08-20

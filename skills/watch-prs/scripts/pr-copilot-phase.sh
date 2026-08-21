@@ -509,9 +509,10 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
     || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
 [[ $RECHECK_HEAD = "$CODEX_SHA" ]] \
     || { echo "ABORT: the head moved to $RECHECK_HEAD while the checks were proving; nothing posted"; exit 1; }
-CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
-[[ $CODEX_STILL_RC -eq 0 ]] \
-    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
+# NO SEPARATE CLEANLINESS PROBE HERE ANY MORE. It asked `verdict` and the
+# `clean-at` read below asks the same question — so it established nothing the
+# next call does not, while adding a way to fail: a transient failure on it
+# aborted the stage before reaching the arm that recovers from exactly that. #139.
 
 # AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
 # this window is the case #115 was filed for, and refusing on ANY revocation was
