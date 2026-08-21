@@ -1,5 +1,60 @@
 # Changelog
 
+## [2.0.53] — 2026-08-21
+
+- **The remaining assignability probes ended your shell in the state they exist
+  to detect.** `SKILL.md` proves three names assignable before it uses them —
+  the transport parent, the session's working directory, and the name the review
+  baseline is read into — and each did it by writing a value and reading it back.
+  Both halves are assignments in *your* long-lived shell, and measured on bash 5:
+
+  ```
+  $ bash -c 'set -e; readonly V=0; V=probe-a; echo REACHED'
+  bash: line 1: V: readonly variable
+  ```
+
+  `REACHED` never prints. **A failed readonly assignment under `errexit` is
+  fatal** — and the block is pasted into such a shell as often as it is typed — so
+  the probe killed the session before the test after it could run, with only
+  bash's own one-line complaint and none of the abort messages that say which name
+  and what to do about it.
+
+  Each is a subshell now, **with the comparison inside it**. It inherits the
+  readonly attribute, so it fails for the same reason, and as a condition it is
+  exempt from `errexit`. The comparison is what the read-back used to do and is
+  still needed: a *transforming* attribute — `declare -i` on any of these names —
+  lets the assignment **succeed** and stores something else (`probe-a` becomes
+  `0`), which a status-only probe accepts. For the baseline that meant the request
+  going out and the ordinary empty answer coming back rewritten.
+
+  One value is enough now. Two existed because a readonly pre-seeded with the
+  probe's own value leaves a comparison *in this shell* holding; in the subshell
+  that same readonly makes the assignment fail outright, so the comparison is
+  never reached.
+
+  That value is **mixed case**, and deliberately. `probe-a` is already lowercase,
+  so `declare -l` leaves it unchanged and a probe using it passes — then the real
+  assignment lowercases the path and setup fails somewhere else, about something
+  else. `Probe-A` survives no case transformation in either direction, and
+  under `declare -i` — where `Probe-A` is evaluated as `Probe - A` and `0` is
+  stored, so the assignment succeeds — the comparison is what sees that `0` is not
+  `Probe-A`.
+
+  `RB_TRY` is the fourth site and keeps the subshell it got in 2.0.52 without the
+  comparison: it is pre-existing here, so the transforming-attribute gap is filed
+  as its own change rather than folded into this one.
+
+  The refusals name both attributes now, since the probe answers one question —
+  can this name hold what this line writes — and two attributes make it "no".
+  Saying only `readonly` sent the operator looking for one that is not there. And
+  the transport parent's selection became its probe's success arm, like the other
+  two: written as a guard it printed the refusal and then ran the loop anyway, on
+  a name it had just reported unusable.
+
+  The pin proof's own probe is deliberately unchanged: it is an `elif` chain that
+  has to run before its `mkdir`, and the base ref records why stopping on the spot
+  is accepted there.
+
 ## [2.0.52] — 2026-08-21
 
 - **A readonly `RB_TRY` could put the transport directory outside the parent
