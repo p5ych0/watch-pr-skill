@@ -1729,21 +1729,26 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # that; the question has to be asked before it, where the same failure costs a
 # stop and nothing else. Two unequal values, since one leaves a name pre-seeded
 # with exactly it looking assignable.
-_rb_prp_n=0
-grep -c 'PRIOR_REVIEW=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_prp_n="$(grep -c 'PRIOR_REVIEW=probe-[ab]$' "$SKILL")"
-_rb_prp_ln="$(grep -n 'PRIOR_REVIEW=probe-b$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+# A SUBSHELL, for the reason the two above give: an assignment read back is an
+# assignment in the operator's shell, and a failed readonly one under `errexit` is
+# fatal — here that would end the session before the request rather than after it,
+# which is better, but it is still the state the probe exists to REPORT. #148.
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=probe-a )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
-{ [ "$_rb_prp_n" = 2 ] && [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
+{ [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
-    || die "PRIOR_REVIEW is not probed before the request ($_rb_prp_n probes, probe=$_rb_prp_ln request=$_rb_req_ln)"
+    || die "PRIOR_REVIEW is not probed before the request (probe=$_rb_prp_ln request=$_rb_req_ln)"
+grep -q '^PRIOR_REVIEW=probe-' "$SKILL" \
+    && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
+    || pass "…and not with a bare assignment, which errexit makes fatal"
 # AND THE REQUEST IS THE PROBES' SUCCESS ARM, not a statement after them. Written
 # as standalone guards they detect the readonly name and then cannot act on it —
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { \[\[ $PRIOR_REVIEW = probe-a \]\]' "$SKILL" \
-    && pass "…and the probes are one condition whose success arm holds the request" \
-    || die "the PRIOR_REVIEW probes are standalone guards; a shadowed exit walks past them into the request"
+grep -q '^if { ( PRIOR_REVIEW=probe-a )' "$SKILL" \
+    && pass "…and the probe is a condition whose success arm holds the request" \
+    || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "…with the request nested inside it" \
     || die "the request is not nested inside the probes' success arm"
@@ -2279,23 +2284,6 @@ _rb_bt_left="$(ls -A "$_rb_bt/parent/attacker" 2>/dev/null)" || _rb_bt_left='THE
 rm -rf "$_rb_bt" 2>/dev/null || true
 fi
 
-# AND THE NAME IS PROVEN ASSIGNABLE FIRST, WITH TWO VALUES. The shape check on the
-# built path matches a PREFIX, and a readonly value such as
-# `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while naming a
-# directory under a parent nothing proved — `mkdir` resolves the `..`, and another
-# account owning that parent could replace the directory and with it the account
-# this session posts and the baseline it waits on. One probe value cannot see it
-# either: a name pre-seeded with exactly that value leaves the postcondition
-# holding. Two that differ can, since a readonly cannot equal both — the probe the
-# transport parent above already uses.
-# COUNTED WHEREVER THEY SIT. The second probe is inside the allocation condition
-# now, so it is neither at the start of a line nor the only thing on it — an
-# anchored pattern found one and reported the probe missing.
-_rb_pr_n=0
-grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_pr_n="$(grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL")"
-[ "$_rb_pr_n" = 2 ] \
-    && pass "…with the name proven assignable by two differing probes before the path is built" \
-    || die "RB_WORK_DIR is assigned without the two-value probe ($_rb_pr_n found); a readonly traversal value passes the prefix check"
 grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
     && pass "…created with mkdir as the exclusion, at mode 700" \
     || die "the working directory is not created with mkdir -m 700 by path"

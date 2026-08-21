@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.53] — 2026-08-21
+
+- **The remaining assignability probes ended your shell in the state they exist
+  to detect.** `SKILL.md` proves three names assignable before it uses them —
+  the transport parent, the session's working directory, and the name the review
+  baseline is read into — and each did it by writing a value and reading it back.
+  Both halves are assignments in *your* long-lived shell, and measured on bash 5:
+
+  ```
+  $ bash -c 'set -e; readonly V=0; V=probe-a; echo REACHED'
+  bash: line 1: V: readonly variable
+  ```
+
+  `REACHED` never prints. **A failed readonly assignment under `errexit` is
+  fatal** — and the block is pasted into such a shell as often as it is typed — so
+  the probe killed the session before the test after it could run, with only
+  bash's own one-line complaint and none of the abort messages that say which name
+  and what to do about it.
+
+  Each is a subshell now. It inherits the readonly attribute, so it fails for the
+  same reason and answers the same question, and as a condition it is exempt from
+  `errexit`. Its status is the whole answer, which also removes the second probe
+  everywhere: two unequal values existed because a name pre-seeded with exactly
+  one leaves a *value comparison* holding, and there is no comparison left.
+
+  `RB_TRY` was the fourth and was fixed in 2.0.52, which is where the measurement
+  came from. The pin proof's own probe is deliberately unchanged: it is an
+  `elif` chain that has to run before its `mkdir`, and the base ref records why
+  stopping on the spot is accepted there.
+
 ## [2.0.52] — 2026-08-21
 
 - **A readonly `RB_TRY` could put the transport directory outside the parent

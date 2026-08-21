@@ -532,20 +532,23 @@ RB_TMPDIR=
 # it is not. A readonly `RB_TMPPARENT` in the long-lived driving shell makes every
 # iteration's assignment fail, so no candidate is ever tried and setup refuses
 # with a message about `TMPDIR` and `HOME` that describes neither — the operator
-# is sent to look at their environment for a variable that is fine. The probe
-# writes a value only this line writes and reads it back, which no readonly can
-# satisfy; the clear after it cannot fail once that has passed.
-# TWO UNEQUAL ASSIGNMENTS, because ONE proves nothing against a readonly holding
-# the probe's own value. `readonly RB_TMPPARENT=probe` in the driving shell makes
-# the failed assignment leave exactly what the postcondition expects, so the guard
-# passes and every `for` assignment then fails silently. No single value can be
-# ruled out; two that differ can, because a readonly cannot equal both.
-RB_TMPPARENT=probe-a
-[[ $RB_TMPPARENT = probe-a ]] \
-    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
-RB_TMPPARENT=probe-b
-[[ $RB_TMPPARENT = probe-b ]] \
-    || { echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"; exit 1; }
+# is sent to look at their environment for a variable that is fine. The clear
+# after the probe cannot fail once it has passed.
+# ASKED IN A SUBSHELL, AND THAT IS WHAT MAKES IT SAFE TO ASK. It was two unequal
+# assignments read back here, because one proves nothing against a readonly
+# holding the probe's own value — and both were assignments in THIS shell, which
+# is the operator's. Measured on bash 5: with `errexit` on, a failed readonly
+# assignment is FATAL, so `RB_TMPPARENT=probe-a` ends the session in exactly the
+# state the probe exists to detect. A subshell inherits the readonly attribute, so
+# it fails for the same reason and answers the same question, and being a
+# CONDITION it is exempt from `errexit`. Its status is the whole answer, which is
+# also why one is now enough: the two values existed to defeat a pre-seeded value
+# in a comparison, and there is no comparison left. #148.
+if ! ( RB_TMPPARENT=probe-a ); then
+    echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"
+    exit 1
+    [[ -n "" ]]
+fi
 RB_TMPPARENT=
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
@@ -939,13 +942,19 @@ else
         # the files are its `then`, so a failed arm cannot reach them whatever `exit` was
         # made to do. Each cause still names itself, from inside the condition, ending in
         # a reserved word so the arm is false however `echo` was replaced.
-        RB_WORK_DIR=probe-a
-        if { [[ $RB_WORK_DIR = probe-a ]] \
+        # ASKED IN A SUBSHELL, WHICH IS WHAT MAKES IT SAFE TO ASK. It was two
+        # unequal assignments read back here, because one proves nothing against a
+        # readonly holding the probe's own value — and both were assignments in
+        # THIS shell, which is the operator's, where a failed readonly assignment
+        # under `errexit` is FATAL. The probe ended the session in exactly the
+        # state it exists to detect. A subshell inherits the attribute, fails for
+        # the same reason and answers the same question, and as a condition is
+        # exempt; its status is the whole answer, so there is no comparison left
+        # for a pre-seeded value to satisfy and one probe is enough. #148.
+        if { ( RB_WORK_DIR=probe-a ) \
              || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
-           && { RB_WORK_DIR=probe-b
-                [[ $RB_WORK_DIR = probe-b ]] \
-             || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
-           && { RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
+           && {
+                RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
                 [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
              || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
            && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
@@ -1102,20 +1111,23 @@ WHO="$CODEX_BOT"
 # already readonly, it fails and ends your shell — but by then the request has
 # been POSTED, so the pass is in flight and no watch is ever armed. Nothing after
 # a mutation can undo that; the only place the question can be asked is before it,
-# where the same failure costs a stop and nothing else. Two unequal values,
-# because a name pre-seeded with exactly one of them leaves the postcondition
-# holding — the probe the working directory above uses, for the same reason.
-# AND THE PROBES ARE A CONDITION, WITH THE REQUEST AS THEIR SUCCESS ARM. Written
-# as standalone guards they detect the readonly name and then cannot act on it:
+# where the same failure costs a stop and nothing else.
+#
+# AND ASKED IN A SUBSHELL, which is what makes it safe to ask at all. It was two
+# unequal assignments read back here, because one proves nothing against a
+# readonly holding the probe's own value — and both were assignments in YOUR
+# shell, where a failed readonly assignment under `errexit` is FATAL, so the probe
+# ended the session in exactly the state it exists to detect. A subshell inherits
+# the attribute, fails for the same reason, and as a condition is exempt; its
+# status is the whole answer, so no comparison is left for a pre-seeded value to
+# satisfy and one probe is enough. #148.
+# AND THE PROBE IS A CONDITION, WITH THE REQUEST AS ITS SUCCESS ARM. Written
+# as a standalone guard it detects the readonly name and then cannot act on it:
 # `exit` is a builtin your shell can replace with one that RETURNS, and the
 # trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
-PRIOR_REVIEW=probe-a
-if { [[ $PRIOR_REVIEW = probe-a ]] \
-     || { echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; } \
-   && { PRIOR_REVIEW=probe-b
-        [[ $PRIOR_REVIEW = probe-b ]] \
+if { ( PRIOR_REVIEW=probe-a ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
