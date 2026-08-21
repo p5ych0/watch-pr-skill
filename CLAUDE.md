@@ -99,7 +99,26 @@ Privileged mode does none of the three things, so there is nothing to shadow.
   because the library half would otherwise run somewhere a hook can reach.
 - **What it does NOT cover**: `SKILL.md`'s own bash, which runs in the operator's
   shell and cannot re-exec itself, so the driver keeps every name it has (#102);
-  and a poisoned `PATH`, which is #91.
+  and a poisoned `PATH`.
+
+  **The `PATH` one is settled rather than open.** Privileged startup stops
+  `BASH_ENV`, stops imported functions and ignores `SHELLOPTS`. It does not
+  sanitise `PATH`, and nothing here can: `command -p` searches a default path
+  guaranteed to hold the STANDARD utilities and neither `git` nor `gh` is one; a
+  fixed list has to know where the operator's binaries live, which is the question
+  `PATH` exists to answer; and "this `PATH` looks wrong" is unknowable, because a
+  prepended directory is what a version manager does on every developer machine.
+  A hook can prepend a directory and mark `PATH` readonly, so its own shell cannot
+  undo it — the attribute does not survive the re-exec but the VALUE does.
+
+  So the loop trusts the `PATH` of the shell it was started from, exactly as it
+  trusts that shell not to have run a hook before the first line — and for the
+  same reason: nothing inside a process can distinguish the honest version of
+  something it inherited. **A `PATH` check in one helper is a defect rather than a
+  fix**, because the other eleven would not have it and the narrow guard is the
+  shape this file already records having to delete twice. Both reviewer files
+  carry it verbatim, so a reviewer raising it against one script has an answer.
+  #91.
 
 ## Bash conventions
 
