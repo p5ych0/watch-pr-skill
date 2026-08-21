@@ -277,7 +277,7 @@ clean_comment_for_head() {
 head_review_snapshot() {
     local pr="$1" who="$2" head="$3" reviews out cid
     reviews=$(reviewer_reviews "$pr" "$who") || return 2
-    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" '
+    out="$(printf '%s' "$reviews" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
         if type != "array" then error("bad shape")
         else
           [ .[] | select(.commit_id == $h) ] as $mine
@@ -298,9 +298,15 @@ head_review_snapshot() {
           # `blocked` and `dismissed` are precisely the same-head re-request
           # cases, and an empty id there disabled the caller comparison that
           # exists to tell the new pass from the old one.
+          # AND WHEN IT LANDED, from the SAME record the id came from. A caller
+          # that has to ask a second time can be answered about a different
+          # review — the two reads are not one snapshot, and #132 spent five
+          # rounds proving that no ordering of them is. #139.
           | $st + "\t" + (if ($st == "reviewed" or $st == "blocked" or $st == "dismissed")
                               and $latest != null
                            then ($latest.id | tostring) else "" end)
+               + "\t" + (if $latest != null and ($latest.submitted_at | canonical_utc)
+                          then $latest.submitted_at else "" end)
         end' 2>/dev/null)" || return 2
     # BOTH CHANNELS, placed in time against each other.
     #
@@ -336,7 +342,7 @@ head_review_snapshot() {
                    echo "PR_REVIEW_STATE pr=$pr status=error reason=ambiguous_verdict_order ts=$cts" >&2
                    return 2
                elif [ -z "$latest_ts" ] || [ "$cts" \> "$latest_ts" ]; then
-                   out="reviewed"$'\t'"comment:$cid"
+                   out="reviewed"$'\t'"comment:$cid"$'\t'"$cts"
                fi ;;
         esac
     fi
@@ -411,9 +417,9 @@ review_comment_count() {
 # a draft opened, the review was dismissed, a newer one landed - the count
 # describes a review that is no longer authoritative.
 clean_verdict() {
-    local pr="$1" who="$2" head="$3" snap1 snap2 st id n
+    local pr="$1" who="$2" head="$3" snap1 snap2 st id n _r at
     snap1="$(head_review_snapshot "$pr" "$who" "$head")" || return 2
-    st="${snap1%%$'\t'*}"; id="${snap1#*$'\t'}"
+    st="${snap1%%$'\t'*}"; _r="${snap1#*$'\t'}"; id="${_r%%$'\t'*}"; at="${_r#*$'\t'}"
     case "$st" in
         reviewed) ;;
         *) printf '%s' "$st"; return 1 ;;
@@ -444,15 +450,19 @@ clean_verdict() {
         fi
         return 1
     }
-    printf 'clean'
+    # CLEAN, AND WHEN. The time comes from the SAME snapshot the cleanliness was
+    # derived from, so a caller never has to ask twice and cannot be answered
+    # about two different reviews. `verdict` ignores the tail; `clean-at` is the
+    # tail. #139.
+    printf 'clean\t%s' "$at"
     return 0
 }
 
 main() {
     local cmd="${1:-}" pr="${2:-}" who="${3:-}" head="${4:-}"
     case "$cmd" in
-        state|verdict|head|review-id|review-at|escape-snapshot) ;;
-        *) echo "usage: $0 {state|verdict|head|review-id|review-at|escape-snapshot} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
+        state|verdict|head|review-id|clean-at|escape-snapshot) ;;
+        *) echo "usage: $0 {state|verdict|head|review-id|clean-at|escape-snapshot} <pr> <reviewer-login> [head-oid]" >&2; exit 2 ;;
     esac
     case "$pr" in
         ""|*[!0-9]*) echo "PR_REVIEW_STATE status=error reason=bad_pr" >&2; exit 2 ;;
@@ -489,72 +499,6 @@ main() {
     # The id of the authoritative review on this head, or empty when there is
     # none. A caller waiting for a re-request on an UNCHANGED head has nothing
     # else to tell the new pass from the old one.
-    # WHEN THE AUTHORITATIVE REVIEW LANDED. The merge gate needs it to tell an
-    # operator's answer from a leftover: a signoff recorded for an earlier clean
-    # review on the SAME HEAD would otherwise vouch for a later replies-only review
-    # nobody read. A head is not a moment.
-    if [ "$cmd" = "review-at" ]; then
-        # THE FETCH'S STATUS IS TAKEN ON ITS OWN LINE, as `head_review_snapshot`
-        # does. Nested inside the outer substitution it was DISCARDED: a failed
-        # reviews endpoint prints nothing, `jq` reads empty input, and `jq` on
-        # empty input produces no output and exits 0 — measured. So the answer was
-        # an empty string with status 0, which every caller reads as "no verdict on
-        # this head".
-        #
-        # WHAT THAT COSTS: the merge gate orders records against this value, so a
-        # signoff recorded for an earlier clean review on the same head would vouch
-        # for a later replies-only review nobody read. An incomplete snapshot
-        # presented as a complete one — the fail-open shape this repository forbids.
-        #
-        # The `||` on the outer substitution looks like it takes the status and
-        # does; the status it takes is `jq`'s, and `jq` succeeded. The failure was
-        # one level in. #113.
-        local at reviews
-        reviews=$(reviewer_reviews "$pr" "$who") || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
-            return 2
-        }
-        at="$(printf '%s' "$reviews" | jq -r --arg h "$head" "$RECORDLIB_JQ"'
-            if type != "array" then error("bad shape")
-            else [ .[]
-                   | select(.commit_id == $h)
-                   | select(.submitted_at != null)
-                   | select(.submitted_at | canonical_utc)
-                   | .submitted_at ] | sort | last // ""
-            end' 2>/dev/null)" || {
-            echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
-            return 2
-        }
-        # A CLEAN VERDICT ARRIVES AS A COMMENT AS OFTEN AS A REVIEW, and reading
-        # only `pulls/N/reviews` said "no verdict" on exactly those heads. Codex
-        # submits a review when it has findings and an issue comment when it does
-        # not — it used a comment on #35 — so a caller ordering a revocation
-        # against "when the verdict landed" would have refused the ordinary case.
-        # `verdict` and `state` have consulted both since; this one had not. #117.
-        # 1 IS "NO CLEAN COMMENT", WHICH IS AN ANSWER; only 2 is a failed read.
-        # Treating every non-zero as unreadable made the ordinary case — a head
-        # whose verdict came as a review — report an error instead of the review's
-        # timestamp.
-        local cinfo crc=0
-        cinfo="$(clean_comment_for_head "$pr" "$who" "$head")" || crc=$?
-        case "$crc" in
-            0|1) ;;
-            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
-               return 2 ;;
-        esac
-        # THE LATER OF THE TWO, compared lexically — both are canonical UTC, which
-        # `valid_comment_record` and the `canonical_utc` filter above each enforce,
-        # so the string order is the time order. An absent one is the empty string
-        # and loses to any real timestamp.
-        local cat_=""
-        [ -n "$cinfo" ] && cat_="${cinfo#*$'\t'}"
-        if [ -n "$cat_" ] && { [ -z "$at" ] || [ "$cat_" \> "$at" ]; }; then
-            at="$cat_"
-        fi
-        printf '%s\n' "$at"
-        return 0
-    fi
-
     if [ "$cmd" = "escape-snapshot" ]; then
         # ONE SERVER RESPONSE, NOT A PROTOCOL OVER TWO. The REST endpoints answer
         # reviews and review comments separately, and no ordering of separate
@@ -686,13 +630,44 @@ main() {
         return 0
     fi
 
+    # WHEN A CLEAN VERDICT LANDED, from the snapshot that proved it clean.
+    #
+    #   0  the canonical-UTC time of a verdict that is CLEAN on this head
+    #   1  no clean verdict on it
+    #   2  unreadable
+    #
+    # `record` asked `verdict` and then `review-at`, and a result arriving between
+    # them was the one `review-at` timed — so the signoff could carry the time of a
+    # verdict nobody proved. Binding them by re-proving afterwards closed the named
+    # window and left the next one; this is the removal. #139.
+    if [ "$cmd" = "clean-at" ]; then
+        local cvout cvrc=0 cvat
+        cvout="$(clean_verdict "$pr" "$who" "$head")" || cvrc=$?
+        case "$cvrc" in
+            0) ;;
+            1) return 1 ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
+        esac
+        cvat="${cvout#*$'\t'}"
+        # A CLEAN VERDICT THIS CANNOT PLACE IN TIME IS UNREADABLE, not "no clean
+        # verdict": every consumer compares this as a STRING, and a value of
+        # another shape sorts somewhere arbitrary.
+        case "$cvat" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+            *) echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2; return 2 ;;
+        esac
+        printf '%s\n' "$cvat"
+        return 0
+    fi
+
     if [ "$cmd" = "review-id" ]; then
-        local snap
+        local snap _r
         snap="$(head_review_snapshot "$pr" "$who" "$head")" || {
             echo "PR_REVIEW_STATE pr=$pr status=error reason=unreadable" >&2
             return 2
         }
-        printf '%s\n' "${snap#*$'\t'}"
+        _r="${snap#*$'\t'}"
+        printf '%s\n' "${_r%%$'\t'*}"
         return 0
     fi
 
