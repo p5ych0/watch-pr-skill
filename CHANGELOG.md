@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.0.49] — 2026-08-21
+
+- **"Is it clean" and "when did it land" are one question now.** `record` asked
+  `verdict` and then `review-at`, and a result arriving between them was the one
+  `review-at` timed — so the signoff could carry the time of a verdict nobody
+  proved. Re-proving cleanliness afterwards closed that and left the next: a
+  clean-to-clean transition paired the *new* verdict with the *old* time, and the
+  ordering arm then refused a replacement signoff that was perfectly good.
+
+  `pr-review-state.sh clean-at` answers both from the snapshot that proves the
+  cleanliness. The authoritative record's timestamp now travels with the state and
+  the id it was selected alongside, so no caller can be answered about two
+  different reviews.
+
+  **`review-at` is removed.** It had exactly one consumer, and a second, weaker
+  answer to the same question is one a future caller reaches for — the same call
+  `replies-at` got in 2.0.45. What its cases proved is proved on `clean-at`: the
+  comment channel, the shape of the value, and every unreadable read.
+
+  A `1` from `clean-at` is not an absence for this caller: `record` has already
+  proved the head clean, so "no clean verdict" means it stopped being clean while
+  this ran, and cleanliness is a precondition for recording at all.
+
+  An **unreadable** answer degrades to a record without the field — but it costs
+  the cleanliness proof too, because this call *is* the last one, and the proof
+  before it predates a network round trip a blocking verdict can land in. So the
+  cleanliness is asked for on its own there. That is two reads again, and not the
+  pair this removes: nothing is being paired, because there is no time left to pair
+  with.
+
+  The separate cleanliness probe before the write is **gone**: it asked `verdict`,
+  which is the question `clean-at` answers, so it established nothing the next call
+  does not — while adding a way to fail, since a transient failure on it aborted
+  the stage before reaching the arm that recovers from exactly that.
+
+  Closes #139.
+
 ## [2.0.48] — 2026-08-20
 
 - **A revocation is no longer lost under the signoff that superseded it.** The

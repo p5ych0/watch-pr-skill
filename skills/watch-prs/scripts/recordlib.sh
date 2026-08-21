@@ -461,7 +461,7 @@ rb_replies_only_line() {   # <line> <pr> <reviewer> <head-oid>
     return 0
 }
 
-# rb_signoff_answers <signoff-line> <review-at> <pr> <reviewer> <head-oid>
+# rb_signoff_answers <signoff-line> <answer-deadline> <pr> <reviewer> <head-oid>
 #
 # A HEAD IS NOT A MOMENT. The signoff has to answer THIS review, and naming the
 # same sha does not say that: one recorded for an earlier CLEAN review on an
@@ -489,7 +489,7 @@ RB_VOUCH_REASON=''
 # is always present and says `none` where the record does not carry a time, so
 # this reader has one shape to match rather than two. #135.
 RB_SIGNOFF_RX='^PR_SIGNOFF pr=([0-9]+) reviewer=([^[:space:]]+) verdict-at=(none|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) at=([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) id=([0-9]+) sha=([0-9a-f]{40})$'
-rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
+rb_signoff_answers() {   # <signoff-line> <answer-deadline> <pr> <reviewer> <head-oid>
     RB_VOUCH_REASON=''
     local _at
     # CANONICAL UTC IS PART OF THE SHAPE, because the comparison below is a STRING
@@ -513,7 +513,7 @@ rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
     return 0
 }
 
-# rb_answer_at <review-at> <replies-at> ; sets RB_ANSWER_AT to the later of them
+# rb_answer_at <review-time> <newest-reply-time> ; sets RB_ANSWER_AT to the later
 #
 # WHAT AN OPERATOR'S SIGNOFF HAS TO BE NEWER THAN. A replies-only verdict is
 # produced by the COMMENTS on a review, and a reply added afterwards does not move
@@ -535,7 +535,7 @@ rb_signoff_answers() {   # <signoff-line> <review-at> <pr> <reviewer> <head-oid>
 # arbitrary, and one sorting low would let a signoff older than the conversation
 # vouch for it.
 RB_ANSWER_AT=''
-rb_answer_at() {   # <review-at> <replies-at>
+rb_answer_at() {   # <review-time> <newest-reply-time>
     RB_ANSWER_AT=''
     case "${1-}" in
         ""|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;

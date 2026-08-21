@@ -509,9 +509,10 @@ RECHECK_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --
     || { echo "ABORT: could not re-read the head before recording; nothing posted"; exit 1; }
 [[ $RECHECK_HEAD = "$CODEX_SHA" ]] \
     || { echo "ABORT: the head moved to $RECHECK_HEAD while the checks were proving; nothing posted"; exit 1; }
-CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); CODEX_STILL_RC=$?
-[[ $CODEX_STILL_RC -eq 0 ]] \
-    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($CODEX_STILL); nothing posted"; exit 1; }
+# NO SEPARATE CLEANLINESS PROBE HERE ANY MORE. It asked `verdict` and the
+# `clean-at` read below asks the same question — so it established nothing the
+# next call does not, while adding a way to fail: a transient failure on it
+# aborted the stage before reaching the arm that recovers from exactly that. #139.
 
 # AND THE ORDERING LAST, IMMEDIATELY BEFORE THE WRITE. A revocation landing in
 # this window is the case #115 was filed for, and refusing on ANY revocation was
@@ -521,52 +522,57 @@ CODEX_STILL=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$
 # verdict arrives, and an unconditional refusal means a reopened phase can never
 # record its replacement signoff at all.
 #
-# WHEN THE VERDICT LANDED, READ BEFORE THE RECORD IS, AND USED TWICE. The signoff
+# WHEN THE VERDICT LANDED, FROM THE SNAPSHOT THAT PROVED IT CLEAN. The signoff
 # carries it, so a reader can order a revocation against the VERDICT rather than
 # against comment order — this stage cannot close that window itself, because its
 # own write is what erases the evidence. #137, for #122.
+#
+# ONE QUESTION, NOT TWO. This asked `verdict` and then `review-at`, and a result
+# arriving between them was the one `review-at` timed — so the record could claim
+# to answer a verdict nobody proved. Re-proving cleanliness afterwards closed the
+# named window and left the next: a clean-to-clean transition paired the NEW
+# verdict with the OLD time. `clean-at` answers both from one snapshot, so there is
+# no second question to answer differently. #139.
 #
 # BEFORE THE TRIGGER, NOT BETWEEN IT AND THE WRITE. Read after it, this call sits
 # between the last look at the signoff record and the post — so a revocation
 # landing during it is superseded on the ORDINARY path, where nothing had looked
 # since. That is a window this change would have ADDED, and moving the read
-# removes it rather than guarding it: the revoked arm below re-reads the record
-# anyway, and the ordinary path once again has nothing between its last look and
-# its write.
+# removes it: the revoked arm below re-reads the record anyway.
 #
 # AND ITS ABSENCE NEVER STOPS THE RECORD. The field is optional precisely so an
 # unreadable probe degrades to a record without it, which reads back exactly as
 # every record written before #135 does. A signoff that cannot be ordered against
 # a revocation is the state we already live in; a phase that cannot close because
-# a transient API failure is worse, and this stage stopping is the expensive
-# failure.
-RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh review-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA") || RB_VERDICT_AT=""
+# of a transient API failure is worse.
+#
+# A `1` IS NOT AN ABSENCE HERE, THOUGH. `clean-at` answers 1 when there is no
+# clean verdict on this head — and this stage has already proved there is one, so
+# a `1` means it stopped being clean while this ran, exactly as the separate
+# re-proof used to catch. Cleanliness is a precondition for recording at all.
+RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh clean-at "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_CLEAN_AT_RC=$?
+case "$RB_CLEAN_AT_RC" in
+    0) ;;
+    1) echo "ABORT: Codex is no longer clean on $CODEX_SHA; nothing posted"; exit 1 ;;
+    # AN UNREADABLE ANSWER COSTS THE CLEANLINESS PROOF, NOT ONLY THE TIME. This
+    # call IS the last proof — the one before it predates a network round trip a
+    # blocking verdict can land in — so degrading to "no timestamp" would record
+    # a signoff whose newest evidence is older than the probe that failed.
+    #
+    # SO THE CLEANLINESS IS ASKED FOR ON ITS OWN. That is two reads again, but not
+    # the pair this change removed: nothing is being PAIRED here, because there is
+    # no time left to pair with. It answers one question — is it still clean — and
+    # the record carries no verdict time either way.
+    *) RB_VERDICT_AT=""
+       echo "note: when the verdict on $CODEX_SHA landed could not be read; the signoff will not carry one"
+       RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
+       [[ $RB_STILL_CLEAN_RC -eq 0 ]] \
+           || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RB_STILL_CLEAN); nothing posted"; exit 1; } ;;
+esac
 case "$RB_VERDICT_AT" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
-    *) [[ -z $RB_VERDICT_AT ]] || echo "note: the verdict time on $CODEX_SHA read as '$RB_VERDICT_AT', which is not a time; the signoff will not carry one"
-       RB_VERDICT_AT="" ;;
+    *) RB_VERDICT_AT="" ;;
 esac
-# AND IT HAS TO DESCRIBE THE VERDICT THAT WAS PROVED CLEAN. `review-at` reports
-# the LATEST verdict on this sha across both channels, so a result landing between
-# the cleanliness proof and this read is the one it times — and the record would
-# then claim to answer a verdict nobody proved. Re-proving cleanliness immediately
-# after is what binds them; where it no longer holds, the RECORD IS REFUSED — the
-# timestamp is a value the record carries or does not, but cleanliness is a
-# precondition for recording at all, and posting a signoff without the field for a
-# verdict that has stopped being clean is worse than never having looked.
-#
-# ONE SNAPSHOT WOULD BE BETTER THAN TWO ADJACENT READS, and that is #139: the
-# reader can answer "clean, and at this time" from one response, as
-# `escape-snapshot` does for the replies-only escape.
-# AND IT IS PROVED CLEAN AGAIN AFTERWARDS, WHETHER OR NOT THE TIME CAME BACK.
-# This read is a network call in a place that had none, so a blocking result can
-# land during it — and dropping only the timestamp would post a signoff for a
-# verdict that is no longer clean, which is worse than never having looked. The
-# CLEANLINESS is a precondition for recording at all; the timestamp is a value the
-# record carries or does not, and the two are not the same question.
-RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
-[[ $RB_STILL_CLEAN_RC -eq 0 ]] \
-    || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RB_STILL_CLEAN); nothing posted"; exit 1; }
 [[ -n $RB_VERDICT_AT ]] || echo "note: no readable verdict time for $CODEX_SHA; the signoff will not carry one, and a later revocation cannot be ordered against it"
 
 # AND THE HEAD AGAIN, AFTER THE TIME PROBES. Each probe above is a network call,
@@ -595,9 +601,10 @@ FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq
 # before the verdict, and one that would CANCEL it landed after.
 #
 # THE RECORDS SAY WHICH, since #117: `pr-signoff.sh` reports `at=` on a revocation
-# and `pr-review-state.sh review-at` reports when the verdict landed, answering
+# and `pr-review-state.sh clean-at` reports when the verdict landed, answering
 # from the comment channel as well as the reviews — Codex delivers a clean pass
-# either way.
+# either way. That value is already in hand, read above with the cleanliness it
+# describes; this arm does not ask again. #139.
 #
 # SO THE RULE IS: the phase is reopened when the newest revocation is LATER than
 # the verdict being signed off, and only then. Earlier, and this pass is the
@@ -616,12 +623,10 @@ FINAL_HEAD=$(gh pr view "$PR" --repo "$HOST/$OWNER/$REPO" --json headRefOid --jq
 # recording would supersede a reopening somebody meant.
 # THE READ THAT DECIDES IT IS THE LAST REMOTE READ THERE IS. Asking once and then
 # fetching the verdict's time re-opened the window one level down: a March
-# revocation posted while `review-at` returned February was compared as the
-# January one the first ask saw, and the signoff went out over it. So the first
-# ask is only the TRIGGER — whether an ordering question exists at all, and it is
-# what keeps `review-at` out of the ordinary phase, where a reader failing there
-# would stop a run with no revocation to order against — and the record COMPARED
-# is read again afterwards, with nothing but the write behind it.
+# revocation posted while the time was being fetched was compared as the January
+# one the first ask saw, and the signoff went out over it. So the first ask is
+# only the TRIGGER — whether an ordering question exists at all — and the record
+# COMPARED is read again afterwards, with nothing but the write behind it.
 RB_TRIGGER=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-signoff.sh "$PR" "$RB_CODEX_BOT" 2>&1); RB_TRIGGER_RC=$?
 case "$RB_TRIGGER_RC" in
     0|1) ;;

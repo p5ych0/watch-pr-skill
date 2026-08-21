@@ -227,103 +227,17 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/none2.json" run review-id 7 "$BOT" 2>&
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-id 7 "$BOT" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "review-id: an unreadable fetch => 2" || die "review-id: fetch failure gave rc=$rc"
 
-# ── A CLEAN VERDICT ARRIVES AS A COMMENT, AND `review-at` HAS TO SEE IT ────
-# Codex submits a review when it has findings and an issue COMMENT when it does
-# not — it used a comment on #35. Reading only `pulls/N/reviews` therefore said
-# "no verdict" on exactly the heads a clean pass covers, and a caller ordering a
-# revocation against when the verdict landed would have refused the ordinary case.
-# `verdict` and `state` have consulted both channels for a while; this one had
-# not. #117.
+# ── WHAT `review-at` PROVED, AND WHERE IT WENT ─────────────────────────────
+# Nine cases lived here: the comment channel, the later of the two records in both
+# directions, and failing closed on an unreadable fetch. `review-at` had exactly
+# one consumer — ordering an operator signoff against the verdict — and #139
+# replaced it with `clean-at`, which answers "clean, and when" from ONE snapshot
+# rather than leaving the caller to prove cleanliness separately and pair the two.
 #
-# THE NEWLINES ARE ESCAPED FOR JSON, NOT FOR `printf`. Written as a real newline
-# inside a JSON string this is a parse error, and the helper then answers
-# `unreadable` — so the case would fail for a reason that has nothing to do with
-# the channel it exists to test.
-_icb="I didn't find any major issues.\\n\\n**Reviewed commit:** \`${HEAD40:0:10}\`\\n"
-printf '[{"id":9001,"user":{"login":"%s"},"created_at":"2026-02-02T00:00:00Z","body":"%s"}]' \
-    "$BOT" "$_icb" > "$TMP/icomments.json"
-printf '[]' > "$TMP/reviews.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-02-02T00:00:00Z' ]; } \
-    && pass "review-at: a clean verdict delivered as a comment has a timestamp" \
-    || die "review-at ignored the comment channel (rc=$rc out='$out')"
-# THE LATER OF THE TWO WINS, because "when the verdict landed" is one moment and
-# both channels can carry a record for the same head.
-mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 42
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-02-02T00:00:00Z' ]; } \
-    && pass "…and the later of a review and a clean comment is the answer" \
-    || die "review-at did not take the later record (rc=$rc out='$out')"
-# …IN BOTH DIRECTIONS, or the case above passes because the comment is simply
-# always preferred.
-mk_reviews APPROVED '"2026-03-03T00:00:00Z"' 43
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-03-03T00:00:00Z' ]; } \
-    && pass "…whichever channel it came from" \
-    || die "review-at preferred the comment over a later review (rc=$rc out='$out')"
-# AND AN UNREADABLE COMMENT FETCH IS 2, not a review's timestamp standing in for a
-# snapshot that was never complete.
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS_RC=1 run review-at 7 "$BOT" 2>&1)"; rc=$?
-[ "$rc" -eq 2 ] \
-    && pass "…and an unreadable comment fetch is 2, not a partial answer" \
-    || die "review-at answered from half a snapshot (rc=$rc out='$out')"
-
-# ── `review-at` FAILS CLOSED ON AN UNREADABLE REVIEWS FETCH ───────────────
-# The merge gate orders records against this value, so an empty answer read as
-# "no verdict on this head" lets a signoff recorded for an earlier clean review
-# vouch for a later replies-only one nobody read.
-#
-# THE FETCH WAS NESTED INSIDE THE PARSE, so its status was discarded: a failed
-# endpoint prints nothing, `jq` reads empty input, and `jq` on empty input
-# produces no output and exits 0 — so the answer was "" with status 0.
-_at_err="$TMP/at.err"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-at 7 "$BOT" 2>"$_at_err")"; rc=$?
-{ [ "$rc" -eq 2 ] && [ -z "$out" ]; } \
-    && pass "review-at: an unreadable reviews fetch => 2 with nothing on stdout" \
-    || die "review-at: a failed fetch gave rc=$rc out='$out'"
-grep -q 'reason=unreadable' "$_at_err" \
-    && pass "…and the reason on stderr, where the value's stream is not" \
-    || die "review-at did not name the failure: '$(cat "$_at_err")'"
-# AND THE ORDINARY ANSWER STILL COMES BACK, or a helper that always refused would
-# satisfy every case above.
-mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 41
-printf '[]' > "$TMP/icomments.json"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-01T00:00:00Z' ]; } \
-    && pass "…while a readable one still reports when the review landed" \
-    || die "review-at broke the ordinary answer (rc=$rc out='$out')"
-
-# ── `review-at` FAILS CLOSED ON AN UNREADABLE FETCH ───────────────────────
-# The merge gate orders records against this value, so an empty answer read as
-# "no verdict on this head" lets a signoff recorded for an earlier clean review
-# vouch for a later replies-only one nobody read.
-#
-# THE FETCH WAS NESTED INSIDE THE PARSE, so its status was discarded: a failed
-# reviews endpoint prints nothing, `jq` reads empty input, and `jq` on empty input
-# produces no output and exits 0 — so the answer was "" with status 0. The `||` on
-# the outer substitution took `jq`'s status, and `jq` had succeeded. #113.
-#
-# STDOUT MUST BE EMPTY TOO, not merely the status non-zero: a caller capturing this
-# in a substitution sees the stream, and a reason printed there would be read as a
-# timestamp.
-_at_err="$TMP/at.err"
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS_RC=1 run review-at 7 "$BOT" 2>"$_at_err")"; rc=$?
-[ "$rc" -eq 2 ] \
-    && pass "review-at: an unreadable reviews fetch => 2, not an empty answer" \
-    || die "review-at: a failed fetch gave rc=$rc out='$out'"
-[ -z "$out" ] \
-    && pass "…with nothing on stdout, where a caller would read it as a timestamp" \
-    || die "review-at printed '$out' on a failed fetch"
-grep -q 'reason=unreadable' "$_at_err" \
-    && pass "…and the reason on stderr, where the value's stream is not" \
-    || die "review-at did not name the failure: '$(cat "$_at_err")'"
-# AND THE ORDINARY ANSWER STILL COMES BACK, or a helper that always refused would
-# satisfy all three above.
-mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 41
-out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run review-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && [ "$out" = '2026-01-01T00:00:00Z' ]; } \
-    && pass "…while a readable one still reports when the review landed" \
-    || die "review-at broke the ordinary answer (rc=$rc out='$out')"
+# What they proved is proved below on the subcommand that has a caller: the
+# comment channel, the shape of the value, and every unreadable read. A second,
+# weaker answer to the same question is one a future caller reaches for, which is
+# why it is gone rather than kept for symmetry — the same call `replies-at` got.
 
 # ── a clean pass arrives as a COMMENT, not a review ───────────────────────
 # Codex submits a review only when it has findings. A clean pass is an issue
@@ -795,6 +709,70 @@ out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
+
+# ── `clean-at` — CLEAN, AND WHEN, FROM ONE SNAPSHOT ────────────────────────
+# `record` asked `verdict` and then `review-at`, and a result arriving between
+# them was the one `review-at` timed — so the signoff could carry the time of a
+# verdict nobody proved. The time now comes from the snapshot that proved the
+# verdict clean, so there is no second question to answer differently. #139.
+# ITS OWN STUB, because an earlier case replaced the general one to make a review
+# change between two reads — and a case that inherits that world is asserting
+# about somebody else's fixture.
+cat > "$TMP/bin/gh" <<'CLEANSH'
+#!/usr/bin/env bash
+case "$*" in
+  *"/reviews/"*"/comments"*) [ -n "${GH_COMMENTS_RC:-}" ] && exit "$GH_COMMENTS_RC"
+                             cat "${GH_COMMENTS:-/dev/null}" ;;
+  *"/issues/"*"/comments"*)  cat "${GH_ICOMMENTS:-/dev/null}" ;;
+  *"/reviews"*)              [ -n "${GH_REVIEWS_RC:-}" ] && exit "$GH_REVIEWS_RC"
+                             cat "${GH_REVIEWS:-/dev/null}" ;;
+  *"pr view"*)               printf '%s' "${GH_HEAD:-}" ;;
+  *)                         printf '{}' ;;
+esac
+CLEANSH
+chmod +x "$TMP/bin/gh"
+mk_reviews APPROVED '"2026-03-03T00:00:00Z"' 51
+printf '[]' > "$TMP/comments.json"; printf '[]' > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_COMMENTS="$TMP/comments.json" run clean-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '2026-03-03T00:00:00Z' ]; } \
+    && pass "clean-at: a clean review answers with its own time" \
+    || die "clean-at gave (rc=$rc out='$out')"
+# A CLEAN VERDICT DELIVERED AS A COMMENT CARRIES ITS TIME TOO, since that is the
+# record the snapshot selected.
+#
+# THE NEWLINES ARE ESCAPED FOR JSON, NOT FOR `printf`. Written as a real newline
+# inside a JSON string this is a parse error, and the helper then answers
+# `unreadable` — so the case would fail for a reason that has nothing to do with
+# the channel it exists to test.
+_cleanicb="I didn't find any major issues.\\n\\n**Reviewed commit:** \`${HEAD40:0:10}\`\\n"
+printf '[{"id":9001,"user":{"login":"%s"},"created_at":"2026-04-04T00:00:00Z","body":"%s"}]' \
+    "$BOT" "$_cleanicb" > "$TMP/icomments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_COMMENTS="$TMP/comments.json" run clean-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && [ "$out" = '2026-04-04T00:00:00Z' ]; } \
+    && pass "…and a clean verdict delivered as a comment answers with that comment's time" \
+    || die "clean-at ignored the comment channel (rc=$rc out='$out')"
+# A HEAD WITH FINDINGS IS 1, NOT AN ERROR AND NOT A TIME.
+printf '[]' > "$TMP/icomments.json"
+printf '[{"user":{"login":"%s"},"id":9001,"body":"x","created_at":"2026-01-05T00:00:00Z"}]' "$BOT" \
+    > "$TMP/comments.json"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
+        GH_COMMENTS="$TMP/comments.json" run clean-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && [ -z "$out" ]; } \
+    && pass "…while a head with findings answers 1 with nothing on stdout" \
+    || die "clean-at on a findings head gave (rc=$rc out='$out')"
+# AND AN UNREADABLE FETCH IS 2, with nothing on stdout.
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_REVIEWS_RC=1 \
+        run clean-at 7 "$BOT" 2>&1)"; rc=$?
+{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+    && pass "…and an unreadable reviews fetch is 2" \
+    || die "clean-at on an unreadable fetch gave (rc=$rc out='$out')"
+out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_REVIEWS_RC=1 \
+        run clean-at 7 "$BOT" 2>/dev/null)"
+[ -z "$out" ] \
+    && pass "…with nothing on stdout, which a substitution would have captured" \
+    || die "the unreadable answer printed '$out'"
 
 # ── `escape-snapshot` — ONE RESPONSE, NOT A PROTOCOL OVER TWO ──────────────
 # The escape has to know which review it is, that its comments are all replies,
