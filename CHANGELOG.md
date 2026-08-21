@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.50] — 2026-08-21
+
+- **A poisoned `PATH` is settled as a boundary, not left open as a defect.** The
+  comment in `pr-origin.sh` said the case was *filed*; it now records the decision
+  and its reasoning, so the next reader does not go looking for the fix that is
+  coming.
+
+  What it records: privileged startup stops `BASH_ENV`, stops imported functions
+  and ignores `SHELLOPTS`, and does **not** sanitise `PATH` — nothing here can.
+  `command -p` searches a default path holding the *standard* utilities, and
+  neither `git` nor `gh` is one. A fixed list has to know where the operator's
+  binaries live, which is the question `PATH` exists to answer. And "this `PATH`
+  looks wrong" is unknowable, because a prepended directory is what a version
+  manager does on every developer machine.
+
+  So the loop trusts the `PATH` of the shell it was started from, exactly as it
+  trusts that shell not to have run a hook before the first line — nothing inside
+  a process can tell the honest version of something it inherited. The misreading
+  it prevents is the one the issue was filed to prevent: **a `PATH` check in one
+  helper is a defect rather than a fix**, because the other eleven would not have
+  it.
+
+  Both reviewer files carry the statement verbatim, pinned by the contract test,
+  so a reviewer raising it against one script has an answer. Closes #91.
+
 ## [2.0.49] — 2026-08-21
 
 - **"Is it clean" and "when did it land" are one question now.** `record` asked

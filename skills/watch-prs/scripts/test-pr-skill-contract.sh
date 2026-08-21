@@ -3832,6 +3832,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
     case "$name" in
         AGENTS.md)
             req_clauses=(
+                '**The loop trusts the `PATH` of the shell it was started from**'
+                'A `PATH` check in one helper is a defect, not a fix'
                 'the input or state that triggers it** — the concrete case, not the category'
                 '**the consequence** — what ends up wrong, in terms of what this tool does'
                 'The author is expected to assert the consequence in a test, and can only do that if you state it'
@@ -3843,6 +3845,8 @@ for doc in "$SCRIPT_DIR/../../../AGENTS.md" "$SCRIPT_DIR/../../../.github/copilo
             ) ;;
         copilot-instructions.md)
             req_clauses=(
+                '**The loop trusts the `PATH` of the shell it was started from**'
+                'A `PATH` check in one helper is a defect, not a fix'
                 'Include the input or state that triggers it — **the concrete case, not the category**'
                 'the **consequence** in terms of what this tool does'
                 'the author is expected to assert that consequence in a test'

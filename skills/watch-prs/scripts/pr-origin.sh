@@ -483,5 +483,14 @@ exit 0
 # `PATH` — readonly, so the hook's own shell cannot undo it — supplies a forged
 # `git` here and a forged `gh` in every other helper. It is not specific to the
 # origin read, and a defence belonging to one helper would be the narrow guard
-# this repository keeps having to delete. Filed as #91, with the three candidate
-# fixes and why each trades a hostile-shell exposure for routine breakage.
+# this repository keeps having to delete.
+#
+# SETTLED IN #91, AND NOT AS A FIX: `command -p` searches a default path holding
+# the STANDARD utilities, and neither `git` nor `gh` is one; a fixed list has to
+# know where the operator's binaries live, which is what `PATH` answers; and a
+# prepended directory is what a version manager does on every machine, so "wrong"
+# is unknowable. The loop trusts the `PATH` of the shell it was started from, as
+# it trusts that shell not to have run a hook first — nothing inside a process can
+# tell the honest version of something it inherited. `CLAUDE.md` § the helpers are
+# started privileged carries the statement, and both reviewer files carry it
+# verbatim, so nobody builds the narrow version here.

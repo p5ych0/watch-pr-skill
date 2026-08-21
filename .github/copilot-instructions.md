@@ -263,7 +263,18 @@ Two things are still worth raising, and they are the stated exceptions:
   words (`[[`, `if`), assignments and expansions are the answer, and #102 tracks
   what remains;
 - a poisoned `PATH` forges the external commands a privileged shell still calls.
-  That is #91 and is out of scope for a finding on any individual file.
+  **That is settled, and it is not a finding on any file.** Privileged startup
+  stops `BASH_ENV`, stops imported functions and ignores `SHELLOPTS`; it does not
+  sanitise `PATH`, and nothing here can. `command -p` searches a default path
+  guaranteed to hold the *standard* utilities, and neither `git` nor `gh` is one.
+  A fixed list has to know where the operator's binaries live, which is the
+  question `PATH` exists to answer. And "this `PATH` looks wrong" is unknowable:
+  a prepended directory is what a version manager does on every developer
+  machine. **The loop trusts the `PATH` of the shell it was started from**, the
+  same way it trusts that shell not to have run a hook before the first line. A
+  `PATH` check in one helper is a defect, not a fix — the other eleven would not
+  have it, and the narrow guard is what this repository keeps having to delete.
+  #91.
 
 **A shadowed `type` inside `rb_load` is accepted, not a finding.** The loader
 verifies the symbol it just loaded with `type -t`, and there is no name-free way
