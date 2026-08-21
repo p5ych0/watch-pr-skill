@@ -28,21 +28,33 @@
   quoted one changes nothing, and refusing it there would forbid a PR description
   that quotes the loop.
 
-  The body now arrives on **stdin**. It was going to be a file, which meant
-  `cat > "$FILE" <<EOF` in `SKILL.md` — whose bash runs in your own shell, where
-  `cat` is a *name*: a function by that name receives the heredoc and writes
-  whatever it likes to the redirection, so the account posted would be the
-  function's text rather than yours, and one that writes nothing and succeeds
-  stops a request that was fine. A heredoc redirected straight into the command is
-  a redirection the parser handles — there is no name in it to take, no write to
-  check, and no file left over from a previous round to post as this one's.
+  **The account never passes through your shell.** Writing it there would need
+  `cat` or `printf`, and `SKILL.md`'s bash runs in your own long-lived shell where
+  both are *names*: a function by either name receives the text and writes
+  whatever it likes to the redirection, so the account validated and posted would
+  be the function's, and one that writes nothing and succeeds stops a request that
+  was fine. Carrying it in a heredoc instead is no better — a heredoc splices the
+  account into shell source, so an account containing a line that is exactly the
+  delimiter *ends* it and whatever follows is parsed by that shell, and `EOF` is a
+  line this loop's own accounts quote out of a diff or a finding. A rarer
+  delimiter narrows that without closing it, because the body is not known when
+  the delimiter is chosen. So the session writes the file with its own file tool,
+  which goes through no shell at all, and redirects it into the helper on stdin.
+
+  **And no writable name carries the answer back.** The helper is run as a plain
+  condition with its output redirected to a file, rather than captured into a
+  variable: written as an assignment, a startup file that has already made that
+  name readonly makes the assignment fail, which abandons the `if` without either
+  branch running — so a request that was refused is followed by a wait for it. The
+  same applies to the status, which is why there is no `REQ_RC`, and to the
+  validator, which is a literal pattern rather than a variable holding one.
 
   Two smaller things came with it. The review mode is refused **by name** —
   `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
   truthiness test silently took the manual path and posted a mention into an
-  automatic-review repository. And the baseline the watch is given comes back on
-  stdout alone, printed *after* the post, so a request that stopped leaves nothing
-  to read as a baseline for a request that was never made.
+  automatic-review repository. And the baseline the watch is given is written
+  *after* the post, so a request that stopped leaves nothing to read as a baseline
+  for a request that was never made.
 
 ## [2.0.50] — 2026-08-21
 

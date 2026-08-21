@@ -1643,7 +1643,7 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
 # AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
@@ -1668,6 +1668,39 @@ _rb_cat_n="$(grep -c 'cat > "\$SUMMARY_FILE"' "$SKILL")"
 grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
     && die "the opening request takes its body from a heredoc; an account containing the delimiter would end it and the rest would be parsed as shell" \
     || pass "…and its body is never spliced into shell source"
+# AND THE OPENING ACCOUNT DOES NOT SHARE THE ROUND-SUMMARY FILE. A first round
+# whose summary write did not happen would otherwise find the opening account
+# still there — non-empty, well-formed and about the right PR — and
+# `pr-close-round.sh` would post it as the round summary and request the next
+# pass instead of refusing to close.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE"' "$SKILL" \
+    && die "the opening account is written into the round-summary file; a first round that fails to write its summary would post it as one" \
+    || pass "…and the opening account has a file of its own"
+# AND NO WRITABLE NAME CARRIES ITS ANSWER BACK. A capture written as
+# `PRIOR_REVIEW="$(helper …)"` inside the condition is an ASSIGNMENT, and a
+# startup file that has already made that name readonly makes it fail — which
+# abandons the `if` with NEITHER branch running, so a refused request falls
+# through into the wait. A plain command with its output redirected has no
+# assignment to fail. Same question, same answer as `pr-origin.sh`: a path rather
+# than a name.
+grep -q 'if ! PRIOR_REVIEW=' "$SKILL" \
+    && die "the request's answer is captured into a variable in the condition; a readonly name there abandons the if with neither branch running" \
+    || pass "…and its answer comes back in a file, not a name"
+# AND ITS VALIDATOR IS A LITERAL. A pattern held in a variable is a second name a
+# startup file can seed readonly, and a seeded pattern accepting a seeded value is
+# a check that agrees with itself.
+grep -q 'RX_PRIOR' "$SKILL" \
+    && die "the baseline is validated against a pattern held in a variable; use a literal" \
+    || pass "…and is validated against a literal pattern"
+# AND THE READ-BACK IS PROVEN AGAINST THE FILE. `CLAUDE.md` says to prove an
+# assignment by reading the variable back, and the usual difficulty is that
+# nothing else knows what the value should have been. Here the file does: if the
+# name was already readonly the assignment fails and the two disagree, which is
+# the one case a pattern check on the variable alone cannot see — the helper
+# SUCCEEDED and the baseline is somebody else's.
+grep -qF 'if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then' "$SKILL" \
+    && pass "…and the read-back is proven against the file it came from" \
+    || die "the baseline is not proven against the file; a readonly PRIOR_REVIEW keeps its own value silently"
 # AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
 # lost twice: with `errexit` on, a documented refusal ends the shell at the
 # assignment before anything reads it; without it, a startup file that has already
@@ -1677,7 +1710,7 @@ grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
 grep -q '^[^#]*REQ_RC=' "$SKILL" \
     && die "the opening request's status goes through a variable; take it at the invocation" \
     || pass "…and its status is taken at the invocation, with no variable to seed"
-grep -q 'if ! PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
+grep -q 'if ! /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 

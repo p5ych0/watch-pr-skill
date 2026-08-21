@@ -287,7 +287,9 @@ Then:
    passes through your shell — where writing it would need `cat` or `printf`, both
    names that shell can replace, and carrying it in a heredoc would let an account
    containing a line equal to the delimiter end it and have the rest parsed as
-   shell. The loop is *phased*:
+   shell. The answer comes back in a file for the same reason: a variable is a
+   name, and one your startup files have already made readonly would make the
+   capture fail silently. The loop is *phased*:
    Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
    Running both every round buys a Copilot pass on every intermediate commit and
    mixes its findings into rounds that were not about them.

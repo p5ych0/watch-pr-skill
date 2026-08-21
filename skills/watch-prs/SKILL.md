@@ -673,6 +673,26 @@ SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
     || { echo "ABORT: could not create the round-summary file"; exit 1; }
 [ -f "$SUMMARY_FILE" ] && [ ! -s "$SUMMARY_FILE" ] \
     || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
+# THE OPENING ACCOUNT GETS ITS OWN FILE, not the round-summary one. Sharing them
+# meant that a first round whose summary write did not happen left the OPENING
+# account sitting there — non-empty, well-formed, and about the right PR — so
+# `pr-close-round.sh` posted it as the round summary and requested the next pass
+# instead of refusing to close. The round-summary file has to be empty until that
+# round writes it, and that is only true if nothing else writes it.
+REQUEST_FILE="$(mktemp -t "watch-pr-N-req-XXXXXX.md")" \
+    || { echo "ABORT: could not create the request-body file"; exit 1; }
+[ -f "$REQUEST_FILE" ] && [ ! -s "$REQUEST_FILE" ] \
+    || { echo "ABORT: the request-body file was not created empty"; exit 1; }
+# AND THE BASELINE COMES BACK IN A FILE, not in a variable. `pr-origin.sh` settled
+# the same question the same way: a path rather than a name. A capture written as
+# `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a startup file that has
+# already made that name readonly makes it fail — which abandons the `if` without
+# either branch running, so a refusal falls through into the wait. A plain command
+# with its output redirected has no assignment to fail.
+PRIOR_FILE="$(mktemp -t "watch-pr-N-prior-XXXXXX.txt")" \
+    || { echo "ABORT: could not create the review-baseline file"; exit 1; }
+[ -f "$PRIOR_FILE" ] && [ ! -s "$PRIOR_FILE" ] \
+    || { echo "ABORT: the review-baseline file was not created empty"; exit 1; }
 # ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
 #
 # `REVIEW_BUS_REMOTE` is what every helper inherits, and every post is addressed
@@ -916,13 +936,13 @@ WHO="$CODEX_BOT"
 #        path, where the trigger preceded us and there is nothing to capture
 #     1  stopped — nothing was posted
 #
-# WRITE THE ACCOUNT INTO `$SUMMARY_FILE` WITH YOUR FILE-WRITING TOOL, not from
-# this shell: one paragraph on what this change does and what to look at. It is
-# inserted as DATA, so prose quoting a command line is posted rather than
-# executed — but a line reproducing one of the markers the loop reads as a record
-# CREATES that record, because this is posted under your identity, and on the
-# automatic path a quoted `@codex review` queues a second pass over the same
-# head. The script refuses both rather than publishing them.
+# WRITE THE ACCOUNT INTO `$REQUEST_FILE` WITH YOUR FILE-WRITING TOOL, not from
+# this shell and NOT into `$SUMMARY_FILE`: one paragraph on what this change does
+# and what to look at. It is inserted as DATA, so prose quoting a command line is
+# posted rather than executed — but a line reproducing one of the markers the loop
+# reads as a record CREATES that record, because this is posted under your
+# identity, and on the automatic path a quoted `@codex review` queues a second
+# pass over the same head. The script refuses both rather than publishing them.
 #
 # THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE. A
 # heredoc splices it in: an account containing a line that is exactly the
@@ -932,24 +952,21 @@ WHO="$CODEX_BOT"
 # the body is not known when the delimiter is chosen. And writing the file from
 # here needs a command — `cat`, `printf` — which is a NAME your shell can replace,
 # so the account validated and posted would be the function's text. Your file tool
-# is neither: it does not go through this shell at all. `$SUMMARY_FILE` was
+# is neither: it does not go through this shell at all. `$REQUEST_FILE` was
 # created empty at setup and the script refuses an empty body, so a write that
 # does not happen stops the request rather than posting nothing as this PR's
 # account.
 #
-# THE STATUS IS TAKEN AT THE INVOCATION, WITH NO VARIABLE TO HOLD IT. Written as
-# `…; REQ_RC=$?` it is lost twice over: with `errexit` on — this block is pasted
-# into such a shell as often as it is typed — a documented refusal ends the shell
-# at the assignment before anything can read the status, and without it a startup
-# file that has already made `REQ_RC` readonly `0` leaves the assignment failing
-# silently at the benign value, so a request that never happened is followed by a
-# wait for it. A command run as a CONDITION is exempt from `errexit`, and there is
-# no status variable left to seed.
-#
-# THE BASELINE IS THE ONE VALUE THAT OUTLIVES THIS STEP, and a child cannot
-# assign a variable here — so it comes back on stdout ALONE, with every reason on
-# stderr. Step 3's watch is given it.
-if ! PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE")"; then
+# NOTHING HERE IS AN ASSIGNMENT, AND THAT IS THE SHAPE. Written as
+# `PRIOR_REVIEW="$(…)"` — inside the `if` or beside a `; REQ_RC=$?` — the capture
+# is an assignment, and a startup file that has already made either name readonly
+# makes it FAIL: with `errexit` on that ends your shell before any status is read,
+# and without it the `if` is abandoned with NEITHER branch running, so a refused
+# request falls straight through into the wait for a review nobody asked for. A
+# plain command run as a CONDITION has no assignment to fail and is exempt from
+# `errexit`, and its answer goes to a FILE — a path rather than a name, which is
+# how `pr-origin.sh` settled the same question.
+if ! /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
     echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
     exit 0
     # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
@@ -958,21 +975,36 @@ if ! PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "
     # that sends the driver into a wait for a review nobody asked for.
     [[ -n "" ]]
 fi
-# AND THE VALUE IS READ BACK, BY MODE. The two paths have different correct
-# answers — an id on the manual path, EMPTY on the automatic one, where the
-# trigger preceded us — so one pattern accepting both accepts a lost value as the
-# automatic path's answer. Read back rather than assumed because a readonly
-# `PRIOR_REVIEW` in your shell makes the assignment above fail, which abandons the
-# `if` without either branch running: this check is what that falls into.
-RX_PRIOR='^[0-9]+$'
-if [[ $AUTO_REVIEW = yes ]]; then
-    RX_PRIOR='^$'
-fi
-if ! [[ $PRIOR_REVIEW =~ $RX_PRIOR ]]; then
-    echo "ABORT: the baseline read back as '$PRIOR_REVIEW', which is not what auto-review=$AUTO_REVIEW produces; do not enter the wait step."
+PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+# AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
+# against. `CLAUDE.md` says to prove an assignment by reading the variable back,
+# and the usual difficulty is that nothing else knows what the value should have
+# been — a readonly name simply keeps whatever it held. The file does know. If
+# this name was already readonly the assignment fails and the two disagree, which
+# is the one case a `case` on the variable alone cannot see: the helper SUCCEEDED
+# and the baseline is somebody else's.
+if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
+    echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
     exit 0
     [[ -n "" ]]
 fi
+# AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is nothing to
+# capture because the trigger preceded us; on the manual path Codex has usually
+# not reviewed this head at all yet, which is the ordinary FIRST request — so
+# `review-id` succeeds with an empty value and a digits-only test would abort
+# after the request had already been posted. What is refused is a value that is
+# not a review id.
+#
+# THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a validator
+# in a variable is a second name a startup file can seed readonly, and a seeded
+# pattern accepting a seeded value is a check that agrees with itself. `case` is a
+# reserved word, so nothing can take its place either.
+case "$PRIOR_REVIEW" in
+    *[!0-9]*)
+        echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
+        exit 0
+        [[ -n "" ]] ;;
+esac
 ```
 
 Either way the wait step is next: with auto-review on there is a pass in flight

@@ -96,6 +96,16 @@ bodies | grep -qF 'A one-paragraph account' \
     && pass "…as ONE comment" \
     || die "the manual path posted $(grep -c '^gh ' "$TMP/calls") comments"
 
+# AND ON THE MANUAL PATH AN EMPTY BASELINE IS AN ANSWER, NOT A FAILURE. This is
+# the ORDINARY first request: Codex has not reviewed this head yet, so
+# `review-id` succeeds with an empty value. Treating that as unusable aborts
+# AFTER the request has been posted, leaving a pass in flight that nobody waits
+# for — which is what a digits-only check in the driver did.
+world; : > "$W/prior.out"; rc="$(run 7 no)"
+{ [ "$rc" = 0 ] && [ -z "$(stdout)" ] && posted; } \
+    && pass "…and an empty baseline on the manual path is posted and reported, not refused" \
+    || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
+
 # ── THE AUTOMATIC PATH HAS NO BASELINE, AND ASKS FOR NONE ──────────────────
 # `--after-review` on the initial automatic pass can capture the very review
 # being waited for: the trigger preceded this loop. So there is nothing to read,
