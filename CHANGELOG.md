@@ -32,9 +32,9 @@
   that same readonly makes the assignment fail outright, so the comparison is
   never reached.
 
-  `RB_TRY` gets the comparison too. It is the fourth copy of a rule that has to be
-  identical in all four, and this repository's field checks have each been found
-  missing from at least one copy.
+  `RB_TRY` is the fourth site and keeps the subshell it got in 2.0.52 without the
+  comparison: it is pre-existing here, so the transforming-attribute gap is filed
+  as its own change rather than folded into this one.
 
   `RB_TRY` was the fourth and was fixed in 2.0.52, which is where the measurement
   came from. The pin proof's own probe is deliberately unchanged: it is an

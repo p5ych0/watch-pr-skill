@@ -512,6 +512,8 @@ LOCAL
     # assignment fail outright and the comparison inside is never reached. That
     # comparison is what catches the other half — a TRANSFORMING attribute such as
     # `declare -i`, where the assignment succeeds and stores something else. #148.
+    # `RB_TRY` has the subshell but not that comparison; it is a pre-existing site
+    # and the gap is #150.
     _rp2_rc=0
     _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
         TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1751,7 +1753,10 @@ grep -q '^PRIOR_REVIEW=probe-' "$SKILL" \
     && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
 
-# …AND ALL THREE PROBES ARE RUN, not only matched. What the change claims is that
+# …AND TWO OF THE THREE ARE RUN, not only matched. `PRIOR_REVIEW` is not among
+# them and that is stated rather than implied: exercising it means POSTING a
+# request, so what it shares with these two is the rule, and the rule is what
+# these runs prove. What the change claims is that
 # a readonly or transforming name reaches setup's NAMED refusal instead of ending
 # the operator's shell at a bare assignment, and neither half is visible in the
 # text. Reverting any of these sites to the old shape has to turn something red.
@@ -1760,8 +1765,17 @@ grep -q '^PRIOR_REVIEW=probe-' "$SKILL" \
 # the pin's success arm, so it comes out with that arm; the probe under test is
 # the first thing in it and every refusal below it is unreachable once the probe
 # refuses, which is what makes the case self-contained.
+# A SCRATCH DIRECTORY THAT CANNOT BE MADE IS A FAILURE, NOT A SKIP. Converted to
+# an empty value and guarded, an unusable `TMPDIR` let this file finish
+# `RESULT: PASS` having exercised neither probe — unavailable infrastructure
+# reported as successful coverage, which is the fail-open shape this repository
+# forbids. The guard stays as well, because the probe at the end of this file
+# re-runs everything with `mktemp` stubbed, where an unguarded path under an empty
+# variable writes to `/parent`.
 _rb_pb=""
 _rb_pb="$(mktemp_d)" || _rb_pb=""
+{ [ -n "$_rb_pb" ] && [ -d "$_rb_pb" ]; } \
+    || die "no scratch directory for the setup-probe cases; neither probe was exercised"
 if [ -n "$_rb_pb" ] && [ -d "$_rb_pb" ]; then
 mkdir -p "$_rb_pb/parent"
 awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
@@ -2277,7 +2291,7 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # `errexit` exemption comes from too, a command run as a condition being exempt —
 # and whose success arm is the rest of the candidate, so a shadowed `continue`
 # has nothing to walk past. #146.
-_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a; \[\[ $RB_TRY = probe-a \]\] ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
 { [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
     && pass "the transport candidate is probed in a subshell before its path is built" \
