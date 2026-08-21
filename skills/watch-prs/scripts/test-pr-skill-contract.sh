@@ -1637,9 +1637,116 @@ fi
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review' "$SKILL" \
+#
+# THE POST MOVED INTO `pr-request-review.sh` (#144, under #26), and with it the
+# branch on whether it succeeded — where `test-pr-request-review.sh` EXECUTES
+# both failure paths rather than matching their text. What stays asserted here is
+# the driver's half: the status has to be taken and refused on before the wait
+# step, or a stopped request is followed by a poll for a review nobody asked for.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"' "$SKILL" \
+    && pass "the opening request is made through the helper the suite covers" \
+    || die "the initial Codex request is not made through pr-request-review.sh"
+# AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
+# the operator's shell, where `cat` is a NAME: a function by that name receives
+# the heredoc and writes what it likes to the redirection, so the account posted
+# would be the function's text — and one that writes nothing and succeeds stops a
+# request that was fine. `CLAUDE.md`: prefer REMOVING the dependency over guarding
+# it. Counted rather than forbidden outright, because the Copilot phase still
+# writes a file this way and that block is its own extraction; what must not
+# happen is a SECOND one appearing here.
+_rb_cat_n="$(grep -c 'cat > "\$SUMMARY_FILE"' "$SKILL")"
+[ "$_rb_cat_n" -le 1 ] \
+    && pass "…with its body redirected in, so no shadowable name writes it" \
+    || die "SKILL.md writes a body with cat $_rb_cat_n times; the opening request takes its body on stdin"
+# AND THE BODY IS NOT SPLICED INTO SHELL SOURCE AT ALL. A heredoc puts it there,
+# and an account containing a line that is exactly the delimiter ENDS the
+# heredoc — whatever follows is then parsed by the operator's long-lived shell.
+# `EOF` is a line this loop's own accounts quote, out of a diff or a finding, and
+# a rarer delimiter narrows that without closing it: the body is not known when
+# the delimiter is chosen. The driver's file tool writes the file instead, which
+# does not go through that shell.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
+    && die "the opening request takes its body from a heredoc; an account containing the delimiter would end it and the rest would be parsed as shell" \
+    || pass "…and its body is never spliced into shell source"
+# AND THE OPENING ACCOUNT DOES NOT SHARE THE ROUND-SUMMARY FILE. A first round
+# whose summary write did not happen would otherwise find the opening account
+# still there — non-empty, well-formed and about the right PR — and
+# `pr-close-round.sh` would post it as the round summary and request the next
+# pass instead of refusing to close.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" < "$SUMMARY_FILE"' "$SKILL" \
+    && die "the opening account is written into the round-summary file; a first round that fails to write its summary would post it as one" \
+    || pass "…and the opening account has a file of its own"
+# AND NO WRITABLE NAME CARRIES ITS ANSWER BACK. A capture written as
+# `PRIOR_REVIEW="$(helper …)"` inside the condition is an ASSIGNMENT, and a
+# startup file that has already made that name readonly makes it fail — which
+# abandons the `if` with NEITHER branch running, so a refused request falls
+# through into the wait. A plain command with its output redirected has no
+# assignment to fail. Same question, same answer as `pr-origin.sh`: a path rather
+# than a name.
+grep -q 'if ! PRIOR_REVIEW=' "$SKILL" \
+    && die "the request's answer is captured into a variable in the condition; a readonly name there abandons the if with neither branch running" \
+    || pass "…and its answer comes back in a file, not a name"
+# AND ITS VALIDATOR IS A LITERAL. A pattern held in a variable is a second name a
+# startup file can seed readonly, and a seeded pattern accepting a seeded value is
+# a check that agrees with itself.
+grep -q 'RX_PRIOR' "$SKILL" \
+    && die "the baseline is validated against a pattern held in a variable; use a literal" \
+    || pass "…and is validated against a literal pattern"
+# AND THE READ-BACK IS PROVEN AGAINST THE FILE. `CLAUDE.md` says to prove an
+# assignment by reading the variable back, and the usual difficulty is that
+# nothing else knows what the value should have been. Here the file does: if the
+# name was already readonly the assignment fails and the two disagree, which is
+# the one case a pattern check on the variable alone cannot see — the helper
+# SUCCEEDED and the baseline is somebody else's.
+grep -qF 'if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then' "$SKILL" \
+    && pass "…and the read-back is proven against the file it came from" \
+    || die "the baseline is not proven against the file; a readonly PRIOR_REVIEW keeps its own value silently"
+# AND NO STATUS VARIABLE HOLDS ITS ANSWER. Written as `…; REQ_RC=$?` the status is
+# lost twice: with `errexit` on, a documented refusal ends the shell at the
+# assignment before anything reads it; without it, a startup file that has already
+# made the name readonly `0` leaves the assignment failing silently at the benign
+# value, and a request that never happened is followed by a wait for it. A command
+# run as a condition is exempt from `errexit`, and there is no name left to seed.
+grep -q '^[^#]*REQ_RC=' "$SKILL" \
+    && die "the opening request's status goes through a variable; take it at the invocation" \
+    || pass "…and its status is taken at the invocation, with no variable to seed"
+# THE CONTINUATION IS THE `then` BRANCH, which is structural rather than a
+# refusal. `exit` is a builtin a startup file can replace with one that RETURNS,
+# so an abort arm prints and carries straight on — into the read-back, and from
+# there into the wait for a review that was never requested. Ending the arm in a
+# reserved word makes the LIST report non-zero, which nothing there reads. What
+# holds is that the work sits inside the branch a refusal does not take.
+grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
+grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
+    && pass "…and the read-back is inside that branch, not after it" \
+    || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
+# AND THE NAME IT READS INTO IS PROVEN ASSIGNABLE BEFORE THE REQUEST GOES OUT.
+# That read-back is a simple command: with `errexit` on and `PRIOR_REVIEW` already
+# readonly it fails and ends the shell — after the request has been POSTED, so the
+# pass is in flight and no watch is ever armed. Nothing after a mutation can undo
+# that; the question has to be asked before it, where the same failure costs a
+# stop and nothing else. Two unequal values, since one leaves a name pre-seeded
+# with exactly it looking assignable.
+_rb_prp_n=0
+grep -c 'PRIOR_REVIEW=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_prp_n="$(grep -c 'PRIOR_REVIEW=probe-[ab]$' "$SKILL")"
+_rb_prp_ln="$(grep -n 'PRIOR_REVIEW=probe-b$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
+{ [ "$_rb_prp_n" = 2 ] && [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
+    && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
+    || die "PRIOR_REVIEW is not probed before the request ($_rb_prp_n probes, probe=$_rb_prp_ln request=$_rb_req_ln)"
+# AND THE REQUEST IS THE PROBES' SUCCESS ARM, not a statement after them. Written
+# as standalone guards they detect the readonly name and then cannot act on it —
+# `exit` is a builtin a startup file can replace with one that RETURNS, and a
+# trailing reserved word only gives the `if` a false status nothing consumes, so
+# execution reached the request and posted it anyway.
+grep -q '^if { \[\[ $PRIOR_REVIEW = probe-a \]\]' "$SKILL" \
+    && pass "…and the probes are one condition whose success arm holds the request" \
+    || die "the PRIOR_REVIEW probes are standalone guards; a shadowed exit walks past them into the request"
+grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
+    && pass "…with the request nested inside it" \
+    || die "the request is not nested inside the probes' success arm"
 
 
 # ── the round summary and the review request are ONE comment ───────────────
@@ -1823,11 +1930,18 @@ rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB
 # In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
 # inherited `onecmd` would stop a `-c` script after one command and the probe
 # would measure the truncation instead of the lookup.
-_rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
+# THE PATH TRAVELS, NOT THE BODY. `SKILL.md` passed through the environment as a
+# single value, and Linux caps ONE environment string at 128 KiB — the document
+# reached that in this PR, and `env` then failed with 126, which `set -e` turned
+# into a silent stop of this whole file after 150 assertions. The child reads the
+# file itself with `$(<…)`, a redirection rather than a name, so the probe still
+# proves what it was written to prove.
+_rb_forged="$(env -u SHELLOPTS RB_SKILL_PATH="$SKILL" bash -c '
     printf() { builtin printf "%s\n" 999; }
     awk() { builtin printf "%s\n" 999; }
     grep() { builtin printf "%s\n" 999; }
     sed() { builtin printf "%s\n" 999; }
+    RB_SKILL_BODY="$(<"$RB_SKILL_PATH")"
     '"$(declare -f rb_line_of)"'
     rb_line_of "AUTO_REVIEW=no"
     # Restored only to REPORT the answer: the lookup itself has already run, and
@@ -1840,8 +1954,14 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
-grep -q 'if \[ "\$AUTO_REVIEW" = "yes" \]; then' "$SKILL" \
-    && pass "…and the initial request branches on it" \
+# THE BRANCH IS THE HELPER'S NOW (#144, under #26), so what the driver must do
+# is HAND IT OVER: a mode established here and not passed on leaves the helper
+# with no way to tell the two orderings apart, and it has no default — every
+# unrecognised value is refused by name, which `test-pr-request-review.sh`
+# executes. Asserted as the argument rather than as the branch, because the
+# branch is somewhere the suite can run it.
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <' "$SKILL" \
+    && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 
 # ── the numbered checklist does not push ──────────────────────────────────
@@ -2040,12 +2160,68 @@ grep -qF "cat > \"\$SUMMARY_FILE\" <<'EOF' || {" "$SKILL" \
     && grep -q 'ABORT: could not write the phase body' "$SKILL" \
     && pass "the phase body write is branched on before the script is asked to read it" \
     || die "the phase summary is written without checking the write"
-grep -q 'ABORT: could not create the round-summary file' "$SKILL" \
-    && pass "the summary file's creation is branched on" \
+grep -q "ABORT: could not create the session's working directory" "$SKILL" \
+    && pass "the working directory's creation is branched on" \
     || die "mktemp is unchecked; a failed create still yields a path"
-grep -q 'ABORT: the round-summary file was not created empty' "$SKILL" \
-    && pass "…and the created file is validated as new and empty" \
+grep -q "ABORT: the session's working files were not created empty" "$SKILL" \
+    && pass "…and each created file is validated as present and empty" \
     || die "the summary file is used without validating what was created"
+# AND THE COMPLETION LINE IS THAT VALIDATION'S SUCCESS ARM, not a statement after
+# it. `exit` is a builtin a startup file can replace with one that RETURNS, so an
+# allocation that refused still reached the pin block below it and reported a
+# finished setup naming paths that were unset or somebody else's. Position guards
+# what follows a failure; only containment guards what follows a failure that
+# could not stop the shell.
+_rb_done_ln="$(grep -n 'echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || true
+_rb_empty_ln="$(grep -n "ABORT: the session's working files were not created empty" "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_rb_done_ln" ] && [ -n "$_rb_empty_ln" ] && [ "$_rb_done_ln" -lt "$_rb_empty_ln" ]; } \
+    && pass "…and setup's completion line is that check's success arm, which a refusal cannot reach" \
+    || die "the completion line is not inside the working-file check (done=$_rb_done_ln empty=$_rb_empty_ln)"
+# AND THERE IS NO `mktemp` LEFT TO SHADOW. Three calls were three separate
+# answers, and `mktemp` is a NAME: a function returning the same existing empty
+# path each time passes every validation and leaves all three paths ALIASED — so
+# writing the opening account populates the round-summary file, and a first round
+# that missed its own summary write posts that account as the summary. The
+# directory is built by expansion and created with `mkdir`, which is the
+# exclusion, and the three suffixes are literals under it — nothing a command
+# returns can make two of them equal. Same answer the transport directory above
+# already gives.
+_rb_mk_n=0
+grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
+[ "$_rb_mk_n" = 0 ] \
+    && pass "…from a directory built by expansion, with no mktemp to shadow" \
+    || die "SKILL.md allocates a working path with mktemp; a shadowed one aliases two of them"
+grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
+    && pass "…under the parent the transport read already proved usable" \
+    || die "the working directory is not built under the proven parent"
+# AND THE NAME IS PROVEN ASSIGNABLE FIRST, WITH TWO VALUES. The shape check on the
+# built path matches a PREFIX, and a readonly value such as
+# `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while naming a
+# directory under a parent nothing proved — `mkdir` resolves the `..`, and another
+# account owning that parent could replace the directory and with it the account
+# this session posts and the baseline it waits on. One probe value cannot see it
+# either: a name pre-seeded with exactly that value leaves the postcondition
+# holding. Two that differ can, since a readonly cannot equal both — the probe the
+# transport parent above already uses.
+# COUNTED WHEREVER THEY SIT. The second probe is inside the allocation condition
+# now, so it is neither at the start of a line nor the only thing on it — an
+# anchored pattern found one and reported the probe missing.
+_rb_pr_n=0
+grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_pr_n="$(grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL")"
+[ "$_rb_pr_n" = 2 ] \
+    && pass "…with the name proven assignable by two differing probes before the path is built" \
+    || die "RB_WORK_DIR is assigned without the two-value probe ($_rb_pr_n found); a readonly traversal value passes the prefix check"
+grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
+    && pass "…created with mkdir as the exclusion, at mode 700" \
+    || die "the working directory is not created with mkdir -m 700 by path"
+for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE; do
+    grep -q "^[[:space:]]*$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
+        && pass "…and \$$_rb_f is derived from it by a literal suffix" \
+        || die "\$$_rb_f is not derived from the single working directory"
+    grep -q "\[\[ \$$_rb_f = \"\$RB_WORK_DIR/" "$SKILL" \
+        && pass "…and that assignment is read back against the literal" \
+        || die "\$$_rb_f is assigned without proving the assignment arrived"
+done
 
 # ── the watch deadline is absolute ────────────────────────────────────────
 # Accumulating only the sleeps excluded the time spent inside the probes, so slow
@@ -2345,9 +2521,19 @@ fi
 # ── the automatic path has no pre-request baseline ────────────────────────
 # The trigger preceded the skill, so a lookup can capture the very pass being
 # waited for — and the watch would reject the only terminal review as stale.
+#
+# THE RULE MOVED INTO `pr-request-review.sh` (#144, under #26), where
+# `test-pr-request-review.sh` asserts the concrete outcome — an empty baseline
+# AND no lookup at all — instead of matching an assignment. What is asserted here
+# is that the driver did not keep a second copy: a `PRIOR_REVIEW=` of its own
+# beside the capture would decide the question in the one place nothing executes,
+# and the helper's answer would be overwritten by it.
 grep -q 'PRIOR_REVIEW=""' "$SKILL" \
-    && pass "the automatic-review path waits on any terminal review" \
-    || die "the automatic path captures the in-flight pass as its own baseline"
+    && die "SKILL.md decides the automatic path's baseline itself; that rule lives in pr-request-review.sh, where the suite runs it" \
+    || pass "the baseline is decided once, by the helper the suite runs"
+grep -q 'the trigger preceded us' "$SKILL" \
+    && pass "…and the driver says why that path has none" \
+    || die "the driver does not record why the automatic path carries no baseline"
 
 # ── the checks diagnostic is read with its status ─────────────────────────
 # A `cat` that emitted text containing "no required checks" and then failed would

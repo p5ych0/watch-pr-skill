@@ -1,5 +1,88 @@
 # Changelog
 
+## [2.0.51] — 2026-08-21
+
+- **The opening review request had none of the rules every other posting site
+  has.** It was eighteen lines of shell in `SKILL.md`, in a fenced block nothing
+  executes — not the suite, not `pr-selfcheck.sh`, not the bash 3.2 job — and what
+  those lines do is post the comment that, with automatic review off, *is* the
+  review request. It is now `pr-request-review.sh`, with a fixture that runs it.
+
+  It was also a second, weaker copy of what `pr-close-round.sh` does for every
+  *later* round. That copy refuses a body starting a line with a marker the loop
+  reads back as a record, and a body carrying a mention it did not write itself.
+  The opening request refused neither — so the one body written from scratch,
+  rather than assembled from a round's findings, was the one posted unchecked.
+
+  Both failures are ordinary prose. A paragraph explaining this loop, or quoting a
+  finding about it, that reproduces `**Review-Signoff:**` at the start of a line
+  **creates that signoff**: the comment is posted under your identity, which
+  `pr-signoff.sh` and `pr-round-count.sh` trust. And with automatic review **on** a
+  paragraph quoting `@codex review` — out of an issue, out of a PR description —
+  queues a second pass over the same head, which is the exact duplicate that path
+  exists to avoid: the branch was written and then undone by the body it posted.
+
+  Both rules come from `recordlib.sh`, so there is one definition and three
+  callers rather than three copies. The trigger rule is the automatic path's
+  alone: with automatic review off this script writes the mention itself, so a
+  quoted one changes nothing, and refusing it there would forbid a PR description
+  that quotes the loop.
+
+  **The account never passes through your shell.** Writing it there would need
+  `cat` or `printf`, and `SKILL.md`'s bash runs in your own long-lived shell where
+  both are *names*: a function by either name receives the text and writes
+  whatever it likes to the redirection, so the account validated and posted would
+  be the function's, and one that writes nothing and succeeds stops a request that
+  was fine. Carrying it in a heredoc instead is no better — a heredoc splices the
+  account into shell source, so an account containing a line that is exactly the
+  delimiter *ends* it and whatever follows is parsed by that shell, and `EOF` is a
+  line this loop's own accounts quote out of a diff or a finding. A rarer
+  delimiter narrows that without closing it, because the body is not known when
+  the delimiter is chosen. So the session writes the file with its own file tool,
+  which goes through no shell at all, and redirects it into the helper on stdin.
+
+  **And no writable name carries the answer back.** The helper is run as a plain
+  condition with its output redirected to a file, rather than captured into a
+  variable: written as an assignment, a startup file that has already made that
+  name readonly makes the assignment fail, which abandons the `if` without either
+  branch running — so a request that was refused is followed by a wait for it. The
+  same applies to the status, which is why there is no `REQ_RC`, and to the
+  validator, which is a literal pattern rather than a variable holding one.
+
+  The session's three working files — the round summary, the opening account and
+  the baseline — are derived from **one** directory now, built by expansion and
+  created with `mkdir` as the exclusion, the same answer the transport directory
+  in setup already gives. Three `mktemp` calls were three separate answers, and
+  `mktemp` is a *name*: a function returning the same existing empty path each
+  time passes every validation and leaves all three paths aliased, so writing the
+  opening account would populate the round-summary file — and a first round that
+  missed its own summary write would post that account as the summary and request
+  another pass, which is the regression the separate files exist to prevent.
+  Derived by literal suffixes there is nothing a command could return to make two
+  of them equal.
+
+  The baseline is written **before** the request is posted, and the write's status
+  is taken. `printf` can fail — a full filesystem under the file it is redirected
+  to — and an `exit 0` after it masked that, so the driver read an empty or
+  truncated value as the baseline and the watch would accept the *previous* review
+  as the answer to a request just posted. Taking the status only works while there
+  is something left to refuse with, and after the post there is not. Writing first
+  costs nothing, because the driver reads the file only on success.
+
+  Both baseline shapes are accepted, too: a reviewer's newest verdict arrives
+  either as a submitted review, whose id is digits, or as a clean **comment** on
+  the head, which `pr-review-state.sh` reports as `comment:<id>` and `pr-watch.sh`
+  accepts. A digits-only test refused the second *after* the request had been
+  posted, leaving a pass in flight that nothing waited for.
+
+  Two smaller things came with it. The review mode is refused **by name** —
+  `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
+  truthiness test silently took the manual path and posted a mention into an
+  automatic-review repository. And the name the driver reads the baseline into is
+  proven assignable *before* the request goes out: a readonly one makes that
+  assignment fail after the mutation, which under `errexit` ends the shell with a
+  pass in flight and no watch armed.
+
 ## [2.0.50] — 2026-08-21
 
 - **A poisoned `PATH` is settled as a boundary, not left open as a defect.** The

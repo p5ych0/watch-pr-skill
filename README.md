@@ -279,7 +279,17 @@ Then:
    recommended setting) that is a comment containing `@codex review`. With it
    **on**, opening or pushing the PR has *already* queued a pass, so no mention is
    sent — one would queue a duplicate review of the same head; post the context
-   comment without the mention and go straight to waiting. The loop is *phased*:
+   comment without the mention and go straight to waiting. **`pr-request-review.sh`**
+   holds both, so the setting decides the ordering in one place that is tested —
+   and it refuses a body that would queue that duplicate, along with one whose
+   text would be read back as a record of the loop's own. The account is written
+   with the session's own file tool and redirected in on **stdin**, so it never
+   passes through your shell — where writing it would need `cat` or `printf`, both
+   names that shell can replace, and carrying it in a heredoc would let an account
+   containing a line equal to the delimiter end it and have the rest parsed as
+   shell. The answer comes back in a file for the same reason: a variable is a
+   name, and one your startup files have already made readonly would make the
+   capture fail silently. The loop is *phased*:
    Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
    Running both every round buys a Copilot pass on every intermediate commit and
    mixes its findings into rounds that were not about them.
@@ -425,12 +435,19 @@ Then:
    help: the readers scan the raw comment body, where a line inside a fence still
    starts at column 0.
 
+   **This applies to the opening request too**, and until 2.0.51 it did not: the
+   one body written from scratch rather than assembled from a round's findings was
+   the one posted with no rules at all.
+
    For a related reason a body containing **`@codex review`** is refused where the
-   comment is posted on its own — the phase summary, and a Copilot round's summary.
-   Any comment containing that text requests a Codex pass, so quoting it out of a
-   finding starts one nobody asked for, in a phase that has just stopped or moved
-   on. In a *Codex* round the mention is the request and the script writes it
-   itself, so quoting it there changes nothing and is allowed.
+   comment is posted on its own — the phase summary, a Copilot round's summary, and
+   the opening request with **automatic review on**, where a pass is already queued
+   and a second mention buys a duplicate over the same head. Any comment containing
+   that text requests a Codex pass, so quoting it out of a finding starts one
+   nobody asked for, in a phase that has just stopped or moved on. In a *Codex*
+   round — and in the opening request with automatic review **off** — the mention
+   is the request and the script writes it itself, so quoting it there changes
+   nothing and is allowed.
 
    **The remedy is a different one, and indenting is not it.** This trigger is
    matched case-insensitively *anywhere* in the body, not at the start of a line —
