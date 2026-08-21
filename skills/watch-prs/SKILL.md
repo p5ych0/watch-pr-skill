@@ -901,50 +901,51 @@ duplicate pass or a review nobody requested.
 
 ```bash
 AUTO_REVIEW=no   # or `yes`, per the repo's Codex Code review settings
-
 WHO="$CODEX_BOT"
-# The baseline the watch compares against — and it is EMPTY on the automatic
-# path.
+
+# THE REQUEST IS A SCRIPT. It was eighteen lines here that nothing executed, and
+# what they do is post the comment that — on the manual path — IS the review
+# request. It was also a second, weaker copy of the round-closing request: that
+# one refuses a body carrying a marker the loop honours or a mention it did not
+# write itself, and this one refused neither, so the opening account was the one
+# posting site with no rules. Issues #26, #144.
 #
-# `--after-review` means "the review I am waiting for is newer than this one".
-# On a re-request that is right. On the INITIAL automatic pass it is actively
-# wrong: the push or PR-open that triggered the review happened before this skill
-# ran, so a lookup here can capture the very pass being waited for. The watch
-# would then reject the only terminal review as stale and re-arm forever, waiting
-# for a review nobody is going to request.
+#   pr-request-review.sh <pr> <auto-review: yes|no> <body-file>
 #
-# There is nothing to capture before the trigger, because the trigger preceded
-# us. So the automatic path waits on any terminal review, and only the explicit
-# re-requests in step 5 carry a baseline.
-# No head baseline is captured here. One used to be, so the automatic path could
-# tell a real push from a no-op one and send a mention only for the second — and
-# the request is unconditional now, so nothing reads it. Left in place it would be
-# a `gh pr view` whose transient failure or malformed answer ABORTS this step
-# before any context is posted or any wait begins: a call that can only cost.
-
-if [ "$AUTO_REVIEW" = "yes" ]; then
-    PRIOR_REVIEW=""
-else
-    PRIOR_REVIEW=$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-review-state.sh review-id N "$WHO") \
-        || { echo "ABORT: could not read the current review id; do not request a review blind."; exit 0; }
-fi
-
-if [ "$AUTO_REVIEW" = "yes" ]; then
-    # The pass is already queued by the push that created or updated the PR.
-    # Post the account of what to look at WITHOUT a mention, so the reviewer has
-    # it, and go straight to the wait.
-    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "<one paragraph: what this change does and what to look at>"; then
-        echo "ABORT: could not post the PR context — do not enter the wait step."; exit 0
-    fi
-else
-    # The mention IS the request. Branch on it: a failed post means no review was
-    # ever queued, and the wait step would then poll for one until it timed out,
-    # reporting "no review arrived" rather than "none was asked for".
-    if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review
-
-<one paragraph: what this change does and what to look at>"; then
-        echo "ABORT: could not post the @codex request — do not enter the wait step."; exit 0
-    fi
+#     0  posted — the baseline is on stdout, and it is EMPTY on the automatic
+#        path, where the trigger preceded us and there is nothing to capture
+#     1  stopped — nothing was posted
+#
+# WRITE THE ACCOUNT FIRST: one paragraph on what this change does and what to
+# look at. The body is inserted as DATA, so prose quoting a command line is
+# posted rather than executed — but a line reproducing one of the markers the
+# loop reads as a record CREATES that record, because this is posted under your
+# identity, and on the automatic path a quoted `@codex review` queues a second
+# pass over the same head. The script refuses both rather than publishing them.
+#
+# THE WRITE IS CHECKED, not only the read the script does: a redirection that
+# truncates the file and then fails leaves a FRAGMENT that passes a non-empty
+# test and is posted as this PR's account.
+cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the request body."; exit 0; }
+<one paragraph: what this change does and what to look at>
+EOF
+# THE BASELINE IS THE ONE VALUE THAT OUTLIVES THIS STEP, and a child cannot
+# assign a variable here — so it comes back on stdout ALONE, with every reason on
+# stderr. Step 3's watch is given it.
+PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" "$SUMMARY_FILE")"; REQ_RC=$?
+# THE STATUS AND THE SHAPE, because neither covers the other: empty is the
+# automatic path's correct answer and is indistinguishable from a lost value, so
+# the status is what says a request was made, and the shape is what says the
+# variable holds what the helper printed rather than whatever it already held.
+RX_PRIOR='^[0-9]*$'
+if [[ $REQ_RC -ne 0 ]] || ! [[ $PRIOR_REVIEW =~ $RX_PRIOR ]]; then
+    echo "ABORT: no review was requested (rc=$REQ_RC, baseline='$PRIOR_REVIEW'); do not enter the wait step."
+    exit 0
+    # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
+    # can shadow, and with both shadowed this branch says nothing and returns 0 —
+    # a failed request indistinguishable from a posted one, which is the reading
+    # that sends the driver into a wait for a review nobody asked for.
+    [[ -n "" ]]
 fi
 ```
 

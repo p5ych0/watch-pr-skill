@@ -1637,7 +1637,16 @@ fi
 # A failed Copilot request must not start the phase: --add-reviewer IS the
 # request, so a failure means there is no pass to wait for.
 # The @codex comment IS the request, so the same rule applies to it.
-grep -q 'if ! gh pr comment N --repo "$HOST/$OWNER/$REPO" --body "@codex review' "$SKILL" \
+#
+# THE POST MOVED INTO `pr-request-review.sh` (#144, under #26), and with it the
+# branch on whether it succeeded — where `test-pr-request-review.sh` EXECUTES
+# both failure paths rather than matching their text. What stays asserted here is
+# the driver's half: the status has to be taken and refused on before the wait
+# step, or a stopped request is followed by a poll for a review nobody asked for.
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" "$SUMMARY_FILE"' "$SKILL" \
+    && pass "the opening request is made through the helper the suite covers" \
+    || die "the initial Codex request is not made through pr-request-review.sh"
+grep -q 'if \[\[ $REQ_RC -ne 0 \]\]' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
 
@@ -1840,8 +1849,14 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
 { [ -n "$sel" ] && [ -n "$req" ] && [ "$sel" -gt "$req" ]; } \
     && pass "the review mode is established in the request step, before the mention" \
     || die "the first @codex mention is posted before the review mode is known"
-grep -q 'if \[ "\$AUTO_REVIEW" = "yes" \]; then' "$SKILL" \
-    && pass "…and the initial request branches on it" \
+# THE BRANCH IS THE HELPER'S NOW (#144, under #26), so what the driver must do
+# is HAND IT OVER: a mode established here and not passed on leaves the helper
+# with no way to tell the two orderings apart, and it has no default — every
+# unrecognised value is refused by name, which `test-pr-request-review.sh`
+# executes. Asserted as the argument rather than as the branch, because the
+# branch is somewhere the suite can run it.
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW"' "$SKILL" \
+    && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 
 # ── the numbered checklist does not push ──────────────────────────────────
@@ -2345,9 +2360,19 @@ fi
 # ── the automatic path has no pre-request baseline ────────────────────────
 # The trigger preceded the skill, so a lookup can capture the very pass being
 # waited for — and the watch would reject the only terminal review as stale.
+#
+# THE RULE MOVED INTO `pr-request-review.sh` (#144, under #26), where
+# `test-pr-request-review.sh` asserts the concrete outcome — an empty baseline
+# AND no lookup at all — instead of matching an assignment. What is asserted here
+# is that the driver did not keep a second copy: a `PRIOR_REVIEW=` of its own
+# beside the capture would decide the question in the one place nothing executes,
+# and the helper's answer would be overwritten by it.
 grep -q 'PRIOR_REVIEW=""' "$SKILL" \
-    && pass "the automatic-review path waits on any terminal review" \
-    || die "the automatic path captures the in-flight pass as its own baseline"
+    && die "SKILL.md decides the automatic path's baseline itself; that rule lives in pr-request-review.sh, where the suite runs it" \
+    || pass "the baseline is decided once, by the helper the suite runs"
+grep -q 'the trigger preceded us' "$SKILL" \
+    && pass "…and the driver says why that path has none" \
+    || die "the driver does not record why the automatic path carries no baseline"
 
 # ── the checks diagnostic is read with its status ─────────────────────────
 # A `cat` that emitted text containing "no required checks" and then failed would

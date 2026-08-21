@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.51] — 2026-08-21
+
+- **The opening review request had none of the rules every other posting site
+  has.** It was eighteen lines of shell in `SKILL.md`, in a fenced block nothing
+  executes — not the suite, not `pr-selfcheck.sh`, not the bash 3.2 job — and what
+  those lines do is post the comment that, with automatic review off, *is* the
+  review request. It is now `pr-request-review.sh`, with a fixture that runs it.
+
+  It was also a second, weaker copy of what `pr-close-round.sh` does for every
+  *later* round. That copy refuses a body starting a line with a marker the loop
+  reads back as a record, and a body carrying a mention it did not write itself.
+  The opening request refused neither — so the one body written from scratch,
+  rather than assembled from a round's findings, was the one posted unchecked.
+
+  Both failures are ordinary prose. A paragraph explaining this loop, or quoting a
+  finding about it, that reproduces `**Review-Signoff:**` at the start of a line
+  **creates that signoff**: the comment is posted under your identity, which
+  `pr-signoff.sh` and `pr-round-count.sh` trust. And with automatic review **on** a
+  paragraph quoting `@codex review` — out of an issue, out of a PR description —
+  queues a second pass over the same head, which is the exact duplicate that path
+  exists to avoid: the branch was written and then undone by the body it posted.
+
+  Both rules come from `recordlib.sh`, so there is one definition and three
+  callers rather than three copies. The trigger rule is the automatic path's
+  alone: with automatic review off this script writes the mention itself, so a
+  quoted one changes nothing, and refusing it there would forbid a PR description
+  that quotes the loop.
+
+  Two smaller things came with it. The review mode is refused **by name** —
+  `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
+  truthiness test silently took the manual path and posted a mention into an
+  automatic-review repository. And the baseline the watch is given comes back on
+  stdout alone, printed *after* the post, so a request that stopped leaves nothing
+  to read as a baseline for a request that was never made.
+
 ## [2.0.50] — 2026-08-21
 
 - **A poisoned `PATH` is settled as a boundary, not left open as a defect.** The
