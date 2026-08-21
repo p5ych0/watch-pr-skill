@@ -2134,6 +2134,17 @@ grep -q "ABORT: could not create the session's working directory" "$SKILL" \
 grep -q "ABORT: the session's working files were not created empty" "$SKILL" \
     && pass "…and each created file is validated as present and empty" \
     || die "the summary file is used without validating what was created"
+# AND THE COMPLETION LINE IS THAT VALIDATION'S SUCCESS ARM, not a statement after
+# it. `exit` is a builtin a startup file can replace with one that RETURNS, so an
+# allocation that refused still reached the pin block below it and reported a
+# finished setup naming paths that were unset or somebody else's. Position guards
+# what follows a failure; only containment guards what follows a failure that
+# could not stop the shell.
+_rb_done_ln="$(grep -n 'echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || true
+_rb_empty_ln="$(grep -n "ABORT: the session's working files were not created empty" "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_rb_done_ln" ] && [ -n "$_rb_empty_ln" ] && [ "$_rb_done_ln" -lt "$_rb_empty_ln" ]; } \
+    && pass "…and setup's completion line is that check's success arm, which a refusal cannot reach" \
+    || die "the completion line is not inside the working-file check (done=$_rb_done_ln empty=$_rb_empty_ln)"
 # AND THERE IS NO `mktemp` LEFT TO SHADOW. Three calls were three separate
 # answers, and `mktemp` is a NAME: a function returning the same existing empty
 # path each time passes every validation and leaves all three paths ALIASED — so

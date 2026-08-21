@@ -659,117 +659,6 @@ for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REV
     [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
 done
 unset _rb_knob
-# THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
-# shell variables: the text is long, contains backticks and quotes, and passing
-# it inline mangles it — and the baseline comes back in one because a variable is
-# a name a startup file can have made readonly, which `pr-origin.sh` settled the
-# same way. Freshly created per PR and per session, because a reused path is how
-# a stale summary from another round — or another PR — gets posted as if it were
-# this one's.
-#
-# ONE DIRECTORY, AND THE THREE PATHS DERIVED FROM IT. Three `mktemp` calls made
-# them three separate answers, and `mktemp` is a NAME: a function returning the
-# same existing empty path each time passes every validation and leaves all three
-# ALIASED. Writing the opening account would then populate the round-summary
-# file, and a first round that missed its own summary write would post that
-# account as the summary and request another pass — the exact regression the
-# separate files exist to prevent. Derived by literal suffixes there is nothing to
-# make equal: the distinctness is in the source, not in what a command returned.
-#
-# AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
-# ALREADY GIVES. The path is BUILT by expansion — `$$` and `$RANDOM` are the
-# shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
-# write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
-# an account on this machine that guesses the name gets nothing rather than a
-# file this session then writes through, and `-m 700` is applied by `mkdir`
-# itself, so all three files inherit that protection rather than each needing its
-# own. It runs through `/usr/bin/env` for the reason every other command in this
-# block does.
-#
-# THE PARENT IS THE ONE ALREADY PROVEN — absolute, a directory, and one this user
-# could create under. Choosing it a second time would be a second copy of the
-# loop above, which is the defect this document keeps deleting.
-# ASSIGNABLE FIRST, AND PROVEN WITH TWO VALUES — the probe the transport parent
-# above already uses, and for the reason it gives: no single value can be ruled
-# out, because a readonly name pre-seeded with exactly that value makes the failed
-# assignment leave what the postcondition expects. Two that differ can, since a
-# readonly cannot equal both.
-#
-# THE SHAPE CHECK BELOW IS NOT WHAT STOPS ONE. It matches a PREFIX, and a readonly
-# value such as `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while
-# naming a directory under a parent nothing proved — `mkdir` resolves the `..`,
-# and another account owning that parent could then replace the directory and with
-# it the account this session posts and the baseline it waits on. It stays as a
-# statement of the shape; the probes are what make the value this session's.
-# EVERY FAILURE ARM EXCLUDES THE WORK STRUCTURALLY, rather than ending it. `exit`
-# is a builtin a startup file can replace with one that RETURNS, and this bash
-# runs in the operator's own shell — so a guard written as
-# `… || { echo …; exit 1; }` prints and then carries straight on to the next
-# line. With `RB_WORK_DIR` readonly to an existing directory that meant reaching
-# the three redirections below and truncating `summary.md`, `request.md` and
-# `prior.txt` inside it. `[[ -n "" ]]` is not the answer here either: it makes the
-# LIST report non-zero, which nothing reads. The allocation is one condition and
-# the files are its `then`, so a failed arm cannot reach them whatever `exit` was
-# made to do. Each cause still names itself, from inside the condition, ending in
-# a reserved word so the arm is false however `echo` was replaced.
-RB_WORK_DIR=probe-a
-if { [[ $RB_WORK_DIR = probe-a ]] \
-     || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
-   && { RB_WORK_DIR=probe-b
-        [[ $RB_WORK_DIR = probe-b ]] \
-     || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
-   && { RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
-        [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
-     || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
-   && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
-     || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; [[ -n "" ]]; }; }
-then
-    # Where each round's summary is written before it is posted.
-    SUMMARY_FILE="$RB_WORK_DIR/summary.md"
-    # The opening account, which is NOT the round summary. Sharing one file meant
-    # that a first round whose summary write did not happen left the OPENING
-    # account sitting there — non-empty, well-formed, and about the right PR — so
-    # `pr-close-round.sh` posted it as the round summary and requested the next
-    # pass instead of refusing to close. The round-summary file has to be empty
-    # until that round writes it, and that is only true if nothing else writes it.
-    REQUEST_FILE="$RB_WORK_DIR/request.md"
-    # Where the review baseline comes back. A capture written as
-    # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
-    # has already made readonly makes it fail — which abandons the `if` without
-    # either branch running, so a refusal falls through into the wait. A plain
-    # command with its output redirected has no assignment to fail.
-    PRIOR_FILE="$RB_WORK_DIR/prior.txt"
-    # READ BACK AGAINST THE LITERALS, and again as a CONDITION whose body is the
-    # work: this is what catches a readonly name still pointing somewhere else,
-    # and it has to exclude the writes rather than merely precede them.
-    if [[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
-       && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
-       && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
-    then
-        # CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
-        # none to shadow, and a redirection that cannot be made reports it:
-        # measured, a `> path` into a directory that does not exist is status 1.
-        # Each is then proven present and empty. A missing one fails closed later
-        # anyway — the request's `<` refuses and `pr-close-round.sh` cannot read
-        # its summary — but "fails closed later" is not a reason to leave setup
-        # unable to say so.
-        > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
-        if [[ ! -f "$SUMMARY_FILE" ]] || [[ -s "$SUMMARY_FILE" ]] \
-           || [[ ! -f "$REQUEST_FILE" ]] || [[ -s "$REQUEST_FILE" ]] \
-           || [[ ! -f "$PRIOR_FILE" ]] || [[ -s "$PRIOR_FILE" ]]; then
-            echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
-            exit 1
-            [[ -n "" ]]
-        fi
-    else
-        echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE and PRIOR_FILE is readonly in this shell; the session's working paths cannot be set"
-        exit 1
-        [[ -n "" ]]
-    fi
-else
-    exit 1
-    [[ -n "" ]]
-fi
 # ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
 #
 # `REVIEW_BUS_REMOTE` is what every helper inherits, and every post is addressed
@@ -783,7 +672,15 @@ fi
 # alone is caught below. TOGETHER they are not, if there is anything after them to
 # run: the guard's last line ends the `if` non-zero, but with no `set -e` the next
 # statement simply executes. That is why nothing comes after this — the position
-# is the guard. Do not add a step below it; put it above.
+# is the guard. Do not add a step below it.
+#
+# AND "ABOVE IT" WAS NOT ENOUGH EITHER, WHICH IS WHY THE WORKING FILES ARE INSIDE
+# ITS SUCCESS ARM. Allocated above, their own refusals fell into THIS block with
+# `exit` replaced — and the completion line then reported a finished setup naming
+# paths that were unset or somebody else's. Position guards what comes after a
+# failure; only containment guards what comes after a failure that could not stop
+# the shell. So the allocation is nested here, and the completion line is nested
+# inside IT.
 #
 # THE SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH for the same reason. It is how
 # the driver knows setup completed, so the failure path does not REACH it, whatever
@@ -954,7 +851,123 @@ else
     # setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
     # stage derived its identity from wherever the session happened to stand.
     if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-        echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+        # THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
+        # shell variables: the text is long, contains backticks and quotes, and passing
+        # it inline mangles it — and the baseline comes back in one because a variable is
+        # a name a startup file can have made readonly, which `pr-origin.sh` settled the
+        # same way. Freshly created per PR and per session, because a reused path is how
+        # a stale summary from another round — or another PR — gets posted as if it were
+        # this one's.
+        #
+        # ONE DIRECTORY, AND THE THREE PATHS DERIVED FROM IT. Three `mktemp` calls made
+        # them three separate answers, and `mktemp` is a NAME: a function returning the
+        # same existing empty path each time passes every validation and leaves all three
+        # ALIASED. Writing the opening account would then populate the round-summary
+        # file, and a first round that missed its own summary write would post that
+        # account as the summary and request another pass — the exact regression the
+        # separate files exist to prevent. Derived by literal suffixes there is nothing to
+        # make equal: the distinctness is in the source, not in what a command returned.
+        #
+        # AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
+        # ALREADY GIVES. The path is BUILT by expansion — `$$` and `$RANDOM` are the
+        # shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
+        # write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
+        # an account on this machine that guesses the name gets nothing rather than a
+        # file this session then writes through, and `-m 700` is applied by `mkdir`
+        # itself, so all three files inherit that protection rather than each needing its
+        # own. It runs through `/usr/bin/env` for the reason every other command in this
+        # block does.
+        #
+        # THE PARENT IS THE ONE ALREADY PROVEN — absolute, a directory, and one this user
+        # could create under. Choosing it a second time would be a second copy of the
+        # loop above, which is the defect this document keeps deleting.
+        # ASSIGNABLE FIRST, AND PROVEN WITH TWO VALUES — the probe the transport parent
+        # above already uses, and for the reason it gives: no single value can be ruled
+        # out, because a readonly name pre-seeded with exactly that value makes the failed
+        # assignment leave what the postcondition expects. Two that differ can, since a
+        # readonly cannot equal both.
+        #
+        # THE SHAPE CHECK BELOW IS NOT WHAT STOPS ONE. It matches a PREFIX, and a readonly
+        # value such as `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while
+        # naming a directory under a parent nothing proved — `mkdir` resolves the `..`,
+        # and another account owning that parent could then replace the directory and with
+        # it the account this session posts and the baseline it waits on. It stays as a
+        # statement of the shape; the probes are what make the value this session's.
+        # EVERY FAILURE ARM EXCLUDES THE WORK STRUCTURALLY, rather than ending it. `exit`
+        # is a builtin a startup file can replace with one that RETURNS, and this bash
+        # runs in the operator's own shell — so a guard written as
+        # `… || { echo …; exit 1; }` prints and then carries straight on to the next
+        # line. With `RB_WORK_DIR` readonly to an existing directory that meant reaching
+        # the three redirections below and truncating `summary.md`, `request.md` and
+        # `prior.txt` inside it. `[[ -n "" ]]` is not the answer here either: it makes the
+        # LIST report non-zero, which nothing reads. The allocation is one condition and
+        # the files are its `then`, so a failed arm cannot reach them whatever `exit` was
+        # made to do. Each cause still names itself, from inside the condition, ending in
+        # a reserved word so the arm is false however `echo` was replaced.
+        RB_WORK_DIR=probe-a
+        if { [[ $RB_WORK_DIR = probe-a ]] \
+             || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
+           && { RB_WORK_DIR=probe-b
+                [[ $RB_WORK_DIR = probe-b ]] \
+             || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
+           && { RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
+                [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
+             || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
+           && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
+             || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; [[ -n "" ]]; }; }
+        then
+            # Where each round's summary is written before it is posted.
+            SUMMARY_FILE="$RB_WORK_DIR/summary.md"
+            # The opening account, which is NOT the round summary. Sharing one file meant
+            # that a first round whose summary write did not happen left the OPENING
+            # account sitting there — non-empty, well-formed, and about the right PR — so
+            # `pr-close-round.sh` posted it as the round summary and requested the next
+            # pass instead of refusing to close. The round-summary file has to be empty
+            # until that round writes it, and that is only true if nothing else writes it.
+            REQUEST_FILE="$RB_WORK_DIR/request.md"
+            # Where the review baseline comes back. A capture written as
+            # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
+            # has already made readonly makes it fail — which abandons the `if` without
+            # either branch running, so a refusal falls through into the wait. A plain
+            # command with its output redirected has no assignment to fail.
+            PRIOR_FILE="$RB_WORK_DIR/prior.txt"
+            # READ BACK AGAINST THE LITERALS, and again as a CONDITION whose body is the
+            # work: this is what catches a readonly name still pointing somewhere else,
+            # and it has to exclude the writes rather than merely precede them.
+            if [[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
+               && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
+               && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
+            then
+                # CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
+                # none to shadow, and a redirection that cannot be made reports it:
+                # measured, a `> path` into a directory that does not exist is status 1.
+                # Each is then proven present and empty. A missing one fails closed later
+                # anyway — the request's `<` refuses and `pr-close-round.sh` cannot read
+                # its summary — but "fails closed later" is not a reason to leave setup
+                # unable to say so.
+                > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
+                # AND THE COMPLETION LINE IS THE INNERMOST SUCCESS ARM. It is how the
+                # driver knows setup finished, so every refusal above has to be unable to
+                # REACH it — and with `exit` replaced by a function that returns, "the
+                # abort ran" does not mean "the line did not". Only containment does.
+                if [[ -f "$SUMMARY_FILE" ]] && [[ ! -s "$SUMMARY_FILE" ]] \
+                   && [[ -f "$REQUEST_FILE" ]] && [[ ! -s "$REQUEST_FILE" ]] \
+                   && [[ -f "$PRIOR_FILE" ]] && [[ ! -s "$PRIOR_FILE" ]]; then
+                    echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
+                else
+                    echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
+                    exit 1
+                    [[ -n "" ]]
+                fi
+            else
+                echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE and PRIOR_FILE is readonly in this shell; the session's working paths cannot be set"
+                exit 1
+                [[ -n "" ]]
+            fi
+        else
+            exit 1
+            [[ -n "" ]]
+        fi
     else
         echo "ABORT: the repository pin did not take; every stage would route by the current directory"
         exit 1
