@@ -1905,11 +1905,18 @@ rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB
 # In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
 # inherited `onecmd` would stop a `-c` script after one command and the probe
 # would measure the truncation instead of the lookup.
-_rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
+# THE PATH TRAVELS, NOT THE BODY. `SKILL.md` passed through the environment as a
+# single value, and Linux caps ONE environment string at 128 KiB — the document
+# reached that in this PR, and `env` then failed with 126, which `set -e` turned
+# into a silent stop of this whole file after 150 assertions. The child reads the
+# file itself with `$(<…)`, a redirection rather than a name, so the probe still
+# proves what it was written to prove.
+_rb_forged="$(env -u SHELLOPTS RB_SKILL_PATH="$SKILL" bash -c '
     printf() { builtin printf "%s\n" 999; }
     awk() { builtin printf "%s\n" 999; }
     grep() { builtin printf "%s\n" 999; }
     sed() { builtin printf "%s\n" 999; }
+    RB_SKILL_BODY="$(<"$RB_SKILL_PATH")"
     '"$(declare -f rb_line_of)"'
     rb_line_of "AUTO_REVIEW=no"
     # Restored only to REPORT the answer: the lookup itself has already run, and

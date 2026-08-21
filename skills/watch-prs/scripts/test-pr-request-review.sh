@@ -106,6 +106,30 @@ world; : > "$W/prior.out"; rc="$(run 7 no)"
     && pass "…and an empty baseline on the manual path is posted and reported, not refused" \
     || die "a first request with no prior review gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
 
+# AND A COMMENT-BACKED BASELINE COMES THROUGH AS IT IS. A reviewer's newest
+# verdict arrives either as a submitted review, whose id is digits, or as a clean
+# COMMENT on the head — which `pr-review-state.sh` reports as `comment:<id>` and
+# `pr-watch.sh` accepts. Rewriting or refusing it here would abort after the
+# request had been posted.
+world; printf 'comment:998877\n' > "$W/prior.out"; rc="$(run 7 no)"
+{ [ "$rc" = 0 ] && [ "$(stdout)" = comment:998877 ] && posted; } \
+    && pass "…and a comment-backed baseline is reported unchanged" \
+    || die "a comment-backed baseline gave rc=$rc stdout='$(stdout)'"
+
+# ── THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN ────────
+# `printf` can fail — a full filesystem under the caller's transport file — and
+# an `exit 0` after it masks that, so the driver reads an empty or truncated
+# value as the baseline and the watch accepts the PREVIOUS review as the answer
+# to a request just posted. Taking the status only works while there is something
+# left to refuse with, which is why the write goes first.
+world; rc=0
+(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
+    /usr/bin/env bash -p "$DIR/pr-request-review.sh" 7 no <"$BODY_IN" >&- 2>"$ERR") || rc=$?
+{ [ "$rc" != 0 ] && nothing_posted; } \
+    && pass "a baseline that cannot be written stops with NOTHING posted" \
+    || die "an unwritable baseline gave rc=$rc, posted=$(cat "$TMP/calls")"
+
 # ── THE AUTOMATIC PATH HAS NO BASELINE, AND ASKS FOR NONE ──────────────────
 # `--after-review` on the initial automatic pass can capture the very review
 # being waited for: the trigger preceded this loop. So there is nothing to read,
@@ -196,15 +220,16 @@ nothing_posted \
 # ── A FAILED POST IS NOT A REQUEST ─────────────────────────────────────────
 # The wait step would otherwise poll until it timed out and report "no review
 # arrived" rather than "none was asked for".
+# The baseline is already written by then, and that is deliberate: the driver
+# runs this as a condition and reads the file only on success, so a failed post
+# takes the failure arm where the file is never consumed. What has to hold is the
+# STATUS — the thing the driver branches on.
 for _mode in no yes; do
     world; printf '1\n' > "$W/gh.rc"
     rc="$(run 7 "$_mode")"
     { [ "$rc" = 1 ] && stderr | grep -qF 'do not enter the wait step'; } \
         && pass "a failed post stops rather than reporting a request ($_mode)" \
         || die "a failed post on the $_mode path gave rc=$rc '$(stderr)'"
-    [ -z "$(stdout)" ] \
-        && pass "…and leaves NO baseline on stdout ($_mode)" \
-        || die "a failed post left '$(stdout)' on stdout ($_mode)"
 done
 
 # ── THE BODY IS READ WITH ITS STATUS TAKEN ─────────────────────────────────

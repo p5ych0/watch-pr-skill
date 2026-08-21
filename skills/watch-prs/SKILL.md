@@ -1081,14 +1081,31 @@ if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$
         # Codex has usually not reviewed this head at all yet, which is the
         # ordinary FIRST request — so `review-id` succeeds with an empty value and
         # a digits-only test would abort after the request had already been
-        # posted. What is refused is a value that is not a review id.
+        # posted. What is refused is a value that is neither shape.
         #
         # THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a
         # validator in a variable is a second name a startup file can seed
         # readonly, and a seeded pattern accepting a seeded value is a check that
         # agrees with itself. `case` is a reserved word, so nothing can take its
         # place either.
+        #
+        # AND THERE ARE TWO SHAPES, BECAUSE THERE ARE TWO CHANNELS. A reviewer's
+        # newest verdict arrives either as a submitted review, whose id is digits,
+        # or as a clean COMMENT on the head — which `pr-review-state.sh` reports
+        # as `comment:<id>` and `pr-watch.sh` accepts as a baseline. A digits-only
+        # test refuses the second AFTER the request has been posted, leaving a
+        # pass in flight that nothing waits for.
         case "$PRIOR_REVIEW" in
+            "") ;;
+            comment:)
+                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which names the comment channel with no id; do not enter the wait step."
+                exit 0
+                [[ -n "" ]] ;;
+            comment:*[!0-9]*)
+                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a comment id; do not enter the wait step."
+                exit 0
+                [[ -n "" ]] ;;
+            comment:*) ;;
             *[!0-9]*)
                 echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
                 exit 0

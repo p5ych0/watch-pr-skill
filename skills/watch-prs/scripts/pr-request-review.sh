@@ -4,7 +4,9 @@
 #   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
 #   stdin   the account of what to look at; prose, one paragraph
-#   stdout  the review-id baseline, ALONE — empty on the automatic path
+#   stdout  the review-id baseline, ALONE — empty on the automatic path, and
+#           `comment:<id>` where the reviewer's newest verdict came through the
+#           comment channel rather than as a submitted review
 #   stderr  every reason
 #
 #   0  posted — the baseline is on stdout
@@ -195,6 +197,20 @@ if [ "$AUTO_REVIEW" = "no" ]; then
         || { echo "ABORT: could not read the current review id; do not request a review blind." >&2; exit 1; }
 fi
 
+# THE BASELINE IS WRITTEN BEFORE THE POST, AND ITS WRITE IS TAKEN. `printf` can
+# FAIL — a full filesystem under the caller's transport file — and an `exit 0`
+# after it masks that, so the driver would read an empty or truncated value as
+# the baseline and `pr-watch.sh` would accept the PREVIOUS review as the answer
+# to a request just posted. Taking the status only works if there is something
+# left to refuse WITH: after the post there is not, because the request is
+# already in flight.
+#
+# WRITING IT FIRST COSTS NOTHING, because the driver runs this as a condition and
+# only reads the file on success — a post that then fails takes the failure arm,
+# where the file is never consumed. So an unwritable baseline stops with nothing
+# posted, which is the order the two failures should be in.
+printf '%s\n' "$PRIOR" || { echo "ABORT: the review baseline could not be written; nothing has been posted." >&2; exit 1; }
+
 # THE POST IS BRANCHED ON, because a failed one means no review was ever queued —
 # and the wait step would then poll for one until it timed out, reporting "no
 # review arrived" rather than "none was asked for".
@@ -210,12 +226,4 @@ else
 $BODY" >&2 \
         || { echo "ABORT: could not post the @codex request — do not enter the wait step." >&2; exit 1; }
 fi
-
-# THE BASELINE GOES BACK ON STDOUT, ALONE AND LAST. A child process cannot assign
-# a variable in its parent; it can only say what the value was — and every reason
-# above went to stderr precisely so this stream carries the value or nothing, and
-# the caller reads it with one substitution whatever its shell is tracing. Printed
-# AFTER the post, so a stopped run leaves stdout empty rather than a baseline for
-# a request that was never made.
-printf '%s\n' "$PRIOR"
 exit 0

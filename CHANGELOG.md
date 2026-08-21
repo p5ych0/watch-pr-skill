@@ -61,6 +61,20 @@
   Derived by literal suffixes there is nothing a command could return to make two
   of them equal.
 
+  The baseline is written **before** the request is posted, and the write's status
+  is taken. `printf` can fail — a full filesystem under the file it is redirected
+  to — and an `exit 0` after it masked that, so the driver read an empty or
+  truncated value as the baseline and the watch would accept the *previous* review
+  as the answer to a request just posted. Taking the status only works while there
+  is something left to refuse with, and after the post there is not. Writing first
+  costs nothing, because the driver reads the file only on success.
+
+  Both baseline shapes are accepted, too: a reviewer's newest verdict arrives
+  either as a submitted review, whose id is digits, or as a clean **comment** on
+  the head, which `pr-review-state.sh` reports as `comment:<id>` and `pr-watch.sh`
+  accepts. A digits-only test refused the second *after* the request had been
+  posted, leaving a pass in flight that nothing waited for.
+
   Two smaller things came with it. The review mode is refused **by name** —
   `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
   truthiness test silently took the manual path and posted a mention into an
