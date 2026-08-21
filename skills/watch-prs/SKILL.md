@@ -571,28 +571,34 @@ for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     # compared. Bash's own complaint is left on stderr, because it names the
     # variable and the loop's emptiness test afterwards does not.
     #
-    # `|| continue` LIKE THE TWO CHECKS AROUND IT, so a readonly name skips every
-    # candidate and that emptiness test is what reports the failure. An abort here
-    # would be a statement a shadowed `exit` walks past into the very `mkdir`
-    # this probe exists to stop.
-    ( RB_TRY=probe-a ) || continue
-    RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-    [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
-    /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
-    # THE READ IS THE TEST. If the helper accepts this parent it has already
-    # written the value, so there is nothing to repeat; if it refuses, the reason
-    # is on stderr for the operator and this tries the next candidate.
-    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
-        RB_TMPDIR="$RB_TRY"
-        # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
-        # assignment that did not happen is what turns a readonly into a stale
-        # directory the rest of setup then trusts.
-        [[ $RB_TMPDIR = "$RB_TRY" ]] \
-            || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
-        break
+    # AND THE REST OF THE CANDIDATE IS ITS SUCCESS ARM, not a `|| continue` after
+    # it. `continue` is a BUILTIN, and one replaced by a function returning 0
+    # takes the failure arm and then falls straight through to the next line —
+    # the assignment fails, the stale traversal value passes the prefix check, and
+    # `mkdir` runs outside the proven parent, which is the whole defect. `if` is a
+    # reserved word and nothing can stand in for it, so the work is somewhere a
+    # failed probe cannot reach whatever was done to the builtins. Bash's own
+    # complaint is left on stderr, because it names the variable and the loop's
+    # emptiness test afterwards does not.
+    if ( RB_TRY=probe-a ); then
+        RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+        [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
+        /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
+        # THE READ IS THE TEST. If the helper accepts this parent it has already
+        # written the value, so there is nothing to repeat; if it refuses, the reason
+        # is on stderr for the operator and this tries the next candidate.
+        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
+            RB_TMPDIR="$RB_TRY"
+            # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
+            # assignment that did not happen is what turns a readonly into a stale
+            # directory the rest of setup then trusts.
+            [[ $RB_TMPDIR = "$RB_TRY" ]] \
+                || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
+            break
+        fi
+        /usr/bin/env rm -f "$RB_TRY/origin"
+        /usr/bin/env rmdir "$RB_TRY"
     fi
-    /usr/bin/env rm -f "$RB_TRY/origin"
-    /usr/bin/env rmdir "$RB_TRY"
 done
 [[ -n $RB_TMPDIR ]] \
     || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
