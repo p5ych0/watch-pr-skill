@@ -549,6 +549,27 @@ RB_TMPPARENT=probe-b
 RB_TMPPARENT=
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
+    # ASSIGNABLE FIRST, AND PROVEN WITH TWO VALUES. The check below matches a
+    # PREFIX, and `RB_TRY` is a name: a startup file that has already made it
+    # readonly makes the assignment FAIL, leaving whatever it was seeded with —
+    # and a value such as `…/watch-pr.anchor/../elsewhere/session` satisfies the
+    # prefix while naming a directory under a parent nothing proved. `mkdir`
+    # resolves the `..`, and `mkdir` being the exclusion does not help: it
+    # excludes a name that already EXISTS, not one that resolves elsewhere. The
+    # origin every stage is addressed by would then be read from a directory
+    # another local account owns. Two values, because one leaves a name
+    # pre-seeded with exactly it looking assignable — the probe `RB_TMPPARENT`
+    # above already uses, and the same one the session's working directory uses
+    # further down. #146.
+    #
+    # `|| continue` LIKE THE TWO CHECKS AROUND IT, so a readonly name skips every
+    # candidate rather than aborting from inside a loop, and the emptiness test
+    # after it is what reports the failure. An abort here would be a statement a
+    # shadowed `exit` walks past into the very `mkdir` these probes exist to stop.
+    RB_TRY=probe-a
+    [[ $RB_TRY = probe-a ]] || continue
+    RB_TRY=probe-b
+    [[ $RB_TRY = probe-b ]] || continue
     RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
     [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
     /usr/bin/env mkdir -m 700 "$RB_TRY" || continue

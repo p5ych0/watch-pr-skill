@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.52] — 2026-08-21
+
+- **A readonly `RB_TRY` could put the transport directory outside the parent
+  setup proved.** `SKILL.md` builds a candidate directory for reading origin and
+  then checks the value it built — but the check matches a **prefix**, and
+  `RB_TRY` is a name: a startup file that has already made it readonly makes the
+  assignment fail, leaving whatever it was seeded with. A value such as
+  `…/watch-pr.anchor/../elsewhere/session` satisfies the prefix while naming a
+  directory under a parent nothing proved.
+
+  `mkdir` resolves the `..`, and `mkdir` being the exclusion does not help — it
+  excludes a name that already *exists*, not one that resolves elsewhere. Where
+  the anchor and the target parent exist, another local account owning that parent
+  can replace the directory, and the origin **every stage is addressed by** is
+  then read from whatever that account left there.
+
+  The name is proven assignable first, with two unequal values, which is the probe
+  the parent selection immediately above already uses and the reason it gives: one
+  value cannot rule anything out, because a name pre-seeded with exactly it leaves
+  the postcondition holding. It skips the candidate the way the two checks around
+  it do, so the emptiness test after the loop reports the failure — an abort from
+  inside the loop would be a statement a shadowed `exit` walks past into the very
+  `mkdir` the probes exist to stop.
+
+  Found while fixing the same class in the session's working-directory
+  allocation (2.0.51), where it was new code; this one was pre-existing, so it was
+  filed and landed on its own.
+
 ## [2.0.51] — 2026-08-21
 
 - **The opening review request had none of the rules every other posting site
