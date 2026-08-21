@@ -701,56 +701,72 @@ unset _rb_knob
 # and another account owning that parent could then replace the directory and with
 # it the account this session posts and the baseline it waits on. It stays as a
 # statement of the shape; the probes are what make the value this session's.
+# EVERY FAILURE ARM EXCLUDES THE WORK STRUCTURALLY, rather than ending it. `exit`
+# is a builtin a startup file can replace with one that RETURNS, and this bash
+# runs in the operator's own shell — so a guard written as
+# `… || { echo …; exit 1; }` prints and then carries straight on to the next
+# line. With `RB_WORK_DIR` readonly to an existing directory that meant reaching
+# the three redirections below and truncating `summary.md`, `request.md` and
+# `prior.txt` inside it. `[[ -n "" ]]` is not the answer here either: it makes the
+# LIST report non-zero, which nothing reads. The allocation is one condition and
+# the files are its `then`, so a failed arm cannot reach them whatever `exit` was
+# made to do. Each cause still names itself, from inside the condition, ending in
+# a reserved word so the arm is false however `echo` was replaced.
 RB_WORK_DIR=probe-a
-[[ $RB_WORK_DIR = probe-a ]] \
-    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
-RB_WORK_DIR=probe-b
-[[ $RB_WORK_DIR = probe-b ]] \
-    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
-RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
-[[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
-    || { echo "ABORT: the session's working directory is not under the parent this setup proved"; exit 1; }
-/usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
-    || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; exit 1; }
-# Where each round's summary is written before it is posted.
-SUMMARY_FILE="$RB_WORK_DIR/summary.md"
-[[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
-    || { echo "ABORT: SUMMARY_FILE is readonly in this shell; the round-summary path cannot be set"; exit 1; }
-# The opening account, which is NOT the round summary. Sharing one file meant that
-# a first round whose summary write did not happen left the OPENING account
-# sitting there — non-empty, well-formed, and about the right PR — so
-# `pr-close-round.sh` posted it as the round summary and requested the next pass
-# instead of refusing to close. The round-summary file has to be empty until that
-# round writes it, and that is only true if nothing else writes it.
-REQUEST_FILE="$RB_WORK_DIR/request.md"
-[[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
-    || { echo "ABORT: REQUEST_FILE is readonly in this shell; the request-body path cannot be set"; exit 1; }
-# Where the review baseline comes back. A capture written as `V="$(helper …)"`
-# inside an `if` is an ASSIGNMENT, and a name a startup file has already made
-# readonly makes it fail — which abandons the `if` without either branch running,
-# so a refusal falls through into the wait. A plain command with its output
-# redirected has no assignment to fail.
-PRIOR_FILE="$RB_WORK_DIR/prior.txt"
-[[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]] \
-    || { echo "ABORT: PRIOR_FILE is readonly in this shell; the review-baseline path cannot be set"; exit 1; }
-# CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is none
-# to shadow, and a redirection that cannot be made reports it: measured, a
-# `> path` into a directory that does not exist is status 1. Each is then proven
-# present and empty. A missing one fails closed later anyway — the request's `<`
-# refuses and `pr-close-round.sh` cannot read its summary — but "fails closed
-# later" is not a reason to leave setup unable to say so.
-#
-# WHICH DIRECTORY THEY ARE IN IS PROVEN ABOVE INSTEAD, by reading each assignment
-# back against the literal it was given — the idiom the transport path already
-# uses, and the only thing that catches a readonly name still pointing somewhere
-# else. Their DISTINCTNESS is not proven by any check: it is in the source, three
-# literal suffixes under one directory, with nothing a command could return to
-# make two of them equal.
-> "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
-if [[ ! -f "$SUMMARY_FILE" ]] || [[ -s "$SUMMARY_FILE" ]] \
-   || [[ ! -f "$REQUEST_FILE" ]] || [[ -s "$REQUEST_FILE" ]] \
-   || [[ ! -f "$PRIOR_FILE" ]] || [[ -s "$PRIOR_FILE" ]]; then
-    echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
+if { [[ $RB_WORK_DIR = probe-a ]] \
+     || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
+   && { RB_WORK_DIR=probe-b
+        [[ $RB_WORK_DIR = probe-b ]] \
+     || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
+   && { RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
+        [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
+     || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
+   && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
+     || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; [[ -n "" ]]; }; }
+then
+    # Where each round's summary is written before it is posted.
+    SUMMARY_FILE="$RB_WORK_DIR/summary.md"
+    # The opening account, which is NOT the round summary. Sharing one file meant
+    # that a first round whose summary write did not happen left the OPENING
+    # account sitting there — non-empty, well-formed, and about the right PR — so
+    # `pr-close-round.sh` posted it as the round summary and requested the next
+    # pass instead of refusing to close. The round-summary file has to be empty
+    # until that round writes it, and that is only true if nothing else writes it.
+    REQUEST_FILE="$RB_WORK_DIR/request.md"
+    # Where the review baseline comes back. A capture written as
+    # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
+    # has already made readonly makes it fail — which abandons the `if` without
+    # either branch running, so a refusal falls through into the wait. A plain
+    # command with its output redirected has no assignment to fail.
+    PRIOR_FILE="$RB_WORK_DIR/prior.txt"
+    # READ BACK AGAINST THE LITERALS, and again as a CONDITION whose body is the
+    # work: this is what catches a readonly name still pointing somewhere else,
+    # and it has to exclude the writes rather than merely precede them.
+    if [[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
+       && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
+       && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
+    then
+        # CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
+        # none to shadow, and a redirection that cannot be made reports it:
+        # measured, a `> path` into a directory that does not exist is status 1.
+        # Each is then proven present and empty. A missing one fails closed later
+        # anyway — the request's `<` refuses and `pr-close-round.sh` cannot read
+        # its summary — but "fails closed later" is not a reason to leave setup
+        # unable to say so.
+        > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
+        if [[ ! -f "$SUMMARY_FILE" ]] || [[ -s "$SUMMARY_FILE" ]] \
+           || [[ ! -f "$REQUEST_FILE" ]] || [[ -s "$REQUEST_FILE" ]] \
+           || [[ ! -f "$PRIOR_FILE" ]] || [[ -s "$PRIOR_FILE" ]]; then
+            echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
+            exit 1
+            [[ -n "" ]]
+        fi
+    else
+        echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE and PRIOR_FILE is readonly in this shell; the session's working paths cannot be set"
+        exit 1
+        [[ -n "" ]]
+    fi
+else
     exit 1
     [[ -n "" ]]
 fi
@@ -1027,45 +1043,53 @@ WHO="$CODEX_BOT"
 # plain command run as a CONDITION has no assignment to fail and is exempt from
 # `errexit`, and its answer goes to a FILE — a path rather than a name, which is
 # how `pr-origin.sh` settled the same question.
-if ! /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+# AND THE CONTINUATION IS THE `then` BRANCH, which is structural too. `exit` is a
+# builtin a startup file can replace with one that RETURNS, so a refusal written
+# as `echo …; exit` prints and carries straight on — into the read-back below, and
+# from there into the wait for a review that was never requested. Ending the arm
+# in `[[ -n "" ]]` makes the LIST report non-zero, which nothing here reads. What
+# does hold is that the work sits inside the branch a refusal does not take.
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+    PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+    # AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
+    # against. `CLAUDE.md` says to prove an assignment by reading the variable
+    # back, and the usual difficulty is that nothing else knows what the value
+    # should have been — a readonly name simply keeps whatever it held. The file
+    # does know. If this name was already readonly the assignment fails and the
+    # two disagree, which is the one case a check on the variable alone cannot
+    # see: the helper SUCCEEDED and the baseline is somebody else's.
+    if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
+        echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
+        exit 0
+        [[ -n "" ]]
+    else
+        # AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is
+        # nothing to capture because the trigger preceded us; on the manual path
+        # Codex has usually not reviewed this head at all yet, which is the
+        # ordinary FIRST request — so `review-id` succeeds with an empty value and
+        # a digits-only test would abort after the request had already been
+        # posted. What is refused is a value that is not a review id.
+        #
+        # THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a
+        # validator in a variable is a second name a startup file can seed
+        # readonly, and a seeded pattern accepting a seeded value is a check that
+        # agrees with itself. `case` is a reserved word, so nothing can take its
+        # place either.
+        case "$PRIOR_REVIEW" in
+            *[!0-9]*)
+                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
+                exit 0
+                [[ -n "" ]] ;;
+        esac
+    fi
+else
     echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
     exit 0
     # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
     # can shadow, and with both shadowed this branch says nothing and returns 0 —
-    # a failed request indistinguishable from a posted one, which is the reading
-    # that sends the driver into a wait for a review nobody asked for.
+    # a failed request indistinguishable from a posted one.
     [[ -n "" ]]
 fi
-PRIOR_REVIEW="$(<"$PRIOR_FILE")"
-# AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
-# against. `CLAUDE.md` says to prove an assignment by reading the variable back,
-# and the usual difficulty is that nothing else knows what the value should have
-# been — a readonly name simply keeps whatever it held. The file does know. If
-# this name was already readonly the assignment fails and the two disagree, which
-# is the one case a `case` on the variable alone cannot see: the helper SUCCEEDED
-# and the baseline is somebody else's.
-if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
-    echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
-    exit 0
-    [[ -n "" ]]
-fi
-# AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is nothing to
-# capture because the trigger preceded us; on the manual path Codex has usually
-# not reviewed this head at all yet, which is the ordinary FIRST request — so
-# `review-id` succeeds with an empty value and a digits-only test would abort
-# after the request had already been posted. What is refused is a value that is
-# not a review id.
-#
-# THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a validator
-# in a variable is a second name a startup file can seed readonly, and a seeded
-# pattern accepting a seeded value is a check that agrees with itself. `case` is a
-# reserved word, so nothing can take its place either.
-case "$PRIOR_REVIEW" in
-    *[!0-9]*)
-        echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
-        exit 0
-        [[ -n "" ]] ;;
-esac
 ```
 
 Either way the wait step is next: with auto-review on there is a pass in flight

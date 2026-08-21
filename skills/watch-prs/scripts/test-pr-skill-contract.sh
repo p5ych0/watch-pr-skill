@@ -1710,9 +1710,18 @@ grep -qF 'if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then' "$SKILL" \
 grep -q '^[^#]*REQ_RC=' "$SKILL" \
     && die "the opening request's status goes through a variable; take it at the invocation" \
     || pass "…and its status is taken at the invocation, with no variable to seed"
-grep -q 'if ! /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
+# THE CONTINUATION IS THE `then` BRANCH, which is structural rather than a
+# refusal. `exit` is a builtin a startup file can replace with one that RETURNS,
+# so an abort arm prints and carries straight on — into the read-back, and from
+# there into the wait for a review that was never requested. Ending the arm in a
+# reserved word makes the LIST report non-zero, which nothing there reads. What
+# holds is that the work sits inside the branch a refusal does not take.
+grep -q 'if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
+grep -q '^    PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
+    && pass "…and the read-back is inside that branch, not after it" \
+    || die "the baseline read-back is not inside the request's success branch; a shadowed exit reaches it"
 
 
 # ── the round summary and the review request are ONE comment ───────────────
@@ -2151,8 +2160,11 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # either: a name pre-seeded with exactly that value leaves the postcondition
 # holding. Two that differ can, since a readonly cannot equal both — the probe the
 # transport parent above already uses.
+# COUNTED WHEREVER THEY SIT. The second probe is inside the allocation condition
+# now, so it is neither at the start of a line nor the only thing on it — an
+# anchored pattern found one and reported the probe missing.
 _rb_pr_n=0
-grep -c '^RB_WORK_DIR=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_pr_n="$(grep -c '^RB_WORK_DIR=probe-[ab]$' "$SKILL")"
+grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_pr_n="$(grep -c 'RB_WORK_DIR=probe-[ab]$' "$SKILL")"
 [ "$_rb_pr_n" = 2 ] \
     && pass "…with the name proven assignable by two differing probes before the path is built" \
     || die "RB_WORK_DIR is assigned without the two-value probe ($_rb_pr_n found); a readonly traversal value passes the prefix check"
@@ -2160,10 +2172,10 @@ grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
     && pass "…created with mkdir as the exclusion, at mode 700" \
     || die "the working directory is not created with mkdir -m 700 by path"
 for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE; do
-    grep -q "^$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
+    grep -q "^[[:space:]]*$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
         && pass "…and \$$_rb_f is derived from it by a literal suffix" \
         || die "\$$_rb_f is not derived from the single working directory"
-    grep -q "^\[\[ \$$_rb_f = \"\$RB_WORK_DIR/" "$SKILL" \
+    grep -q "\[\[ \$$_rb_f = \"\$RB_WORK_DIR/" "$SKILL" \
         && pass "…and that assignment is read back against the literal" \
         || die "\$$_rb_f is assigned without proving the assignment arrived"
 done
