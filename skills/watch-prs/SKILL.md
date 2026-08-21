@@ -581,7 +581,8 @@ if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
         [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
         # ASSIGNABLE FIRST, AND ASKED IN A SUBSHELL. The check below matches a
         # PREFIX, and `RB_TRY` is a name: a startup file that has already made it
-        # readonly makes the assignment FAIL, leaving whatever it was seeded with —
+        # readonly or value-transforming makes the assignment FAIL or rewrite it,
+        # leaving whatever it was seeded with —
         # and a value such as `…/watch-pr.anchor/../elsewhere/session` satisfies the
         # prefix while naming a directory under a parent nothing proved. `mkdir`
         # resolves the `..`, and `mkdir` being the exclusion does not help: it
@@ -592,7 +593,7 @@ if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
         # IN A SUBSHELL BECAUSE THIS SHELL IS THE OPERATOR'S, AND A STANDALONE PROBE
         # WOULD END IT. Measured on bash 5: with `errexit` on — this block is pasted
         # into such a shell as often as it is typed — a failed readonly assignment is
-        # fatal, so `RB_TRY=probe-a` on its own kills the session before the test
+        # fatal, so `RB_TRY=Probe-A` on its own kills the session before the test
         # after it can run. A subshell inherits the readonly attribute, so it fails
         # for exactly the same reason and answers the question this probe asks:
         # whether THIS name can be assigned. Tested by `if`, which is where the
@@ -601,12 +602,24 @@ if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
         # complaint is left on stderr, because it names the variable and the loop's
         # emptiness test afterwards does not.
         #
-        # WHAT IT DOES NOT ASK is whether the value SURVIVED. A transforming attribute
-        # — `declare -i RB_TRY` in the driving shell — lets the assignment succeed and
-        # stores something else, which a status-only probe accepts. The other three
-        # probes compare inside the subshell for exactly that; this one is a
-        # pre-existing site and the gap is #150, not a change smuggled into the PR
-        # that fixed them.
+        # AND THE VALUE IS COMPARED INSIDE IT, because the status alone is not the
+        # whole answer. A TRANSFORMING attribute lets the assignment SUCCEED and
+        # store something else, which a status-only probe accepts — and the real
+        # assignment below is then rewritten the same way, so the prefix check
+        # refuses every candidate and setup stops with the message about `TMPDIR`
+        # and `HOME` that describes neither. Measured on bash 5 with `nounset` off,
+        # which is the ordinary state here: under `declare -i` the value is
+        # evaluated as `Probe - A`, both names are unset, and `0` is stored, so the
+        # ASSIGNMENT succeeds and the comparison is what rejects it.
+        #
+        # THE VALUE IS MIXED CASE FOR THE OTHER HALF OF THAT. `probe-a` is already
+        # lowercase, so `declare -l` leaves it unchanged and a probe using it
+        # PASSES; `Probe-A` survives no case transformation in either direction.
+        #
+        # ONE VALUE IS ENOUGH. Two existed at these sites because a readonly
+        # pre-seeded with the probe's own value leaves a comparison IN THIS SHELL
+        # holding; in the subshell that same readonly makes the assignment fail
+        # outright, so the comparison is never reached. #150.
         #
         # AND THE REST OF THE CANDIDATE IS ITS SUCCESS ARM, not a `|| continue` after
         # it. `continue` is a BUILTIN, and one replaced by a function returning 0
@@ -617,7 +630,7 @@ if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
         # failed probe cannot reach whatever was done to the builtins. Bash's own
         # complaint is left on stderr, because it names the variable and the loop's
         # emptiness test afterwards does not.
-        if ( RB_TRY=probe-a ); then
+        if ( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] ); then
             RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
             [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
             /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
