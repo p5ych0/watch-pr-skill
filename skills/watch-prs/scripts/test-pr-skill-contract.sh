@@ -1786,6 +1786,19 @@ printf '#!/bin/sh\nprintf "git@github.com:acme/widget.git\\n" > "$2"\nexit 0\n' 
 chmod +x "$_rb_pb/bin/pr-origin.sh"
 awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
 awk '/^if \( RB_TMPPARENT=Probe-A;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
+# THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
+# range runs from the probe to the first `fi` at column 0 — which is the probe's
+# own when the selection is its success arm, and the GUARD's if it is not. Revert
+# the containment and the excerpt shrinks to the guard alone: the refusal cases
+# still see their refusal and the control still prints SURVIVED, so every
+# assertion below stays green while the real setup enters the loop with a name it
+# has just reported unusable.
+case "$(cat "$_rb_pb/parent.sh")" in
+    *'for RB_TMPPARENT in'*)
+        pass "…and the excerpt contains the selection, so the cases below can see it" ;;
+    *)
+        die "the extracted probe block stops before the parent selection; the runtime cases below would pass against a guard" ;;
+esac
 # ONE HARNESS, THREE STATES. `readonly` with `errexit` is the regression this
 # change is about; `declare -i` is the half a status-only probe accepted, where
 # the assignment SUCCEEDS and stores `0`; and the ordinary state is the control

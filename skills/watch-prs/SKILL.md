@@ -564,9 +564,12 @@ RB_TMPDIR=
 # THE VALUE IS MIXED CASE, AND THAT IS THE POINT OF IT. `probe-a` is already
 # lowercase, so `declare -l` leaves it unchanged and the probe passes — then the
 # real assignment lowercases the path and setup fails somewhere else, about
-# something else. `Probe-A` survives no case transformation in either direction,
-# and `declare -i` cannot evaluate it at all, so one value covers every
-# transforming attribute this refusal claims to reject.
+# something else. `Probe-A` survives no case transformation in either direction.
+#
+# AND WHAT REJECTS `declare -i` IS THE COMPARISON, not the assignment. Measured on
+# bash 5 with `nounset` off, which is the ordinary state here: `Probe-A` is
+# evaluated as `Probe - A`, both names are unset, and `0` is stored — the
+# assignment SUCCEEDS. The comparison is what sees that `0` is not `Probe-A`.
 #
 # AND THE REFUSAL NAMES BOTH ATTRIBUTES, because the probe now answers one
 # question — can this name hold what this line writes — and two attributes make

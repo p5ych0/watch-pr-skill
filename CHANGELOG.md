@@ -36,7 +36,9 @@
   so `declare -l` leaves it unchanged and a probe using it passes — then the real
   assignment lowercases the path and setup fails somewhere else, about something
   else. `Probe-A` survives no case transformation in either direction, and
-  `declare -i` cannot evaluate it at all.
+  under `declare -i` — where `Probe-A` is evaluated as `Probe - A` and `0` is
+  stored, so the assignment succeeds — the comparison is what sees that `0` is not
+  `Probe-A`.
 
   `RB_TRY` is the fourth site and keeps the subshell it got in 2.0.52 without the
   comparison: it is pre-existing here, so the transforming-attribute gap is filed
