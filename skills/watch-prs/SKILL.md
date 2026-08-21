@@ -543,6 +543,12 @@ RB_TMPDIR=
 # it fails for the same reason and answers the same question, and being a
 # CONDITION it is exempt from `errexit`.
 #
+# AND THE SELECTION IS ITS SUCCESS ARM, not a statement after a guard. `exit` is a
+# builtin your shell can replace with one that RETURNS, and the trailing
+# `[[ -n "" ]]` only gives the `if` a false status nothing consumes — so a refused
+# probe printed its message and then ran the loop anyway, on a name it had just
+# reported unusable. `if` is a reserved word and nothing can stand in for it.
+#
 # AND THE VALUE IS COMPARED INSIDE IT, because the status alone is not the whole
 # answer. A TRANSFORMING attribute — `declare -i RB_TMPPARENT` in the driving
 # shell — lets the assignment SUCCEED and stores something else: measured on
@@ -554,74 +560,80 @@ RB_TMPDIR=
 # the probe's value leaves a comparison IN THIS SHELL holding; in the subshell
 # that same readonly makes the assignment fail outright, so the comparison is
 # never reached and the status is non-zero. #148.
-if ! ( RB_TMPPARENT=probe-a; [[ $RB_TMPPARENT = probe-a ]] ); then
-    echo "ABORT: RB_TMPPARENT is readonly in this shell; the transport parent cannot be chosen"
+#
+# AND THE REFUSAL NAMES BOTH ATTRIBUTES, because the probe now answers one
+# question — can this name hold what this line writes — and two attributes make
+# it "no". Saying only `readonly` sends the operator looking for one that is not
+# there.
+if ( RB_TMPPARENT=probe-a; [[ $RB_TMPPARENT = probe-a ]] ); then
+    RB_TMPPARENT=
+    for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
+        [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
+        # ASSIGNABLE FIRST, AND ASKED IN A SUBSHELL. The check below matches a
+        # PREFIX, and `RB_TRY` is a name: a startup file that has already made it
+        # readonly makes the assignment FAIL, leaving whatever it was seeded with —
+        # and a value such as `…/watch-pr.anchor/../elsewhere/session` satisfies the
+        # prefix while naming a directory under a parent nothing proved. `mkdir`
+        # resolves the `..`, and `mkdir` being the exclusion does not help: it
+        # excludes a name that already EXISTS, not one that resolves elsewhere. The
+        # origin every stage is addressed by would then be read from a directory
+        # another local account owns. #146.
+        #
+        # IN A SUBSHELL BECAUSE THIS SHELL IS THE OPERATOR'S, AND A STANDALONE PROBE
+        # WOULD END IT. Measured on bash 5: with `errexit` on — this block is pasted
+        # into such a shell as often as it is typed — a failed readonly assignment is
+        # fatal, so `RB_TRY=probe-a` on its own kills the session before the test
+        # after it can run. A subshell inherits the readonly attribute, so it fails
+        # for exactly the same reason and answers the question this probe asks:
+        # whether THIS name can be assigned. Tested by `if`, which is where the
+        # `errexit` exemption comes from as well — a command run as a CONDITION is
+        # exempt — so the probe can fail here without ending the session. Bash's own
+        # complaint is left on stderr, because it names the variable and the loop's
+        # emptiness test afterwards does not.
+        #
+        # WHAT IT DOES NOT ASK is whether the value SURVIVED. A transforming attribute
+        # — `declare -i RB_TRY` in the driving shell — lets the assignment succeed and
+        # stores something else, which a status-only probe accepts. The other three
+        # probes compare inside the subshell for exactly that; this one is a
+        # pre-existing site and the gap is #150, not a change smuggled into the PR
+        # that fixed them.
+        #
+        # AND THE REST OF THE CANDIDATE IS ITS SUCCESS ARM, not a `|| continue` after
+        # it. `continue` is a BUILTIN, and one replaced by a function returning 0
+        # takes the failure arm and then falls straight through to the next line —
+        # the assignment fails, the stale traversal value passes the prefix check, and
+        # `mkdir` runs outside the proven parent, which is the whole defect. `if` is a
+        # reserved word and nothing can stand in for it, so the work is somewhere a
+        # failed probe cannot reach whatever was done to the builtins. Bash's own
+        # complaint is left on stderr, because it names the variable and the loop's
+        # emptiness test afterwards does not.
+        if ( RB_TRY=probe-a ); then
+            RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+            [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
+            /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
+            # THE READ IS THE TEST. If the helper accepts this parent it has already
+            # written the value, so there is nothing to repeat; if it refuses, the reason
+            # is on stderr for the operator and this tries the next candidate.
+            if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
+                RB_TMPDIR="$RB_TRY"
+                # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
+                # assignment that did not happen is what turns a readonly into a stale
+                # directory the rest of setup then trusts.
+                [[ $RB_TMPDIR = "$RB_TRY" ]] \
+                    || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
+                break
+            fi
+            /usr/bin/env rm -f "$RB_TRY/origin"
+            /usr/bin/env rmdir "$RB_TRY"
+        fi
+    done
+    [[ -n $RB_TMPDIR ]] \
+        || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
+else
+    echo "ABORT: RB_TMPPARENT is readonly or value-transforming in this shell; the transport parent cannot be chosen"
     exit 1
     [[ -n "" ]]
 fi
-RB_TMPPARENT=
-for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
-    [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
-    # ASSIGNABLE FIRST, AND ASKED IN A SUBSHELL. The check below matches a
-    # PREFIX, and `RB_TRY` is a name: a startup file that has already made it
-    # readonly makes the assignment FAIL, leaving whatever it was seeded with —
-    # and a value such as `…/watch-pr.anchor/../elsewhere/session` satisfies the
-    # prefix while naming a directory under a parent nothing proved. `mkdir`
-    # resolves the `..`, and `mkdir` being the exclusion does not help: it
-    # excludes a name that already EXISTS, not one that resolves elsewhere. The
-    # origin every stage is addressed by would then be read from a directory
-    # another local account owns. #146.
-    #
-    # IN A SUBSHELL BECAUSE THIS SHELL IS THE OPERATOR'S, AND A STANDALONE PROBE
-    # WOULD END IT. Measured on bash 5: with `errexit` on — this block is pasted
-    # into such a shell as often as it is typed — a failed readonly assignment is
-    # fatal, so `RB_TRY=probe-a` on its own kills the session before the test
-    # after it can run. A subshell inherits the readonly attribute, so it fails
-    # for exactly the same reason and answers the question this probe asks:
-    # whether THIS name can be assigned. Tested by `if`, which is where the
-    # `errexit` exemption comes from as well — a command run as a CONDITION is
-    # exempt — so the probe can fail here without ending the session. Bash's own
-    # complaint is left on stderr, because it names the variable and the loop's
-    # emptiness test afterwards does not.
-    #
-    # WHAT IT DOES NOT ASK is whether the value SURVIVED. A transforming attribute
-    # — `declare -i RB_TRY` in the driving shell — lets the assignment succeed and
-    # stores something else, which a status-only probe accepts. The other three
-    # probes compare inside the subshell for exactly that; this one is a
-    # pre-existing site and the gap is #150, not a change smuggled into the PR
-    # that fixed them.
-    #
-    # AND THE REST OF THE CANDIDATE IS ITS SUCCESS ARM, not a `|| continue` after
-    # it. `continue` is a BUILTIN, and one replaced by a function returning 0
-    # takes the failure arm and then falls straight through to the next line —
-    # the assignment fails, the stale traversal value passes the prefix check, and
-    # `mkdir` runs outside the proven parent, which is the whole defect. `if` is a
-    # reserved word and nothing can stand in for it, so the work is somewhere a
-    # failed probe cannot reach whatever was done to the builtins. Bash's own
-    # complaint is left on stderr, because it names the variable and the loop's
-    # emptiness test afterwards does not.
-    if ( RB_TRY=probe-a ); then
-        RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-        [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
-        /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
-        # THE READ IS THE TEST. If the helper accepts this parent it has already
-        # written the value, so there is nothing to repeat; if it refuses, the reason
-        # is on stderr for the operator and this tries the next candidate.
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
-            RB_TMPDIR="$RB_TRY"
-            # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
-            # assignment that did not happen is what turns a readonly into a stale
-            # directory the rest of setup then trusts.
-            [[ $RB_TMPDIR = "$RB_TRY" ]] \
-                || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
-            break
-        fi
-        /usr/bin/env rm -f "$RB_TRY/origin"
-        /usr/bin/env rmdir "$RB_TRY"
-    fi
-done
-[[ -n $RB_TMPDIR ]] \
-    || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
 RB_ORIGIN_OUT="$RB_TMPDIR/origin"
 [[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
     || { /usr/bin/env rm -f "$RB_TMPDIR/origin"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
@@ -971,7 +983,7 @@ else
         # value makes the subshell's assignment fail outright, so the comparison
         # is never reached. #148.
         if { ( RB_WORK_DIR=probe-a; [[ $RB_WORK_DIR = probe-a ]] ) \
-             || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
+             || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
            && {
                 RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
                 [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
@@ -1151,7 +1163,7 @@ WHO="$CODEX_BOT"
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
 if { ( PRIOR_REVIEW=probe-a; [[ $PRIOR_REVIEW = probe-a ]] ) \
-     || { echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
+     || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         PRIOR_REVIEW="$(<"$PRIOR_FILE")"

@@ -1777,9 +1777,15 @@ _rb_pb="$(mktemp_d)" || _rb_pb=""
 { [ -n "$_rb_pb" ] && [ -d "$_rb_pb" ]; } \
     || die "no scratch directory for the setup-probe cases; neither probe was exercised"
 if [ -n "$_rb_pb" ] && [ -d "$_rb_pb" ]; then
-mkdir -p "$_rb_pb/parent"
+mkdir -p "$_rb_pb/parent" "$_rb_pb/bin"
+# A WORKING `pr-origin.sh` FOR THE CONTROL, because the parent selection is inside
+# the probe's success arm now: without one, an ordinary shell reaches the loop,
+# every candidate is refused by the helper, and the control would agree with the
+# two refusal cases for a reason that has nothing to do with the probe.
+printf '#!/bin/sh\nprintf "git@github.com:acme/widget.git\\n" > "$2"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
+chmod +x "$_rb_pb/bin/pr-origin.sh"
 awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
-awk '/^if ! \( RB_TMPPARENT=probe-a;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
+awk '/^if \( RB_TMPPARENT=probe-a;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
 # ONE HARNESS, THREE STATES. `readonly` with `errexit` is the regression this
 # change is about; `declare -i` is the half a status-only probe accepted, where
 # the assignment SUCCEEDS and stores `0`; and the ordinary state is the control
@@ -1792,24 +1798,42 @@ rb_probe_case() {   # rb_probe_case <script> <attribute-line> <extra-env…>
     run_limited 25 env "$@" bash --noprofile --norc -c '
 set -e
 '"$_attr"'
-OWNER=acme; REPO=widget; RB_SCRIPTS=/nonexistent-rb-scripts
+OWNER=acme; REPO=widget; RB_SCRIPTS="${RB_PROBE_SCRIPTS:-/nonexistent-rb-scripts}"
 RB_PIN_SEEN=same; RB_REMOTE=same
 . "$1"
 printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 }
 for _rb_attr in 'readonly RB_TMPPARENT=probe-a' 'declare -i RB_TMPPARENT=0'; do
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly in this shell' \
+    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
 done
-_rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
+# AND A SHADOWED `exit` CHANGES NOTHING ABOUT WHICH REFUSAL IS PRINTED. The
+# selection being the probe's success arm is asserted STRUCTURALLY above, and that
+# is deliberate: no state reaches the selection to be observed. Measured on bash 5
+# against the guard form — a readonly ends the shell at the loop's first
+# assignment, and `declare -i` makes that assignment an arithmetic error, which
+# under `errexit` ends it too. So the loop's own misdirected abort about `TMPDIR`
+# and `HOME` never follows in either shape, and an assertion demanding its absence
+# would pass against the code it was written to reject. What is asserted here is
+# what can be: the refusal that IS printed is the probe's own, naming the
+# variable, whatever was done to `exit`.
+_rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
+declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
+printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
+    && pass "…and a shadowed exit does not change which refusal is printed" \
+    || die "the shadowed-exit case gave '$_rb_out'"
+printf '%s' "$_rb_out" | grep -qF 'could not read origin into a transport directory' \
+    && die "…but the selection ran anyway and added its own misdirected abort: '$_rb_out'" \
+    || pass "…and no second, misdirected abort follows it (an absence check; see above for what it cannot see)"
+_rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
 printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
     && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
     || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
 for _rb_attr in 'readonly RB_WORK_DIR=/tmp' 'declare -i RB_WORK_DIR=0'; do
     _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly in this shell" \
+    printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
         && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_WORK_DIR probe gave '$_rb_out' ($_rb_attr)"
     printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
@@ -2291,15 +2315,15 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # `errexit` exemption comes from too, a command run as a condition being exempt —
 # and whose success arm is the rest of the candidate, so a shadowed `continue`
 # has nothing to walk past. #146.
-_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+_rb_try_ln="$(grep -n '^[[:space:]]*if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
 { [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
     && pass "the transport candidate is probed in a subshell before its path is built" \
     || die "RB_TRY is not probed in a subshell before the path is built (probe=$_rb_try_ln path=$_rb_try_path_ln)"
-grep -q '^    RB_TRY=probe-' "$SKILL" \
+grep -q '^[[:space:]]*RB_TRY=probe-' "$SKILL" \
     && die "RB_TRY is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
-grep -q '^    ( RB_TRY=probe-a ) || continue$' "$SKILL" \
+grep -q '^[[:space:]]*( RB_TRY=probe-a ) || continue$' "$SKILL" \
     && die "the RB_TRY probe falls through on a shadowed continue; put the candidate in its success arm" \
     || pass "…and the candidate is the probe's success arm, not a shadowable continue after it"
 
@@ -2313,7 +2337,7 @@ grep -q '^    ( RB_TRY=probe-a ) || continue$' "$SKILL" \
 # block would need an origin, a repository and a plugin root; the loop needs a
 # parent directory and a `$RB_SCRIPTS` that refuses, which is what makes every
 # candidate fall to the bottom.
-_rb_loop="$(awk '/^for RB_TMPPARENT in /,/^done$/' "$SKILL")" || _rb_loop=""
+_rb_loop="$(awk '/^[[:space:]]*for RB_TMPPARENT in /,/^[[:space:]]*done$/' "$SKILL")" || _rb_loop=""
 [ -n "$_rb_loop" ] \
     && pass "the transport loop can be extracted for execution" \
     || die "the transport loop could not be extracted; the behavioural case below proves nothing"

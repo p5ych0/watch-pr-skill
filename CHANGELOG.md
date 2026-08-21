@@ -36,10 +36,16 @@
   comparison: it is pre-existing here, so the transforming-attribute gap is filed
   as its own change rather than folded into this one.
 
-  `RB_TRY` was the fourth and was fixed in 2.0.52, which is where the measurement
-  came from. The pin proof's own probe is deliberately unchanged: it is an
-  `elif` chain that has to run before its `mkdir`, and the base ref records why
-  stopping on the spot is accepted there.
+  The refusals name both attributes now, since the probe answers one question —
+  can this name hold what this line writes — and two attributes make it "no".
+  Saying only `readonly` sent the operator looking for one that is not there. And
+  the transport parent's selection became its probe's success arm, like the other
+  two: written as a guard it printed the refusal and then ran the loop anyway, on
+  a name it had just reported unusable.
+
+  The pin proof's own probe is deliberately unchanged: it is an `elif` chain that
+  has to run before its `mkdir`, and the base ref records why stopping on the spot
+  is accepted there.
 
 ## [2.0.52] — 2026-08-21
 
