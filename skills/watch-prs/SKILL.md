@@ -689,9 +689,27 @@ unset _rb_knob
 # THE PARENT IS THE ONE ALREADY PROVEN — absolute, a directory, and one this user
 # could create under. Choosing it a second time would be a second copy of the
 # loop above, which is the defect this document keeps deleting.
+# ASSIGNABLE FIRST, AND PROVEN WITH TWO VALUES — the probe the transport parent
+# above already uses, and for the reason it gives: no single value can be ruled
+# out, because a readonly name pre-seeded with exactly that value makes the failed
+# assignment leave what the postcondition expects. Two that differ can, since a
+# readonly cannot equal both.
+#
+# THE SHAPE CHECK BELOW IS NOT WHAT STOPS ONE. It matches a PREFIX, and a readonly
+# value such as `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while
+# naming a directory under a parent nothing proved — `mkdir` resolves the `..`,
+# and another account owning that parent could then replace the directory and with
+# it the account this session posts and the baseline it waits on. It stays as a
+# statement of the shape; the probes are what make the value this session's.
+RB_WORK_DIR=probe-a
+[[ $RB_WORK_DIR = probe-a ]] \
+    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
+RB_WORK_DIR=probe-b
+[[ $RB_WORK_DIR = probe-b ]] \
+    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
 RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
 [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
-    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
+    || { echo "ABORT: the session's working directory is not under the parent this setup proved"; exit 1; }
 /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
     || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; exit 1; }
 # Where each round's summary is written before it is posted.

@@ -2142,6 +2142,20 @@ grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
 grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
     && pass "…under the parent the transport read already proved usable" \
     || die "the working directory is not built under the proven parent"
+# AND THE NAME IS PROVEN ASSIGNABLE FIRST, WITH TWO VALUES. The shape check on the
+# built path matches a PREFIX, and a readonly value such as
+# `…/watch-pr-work.anchor/../elsewhere/session` satisfies it while naming a
+# directory under a parent nothing proved — `mkdir` resolves the `..`, and another
+# account owning that parent could replace the directory and with it the account
+# this session posts and the baseline it waits on. One probe value cannot see it
+# either: a name pre-seeded with exactly that value leaves the postcondition
+# holding. Two that differ can, since a readonly cannot equal both — the probe the
+# transport parent above already uses.
+_rb_pr_n=0
+grep -c '^RB_WORK_DIR=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_pr_n="$(grep -c '^RB_WORK_DIR=probe-[ab]$' "$SKILL")"
+[ "$_rb_pr_n" = 2 ] \
+    && pass "…with the name proven assignable by two differing probes before the path is built" \
+    || die "RB_WORK_DIR is assigned without the two-value probe ($_rb_pr_n found); a readonly traversal value passes the prefix check"
 grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
     && pass "…created with mkdir as the exclusion, at mode 700" \
     || die "the working directory is not created with mkdir -m 700 by path"
