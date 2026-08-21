@@ -1643,9 +1643,21 @@ fi
 # both failure paths rather than matching their text. What stays asserted here is
 # the driver's half: the status has to be taken and refused on before the wait
 # step, or a stopped request is followed by a poll for a review nobody asked for.
-grep -q 'pr-request-review.sh N "$AUTO_REVIEW" "$SUMMARY_FILE"' "$SKILL" \
+grep -q 'pr-request-review.sh N "$AUTO_REVIEW" <<' "$SKILL" \
     && pass "the opening request is made through the helper the suite covers" \
     || die "the initial Codex request is not made through pr-request-review.sh"
+# AND ITS BODY GOES IN AS A REDIRECTION, not through a name. This bash runs in
+# the operator's shell, where `cat` is a NAME: a function by that name receives
+# the heredoc and writes what it likes to the redirection, so the account posted
+# would be the function's text — and one that writes nothing and succeeds stops a
+# request that was fine. `CLAUDE.md`: prefer REMOVING the dependency over guarding
+# it. Counted rather than forbidden outright, because the Copilot phase still
+# writes a file this way and that block is its own extraction; what must not
+# happen is a SECOND one appearing here.
+_rb_cat_n="$(grep -c 'cat > "\$SUMMARY_FILE"' "$SKILL")"
+[ "$_rb_cat_n" -le 1 ] \
+    && pass "…with its body redirected in, so no shadowable name writes it" \
+    || die "SKILL.md writes a body with cat $_rb_cat_n times; the opening request takes its body on stdin"
 grep -q 'if \[\[ $REQ_RC -ne 0 \]\]' "$SKILL" \
     && pass "the Codex request is branched on before the wait begins" \
     || die "a failed @codex request still enters the wait step"
@@ -1855,7 +1867,7 @@ _rb_forged="$(env -u SHELLOPTS RB_SKILL_BODY="$RB_SKILL_BODY" bash -c '
 # unrecognised value is refused by name, which `test-pr-request-review.sh`
 # executes. Asserted as the argument rather than as the branch, because the
 # branch is somewhere the suite can run it.
-grep -q 'pr-request-review.sh N "\$AUTO_REVIEW"' "$SKILL" \
+grep -q 'pr-request-review.sh N "\$AUTO_REVIEW" <<' "$SKILL" \
     && pass "…and the initial request is given it" \
     || die "the initial request does not branch on the review mode"
 

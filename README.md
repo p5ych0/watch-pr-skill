@@ -282,7 +282,9 @@ Then:
    comment without the mention and go straight to waiting. **`pr-request-review.sh`**
    holds both, so the setting decides the ordering in one place that is tested —
    and it refuses a body that would queue that duplicate, along with one whose
-   text would be read back as a record of the loop's own. The loop is *phased*:
+   text would be read back as a record of the loop's own. The account goes in on
+   **stdin**, as a heredoc redirected straight into it, so writing it needs no
+   file and no `cat` — a name the operator's shell can replace. The loop is *phased*:
    Codex reviews to a clean signoff, and only then is Copilot asked (step 6).
    Running both every round buys a Copilot pass on every intermediate commit and
    mixes its findings into rounds that were not about them.

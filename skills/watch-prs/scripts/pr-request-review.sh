@@ -1,8 +1,9 @@
 #!/usr/bin/env -S bash -p
 # Request the OPENING Codex review, and report the baseline the watch needs.
 #
-#   pr-request-review.sh <pr> <auto-review: yes|no> <body-file>
+#   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
+#   stdin   the account of what to look at; prose, one paragraph
 #   stdout  the review-id baseline, ALONE — empty on the automatic path
 #   stderr  every reason
 #
@@ -96,7 +97,13 @@ rb_load "$_RB_SELF_DIR" recordlib RB_CODEX_BOT "ABORT:" var || exit 1
 rb_load "$_RB_SELF_DIR" identitylib rb_identity "ABORT:" || exit 1
 rb_identity || { echo "ABORT: reason=$RB_IDENTITY_REASON" >&2; exit 1; }
 
-PR="${1:-}"; AUTO_REVIEW="${2:-}"; BODY_FILE="${3:-}"
+# AN EXTRA ARGUMENT IS REFUSED RATHER THAN IGNORED. The body used to be a third
+# argument naming a file, and a caller still passing one would have it silently
+# dropped while the body was taken from whatever stdin happened to be — a
+# terminal, or the previous command's output. A shape that changed is worth
+# saying so about; an argument nothing reads is not.
+[ "$#" -le 2 ] || { echo "ABORT: this takes two arguments and the body on stdin (got $# — the body is no longer a file)" >&2; exit 1; }
+PR="${1:-}"; AUTO_REVIEW="${2:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')" >&2; exit 1 ;;
 esac
@@ -110,14 +117,29 @@ case "$AUTO_REVIEW" in
     "") echo "ABORT: the auto-review mode is required: 'yes' if Codex automatic review is on for this repository, 'no' if it is not" >&2; exit 1 ;;
     *) echo "ABORT: '$AUTO_REVIEW' is not an auto-review mode; expected 'yes' or 'no'" >&2; exit 1 ;;
 esac
-[ -n "$BODY_FILE" ] || { echo "ABORT: a body file is required" >&2; exit 1; }
-
-# THE BODY IS READ WITH ITS STATUS TAKEN, before anything is posted. `$(cat …)`
-# inside the argument swallows the reader's status, so a partial read still
-# produces a successful `gh pr comment` — and this is the account the reviewer
-# reads before the diff, so a truncated one is worse than none: it looks
-# complete.
-BODY="$(cat "$BODY_FILE")" || { echo "ABORT: could not read the request body." >&2; exit 1; }
+# THE BODY ARRIVES ON STDIN, NOT IN A FILE THE CALLER WROTE FIRST.
+#
+# It was a file, and writing it meant `cat > "$FILE" <<EOF` in `SKILL.md` — whose
+# bash runs in the operator's own shell, where `cat` is a NAME. A function by that
+# name receives the heredoc on stdin and writes whatever it likes to the
+# redirection, so the account this script validates and posts would be the
+# function's text rather than the driver's; and one that writes nothing and
+# succeeds stops an otherwise valid request. `CLAUDE.md`: prefer REMOVING the
+# dependency over guarding it. A heredoc redirected straight into this command is
+# a redirection the parser handles — there is no command name in it to take, and
+# no file to write, check, or leave behind from a previous round.
+#
+# READ WITH ITS STATUS TAKEN, before anything is posted. `$(cat)` inside the
+# argument swallows the reader's status, so a partial read still produces a
+# successful `gh pr comment` — and this is the account the reviewer is told to
+# read before the diff, so a truncated one is worse than none: it looks complete.
+# Here `cat` is an external command in a PRIVILEGED shell, which imports no
+# functions — the same footing as `gh`, `jq` and `git`, and the `PATH` boundary
+# settled in #91.
+#
+# FULLY, AND FIRST. Everything below runs with stdin at end of file, so the
+# nested helper and `gh` inherit nothing to consume.
+BODY="$(cat)" || { echo "ABORT: could not read the request body from stdin." >&2; exit 1; }
 [ -n "$BODY" ] || { echo "ABORT: the request body is empty." >&2; exit 1; }
 
 if _marker="$(rb_reserved_marker_line "$BODY")"; then

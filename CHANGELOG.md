@@ -28,6 +28,15 @@
   quoted one changes nothing, and refusing it there would forbid a PR description
   that quotes the loop.
 
+  The body now arrives on **stdin**. It was going to be a file, which meant
+  `cat > "$FILE" <<EOF` in `SKILL.md` — whose bash runs in your own shell, where
+  `cat` is a *name*: a function by that name receives the heredoc and writes
+  whatever it likes to the redirection, so the account posted would be the
+  function's text rather than yours, and one that writes nothing and succeeds
+  stops a request that was fine. A heredoc redirected straight into the command is
+  a redirection the parser handles — there is no name in it to take, no write to
+  check, and no file left over from a previous round to post as this one's.
+
   Two smaller things came with it. The review mode is refused **by name** —
   `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
   truthiness test silently took the manual path and posted a mention into an

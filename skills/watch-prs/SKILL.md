@@ -910,29 +910,34 @@ WHO="$CODEX_BOT"
 # write itself, and this one refused neither, so the opening account was the one
 # posting site with no rules. Issues #26, #144.
 #
-#   pr-request-review.sh <pr> <auto-review: yes|no> <body-file>
+#   pr-request-review.sh <pr> <auto-review: yes|no> < <body>
 #
 #     0  posted — the baseline is on stdout, and it is EMPTY on the automatic
 #        path, where the trigger preceded us and there is nothing to capture
 #     1  stopped — nothing was posted
 #
-# WRITE THE ACCOUNT FIRST: one paragraph on what this change does and what to
-# look at. The body is inserted as DATA, so prose quoting a command line is
+# WRITE THE ACCOUNT INTO THE HEREDOC: one paragraph on what this change does and
+# what to look at. It is inserted as DATA, so prose quoting a command line is
 # posted rather than executed — but a line reproducing one of the markers the
 # loop reads as a record CREATES that record, because this is posted under your
 # identity, and on the automatic path a quoted `@codex review` queues a second
 # pass over the same head. The script refuses both rather than publishing them.
 #
-# THE WRITE IS CHECKED, not only the read the script does: a redirection that
-# truncates the file and then fails leaves a FRAGMENT that passes a non-empty
-# test and is posted as this PR's account.
-cat > "$SUMMARY_FILE" <<'EOF' || { echo "ABORT: could not write the request body."; exit 0; }
-<one paragraph: what this change does and what to look at>
-EOF
+# THE BODY GOES STRAIGHT IN, WITH NO FILE AND NO `cat`. This bash runs in YOUR
+# shell, where `cat` is a NAME: a function by that name receives the heredoc and
+# writes whatever it likes to the redirection, so the account posted would be the
+# function's text rather than yours — and one that writes nothing and succeeds
+# stops a request that was fine. A heredoc redirected into the command is a
+# REDIRECTION the parser handles, so there is no name in it to take, no write to
+# check, and no file left over from a previous round to post as this one's.
+#
 # THE BASELINE IS THE ONE VALUE THAT OUTLIVES THIS STEP, and a child cannot
 # assign a variable here — so it comes back on stdout ALONE, with every reason on
 # stderr. Step 3's watch is given it.
-PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" "$SUMMARY_FILE")"; REQ_RC=$?
+PRIOR_REVIEW="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" <<'EOF'
+<one paragraph: what this change does and what to look at>
+EOF
+)"; REQ_RC=$?
 # THE STATUS AND THE SHAPE, because neither covers the other: empty is the
 # automatic path's correct answer and is indistinguishable from a lost value, so
 # the status is what says a request was made, and the shape is what says the

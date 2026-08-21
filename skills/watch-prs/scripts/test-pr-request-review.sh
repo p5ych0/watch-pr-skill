@@ -56,17 +56,22 @@ world() {   # world ; auto-review off, a readable baseline, a working post
     printf '4242\n' > "$W/prior.out"
     printf '0\n' > "$W/prior.rc"
     printf 'A one-paragraph account of what this change does.\n' > "$TMP/body.md"
+    BODY_IN="$TMP/body.md"
 }
 
 # STDOUT AND STDERR ARE CAPTURED APART, because keeping them apart is the
 # contract: stdout carries the baseline or nothing, so a reason leaking onto it
 # is read by the driver as a review id.
 OUT="$TMP/out"; ERR="$TMP/err"
+# THE BODY ARRIVES ON STDIN, which is why the third argument is gone: the driver
+# redirects a heredoc straight in, so `SKILL.md` needs no `cat` and no file.
+# `$BODY_IN` is what this harness feeds through that redirection, and the case
+# that wants an unreadable body points it at a path that does not exist.
 run() {   # run [args…] ; prints "<rc>", with stdout in $OUT and stderr in $ERR
     local rc=0
     (cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
         BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-        /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" >"$OUT" 2>"$ERR") || rc=$?
+        /usr/bin/env bash -p "$DIR/pr-request-review.sh" "$@" <"$BODY_IN" >"$OUT" 2>"$ERR") || rc=$?
     printf '%s' "$rc"
 }
 stdout()  { cat "$OUT"; }
@@ -76,7 +81,7 @@ nothing_posted() { ! grep -q '^gh ' "$TMP/calls"; }
 bodies()  { cat "$TMP/bodies"; }
 
 # ── THE ORDINARY MANUAL PATH ───────────────────────────────────────────────
-world; rc="$(run 7 no "$TMP/body.md")"
+world; rc="$(run 7 no)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
     && pass "the manual path posts and returns the baseline on stdout, alone" \
     || die "the manual path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
@@ -94,7 +99,7 @@ bodies | grep -qF 'A one-paragraph account' \
 # `--after-review` on the initial automatic pass can capture the very review
 # being waited for: the trigger preceded this loop. So there is nothing to read,
 # and reading it anyway is the failure — not a wasted call.
-world; rc="$(run 7 yes "$TMP/body.md")"
+world; rc="$(run 7 yes)"
 { [ "$rc" = 0 ] && [ -z "$(stdout)" ]; } \
     && pass "the automatic path posts and reports an EMPTY baseline" \
     || die "the automatic path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
@@ -112,7 +117,7 @@ bodies | grep -qF '@codex review' \
 for _mode in no yes; do
     world
     printf '**Review-Signoff:** `%s` `%s`\n' "$CODEXBOT" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$TMP/body.md"
-    rc="$(run 7 "$_mode" "$TMP/body.md")"
+    rc="$(run 7 "$_mode")"
     { [ "$rc" = 1 ] && stderr | grep -qF 'marker the loop reads as a record'; } \
         && pass "a body reproducing a signoff marker is refused ($_mode)" \
         || die "a marker body on the $_mode path gave rc=$rc '$(stderr)'"
@@ -129,7 +134,7 @@ done
 # "refuse any body mentioning a signoff" and every case above would still pass.
 world
 printf 'The loop records this:\n\n    **Review-Signoff:** `x` `y`\n' > "$TMP/body.md"
-rc="$(run 7 no "$TMP/body.md")"
+rc="$(run 7 no)"
 { [ "$rc" = 0 ] && posted; } \
     && pass "…while the same line indented is posted, because the readers scan column 0" \
     || die "an indented marker was refused: rc=$rc '$(stderr)'"
@@ -139,7 +144,7 @@ rc="$(run 7 no "$TMP/body.md")"
 # quoted out of an issue or a PR description queues a second one over the same
 # head, which is the duplicate the branch exists to prevent.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
-rc="$(run 7 yes "$TMP/body.md")"
+rc="$(run 7 yes)"
 { [ "$rc" = 1 ] && stderr | grep -qF 'queues a second one'; } \
     && pass "an automatic-path body containing the mention is refused" \
     || die "a quoted mention on the automatic path gave rc=$rc '$(stderr)'"
@@ -151,7 +156,7 @@ nothing_posted \
 # the mention itself there, so a body that also carries one changes nothing.
 # Refusing it in both would forbid a PR description that quotes the loop.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
-rc="$(run 7 no "$TMP/body.md")"
+rc="$(run 7 no)"
 { [ "$rc" = 0 ] && posted; } \
     && pass "…while the manual path accepts one, because it writes the mention itself" \
     || die "a quoted mention on the manual path was refused: rc=$rc '$(stderr)'"
@@ -160,7 +165,7 @@ rc="$(run 7 no "$TMP/body.md")"
 # a body carrying `@Codex Review` on the automatic path queues the second pass an
 # exact-match check would have let through.
 world; printf 'See the @Codex Review thread on #12.\n' > "$TMP/body.md"
-rc="$(run 7 yes "$TMP/body.md")"
+rc="$(run 7 yes)"
 { [ "$rc" = 1 ] && nothing_posted; } \
     && pass "…and the mention is matched case-insensitively, as the trigger is" \
     || die "a mixed-case mention on the automatic path gave rc=$rc, posted=$(cat "$TMP/calls")"
@@ -169,7 +174,7 @@ rc="$(run 7 yes "$TMP/body.md")"
 # Read as empty it becomes the automatic path's answer on the manual path, and
 # the watch then accepts the PREVIOUS review as this round's.
 world; printf '2\n' > "$W/prior.rc"
-rc="$(run 7 no "$TMP/body.md")"
+rc="$(run 7 no)"
 { [ "$rc" = 1 ] && stderr | grep -qF 'do not request a review blind'; } \
     && pass "an unreadable baseline stops the request" \
     || die "an unreadable baseline gave rc=$rc '$(stderr)'"
@@ -182,7 +187,7 @@ nothing_posted \
 # arrived" rather than "none was asked for".
 for _mode in no yes; do
     world; printf '1\n' > "$W/gh.rc"
-    rc="$(run 7 "$_mode" "$TMP/body.md")"
+    rc="$(run 7 "$_mode")"
     { [ "$rc" = 1 ] && stderr | grep -qF 'do not enter the wait step'; } \
         && pass "a failed post stops rather than reporting a request ($_mode)" \
         || die "a failed post on the $_mode path gave rc=$rc '$(stderr)'"
@@ -192,11 +197,29 @@ for _mode in no yes; do
 done
 
 # ── THE BODY IS READ WITH ITS STATUS TAKEN ─────────────────────────────────
-world; rc="$(run 7 no "$TMP/nonexistent.md")"
-{ [ "$rc" = 1 ] && nothing_posted; } \
-    && pass "a body file that cannot be read stops before posting" \
+# A STDIN THAT FAILS TO READ, not merely an empty one: `$(cat)` inside the
+# argument would swallow the reader's status, and a failed read would then post an
+# empty account as this PR's — or, with a partial one, an account that looks
+# complete. A directory is the portable way to stage it, since opening one for
+# reading succeeds and reading from it does not.
+#
+# THE INVARIANT, NOT THE ROUTE: whether the redirection itself is refused or the
+# read fails inside the script, what must hold is that nothing was posted and
+# nothing reached stdout.
+#
+# THIS CASE REACHES THE EMPTY CHECK, NOT THE STATUS ONE, and that is stated
+# rather than hidden: a read that fails having produced NOTHING is caught either
+# way. What the status is there for is a read that fails having produced SOME of
+# the body — an account that looks complete to the reviewer told to read it
+# before the diff — and no fixture stages that, for the same reason
+# `recordlib.sh` gives about heredoc temporary files: making a read fail halfway
+# means making it fail everywhere. `pr-close-round.sh` carries the same guard for
+# the same case.
+world; BODY_IN="$TMP"; rc="$(run 7 no)"
+{ [ "$rc" != 0 ] && nothing_posted && [ -z "$(stdout)" ]; } \
+    && pass "a body that cannot be read stops before posting" \
     || die "an unreadable body gave rc=$rc, posted=$(cat "$TMP/calls")"
-world; : > "$TMP/body.md"; rc="$(run 7 no "$TMP/body.md")"
+world; : > "$TMP/body.md"; rc="$(run 7 no)"
 { [ "$rc" = 1 ] && stderr | grep -qF 'empty' && nothing_posted; } \
     && pass "…and an empty one is refused rather than posted as an account" \
     || die "an empty body gave rc=$rc '$(stderr)'"
@@ -206,7 +229,7 @@ world; rc="$(run)"
 { [ "$rc" = 1 ] && stderr | grep -qF 'a PR number is required'; } \
     && pass "a missing PR number refuses" \
     || die "a missing PR gave rc=$rc '$(stderr)'"
-world; rc="$(run notanumber no "$TMP/body.md")"
+world; rc="$(run notanumber no)"
 { [ "$rc" = 1 ] && stderr | grep -qF 'a PR number is required'; } \
     && pass "…and so does one that is not a number" \
     || die "a non-numeric PR gave rc=$rc '$(stderr)'"
@@ -214,27 +237,30 @@ world; rc="$(run notanumber no "$TMP/body.md")"
 # THE MODE HAS NO DEFAULT AND IS NOT A TRUTHINESS TEST. The two wrong answers are
 # a duplicate pass and a review nobody asked for, so an unrecognised value cannot
 # fall into either branch — which is what `[ "$X" = yes ]` on its own does.
-world; rc="$(run 7 '' "$TMP/body.md")"
+world; rc="$(run 7 '')"
 { [ "$rc" = 1 ] && stderr | grep -qF 'auto-review mode is required' && nothing_posted; } \
     && pass "a missing auto-review mode refuses rather than defaulting" \
     || die "a missing mode gave rc=$rc '$(stderr)'"
 for _bad in YES true on 1 y; do
-    world; rc="$(run 7 "$_bad" "$TMP/body.md")"
+    world; rc="$(run 7 "$_bad")"
     { [ "$rc" = 1 ] && stderr | grep -qF "'$_bad' is not an auto-review mode" && nothing_posted; } \
         && pass "…and '$_bad' is refused by name" \
         || die "the mode '$_bad' gave rc=$rc '$(stderr)', posted=$(cat "$TMP/calls")"
 done
-world; rc="$(run 7 no)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'a body file is required'; } \
-    && pass "a missing body file refuses" \
-    || die "a missing body file gave rc=$rc '$(stderr)'"
+# AND THE OLD SHAPE IS REFUSED BY NAME, rather than dropping the argument and
+# reading whatever stdin happened to be — a terminal, or the previous command's
+# output, posted as this PR's account.
+world; rc="$(run 7 no "$TMP/body.md")"
+{ [ "$rc" = 1 ] && stderr | grep -qF 'the body is no longer a file' && nothing_posted; } \
+    && pass "a caller still passing a body file is refused, not silently ignored" \
+    || die "the old three-argument form gave rc=$rc '$(stderr)'"
 
 # ── EVERY REASON IS ON STDERR ──────────────────────────────────────────────
 # The caller reads stdout with `$(…)` and treats what it finds as a review id, so
 # a reason landing there is a baseline. Asserted as an ABSENCE as well as the
 # rc, because a run that emits the right refusal AND something on stdout has
 # violated the contract and only the absence check sees it.
-world; printf '1\n' > "$W/prior.rc"; rc="$(run 7 no "$TMP/body.md")"
+world; printf '1\n' > "$W/prior.rc"; rc="$(run 7 no)"
 { [ "$rc" = 1 ] && [ -z "$(stdout)" ] && [ -n "$(stderr)" ]; } \
     && pass "a refusal says nothing on stdout and everything on stderr" \
     || die "a refusal put '$(stdout)' on stdout"
@@ -243,7 +269,7 @@ world; printf '1\n' > "$W/prior.rc"; rc="$(run 7 no "$TMP/body.md")"
 # stdout, and letting it through would give the driver a URL where it expects a
 # review id — which its shape check would then refuse, turning a posted request
 # into an abort.
-world; rc="$(run 7 no "$TMP/body.md")"
+world; rc="$(run 7 no)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
     && pass "…and a success carries the baseline and nothing else, not gh's own output" \
     || die "a success put '$(stdout)' on stdout"
@@ -254,7 +280,7 @@ world; rc="$(run 7 no "$TMP/body.md")"
 world
 out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
-    bash "$DIR/pr-request-review.sh" 7 no "$TMP/body.md" 2>&1)"; rc=$?
+    bash "$DIR/pr-request-review.sh" 7 no <"$TMP/body.md" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'reason=not_privileged'; } \
     && pass "an unprivileged interpreter is refused" \
     || die "an unprivileged run gave rc=$rc '$out'"
