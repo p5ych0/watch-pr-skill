@@ -1070,74 +1070,79 @@ WHO="$CODEX_BOT"
 # where the same failure costs a stop and nothing else. Two unequal values,
 # because a name pre-seeded with exactly one of them leaves the postcondition
 # holding — the probe the working directory above uses, for the same reason.
+# AND THE PROBES ARE A CONDITION, WITH THE REQUEST AS THEIR SUCCESS ARM. Written
+# as standalone guards they detect the readonly name and then cannot act on it:
+# `exit` is a builtin your shell can replace with one that RETURNS, and the
+# trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
+# — so execution reached the request and posted it anyway, which is the state
+# these probes exist to prevent. Only containment excludes it.
 PRIOR_REVIEW=probe-a
-if [[ $PRIOR_REVIEW != probe-a ]]; then
-    echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."
-    exit 0
-    [[ -n "" ]]
-fi
-PRIOR_REVIEW=probe-b
-if [[ $PRIOR_REVIEW != probe-b ]]; then
-    echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."
-    exit 0
-    [[ -n "" ]]
-fi
-if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
-    PRIOR_REVIEW="$(<"$PRIOR_FILE")"
-    # AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
-    # against. `CLAUDE.md` says to prove an assignment by reading the variable
-    # back, and the usual difficulty is that nothing else knows what the value
-    # should have been — a readonly name simply keeps whatever it held. The file
-    # does know. If this name was already readonly the assignment fails and the
-    # two disagree, which is the one case a check on the variable alone cannot
-    # see: the helper SUCCEEDED and the baseline is somebody else's.
-    if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
-        echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
-        exit 0
-        [[ -n "" ]]
+if { [[ $PRIOR_REVIEW = probe-a ]] \
+     || { echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; } \
+   && { PRIOR_REVIEW=probe-b
+        [[ $PRIOR_REVIEW = probe-b ]] \
+     || { echo "ABORT: PRIOR_REVIEW is readonly in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
+then
+    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
+        PRIOR_REVIEW="$(<"$PRIOR_FILE")"
+        # AND THE ASSIGNMENT IS PROVEN, because here there is something to prove it
+        # against. `CLAUDE.md` says to prove an assignment by reading the variable
+        # back, and the usual difficulty is that nothing else knows what the value
+        # should have been — a readonly name simply keeps whatever it held. The file
+        # does know. If this name was already readonly the assignment fails and the
+        # two disagree, which is the one case a check on the variable alone cannot
+        # see: the helper SUCCEEDED and the baseline is somebody else's.
+        if [[ $PRIOR_REVIEW != "$(<"$PRIOR_FILE")" ]]; then
+            echo "ABORT: the review baseline did not survive being read back; PRIOR_REVIEW is not this session's to set."
+            exit 0
+            [[ -n "" ]]
+        else
+            # AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is
+            # nothing to capture because the trigger preceded us; on the manual path
+            # Codex has usually not reviewed this head at all yet, which is the
+            # ordinary FIRST request — so `review-id` succeeds with an empty value and
+            # a digits-only test would abort after the request had already been
+            # posted. What is refused is a value that is neither shape.
+            #
+            # THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a
+            # validator in a variable is a second name a startup file can seed
+            # readonly, and a seeded pattern accepting a seeded value is a check that
+            # agrees with itself. `case` is a reserved word, so nothing can take its
+            # place either.
+            #
+            # AND THERE ARE TWO SHAPES, BECAUSE THERE ARE TWO CHANNELS. A reviewer's
+            # newest verdict arrives either as a submitted review, whose id is digits,
+            # or as a clean COMMENT on the head — which `pr-review-state.sh` reports
+            # as `comment:<id>` and `pr-watch.sh` accepts as a baseline. A digits-only
+            # test refuses the second AFTER the request has been posted, leaving a
+            # pass in flight that nothing waits for.
+            case "$PRIOR_REVIEW" in
+                "") ;;
+                comment:)
+                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which names the comment channel with no id; do not enter the wait step."
+                    exit 0
+                    [[ -n "" ]] ;;
+                comment:*[!0-9]*)
+                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a comment id; do not enter the wait step."
+                    exit 0
+                    [[ -n "" ]] ;;
+                comment:*) ;;
+                *[!0-9]*)
+                    echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
+                    exit 0
+                    [[ -n "" ]] ;;
+            esac
+        fi
     else
-        # AND EMPTY IS AN ANSWER, NOT A FAILURE. On the automatic path there is
-        # nothing to capture because the trigger preceded us; on the manual path
-        # Codex has usually not reviewed this head at all yet, which is the
-        # ordinary FIRST request — so `review-id` succeeds with an empty value and
-        # a digits-only test would abort after the request had already been
-        # posted. What is refused is a value that is neither shape.
-        #
-        # THE PATTERN IS A LITERAL IN THE `case`, not a variable holding one: a
-        # validator in a variable is a second name a startup file can seed
-        # readonly, and a seeded pattern accepting a seeded value is a check that
-        # agrees with itself. `case` is a reserved word, so nothing can take its
-        # place either.
-        #
-        # AND THERE ARE TWO SHAPES, BECAUSE THERE ARE TWO CHANNELS. A reviewer's
-        # newest verdict arrives either as a submitted review, whose id is digits,
-        # or as a clean COMMENT on the head — which `pr-review-state.sh` reports
-        # as `comment:<id>` and `pr-watch.sh` accepts as a baseline. A digits-only
-        # test refuses the second AFTER the request has been posted, leaving a
-        # pass in flight that nothing waits for.
-        case "$PRIOR_REVIEW" in
-            "") ;;
-            comment:)
-                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which names the comment channel with no id; do not enter the wait step."
-                exit 0
-                [[ -n "" ]] ;;
-            comment:*[!0-9]*)
-                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a comment id; do not enter the wait step."
-                exit 0
-                [[ -n "" ]] ;;
-            comment:*) ;;
-            *[!0-9]*)
-                echo "ABORT: the review baseline read back as '$PRIOR_REVIEW', which is not a review id; do not enter the wait step."
-                exit 0
-                [[ -n "" ]] ;;
-        esac
+        echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
+        exit 0
+        # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
+        # can shadow, and with both shadowed this branch says nothing and returns 0 —
+        # a failed request indistinguishable from a posted one.
+        [[ -n "" ]]
     fi
 else
-    echo "ABORT: no review was requested; the reason is above. Do not enter the wait step."
     exit 0
-    # THE LAST WORD IS A RESERVED ONE. `echo` and `exit` are builtins a function
-    # can shadow, and with both shadowed this branch says nothing and returns 0 —
-    # a failed request indistinguishable from a posted one.
     [[ -n "" ]]
 fi
 ```
