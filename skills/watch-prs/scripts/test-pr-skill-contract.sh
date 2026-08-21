@@ -505,9 +505,13 @@ LOCAL
     # is the readonly itself.
     #
     # THE READONLY HOLDS THE PROBE'S OWN VALUE, which is the case a single
-    # assignment cannot see: the failed assignment leaves exactly what the
-    # postcondition expects, so the guard passes and every `for` assignment then
-    # fails silently. Two unequal probes are what rules it out.
+    # assignment IN THIS SHELL cannot see: the failed assignment leaves exactly
+    # what the postcondition expects, so the guard passes and every `for`
+    # assignment then fails silently. Two unequal probes ruled it out and are gone;
+    # the SUBSHELL rules it out with one, because there the same readonly makes the
+    # assignment fail outright and the comparison inside is never reached. That
+    # comparison is what catches the other half — a TRANSFORMING attribute such as
+    # `declare -i`, where the assignment succeeds and stores something else. #148.
     _rp2_rc=0
     _rp2_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
         TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
@@ -1727,13 +1731,18 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # readonly it fails and ends the shell — after the request has been POSTED, so the
 # pass is in flight and no watch is ever armed. Nothing after a mutation can undo
 # that; the question has to be asked before it, where the same failure costs a
-# stop and nothing else. Two unequal values, since one leaves a name pre-seeded
-# with exactly it looking assignable.
-# A SUBSHELL, for the reason the two above give: an assignment read back is an
+# stop and nothing else.
+#
+# A SUBSHELL WITH THE COMPARISON INSIDE IT. An assignment read back HERE is an
 # assignment in the operator's shell, and a failed readonly one under `errexit` is
-# fatal — here that would end the session before the request rather than after it,
-# which is better, but it is still the state the probe exists to REPORT. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=probe-a )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+# fatal — that would end the session in the state the probe exists to REPORT. One
+# probe is enough there, because a readonly pre-seeded with the probe's own value
+# makes the subshell's assignment fail outright and the comparison is never
+# reached; and the comparison is what catches a TRANSFORMING attribute such as
+# `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
+# else — a status-only probe accepts that, and the request goes out with the
+# baseline rewritten. #148.
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=probe-a; \[\[ $PRIOR_REVIEW = probe-a \]\] )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
 { [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
@@ -1741,12 +1750,70 @@ _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' 
 grep -q '^PRIOR_REVIEW=probe-' "$SKILL" \
     && die "PRIOR_REVIEW is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
+
+# …AND ALL THREE PROBES ARE RUN, not only matched. What the change claims is that
+# a readonly or transforming name reaches setup's NAMED refusal instead of ending
+# the operator's shell at a bare assignment, and neither half is visible in the
+# text. Reverting any of these sites to the old shape has to turn something red.
+#
+# THE BLOCKS ALONE, extracted by their own headers. The allocation lives inside
+# the pin's success arm, so it comes out with that arm; the probe under test is
+# the first thing in it and every refusal below it is unreachable once the probe
+# refuses, which is what makes the case self-contained.
+_rb_pb=""
+_rb_pb="$(mktemp_d)" || _rb_pb=""
+if [ -n "$_rb_pb" ] && [ -d "$_rb_pb" ]; then
+mkdir -p "$_rb_pb/parent"
+awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
+awk '/^if ! \( RB_TMPPARENT=probe-a;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
+# ONE HARNESS, THREE STATES. `readonly` with `errexit` is the regression this
+# change is about; `declare -i` is the half a status-only probe accepted, where
+# the assignment SUCCEEDS and stores `0`; and the ordinary state is the control
+# that keeps the other two from passing against a block that refuses everything.
+rb_probe_case() {   # rb_probe_case <script> <attribute-line> <extra-env…>
+    local _s="$1" _attr="$2"; shift 2
+    # THE STATUS IS DISCARDED ON PURPOSE, and the OUTPUT is what every case reads.
+    # A refusing block exits non-zero, and under this file's `set -e` a command
+    # substitution that fails ends the fixture — silently, after 140 assertions.
+    run_limited 25 env "$@" bash --noprofile --norc -c '
+set -e
+'"$_attr"'
+OWNER=acme; REPO=widget; RB_SCRIPTS=/nonexistent-rb-scripts
+RB_PIN_SEEN=same; RB_REMOTE=same
+. "$1"
+printf "SURVIVED\n"' _ "$_s" 2>&1 || true
+}
+for _rb_attr in 'readonly RB_TMPPARENT=probe-a' 'declare -i RB_TMPPARENT=0'; do
+    _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
+    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly in this shell' \
+        && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
+        || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
+done
+_rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
+printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
+    && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
+    || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
+for _rb_attr in 'readonly RB_WORK_DIR=/tmp' 'declare -i RB_WORK_DIR=0'; do
+    _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
+    printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly in this shell" \
+        && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
+        || die "the RB_WORK_DIR probe gave '$_rb_out' ($_rb_attr)"
+    printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
+        && die "…but setup still reported completion ($_rb_attr): '$_rb_out'" \
+        || pass "…and setup's completion line is not reached ($_rb_attr)"
+done
+_rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" 'RB_WORK_DIR=' TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
+printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
+    && pass "…and an ordinary shell reaches the completion line, so the two above are not refusing everything" \
+    || die "the RB_WORK_DIR allocation refused an ordinary shell: '$_rb_out'"
+rm -rf "$_rb_pb" 2>/dev/null || true
+fi
 # AND THE REQUEST IS THE PROBES' SUCCESS ARM, not a statement after them. Written
 # as standalone guards they detect the readonly name and then cannot act on it —
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW=probe-a )' "$SKILL" \
+grep -q '^if { ( PRIOR_REVIEW=probe-a; \[\[ $PRIOR_REVIEW = probe-a \]\] )' "$SKILL" \
     && pass "…and the probe is a condition whose success arm holds the request" \
     || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
@@ -2210,7 +2277,7 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # `errexit` exemption comes from too, a command run as a condition being exempt —
 # and whose success arm is the rest of the candidate, so a shadowed `continue`
 # has nothing to walk past. #146.
-_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+_rb_try_ln="$(grep -n '^    if ( RB_TRY=probe-a; \[\[ $RB_TRY = probe-a \]\] ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
 { [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
     && pass "the transport candidate is probed in a subshell before its path is built" \

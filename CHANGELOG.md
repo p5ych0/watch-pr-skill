@@ -19,11 +19,22 @@
   bash's own one-line complaint and none of the abort messages that say which name
   and what to do about it.
 
-  Each is a subshell now. It inherits the readonly attribute, so it fails for the
-  same reason and answers the same question, and as a condition it is exempt from
-  `errexit`. Its status is the whole answer, which also removes the second probe
-  everywhere: two unequal values existed because a name pre-seeded with exactly
-  one leaves a *value comparison* holding, and there is no comparison left.
+  Each is a subshell now, **with the comparison inside it**. It inherits the
+  readonly attribute, so it fails for the same reason, and as a condition it is
+  exempt from `errexit`. The comparison is what the read-back used to do and is
+  still needed: a *transforming* attribute — `declare -i` on any of these names —
+  lets the assignment **succeed** and stores something else (`probe-a` becomes
+  `0`), which a status-only probe accepts. For the baseline that meant the request
+  going out and the ordinary empty answer coming back rewritten.
+
+  One value is enough now. Two existed because a readonly pre-seeded with the
+  probe's own value leaves a comparison *in this shell* holding; in the subshell
+  that same readonly makes the assignment fail outright, so the comparison is
+  never reached.
+
+  `RB_TRY` gets the comparison too. It is the fourth copy of a rule that has to be
+  identical in all four, and this repository's field checks have each been found
+  missing from at least one copy.
 
   `RB_TRY` was the fourth and was fixed in 2.0.52, which is where the measurement
   came from. The pin proof's own probe is deliberately unchanged: it is an
