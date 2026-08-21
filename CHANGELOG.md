@@ -21,8 +21,14 @@
 
   A `1` from `clean-at` is not an absence for this caller: `record` has already
   proved the head clean, so "no clean verdict" means it stopped being clean while
-  this ran, and cleanliness is a precondition for recording at all. Only an
-  unreadable answer degrades to a record without the field.
+  this ran, and cleanliness is a precondition for recording at all.
+
+  An **unreadable** answer degrades to a record without the field — but it costs
+  the cleanliness proof too, because this call *is* the last one, and the proof
+  before it predates a network round trip a blocking verdict can land in. So the
+  cleanliness is asked for on its own there. That is two reads again, and not the
+  pair this removes: nothing is being paired, because there is no time left to pair
+  with.
 
   Closes #139.
 

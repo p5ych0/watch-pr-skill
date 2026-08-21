@@ -234,13 +234,25 @@ got="$(run record 7 "$TMP/body.md")"
     && pass "a verdict that stopped being clean while its time was read stops the record" \
     || die "a moved verdict gave '${got}'"
 nothing_posted "…with no signoff recorded for it"
-# AND AN UNREADABLE ANSWER IS THE DEGRADING ONE, because it says nothing about
-# whether the verdict still stands — only that this call could not find out.
+# AN UNREADABLE ANSWER COSTS THE CLEANLINESS PROOF, NOT ONLY THE TIME. This call
+# IS the last proof, so degrading to "no timestamp" would record a signoff whose
+# newest evidence predates the probe that failed — and a blocking verdict can land
+# in exactly that round trip. The cleanliness is asked for on its own, and the
+# record still carries no time.
 world; printf '2\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
 { [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'will not carry one'; } \
     && pass "…while an unreadable one records without the field rather than stopping" \
     || die "an unreadable clean-at gave '${got}'"
+# AND THAT RE-PROOF IS A REFUSAL WHERE IT COMES BACK NON-CLEAN.
+world; printf '2\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
+printf '1\n' > "$W/verdict.3.rc"
+printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.3.out"
+got="$(run record 7 "$TMP/body.md")"
+{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+    && pass "…and a blocking verdict landing during that failed read still stops it" \
+    || die "an unreadable clean-at skipped the cleanliness re-proof: '${got}'"
+nothing_posted "…with no signoff recorded for it"
 
 # THE MARKER CARRIES THE VERDICT TIME, as its third backticked field: a reader can
 # then order a revocation against the VERDICT rather than against comment order,

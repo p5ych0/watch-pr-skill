@@ -553,7 +553,20 @@ RB_VERDICT_AT=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh clean-at
 case "$RB_CLEAN_AT_RC" in
     0) ;;
     1) echo "ABORT: Codex is no longer clean on $CODEX_SHA; nothing posted"; exit 1 ;;
-    *) RB_VERDICT_AT="" ;;
+    # AN UNREADABLE ANSWER COSTS THE CLEANLINESS PROOF, NOT ONLY THE TIME. This
+    # call IS the last proof — the one before it predates a network round trip a
+    # blocking verdict can land in — so degrading to "no timestamp" would record
+    # a signoff whose newest evidence is older than the probe that failed.
+    #
+    # SO THE CLEANLINESS IS ASKED FOR ON ITS OWN. That is two reads again, but not
+    # the pair this change removed: nothing is being PAIRED here, because there is
+    # no time left to pair with. It answers one question — is it still clean — and
+    # the record carries no verdict time either way.
+    *) RB_VERDICT_AT=""
+       echo "note: when the verdict on $CODEX_SHA landed could not be read; the signoff will not carry one"
+       RB_STILL_CLEAN=$(/usr/bin/env bash -p "$_RB_SELF_DIR"/pr-review-state.sh verdict "$PR" "$RB_CODEX_BOT" "$CODEX_SHA"); RB_STILL_CLEAN_RC=$?
+       [[ $RB_STILL_CLEAN_RC -eq 0 ]] \
+           || { echo "ABORT: Codex is no longer clean on $CODEX_SHA ($RB_STILL_CLEAN); nothing posted"; exit 1; } ;;
 esac
 case "$RB_VERDICT_AT" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
