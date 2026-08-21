@@ -2194,17 +2194,23 @@ grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
 grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
     && pass "…under the parent the transport read already proved usable" \
     || die "the working directory is not built under the proven parent"
-# AND SO IS THE TRANSPORT CANDIDATE, for the same reason and by the same probe.
-# `RB_TRY`'s own check matches a PREFIX, so a readonly value carrying `..` names a
-# directory under a parent nothing proved — and the origin every stage is
-# addressed by would be read from it. #146.
-_rb_try_n=0
-grep -c 'RB_TRY=probe-[ab]$' "$SKILL" >/dev/null 2>&1 && _rb_try_n="$(grep -c 'RB_TRY=probe-[ab]$' "$SKILL")"
-_rb_try_ln="$(grep -n 'RB_TRY=probe-b$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+# AND SO IS THE TRANSPORT CANDIDATE — IN A SUBSHELL. `RB_TRY`'s own check matches
+# a PREFIX, so a readonly value carrying `..` names a directory under a parent
+# nothing proved, and the origin every stage is addressed by would be read from
+# it. The probe is a subshell rather than a bare assignment because this bash runs
+# in the operator's long-lived shell: measured on bash 5, a failed readonly
+# assignment under `errexit` is fatal, so a standalone `RB_TRY=probe-a` ends the
+# session before the test after it can run. A subshell inherits the attribute,
+# fails for the same reason, and on the left of `||` is exempt from `errexit`.
+# #146.
+_rb_try_ln="$(grep -n '^    ( RB_TRY=probe-a ) || continue$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
-{ [ "$_rb_try_n" = 2 ] && [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
-    && pass "the transport candidate is proven assignable before its path is built" \
-    || die "RB_TRY is not probed before the path is built ($_rb_try_n probes, probe=$_rb_try_ln path=$_rb_try_path_ln)"
+{ [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
+    && pass "the transport candidate is probed in a subshell before its path is built" \
+    || die "RB_TRY is not probed in a subshell before the path is built (probe=$_rb_try_ln path=$_rb_try_path_ln)"
+grep -q '^    RB_TRY=probe-' "$SKILL" \
+    && die "RB_TRY is probed with a bare assignment; under errexit that ends the operator's shell" \
+    || pass "…and not with a bare assignment, which errexit makes fatal"
 
 # AND THE NAME IS PROVEN ASSIGNABLE FIRST, WITH TWO VALUES. The shape check on the
 # built path matches a PREFIX, and a readonly value such as

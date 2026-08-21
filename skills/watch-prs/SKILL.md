@@ -549,7 +549,7 @@ RB_TMPPARENT=probe-b
 RB_TMPPARENT=
 for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
-    # ASSIGNABLE FIRST, AND PROVEN WITH TWO VALUES. The check below matches a
+    # ASSIGNABLE FIRST, AND ASKED IN A SUBSHELL. The check below matches a
     # PREFIX, and `RB_TRY` is a name: a startup file that has already made it
     # readonly makes the assignment FAIL, leaving whatever it was seeded with —
     # and a value such as `…/watch-pr.anchor/../elsewhere/session` satisfies the
@@ -557,19 +557,25 @@ for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
     # resolves the `..`, and `mkdir` being the exclusion does not help: it
     # excludes a name that already EXISTS, not one that resolves elsewhere. The
     # origin every stage is addressed by would then be read from a directory
-    # another local account owns. Two values, because one leaves a name
-    # pre-seeded with exactly it looking assignable — the probe `RB_TMPPARENT`
-    # above already uses, and the same one the session's working directory uses
-    # further down. #146.
+    # another local account owns. #146.
+    #
+    # IN A SUBSHELL BECAUSE THIS SHELL IS THE OPERATOR'S, AND A STANDALONE PROBE
+    # WOULD END IT. Measured on bash 5: with `errexit` on — this block is pasted
+    # into such a shell as often as it is typed — a failed readonly assignment is
+    # fatal, so `RB_TRY=probe-a` on its own kills the session before the test
+    # after it can run. A subshell inherits the readonly attribute, so it fails
+    # for exactly the same reason and answers exactly the same question, and its
+    # status is the answer; on the left of `||` it is exempt from `errexit` too.
+    # `readonly` is not what is being asked about here — whether THIS name can be
+    # assigned is — so the status is the whole answer and no value has to be
+    # compared. Bash's own complaint is left on stderr, because it names the
+    # variable and the loop's emptiness test afterwards does not.
     #
     # `|| continue` LIKE THE TWO CHECKS AROUND IT, so a readonly name skips every
-    # candidate rather than aborting from inside a loop, and the emptiness test
-    # after it is what reports the failure. An abort here would be a statement a
-    # shadowed `exit` walks past into the very `mkdir` these probes exist to stop.
-    RB_TRY=probe-a
-    [[ $RB_TRY = probe-a ]] || continue
-    RB_TRY=probe-b
-    [[ $RB_TRY = probe-b ]] || continue
+    # candidate and that emptiness test is what reports the failure. An abort here
+    # would be a statement a shadowed `exit` walks past into the very `mkdir`
+    # this probe exists to stop.
+    ( RB_TRY=probe-a ) || continue
     RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
     [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
     /usr/bin/env mkdir -m 700 "$RB_TRY" || continue

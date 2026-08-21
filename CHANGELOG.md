@@ -16,13 +16,19 @@
   can replace the directory, and the origin **every stage is addressed by** is
   then read from whatever that account left there.
 
-  The name is proven assignable first, with two unequal values, which is the probe
-  the parent selection immediately above already uses and the reason it gives: one
-  value cannot rule anything out, because a name pre-seeded with exactly it leaves
-  the postcondition holding. It skips the candidate the way the two checks around
-  it do, so the emptiness test after the loop reports the failure — an abort from
-  inside the loop would be a statement a shadowed `exit` walks past into the very
-  `mkdir` the probes exist to stop.
+  The name is proven assignable first, **in a subshell**. That matters because
+  `SKILL.md`'s bash runs in your own long-lived shell, and a bare probe assignment
+  would end it: measured on bash 5, a failed readonly assignment under `errexit`
+  is fatal, so `RB_TRY=probe-a` on its own kills the session before the test after
+  it can run — in exactly the state the probe exists to detect. A subshell
+  inherits the readonly attribute, so it fails for the same reason and answers the
+  same question, and on the left of `||` it is exempt from `errexit`. Its status
+  is the whole answer, so no value has to be compared.
+
+  It skips the candidate the way the two checks around it do, so the emptiness
+  test after the loop reports the failure — an abort from inside the loop would be
+  a statement a shadowed `exit` walks past into the very `mkdir` the probe exists
+  to stop.
 
   Found while fixing the same class in the session's working-directory
   allocation (2.0.51), where it was new code; this one was pre-existing, so it was
