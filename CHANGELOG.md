@@ -49,6 +49,18 @@
   same applies to the status, which is why there is no `REQ_RC`, and to the
   validator, which is a literal pattern rather than a variable holding one.
 
+  The session's three working files — the round summary, the opening account and
+  the baseline — are derived from **one** directory now, built by expansion and
+  created with `mkdir` as the exclusion, the same answer the transport directory
+  in setup already gives. Three `mktemp` calls were three separate answers, and
+  `mktemp` is a *name*: a function returning the same existing empty path each
+  time passes every validation and leaves all three paths aliased, so writing the
+  opening account would populate the round-summary file — and a first round that
+  missed its own summary write would post that account as the summary and request
+  another pass, which is the regression the separate files exist to prevent.
+  Derived by literal suffixes there is nothing a command could return to make two
+  of them equal.
+
   Two smaller things came with it. The review mode is refused **by name** —
   `YES`, `true`, `on`, `1` and an empty value are each an abort, where a
   truthiness test silently took the manual path and posted a mention into an

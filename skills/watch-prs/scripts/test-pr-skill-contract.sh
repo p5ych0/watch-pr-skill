@@ -2119,12 +2119,40 @@ grep -qF "cat > \"\$SUMMARY_FILE\" <<'EOF' || {" "$SKILL" \
     && grep -q 'ABORT: could not write the phase body' "$SKILL" \
     && pass "the phase body write is branched on before the script is asked to read it" \
     || die "the phase summary is written without checking the write"
-grep -q 'ABORT: could not create the round-summary file' "$SKILL" \
-    && pass "the summary file's creation is branched on" \
+grep -q "ABORT: could not create the session's working directory" "$SKILL" \
+    && pass "the working directory's creation is branched on" \
     || die "mktemp is unchecked; a failed create still yields a path"
-grep -q 'ABORT: the round-summary file was not created empty' "$SKILL" \
-    && pass "…and the created file is validated as new and empty" \
+grep -q "ABORT: the session's working files were not created empty" "$SKILL" \
+    && pass "…and each created file is validated as present and empty" \
     || die "the summary file is used without validating what was created"
+# AND THERE IS NO `mktemp` LEFT TO SHADOW. Three calls were three separate
+# answers, and `mktemp` is a NAME: a function returning the same existing empty
+# path each time passes every validation and leaves all three paths ALIASED — so
+# writing the opening account populates the round-summary file, and a first round
+# that missed its own summary write posts that account as the summary. The
+# directory is built by expansion and created with `mkdir`, which is the
+# exclusion, and the three suffixes are literals under it — nothing a command
+# returns can make two of them equal. Same answer the transport directory above
+# already gives.
+_rb_mk_n=0
+grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
+[ "$_rb_mk_n" = 0 ] \
+    && pass "…from a directory built by expansion, with no mktemp to shadow" \
+    || die "SKILL.md allocates a working path with mktemp; a shadowed one aliases two of them"
+grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
+    && pass "…under the parent the transport read already proved usable" \
+    || die "the working directory is not built under the proven parent"
+grep -qF '/usr/bin/env mkdir -m 700 "$RB_WORK_DIR"' "$SKILL" \
+    && pass "…created with mkdir as the exclusion, at mode 700" \
+    || die "the working directory is not created with mkdir -m 700 by path"
+for _rb_f in SUMMARY_FILE REQUEST_FILE PRIOR_FILE; do
+    grep -q "^$_rb_f=\"\$RB_WORK_DIR/" "$SKILL" \
+        && pass "…and \$$_rb_f is derived from it by a literal suffix" \
+        || die "\$$_rb_f is not derived from the single working directory"
+    grep -q "^\[\[ \$$_rb_f = \"\$RB_WORK_DIR/" "$SKILL" \
+        && pass "…and that assignment is read back against the literal" \
+        || die "\$$_rb_f is assigned without proving the assignment arrived"
+done
 
 # ── the watch deadline is absolute ────────────────────────────────────────
 # Accumulating only the sleeps excluded the time spent inside the probes, so slow

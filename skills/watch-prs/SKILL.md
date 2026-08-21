@@ -659,40 +659,83 @@ for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REV
     [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
 done
 unset _rb_knob
-# Where each round's summary is written before it is posted. A file, not a shell
-# variable: the text is long, contains backticks and quotes, and passing it
-# inline mangles it. Freshly created per PR and per session, because a reused
-# path is how a stale summary from another round — or another PR — gets posted
-# as if it were this one's.
-# `mktemp` takes its status like every other probe here, and the result is
-# validated. A wrapper that prints a plausible path and then fails would
-# otherwise point every later write and guarded read at an existing file — and a
-# stale summary read back as this round's is exactly what the guarded read was
-# added to prevent.
-SUMMARY_FILE="$(mktemp -t "watch-pr-N-XXXXXX.md")" \
-    || { echo "ABORT: could not create the round-summary file"; exit 1; }
-[ -f "$SUMMARY_FILE" ] && [ ! -s "$SUMMARY_FILE" ] \
-    || { echo "ABORT: the round-summary file was not created empty"; exit 1; }
-# THE OPENING ACCOUNT GETS ITS OWN FILE, not the round-summary one. Sharing them
-# meant that a first round whose summary write did not happen left the OPENING
-# account sitting there — non-empty, well-formed, and about the right PR — so
+# THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
+# shell variables: the text is long, contains backticks and quotes, and passing
+# it inline mangles it — and the baseline comes back in one because a variable is
+# a name a startup file can have made readonly, which `pr-origin.sh` settled the
+# same way. Freshly created per PR and per session, because a reused path is how
+# a stale summary from another round — or another PR — gets posted as if it were
+# this one's.
+#
+# ONE DIRECTORY, AND THE THREE PATHS DERIVED FROM IT. Three `mktemp` calls made
+# them three separate answers, and `mktemp` is a NAME: a function returning the
+# same existing empty path each time passes every validation and leaves all three
+# ALIASED. Writing the opening account would then populate the round-summary
+# file, and a first round that missed its own summary write would post that
+# account as the summary and request another pass — the exact regression the
+# separate files exist to prevent. Derived by literal suffixes there is nothing to
+# make equal: the distinctness is in the source, not in what a command returned.
+#
+# AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
+# ALREADY GIVES. The path is BUILT by expansion — `$$` and `$RANDOM` are the
+# shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
+# write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
+# an account on this machine that guesses the name gets nothing rather than a
+# file this session then writes through, and `-m 700` is applied by `mkdir`
+# itself, so all three files inherit that protection rather than each needing its
+# own. It runs through `/usr/bin/env` for the reason every other command in this
+# block does.
+#
+# THE PARENT IS THE ONE ALREADY PROVEN — absolute, a directory, and one this user
+# could create under. Choosing it a second time would be a second copy of the
+# loop above, which is the defect this document keeps deleting.
+RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
+[[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
+    || { echo "ABORT: RB_WORK_DIR is readonly in this shell; the session's working directory cannot be chosen"; exit 1; }
+/usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
+    || { echo "ABORT: could not create the session's working directory at $RB_WORK_DIR"; exit 1; }
+# Where each round's summary is written before it is posted.
+SUMMARY_FILE="$RB_WORK_DIR/summary.md"
+[[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
+    || { echo "ABORT: SUMMARY_FILE is readonly in this shell; the round-summary path cannot be set"; exit 1; }
+# The opening account, which is NOT the round summary. Sharing one file meant that
+# a first round whose summary write did not happen left the OPENING account
+# sitting there — non-empty, well-formed, and about the right PR — so
 # `pr-close-round.sh` posted it as the round summary and requested the next pass
 # instead of refusing to close. The round-summary file has to be empty until that
 # round writes it, and that is only true if nothing else writes it.
-REQUEST_FILE="$(mktemp -t "watch-pr-N-req-XXXXXX.md")" \
-    || { echo "ABORT: could not create the request-body file"; exit 1; }
-[ -f "$REQUEST_FILE" ] && [ ! -s "$REQUEST_FILE" ] \
-    || { echo "ABORT: the request-body file was not created empty"; exit 1; }
-# AND THE BASELINE COMES BACK IN A FILE, not in a variable. `pr-origin.sh` settled
-# the same question the same way: a path rather than a name. A capture written as
-# `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a startup file that has
-# already made that name readonly makes it fail — which abandons the `if` without
-# either branch running, so a refusal falls through into the wait. A plain command
-# with its output redirected has no assignment to fail.
-PRIOR_FILE="$(mktemp -t "watch-pr-N-prior-XXXXXX.txt")" \
-    || { echo "ABORT: could not create the review-baseline file"; exit 1; }
-[ -f "$PRIOR_FILE" ] && [ ! -s "$PRIOR_FILE" ] \
-    || { echo "ABORT: the review-baseline file was not created empty"; exit 1; }
+REQUEST_FILE="$RB_WORK_DIR/request.md"
+[[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
+    || { echo "ABORT: REQUEST_FILE is readonly in this shell; the request-body path cannot be set"; exit 1; }
+# Where the review baseline comes back. A capture written as `V="$(helper …)"`
+# inside an `if` is an ASSIGNMENT, and a name a startup file has already made
+# readonly makes it fail — which abandons the `if` without either branch running,
+# so a refusal falls through into the wait. A plain command with its output
+# redirected has no assignment to fail.
+PRIOR_FILE="$RB_WORK_DIR/prior.txt"
+[[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]] \
+    || { echo "ABORT: PRIOR_FILE is readonly in this shell; the review-baseline path cannot be set"; exit 1; }
+# CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is none
+# to shadow, and a redirection that cannot be made reports it: measured, a
+# `> path` into a directory that does not exist is status 1. Each is then proven
+# present and empty. A missing one fails closed later anyway — the request's `<`
+# refuses and `pr-close-round.sh` cannot read its summary — but "fails closed
+# later" is not a reason to leave setup unable to say so.
+#
+# WHICH DIRECTORY THEY ARE IN IS PROVEN ABOVE INSTEAD, by reading each assignment
+# back against the literal it was given — the idiom the transport path already
+# uses, and the only thing that catches a readonly name still pointing somewhere
+# else. Their DISTINCTNESS is not proven by any check: it is in the source, three
+# literal suffixes under one directory, with nothing a command could return to
+# make two of them equal.
+> "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
+if [[ ! -f "$SUMMARY_FILE" ]] || [[ -s "$SUMMARY_FILE" ]] \
+   || [[ ! -f "$REQUEST_FILE" ]] || [[ -s "$REQUEST_FILE" ]] \
+   || [[ ! -f "$PRIOR_FILE" ]] || [[ -s "$PRIOR_FILE" ]]; then
+    echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
+    exit 1
+    [[ -n "" ]]
+fi
 # ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
 #
 # `REVIEW_BUS_REMOTE` is what every helper inherits, and every post is addressed
