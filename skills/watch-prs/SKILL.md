@@ -605,6 +605,15 @@ if [[ -z $RB_REMOTE ]]; then
     # operator is told which name is unusable. Reverting the containment restores
     # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
     # excerpt reaches the selection.
+    # AND `REPO_DIR` WITH THEM, which is neither a candidate nor a transport name
+    # but is in scope and is what the MERGE stage runs `cd` into. An alias onto it
+    # passed both probes — neither read it — and the assignments then replaced the
+    # captured repository root with a transport path this setup deletes a few lines
+    # later, so the merge could not inspect the pull request it had just approved.
+    # The rule is every name in scope that an assignment here can reach, not every
+    # name this stage introduces; that narrower reading is what left `HOME`,
+    # `TMPDIR` and now this one out, one round each.
+    #
     # AND `HOME` AND `TMPDIR` ARE READ BACK TOO, because they are the CANDIDATES and
     # a nameref onto one is not a nameref between two of these names. With
     # `declare -n RB_ORIGIN_DIR=HOME` the probe passed — it read neither — and the
@@ -613,10 +622,11 @@ if [[ -z $RB_REMOTE ]]; then
     # shell pointing at a directory that no longer exists. A probe that compares
     # only against the names its own stage introduces cannot see that.
     if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
-         && [[ ${RB_REMOTE:-} != Probe-A ]] \
+         && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
+         && [[ ${REPO_DIR:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -880,11 +890,11 @@ if [[ -z $RB_REMOTE ]]; then
     # of three helpers and sat missing from the third for eleven rounds.
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-A ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-B ]] && [[ ${REPO_DIR:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.

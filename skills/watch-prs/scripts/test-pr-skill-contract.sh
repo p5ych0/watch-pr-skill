@@ -730,12 +730,14 @@ LOCAL
     if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
         for _al in 'declare -n RB_ORIGIN_DIR=HOME:HOME' \
                    'declare -n RB_ORIGIN_DIR=TMPDIR:TMPDIR' \
-                   'declare -n RB_TMPPARENT=HOME:HOME'; do
+                   'declare -n RB_TMPPARENT=HOME:HOME' \
+                   'declare -n RB_ORIGIN_DIR=REPO_DIR:REPO_DIR' \
+                   'declare -n RB_TMPPARENT=REPO_DIR:REPO_DIR'; do
             _al_decl="${_al%%:*}"; _al_var="${_al##*:}"
             rm -f "$_forge_dir/alias.out"
             _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
                 RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
-                RB_ALIAS_OUT="$_forge_dir/alias.out" \
+                REPO_DIR="$_forge_dir" RB_ALIAS_OUT="$_forge_dir/alias.out" \
                 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                     trap '"'"'printf "CANDIDATE=[%s] PINNED=[%s]\n" "${'"$_al_var"':-}" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
                     '"$_al_decl"'
@@ -996,11 +998,11 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 # process to kill.
 for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
           '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] && \[\[ ${REPO_DIR:-} != Probe-A \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-A \]\] && \[\[ ${TMPDIR:-} != Probe-A \]\] ) 2>/dev/null \\' \
           '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
           '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] && \[\[ ${REPO_DIR:-} != Probe-B \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-B \]\] && \[\[ ${TMPDIR:-} != Probe-B \]\] ) 2>/dev/null; then'; do
     grep -q "^$_v\$" <<<"$_pin_body" \
         || die "the pin probe is missing a line: $_v"
@@ -1435,11 +1437,14 @@ fi
 # comparisons are present; only running them says they refuse.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     for _pal in 'declare -n RB_PIN_DIR=HOME:HOME' \
-                'declare -n RB_PIN_SEEN=TMPDIR:TMPDIR'; do
+                'declare -n RB_PIN_SEEN=TMPDIR:TMPDIR' \
+                'declare -n RB_PIN_DIR=REPO_DIR:REPO_DIR' \
+                'declare -n RB_PIN_SEEN=REPO_DIR:REPO_DIR'; do
         _pal_decl="${_pal%%:*}"; _pal_var="${_pal##*:}"
         rm -f "$_forge_dir/palias.out"
         _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-            TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" RB_ALIAS_OUT="$_forge_dir/palias.out" \
+            TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" REPO_DIR="$RB_TMPBASE" \
+            RB_ALIAS_OUT="$_forge_dir/palias.out" \
             'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                 trap '"'"'printf "CANDIDATE=[%s]\n" "${'"$_pal_var"':-}" > "$RB_ALIAS_OUT"'"'"' EXIT
                 RB_REMOTE="git@github.com:acme/widget.git"

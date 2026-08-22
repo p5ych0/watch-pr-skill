@@ -90,13 +90,17 @@
   machine, it fails closed, and `pr-origin.sh` states it beside the ordering.
   #160.
 
-- **A nameref from a transport name onto `HOME` or `TMPDIR` replaced the
-  operator's variable with a path setup then deleted.** Each probe compared only
+- **A nameref from a transport name onto `HOME`, `TMPDIR` or `REPO_DIR` replaced
+  that variable with a path setup then deleted.** Each probe compared only
   against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
   passed both subshells — neither read `HOME`. The assignments then cleared it and
   set it to the transport path, and the cleanup a few lines later removed that
   directory, leaving the operator's long-lived shell pointing at a path that no
-  longer exists. Both probes read both candidates back now.
+  longer exists. `REPO_DIR` is the same defect with a worse end: it is what the
+  merge stage runs `cd` into, so the session could approve a pull request and then
+  be unable to inspect or merge it. Every probe reads back every name in scope that
+  an assignment there can reach — which is the rule, rather than every name the
+  stage introduces.
 
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so
