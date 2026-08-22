@@ -1176,6 +1176,20 @@ _res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXI
 { [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
     && pass "…and a cleanup trap is armed after the reservation is taken" \
     || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
+# …WITH NOTHING EXECUTABLE BETWEEN THEM. The handlers used to be DEFINED after the
+# `mkdir`, so a phase assignment and three function definitions ran in an interval
+# where the directory existed and no trap did — a signal there took its default
+# action and left the reservation behind. Nothing in those definitions needs the
+# reservation; the arming does, and it has to be the first thing after it.
+_res_gap=""
+_res_gap="$(awk -v a="$_res_mk" -v b="$_res_tr" 'NR>a && NR<b && NF && $0 !~ /^ *#/ && $0 !~ /^ *(\|\||&&)/ && $0 !~ /^ *(\[\[|echo|exit|_rb_|\}| *[a-z_]*=)/' "$SCRIPT")" || _res_gap=""
+# THE `mkdir`'S OWN FAILURE ARM IS NOT A GAP: it runs only where nothing was
+# created, and it ends in `exit 1`. What the scan is for is a statement that runs
+# on the SUCCESS path, which is anything at column 0 that is not the trap itself.
+_res_gap="$(printf '%s\n' "$_res_gap" | grep -v '^ ' || true)"
+[ -z "$_res_gap" ] \
+    && pass "…as the first thing after it, with nothing running in between" \
+    || die "statements run between the reservation and the arming: '$_res_gap'"
 # …AND IT HAS THE SAME TWO PHASES THE REFUSALS DO. `rmdir` alone is right while no
 # leaf can exist; once a write has happened it NECESSARILY fails, because the
 # directory holds the leaf — so a signal between the write and the disarm left both
@@ -1190,9 +1204,16 @@ _res_cl="$(awk '/^rb_cleanup\(\) \{/,/^\}/' "$SCRIPT")" || _res_cl=""
     && pass "…removing the leaf only in the phase where one can exist" \
     || die "the cleanup trap does not remove the leaf after a write: '$_res_cl'"
 _res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
-_res_w2=0; _res_w2="$(grep -n 'rb_refuse_pre$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
+# THE LAST WALK IS LOCATED BY A PATTERN THAT STILL MATCHES, and its match is
+# REQUIRED. This searched for `rb_refuse_pre`, a symbol removed two rounds ago, so
+# it found nothing, left `_res_w2=0`, and the comparison below accepted zero as
+# preceding every positive phase line — moving `RB_PHASE=post` above the walks
+# would have stayed green while a signal during an unsafe walk ran the post-phase
+# `rm -f "$OUT"` through an attacker-replaced path.
+_res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
 _res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
-{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
+{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
+  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
     && pass "…and the phase flips after the walks and before any write" \
     || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
 # …AND THE SUCCESS PATHS RESET `EXIT` ONLY. The EXIT handler would remove the leaf
@@ -1347,25 +1368,50 @@ rm -rf "$_pin_dir" "$_pin_bin"
 # it sleeps, then execs the real one, and the second TERM is sent during that
 # sleep. Without the ignore, that TERM lands while the stub runs and the directory
 # survives.
+# THE REAL `rmdir` IS RESOLVED BEFORE THE STUB DIRECTORY GOES ON `PATH`, and it is
+# resolved rather than named: `/usr/bin/rmdir` is where Linux keeps it and stock
+# macOS keeps it at `/bin/rmdir`, so testing for the Linux path took a
+# success-looking skip on exactly the platform whose shell this suite exists to
+# cover — and the mac-shaped CI job cannot see that, because it runs on an Ubuntu
+# filesystem.
+_sig_real=""
+_sig_real="$(command -v rmdir 2>/dev/null)" || _sig_real=""
 _sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
-printf '#!/usr/bin/env bash\nsleep 2\nexec /usr/bin/rmdir "$@"\n' > "$_sig_bin/rmdir"
+# AND THE STUB ANNOUNCES ITSELF. The interval to aim at is the one where the
+# cleanup is inside `rmdir`, and a fixed sleep is a guess at when that starts: too
+# early and the second signal joins the first one still pending, too late and it
+# lands after the helper has gone. Either way the case observes 143 and an absent
+# directory from the FIRST signal and passes without ever delivering a second one.
+# The stub writes a marker, this waits for it, and the second `kill` is required to
+# succeed.
+printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec %s "$@"\n' "$_sig_real" > "$_sig_bin/rmdir"
 printf '#!/usr/bin/env bash\nsleep 3\n' > "$_sig_bin/git"
 chmod +x "$_sig_bin/rmdir" "$_sig_bin/git"
 _sig_dir="$TMP/sigt.$$"
 rm -rf "$_sig_dir"
-if [ -x /usr/bin/rmdir ]; then
+_sig_mark="$TMP/sig.cleanup-started"
+rm -f "$_sig_mark"
+if [ -n "$_sig_real" ] && [ -x "$_sig_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
 _sig_pid=$!
 _sig_n=0
 while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
 if [ -d "$_sig_dir" ]; then
     kill -TERM "$_sig_pid" 2>/dev/null
     # THE FIRST SIGNAL IS HANDLED ONLY AFTER `git` RETURNS — bash defers it while
-    # waiting on a foreign command — so the cleanup starts about three seconds in
-    # and the slow `rmdir` runs from there. The second TERM goes in during that.
-    sleep 4
-    kill -TERM "$_sig_pid" 2>/dev/null
+    # waiting on a foreign command — so the cleanup starts when `git` does, and the
+    # marker is what says it has. Waiting for the marker rather than for a fixed
+    # interval is what makes the second signal land INSIDE the cleanup.
+    _sig_m=0
+    while [ ! -e "$_sig_mark" ] && [ "$_sig_m" -lt 150 ]; do _sig_m=$(( _sig_m + 1 )); sleep 0.1; done
+    [ -e "$_sig_mark" ] \
+        || die "the cleanup never reached rmdir; no second signal was delivered during it"
+    # AND THE SECOND `kill` MUST SUCCEED. Ignoring its status let the case pass
+    # having delivered nothing: the helper had already gone, and the consequence
+    # checked below was the FIRST signal's.
+    kill -TERM "$_sig_pid" \
+        || die "the helper was already gone; no signal was delivered during the cleanup"
     _sig_w=0
     while kill -0 "$_sig_pid" 2>/dev/null && [ "$_sig_w" -lt 150 ]; do
         _sig_w=$(( _sig_w + 1 )); sleep 0.1
@@ -1386,7 +1432,7 @@ rm -rf "$_sig_dir"
 else
     echo "ok   - (no /usr/bin/rmdir to exec through; the cleanup-interruption case did not run)"
 fi
-rm -rf "$_sig_bin"
+rm -rf "$_sig_bin"; rm -f "$_sig_mark"
 
 # WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
 # before the disarm is the phase where the handler must remove the leaf as well.

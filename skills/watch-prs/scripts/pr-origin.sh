@@ -363,6 +363,90 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
     done
     return 0
 }
+# THE HANDLERS ARE DEFINED BEFORE THE RESERVATION AND ARMED IMMEDIATELY AFTER IT.
+# Defining them afterwards left an interval between the `mkdir` succeeding and the
+# traps existing — a phase assignment and three function definitions wide — in
+# which a signal took its DEFAULT action and terminated the helper with the
+# directory already created. The caller performs no cleanup after a non-zero
+# status, so that directory stayed for the life of the machine. Nothing in these
+# definitions needs the reservation to exist; the arming is what does, and it is
+# the first thing after it.
+#
+# THE CLEANUP EXISTS ONCE AND RUNS ONCE, and both halves of that are the fix. It
+# used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up
+# and then `exit` fired the trap, which cleaned up again — and the second pass is
+# the dangerous one: on a shared sticky parent an account watching the published
+# path can recreate it as a symlink between the two, and the second `rm -f "$OUT"`
+# follows the replacement into a file this run never created.
+#
+# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap is what gives the
+# reservation back, on every path out — a refusal, a signal, or a fall off the end
+# — and there is nothing left to do twice.
+#
+# THE PHASE IS WHAT PICKS THE SHAPE, and it replaces the two refusal functions
+# exactly: `rmdir` alone while no leaf can exist, and leaf-then-directory once a
+# write has happened. `rmdir` refuses a symlink outright, which is what makes the
+# pre-write shape safe on a name the ancestry walks have not approved yet; and
+# `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
+# post-write shape has to remove the leaf first.
+#
+# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, after both walks — which is also
+# before either write, so the leaf-removing shape is never the one running on an
+# unapproved path.
+RB_PHASE=pre
+rb_cleanup() {   # give back what this run created, for the phase it is in
+    [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
+    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+}
+rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans up
+    [[ -n ${1-} ]] && echo "$1" >&2
+    exit 1
+}
+# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
+# caller performs no cleanup after a non-zero status, deliberately — it cannot know
+# who created the path — so an interrupted run used to leak its `watch-pr.*`
+# directory for the life of the machine. The obligation moved here with the
+# creation, and a signal is a way out no refusal sees.
+#
+# THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
+# default terminating action: handled and returned from, bash resumes the
+# interrupted work — a `TERM` arriving while `git` runs left this process waiting
+# for that child, and one arriving between a successful write and the disarm let it
+# return status 0, reporting success for a run somebody killed. Each handler cleans
+# up, removes its own trap, and kills this process with the same signal, so the
+# caller sees the true cause and the true status.
+#
+# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
+# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
+# the same statement: without that the re-raise runs the EXIT handler as well,
+# which is the second pass this whole block exists to prevent.
+# AND THE SIGNALS ARE IGNORED WHILE IT RUNS, NOT RESET TO THEIR DEFAULTS. `trap -`
+# restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is to terminate:
+# it stops the cleanup being re-entered and makes it INTERRUPTIBLE instead, so a
+# second signal during `rb_on_signal`, or one during the EXIT handler on an
+# ordinary refusal, kills the shell between the `rm` and the `rmdir` — and the
+# caller removes nothing after a non-zero status. `trap ''` ignores them, which
+# stops both. The original signal is restored to its default immediately before
+# the re-raise, and only that one.
+#
+# AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
+# afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
+# second signal arriving while the first handler is between its two statements —
+# invokes it again, and the second pass is the dangerous one for the reason the
+# refusals gave up their own cleanup. After the first pass has freed the candidate,
+# an account watching that path on a shared parent can recreate it as a symlink
+# before the second `rm -f "$OUT"` resolves it.
+#
+# ALL FOUR IN ONE STATEMENT, in both exit paths, and BEFORE the first removal.
+# Removing only the signal that fired leaves the other two armed; removing them
+# after `rb_cleanup` leaves the whole window open.
+rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+    trap '' EXIT HUP INT TERM
+    rb_cleanup
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+
 # ── THE NAME IS RESERVED BEFORE IT IS WALKED ───────────────────────────────
 #
 # WHAT THIS ORDERING DOES NOT CLOSE, STATED HERE BECAUSE IT CANNOT BE CLOSED FROM
@@ -457,80 +541,6 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
 # said why — the ancestry walks name the component and the reason, and a second
 # line after them would say less.
-# THE CLEANUP EXISTS ONCE AND RUNS ONCE, and both halves of that are the fix. It
-# used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up
-# and then `exit` fired the trap, which cleaned up again — and the second pass is
-# the dangerous one: on a shared sticky parent an account watching the published
-# path can recreate it as a symlink between the two, and the second `rm -f "$OUT"`
-# follows the replacement into a file this run never created.
-#
-# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap is what gives the
-# reservation back, on every path out — a refusal, a signal, or a fall off the end
-# — and there is nothing left to do twice.
-#
-# THE PHASE IS WHAT PICKS THE SHAPE, and it replaces the two refusal functions
-# exactly: `rmdir` alone while no leaf can exist, and leaf-then-directory once a
-# write has happened. `rmdir` refuses a symlink outright, which is what makes the
-# pre-write shape safe on a name the ancestry walks have not approved yet; and
-# `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
-# post-write shape has to remove the leaf first.
-#
-# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, after both walks — which is also
-# before either write, so the leaf-removing shape is never the one running on an
-# unapproved path.
-RB_PHASE=pre
-rb_cleanup() {   # give back what this run created, for the phase it is in
-    [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
-    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
-}
-rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans up
-    [[ -n ${1-} ]] && echo "$1" >&2
-    exit 1
-}
-# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
-# caller performs no cleanup after a non-zero status, deliberately — it cannot know
-# who created the path — so an interrupted run used to leak its `watch-pr.*`
-# directory for the life of the machine. The obligation moved here with the
-# creation, and a signal is a way out no refusal sees.
-#
-# THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
-# default terminating action: handled and returned from, bash resumes the
-# interrupted work — a `TERM` arriving while `git` runs left this process waiting
-# for that child, and one arriving between a successful write and the disarm let it
-# return status 0, reporting success for a run somebody killed. Each handler cleans
-# up, removes its own trap, and kills this process with the same signal, so the
-# caller sees the true cause and the true status.
-#
-# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
-# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
-# the same statement: without that the re-raise runs the EXIT handler as well,
-# which is the second pass this whole block exists to prevent.
-# AND THE SIGNALS ARE IGNORED WHILE IT RUNS, NOT RESET TO THEIR DEFAULTS. `trap -`
-# restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is to terminate:
-# it stops the cleanup being re-entered and makes it INTERRUPTIBLE instead, so a
-# second signal during `rb_on_signal`, or one during the EXIT handler on an
-# ordinary refusal, kills the shell between the `rm` and the `rmdir` — and the
-# caller removes nothing after a non-zero status. `trap ''` ignores them, which
-# stops both. The original signal is restored to its default immediately before
-# the re-raise, and only that one.
-#
-# AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
-# afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
-# second signal arriving while the first handler is between its two statements —
-# invokes it again, and the second pass is the dangerous one for the reason the
-# refusals gave up their own cleanup. After the first pass has freed the candidate,
-# an account watching that path on a shared parent can recreate it as a symlink
-# before the second `rm -f "$OUT"` resolves it.
-#
-# ALL FOUR IN ONE STATEMENT, in both exit paths, and BEFORE the first removal.
-# Removing only the signal that fired leaves the other two armed; removing them
-# after `rb_cleanup` leaves the whole window open.
-rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
-    trap '' EXIT HUP INT TERM
-    rb_cleanup
-    trap - "$1"
-    kill -s "$1" "$$"
-}
 trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
