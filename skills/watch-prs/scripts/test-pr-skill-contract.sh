@@ -1052,11 +1052,21 @@ _pin_fi="$(awk -v n="${_pin_ln:-0}" 'NR>n && /^    fi$/ {print NR; exit}' "$SKIL
 # is none of those.
 _after=""
 _after="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^[[:space:]]*#/ {print; if ($0 == "```") exit}' "$SKILL")" || _after=""
-_pin_stray=""
-_pin_stray="$(printf '%s\n' "$_after" | grep -vE '^[[:space:]]*(fi|else|exit 1|\[\[ -n "" \]\]|echo "ABORT: [^"]*"|```)$' || true)"
-{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ -z "$_pin_stray" ]; } \
+# COMPARED WHOLE, NOT FILTERED. An allowlist of the shapes that may appear accepts
+# them at ANY position — a copied `echo "ABORT: …"; exit 1; [[ -n "" ]]` arm
+# appended after the outer `fi` matched every line of it, while running on every
+# successful setup and aborting it. This is the second time a filter has been
+# written here and the second time it let through exactly what it forbade; the
+# suffix is one exact string.
+_pin_want='else
+    echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"
+    exit 1
+    [[ -n "" ]]
+fi
+```'
+{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ "$_after" = "$_pin_want" ]; } \
     && pass "…and nothing in setup runs after the pin, so a neutralised abort cannot be stepped over" \
-    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi stray='$_pin_stray')"
+    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi after='$_after')"
 # …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
 # would run whatever the pin did, once `exit` is shadowed — the driver would be
 # told setup completed with no pin in place, which is the whole failure.
