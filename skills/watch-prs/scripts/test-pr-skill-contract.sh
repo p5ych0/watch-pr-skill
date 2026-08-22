@@ -280,6 +280,23 @@ _read_block="$(awk '/^RB_REMOTE=$/, /there is no repository to pin this session 
   && case "$_read_block" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
+# ── whether this shell has a case-transforming attribute ──────────────────
+# `declare -l` is bash 4.0+, and the cases below use it to prove that a probe
+# reading only an assignment's STATUS is not enough. On the 3.2.57 path the
+# attribute line itself fails, and under this file's `set -e` a case would die
+# before reaching any refusal — reporting a probe broken on a shell where the
+# attribute it tests does not exist. So the shell is ASKED, and the skip is
+# announced by name rather than being silent.
+#
+# ASKED WITH AN `if`, NOT AN `&&` LIST. Written as `( declare -l … ) && _rb_has_l=yes`
+# the list itself reports 1 on a shell without the attribute, and under `set -e`
+# that ends the run — on exactly the path the probe exists to accommodate.
+_rb_has_l=no
+if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
+[ "$_rb_has_l" = yes ] \
+    && pass "this shell has declare -l, so the case-transforming states run" \
+    || pass "this shell has no declare -l, so those states are skipped by name"
+
 # ── the transport path cannot be built without a directory ────────────────
 # `exit` is a builtin the operator's shell can replace with one that RETURNS, and
 # every refusal in the block above then prints its message and CARRIES ON — to the
@@ -296,7 +313,10 @@ _read_block="$(awk '/^RB_REMOTE=$/, /there is no repository to pin this session 
 # diagnostics to gain this one, which the cases below this file already prove.
 # EVERY SPELLING OF THE PATH REQUIRES THE DIRECTORY, and there is no name holding
 # it — so this counts the uses rather than looking for one assignment.
-_rb_req_n="$(grep -c '${RB_TMPDIR:?' "$SKILL" || true)"
+# COUNTED OUTSIDE COMMENTS. The comments in this region quote the expansion while
+# explaining it, so a count over the whole file stays high after a runtime one is
+# removed — the check would then agree with the defect it exists to catch.
+_rb_req_n="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -c '${RB_TMPDIR:?' || true)"
 [ "${_rb_req_n:-0}" -ge 4 ] \
     && pass "the transport path requires its directory at every spelling ($_rb_req_n)" \
     || die "SKILL.md builds \$RB_TMPDIR/origin without requiring the directory; an emptied one is /origin"
@@ -325,8 +345,18 @@ esac
 # requirement for that reason — and it is asserted as an ABSENCE rather than a
 # list, because a list of uses is wrong by omission.
 _rb_bare=""
-_rb_bare="$(awk '/RB_ORIGIN_OUT="\$\{RB_TMPDIR/,/rmdir "\$\{RB_TMPDIR[^}]*\}"$/' "$SKILL" \
-    | grep -vE '^[[:space:]]*#' | grep -F '"$RB_TMPDIR' || true)"
+# ANCHORED ON THE REGION AS IT IS. The range began at `RB_ORIGIN_OUT="${RB_TMPDIR`
+# and that name was removed two rounds ago, so the stream was EMPTY and the check
+# reported success about text it never read — the same vacuous green the
+# apostrophe check had, one assertion along. It runs from the probe that opens the
+# region to the `rmdir` that closes it, and the range having found something is
+# asserted before its contents are.
+_rb_region="$(awk '/^if \( RB_TMPDIR=Probe-A;/,/rmdir "\$\{RB_TMPDIR[^}]*\}"$/' "$SKILL")" || _rb_region=""
+case "$_rb_region" in
+    *'rmdir "${RB_TMPDIR:?'*) pass "the transport region lifts out whole for the scan below" ;;
+    *) die "the transport region could not be lifted; the bare-use scan below would pass vacuously" ;;
+esac
+_rb_bare="$(printf '%s\n' "$_rb_region" | grep -vE '^[[:space:]]*#' | grep -F '"$RB_TMPDIR' || true)"
 [ -z "$_rb_bare" ] \
     && pass "…at every use in the region, so an interactive shell cannot reach one of them" \
     || die "a bare \$RB_TMPDIR survives past the loop: $_rb_bare"
@@ -378,22 +408,35 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # read as this session's remote and DELETED by the cleanup. The probe before
     # the clear is what refuses it, and interactively is where that matters: a
     # neutralised `exit` walks past anything that merely reports.
+    # THREE ATTRIBUTES, LIKE THE PROBES BEFORE IT. A readonly is only half of what
+    # this probe claims to reject: with a status-only assignment in place of the
+    # comparison, `declare -i RB_TMPDIR=0` SUCCEEDS, the clear leaves `0`, and with
+    # no usable candidate the non-empty requirement accepts it — setup then works
+    # against a relative `0/origin`. `declare -l` is bash 4.0+, so it is asked for
+    # rather than assumed, exactly as the other cases ask.
+    _rb_st_states="readonly RB_TMPDIR=%s/stale|declare -i RB_TMPDIR=0"
+    if [ "$_rb_has_l" = yes ]; then _rb_st_states="$_rb_st_states|declare -l RB_TMPDIR=x"; fi
+    _rb_st_rest="$(printf "$_rb_st_states" "$_rb_ex")"
     mkdir -p "$_rb_ex/stale"
+    while [ -n "$_rb_st_rest" ]; do
+    _rb_st_attr="${_rb_st_rest%%|*}"
+    case "$_rb_st_rest" in *'|'*) _rb_st_rest="${_rb_st_rest#*|}" ;; *) _rb_st_rest="" ;; esac
     printf '%s\n' "git@github.com:WRONG/other.git" > "$_rb_ex/stale/origin"
-    printf 'exit() { return 0; }\nreadonly RB_TMPDIR=%s/stale\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED remote=[%%s]\\n" "${RB_REMOTE:-unset}"\nexit\n' \
-        "$_rb_ex" "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/stale.sh"
+    printf 'exit() { return 0; }\n%s\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED remote=[%%s]\\n" "${RB_REMOTE:-unset}"\nexit\n' \
+        "$_rb_st_attr" "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/stale.sh"
     _rb_st_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/stale.sh" 2>&1 || true)"
     printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly or value-transforming' \
-        && pass "…and a stale readonly transport directory is refused by name, interactively" \
-        || die "the stale-directory case did not refuse: '$_rb_st_out'"
+        && pass "…and an unusable transport directory is refused by name, interactively ($_rb_st_attr)" \
+        || die "the unusable-directory case did not refuse: '$_rb_st_out' ($_rb_st_attr)"
     printf '%s' "$_rb_st_out" | grep -qF 'WRONG/other' \
-        && die "…but the stale directory's origin was read: '$_rb_st_out'" \
-        || pass "…and its origin is never read"
+        && die "…but a directory this run did not establish was read: '$_rb_st_out' ($_rb_st_attr)" \
+        || pass "…and no origin outside this run is read ($_rb_st_attr)"
     { [ -f "$_rb_ex/stale/origin" ] \
       && [ "$(cat "$_rb_ex/stale/origin")" = "git@github.com:WRONG/other.git" ]; } \
-        && pass "…nor removed" \
-        || die "the stale directory's origin was consumed or deleted"
+        && pass "…nor removed ($_rb_st_attr)" \
+        || die "an origin outside this run was consumed or deleted ($_rb_st_attr)"
+    done
     rm -rf "$_rb_ex" 2>/dev/null || true
 fi
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -1972,15 +2015,6 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # where the attribute it tests does not exist. The skip is announced rather than
 # silent: a case that quietly does not run is the coverage this file exists to
 # stop claiming.
-# ASKED WITH AN `if`, NOT AN `&&` LIST. Written as `( declare -l … ) && _rb_has_l=yes`
-# the list itself reports 1 on a shell without the attribute, and under this
-# file's `set -e` that ends the run — on exactly the 3.2.57 path the probe exists
-# to accommodate, which is the failure it was written to avoid.
-_rb_has_l=no
-if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
-[ "$_rb_has_l" = yes ] \
-    && pass "…and this shell has declare -l, so the lowercase-transforming state runs" \
-    || pass "…and this shell has no declare -l, so that state is skipped by name"
 _rb_attrs="readonly RB_TMPPARENT=Probe-A|declare -i RB_TMPPARENT=0"
 if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x"; fi
 _rb_rest="$_rb_attrs"
