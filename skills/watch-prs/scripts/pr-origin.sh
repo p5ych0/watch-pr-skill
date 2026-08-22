@@ -548,13 +548,16 @@ rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and 
 # was left with it. The window is small and it is not zero, and it is the one
 # window the ordering fixture could not see.
 #
-# WHICH MAKES THE OWNERSHIP TEST IN `rb_cleanup` LOAD-BEARING RATHER THAN
-# BELT-AND-BRACES. Arming first means the cleanup can now run at a moment when
-# this run has NOT created the directory — when the `mkdir` had already failed
-# because the name was taken. `[[ -O … ]]` is what tells those apart: the name
-# carries three `$RANDOM` draws and this process id, so a directory there owned by
-# THIS account is one this run created, and one owned by anybody else is theirs and
-# is left alone. `rmdir` refuses a symlink and a non-empty directory besides.
+# WHICH MAKES `rb_cleanup`'S THREE-PART DECISION LOAD-BEARING RATHER THAN
+# BELT-AND-BRACES. Arming first means the cleanup can now run at a moment when this
+# run has NOT created the directory — when the `mkdir` had already failed because
+# the name was taken. What tells those apart is the combination stated above it:
+# `RB_OWNED` where the `mkdir` has already reported success, `RB_PREEXISTED` for
+# the window where it has not reported anything yet, and `-O` for a name another
+# ACCOUNT holds. No one of the three is sufficient — an EMPTY pre-existing
+# directory owned by the operator passes `-O` exactly as a created one does, and
+# `RB_OWNED` is not yet set when a signal is handled straight out of the `mkdir`.
+# `rmdir` refuses a symlink and a non-empty directory besides.
 trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT

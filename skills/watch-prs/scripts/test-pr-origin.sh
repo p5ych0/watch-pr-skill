@@ -7,9 +7,16 @@
 # code when it runs inline in `SKILL.md`; that is the whole point of the script.
 #
 # THE CONTRACT UNDER TEST: the caller starts it with `/usr/bin/env bash -p` and
-# names a file; the VALUE goes to that file and every REASON goes to stderr, and
-# nothing is ever written to stdout. `run` below joins the two only so a single
-# assertion can look at both.
+# names a DIRECTORY that must not exist; the helper creates it, exclusively and at
+# mode 700, and names the leaf inside it itself — `<dir>/origin` for `read`,
+# `<dir>/pin` for `pin`. The VALUE goes to that leaf and every REASON goes to
+# stderr, and nothing is ever written to stdout. `run` below joins the two only so
+# a single assertion can look at both.
+#
+# It was a FILE the caller had already created, until #157 moved the creation into
+# the helper — where `mkdir` runs privileged and is not a name the operator's shell
+# can replace. A case written to the old contract would hand a file path to
+# something that means to `mkdir` it.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
