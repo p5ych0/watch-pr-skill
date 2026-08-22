@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.55] — 2026-08-22
+
+- **A neutralised `exit` walked a refused setup into reading and deleting
+  `/origin`.** `SKILL.md`'s setup runs in your own long-lived shell, and `exit` is
+  a builtin a startup file can replace with one that RETURNS. Every refusal in the
+  transport block then printed its message and carried on to the next line — which
+  built `$RB_TMPDIR/origin` with `RB_TMPDIR` never set. That is `/origin`.
+
+  The ownership test below it is `[[ -O ]]`, so for an operator running as **root**
+  with a root-owned file there it passes: the value is read as this session's
+  origin, the `rm -f` two lines down **deletes that file**, and every stage —
+  signoffs, revocations, review requests — is then addressed by whatever
+  repository it named. The cleanup arms are worse still: they run
+  `rmdir "$RB_TMPDIR"`, which with an empty value is `rmdir /`.
+
+  The directory is required by the **expansion that builds the path**:
+  `${RB_TMPDIR:?…}`. A parameter expansion error ends a non-interactive shell
+  where it stands — there is no command name in it to shadow and no `exit` to
+  neutralise — and it names the variable while doing it. Every later use of
+  `$RB_TMPDIR` is downstream of that line, so none of them is reachable with an
+  empty one.
+
+  Wrapping the region in an `if` was tried and taken back, and the reason is worth
+  having: inside a compound command a failed readonly assignment ends the shell
+  **before** the guard that would have named it, so `RB_ORIGIN_OUT` and
+  `RB_REMOTE` lost their own diagnostics to gain this one. The expansion costs
+  nothing and moves nothing.
+
+  One thing about that message is load-bearing: it carries **no apostrophe**. Bash
+  parses the `:?` word specially, so a `'` inside it opens a quote even within
+  double quotes and the whole setup block stops parsing.
+
 ## [2.0.54] — 2026-08-22
 
 - **`RB_TRY`'s probe read only a status, so a transforming attribute passed it.**

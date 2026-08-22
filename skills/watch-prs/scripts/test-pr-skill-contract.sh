@@ -276,6 +276,56 @@ _read_block="$(awk '/^RB_TMPDIR=$/, /there is no repository to pin this session 
   && case "$_read_block" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
+# ── the transport path cannot be built without a directory ────────────────
+# `exit` is a builtin the operator's shell can replace with one that RETURNS, and
+# every refusal in the block above then prints its message and CARRIES ON — to the
+# line that builds `$RB_TMPDIR/origin`, which with an empty value is `/origin`.
+# The ownership test is `[[ -O ]]`, so a root operator with a root-owned file
+# there reads it as this session's origin, the `rm -f` below DELETES it, and the
+# cleanup arms run `rmdir "$RB_TMPDIR"` — `rmdir /`. #151.
+#
+# AN EXPANSION, NOT AN `if`. A parameter expansion error ends a non-interactive
+# shell where it stands: no command name to shadow, no `exit` to neutralise, and
+# it names the variable. The `if` was tried and taken back, because inside a
+# compound command a failed readonly assignment ends the shell BEFORE the guard
+# that would have named it — `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own
+# diagnostics to gain this one, which the cases below this file already prove.
+grep -qF 'RB_ORIGIN_OUT="${RB_TMPDIR:?' "$SKILL" \
+    && pass "the transport path requires its directory through the expansion that builds it" \
+    || die "SKILL.md builds \$RB_TMPDIR/origin without requiring the directory; an emptied one is /origin"
+# AND THE MESSAGE CARRIES NO APOSTROPHE. Bash parses the `:?` word specially, so a
+# `'` inside it opens a quote even within double quotes and the whole block stops
+# parsing — measured, `X="${V:?a session's origin}/o"` is `unexpected EOF`. A
+# fixture is the only thing that would notice, because the block that stops
+# parsing is the one nothing here executes.
+_rb_qm="$(grep -o 'RB_ORIGIN_OUT="${RB_TMPDIR:?[^}]*}' "$SKILL" || true)"
+case "$_rb_qm" in
+    *"'"*) die "the transport path's :? message contains an apostrophe; the setup block will not parse" ;;
+    *)     pass "…and that requirement's message cannot break the block it lives in" ;;
+esac
+# AND IT IS RUN. The lift already in hand is the block itself; with no usable
+# parent and `exit` neutralised, what must come out is the expansion's refusal
+# naming RB_TMPDIR, and what must NOT is any sign of the read continuing.
+_rb_ex=""
+_rb_ex="$(mktemp_d)" || _rb_ex=""
+{ [ -n "$_rb_ex" ] && [ -d "$_rb_ex" ]; } \
+    || die "no scratch directory for the transport-path case; it proves nothing"
+if [ -n "$_rb_ex" ] && [ -d "$_rb_ex" ]; then
+    printf '%s\n' "$_read_block" > "$_rb_ex/blk.sh"
+    _rb_ex_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
+        RB_SCRIPTS="$_rb_ex" TMPDIR="$_rb_ex" bash --noprofile --norc -c '
+exit() { return 0; }
+readonly RB_TMPPARENT=/nonexistent-parent-for-this-case
+. "$1"
+printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh" 2>&1 || true)"
+    printf '%s' "$_rb_ex_out" | grep -qF 'RB_TMPDIR: no transport directory was established' \
+        && pass "…so a walked-past refusal stops at the expansion, naming the directory it lacks" \
+        || die "the transport-path case gave '$_rb_ex_out'"
+    printf '%s' "$_rb_ex_out" | grep -qF 'REACHED' \
+        && die "…but the block carried on past it: '$_rb_ex_out'" \
+        || pass "…and nothing after it runs"
+    rm -rf "$_rb_ex" 2>/dev/null || true
+fi
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
 # the only shape that separates the two behaviours: one that failed to write would
 # be refused by the emptiness check further down, and the block would look correct

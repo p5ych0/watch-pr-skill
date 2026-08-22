@@ -652,7 +652,31 @@ else
     exit 1
     [[ -n "" ]]
 fi
-RB_ORIGIN_OUT="$RB_TMPDIR/origin"
+# THE DIRECTORY IS REQUIRED BY THE EXPANSION, not by a check after it. `exit` is a
+# builtin your shell can replace with one that RETURNS, and every refusal above --
+# a name that cannot be assigned, a parent that could not be used, no candidate
+# that worked -- then printed its message and CARRIED ON to this line, where
+# `$RB_TMPDIR` is empty and the path built is `/origin`.
+#
+# WHAT THAT REACHES IS A FILE NOBODY HERE CREATED. The ownership test below is
+# `[[ -O ]]`, so for an operator running as ROOT with a root-owned `/origin` it
+# passes: the value is read as this session's origin, the `rm -f` further down
+# DELETES that file, and every stage is then addressed by whatever repository it
+# named. The cleanup arms are worse still -- they run `rmdir "$RB_TMPDIR"`, which
+# with an empty value is `rmdir /`. #151.
+#
+# `${...:?}` IS AN EXPANSION, AND THAT IS WHY IT IS THIS AND NOT AN `if`. A
+# parameter expansion error ends a non-interactive shell where it stands: there is
+# no command name in it to shadow and no `exit` to neutralise, and it names the
+# variable while doing it. Wrapping the region in an `if` was tried and taken back
+# -- inside a compound command a failed readonly assignment ends the shell BEFORE
+# the guard that would have named it, so `RB_ORIGIN_OUT` and `RB_REMOTE` lost
+# their own diagnostics to gain this one.
+# NO APOSTROPHE IN THAT MESSAGE, and it is not a style choice: bash parses the
+# `:?` word specially, so a `'` inside it opens a quote even within double quotes
+# and the whole block stops parsing. Measured -- `X="${V:?a session's origin}/o"`
+# is `unexpected EOF while looking for matching`.
+RB_ORIGIN_OUT="${RB_TMPDIR:?no transport directory was established, so there is nothing to read the session origin from}/origin"
 [[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
     || { /usr/bin/env rm -f "$RB_TMPDIR/origin"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_REMOTE=
