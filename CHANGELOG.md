@@ -22,9 +22,11 @@
 - **A refusal after the directory existed left it behind.** The helper's contract
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean
-  up. Each goes through one `rb_refuse`, which removes the file and the directory
-  before it stops. The driver does the same for the one refusal that is its own:
-  a transport file that fails the ownership checks.
+  up. Those go through `rb_refuse`, which removes the file and the directory
+  before it stops; the refusals that happen BEFORE either write use
+  `rb_refuse_pre`, which is `rmdir` alone, for the reason the entry below gives.
+  The driver does the same for the one refusal that is its own: a transport file
+  that fails the ownership checks.
 
 - **An abandoned assignment left the previous run's transport path standing.**
   `${VAR:?}` ends a non-interactive shell where it stands; interactively the shell

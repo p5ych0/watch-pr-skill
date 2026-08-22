@@ -74,9 +74,17 @@
 #          refusal that tidied it up would be this script deleting what it just
 #          refused to trust.
 #        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
-#          in it, a failed write — this script created the directory, so
-#          `rb_refuse` removes the leaf and the directory before stopping. Nothing
-#          is left at the argument and there is nothing for the caller to collect.
+#          in it, a failed write — this script created the directory, so it gives
+#          the directory back before stopping. Nothing is left at the argument and
+#          there is nothing for the caller to collect.
+#
+#          THE CLEANUP HAS TWO SHAPES ON THIS LIST, and which one runs is decided
+#          by whether a leaf can exist yet. BEFORE either write — the two ancestry
+#          walks and the unresolvable-path refusal — it is `rmdir` ALONE, through
+#          `rb_refuse_pre`: there is no leaf to remove, and removing one by NAME
+#          would resolve a path the walk has just decided not to trust, which is a
+#          symlink an attacker can substitute while it runs. AFTER the writes it is
+#          `rb_refuse`, which removes the leaf and then the directory.
 #
 #      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
 #      The walks used to run first, so an unsafe component was refused before
@@ -482,7 +490,28 @@ rb_refuse_pre() {   # rb_refuse_pre [message] ; give the reservation back, no le
 # the correct answer for a signal arriving between the write and the exit — the
 # caller may still read what was written. The trap is disarmed on the success path
 # anyway, so that case is stated rather than relied on.
-trap '/usr/bin/env rmdir "$RB_DIR" 2>/dev/null' EXIT HUP INT TERM
+#
+# AND THE SIGNAL HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal
+# REPLACES its default terminating action: handled and returned from, bash resumes
+# the interrupted work — a `TERM` arriving while `git` runs left this process
+# waiting for that child to finish, and one arriving between a successful write and
+# the disarm let it return status 0, reporting success for a run somebody killed.
+# Each handler therefore cleans up, removes its own trap, and kills this process
+# with the same signal, so the caller sees the true cause and the true status.
+#
+# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
+# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
+# the same statement: without that the re-raise runs the EXIT handler as well,
+# which is a second `rmdir` on a path already given back.
+rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+    trap - EXIT "$1"
+    kill -s "$1" "$$"
+}
+trap '/usr/bin/env rmdir "$RB_DIR" 2>/dev/null' EXIT
+trap 'rb_on_signal HUP' HUP
+trap 'rb_on_signal INT' INT
+trap 'rb_on_signal TERM' TERM
 # THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
 # examines the link rather than what it points at, so this pass asks who owns each
 # link on the way — an account that owns one can repoint it.

@@ -1205,11 +1205,16 @@ grep -qF 'WHAT THIS ORDERING DOES NOT CLOSE' "$SCRIPT" \
 # the write. `git` is reached through `PATH` — the helper runs privileged, so a
 # FUNCTION cannot stand in for it, but a directory on `PATH` can.
 _int_bin="$TMP/intbin"; mkdir -p "$_int_bin"
-printf '#!/usr/bin/env bash\nsleep 30\n' > "$_int_bin/git"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_int_bin/git"
 chmod +x "$_int_bin/git"
 _int_dir="$TMP/int.$$"
 rm -rf "$_int_dir"
-( cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+# `exec`, SO `$!` IS THE HELPER. Without it the background job is the SUBSHELL and
+# the helper is its child: a TERM to the subshell leaves the helper running, the
+# subshell waits for it, and the case reports the defect it exists to detect
+# against a correct handler. `exec` replaces the subshell, so the pid is the one
+# the signal has to reach.
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     PATH="$_int_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_int_dir" ) >/dev/null 2>&1 &
 _int_pid=$!
 # WAIT FOR THE RESERVATION, rather than sleeping a guessed interval: the case is
@@ -1219,7 +1224,29 @@ while [ ! -d "$_int_dir" ] && [ "$_int_n" -lt 100 ]; do _int_n=$(( _int_n + 1 ))
 if [ -d "$_int_dir" ]; then
     pass "the helper reserves its directory before reading origin"
     kill -TERM "$_int_pid" 2>/dev/null
-    wait "$_int_pid" 2>/dev/null
+    # BOUNDED, so a handler that hangs is a failure rather than a fixture that
+    # never returns.
+    #
+    # AND THE STATUS IS THE DISCRIMINATING ASSERTION, not the absence of the
+    # directory. Bash does not run a trap while it waits for a foreign command: the
+    # TERM is noticed and handled only once `git` returns, so BOTH shapes end with
+    # the directory gone and a non-zero status — a handler that RETURNS lets bash
+    # resume, the empty `git` output is refused, and `rb_refuse` cleans up and
+    # exits 1. What tells them apart is WHICH non-zero: 143 is 128+TERM, the status
+    # of a process that died of the signal, and 1 is a refusal reported by a run
+    # that carried on after being killed.
+    _int_w=0
+    while kill -0 "$_int_pid" 2>/dev/null && [ "$_int_w" -lt 150 ]; do
+        _int_w=$(( _int_w + 1 )); sleep 0.1
+    done
+    [ "$_int_w" -lt 150 ] \
+        && pass "…and the interrupted helper ends rather than hanging" \
+        || die "the helper was still running fifteen seconds after TERM"
+    _int_rc=0
+    wait "$_int_pid" 2>/dev/null || _int_rc=$?
+    [ "$_int_rc" = 143 ] \
+        && pass "…dying of the signal (143 = 128+TERM) rather than resuming and reporting a refusal" \
+        || die "a helper killed after its reservation exited $_int_rc; the handler returned instead of re-raising"
     # THE TRAP RUNS IN THE HELPER, and `wait` returns when the backgrounded
     # SUBSHELL ends — which can be before its child has finished handling the
     # signal. A bounded wait for the absence, rather than one assertion racing a
@@ -1230,7 +1257,7 @@ if [ -d "$_int_dir" ]; then
         && pass "…and a TERM between the reservation and the write gives it back" \
         || die "an interrupted helper leaked '$_int_dir'"
 else
-    kill -TERM "$_int_pid" 2>/dev/null; wait "$_int_pid" 2>/dev/null
+    kill -KILL "$_int_pid" 2>/dev/null; wait "$_int_pid" 2>/dev/null || true
     die "the helper never created its directory; the interruption case proves nothing"
 fi
 rm -rf "$_int_dir" "$_int_bin"
