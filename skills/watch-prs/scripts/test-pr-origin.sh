@@ -1033,9 +1033,13 @@ _ex_base="$TMP/excl"; mkdir -p "$_ex_base"
 for _ex_kind in dir file link; do
     _ex_path="$_ex_base/$_ex_kind"
     rm -rf "$_ex_path"
+    # WITH CONTENTS, so their SURVIVAL can be asserted and not only the absence of
+    # a write. A refusal before the `mkdir` created nothing, so it must remove
+    # nothing — and a child-absence check alone passes just as well if the helper
+    # deleted the whole argument, which is the opposite failure.
     case "$_ex_kind" in
-        dir)  mkdir "$_ex_path" ;;
-        file) : > "$_ex_path" ;;
+        dir)  mkdir "$_ex_path"; printf 'DO NOT DELETE\n' > "$_ex_path/keepme" ;;
+        file) printf 'DO NOT DELETE\n' > "$_ex_path" ;;
         link) ln -s "$_ex_base" "$_ex_path" ;;
     esac
     _ex_rc=0
@@ -1048,6 +1052,21 @@ for _ex_kind in dir file link; do
     [ ! -e "$_ex_path/origin" ] \
         && pass "…and writes nothing through it" \
         || die "an existing $_ex_kind was written through"
+    # …AND LEAVES IT WHERE IT WAS, which the child-absence check above cannot see:
+    # a helper that deleted the argument outright satisfies it perfectly. The
+    # refusal happens BEFORE the `mkdir`, so this script created nothing and must
+    # remove nothing — a name somebody else got to first is theirs.
+    case "$_ex_kind" in
+        dir)  { [ -d "$_ex_path" ] && [ -s "$_ex_path/keepme" ]; } \
+                  && pass "…and leaves the existing directory and its contents alone" \
+                  || die "an existing directory or its contents were removed" ;;
+        file) { [ -f "$_ex_path" ] && [ -s "$_ex_path" ]; } \
+                  && pass "…and leaves the existing file alone" \
+                  || die "an existing file was removed or truncated" ;;
+        link) { [ -L "$_ex_path" ] && [ -d "$_ex_base" ]; } \
+                  && pass "…and leaves the symlink and its target alone" \
+                  || die "an existing symlink or its target was removed" ;;
+    esac
 done
 # …AND THE ORDINARY CASE STILL CREATES IT, so the three above are not passing
 # because every path is refused.

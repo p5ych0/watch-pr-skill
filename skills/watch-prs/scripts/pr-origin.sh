@@ -55,10 +55,25 @@
 #   1  refused — the reason is on STDERR, and the value file is NOT created. It is
 #      written by the single redirection that creates it, so a refusal before that
 #      point leaves the leaf ABSENT rather than empty; a caller that opens it sees
-#      the open fail, which is what `SKILL.md` branches on. A refusal AFTER the
-#      directory exists takes the directory with it, through `rb_refuse` — so on
-#      status 1 there is nothing at the argument either, and nothing for the
-#      caller to clean up.
+#      the open fail, which is what `SKILL.md` branches on.
+#
+#      WHAT IS AT THE ARGUMENT ON STATUS 1 DEPENDS ON WHICH SIDE OF THE `mkdir`
+#      the refusal happened, and the two are opposite:
+#
+#        - BEFORE it — a bad mode, a relative path, an unsafe ancestor, or the
+#          `mkdir` itself failing because the name is ALREADY TAKEN — nothing here
+#          created anything, so nothing here removes anything. A pre-existing
+#          directory, file or symlink at that name survives untouched, contents
+#          included. That is the exclusion working: a name somebody else got to
+#          first is theirs, and a refusal that tidied it up would be this script
+#          deleting what it just refused to trust.
+#        - AFTER it — the git read, an empty origin, a newline in it, a failed
+#          write — this script created the directory, so `rb_refuse` removes the
+#          leaf and the directory before stopping. Nothing is left at the argument
+#          and there is nothing for the caller to collect.
+#
+#      A caller cannot tell the two apart from the status, and does not need to:
+#      the rule it follows is that it removes only what a status 0 gave it.
 #
 # NOTHING IS EVER WRITTEN TO STDOUT. The value goes to the file and the reasons go
 # to stderr, so a caller reads one and never sees the other — which is what lets
