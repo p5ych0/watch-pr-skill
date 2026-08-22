@@ -316,9 +316,16 @@ if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
 # COUNTED OUTSIDE COMMENTS. The comments in this region quote the expansion while
 # explaining it, so a count over the whole file stays high after a runtime one is
 # removed — the check would then agree with the defect it exists to catch.
-_rb_req_n="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -c '${RB_TMPDIR:?' || true)"
-[ "${_rb_req_n:-0}" -ge 4 ] \
-    && pass "the transport path requires its directory at every spelling ($_rb_req_n)" \
+# OCCURRENCES, NOT LINES. `grep -c` counts matching LINES, and one line here
+# carries two protected uses — so removing one left the count unchanged. `-o`
+# prints each match.
+_rb_req_n="$(grep -v '^[[:space:]]*#' "$SKILL" | grep -o '${RB_TMPDIR:?' | grep -c . || true)"
+# A COUNT IS NOT COMPLETENESS, and this one does not claim to be: it says the
+# expansions exist to be read, and the ABSENCE scan below is what says none is
+# missing. A threshold was tried as the completeness check and is not one — one
+# line carries two uses, so removing a single one left it satisfied.
+[ "${_rb_req_n:-0}" -ge 1 ] \
+    && pass "the transport path requires its directory where it is built ($_rb_req_n)" \
     || die "SKILL.md builds \$RB_TMPDIR/origin without requiring the directory; an emptied one is /origin"
 # AND THE MESSAGE CARRIES NO APOSTROPHE. Bash parses the `:?` word specially, so a
 # `'` inside it opens a quote even within double quotes and the whole block stops
@@ -356,7 +363,17 @@ case "$_rb_region" in
     *'rmdir "${RB_TMPDIR:?'*) pass "the transport region lifts out whole for the scan below" ;;
     *) die "the transport region could not be lifted; the bare-use scan below would pass vacuously" ;;
 esac
-_rb_bare="$(printf '%s\n' "$_rb_region" | grep -vE '^[[:space:]]*#' | grep -F '"$RB_TMPDIR' || true)"
+# THE PROTECTED USES ARE REMOVED AND WHATEVER IS LEFT IS THE ANSWER. Looking for
+# `"$RB_TMPDIR` missed a BRACED one — `"${RB_TMPDIR}/origin"` is a bare use and
+# reads nothing like the pattern. Stripping `${RB_TMPDIR:?…}` and then finding any
+# remaining `$RB_TMPDIR` needs no list of the spellings a use can take.
+#
+# FROM THE EMPTINESS CHECK ONWARD, because before it `$RB_TMPDIR` is READ by
+# tests — `[[ -n … ]]`, `[[ … = "$RB_TRY" ]]` — which command nothing and are not
+# what this scan is about.
+_rb_after="$(printf '%s\n' "$_rb_region" | awk '/\[\[ -n \$RB_TMPDIR \]\]/,0' | tail -n +2)"
+_rb_bare="$(printf '%s\n' "$_rb_after" | grep -vE '^[[:space:]]*#' \
+    | sed 's/${RB_TMPDIR:?[^}]*}//g' | grep -F 'RB_TMPDIR' || true)"
 [ -z "$_rb_bare" ] \
     && pass "…at every use in the region, so an interactive shell cannot reach one of them" \
     || die "a bare \$RB_TMPDIR survives past the loop: $_rb_bare"
@@ -398,9 +415,24 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     printf '%s' "$_rb_it_out" | grep -qF 'RB_TMPDIR: no transport directory was established' \
         && pass "…and interactively the requirement still refuses, where the shell survives it" \
         || die "the interactive case did not refuse: '$_rb_it_out'"
-    printf '%s' "$_rb_it_out" | grep -qF 'origin_out=[/origin]' \
-        && die "…but a path was built from an empty transport directory: '$_rb_it_out'" \
-        || pass "…and no path is ever built from an empty one"
+    # THE PATH THE CLEANUP IS HANDED IS OBSERVED, not inferred. `RB_ORIGIN_OUT` was
+    # what this used to read, and that name is gone — so the check was reporting on
+    # a variable the block no longer has. `rm` and `rmdir` are wrapped on `PATH`
+    # instead: they record their arguments and delete nothing, and what must never
+    # be recorded is a path outside this scratch tree. That is the actual claim —
+    # `rm -f /origin` is the failure, and only an argument log sees it.
+    mkdir -p "$_rb_ex/bin"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$@" >> "$RB_ARGLOG"\nexit 0\n' > "$_rb_ex/bin/rm"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$@" >> "$RB_ARGLOG"\nexit 0\n' > "$_rb_ex/bin/rmdir"
+    chmod +x "$_rb_ex/bin/rm" "$_rb_ex/bin/rmdir"
+    : > "$_rb_ex/arglog"
+    run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
+        RB_ARGLOG="$_rb_ex/arglog" PATH="$_rb_ex/bin:$PATH" \
+        bash --noprofile --norc -i < "$_rb_ex/interactive.sh" >/dev/null 2>&1 || true
+    _rb_arg_bad="$(grep -vE "^(-f|$_rb_ex(/.*)?)$" "$_rb_ex/arglog" || true)"
+    [ -z "$_rb_arg_bad" ] \
+        && pass "…and no cleanup is handed a path outside this session's own tree" \
+        || die "a cleanup was handed '$_rb_arg_bad' — with an empty directory that is /origin"
     # …AND A STALE NON-EMPTY DIRECTORY IS REFUSED TOO, which the requirement alone
     # cannot do: `${RB_TMPDIR:?}` proves a value is non-empty, not that this run
     # established it. A readonly `RB_TMPDIR` naming a directory the operator owns
