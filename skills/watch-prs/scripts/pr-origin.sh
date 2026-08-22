@@ -503,12 +503,28 @@ rb_refuse_pre() {   # rb_refuse_pre [message] ; give the reservation back, no le
 # is a name anything can stand in for. `EXIT` is removed with the signal's trap in
 # the same statement: without that the re-raise runs the EXIT handler as well,
 # which is a second `rmdir` on a path already given back.
-rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+# AND THE HANDLER HAS THE SAME TWO PHASES THE REFUSALS DO, for the same reason and
+# with the same boundary. `rmdir` alone is right while no leaf can exist — it
+# refuses a symlink outright, which is what makes it safe before the walks have
+# approved the name. Once a write has happened `rmdir` NECESSARILY fails, because
+# the directory holds the leaf: a signal landing between the write and the disarm
+# left both behind, and the caller performs no cleanup after a non-zero status.
+#
+# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, which is after both walks. That
+# is also before either write, so the leaf-removing shape is never the one running
+# on a path the walks have not approved — the ordering that made the P1 two rounds
+# ago possible cannot recur.
+RB_PHASE=pre
+rb_cleanup() {   # give back what this run created, for the phase it is in
+    [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+}
+rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+    rb_cleanup
     trap - EXIT "$1"
     kill -s "$1" "$$"
 }
-trap '/usr/bin/env rmdir "$RB_DIR" 2>/dev/null' EXIT
+trap 'rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM
@@ -529,6 +545,11 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
     || rb_refuse_pre "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
 [[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse_pre
+# THE NAME IS TRUSTED FROM HERE, and that is what the phase says. Every write is
+# below this line and every walk above it, so a signal arriving from now on gets
+# the shape that removes the leaf as well — and never gets it while the ancestry
+# is still unproven.
+RB_PHASE=post
 
 
 if [[ $MODE = pin ]]; then

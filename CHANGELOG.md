@@ -51,7 +51,13 @@
   after a non-zero status, deliberately — it cannot know who created the path — so
   a signal between the reservation and either end left a `watch-pr.*` directory
   behind for the life of the machine. A trap gives it back, and is disarmed on the
-  success paths.
+  success paths. It has the same two phases the refusals do: `rmdir` alone while
+  no leaf can exist, and leaf-then-directory once a write has happened, since
+  `rmdir` necessarily fails on a directory holding its leaf. The phase flips after
+  the ancestry walks — where the name becomes trusted, and still before either
+  write. The handlers re-raise rather than returning, because a trap REPLACES a
+  signal's terminating action and one that returned left bash resuming the work it
+  was killed during, and returning status 0 for a run somebody killed.
 
 - **Another account could keep a session from starting, repeatably — narrowed,
   and the remainder written down.** The

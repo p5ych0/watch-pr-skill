@@ -1178,10 +1178,29 @@ _res_pre="$(awk "/^rb_refuse_pre\\(\\) \{/,/^\}/" "$SCRIPT")" || _res_pre=""
 # caller performs no cleanup after a non-zero status — deliberately, since it
 # cannot know who created the path — so an interrupted helper leaked its directory
 # for the life of the machine.
-_res_tr=0; _res_tr="$(grep -n "^trap '/usr/bin/env rmdir \"\\\$RB_DIR\"" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
+_res_tr=0; _res_tr="$(grep -n "^trap 'rb_cleanup' EXIT$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
     && pass "…and a cleanup trap is armed after the reservation is taken" \
     || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
+# …AND IT HAS THE SAME TWO PHASES THE REFUSALS DO. `rmdir` alone is right while no
+# leaf can exist; once a write has happened it NECESSARILY fails, because the
+# directory holds the leaf — so a signal between the write and the disarm left both
+# behind, and the caller cleans up nothing after a non-zero status. The phase flips
+# after both walks, which is where the name becomes trusted and is still before
+# either write, so the leaf-removing shape never runs on an unapproved path.
+_res_cl=""
+_res_cl="$(awk '/^rb_cleanup\(\) \{/,/^\}/' "$SCRIPT")" || _res_cl=""
+{ [ -n "$_res_cl" ] \
+  && case "$_res_cl" in *'[[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"'*) true ;; *) false ;; esac \
+  && case "$_res_cl" in *'rmdir "$RB_DIR"'*) true ;; *) false ;; esac; } \
+    && pass "…removing the leaf only in the phase where one can exist" \
+    || die "the cleanup trap does not remove the leaf after a write: '$_res_cl'"
+_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
+_res_w2=0; _res_w2="$(grep -n 'rb_refuse_pre$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
+_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
+{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
+    && pass "…and the phase flips after the walks and before any write" \
+    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
 _res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT HUP INT TERM$' "$SCRIPT")" || _res_dis=0
 [ "$_res_dis" = 2 ] \
     && pass "…and disarmed on both success paths" \
@@ -1261,6 +1280,45 @@ else
     die "the helper never created its directory; the interruption case proves nothing"
 fi
 rm -rf "$_int_dir" "$_int_bin"
+# …AND `pin` MODE TOO, which reaches no `git` at all. Its only external command
+# before the write is the ancestry walk's `find`, so that is what the signal lands
+# during — the pre-write phase, where the handler is `rmdir` alone.
+_pin_bin="$TMP/pinbin"; mkdir -p "$_pin_bin"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_pin_bin/find"
+chmod +x "$_pin_bin/find"
+_pin_dir="$TMP/pint.$$"
+rm -rf "$_pin_dir"
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    REVIEW_BUS_REMOTE="$REAL" PATH="$_pin_bin:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" pin "$_pin_dir" ) >/dev/null 2>&1 &
+_pin_pid=$!
+_pin_n=0
+while [ ! -d "$_pin_dir" ] && [ "$_pin_n" -lt 100 ]; do _pin_n=$(( _pin_n + 1 )); sleep 0.1; done
+if [ -d "$_pin_dir" ]; then
+    kill -TERM "$_pin_pid" 2>/dev/null
+    _pin_w=0
+    while kill -0 "$_pin_pid" 2>/dev/null && [ "$_pin_w" -lt 150 ]; do
+        _pin_w=$(( _pin_w + 1 )); sleep 0.1
+    done
+    _pin_rc=0
+    wait "$_pin_pid" 2>/dev/null || _pin_rc=$?
+    { [ "$_pin_rc" = 143 ] && [ ! -e "$_pin_dir" ]; } \
+        && pass "…and an interrupted pin gives its reservation back and dies of the signal too" \
+        || die "an interrupted pin exited $_pin_rc leaving '$(ls -A "$_pin_dir" 2>&1)'"
+else
+    kill -KILL "$_pin_pid" 2>/dev/null; wait "$_pin_pid" 2>/dev/null || true
+    die "the pin helper never created its directory; that interruption case proves nothing"
+fi
+rm -rf "$_pin_dir" "$_pin_bin"
+# WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
+# before the disarm is the phase where the handler must remove the leaf as well.
+# It is asserted structurally above and not run, because the interval cannot be
+# reached: bash defers a signal until the foreign command it is waiting on
+# returns, so a TERM sent during `git` is handled BEFORE the write, and the only
+# thing between the write and the disarm is a builtin. Racing a builtin is not a
+# case, it is a coin. The structural assertions cover which shape the handler
+# takes and where the phase flips; the runs above cover that the handler fires,
+# cleans up and re-raises, in both modes.
 
 # ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
 #
