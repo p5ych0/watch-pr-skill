@@ -1030,7 +1030,13 @@ iog_got="$(cat "$TMP/iog.value/origin" 2>/dev/null)"
 # `mkdir` does not follow on the last component, so a link aimed at somewhere the
 # operator owns is refused rather than written through.
 _ex_base="$TMP/excl"; mkdir -p "$_ex_base"
-for _ex_kind in dir file link; do
+# `emptydir` IS A KIND OF ITS OWN, and it is the one the others hide. `dir` puts a
+# `keepme` inside, so `rmdir` refuses it and the case passes for a reason that has
+# nothing to do with ownership — while an EMPTY pre-existing directory owned by
+# this account passes every test a directory this run created passes. Removing it
+# contradicts the status-1 contract that a pre-existing argument survives
+# untouched, and only this case can see that.
+for _ex_kind in dir emptydir file link; do
     _ex_path="$_ex_base/$_ex_kind"
     rm -rf "$_ex_path"
     # WITH CONTENTS, so their SURVIVAL can be asserted and not only the absence of
@@ -1039,6 +1045,7 @@ for _ex_kind in dir file link; do
     # deleted the whole argument, which is the opposite failure.
     case "$_ex_kind" in
         dir)  mkdir "$_ex_path"; printf 'DO NOT DELETE\n' > "$_ex_path/keepme" ;;
+        emptydir) mkdir "$_ex_path" ;;
         file) printf 'DO NOT DELETE\n' > "$_ex_path" ;;
         link) mkdir -p "$_ex_base/linktarget"
               printf 'DO NOT DELETE\n' > "$_ex_base/linktarget/keepme"
@@ -1062,6 +1069,9 @@ for _ex_kind in dir file link; do
         dir)  { [ -d "$_ex_path" ] && [ -s "$_ex_path/keepme" ]; } \
                   && pass "…and leaves the existing directory and its contents alone" \
                   || die "an existing directory or its contents were removed" ;;
+        emptydir) [ -d "$_ex_path" ] \
+                  && pass "…and leaves an existing EMPTY directory alone, which rmdir would have taken" \
+                  || die "an existing empty directory was removed" ;;
         file) { [ -f "$_ex_path" ] && [ -s "$_ex_path" ]; } \
                   && pass "…and leaves the existing file alone" \
                   || die "an existing file was removed or truncated" ;;

@@ -394,12 +394,37 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # before either write, so the leaf-removing shape is never the one running on an
 # unapproved path.
 RB_PHASE=pre
+# WHAT THIS RUN CREATED IS RECORDED IN TWO FACTS, because one is not enough and
+# neither is signal-safe alone.
+#
+# `RB_OWNED` IS THE CERTAIN ONE and it is set after a successful `mkdir` — but not
+# in time for every signal. Measured on bash 5: a `TERM` delivered while an
+# external `mkdir` runs is handled once that command RETURNS and BEFORE the `&&`
+# after it, so the handler sees the directory created and the flag still `no`.
+#
+# `RB_PREEXISTED` IS WHAT COVERS THAT WINDOW. It is a `[[ -e ]]` taken before the
+# traps are armed — a reserved word, no command, nothing to be interrupted between
+# — and it says whether anything stood at the name when this run began. If nothing
+# did, then a directory there afterwards is one this run made, whatever the flag
+# has had time to say.
+#
+# AND AN OWNED, EMPTY, PRE-EXISTING DIRECTORY IS THE CASE THAT MAKES BOTH
+# NECESSARY. `-O` alone cannot see it: the operator own empty directory at that
+# name passes every test a created one passes, and removing it contradicts the
+# status-1 contract that a pre-existing argument survives untouched. The `keepme`
+# file in the exclusion fixtures hid it, because `rmdir` refuses a non-empty
+# directory and the removal failed for the wrong reason.
+RB_OWNED=no
+RB_PREEXISTED=no
+[[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 rb_cleanup() {   # give back what this run created, for the phase it is in
-    # OWNED BY THIS ACCOUNT, OR IT IS NOT OURS TO REMOVE. The traps are armed
-    # before the `mkdir`, so this can run at a moment when the `mkdir` had already
-    # failed because the name was taken — and a directory there that belongs to
-    # somebody else is theirs. The name carries this process id and three
-    # `$RANDOM` draws, so one owned by THIS account is one this run created.
+    # THIS RUN'S, OR IT IS NOT OURS TO REMOVE. The traps are armed before the
+    # `mkdir`, so this can run at a moment when the `mkdir` had already failed
+    # because the name was taken. `-O` is kept as well as the two facts above: it
+    # is what refuses a name another ACCOUNT holds, which neither flag can see.
+    [[ $RB_OWNED = yes ]] \
+        || { [[ $RB_PREEXISTED = no ]] && [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]]; } \
+        || return 0
     [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
     [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
@@ -535,7 +560,7 @@ trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM
 
-/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null \
+/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
     || { _rb_walk "$_rb_dir" || exit 1
          # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the
          # case the lexical walk cannot answer: the link's own owner is fine and

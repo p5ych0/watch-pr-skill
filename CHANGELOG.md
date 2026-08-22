@@ -25,10 +25,14 @@
   up. The cleanup is one `EXIT` trap that runs once, on every path out — a
   refusal, a signal, or the end of the script — armed BEFORE the reservation is
   attempted, since `mkdir` is an external command and a signal while it ran left
-  the shell dead and the child creating the directory. `[[ -O … ]]` is what makes
-  arming first safe: the cleanup can then run when the `mkdir` had already failed
-  because the name was taken, and a directory there belonging to somebody else is
-  theirs. Every signal is IGNORED before the cleanup begins, so one arriving during
+  the shell dead and the child creating the directory. Two recorded facts and an
+  ownership test are what make arming first safe: `RB_OWNED` after a successful
+  `mkdir`, certain but late — a signal during that external command is handled
+  once it returns and before the `&&` after it — `RB_PREEXISTED`, a `[[ -e ]]`
+  taken before the traps are armed, and `-O` for a name another account holds. An
+  EMPTY pre-existing directory owned by the operator is the case that needs all
+  three: it passes every test a created one passes, and removing it would
+  contradict the contract that a pre-existing argument survives untouched. Every signal is IGNORED before the cleanup begins, so one arriving during
   it can neither re-enter it nor interrupt it. `RB_PHASE` picks its shape:
   `rmdir` alone while no leaf can exist, leaf-then-directory once a write has
   happened. The driver does the same for the one refusal that is its own: a
