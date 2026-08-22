@@ -81,7 +81,7 @@
 #          THE CLEANUP HAS TWO SHAPES ON THIS LIST, and which one runs is decided
 #          by whether a leaf can exist yet. BEFORE either write — the two ancestry
 #          walks and the unresolvable-path refusal — it is `rmdir` ALONE, through
-#          `rb_refuse_pre`: there is no leaf to remove, and removing one by NAME
+#          `rb_refuse`: there is no leaf to remove, and removing one by NAME
 #          would resolve a path the walk has just decided not to trust, which is a
 #          symlink an attacker can substitute while it runs. AFTER the writes it is
 #          `rb_refuse`, which removes the leaf and then the directory.
@@ -454,71 +454,54 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
 # said why — the ancestry walks name the component and the reason, and a second
 # line after them would say less.
-rb_refuse() {   # rb_refuse [message] ; clean up and stop, AFTER the leaf may exist
-    [[ -n ${1-} ]] && echo "$1" >&2
-    /usr/bin/env rm -f "$OUT"
-    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
-    exit 1
-}
-# AND A SECOND ONE FOR BEFORE THE LEAF CAN EXIST, WHICH IS NOT TIDINESS. The walks
-# run after the `mkdir` now and before either write, so on that path there is no
-# leaf — and `rm -f "$OUT"` there is a path RESOLUTION, not a removal of something
-# this script made. An account that can write a non-sticky ancestor — which is
-# exactly what the walk is in the middle of detecting — can rename the reserved
-# directory and put a symlink at `$RB_DIR` while the walk runs; `rm -f
-# "$RB_DIR/origin"` then follows it and deletes an `origin` or a `pin` in whatever
-# operator-accessible directory it points at. The refusal that fires ON that
-# detection must not be the one that reaches through the name it distrusts.
+# THE CLEANUP EXISTS ONCE AND RUNS ONCE, and both halves of that are the fix. It
+# used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up
+# and then `exit` fired the trap, which cleaned up again — and the second pass is
+# the dangerous one: on a shared sticky parent an account watching the published
+# path can recreate it as a symlink between the two, and the second `rm -f "$OUT"`
+# follows the replacement into a file this run never created.
 #
-# `rmdir` ALONE IS SAFE THERE: it removes only an empty directory and refuses a
-# symlink outright, so a substituted name is a failed `rmdir` rather than a
-# deletion somewhere else. What is given back is the reservation and nothing more.
-rb_refuse_pre() {   # rb_refuse_pre [message] ; give the reservation back, no leaf
-    [[ -n ${1-} ]] && echo "$1" >&2
-    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
-    exit 1
-}
-# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
-# caller performs no cleanup after a non-zero status, deliberately — it cannot know
-# who created the path — so an interrupted run used to leak its `watch-pr.*`
-# directory for the life of the machine. The caller-owned protocol cleaned up after
-# any non-zero helper status; the obligation moved here with the creation, and a
-# signal is a way out that no `rb_refuse` sees.
+# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap is what gives the
+# reservation back, on every path out — a refusal, a signal, or a fall off the end
+# — and there is nothing left to do twice.
 #
-# `rmdir` AGAIN, so the trap can only give back an EMPTY reservation: after a
-# successful write the directory holds the leaf and `rmdir` refuses it, which is
-# the correct answer for a signal arriving between the write and the exit — the
-# caller may still read what was written. The trap is disarmed on the success path
-# anyway, so that case is stated rather than relied on.
+# THE PHASE IS WHAT PICKS THE SHAPE, and it replaces the two refusal functions
+# exactly: `rmdir` alone while no leaf can exist, and leaf-then-directory once a
+# write has happened. `rmdir` refuses a symlink outright, which is what makes the
+# pre-write shape safe on a name the ancestry walks have not approved yet; and
+# `rmdir` NECESSARILY fails on a directory holding its leaf, which is why the
+# post-write shape has to remove the leaf first.
 #
-# AND THE SIGNAL HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal
-# REPLACES its default terminating action: handled and returned from, bash resumes
-# the interrupted work — a `TERM` arriving while `git` runs left this process
-# waiting for that child to finish, and one arriving between a successful write and
-# the disarm let it return status 0, reporting success for a run somebody killed.
-# Each handler therefore cleans up, removes its own trap, and kills this process
-# with the same signal, so the caller sees the true cause and the true status.
-#
-# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
-# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
-# the same statement: without that the re-raise runs the EXIT handler as well,
-# which is a second `rmdir` on a path already given back.
-# AND THE HANDLER HAS THE SAME TWO PHASES THE REFUSALS DO, for the same reason and
-# with the same boundary. `rmdir` alone is right while no leaf can exist — it
-# refuses a symlink outright, which is what makes it safe before the walks have
-# approved the name. Once a write has happened `rmdir` NECESSARILY fails, because
-# the directory holds the leaf: a signal landing between the write and the disarm
-# left both behind, and the caller performs no cleanup after a non-zero status.
-#
-# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, which is after both walks. That
-# is also before either write, so the leaf-removing shape is never the one running
-# on a path the walks have not approved — the ordering that made the P1 two rounds
-# ago possible cannot recur.
+# THE PHASE FLIPS WHERE THE NAME BECOMES TRUSTED, after both walks — which is also
+# before either write, so the leaf-removing shape is never the one running on an
+# unapproved path.
 RB_PHASE=pre
 rb_cleanup() {   # give back what this run created, for the phase it is in
     [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
 }
+rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans up
+    [[ -n ${1-} ]] && echo "$1" >&2
+    exit 1
+}
+# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
+# caller performs no cleanup after a non-zero status, deliberately — it cannot know
+# who created the path — so an interrupted run used to leak its `watch-pr.*`
+# directory for the life of the machine. The obligation moved here with the
+# creation, and a signal is a way out no refusal sees.
+#
+# THE HANDLERS RE-RAISE, WHICH IS NOT DECORATION. A trap on a signal REPLACES its
+# default terminating action: handled and returned from, bash resumes the
+# interrupted work — a `TERM` arriving while `git` runs left this process waiting
+# for that child, and one arriving between a successful write and the disarm let it
+# return status 0, reporting success for a run somebody killed. Each handler cleans
+# up, removes its own trap, and kills this process with the same signal, so the
+# caller sees the true cause and the true status.
+#
+# `kill` AND `$$` ARE THE SHELL'S OWN, and this process is privileged, so neither
+# is a name anything can stand in for. `EXIT` is removed with the signal's trap in
+# the same statement: without that the re-raise runs the EXIT handler as well,
+# which is the second pass this whole block exists to prevent.
 rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
     rb_cleanup
     trap - EXIT "$1"
@@ -531,7 +514,7 @@ trap 'rb_on_signal TERM' TERM
 # THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
 # examines the link rather than what it points at, so this pass asks who owns each
 # link on the way — an account that owns one can repoint it.
-_rb_walk "$_rb_dir" || rb_refuse_pre
+_rb_walk "$_rb_dir" || rb_refuse
 # …AND THE PATH AS IT RESOLVES, which is where the FILE lives. A lexical walk
 # never sees the real ancestry: `TMPDIR=/home/me/t` pointing at `/srv/other/mine`
 # checks `/home/me` and never `/srv/other`, and the account that owns that one can
@@ -543,8 +526,8 @@ _rb_walk "$_rb_dir" || rb_refuse_pre
 # function can stand in front of either. In the driving shell they would be names.
 _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
-    || rb_refuse_pre "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
-[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse_pre
+    || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
+[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
 # THE NAME IS TRUSTED FROM HERE, and that is what the phase says. Every write is
 # below this line and every walk above it, so a signal arriving from now on gets
 # the shape that removes the leaf as well — and never gets it while the ancestry
@@ -563,12 +546,13 @@ if [[ $MODE = pin ]]; then
     # file and success. The caller could not tell them apart, so this one says.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink"
-    # DISARMED ON THE WAY OUT. The trap could only remove an EMPTY directory and
-    # this one holds the pin, so leaving it armed would be harmless — but saying so
-    # in a comment and stating it in code are different, and a later edit that
-    # changes what the trap removes should not silently change what a successful
-    # run does.
-    trap - EXIT HUP INT TERM
+    # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
+    # EXIT handler would remove the leaf this run just wrote, so it has to go. The
+    # SIGNAL handlers stay armed through the final command: resetting them too left
+    # a window in which a `TERM` terminated the helper by default, with no cleanup
+    # — and the caller, seeing a non-zero status, removes nothing, so a completed
+    # directory leaked.
+    trap - EXIT
     exit 0
 fi
 
@@ -714,7 +698,9 @@ if [[ $_rb_origin != "${_rb_origin%%'
 fi
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink"
-trap - EXIT HUP INT TERM
+# ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
+# stay armed through the final command.
+trap - EXIT
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────

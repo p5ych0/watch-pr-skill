@@ -22,11 +22,11 @@
 - **A refusal after the directory existed left it behind.** The helper's contract
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean
-  up. Those go through `rb_refuse`, which removes the file and the directory
-  before it stops; the refusals that happen BEFORE either write use
-  `rb_refuse_pre`, which is `rmdir` alone, for the reason the entry below gives.
-  The driver does the same for the one refusal that is its own: a transport file
-  that fails the ownership checks.
+  up. The cleanup is one `EXIT` trap that runs once, on every path out — a
+  refusal, a signal, or the end of the script — and `RB_PHASE` picks its shape:
+  `rmdir` alone while no leaf can exist, leaf-then-directory once a write has
+  happened. The driver does the same for the one refusal that is its own: a
+  transport file that fails the ownership checks.
 
 - **An abandoned assignment left the previous run's transport path standing.**
   `${VAR:?}` ends a non-interactive shell where it stands; interactively the shell
@@ -57,7 +57,10 @@
   the ancestry walks — where the name becomes trusted, and still before either
   write. The handlers re-raise rather than returning, because a trap REPLACES a
   signal's terminating action and one that returned left bash resuming the work it
-  was killed during, and returning status 0 for a run somebody killed.
+  was killed during, and returning status 0 for a run somebody killed. The success
+  paths reset `EXIT` alone: resetting the signal traps too left a window in which a
+  `TERM` terminated the helper with no cleanup, and the caller removes nothing
+  after a non-zero status.
 
 - **Another account could keep a session from starting, repeatably — narrowed,
   and the remainder written down.** The

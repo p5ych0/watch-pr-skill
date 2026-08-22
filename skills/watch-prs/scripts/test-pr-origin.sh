@@ -1155,29 +1155,23 @@ _res_w1=0; _res_w1="$(grep -n '^_rb_walk "\$_rb_dir"' "$SCRIPT" | head -1 | cut 
     && pass "the transport directory is reserved before the ancestry walks run" \
     || die "the mkdir does not precede the walks (mkdir=$_res_mk walk=$_res_w1); the name is observable while they run"
 # …AND THE WALKS STILL REFUSE AFTER IT, which is what makes reserving first safe
-# rather than merely earlier. Both walk refusals give the reservation back — and
-# through `rb_refuse_pre`, NOT `rb_refuse`: on that path no leaf has been written,
-# so `rm -f "$OUT"` would be a path RESOLUTION rather than a removal of anything
-# this script made, and the account the walk is in the middle of detecting can put
-# a symlink at the reserved name while it runs.
-_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse_pre$' "$SCRIPT")" || _res_g=0
+# rather than merely earlier.
+_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCRIPT")" || _res_g=0
 [ "$_res_g" = 2 ] \
-    && pass "…and both walk refusals give the reservation back through rb_refuse_pre" \
-    || die "expected both walks to refuse through rb_refuse_pre, found $_res_g"
-# …AND THAT ONE REMOVES NO LEAF. `rmdir` refuses a symlink outright and refuses a
-# non-empty directory, so a substituted name is a failed `rmdir` rather than a
-# deletion somewhere else.
-_res_pre=""
-_res_pre="$(awk "/^rb_refuse_pre\\(\\) \{/,/^\}/" "$SCRIPT")" || _res_pre=""
-{ [ -n "$_res_pre" ] \
-  && case "$_res_pre" in *'rmdir "$RB_DIR"'*) true ;; *) false ;; esac \
-  && case "$_res_pre" in *'rm -f'*) false ;; *) true ;; esac; } \
-    && pass "…and the pre-write refusal removes no leaf, so it never resolves the name it distrusts" \
-    || die "rb_refuse_pre reaches through the transport name: '$_res_pre'"
-# …AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
-# caller performs no cleanup after a non-zero status — deliberately, since it
-# cannot know who created the path — so an interrupted helper leaked its directory
-# for the life of the machine.
+    && pass "…and both walk refusals stop through rb_refuse" \
+    || die "expected both walks to refuse through rb_refuse, found $_res_g"
+# …AND NO REFUSAL CLEANS UP ITSELF, which is what makes the cleanup run ONCE. It
+# used to live in the refusals AND in the EXIT trap, so a refusal cleaned up and
+# then `exit` fired the trap and cleaned again — and the second pass is the
+# dangerous one: an account watching the published path can recreate it as a
+# symlink between the two, and a second `rm -f "$OUT"` follows the replacement.
+_res_ref=""
+_res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
+{ [ -n "$_res_ref" ] \
+  && case "$_res_ref" in *'rm -f'*|*rmdir*|*rb_cleanup*) false ;; *) true ;; esac \
+  && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
+    && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
+    || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
 _res_tr=0; _res_tr="$(grep -n "^trap 'rb_cleanup' EXIT$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
     && pass "…and a cleanup trap is armed after the reservation is taken" \
@@ -1201,10 +1195,19 @@ _res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1
 { [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
     && pass "…and the phase flips after the walks and before any write" \
     || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
-_res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT HUP INT TERM$' "$SCRIPT")" || _res_dis=0
+# …AND THE SUCCESS PATHS RESET `EXIT` ONLY. The EXIT handler would remove the leaf
+# the run just wrote, so it has to go; the SIGNAL handlers must stay armed through
+# the final command, because resetting them too left a window in which a `TERM`
+# terminated the helper by default with no cleanup — and the caller, seeing a
+# non-zero status, removes nothing, so a completed directory leaked.
+_res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT$' "$SCRIPT")" || _res_dis=0
 [ "$_res_dis" = 2 ] \
-    && pass "…and disarmed on both success paths" \
-    || die "expected the trap disarmed on both success paths, found $_res_dis"
+    && pass "…and both success paths reset EXIT" \
+    || die "expected EXIT reset on both success paths, found $_res_dis"
+_res_bad=0; _res_bad="$(grep -c 'trap - EXIT HUP INT TERM' "$SCRIPT")" || _res_bad=0
+[ "$_res_bad" = 0 ] \
+    && pass "…and neither disarms the signal handlers before the final command" \
+    || die "a success path resets the signal traps early, leaving a window with no cleanup"
 # …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
 # `mkdir` ahead of the walks narrows the interval between exec and reservation; it
 # does not remove it, because the candidate is an argv entry published at exec. A
