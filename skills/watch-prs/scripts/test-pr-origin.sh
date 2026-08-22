@@ -1115,7 +1115,16 @@ _wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively a
 #
 # RUN IN A SUBSHELL WITH ITS OWN `die`, so exercising the failure does not record
 # one: the point is what `run` DOES next, not that the allocation failed.
+#
+# AND THE INVOCATION IS RECORDED UNDER `$TMP`, not asked of the filesystem root.
+# `[ ! -e /dir ]` was the first shape and it made the case HOST-DEPENDENT: a
+# machine with a legitimate `/dir` failed it against code that returned before
+# invoking anything. `run` reaches the helper through `env`, which is a name, so a
+# function by that name logs what it was asked to run and refuses — and the
+# assertion is that this case's own log was never written.
+rm -f "$TMP/alloccalls"
 _alloc_out="$( { mktemp() { return 1; }
+                 env() { printf '%s\n' "$*" >> "$TMP/alloccalls"; return 1; }
                  die() { printf 'DIED[%s]\n' "$1" >&2; }   # stderr, or it lands IN the value
                  _r=0
                  _v="$(run read)" || _r=$?
@@ -1129,9 +1138,9 @@ case "$_alloc_out" in
     *'RC=1 VALUE=[]'*) pass "…and the call is abandoned rather than continuing with an empty parent" ;;
     *)                 die "run continued past a failed allocation: '$_alloc_out'" ;;
 esac
-[ ! -e /dir ] \
-    && pass "…so nothing is aimed at the filesystem root" \
-    || die "a failed allocation left /dir behind"
+[ ! -e "$TMP/alloccalls" ] \
+    && pass "…so the helper is never invoked, and nothing is aimed at /dir" \
+    || die "a failed allocation still reached the helper: '$(cat "$TMP/alloccalls")'"
 
 # ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
 #

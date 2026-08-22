@@ -48,11 +48,17 @@
 # captured now: the usage above is the whole invocation, and a maintainer reading
 # the old paragraph would have reintroduced the failure it described.
 #
-#   0  the value is in the file named by the second argument
-#   1  refused — the reason is on STDERR, and the file is NOT created. The value
-#      is written by the single redirection that creates it, so a refusal before
-#      that point leaves the path ABSENT rather than empty; a caller that opens it
-#      sees the open fail, which is what `SKILL.md` branches on.
+#   0  the second argument is a DIRECTORY this script created, and the value is in
+#      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
+#      itself is the directory, never the file — a caller that opens it directly
+#      opens a directory.
+#   1  refused — the reason is on STDERR, and the value file is NOT created. It is
+#      written by the single redirection that creates it, so a refusal before that
+#      point leaves the leaf ABSENT rather than empty; a caller that opens it sees
+#      the open fail, which is what `SKILL.md` branches on. A refusal AFTER the
+#      directory exists takes the directory with it, through `rb_refuse` — so on
+#      status 1 there is nothing at the argument either, and nothing for the
+#      caller to clean up.
 #
 # NOTHING IS EVER WRITTEN TO STDOUT. The value goes to the file and the reasons go
 # to stderr, so a caller reads one and never sees the other — which is what lets
