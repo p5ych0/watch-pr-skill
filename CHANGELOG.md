@@ -26,6 +26,15 @@
   before it stops. The driver does the same for the one refusal that is its own:
   a transport file that fails the ownership checks.
 
+- **A nameref between a pin name and the transport parent replaced the parent.**
+  The pin's probe compared only against the names that stage introduces, so
+  `declare -n RB_PIN_SEEN=RB_TMPPARENT` passed both subshells — neither read that
+  name — and the real pin read then assigned the inherited origin THROUGH the
+  nameref, replacing the parent setup had just proved. For a local origin such as
+  `/tmp/repo` the session's working directory was created inside that repository.
+  Both subshells cross-check `RB_TMPPARENT` now, as the transport probe already
+  did.
+
 - **A shadowed `exit` could build the transport at the filesystem root.** With
   neither `TMPDIR` nor `HOME` usable the refusal was a GUARD, and `exit` is a name
   a startup file can replace with one that RETURNS: measured, the refusal printed

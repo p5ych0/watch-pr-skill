@@ -881,9 +881,11 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 # herestring, which is a redirection rather than a pipeline and has no second
 # process to kill.
 for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
-          '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] ) 2>/dev/null \\' \
+          '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] ) 2>/dev/null \\' \
           '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
-          '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] ) 2>/dev/null; then'; do
+          '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] ) 2>/dev/null; then'; do
     grep -q "^$_v\$" <<<"$_pin_body" \
         || die "the pin probe is missing a line: $_v"
 done
@@ -1254,6 +1256,43 @@ if [ -n "$_forge_dir" ]; then
         && pass "…and removes neither the directory nor the file, having created neither" \
         || die "a refused pin deleted what the helper left behind (left='$_pxl_left')"
     rm -rf "$RB_TMPBASE"/watch-pr-pin.*
+fi
+# …AND A NAMEREF BETWEEN A PIN NAME AND THE TRANSPORT PARENT IS REFUSED, IN BOTH
+# DIRECTIONS. The probe compared only against the names this stage introduces, so
+# `declare -n RB_PIN_SEEN=RB_TMPPARENT` passed both subshells — neither read that
+# name — and the real pin read then assigned the inherited origin THROUGH the
+# nameref, replacing the parent this setup had just proved. For a local origin such
+# as `/tmp/repo` the session's working directory is created inside that repository.
+#
+# `declare -n` IS BASH 4.3+, so this shell is asked rather than assumed, and the
+# skip announces itself: a case that quietly does not run is the coverage this file
+# exists to stop claiming.
+if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+    for _nr in 'declare -n RB_PIN_SEEN=RB_TMPPARENT' \
+               'declare -n RB_PIN_DIR=RB_TMPPARENT'; do
+        _nr_rc=0
+        _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
+                RB_REMOTE="git@github.com:acme/widget.git"
+                RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+                '"$_nr"'
+                '"$_pin_block"'
+                printf "PARENT=[%s]\n" "${RB_TMPPARENT:-}"
+            ' 2>&1)" || _nr_rc=$?
+        { [ "$_nr_rc" -ne 0 ] \
+          && case "$_nr_out" in *OWNER=*) false ;; *) true ;; esac \
+          && case "$_nr_out" in *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+            && pass "…and a nameref onto the transport parent is refused by name ($_nr)" \
+            || die "a nameref onto RB_TMPPARENT was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
+        # AND THE PARENT IS UNCHANGED, which is the damage the status cannot see:
+        # a probe that merely refused later would still have let the read write the
+        # origin through the alias first.
+        case "$_nr_out" in
+            *'acme/widget.git]'*) die "the origin was written through the nameref into the parent ($_nr): '$_nr_out'" ;;
+            *)                    pass "…leaving the proven parent unchanged ($_nr)" ;;
+        esac
+    done
+else
+    echo "ok   - (declare -n is unavailable on this bash, or no scratch tree; the pin nameref cases did not run)"
 fi
 # ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
 #

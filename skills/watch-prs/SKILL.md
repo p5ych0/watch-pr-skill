@@ -845,10 +845,20 @@ if [[ -z $RB_REMOTE ]]; then
     # message and none of the diagnosis below — while a `declare -n` aimed at
     # another transport variable mutates its target before anything has validated
     # it. The transport read above settled this the same way.
+    # AND `RB_TMPPARENT` IS CROSS-CHECKED HERE TOO, which the first version of this
+    # probe left out. It compares only against the names this STAGE introduces, and
+    # `declare -n RB_PIN_SEEN=RB_TMPPARENT` therefore passes both subshells —
+    # neither reads that name — after which the real pin read assigns the inherited
+    # origin through the nameref and REPLACES the parent this setup proved. For a
+    # local origin such as `/tmp/repo` the session's working directory is then
+    # created inside that repository. The transport probe above already compares
+    # against every name it can reach; this one now does the same.
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
-         && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
+         && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
-         && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] ) 2>/dev/null; then
+         && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
