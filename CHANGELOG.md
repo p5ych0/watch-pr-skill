@@ -55,11 +55,15 @@
   pins from its own file and never touches the one that name pointed at, which is
   stronger than the refusal it replaces.
 
-  Wrapping the region in an `if` was tried and taken back, and the reason is worth
-  having: inside a compound command a failed readonly assignment ends the shell
-  **before** the guard that would have named it, so `RB_ORIGIN_OUT` and
-  `RB_REMOTE` lost their own diagnostics to gain this one. The expansion costs
-  nothing and moves nothing.
+  The expansion and the containment do different jobs, and both are here. The
+  `RB_TMPDIR` arm stops a walked-past refusal entering the region with a *stale*
+  directory; the requirement stops one entering it with an *empty* one, from a
+  refusal inside that same arm. What was tried and taken back is a third thing:
+  moving the region into the `RB_TMPPARENT` arm, three levels in. Inside a
+  compound command a failed readonly assignment ends the shell **before** the test
+  that would have named it, so `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own
+  diagnostics to gain this one — which is why `RB_REMOTE`'s clear sits above the
+  arm and `RB_ORIGIN_OUT` no longer exists at all.
 
   One thing about that message is load-bearing: it carries **no apostrophe**. Bash
   parses the `:?` word specially, so a `'` inside it opens a quote even within
