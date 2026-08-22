@@ -46,6 +46,14 @@
   cannot be hardened, and an unsafe ancestry is a state an operator has to see
   named.
 
+- **`SKILL.md` still carried the removed loop as an instruction.** A hundred and
+  thirty lines of commentary above the transport described what the driver used to
+  do: both transport files in one directory this setup created, a `mkdir` here
+  whose refusal moved to the next candidate, `HOME` tried whenever the helper
+  refused, and probes over `RB_TMPDIR`, `RB_TRY` and `RB_ORIGIN_OUT`. A comment
+  that argues against the code beside it is an instruction, and this one invited
+  the deleted loop back. It is rewritten to describe what is there.
+
 - **The transport parent is chosen inside the probe that proves it assignable.**
   A readonly `RB_TMPPARENT` makes the selection fail, and under `errexit` — which
   a driving shell may well be in — a failed readonly assignment ends the session

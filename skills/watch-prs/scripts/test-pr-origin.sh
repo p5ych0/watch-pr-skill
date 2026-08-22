@@ -65,13 +65,15 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # since `mkdir` refuses an existing name whatever it holds — and names the file
     # inside it itself. The caller reads `<dir>/origin` or `<dir>/pin`.
     #
-    # REMOVED, NOT REUSED. A path this fixture has already handed to one case is
-    # one `mkdir` refuses for the next, which is the contract working; the counter
-    # keeps every case on a name of its own.
-    _rb_run_n=$(( ${_rb_run_n:-0} + 1 ))
-    local vd="$TMP/value.$_rb_run_n" vf diag
+    # A FRESH NAME PER CALL, BUILT RATHER THAN COUNTED. A path this fixture has
+    # already handed to one case is one `mkdir` refuses for the next, which is the
+    # contract working — so every call needs a name of its own. A counter cannot
+    # give one: `run` is always called inside a command substitution, so the
+    # increment happens in a subshell and never reaches the next call. `$$` and
+    # `$RANDOM` are read in that same subshell and differ per call, which is what
+    # a counter was reaching for.
+    local vd="$TMP/value.$$.$RANDOM$RANDOM" vf diag
     case "$mode" in read) vf="$vd/origin" ;; *) vf="$vd/pin" ;; esac
-    rm -rf "$vd"
     # A CONTROLLED `HOME`, so these cases do not read the contributor's git
     # config. The helper carries `HOME` through on purpose — global
     # `url.<base>.insteadOf` rules are part of what `git remote get-url` answers —
@@ -1042,6 +1044,50 @@ esac
 #
 # The guards stay. `pr-selfcheck.sh` will not miss their removal, but a reader
 # will, so this says what they are and why nothing below reaches them.
+
+# ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
+#
+# Since #157 this script creates the transport directory, so every refusal PAST
+# that `mkdir` — the git read, an empty origin, a newline in it, a failed write —
+# owns something nothing else will collect. `rb_refuse` is what removes it, and
+# nothing observed the directory after such a failure: the cases above assert
+# status and output, and each `run` now takes a fresh name, so removing the
+# `rmdir` from `rb_refuse` left every one of them green while each refused read
+# leaked a `watch-pr.*` directory into the operator's `TMPDIR` for the life of the
+# machine.
+#
+# SELF-CONTAINED, AND NOT THROUGH `run`. The assertion is about the DIRECTORY, and
+# `run` builds its name inside a command substitution where this shell cannot see
+# it. The failure is staged by running the helper from a directory that is not a
+# git checkout, so `git remote get-url origin` fails on its own — a forged `git`
+# would not do it, because `bash -p` is what stops an imported function being seen
+# at all, which is the property half this file exists to prove.
+_leak_dir="$TMP/leak.$$.$RANDOM$RANDOM"
+mkdir -p "$TMP/notarepo"
+_leak_rc=0
+_leak_out="$(cd "$TMP/notarepo" && run_limited 20 env HOME="$TMP/nohome" \
+    XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" read "$_leak_dir" 2>&1)" || _leak_rc=$?
+# THE REFUSAL FIRST, or the absence below means the directory was never made and
+# the case passes against a script that cannot create one at all.
+{ [ "$_leak_rc" -ne 0 ] && printf '%s' "$_leak_out" | grep -qF 'could not read origin'; } \
+    && pass "a read outside a checkout is refused after the directory exists" \
+    || die "the post-mkdir refusal case did not refuse (rc=$_leak_rc out='$_leak_out')"
+[ ! -e "$_leak_dir" ] \
+    && pass "…and the directory it created is gone, not left for nobody to collect" \
+    || die "a refusal after the mkdir leaked '$_leak_dir' ($(ls -A "$_leak_dir" 2>&1))"
+# AND THE ORDINARY READ STILL LEAVES THE DIRECTORY FOR ITS CALLER, which is the
+# other half: a script that removed the directory on every path would satisfy the
+# line above and hand back nothing to read.
+_keep_dir="$TMP/keep.$$.$RANDOM$RANDOM"
+_keep_rc=0
+_keep_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" \
+    XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" read "$_keep_dir" 2>&1)" || _keep_rc=$?
+{ [ "$_keep_rc" -eq 0 ] && [ -s "$_keep_dir/origin" ]; } \
+    && pass "…while a successful read leaves the directory and its file for the caller" \
+    || die "a successful read left nothing to read (rc=$_keep_rc out='$_keep_out')"
+rm -rf "$_keep_dir" "$TMP/notarepo"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

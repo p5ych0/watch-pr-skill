@@ -438,37 +438,31 @@ unset -f rb_identity 2>/dev/null \
 # successfully, with a plausible value. `"$RB_SCRIPTS"/pr-origin.sh` is a PATH, so
 # no function can stand in front of it, and `bash -p` means no startup hook is
 # sourced and no inherited function is imported in the first place. #84.
-# THE PATH IS BUILT, NOT CAPTURED. `RB_ORIGIN_OUT="$(mktemp …)"` is a command
-# substitution, and a driving shell tracing to fd 1 writes the trace of `mktemp`
-# into it — so the variable holds trace text and a path, and the helper cannot
-# open it. An expansion runs no command, so there is nothing to trace: `$$` is the
-# shell's own pid and `${TMPDIR:-/tmp}` its own variable.
+# THE TRANSPORT IS A DIRECTORY, AND THE HELPER IS WHAT CREATES IT. `watch-pr-origin.$$`
+# was a FILE this setup named and the helper truncated, and that name is
+# predictable from another account on the machine: pre-created as a world-writable
+# file or as a symlink, the helper wrote through it and the value read back — the
+# one every later signoff, revocation and review request is addressed by — was
+# whatever that account left there. A directory created with `mkdir` answers it,
+# because `mkdir` FAILS if the name exists: a directory, a file and a symlink
+# alike. That exclusion is the helper's since #157, along with the ancestry walk
+# and the write, so all three run privileged, where `mkdir` is not a name an
+# operator's startup file can replace.
 #
-# BOTH TRANSPORT FILES LIVE IN A DIRECTORY THIS SETUP CREATES, and that replaces
-# the trade an earlier round wrote down and accepted. `watch-pr-origin.$$` is
-# predictable from another account on the machine, so it could be pre-created as a
-# world-writable file or as a symlink; the helper would then truncate and write
-# through it, and the value read back at the line below — the one every later
-# signoff, revocation and review request is addressed by — would be whatever that
-# account left there. Calling it a public URL answered disclosure and left the
-# substitution and the follow-the-symlink write untouched.
+# TWO DIRECTORIES, NOT ONE, AND EACH GONE AS SOON AS ITS VALUE IS READ. The origin
+# read and the pin probe are separate calls at separate times, and the second is
+# behind the first's success; sharing one directory would mean keeping it open
+# across the whole of setup for no gain. `-m 700` is applied by `mkdir` itself, so
+# there is no interval between creation and use in which anything can be placed
+# inside.
 #
-# `mkdir` IS THE EXCLUSION, and `$RANDOM` only keeps it from being a nuisance.
-# `mkdir` fails if the name exists, so an account that guesses right gets nothing
-# — the candidate is passed over and the next one is tried, which is the
-# fail-closed half and the half that matters. It does not end the session: a
-# guessed name is a reason to use a different directory, not to stop. Three `$RANDOM` draws make guessing right unlikely enough
-# that nobody can hold the session open by squatting the name. `-m 700` is applied
-# by `mkdir` itself, so nothing can be placed in the directory between its creation
-# and its use, and both files below inherit that protection rather than each
-# needing its own.
-#
-# STILL AN EXPANSION, NOT A SUBSTITUTION. `$(mktemp -d)` would name the directory
-# in one line, and a driving shell tracing to fd 1 would put the trace of `mktemp`
-# inside the value. `$RANDOM` and `$$` are the shell's own, so there is nothing to
-# trace. `mkdir` runs through `/usr/bin/env` for the reason every other command in
-# this block does: a function called `mkdir` would otherwise answer, report
-# success, and leave the transport in a directory of its choosing.
+# THE PATH IS BUILT, NOT CAPTURED. `$(mktemp -d)` would name the directory in one
+# line, and a driving shell tracing to fd 1 would put the trace of `mktemp` inside
+# the value — so the variable holds trace text and a path, and the helper cannot
+# open it. `$$` and `$RANDOM` are the shell's own, so nothing runs and there is
+# nothing to trace. Three `$RANDOM` draws make the name unguessable enough that
+# nobody can hold the session open by squatting it; the exclusion, not the
+# randomness, is what makes a guess harmless.
 #
 # THE PARENT HAS TO BE ONE NOBODY ELSE CAN REPLACE THE DIRECTORY IN, and mode 700
 # does not give that. It protects what is INSIDE the directory; it says nothing
@@ -476,101 +470,67 @@ unset -f rb_identity 2>/dev/null \
 # and search and that lacks the sticky bit, that account can watch for the name,
 # RENAME the directory without ever entering it, and put a writable one of its own
 # at the same path — after which the helper writes `origin` into the replacement
-# and the value read back is the attacker's. The random suffix stops the name
-# being pre-created and does nothing about it being observed and then replaced.
+# and the value read back is theirs. The random suffix stops the name being
+# pre-created and does nothing about it being observed and then replaced.
 #
-# WHO MAY RENAME THE DIRECTORY IS THE QUESTION, and the helper is what answers it.
-# Checking a path and then opening it are two operations on a name, and whoever
-# controls the directory controls what the name means in between — so a parent
-# another account can rename entries in is unusable however the file itself checks
-# out, because that account can leave the helper's own output in place for the
-# checks and swap the pathname before the read.
+# WHO MAY RENAME THE DIRECTORY IS THE QUESTION, AND THE HELPER ANSWERS IT. Checking
+# a path and then opening it are two operations on a name, and whoever controls the
+# directory controls what the name means in between. That rule lives in
+# `pr-origin.sh`, which walks the whole ancestry as written and as it resolves —
+# ownership, group- and world-writability without the sticky bit, and the `+`/`@`
+# marks that show an ACL the mode bits do not. It is NOT the same as "owned by this
+# user": root-owned and sticky — `/tmp` — is safe, and an attacker-owned sticky
+# directory is not, because sticky says nothing about its OWNER renaming ours.
 #
-# WHICH IS NOT THE SAME AS "OWNED BY THIS USER". Root-owned and sticky — `/tmp` —
-# is safe: sticky means nobody may rename another account's entries, and the
-# entries above it belong to root, who can replace this script anyway. What is
-# NOT safe is an attacker-owned sticky directory, because sticky says nothing
-# about its OWNER renaming ours. Ownership and mode together decide that, and the
-# rule lives in `pr-origin.sh` where the whole ancestry is walked; the loop below
-# offers candidates and lets it answer.
+# WHAT IS DECIDED HERE IS ONLY WHETHER A PARENT CAN BE TRIED AT ALL. Absolute,
+# because a relative path cannot be walked to the root and the helper refuses one —
+# and a relative but perfectly usable `TMPDIR` such as `.tmp` selected here and
+# refused there ended a session that had a working fallback next to it. A
+# directory, because a name that is not one cannot hold a transport. Writable and
+# searchable, because "can hold a directory" is what the fallback to `HOME` is FOR
+# and `-d` does not answer it: `/usr` satisfies `-d`, was committed to, and the
+# helper's `mkdir` then failed. None of the four is a SAFETY rule; the safety rules
+# are the helper's, in one place, and this stopped deciding them after an owned
+# mode-0777 `TMPDIR` passed an `-O` test here and was rejected there.
 #
-# `$TMPDIR` FIRST, `$HOME` SECOND. Where `TMPDIR` is per-user this changes
-# nothing; where it is the shared `/tmp` the helper accepts it, because root owns
-# it and it is sticky. `HOME` is the fallback for the cases the helper refuses —
-# an attacker-owned `TMPDIR`, one made world-writable without the sticky bit, a
-# relative one, or a component of its ancestry that fails the same tests. What
-# neither covers is a home directory the operator has made writable by others,
-# which is stated here as the limit rather than left to be inferred.
-# ABSOLUTE, AND TESTED HERE RATHER THAN DISCOVERED LATER. The helper walks every
-# component of the output path to the root, which a relative path cannot be walked
-# to — so it refuses one. Without this test a relative but perfectly usable
-# `TMPDIR` such as `.tmp` was SELECTED here and refused there, and the session
-# aborted over a configuration that has a working fallback sitting next to it.
-# Requiring it in the candidate makes a relative `TMPDIR` fall through to `HOME`,
-# and a relative `HOME` refuse in these words rather than in the helper's.
-# CANDIDATES ARE OFFERED; THE HELPER DECIDES. The driver used to pick a parent
-# with its own tests and hand the result over — and the helper then walked the
-# whole path and refused for reasons the driver had never asked about. An owned
-# mode-0777 `TMPDIR` passed `-O` here and was rejected there, so a session with a
-# perfectly good `HOME` sitting behind it aborted. That is the same
-# selector-versus-helper mismatch the relative-path case had, and the fix that
-# does not reproduce it a third time is to stop deciding here: the safety rule
-# lives in ONE place, and this loop finds out by asking.
+# SO AN ANCESTRY REFUSAL IS REPORTED, NOT ROUTED AROUND. The two-candidate loop
+# this replaced tried `HOME` whenever the helper refused, which meant it also
+# retried after a bad ORIGIN — where `HOME` is just as bad — and it could only
+# work by re-asking the safety question here. A `TMPDIR` whose ancestry is unsafe
+# is a state an operator has to SEE named, and the helper names which component and
+# why.
 #
-# `-d` AND ABSOLUTE ARE STILL TESTED, because they are about whether a candidate
-# can be TRIED at all: a relative path cannot be walked to the root, and a name
-# that is not a directory cannot hold a transport. Neither is a safety rule.
-# THIS NAME IS PROVED ASSIGNABLE BEFORE ANYTHING USES IT, and it is the one the
-# read downstream depends on. A readonly or value-transforming `RB_TMPDIR` in the
-# long-lived driving shell survives the clear below AND the loop's assignment, so
-# the loop breaks on a STALE value — and `${RB_TMPDIR:?}` further down only proves
-# a value is non-empty, not that this run established it. A stale
-# `/somewhere/owned` then passes every check: its `origin` is read as this
-# session's remote and the cleanup deletes it.
+# THE NAMES THAT ARE LEFT ARE PROVED ASSIGNABLE BEFORE ANYTHING USES THEM. There
+# were five — `RB_TMPPARENT`, `RB_TRY`, `RB_TMPDIR`, `RB_ORIGIN_OUT` and
+# `RB_PIN_OUT` — each with a probe and each a thing this shell had to defend; two
+# remain per stage, because the helper owns the rest. A readonly or
+# value-transforming one in the long-lived driving shell survives an assignment and
+# leaves a STALE value behind, and a stale `/somewhere/owned` then passes every
+# check: its `origin` is read as this session's remote and the cleanup deletes it.
 #
-# WHAT THE PROBE BUYS IS THE CLEAR. Once the name is known assignable, the reset
-# on the next line cannot fail, so the value reaching the read is either one this
-# loop set or empty — and empty is what the requirement downstream is for. The
-# old check read the variable back AFTER the clear, which is the same question
-# asked where a neutralised `exit` can walk past the answer.
-#
-# AND THE WHOLE TRANSPORT REGION IS ITS SUCCESS ARM, not a statement after it.
-# `exit` is a builtin your shell can replace with one that RETURNS, and
-# INTERACTIVELY a `${...:?}` abandons only the command it is in — so a refusal
-# that merely reports is walked past twice over. Measured: with the probe written
-# as a guard, an operator-owned `readonly RB_TMPDIR=/somewhere/stale` printed the
-# refusal and setup then read that directory's `origin` as this session's remote
-# AND DELETED IT. `if` is a reserved word and nothing can stand in for it.
-#
-# THE ARM ENDS WITH THE TRANSPORT REGION, not with setup. What follows needs no
-# containment of its own: it never names this variable, and with `RB_REMOTE` still
-# empty the identity parse refuses. Carrying the pin three levels in was tried and
-# taken back for no gain.
-#
-# A SUBSHELL, ONE MIXED-CASE VALUE, COMPARED INSIDE: the probe the three names
-# after it use, for the reasons they give. #151.
+# A SUBSHELL, ONE MIXED-CASE VALUE, COMPARED INSIDE. The subshell inherits the
+# attribute, so a readonly fails there and a `declare -i` or `declare -l` stores
+# something else and the comparison catches it — and as an `if` CONDITION the
+# failure is contained, which a bare assignment is not: under `errexit` a failed
+# readonly assignment ends the session where it stands. #151.
 #
 # AND IT READS ANOTHER NAME BACK, because reading its OWN back cannot see an
-# ALIAS. `declare -n RB_TMPDIR=RB_REMOTE` passes an assign-and-read-back probe
+# ALIAS. `declare -n RB_ORIGIN_DIR=RB_REMOTE` passes an assign-and-read-back probe
 # perfectly: the assignment works and the value returns. The two are then the SAME
 # VARIABLE, so the origin read — which sets `RB_REMOTE` — silently changes
-# `RB_TMPDIR` before the cleanups run. For a local origin such as `/tmp/victim`
-# they remove `/tmp/victim/origin` and try to remove `/tmp/victim`, and the
-# identity parser only rejects the value afterwards.
+# `RB_ORIGIN_DIR` before the cleanups run. For a local origin such as
+# `/tmp/victim` they remove `/tmp/victim/origin` and try to remove `/tmp/victim`.
 #
 # DISTINCT VALUES ARE WHAT MAKES IT VISIBLE, which is the pattern `clocklib.sh`
 # already uses and states: one value says nothing about whether two names are one
 # variable. `RB_REMOTE` was cleared and proved clear immediately above, so it
 # holds the empty string — writing `Probe-A` here and finding it there is an
-# alias, and finding it unchanged is not. Each probe below checks the same way,
-# and each refusal still names ITS OWN variable rather than a class.
+# alias, and finding it unchanged is not. Each probe checks the same way, and the
+# refusal names its own variables rather than a class.
 #
-# WHICH PAIRS THESE COVER, STATED NARROWLY. Every probe compares against
-# `RB_TMPDIR` and `RB_REMOTE` — the two names that can REDIRECT the origin read or
-# the cleanups, which is the damage. `RB_TMPPARENT` aliased to `RB_TRY` is NOT
-# detected here, and does not need to be: the loop refuses it at the prefix check,
-# so nothing is read and nothing is removed. What is lost there is the diagnostic,
-# not the property.
+# WHICH PAIRS THESE COVER, STATED NARROWLY. Each stage's probe compares against
+# `RB_REMOTE` and against the other name in that stage — the ones that can REDIRECT
+# the read or the cleanups, which is the damage.
 #
 # `2>/dev/null` because a nameref loop is a message, not an answer.
 # THE VALUE THIS SESSION PINS BY IS CLEARED AND PROVED CLEARED HERE, ABOVE THE
