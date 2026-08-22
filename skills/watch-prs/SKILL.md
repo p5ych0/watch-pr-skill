@@ -658,6 +658,17 @@ fi
 # that worked -- then printed its message and CARRIED ON to this line, where
 # `$RB_TMPDIR` is empty and the path built is `/origin`.
 #
+# EVERY USE IN THIS REGION, NOT ONLY THE FIRST, and that is what an INTERACTIVE
+# shell forces. There, `${...:?}` reports the error and abandons only the command
+# it is in — the shell survives — so a walked-past refusal that stops at the line
+# below would continue into the cleanup arms, where `rm -f "$RB_TMPDIR/origin"` is
+# `rm -f /origin` and `rmdir "$RB_TMPDIR"` is `rmdir /`. With the requirement on
+# each of them, every one of those commands refuses on its own and nothing here
+# acts on `/` in either mode. The postcondition below carries it too, so the rule
+# is simply that no bare `$RB_TMPDIR` survives past the loop -- a list of uses is
+# wrong by omission, and one a `grep` can state is not a list anybody has to
+# remember.
+#
 # WHAT THAT REACHES IS A FILE NOBODY HERE CREATED. The ownership test below is
 # `[[ -O ]]`, so for an operator running as ROOT with a root-owned `/origin` it
 # passes: the value is read as this session's origin, the `rm -f` further down
@@ -677,14 +688,14 @@ fi
 # and the whole block stops parsing. Measured -- `X="${V:?a session's origin}/o"`
 # is `unexpected EOF while looking for matching`.
 RB_ORIGIN_OUT="${RB_TMPDIR:?no transport directory was established, so there is nothing to read the session origin from}/origin"
-[[ $RB_ORIGIN_OUT = "$RB_TMPDIR/origin" ]] \
-    || { /usr/bin/env rm -f "$RB_TMPDIR/origin"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
+[[ $RB_ORIGIN_OUT = "${RB_TMPDIR:?no transport directory was established}/origin" ]] \
+    || { /usr/bin/env rm -f "${RB_TMPDIR:?no transport directory was established}/origin"; /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"; echo "ABORT: RB_ORIGIN_OUT is readonly in this shell; the transport path cannot be set"; exit 1; }
 RB_REMOTE=
 [[ -z $RB_REMOTE ]] \
-    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"; echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
 { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_OUT" \
-    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "$RB_TMPDIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
+    || { /usr/bin/env rm -f "$RB_ORIGIN_OUT"; /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
 /usr/bin/env rm -f "$RB_ORIGIN_OUT"
 # THE DIRECTORY GOES HERE, WHILE THE LIST OF PLACES THAT WOULD HAVE TO REMOVE IT
 # IS STILL ONE LONG. It used to stand until the pin at the end of setup, which put
@@ -696,7 +707,7 @@ RB_REMOTE=
 # removed the moment its value has been read, and every abort after this line has
 # nothing to clean up. The pin allocates its own directory later, for the same
 # reason and with the same lifetime.
-/usr/bin/env rmdir "$RB_TMPDIR"
+/usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"
 [[ -n $RB_REMOTE ]] \
     || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
 # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of

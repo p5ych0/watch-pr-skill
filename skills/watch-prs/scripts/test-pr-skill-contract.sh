@@ -303,6 +303,19 @@ case "$_rb_qm" in
     *"'"*) die "the transport path's :? message contains an apostrophe; the setup block will not parse" ;;
     *)     pass "…and that requirement's message cannot break the block it lives in" ;;
 esac
+# AND NO BARE USE SURVIVES PAST THE LOOP. One requirement stops a NON-interactive
+# shell at the first line, and that is all it stops: interactively `${...:?}`
+# reports the error and abandons only the command it is in, so a walked-past
+# refusal continues into the cleanup arms, where `rm -f "$RB_TMPDIR/origin"` is
+# `rm -f /origin` and `rmdir "$RB_TMPDIR"` is `rmdir /`. Each use carries the
+# requirement for that reason — and it is asserted as an ABSENCE rather than a
+# list, because a list of uses is wrong by omission.
+_rb_bare=""
+_rb_bare="$(awk '/RB_ORIGIN_OUT="\$\{RB_TMPDIR/,/rmdir "\$\{RB_TMPDIR[^}]*\}"$/' "$SKILL" \
+    | grep -vE '^[[:space:]]*#' | grep -F '"$RB_TMPDIR' || true)"
+[ -z "$_rb_bare" ] \
+    && pass "…at every use in the region, so an interactive shell cannot reach one of them" \
+    || die "a bare \$RB_TMPDIR survives past the loop: $_rb_bare"
 # AND IT IS RUN. The lift already in hand is the block itself; with no usable
 # parent and `exit` neutralised, what must come out is the expansion's refusal
 # naming RB_TMPDIR, and what must NOT is any sign of the read continuing.
@@ -324,6 +337,21 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     printf '%s' "$_rb_ex_out" | grep -qF 'REACHED' \
         && die "…but the block carried on past it: '$_rb_ex_out'" \
         || pass "…and nothing after it runs"
+    # AND INTERACTIVELY, WHERE THE SHELL SURVIVES THE EXPANSION. `bash -c` cannot
+    # show this: there the first requirement ends the shell, so the cleanup arms
+    # are unreachable for a reason that does not hold at an operator's prompt.
+    # Here the block runs to the end and every dangerous command has to refuse on
+    # its own — what must never appear is a path built from an empty directory.
+    printf 'exit() { return 0; }\nreadonly RB_TMPPARENT=/nonexistent-parent-for-this-case\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED origin_out=[%%s]\\n" "${RB_ORIGIN_OUT:-unset}"\nexit\n' \
+        "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/interactive.sh"
+    _rb_it_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
+        bash --noprofile --norc -i < "$_rb_ex/interactive.sh" 2>&1 || true)"
+    [ "$(printf '%s\n' "$_rb_it_out" | grep -cF 'RB_TMPDIR: no transport directory was established')" -ge 2 ] \
+        && pass "…and interactively every use of the directory refuses, not just the first" \
+        || die "the interactive case did not refuse at each use: '$_rb_it_out'"
+    printf '%s' "$_rb_it_out" | grep -qF 'origin_out=[/origin]' \
+        && die "…but a path was built from an empty transport directory: '$_rb_it_out'" \
+        || pass "…and no path is ever built from an empty one"
     rm -rf "$_rb_ex" 2>/dev/null || true
 fi
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is

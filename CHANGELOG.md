@@ -18,9 +18,16 @@
   The directory is required by the **expansion that builds the path**:
   `${RB_TMPDIR:?…}`. A parameter expansion error ends a non-interactive shell
   where it stands — there is no command name in it to shadow and no `exit` to
-  neutralise — and it names the variable while doing it. Every later use of
-  `$RB_TMPDIR` is downstream of that line, so none of them is reachable with an
-  empty one.
+  neutralise — and it names the variable while doing it.
+
+  **Every use in the region carries it, not just the first**, and that is what an
+  *interactive* shell forces. There `${…:?}` reports the error and abandons only
+  the command it is in — the shell survives — so a walked-past refusal would
+  continue into the cleanup arms, where `rm -f "$RB_TMPDIR/origin"` is
+  `rm -f /origin` and `rmdir "$RB_TMPDIR"` is `rmdir /`. With the requirement on
+  each of them, every one of those commands refuses on its own, and no bare
+  `$RB_TMPDIR` survives past the loop at all — asserted as an absence, because a
+  list of uses is wrong by omission.
 
   Wrapping the region in an `if` was tried and taken back, and the reason is worth
   having: inside a compound command a failed readonly assignment ends the shell
