@@ -2373,9 +2373,15 @@ _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RAN
 grep -q '^[[:space:]]*RB_TRY=[Pp]robe-' "$SKILL" \
     && die "RB_TRY is probed with a bare assignment; under errexit that ends the operator's shell" \
     || pass "…and not with a bare assignment, which errexit makes fatal"
-grep -q '^[[:space:]]*( RB_TRY=Probe-A[;)]' "$SKILL" \
-    && die "the RB_TRY probe falls through on a shadowed continue; put the candidate in its success arm" \
-    || pass "…and the candidate is the probe's success arm, not a shadowable continue after it"
+# THE FORBIDDEN SHAPE IS NAMED IN FULL, not approximated. Written as a character
+# class after the probe — `( RB_TRY=Probe-A[;)]` — it read as though it could
+# match the `if` form as well, and a reviewer said so; it cannot, because the
+# pattern needs `(` immediately after the leading whitespace and the real line has
+# `if ` there. A check whose scope has to be worked out from its regex is one that
+# will be "fixed" by someone who works it out wrongly, so it says the whole thing.
+grep -qF '( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] ) || continue' "$SKILL" \
+    && die "the RB_TRY probe falls through on a shadowed continue; the loop is its success arm" \
+    || pass "…and the loop is the probe's success arm, not a shadowable continue after it"
 
 # …AND THE CONSEQUENCES ARE RUN, NOT ONLY MATCHED. The three greps above describe
 # a shape; what the fix claims is that a readonly `RB_TRY` carrying a traversal
