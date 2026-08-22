@@ -505,6 +505,15 @@ rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans u
 # is a name anything can stand in for. `EXIT` is removed with the signal's trap in
 # the same statement: without that the re-raise runs the EXIT handler as well,
 # which is the second pass this whole block exists to prevent.
+# AND THE SIGNALS ARE IGNORED WHILE IT RUNS, NOT RESET TO THEIR DEFAULTS. `trap -`
+# restores the DEFAULT action, which for `HUP`, `INT` and `TERM` is to terminate:
+# it stops the cleanup being re-entered and makes it INTERRUPTIBLE instead, so a
+# second signal during `rb_on_signal`, or one during the EXIT handler on an
+# ordinary refusal, kills the shell between the `rm` and the `rmdir` — and the
+# caller removes nothing after a non-zero status. `trap ''` ignores them, which
+# stops both. The original signal is restored to its default immediately before
+# the re-raise, and only that one.
+#
 # AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
 # afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
 # second signal arriving while the first handler is between its two statements —
@@ -517,11 +526,12 @@ rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans u
 # Removing only the signal that fired leaves the other two armed; removing them
 # after `rb_cleanup` leaves the whole window open.
 rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
-    trap - EXIT HUP INT TERM
+    trap '' EXIT HUP INT TERM
     rb_cleanup
+    trap - "$1"
     kill -s "$1" "$$"
 }
-trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT
+trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM

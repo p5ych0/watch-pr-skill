@@ -1172,7 +1172,7 @@ _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
   && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
     && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
     || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
-_res_tr=0; _res_tr="$(grep -n "^trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
+_res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXIT$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
     && pass "…and a cleanup trap is armed after the reservation is taken" \
     || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
@@ -1221,12 +1221,12 @@ _res_sig=""
 _res_sig="$(awk '/^rb_on_signal\(\) \{/,/^\}/' "$SCRIPT")" || _res_sig=""
 _res_sig_ok=no
 case "$_res_sig" in
-    *'trap - EXIT HUP INT TERM'*rb_cleanup*) _res_sig_ok=yes ;;
+    *"trap '' EXIT HUP INT TERM"*rb_cleanup*) _res_sig_ok=yes ;;
 esac
 [ "$_res_sig_ok" = yes ] \
     && pass "…and the signal handler disarms every trap before it cleans up" \
     || die "the signal handler cleans up while still armed: '$_res_sig'"
-grep -qF "trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT" "$SCRIPT" \
+grep -qF 'trap '"'"'trap "" EXIT HUP INT TERM; rb_cleanup'"'"' EXIT' "$SCRIPT" \
     && pass "…and so does the EXIT handler" \
     || die "the EXIT handler cleans up while the signal traps are still armed"
 # …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
@@ -1334,6 +1334,60 @@ else
     die "the pin helper never created its directory; that interruption case proves nothing"
 fi
 rm -rf "$_pin_dir" "$_pin_bin"
+# ── A SECOND SIGNAL DURING THE CLEANUP DOES NOT INTERRUPT IT ───────────────
+#
+# `trap -` restores a signal's DEFAULT action, which for these three is to
+# terminate: disarming that way stops the cleanup being RE-ENTERED and makes it
+# INTERRUPTIBLE instead, so a second signal between the `rm` and the `rmdir` kills
+# the shell and the caller — which removes nothing after a non-zero status — is
+# left with the directory. `trap ''` ignores them, which stops both.
+#
+# STAGED WITH A SLOW `rmdir`, so there is an interval to aim at. The cleanup
+# reaches it through `/usr/bin/env`, which resolves on `PATH`, so a stub is enough:
+# it sleeps, then execs the real one, and the second TERM is sent during that
+# sleep. Without the ignore, that TERM lands while the stub runs and the directory
+# survives.
+_sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
+printf '#!/usr/bin/env bash\nsleep 2\nexec /usr/bin/rmdir "$@"\n' > "$_sig_bin/rmdir"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_sig_bin/git"
+chmod +x "$_sig_bin/rmdir" "$_sig_bin/git"
+_sig_dir="$TMP/sigt.$$"
+rm -rf "$_sig_dir"
+if [ -x /usr/bin/rmdir ]; then
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+_sig_pid=$!
+_sig_n=0
+while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
+if [ -d "$_sig_dir" ]; then
+    kill -TERM "$_sig_pid" 2>/dev/null
+    # THE FIRST SIGNAL IS HANDLED ONLY AFTER `git` RETURNS — bash defers it while
+    # waiting on a foreign command — so the cleanup starts about three seconds in
+    # and the slow `rmdir` runs from there. The second TERM goes in during that.
+    sleep 4
+    kill -TERM "$_sig_pid" 2>/dev/null
+    _sig_w=0
+    while kill -0 "$_sig_pid" 2>/dev/null && [ "$_sig_w" -lt 150 ]; do
+        _sig_w=$(( _sig_w + 1 )); sleep 0.1
+    done
+    _sig_rc=0
+    wait "$_sig_pid" 2>/dev/null || _sig_rc=$?
+    [ ! -e "$_sig_dir" ] \
+        && pass "a second signal during the cleanup does not interrupt it" \
+        || die "a signal during cleanup left '$_sig_dir' behind (rc=$_sig_rc)"
+    [ "$_sig_rc" = 143 ] \
+        && pass "…and the run still dies of the signal it was sent" \
+        || die "the interrupted cleanup exited $_sig_rc rather than 143"
+else
+    kill -KILL "$_sig_pid" 2>/dev/null; wait "$_sig_pid" 2>/dev/null || true
+    die "the helper never created its directory; the cleanup-interruption case proves nothing"
+fi
+rm -rf "$_sig_dir"
+else
+    echo "ok   - (no /usr/bin/rmdir to exec through; the cleanup-interruption case did not run)"
+fi
+rm -rf "$_sig_bin"
+
 # WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
 # before the disarm is the phase where the handler must remove the leaf as well.
 # It is asserted structurally above and not run, because the interval cannot be
