@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.54] — 2026-08-22
+
+- **`RB_TRY`'s probe read only a status, so a transforming attribute passed it.**
+  The transport loop proves the candidate name assignable before it builds a path
+  under it, and that probe asked whether the assignment *succeeded* — which covers
+  a `readonly` and nothing else.
+
+  A transforming attribute lets the assignment succeed and store something else.
+  Measured on bash 5 with `nounset` off, which is the ordinary state here:
+  `declare -i RB_TRY` evaluates `Probe-A` as `Probe - A`, both names are unset,
+  and `0` is stored. The real assignment below the probe is then rewritten the
+  same way, the prefix check refuses every candidate, and setup stops with the
+  message about `TMPDIR` and `HOME` that describes neither — the misdirected
+  diagnostic the probe above it exists to prevent.
+
+  The value is compared inside the subshell now, which is what the other three
+  probes have done since 2.0.53, and it is `Probe-A` rather than `probe-a`:
+  already-lowercase text is left unchanged by `declare -l`, so a probe using it
+  passes. `Probe-A` survives no case transformation in either direction, and the
+  comparison is what rejects the arithmetic one.
+
+  One value is enough. Two existed because a readonly pre-seeded with the probe's
+  own value leaves a comparison *in the caller's shell* holding; in the subshell
+  that same readonly makes the assignment fail outright, so the comparison is
+  never reached.
+
+  **And the probe moved out of the candidate loop, where its failure had nowhere
+  to go.** Asked per candidate it could only `continue`, so every candidate was
+  skipped and the emptiness check afterwards blamed `TMPDIR` and `HOME` — sending
+  you to look at an environment that is fine, which is the misdirected diagnostic
+  the probe above it exists to prevent. Whether this shell can assign the name
+  does not change per candidate: it is asked once, before the loop, with its own
+  refusal naming the variable, and the loop is that probe's success arm.
+
 ## [2.0.53] — 2026-08-21
 
 - **The remaining assignability probes ended your shell in the state they exist
