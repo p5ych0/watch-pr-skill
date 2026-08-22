@@ -446,16 +446,47 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
 # said why — the ancestry walks name the component and the reason, and a second
 # line after them would say less.
-rb_refuse() {   # rb_refuse [message] ; clean up and stop
+rb_refuse() {   # rb_refuse [message] ; clean up and stop, AFTER the leaf may exist
     [[ -n ${1-} ]] && echo "$1" >&2
     /usr/bin/env rm -f "$OUT"
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     exit 1
 }
+# AND A SECOND ONE FOR BEFORE THE LEAF CAN EXIST, WHICH IS NOT TIDINESS. The walks
+# run after the `mkdir` now and before either write, so on that path there is no
+# leaf — and `rm -f "$OUT"` there is a path RESOLUTION, not a removal of something
+# this script made. An account that can write a non-sticky ancestor — which is
+# exactly what the walk is in the middle of detecting — can rename the reserved
+# directory and put a symlink at `$RB_DIR` while the walk runs; `rm -f
+# "$RB_DIR/origin"` then follows it and deletes an `origin` or a `pin` in whatever
+# operator-accessible directory it points at. The refusal that fires ON that
+# detection must not be the one that reaches through the name it distrusts.
+#
+# `rmdir` ALONE IS SAFE THERE: it removes only an empty directory and refuses a
+# symlink outright, so a substituted name is a failed `rmdir` rather than a
+# deletion somewhere else. What is given back is the reservation and nothing more.
+rb_refuse_pre() {   # rb_refuse_pre [message] ; give the reservation back, no leaf
+    [[ -n ${1-} ]] && echo "$1" >&2
+    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+    exit 1
+}
+# AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
+# caller performs no cleanup after a non-zero status, deliberately — it cannot know
+# who created the path — so an interrupted run used to leak its `watch-pr.*`
+# directory for the life of the machine. The caller-owned protocol cleaned up after
+# any non-zero helper status; the obligation moved here with the creation, and a
+# signal is a way out that no `rb_refuse` sees.
+#
+# `rmdir` AGAIN, so the trap can only give back an EMPTY reservation: after a
+# successful write the directory holds the leaf and `rmdir` refuses it, which is
+# the correct answer for a signal arriving between the write and the exit — the
+# caller may still read what was written. The trap is disarmed on the success path
+# anyway, so that case is stated rather than relied on.
+trap '/usr/bin/env rmdir "$RB_DIR" 2>/dev/null' EXIT HUP INT TERM
 # THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
 # examines the link rather than what it points at, so this pass asks who owns each
 # link on the way — an account that owns one can repoint it.
-_rb_walk "$_rb_dir" || rb_refuse
+_rb_walk "$_rb_dir" || rb_refuse_pre
 # …AND THE PATH AS IT RESOLVES, which is where the FILE lives. A lexical walk
 # never sees the real ancestry: `TMPDIR=/home/me/t` pointing at `/srv/other/mine`
 # checks `/home/me` and never `/srv/other`, and the account that owns that one can
@@ -467,8 +498,8 @@ _rb_walk "$_rb_dir" || rb_refuse
 # function can stand in front of either. In the driving shell they would be names.
 _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
-    || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
-[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
+    || rb_refuse_pre "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
+[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse_pre
 
 
 if [[ $MODE = pin ]]; then
@@ -482,6 +513,12 @@ if [[ $MODE = pin ]]; then
     # file and success. The caller could not tell them apart, so this one says.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
         || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink"
+    # DISARMED ON THE WAY OUT. The trap could only remove an EMPTY directory and
+    # this one holds the pin, so leaving it armed would be harmless — but saying so
+    # in a comment and stating it in code are different, and a later edit that
+    # changes what the trap removes should not silently change what a successful
+    # run does.
+    trap - EXIT HUP INT TERM
     exit 0
 fi
 
@@ -627,6 +664,7 @@ if [[ $_rb_origin != "${_rb_origin%%'
 fi
 printf '%s\n' "$_rb_origin" > "$OUT" \
     || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink"
+trap - EXIT HUP INT TERM
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────

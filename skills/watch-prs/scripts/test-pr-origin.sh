@@ -1155,12 +1155,37 @@ _res_w1=0; _res_w1="$(grep -n '^_rb_walk "\$_rb_dir"' "$SCRIPT" | head -1 | cut 
     && pass "the transport directory is reserved before the ancestry walks run" \
     || die "the mkdir does not precede the walks (mkdir=$_res_mk walk=$_res_w1); the name is observable while they run"
 # …AND THE WALKS STILL REFUSE AFTER IT, which is what makes reserving first safe
-# rather than merely earlier. Both walk refusals go through `rb_refuse`, so the
-# reservation is given back.
-_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCRIPT")" || _res_g=0
+# rather than merely earlier. Both walk refusals give the reservation back — and
+# through `rb_refuse_pre`, NOT `rb_refuse`: on that path no leaf has been written,
+# so `rm -f "$OUT"` would be a path RESOLUTION rather than a removal of anything
+# this script made, and the account the walk is in the middle of detecting can put
+# a symlink at the reserved name while it runs.
+_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse_pre$' "$SCRIPT")" || _res_g=0
 [ "$_res_g" = 2 ] \
-    && pass "…and both walk refusals give the reservation back through rb_refuse" \
-    || die "expected both walks to refuse through rb_refuse, found $_res_g"
+    && pass "…and both walk refusals give the reservation back through rb_refuse_pre" \
+    || die "expected both walks to refuse through rb_refuse_pre, found $_res_g"
+# …AND THAT ONE REMOVES NO LEAF. `rmdir` refuses a symlink outright and refuses a
+# non-empty directory, so a substituted name is a failed `rmdir` rather than a
+# deletion somewhere else.
+_res_pre=""
+_res_pre="$(awk "/^rb_refuse_pre\\(\\) \{/,/^\}/" "$SCRIPT")" || _res_pre=""
+{ [ -n "$_res_pre" ] \
+  && case "$_res_pre" in *'rmdir "$RB_DIR"'*) true ;; *) false ;; esac \
+  && case "$_res_pre" in *'rm -f'*) false ;; *) true ;; esac; } \
+    && pass "…and the pre-write refusal removes no leaf, so it never resolves the name it distrusts" \
+    || die "rb_refuse_pre reaches through the transport name: '$_res_pre'"
+# …AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
+# caller performs no cleanup after a non-zero status — deliberately, since it
+# cannot know who created the path — so an interrupted helper leaked its directory
+# for the life of the machine.
+_res_tr=0; _res_tr="$(grep -n "^trap '/usr/bin/env rmdir \"\\\$RB_DIR\"" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
+{ [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
+    && pass "…and a cleanup trap is armed after the reservation is taken" \
+    || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
+_res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT HUP INT TERM$' "$SCRIPT")" || _res_dis=0
+[ "$_res_dis" = 2 ] \
+    && pass "…and disarmed on both success paths" \
+    || die "expected the trap disarmed on both success paths, found $_res_dis"
 # …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
 # `mkdir` ahead of the walks narrows the interval between exec and reservation; it
 # does not remove it, because the candidate is an argv entry published at exec. A
@@ -1169,6 +1194,46 @@ _res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCR
 grep -qF 'WHAT THIS ORDERING DOES NOT CLOSE' "$SCRIPT" \
     && pass "…and the file states the interval the ordering cannot remove" \
     || die "the reservation ordering claims a property it does not have; the argv limit is unstated"
+
+# ── AN INTERRUPTED RUN GIVES ITS RESERVATION BACK ──────────────────────────
+#
+# The caller performs no cleanup after a non-zero helper status, deliberately: it
+# cannot know who created the path. So a signal arriving between the `mkdir` and
+# either end used to leak a `watch-pr.*` directory for the life of the machine.
+#
+# STAGED WITH A SLOW `git`, so the signal lands after the reservation and before
+# the write. `git` is reached through `PATH` — the helper runs privileged, so a
+# FUNCTION cannot stand in for it, but a directory on `PATH` can.
+_int_bin="$TMP/intbin"; mkdir -p "$_int_bin"
+printf '#!/usr/bin/env bash\nsleep 30\n' > "$_int_bin/git"
+chmod +x "$_int_bin/git"
+_int_dir="$TMP/int.$$"
+rm -rf "$_int_dir"
+( cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    PATH="$_int_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_int_dir" ) >/dev/null 2>&1 &
+_int_pid=$!
+# WAIT FOR THE RESERVATION, rather than sleeping a guessed interval: the case is
+# about what happens after the directory exists, so it has to exist first.
+_int_n=0
+while [ ! -d "$_int_dir" ] && [ "$_int_n" -lt 100 ]; do _int_n=$(( _int_n + 1 )); sleep 0.1; done
+if [ -d "$_int_dir" ]; then
+    pass "the helper reserves its directory before reading origin"
+    kill -TERM "$_int_pid" 2>/dev/null
+    wait "$_int_pid" 2>/dev/null
+    # THE TRAP RUNS IN THE HELPER, and `wait` returns when the backgrounded
+    # SUBSHELL ends — which can be before its child has finished handling the
+    # signal. A bounded wait for the absence, rather than one assertion racing a
+    # process teardown.
+    _int_n=0
+    while [ -e "$_int_dir" ] && [ "$_int_n" -lt 100 ]; do _int_n=$(( _int_n + 1 )); sleep 0.1; done
+    [ ! -e "$_int_dir" ] \
+        && pass "…and a TERM between the reservation and the write gives it back" \
+        || die "an interrupted helper leaked '$_int_dir'"
+else
+    kill -TERM "$_int_pid" 2>/dev/null; wait "$_int_pid" 2>/dev/null
+    die "the helper never created its directory; the interruption case proves nothing"
+fi
+rm -rf "$_int_dir" "$_int_bin"
 
 # ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
 #

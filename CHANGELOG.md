@@ -36,6 +36,21 @@
   compares against `$RB_TMPPARENT`, so an empty parent made it read
   `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and agree.
 
+- **A pre-write refusal could delete a file it never created.** The ancestry walks
+  run after the reservation now, and their refusal went through the same cleanup
+  as every other — which removes the value file by NAME. On that path no value
+  file exists, so the removal was a path resolution rather than a removal: an
+  account able to write a non-sticky ancestor, which is exactly what the walk is
+  detecting, could rename the reserved directory and leave a symlink at its name
+  while the walk ran, and the refusal then followed it. The pre-write path gives
+  the reservation back with `rmdir` alone, which refuses a symlink outright.
+
+- **An interrupted helper leaked its directory.** The caller performs no cleanup
+  after a non-zero status, deliberately — it cannot know who created the path — so
+  a signal between the reservation and either end left a `watch-pr.*` directory
+  behind for the life of the machine. A trap gives it back, and is disarmed on the
+  success paths.
+
 - **Another account could keep a session from starting, repeatably — narrowed,
   and the remainder written down.** The
   transport directory's name is an argv entry, which `ps` and `/proc` publish the
