@@ -2387,10 +2387,15 @@ grep -q '^[[:space:]]*( RB_TRY=Probe-A[;)]' "$SKILL" \
 # block would need an origin, a repository and a plugin root; the loop needs a
 # parent directory and a `$RB_SCRIPTS` that refuses, which is what makes every
 # candidate fall to the bottom.
-_rb_loop="$(awk '/^[[:space:]]*for RB_TMPPARENT in /,/^[[:space:]]*done$/' "$SKILL")" || _rb_loop=""
-[ -n "$_rb_loop" ] \
-    && pass "the transport loop can be extracted for execution" \
-    || die "the transport loop could not be extracted; the behavioural case below proves nothing"
+# THE PROBE AND THE LOOP TOGETHER, since the probe sits BEFORE the loop now and
+# the loop is its success arm. Extracting the loop alone leaves `RB_TRY` unprobed,
+# so the readonly traversal value goes straight to the prefix check — the cases
+# below would then be exercising the defect rather than the fix.
+_rb_loop="$(awk '/^[[:space:]]*if \( RB_TRY=Probe-A;/,/^    fi$/' "$SKILL")" || _rb_loop=""
+{ [ -n "$_rb_loop" ] \
+  && case "$_rb_loop" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
+    && pass "the RB_TRY probe and the loop it guards can be extracted together" \
+    || die "the probe/loop excerpt is missing one of them; the behavioural cases below prove nothing"
 # ITS OWN ALLOCATION, AND GUARDED ON IT. `$_forge_dir` looked like the tree to
 # reuse and is removed long before this point, so the whole case was SKIPPED — it
 # reported nothing and the mutation that should have turned it red turned nothing
@@ -2417,16 +2422,16 @@ printf '%s\n' "$_rb_loop" > "$_rb_bt/loop.sh"
 # else, so only the comparison inside it refuses them — and `declare -l` is
 # bash 4.0+, so this shell is asked rather than assumed.
 #
-# THESE ARE ABSENCE CHECKS AND THE STRUCTURAL ASSERTION ABOVE IS WHAT
-# DISCRIMINATES. Stated rather than implied, because the difference matters: with
-# the comparison removed or the probe value lowercased, the transforming states
-# still end with an empty `RB_TMPDIR` and nothing created — the rewritten path
-# fails the PREFIX check instead, since `$RB_TMPPARENT` is not itself rewritten
-# and this scratch root carries `mktemp`'s mixed case. Staging the case where it
-# does reach `mkdir` needs an all-lowercase parent, which is a fixed path outside
-# `mktemp` and not something a fixture may take. What these runs prove is that
-# each state ends with nothing created and the operator's shell alive; that the
-# COMPARISON is what refuses them is proven by the assertion on the probe's form.
+# WHAT EACH ASSERTION SEES. The diagnostic is the discriminating one: with the
+# probe removed, or asked inside the loop where its failure had nowhere to go,
+# `RB_TRY` is never named and the emptiness check's message about `TMPDIR` and
+# `HOME` comes out instead. The creates-nothing line is an absence check beside
+# it, and it discriminates only for the READONLY state, where the unprobed loop
+# reaches `mkdir` — for the transforming ones the rewritten path fails the PREFIX
+# check first, since `$RB_TMPPARENT` is not itself rewritten and this scratch root
+# carries `mktemp`'s mixed case. Staging the case where a transformed path does
+# reach `mkdir` needs an all-lowercase parent, which is a fixed path outside
+# `mktemp` and not something a fixture may take.
 _rb_bt_states="readonly RB_TRY=\"\$TMPDIR/watch-pr.anchor/../attacker/session\"|declare -i RB_TRY=0"
 if [ "$_rb_has_l" = yes ]; then _rb_bt_states="$_rb_bt_states|declare -l RB_TRY=x"; fi
 _rb_bt_rest="$_rb_bt_states"
@@ -2439,10 +2444,17 @@ continue() { return 0; }
 '"$_rb_bt_attr"'
 RB_SCRIPTS=/nonexistent-rb-scripts
 . "$1"
-printf "SURVIVED rb_tmpdir=[%s]\n" "${RB_TMPDIR:-}"' _ "$_rb_bt/loop.sh" 2>&1)"; _rb_bt_rc=$?
-    printf '%s' "$_rb_bt_out" | grep -qF 'SURVIVED rb_tmpdir=[]' \
-        && pass "…an unusable RB_TRY under errexit leaves the operator's shell alive and no transport directory ($_rb_bt_attr)" \
+printf "SURVIVED rb_tmpdir=[%s]\n" "${RB_TMPDIR:-}"' _ "$_rb_bt/loop.sh" 2>&1 || true)"; _rb_bt_rc=$?
+    # THE DIAGNOSTIC IS THE ASSERTION. Asked inside the loop the probe's failure
+    # had nowhere to go — every candidate was skipped and the emptiness check
+    # afterwards blamed `TMPDIR` and `HOME`, which is an environment that is fine.
+    # What must come out is this variable's own name.
+    printf '%s' "$_rb_bt_out" | grep -qF 'ABORT: RB_TRY is readonly or value-transforming in this shell' \
+        && pass "…an unusable RB_TRY is refused by name ($_rb_bt_attr)" \
         || die "the RB_TRY case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
+    printf '%s' "$_rb_bt_out" | grep -qF 'could not read origin into a transport directory' \
+        && die "…but the loop ran and blamed TMPDIR and HOME instead ($_rb_bt_attr): '$_rb_bt_out'" \
+        || pass "…and the loop's message about TMPDIR and HOME does not follow it ($_rb_bt_attr)"
     _rb_bt_left="$(ls -A "$_rb_bt/parent/attacker" 2>/dev/null)" || _rb_bt_left='THE_SCAN_FAILED'
     [ -z "$_rb_bt_left" ] \
         && pass "…and creates nothing under the parent the traversal value named ($_rb_bt_attr)" \

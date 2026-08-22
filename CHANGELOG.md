@@ -26,6 +26,14 @@
   that same readonly makes the assignment fail outright, so the comparison is
   never reached.
 
+  **And the probe moved out of the candidate loop, where its failure had nowhere
+  to go.** Asked per candidate it could only `continue`, so every candidate was
+  skipped and the emptiness check afterwards blamed `TMPDIR` and `HOME` — sending
+  you to look at an environment that is fine, which is the misdirected diagnostic
+  the probe above it exists to prevent. Whether this shell can assign the name
+  does not change per candidate: it is asked once, before the loop, with its own
+  refusal naming the variable, and the loop is that probe's success arm.
+
 ## [2.0.53] — 2026-08-21
 
 - **The remaining assignability probes ended your shell in the state they exist
