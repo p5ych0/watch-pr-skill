@@ -1173,62 +1173,40 @@ _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
     && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
     || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
 _res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXIT$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
-{ [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
-    && pass "…and a cleanup trap is armed after the reservation is taken" \
-    || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
-# …WITH NOTHING EXECUTABLE BETWEEN THEM. The handlers used to be DEFINED after the
-# `mkdir`, so a phase assignment and three function definitions ran in an interval
-# where the directory existed and no trap did — a signal there took its default
-# action and left the reservation behind. Nothing in those definitions needs the
-# reservation; the arming does, and it has to be the first thing after it.
-# NOTHING IS ALLOWLISTED HERE, and that is deliberate. The first version excluded
-# statement SPELLINGS — assignments, `echo`, `exit`, names beginning `_rb_` — and an
-# allowlist accepts whatever nobody thought of: a top-level
-# `_rb_pause="$(slow_command)"` matched the `_rb_` clause, so a TERM during that
-# substitution would again leave the reservation behind with this case green. This
-# repository records the same defect twice already, in the pin-suffix check.
+_res_tl=0; _res_tl="$(grep -n "^trap 'rb_on_signal TERM' TERM$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tl=0
+{ [ "$_res_tr" -gt 0 ] && [ "$_res_tl" -gt 0 ] && [ "$_res_tl" -lt "$_res_mk" ]; } \
+    && pass "…and the cleanup traps are armed BEFORE the reservation is attempted" \
+    || die "the traps are not armed before the mkdir (trap=$_res_tr..$_res_tl mkdir=$_res_mk); a signal during it leaks the directory"
+# …WITH NOTHING EXECUTABLE BETWEEN THEM. Armed AFTER the `mkdir` they protected
+# only what follows the command RETURNING: a signal while the external `mkdir` ran
+# terminated this shell while the child went on to create the directory. Armed
+# before it, what matters is that nothing runs in between — every statement there
+# is another moment with the arming spent and the reservation not yet taken, and
+# nothing needs to happen there at all.
 #
-# WHAT IS EXCLUDED IS POSITIONAL AND EXACT. The `mkdir`'s own failure arm is
-# CONTINUATION, so every line of it is indented; it runs only where nothing was
-# created and it ends in `exit 1`. Comments and blank lines are not statements.
-# Everything else left in the interval fails the case, whatever it says.
+# NOTHING IS ALLOWLISTED, and that is deliberate. An earlier version excluded
+# statement SPELLINGS and then INDENTATION, and both are filters: a top-level
+# `_rb_pause="$(slow_command)"` matched the first, and the same line written with
+# four spaces in front matched the second. This repository records the same defect
+# twice more in the pin-suffix check. Every non-comment, non-blank line in the
+# interval fails the case, whatever it says and wherever it starts.
 _res_gap=""
-_res_gap="$(awk -v a="$_res_mk" -v b="$_res_tr" 'NR>a && NR<b' "$SCRIPT" \
-    | grep -v '^[[:space:]]' | grep -v '^#' | grep -v '^$' || true)"
+_res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
+    | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' || true)"
 [ -z "$_res_gap" ] \
-    && pass "…as the first thing after it, with nothing running in between" \
-    || die "statements run between the reservation and the arming: '$_res_gap'"
-# …AND IT HAS THE SAME TWO PHASES THE REFUSALS DO. `rmdir` alone is right while no
-# leaf can exist; once a write has happened it NECESSARILY fails, because the
-# directory holds the leaf — so a signal between the write and the disarm left both
-# behind, and the caller cleans up nothing after a non-zero status. The phase flips
-# after both walks, which is where the name becomes trusted and is still before
-# either write, so the leaf-removing shape never runs on an unapproved path.
-_res_cl=""
-_res_cl="$(awk '/^rb_cleanup\(\) \{/,/^\}/' "$SCRIPT")" || _res_cl=""
-{ [ -n "$_res_cl" ] \
-  && case "$_res_cl" in *'[[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"'*) true ;; *) false ;; esac \
-  && case "$_res_cl" in *'rmdir "$RB_DIR"'*) true ;; *) false ;; esac; } \
-    && pass "…removing the leaf only in the phase where one can exist" \
-    || die "the cleanup trap does not remove the leaf after a write: '$_res_cl'"
-_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
-# THE LAST WALK IS LOCATED BY A PATTERN THAT STILL MATCHES, and its match is
-# REQUIRED. This searched for `rb_refuse_pre`, a symbol removed two rounds ago, so
-# it found nothing, left `_res_w2=0`, and the comparison below accepted zero as
-# preceding every positive phase line — moving `RB_PHASE=post` above the walks
-# would have stayed green while a signal during an unsafe walk ran the post-phase
-# `rm -f "$OUT"` through an attacker-replaced path.
-_res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
-_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
-{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
-  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
-    && pass "…and the phase flips after the walks and before any write" \
-    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
-# …AND THE SUCCESS PATHS RESET `EXIT` ONLY. The EXIT handler would remove the leaf
-# the run just wrote, so it has to go; the SIGNAL handlers must stay armed through
-# the final command, because resetting them too left a window in which a `TERM`
-# terminated the helper by default with no cleanup — and the caller, seeing a
-# non-zero status, removes nothing, so a completed directory leaked.
+    && pass "…with nothing running between the arming and the reservation" \
+    || die "statements run between the arming and the reservation: '$_res_gap'"
+# …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
+# means the cleanup can run at a moment when the `mkdir` had already failed because
+# the name was taken, and a directory there that belongs to somebody else is
+# theirs.
+_res_own=""
+_res_own="$(awk '/^rb_cleanup\(\) \{/,/^\}/' "$SCRIPT")" || _res_own=""
+case "$_res_own" in
+    *'[[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0'*)
+        pass "…and the cleanup removes nothing this account does not own" ;;
+    *)  die "the cleanup has no ownership test, so it can remove a name somebody else took: '$_res_own'" ;;
+esac
 _res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT$' "$SCRIPT")" || _res_dis=0
 [ "$_res_dis" = 2 ] \
     && pass "…and both success paths reset EXIT" \
@@ -1363,6 +1341,56 @@ else
     die "the pin helper never created its directory; that interruption case proves nothing"
 fi
 rm -rf "$_pin_dir" "$_pin_bin"
+# ── A SIGNAL DURING THE RESERVATION ITSELF LEAVES NOTHING BEHIND ───────────
+#
+# `mkdir` is an external command. Armed after it returned, the traps protected only
+# what came later: a signal arriving while the child ran terminated this shell
+# while that child went on to create the directory, and the caller — which removes
+# nothing after a non-zero status — was left with it.
+#
+# STAGED WITH A SLOW `mkdir` THAT CREATES FIRST AND RETURNS LATE, which is the
+# shape the race has: the directory exists, the command has not returned, and no
+# handler would have been installed. The stub announces itself so the signal lands
+# inside that interval rather than at a guessed moment.
+_mkd_real=""
+_mkd_real="$(command -v mkdir 2>/dev/null)" || _mkd_real=""
+_mkd_bin="$TMP/mkdbin"; mkdir -p "$_mkd_bin"
+_mkd_mark="$TMP/mkd.created"
+rm -f "$_mkd_mark"
+printf '#!/usr/bin/env bash\n%s "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' "$_mkd_real" > "$_mkd_bin/mkdir"
+chmod +x "$_mkd_bin/mkdir"
+_mkd_dir="$TMP/mkdt.$$"
+rm -rf "$_mkd_dir"
+if [ -n "$_mkd_real" ] && [ -x "$_mkd_real" ]; then
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    RB_MKD_MARK="$_mkd_mark" PATH="$_mkd_bin:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_mkd_dir" ) >/dev/null 2>&1 &
+_mkd_pid=$!
+_mkd_n=0
+while [ ! -e "$_mkd_mark" ] && [ "$_mkd_n" -lt 150 ]; do _mkd_n=$(( _mkd_n + 1 )); sleep 0.1; done
+if [ -e "$_mkd_mark" ]; then
+    pass "the reservation is created before its command returns, as the race requires"
+    kill -TERM "$_mkd_pid" \
+        || die "the helper was already gone; no signal was delivered during the reservation"
+    _mkd_w=0
+    while kill -0 "$_mkd_pid" 2>/dev/null && [ "$_mkd_w" -lt 150 ]; do
+        _mkd_w=$(( _mkd_w + 1 )); sleep 0.1
+    done
+    _mkd_rc=0
+    wait "$_mkd_pid" 2>/dev/null || _mkd_rc=$?
+    [ ! -e "$_mkd_dir" ] \
+        && pass "…and a signal delivered during it still gives the directory back" \
+        || die "a signal during the reservation leaked '$_mkd_dir' (rc=$_mkd_rc)"
+else
+    kill -KILL "$_mkd_pid" 2>/dev/null; wait "$_mkd_pid" 2>/dev/null || true
+    die "the slow mkdir never reported creating the directory; that case proves nothing"
+fi
+rm -rf "$_mkd_dir"
+else
+    echo "ok   - (mkdir could not be resolved; the reservation-interruption case did not run)"
+fi
+rm -rf "$_mkd_bin"; rm -f "$_mkd_mark"
+
 # ── A SECOND SIGNAL DURING THE CLEANUP DOES NOT INTERRUPT IT ───────────────
 #
 # `trap -` restores a signal's DEFAULT action, which for these three is to

@@ -395,8 +395,15 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # unapproved path.
 RB_PHASE=pre
 rb_cleanup() {   # give back what this run created, for the phase it is in
+    # OWNED BY THIS ACCOUNT, OR IT IS NOT OURS TO REMOVE. The traps are armed
+    # before the `mkdir`, so this can run at a moment when the `mkdir` had already
+    # failed because the name was taken — and a directory there that belongs to
+    # somebody else is theirs. The name carries this process id and three
+    # `$RANDOM` draws, so one owned by THIS account is one this run created.
+    [[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0
     [[ $RB_PHASE = post ]] && /usr/bin/env rm -f "$OUT"
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+    return 0
 }
 rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans up
     [[ -n ${1-} ]] && echo "$1" >&2
@@ -509,6 +516,25 @@ rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and 
 # precise reason, and its refusal is the one that comes out; the generic message
 # is what remains when the ancestry is fine and the name was simply taken. Nothing
 # was created on this path, so nothing is removed on it.
+# THE TRAPS ARE ARMED BEFORE THE `mkdir`, NOT AFTER IT. Armed afterwards they
+# protected only what follows the command RETURNING: a signal arriving while the
+# external `mkdir` ran terminated this shell while the child went on to create
+# the directory, and the caller — which removes nothing after a non-zero status —
+# was left with it. The window is small and it is not zero, and it is the one
+# window the ordering fixture could not see.
+#
+# WHICH MAKES THE OWNERSHIP TEST IN `rb_cleanup` LOAD-BEARING RATHER THAN
+# BELT-AND-BRACES. Arming first means the cleanup can now run at a moment when
+# this run has NOT created the directory — when the `mkdir` had already failed
+# because the name was taken. `[[ -O … ]]` is what tells those apart: the name
+# carries three `$RANDOM` draws and this process id, so a directory there owned by
+# THIS account is one this run created, and one owned by anybody else is theirs and
+# is left alone. `rmdir` refuses a symlink and a non-empty directory besides.
+trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
+trap 'rb_on_signal HUP' HUP
+trap 'rb_on_signal INT' INT
+trap 'rb_on_signal TERM' TERM
+
 /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null \
     || { _rb_walk "$_rb_dir" || exit 1
          # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the
@@ -541,10 +567,6 @@ rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and 
 # AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
 # said why — the ancestry walks name the component and the reason, and a second
 # line after them would say less.
-trap 'trap "" EXIT HUP INT TERM; rb_cleanup' EXIT
-trap 'rb_on_signal HUP' HUP
-trap 'rb_on_signal INT' INT
-trap 'rb_on_signal TERM' TERM
 # THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
 # examines the link rather than what it points at, so this pass asks who owns each
 # link on the way — an account that owns one can repoint it.

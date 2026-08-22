@@ -23,9 +23,13 @@
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean
   up. The cleanup is one `EXIT` trap that runs once, on every path out — a
-  refusal, a signal, or the end of the script — armed as the first thing after the
-  reservation, with every signal IGNORED before the cleanup begins, so one arriving
-  during it can neither re-enter it nor interrupt it. `RB_PHASE` picks its shape:
+  refusal, a signal, or the end of the script — armed BEFORE the reservation is
+  attempted, since `mkdir` is an external command and a signal while it ran left
+  the shell dead and the child creating the directory. `[[ -O … ]]` is what makes
+  arming first safe: the cleanup can then run when the `mkdir` had already failed
+  because the name was taken, and a directory there belonging to somebody else is
+  theirs. Every signal is IGNORED before the cleanup begins, so one arriving during
+  it can neither re-enter it nor interrupt it. `RB_PHASE` picks its shape:
   `rmdir` alone while no leaf can exist, leaf-then-directory once a write has
   happened. The driver does the same for the one refusal that is its own: a
   transport file that fails the ownership checks.
