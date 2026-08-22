@@ -26,6 +26,16 @@
   before it stops. The driver does the same for the one refusal that is its own:
   a transport file that fails the ownership checks.
 
+- **An abandoned assignment left the previous run's transport path standing.**
+  `${VAR:?}` ends a non-interactive shell where it stands; interactively the shell
+  survives, so the assignment that would have built this run's path did not happen
+  and whatever an earlier run left in that name stood. Each destination is cleared
+  immediately before its guarded assignment now, so an abandoned one leaves EMPTY
+  — which the helper refuses by name — rather than a path from another session.
+  The session's working directory carries the same requirement: its prefix check
+  compares against `$RB_TMPPARENT`, so an empty parent made it read
+  `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and agree.
+
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so
   `declare -n RB_PIN_SEEN=RB_TMPPARENT` passed both subshells — neither read that

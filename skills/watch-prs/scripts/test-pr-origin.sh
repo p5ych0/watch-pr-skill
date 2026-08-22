@@ -85,8 +85,19 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # given: the parent exists and is this run's, the child does not exist at all,
     # which is exactly the contract. Under `$TMP`, so the EXIT trap collects it.
     local vp vd vf diag
-    vp="$(mktemp -d "$TMP/run.XXXXXX")" \
-        || die "mktemp could not allocate a scratch parent for a run; the case below would share a path"
+    # AND THE ALLOCATION'S FAILURE STOPS THIS CALL. `die` records the failure and
+    # RETURNS — it does not end the fixture — so a `die` alone left `vp` empty and
+    # the function carried on with `vd=/dir`: a root-run fixture then creates
+    # `/dir/origin` outside `$TMP`, and every later case collides with that same
+    # path and stops exercising its own state. The value is read back too, because
+    # a `mktemp` that succeeds and prints nothing is the same empty variable by
+    # another route.
+    vp=""
+    vp="$(mktemp -d "$TMP/run.XXXXXX")" || vp=""
+    if [ -z "$vp" ] || [ ! -d "$vp" ]; then
+        die "mktemp could not allocate a scratch parent for a run; this call is abandoned rather than aimed at /dir"
+        return 1
+    fi
     vd="$vp/dir"
     case "$mode" in read) vf="$vd/origin" ;; *) vf="$vd/pin" ;; esac
     # A CONTROLLED `HOME`, so these cases do not read the contributor's git
@@ -1095,6 +1106,32 @@ _wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively a
 [ "$_wr_g" = 2 ] \
     && pass "…and each takes its status through rb_refuse, so a failed write removes the directory too" \
     || die "expected two rb_refuse guards on the writes, found $_wr_g"
+
+# ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
+#
+# `die` records a failure and returns, so a `die` with nothing after it left `run`
+# carrying on with an empty parent and `vd=/dir`. Under a root-run fixture that
+# creates `/dir/origin` outside `$TMP`, and every later case collides with it.
+#
+# RUN IN A SUBSHELL WITH ITS OWN `die`, so exercising the failure does not record
+# one: the point is what `run` DOES next, not that the allocation failed.
+_alloc_out="$( { mktemp() { return 1; }
+                 die() { printf 'DIED[%s]\n' "$1" >&2; }   # stderr, or it lands IN the value
+                 _r=0
+                 _v="$(run read)" || _r=$?
+                 printf 'RC=%s VALUE=[%s]\n' "$_r" "$_v"
+               } 2>&1 )"
+case "$_alloc_out" in
+    *DIED*) pass "a failed scratch allocation is recorded" ;;
+    *)      die "a failed scratch allocation was not recorded: '$_alloc_out'" ;;
+esac
+case "$_alloc_out" in
+    *'RC=1 VALUE=[]'*) pass "…and the call is abandoned rather than continuing with an empty parent" ;;
+    *)                 die "run continued past a failed allocation: '$_alloc_out'" ;;
+esac
+[ ! -e /dir ] \
+    && pass "…so nothing is aimed at the filesystem root" \
+    || die "a failed allocation left /dir behind"
 
 # ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
 #

@@ -371,7 +371,18 @@ if [ -n "$_forge_dir" ]; then
     # leaves the caller opening `<file>/origin`, which fails for a reason that has
     # nothing to do with the case — a stub that drifts from its subject is how a
     # fixture stops testing it.
-    # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
+    # AND AN INHERITED `FORGE_LOG` IS CLEARED FIRST. `pr-selfcheck.sh` clears
+# inherited FUNCTIONS and the hook variables; it deliberately does not clear
+# arbitrary exported values, because `SKILL.md` pins the session by exporting one.
+# So a fixture whose subject is an env-driven override clears it ITSELF, as
+# `test-pr-identity.sh` and this file already do for `REVIEW_BUS_REMOTE`. Without
+# that, an exported `FORGE_LOG` reaches EVERY invocation of the forged helper
+# rather than the one case that supplies a controlled value: naming an external
+# file it mutates that file, naming `/dev/full` it injects diagnostics into
+# unrelated cases' output, and naming a FIFO with no reader it hangs the run
+# before the helper reaches its subject.
+unset FORGE_LOG
+# AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
 # cases assert the helper was never invoked, and the only alternative was scanning
 # a directory for what it would have created — which for the empty-parent case
 # meant scanning `/`, where an entry left by any earlier run of anything failed
@@ -700,6 +711,64 @@ LOCAL
     [ ! -e "$_forge_dir/epcalls" ] \
         && pass "…and never invoked the helper, so no path was built from the empty parent" \
         || die "an empty transport parent reached the helper: '$(cat "$_forge_dir/epcalls")'"
+    # …AND INTERACTIVELY, WITH A STALE DESTINATION FROM AN EARLIER RUN, THE HELPER
+    # IS STILL NOT INVOKED WITH IT — and WHY is worth stating, because the obvious
+    # reason is not the operative one.
+    #
+    # `${VAR:?}` ends a NON-interactive shell where it stands; interactively the
+    # shell survives, which raises the question of what a stale `RB_ORIGIN_DIR`
+    # from an earlier run in the same long-lived shell does. MEASURED on bash 5:
+    # interactively the expansion abandons the whole COMPOUND COMMAND it sits in,
+    # not just its own assignment —
+    #
+    #     V=stale; P=; if true; then V="${P:?empty}/built"; echo REACHED; fi; echo AFTER
+    #
+    # prints the diagnostic and `AFTER`, never `REACHED`. Setup's transport read,
+    # its pin and its working files are all inside ONE `if [[ -z $RB_REMOTE ]]`, so
+    # the abandonment takes all of them and no helper is reached with anything.
+    #
+    # THE CLEAR IN FRONT OF THE ASSIGNMENT IS STILL THERE, and it is not what this
+    # case proves. It makes the property local — an abandoned assignment leaves
+    # EMPTY, which the helper refuses by name — rather than resting on the whole
+    # block being one command, which is a fact about a structure a later edit can
+    # split. The structural case below is what holds that structure.
+    #
+    # FED TO A REAL INTERACTIVE SHELL, since that is the mode in question, and the
+    # LOG is what is asserted rather than the transcript: an interactive shell
+    # ECHOES its input, so every path in the block appears in the output whether or
+    # not anything ran.
+    if [ -n "$_forge_dir" ]; then
+        rm -f "$_forge_dir/stalecalls"
+        printf 'RB_ORIGIN_DIR=%s/stale-from-an-earlier-run\n' "$_forge_dir" > "$_forge_dir/stale.sh"
+        printf '%s\n' "$_read_block" >> "$_forge_dir/stale.sh"
+        _sv_out="$(cd "$_forge_dir" && run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
+            RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_LOG="$_forge_dir/stalecalls" \
+            TMPDIR=.tmp HOME=.tmp bash --noprofile --norc -i < "$_forge_dir/stale.sh" 2>&1 || true)"
+        [ ! -e "$_forge_dir/stalecalls" ] \
+            && pass "…and an interactive shell holding a stale transport path never hands it to the helper" \
+            || die "a stale transport path reached the helper interactively: '$(cat "$_forge_dir/stalecalls")'"
+        # ITS REACH: the shell must really have run the block, or the absence above
+        # is what a shell that failed to start leaves. The refusal is bash's own
+        # and carries the sentence the expansion holds.
+        printf '%s' "$_sv_out" | grep -q 'RB_TMPPARENT: neither TMPDIR nor HOME is an absolute directory' \
+            && pass "…where that shell did reach the refusal and print it" \
+            || die "the interactive stale-value case did not reach the refusal: '$_sv_out'"
+    fi
+    # AND THE STRUCTURE THAT MAKES THAT TRUE IS ASSERTED, because it is a fact
+    # about where these lines SIT and an edit can move them. Every requirement of
+    # the transport parent, and both helper invocations, must be inside the one
+    # compound command an interactive abandonment takes — which is the block lifted
+    # into `$_read_block`. Lift any of them out and the interactive case above
+    # stops proving anything, silently.
+    _tp_in=0; _tp_in="$(grep -c '\${RB_TMPPARENT:?' <<<"$_read_block")" || _tp_in=0
+    _tp_all=0; _tp_all="$(grep -c '\${RB_TMPPARENT:?' "$SKILL")" || _tp_all=0
+    { [ "$_tp_all" -ge 3 ] && [ "$_tp_in" = "$_tp_all" ]; } \
+        && pass "every requirement of the transport parent is inside the block an interactive abandonment takes" \
+        || die "a \${RB_TMPPARENT:?…} sits outside the transport block (in=$_tp_in all=$_tp_all)"
+    { case "$_read_block" in *'pr-origin.sh read "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
+      && case "$_read_block" in *'pr-origin.sh pin "$RB_PIN_DIR"'*) true ;; *) false ;; esac; } \
+        && pass "…and so are both helper invocations" \
+        || die "a helper invocation sits outside the block the parent requirement guards"
     # …AND A HELPER THAT REFUSES DOES NOT HAVE ITS TRANSPORT READ OR REMOVED, EVEN
     # WITH `exit` SHADOWED. The helper's `mkdir` is the exclusion, so a refusal
     # means the name was already something — and something is not ours. Written as
@@ -1283,12 +1352,30 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
           && case "$_nr_out" in *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
             && pass "…and a nameref onto the transport parent is refused by name ($_nr)" \
             || die "a nameref onto RB_TMPPARENT was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
-        # AND THE PARENT IS UNCHANGED, which is the damage the status cannot see:
-        # a probe that merely refused later would still have let the read write the
-        # origin through the alias first.
-        case "$_nr_out" in
-            *'acme/widget.git]'*) die "the origin was written through the nameref into the parent ($_nr): '$_nr_out'" ;;
-            *)                    pass "…leaving the proven parent unchanged ($_nr)" ;;
+        # AND THE PARENT IS UNCHANGED — OBSERVED, NOT INFERRED FROM AN ABSENCE.
+        # The run above ends at the block's own `exit 1`, so the `printf` after it
+        # never runs and `$_nr_out` carries no parent marker at all: a `case` that
+        # treated the marker's ABSENCE as success passed against every
+        # implementation, including one that writes the origin through the alias
+        # and only then refuses. That is the exact mutation this case claims to
+        # detect, and it was invisible.
+        #
+        # SO A SECOND RUN SHADOWS `exit`, purely to reach the line after the block.
+        # The refusal then returns instead of terminating, execution falls out of
+        # the branch, and the marker is emitted with whatever `RB_TMPPARENT` holds.
+        # What is required is the SCRATCH PATH, exactly — not the absence of
+        # something else.
+        _nrp_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+                RB_REMOTE="git@github.com:acme/widget.git"
+                RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+                '"$_nr"'
+                '"$_pin_block"'
+                printf "PARENT=[%s]\n" "${RB_TMPPARENT:-}"
+            ' 2>&1)" || true
+        case "$_nrp_out" in
+            *"PARENT=[$RB_TMPBASE]"*) pass "…leaving the proven parent unchanged ($_nr)" ;;
+            *) die "the parent was not left as this setup proved it ($_nr): '$_nrp_out'" ;;
         esac
     done
 else
@@ -2554,7 +2641,7 @@ grep -q '^[A-Z_][A-Z_]*="\$(mktemp' "$SKILL" && _rb_mk_n=1
 [ "$_rb_mk_n" = 0 ] \
     && pass "…from a directory built by expansion, with no mktemp to shadow" \
     || die "SKILL.md allocates a working path with mktemp; a shadowed one aliases two of them"
-grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
+grep -qF 'RB_WORK_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
     && pass "…under the parent the transport read already proved usable" \
     || die "the working directory is not built under the proven parent"
 # AND SO IS THE TRANSPORT DIRECTORY — IN A SUBSHELL, AND UNDER ITS OWN NAME. This

@@ -639,6 +639,16 @@ if [[ -z $RB_REMOTE ]]; then
         # where it stands whatever `exit` has become. Interactively it abandons
         # only its own command, which leaves the variable unset and the helper
         # refusing an empty argument — the same answer one step later.
+        # CLEARED FIRST, BECAUSE AN ABANDONED ASSIGNMENT LEAVES THE OLD VALUE.
+        # INTERACTIVELY `${VAR:?}` abandons only the command it is in — the shell
+        # survives — so with a STALE `RB_ORIGIN_DIR` from an earlier run in the
+        # same long-lived shell, the refusal fired and the helper was then invoked
+        # with the previous session's path. Clearing it immediately before means an
+        # abandoned assignment leaves EMPTY, and an empty argument is one the helper
+        # refuses by name. That is a removal rather than a guard: there is no
+        # condition here for a shadowed `exit` to walk past, because there is no
+        # value left to walk past it WITH.
+        RB_ORIGIN_DIR=
         RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
         # after a guard. `mkdir` is what proves this shell's helper created that
@@ -861,6 +871,11 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
+        # CLEARED FIRST, for the reason the origin read gives: interactively the
+        # expansion abandons its own command and a stale `RB_PIN_DIR` from an
+        # earlier run in the same shell would otherwise be what the helper is
+        # handed.
+        RB_PIN_DIR=
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
         # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
@@ -979,7 +994,17 @@ if [[ -z $RB_REMOTE ]]; then
             if { ( RB_WORK_DIR=Probe-A; [[ $RB_WORK_DIR = Probe-A ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
-                    RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
+                    # THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, and it is
+                    # not redundant with the two above: the prefix check on the
+                    # next line compares against `$RB_TMPPARENT`, so with an EMPTY
+                    # one it reads `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and
+                    # AGREES — the check that exists to keep this under the proven
+                    # parent is the check an empty parent satisfies. Reaching here
+                    # with one requires the pin to have succeeded, which the clears
+                    # above make impossible; stating the requirement locally means
+                    # that argument does not have to be re-derived three blocks
+                    # away.
+                    RB_WORK_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
                     [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
                  || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
                && { /usr/bin/env mkdir -m 700 "$RB_WORK_DIR" \
