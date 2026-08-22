@@ -293,6 +293,11 @@ _read_block="$(awk '/^RB_REMOTE=$/, /there is no repository to pin this session 
 # that ends the run — on exactly the path the probe exists to accommodate.
 _rb_has_l=no
 if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
+# AND `declare -n`, WHICH IS 4.3+. The alias cases below need it, and they need it
+# named here rather than where the first of them runs — a capability asked for
+# twice is a capability two answers can disagree about.
+_rb_has_n=no
+if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; fi
 [ "$_rb_has_l" = yes ] \
     && pass "this shell has declare -l, so the case-transforming states run" \
     || pass "this shell has no declare -l, so those states are skipped by name"
@@ -381,6 +386,14 @@ esac
 # tests — `[[ -n … ]]`, `[[ … = "$RB_TRY" ]]` — which command nothing and are not
 # what this scan is about.
 _rb_after="$(printf '%s\n' "$_rb_region" | awk '/\[\[ -n \$RB_TMPDIR \]\]/,0' | tail -n +2)"
+# AND THE INNER LIFT HAS TO HAVE FOUND ITS START. An exact `awk` anchor finds
+# nothing if the emptiness check is ever written equivalently — `[[ -n
+# ${RB_TMPDIR} ]]` — and an empty stream then reports success about text nobody
+# read. The outer assertion proves only that the OUTER lift reached its `rmdir`.
+case "$_rb_after" in
+    *'rmdir "${RB_TMPDIR:?'*) pass "…and the scanned tail reaches the cleanup that closes it" ;;
+    *) die "the inner lift did not find its start; the bare-use scan below would pass vacuously" ;;
+esac
 _rb_bare="$(printf '%s\n' "$_rb_after" | grep -vE '^[[:space:]]*#' \
     | sed 's/${RB_TMPDIR:?[^}]*}//g' | grep -F 'RB_TMPDIR' || true)"
 [ -z "$_rb_bare" ] \
@@ -447,17 +460,22 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # interpolated regex invalid, `grep` errors, and `|| true` turns that into an
     # empty result: an out-of-tree argument reported clean. A quoted `case` pattern
     # is literal.
-    _rb_arg_bad=""
+    # A SEPARATE FLAG, BECAUSE AN EMPTY ARGUMENT IS DATA. A regressed cleanup
+    # handed `""` — which is exactly what a walked-past failure reaching a quoted
+    # bare `"$RB_TMPDIR"` produces — records a blank line, and using emptiness as
+    # both the value and the verdict reported that as safe.
+    _rb_arg_bad=no
+    _rb_arg_saw=""
     while IFS= read -r _rb_a; do
         case "$_rb_a" in
             -f) ;;
             "$_rb_ex"|"$_rb_ex"/*) ;;
-            *) _rb_arg_bad="$_rb_a"; break ;;
+            *) _rb_arg_bad=yes; _rb_arg_saw="$_rb_a"; break ;;
         esac
     done < "$_rb_ex/arglog"
-    [ -z "$_rb_arg_bad" ] \
+    [ "$_rb_arg_bad" = no ] \
         && pass "…and no cleanup is handed a path outside this session's own tree" \
-        || die "a cleanup was handed '$_rb_arg_bad' — with an empty directory that is /origin"
+        || die "a cleanup was handed '$_rb_arg_saw' — with an empty directory that is /origin"
     # …AND A STALE NON-EMPTY DIRECTORY IS REFUSED TOO, which the requirement alone
     # cannot do: `${RB_TMPDIR:?}` proves a value is non-empty, not that this run
     # established it. A readonly `RB_TMPDIR` naming a directory the operator owns
@@ -471,9 +489,17 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # no usable candidate the non-empty requirement accepts it — setup then works
     # against a relative `0/origin`. `declare -l` is bash 4.0+, so it is asked for
     # rather than assumed, exactly as the other cases ask.
-    _rb_st_states="readonly RB_TMPDIR=%s/stale|declare -i RB_TMPDIR=0"
+    # THE READONLY ARM BUILDS ITS VALUE IN THE CHILD, from the quoted `$TMPDIR` the
+    # child already has — interpolating the scratch root leaves a space in it
+    # truncating the assignment, and the case would then point `RB_TMPDIR`
+    # somewhere else and report the preservation check clean without ever touching
+    # the prepared directory.
+    _rb_st_states='readonly RB_TMPDIR="$TMPDIR/stale"|declare -i RB_TMPDIR=0'
     if [ "$_rb_has_l" = yes ]; then _rb_st_states="$_rb_st_states|declare -l RB_TMPDIR=x"; fi
-    _rb_st_rest="$(printf "$_rb_st_states" "$_rb_ex")"
+    if [ "$_rb_has_n" = yes ]; then
+        _rb_st_states="$_rb_st_states|declare -n RB_TMPPARENT=RB_REMOTE|declare -n RB_TRY=RB_REMOTE"
+    fi
+    _rb_st_rest="$_rb_st_states"
     mkdir -p "$_rb_ex/stale"
     while [ -n "$_rb_st_rest" ]; do
     _rb_st_attr="${_rb_st_rest%%|*}"
@@ -483,9 +509,13 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
         "$_rb_st_attr" > "$_rb_ex/stale.sh"
     _rb_st_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/stale.sh" 2>&1 || true)"
-    printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable' \
-        && pass "…and an unusable transport directory is refused by name, interactively ($_rb_st_attr)" \
-        || die "the unusable-directory case did not refuse: '$_rb_st_out' ($_rb_st_attr)"
+    # THE REFUSAL EXPECTED IS THE ONE FOR THIS NAME. An alias aimed at
+    # `RB_TMPPARENT` or `RB_TRY` is caught by THAT name's probe, and demanding
+    # `RB_TMPDIR`'s message would be asserting the wrong variable was blamed.
+    _rb_st_var="${_rb_st_attr##* }"; _rb_st_var="${_rb_st_var%%=*}"
+    printf '%s' "$_rb_st_out" | grep -qF "ABORT: $_rb_st_var is readonly, value-transforming, or aimed at another transport variable" \
+        && pass "…and an unusable transport variable is refused by its own name, interactively ($_rb_st_attr)" \
+        || die "the unusable-variable case did not refuse as $_rb_st_var: '$_rb_st_out' ($_rb_st_attr)"
     printf '%s' "$_rb_st_out" | grep -qF 'WRONG/other' \
         && die "…but a directory this run did not establish was read: '$_rb_st_out' ($_rb_st_attr)" \
         || pass "…and no origin outside this run is read ($_rb_st_attr)"
@@ -501,8 +531,6 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # `/tmp/victim` remove `/tmp/victim/origin` and try to remove `/tmp/victim`.
     # Distinct probe values are what makes it visible; `declare -n` is bash 4.3+,
     # so the shell is asked and the skip announced.
-    _rb_has_n=no
-    if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; fi
     if [ "$_rb_has_n" = yes ]; then
         mkdir -p "$_rb_ex/victim"
         printf 'origin-file\n' > "$_rb_ex/victim/origin"
