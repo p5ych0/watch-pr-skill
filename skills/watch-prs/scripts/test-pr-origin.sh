@@ -1040,7 +1040,9 @@ for _ex_kind in dir file link; do
     case "$_ex_kind" in
         dir)  mkdir "$_ex_path"; printf 'DO NOT DELETE\n' > "$_ex_path/keepme" ;;
         file) printf 'DO NOT DELETE\n' > "$_ex_path" ;;
-        link) ln -s "$_ex_base" "$_ex_path" ;;
+        link) mkdir -p "$_ex_base/linktarget"
+              printf 'DO NOT DELETE\n' > "$_ex_base/linktarget/keepme"
+              ln -s "$_ex_base/linktarget" "$_ex_path" ;;
     esac
     _ex_rc=0
     _ex_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
@@ -1063,9 +1065,16 @@ for _ex_kind in dir file link; do
         file) { [ -f "$_ex_path" ] && [ -s "$_ex_path" ]; } \
                   && pass "…and leaves the existing file alone" \
                   || die "an existing file was removed or truncated" ;;
-        link) { [ -L "$_ex_path" ] && [ -d "$_ex_base" ]; } \
-                  && pass "…and leaves the symlink and its target alone" \
-                  || die "an existing symlink or its target was removed" ;;
+        # A DEDICATED TARGET WITH A MARKER IN IT, because the symlink pointed at the
+        # shared `$_ex_base` and the check asked only whether that still existed.
+        # A regression that FOLLOWED the link and deleted entries inside the target,
+        # leaving the link and the directory in place, passed — which is precisely
+        # the write-through this case is here to refuse, and the "contents included"
+        # half of the guarantee went unasserted for links alone.
+        link) { [ -L "$_ex_path" ] && [ -d "$_ex_base/linktarget" ] \
+                && [ -s "$_ex_base/linktarget/keepme" ]; } \
+                  && pass "…and leaves the symlink, its target and the target's contents alone" \
+                  || die "an existing symlink, its target or the target's contents were removed" ;;
     esac
 done
 # …AND THE ORDINARY CASE STILL CREATES IT, so the three above are not passing

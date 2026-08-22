@@ -605,10 +605,19 @@ if [[ -z $RB_REMOTE ]]; then
     # operator is told which name is unusable. Reverting the containment restores
     # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
     # excerpt reaches the selection.
+    # AND `HOME` AND `TMPDIR` ARE READ BACK TOO, because they are the CANDIDATES and
+    # a nameref onto one is not a nameref between two of these names. With
+    # `declare -n RB_ORIGIN_DIR=HOME` the probe passed — it read neither — and the
+    # assignments below then cleared the operator's `HOME` and replaced it with a
+    # transient path this setup removes a few lines later, leaving their long-lived
+    # shell pointing at a directory that no longer exists. A probe that compares
+    # only against the names its own stage introduces cannot see that.
     if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
-         && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
+         && [[ ${RB_REMOTE:-} != Probe-A ]] \
+         && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
-         && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
+         && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
+         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -863,12 +872,20 @@ if [[ -z $RB_REMOTE ]]; then
     # local origin such as `/tmp/repo` the session's working directory is then
     # created inside that repository. The transport probe above already compares
     # against every name it can reach; this one now does the same.
+    # AND `HOME` AND `TMPDIR` HERE TOO, for the reason the transport probe gives.
+    # This stage removes what it creates as well, so an alias onto a candidate has
+    # the same end: the operator's variable is replaced with a path and the path is
+    # then deleted. Written into ONE of two identical probes it is the shape this
+    # repository records as the cause of its worst bugs — a rule that reached two
+    # of three helpers and sat missing from the third for eleven rounds.
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-A ]] ) 2>/dev/null \
+         && [[ ${RB_TMPPARENT:-} != Probe-A ]] \
+         && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
+         && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
+         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
         # CLEARED FIRST, for the reason the origin read gives: interactively the

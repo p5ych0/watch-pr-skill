@@ -36,6 +36,14 @@
   compares against `$RB_TMPPARENT`, so an empty parent made it read
   `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and agree.
 
+- **A nameref from a transport name onto `HOME` or `TMPDIR` replaced the
+  operator's variable with a path setup then deleted.** Each probe compared only
+  against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
+  passed both subshells — neither read `HOME`. The assignments then cleared it and
+  set it to the transport path, and the cleanup a few lines later removed that
+  directory, leaving the operator's long-lived shell pointing at a path that no
+  longer exists. Both probes read both candidates back now.
+
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so
   `declare -n RB_PIN_SEEN=RB_TMPPARENT` passed both subshells — neither read that

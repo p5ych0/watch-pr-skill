@@ -711,6 +711,51 @@ LOCAL
     [ ! -e "$_forge_dir/epcalls" ] \
         && pass "…and never invoked the helper, so no path was built from the empty parent" \
         || die "an empty transport parent reached the helper: '$(cat "$_forge_dir/epcalls")'"
+    # …AND A NAMEREF ONTO A CANDIDATE — `HOME` OR `TMPDIR` — IS REFUSED, WITH THAT
+    # CANDIDATE LEFT AS IT WAS. The probe compared only against the names this stage
+    # introduces, so `declare -n RB_ORIGIN_DIR=HOME` passed it: neither subshell read
+    # `HOME`. The assignments then cleared the operator's `HOME` and replaced it with
+    # a transport path this setup REMOVES a few lines later, so their long-lived shell
+    # was left pointing at a directory that no longer exists.
+    #
+    # THE CANDIDATE IS READ BACK, not just the status: a probe that refused only after
+    # the assignment had happened would still have replaced it.
+    #
+    # READ FROM AN `EXIT` TRAP, because the line after the block is not reachable
+    # here. With the transport probe refusing and `exit` shadowed, execution walks
+    # on to the pin, where `${RB_TMPPARENT:?…}` ends the shell — the parent was
+    # never selected, since selecting it is the refused arm's job. A trap installed
+    # before the block runs on that exit and writes the candidate to a file, so the
+    # observation survives however the shell leaves.
+    if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+        for _al in 'declare -n RB_ORIGIN_DIR=HOME:HOME' \
+                   'declare -n RB_ORIGIN_DIR=TMPDIR:TMPDIR' \
+                   'declare -n RB_TMPPARENT=HOME:HOME'; do
+            _al_decl="${_al%%:*}"; _al_var="${_al##*:}"
+            rm -f "$_forge_dir/alias.out"
+            _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+                RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
+                RB_ALIAS_OUT="$_forge_dir/alias.out" \
+                'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+                    trap '"'"'printf "CANDIDATE=[%s] PINNED=[%s]\n" "${'"$_al_var"':-}" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
+                    '"$_al_decl"'
+                    '"$_read_block"'
+                ' 2>&1)" || true
+            _al_seen=""
+            [ -f "$_forge_dir/alias.out" ] && _al_seen="$(<"$_forge_dir/alias.out")"
+            case "$_al_seen" in
+                *"CANDIDATE=[$_forge_dir]"*) pass "…and a nameref onto \$$_al_var leaves it as the operator had it ($_al_decl)" ;;
+                *) die "a nameref onto \$$_al_var replaced it ($_al_decl): seen='$_al_seen' out='$_al_out'" ;;
+            esac
+            case "$_al_seen" in
+                *'PINNED=[git@'*) die "a nameref onto \$$_al_var still pinned the session ($_al_decl): '$_al_seen'" ;;
+                *'PINNED=[]'*)    pass "…and nothing is pinned through it ($_al_decl)" ;;
+                *) die "the alias case left no observation at all ($_al_decl): seen='$_al_seen' out='$_al_out'" ;;
+            esac
+        done
+    else
+        echo "ok   - (declare -n is unavailable on this bash, or no forge; the candidate-alias cases did not run)"
+    fi
     # …AND INTERACTIVELY, WITH A STALE DESTINATION FROM AN EARLIER RUN, THE HELPER
     # IS STILL NOT INVOKED WITH IT — and WHY is worth stating, because the obvious
     # reason is not the operative one.
@@ -951,10 +996,12 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 # process to kill.
 for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
           '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] ) 2>/dev/null \\' \
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${HOME:-} != Probe-A \]\] && \[\[ ${TMPDIR:-} != Probe-A \]\] ) 2>/dev/null \\' \
           '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
           '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] ) 2>/dev/null; then'; do
+          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${HOME:-} != Probe-B \]\] && \[\[ ${TMPDIR:-} != Probe-B \]\] ) 2>/dev/null; then'; do
     grep -q "^$_v\$" <<<"$_pin_body" \
         || die "the pin probe is missing a line: $_v"
 done
