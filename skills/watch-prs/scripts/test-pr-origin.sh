@@ -364,9 +364,14 @@ run_limited 20 bash -c '
 # any defence that lives inside this file. `bash -p` at the CALL SITE is the
 # answer, because privileged mode is what stops the hook being sourced at all, and
 # nothing inside the file can undo work that happened before its first line.
-# THE HOOK WRITES THE VALUE FILE, whose path it can see as `$2` — it is sourced
-# inside the script's own shell, so the script's arguments are its arguments.
-printf "printf '%%s\\n' '%s' > \"\$2\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
+# THE HOOK FOLLOWS THE HELPER'S CONTRACT, whose argument it can see as `$2` — it
+# is sourced inside the script's own shell, so the script's arguments are its
+# arguments. Since #157 that argument is a DIRECTORY, so the hook creates it and
+# writes the leaf inside; one that still wrote a FILE at `$2` left the caller
+# reading `<file>/origin`, which is absent whatever happened — so the unprivileged
+# comparison below saw nothing and took its "this bash cannot reach the arguments"
+# branch on a shell where the attack lands perfectly.
+printf "mkdir -p \"\$2\" 2>/dev/null\nprintf '%%s\\n' '%s' > \"\$2/origin\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
 got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
     && pass "a hook that writes the value file and exits never runs" \
@@ -500,7 +505,7 @@ open_rc=0
 open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "a transport directory other accounts can write is refused" \
     || die "the helper wrote into a world-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND A GROUP-WRITABLE ONE TOO, which is the shape a shared machine actually has.
@@ -603,7 +608,7 @@ SAFELINK="$TMP/safelink"
 mkdir -p "$SAFELINK"
 ln -sfn "$OPENDIR" "$SAFELINK/t"
 chmod 700 "$OPENDIR"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/dir" ) >/dev/null 2>&1
 [ "$(cat "$SAFELINK/t/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a symlink to a directory this user owns is followed as before" \
@@ -628,7 +633,7 @@ if command -v setfacl >/dev/null 2>&1; then
         acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/dir" 2>&1 )" || acl_rc=$?
         { [ "$acl_rc" -ne 0 ] \
           && case "$acl_diag" in *"access-control list"*) true ;; *) false ;; esac \
-          && [ ! -e "$ACLDIR/origin" ]; } \
+          && [ ! -e "$ACLDIR/dir" ]; } \
             && pass "…and a component carrying an ACL is refused" \
             || die "an ACL-bearing directory was accepted (rc=$acl_rc diag='$acl_diag')"
         # THE FIXTURE'S OWN REACH: the ACL must actually be there, or the case
@@ -665,7 +670,7 @@ xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME=
     /usr/bin/env bash -p "$SCRIPT" read "$XADIR/dir" 2>&1 )" || xa_rc=$?
 { [ "$xa_rc" -ne 0 ] \
   && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
-  && [ ! -e "$XADIR/origin" ]; } \
+  && [ ! -e "$XADIR/dir" ]; } \
     && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
     || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
 
@@ -678,14 +683,14 @@ LSFAIL="$TMP/lsfail"
 mkdir -p "$LSFAIL"
 printf '#!/usr/bin/env bash\nexit 3\n' > "$LSFAIL/ls"
 chmod +x "$LSFAIL/ls"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 chmod 700 "$OPENDIR"
 lsf_rc=0
 lsf_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$LSFAIL:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || lsf_rc=$?
 { [ "$lsf_rc" -ne 0 ] \
   && case "$lsf_diag" in *"could not read the permissions"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and an ACL probe that cannot run refuses rather than reading empty as unmarked" \
     || die "a failing ls was treated as a clean result (rc=$lsf_rc diag='$lsf_diag')"
 
@@ -698,19 +703,19 @@ FINDSTUB="$TMP/findstub"
 mkdir -p "$FINDSTUB"
 printf '#!/usr/bin/env bash\nexit 2\n' > "$FINDSTUB/find"
 chmod +x "$FINDSTUB/find"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 probe_rc=0
 probe_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$FINDSTUB:$PATH" \
     /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || probe_rc=$?
 { [ "$probe_rc" -ne 0 ] \
   && case "$probe_diag" in *"could not examine"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and a probe that cannot run refuses rather than reading empty as safe" \
     || die "a failing probe was treated as a clean result (rc=$probe_rc diag='$probe_diag')"
 
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" ) >/dev/null 2>&1
 [ "$(cat "$OPENDIR/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a private directory is written as before" \
