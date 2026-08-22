@@ -412,8 +412,12 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # are unreachable for a reason that does not hold at an operator's prompt.
     # Here the block runs to the end and every dangerous command has to refuse on
     # its own — what must never appear is a path built from an empty directory.
-    printf 'exit() { return 0; }\nreadonly RB_TMPPARENT=/nonexistent-parent-for-this-case\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED origin_out=[%%s]\\n" "${RB_ORIGIN_OUT:-unset}"\nexit\n' \
-        "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/interactive.sh"
+    # THE PATH IS NOT SPLICED IN. Interpolating the scratch root as shell source
+    # makes a space in it — which `TMPDIR` may legally contain — execute the
+    # suffix, and quotes or substitutions in it alter the script outright. The
+    # child already has the root exported as `TMPDIR`, so the script reads it.
+    printf 'exit() { return 0; }\nreadonly RB_TMPPARENT=/nonexistent-parent-for-this-case\nRB_SCRIPTS="$TMPDIR"\n. "$TMPDIR/blk.sh"\nprintf "REACHED origin_out=[%%s]\\n" "${RB_ORIGIN_OUT:-unset}"\nexit\n' \
+        > "$_rb_ex/interactive.sh"
     _rb_it_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/interactive.sh" 2>&1 || true)"
     # THE OUTCOME, NOT THE COUNT. How many refusals appear depends on how far the
@@ -475,8 +479,8 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     _rb_st_attr="${_rb_st_rest%%|*}"
     case "$_rb_st_rest" in *'|'*) _rb_st_rest="${_rb_st_rest#*|}" ;; *) _rb_st_rest="" ;; esac
     printf '%s\n' "git@github.com:WRONG/other.git" > "$_rb_ex/stale/origin"
-    printf 'exit() { return 0; }\n%s\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED remote=[%%s]\\n" "${RB_REMOTE:-unset}"\nexit\n' \
-        "$_rb_st_attr" "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/stale.sh"
+    printf 'exit() { return 0; }\n%s\nRB_SCRIPTS="$TMPDIR"\n. "$TMPDIR/blk.sh"\nprintf "REACHED remote=[%%s]\\n" "${RB_REMOTE:-unset}"\nexit\n' \
+        "$_rb_st_attr" > "$_rb_ex/stale.sh"
     _rb_st_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/stale.sh" 2>&1 || true)"
     printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable' \
@@ -502,10 +506,10 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     if [ "$_rb_has_n" = yes ]; then
         mkdir -p "$_rb_ex/victim"
         printf 'origin-file\n' > "$_rb_ex/victim/origin"
-        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s/victim" > "$2"\nexit 0\n' "$_rb_ex" > "$_rb_ex/pr-origin.sh"
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$TMPDIR/victim" > "$2"\nexit 0\n' > "$_rb_ex/pr-origin.sh"
         chmod +x "$_rb_ex/pr-origin.sh"
-        printf 'declare -n RB_TMPDIR=RB_REMOTE\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED\\n"\n' \
-            "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/nameref.sh"
+        printf 'declare -n RB_TMPDIR=RB_REMOTE\nRB_SCRIPTS="$TMPDIR"\n. "$TMPDIR/blk.sh"\nprintf "REACHED\\n"\n' \
+            > "$_rb_ex/nameref.sh"
         _rb_nr_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
             bash --noprofile --norc "$_rb_ex/nameref.sh" 2>&1 || true)"
         printf '%s' "$_rb_nr_out" | grep -qF 'aimed at another transport variable' \
