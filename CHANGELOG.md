@@ -36,7 +36,8 @@
   compares against `$RB_TMPPARENT`, so an empty parent made it read
   `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and agree.
 
-- **Another account could keep a session from starting, repeatably.** The
+- **Another account could keep a session from starting, repeatably — narrowed,
+  and the remainder written down.** The
   transport directory's name is an argv entry, which `ps` and `/proc` publish the
   moment the helper starts, and the `mkdir` ran only after both ancestry walks. On
   a shared sticky parent such as `/tmp` another local account could read the name
@@ -44,6 +45,14 @@
   watched. The random suffix stops a name being guessed and does nothing about one
   being read. The directory is reserved first now, and a failed `mkdir` asks the
   walks why before refusing, so the precise diagnostic survives the reordering.
+
+  That narrows the interval to process startup rather than removing it: the name
+  is in argv, which is published at exec. Removing it entirely means the caller
+  creating the directory, which puts a `mkdir` back in the operator's own shell on
+  a name that shell may have made readonly or a nameref — the class #157 exists to
+  remove. The remainder is a denial of service by an account already on the
+  machine, it fails closed, and `pr-origin.sh` states it beside the ordering.
+  #160.
 
 - **A nameref from a transport name onto `HOME` or `TMPDIR` replaced the
   operator's variable with a path setup then deleted.** Each probe compared only

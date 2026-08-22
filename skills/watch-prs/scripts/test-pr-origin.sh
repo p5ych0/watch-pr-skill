@@ -1161,6 +1161,14 @@ _res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCR
 [ "$_res_g" = 2 ] \
     && pass "…and both walk refusals give the reservation back through rb_refuse" \
     || die "expected both walks to refuse through rb_refuse, found $_res_g"
+# …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
+# `mkdir` ahead of the walks narrows the interval between exec and reservation; it
+# does not remove it, because the candidate is an argv entry published at exec. A
+# maintainer reading the reservation ordering has to learn what it does not buy, or
+# the next round re-derives it — which is what happened twice on #158. #160.
+grep -qF 'WHAT THIS ORDERING DOES NOT CLOSE' "$SCRIPT" \
+    && pass "…and the file states the interval the ordering cannot remove" \
+    || die "the reservation ordering claims a property it does not have; the argv limit is unstated"
 
 # ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
 #

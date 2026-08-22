@@ -66,17 +66,28 @@
 #      WHAT IS AT THE ARGUMENT ON STATUS 1 DEPENDS ON WHICH SIDE OF THE `mkdir`
 #      the refusal happened, and the two are opposite:
 #
-#        - BEFORE it — a bad mode, a relative path, an unsafe ancestor, or the
-#          `mkdir` itself failing because the name is ALREADY TAKEN — nothing here
-#          created anything, so nothing here removes anything. A pre-existing
-#          directory, file or symlink at that name survives untouched, contents
-#          included. That is the exclusion working: a name somebody else got to
-#          first is theirs, and a refusal that tidied it up would be this script
-#          deleting what it just refused to trust.
-#        - AFTER it — the git read, an empty origin, a newline in it, a failed
-#          write — this script created the directory, so `rb_refuse` removes the
-#          leaf and the directory before stopping. Nothing is left at the argument
-#          and there is nothing for the caller to collect.
+#        - BEFORE it — a bad mode, a relative path, or the `mkdir` itself failing
+#          because the name is ALREADY TAKEN — nothing here created anything, so
+#          nothing here removes anything. A pre-existing directory, file or symlink
+#          at that name survives untouched, contents included. That is the
+#          exclusion working: a name somebody else got to first is theirs, and a
+#          refusal that tidied it up would be this script deleting what it just
+#          refused to trust.
+#        - AFTER it — an UNSAFE ANCESTOR, the git read, an empty origin, a newline
+#          in it, a failed write — this script created the directory, so
+#          `rb_refuse` removes the leaf and the directory before stopping. Nothing
+#          is left at the argument and there is nothing for the caller to collect.
+#
+#      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
+#      The walks used to run first, so an unsafe component was refused before
+#      anything existed; the reservation ordering put the create in front of them,
+#      so that refusal now has a directory of its own to remove. A maintainer
+#      reading the old classification would expect the opposite cleanup semantics
+#      for a path that runs on every unsafe parent.
+#
+#      THE FAILED-`mkdir` DIAGNOSTIC PATH IS SEPARATE AND STILL PRE-CREATION: a
+#      `mkdir` that fails runs the walks itself, purely to name the cause, and
+#      nothing was created there either.
 #
 #      A caller cannot tell the two apart from the status, and does not need to:
 #      the rule it follows is that it removes only what a status 0 gave it.
@@ -342,6 +353,28 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
     return 0
 }
 # ── THE NAME IS RESERVED BEFORE IT IS WALKED ───────────────────────────────
+#
+# WHAT THIS ORDERING DOES NOT CLOSE, STATED HERE BECAUSE IT CANNOT BE CLOSED FROM
+# INSIDE. The candidate is an ARGV ENTRY, published by `ps` and `/proc` at exec —
+# before this script's first line. Moving the `mkdir` ahead of the walks narrows
+# the interval to process startup; it does not remove it. A local account watching
+# `/proc` continuously can still win that interval and make an otherwise valid
+# setup abort.
+#
+# THE ONLY PROTOCOL THAT REMOVES IT PUTS THE `mkdir` BACK IN THE CALLER, and that
+# is the trade rather than an oversight. For the name never to be published, the
+# directory in argv has to be one the caller ALREADY created private — nobody else
+# can create anything inside a mode-700 directory — and then the caller is doing
+# the `mkdir`, in the operator's own long-lived shell, on a name that shell may
+# have made readonly, `declare -i`, `declare -l` or a nameref aimed at another
+# transport variable. That is #146, #148, #150, #151 and half of #155: five issues
+# and dozens of review rounds, and removing it is what #157 is.
+#
+# The exposure that remains is a DENIAL OF SERVICE by an account already on the
+# machine, and it fails CLOSED: setup refuses, nothing is forged, and the
+# directory is 700 so nothing is read. Trading that for the class above is not a
+# trade worth making silently, so it is written down instead — the same shape as
+# the `PATH` limit at the foot of this file and #91. #160.
 #
 # THE `mkdir` COMES FIRST, and that ordering is a fix rather than an accident. It
 # used to run AFTER both ancestry walks, and the candidate is visible to every
