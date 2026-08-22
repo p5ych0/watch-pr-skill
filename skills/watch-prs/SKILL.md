@@ -649,27 +649,56 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
+        # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
+        # fallback is FOR and `-d` does not answer it. An absolute, existing but
+        # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
+        # the helper's `mkdir` then failed with a usable `HOME` sitting next to it.
+        # The candidate loop this replaced did fall through in that state.
+        #
+        # WHAT IS NOT RETRIED, AND WHY. A parent whose ANCESTRY the helper refuses —
+        # another account owning a component, a world-writable non-sticky one, an
+        # ACL — is reported rather than silently routed around. Deciding it here
+        # means a second copy of that walk in the one shell nothing can harden,
+        # which is the removal this whole change is; and a `TMPDIR` whose ancestry
+        # is unsafe is a state an operator has to SEE named, not one to step past
+        # into `HOME`. The helper says which component and why.
         RB_TMPPARENT=
-        [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
+        [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
+            && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
         [[ -n $RB_TMPPARENT ]] \
-            || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
+            || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
+                 && [[ -x ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
         [[ -n $RB_TMPPARENT ]] \
             || { echo "ABORT: neither TMPDIR nor HOME is an absolute directory this session can write to"; exit 1; }
         RB_ORIGIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-        /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR" \
-            || { echo "ABORT: could not read this session's origin"; exit 1; }
-        # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked of
-        # the OPEN DESCRIPTOR, so they describe the object this shell is about to
-        # read rather than a name it could be talked into looking up twice.
-        # AND A REFUSED READ REMOVES WHAT THE HELPER LEFT. The helper cleans up
-        # after its OWN refusals — it created the directory — but a read this
-        # side rejects leaves a written file in a directory nothing else will
-        # remove. The obligation follows whoever the refusal belongs to.
-        { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-            && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" \
-            || { /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"; /usr/bin/env rmdir "$RB_ORIGIN_DIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
-        /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-        /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+        # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
+        # after a guard. `mkdir` is what proves this shell's helper created that
+        # directory, and it is the helper that runs it — so a REFUSED call means
+        # the name was already something, and something is not ours. Written as a
+        # guard the refusal was walked past by a shadowed `exit` and the lines
+        # below then read a pre-existing `origin` owned by this user, which passes
+        # `-O` and `-f`, and pinned the session from it — and removed the
+        # operator's file and directory on the way out. Containment is what a
+        # neutralised `exit` cannot step over.
+        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
+            # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
+            # of the OPEN DESCRIPTOR, so they describe the object this shell is
+            # about to read rather than a name it could be talked into looking up
+            # twice.
+            # AND A REFUSED READ REMOVES WHAT THE HELPER LEFT. The helper cleans up
+            # after its OWN refusals — it created the directory — but a read this
+            # side rejects leaves a written file in a directory nothing else will
+            # remove. The obligation follows whoever the refusal belongs to.
+            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" \
+                || { /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"; /usr/bin/env rmdir "$RB_ORIGIN_DIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
+            /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
+            /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+        else
+            echo "ABORT: could not read this session's origin"
+            exit 1
+            [[ -n "" ]]
+        fi
     else
         echo "ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
@@ -810,24 +839,24 @@ if [[ -z $RB_REMOTE ]]; then
     # unset `RB_PIN_SEEN` cannot match a non-empty remote, so the failure lands on the
     # postcondition that is already here.
     #
-    # WRITTEN AS `&&` RATHER THAN AS `if`, and that is structural, not style: the
-    # postcondition below is lifted out of this file and executed by
-    # `test-pr-skill-contract.sh`, which takes the block from here to the first `fi`
-    # at column 0. An `if … else … fi` around this call ends the lift before the
-    # postcondition, and every case built on it then runs against a truncated block —
-    # nine assertions passed against nothing on the first attempt at this.
-    # ITS OWN DIRECTORY, ALLOCATED HERE AND GONE ON EVERY PATH OUT OF THE BRANCH
-    # BELOW. The origin read removed the first one as soon as it had its value; this
-    # is the second half of that. Same parent, same rules, same lifetime — but the
-    # lifetime is now a branch rather than four lines, because WHO MADE IT decides who
-    # may remove it: the `mkdir` below is what proves this shell did, so its arms
-    # remove the directory and everything outside them removes nothing at all.
+    # WRITTEN AS `if` RATHER THAN AS `&&`, WHICH IS THE OPPOSITE OF WHAT STOOD HERE.
+    # The `&&` form was chosen because the postcondition below is lifted out of this
+    # file and executed by `test-pr-skill-contract.sh`, and that lift used to end at
+    # the first `fi` at COLUMN 0 — so an `if` around this call ended it before the
+    # postcondition and nine assertions ran against a truncated block. The lift ends
+    # at the pin branch's own `fi`, four spaces in, since #155; an `if` around the
+    # call closes eight spaces in and the lift is unaffected. The `&&` form's real
+    # cost is the one the round after found: the removals that followed it ran on
+    # every path, including the one where the helper refused because the directory
+    # was already the operator's.
     #
-    # ONE ARM REMOVES IT, AND ONLY ONE: the arm where the `mkdir` succeeded, which is
-    # the only place this shell is known to have created it. Every refusal fires
-    # BEFORE that `mkdir` — the assignments are proved first — so there is nothing for
-    # them to clean up, and a `mkdir` that failed means the path was already
-    # something, and something is not ours.
+    # ITS OWN DIRECTORY, ALLOCATED HERE AND GONE ON EVERY PATH OUT OF THE ARM BELOW.
+    # The origin read removed the first one as soon as it had its value; this is the
+    # second half of that. Same parent, same rules, same lifetime — and the lifetime
+    # is the HELPER'S ANSWER, because WHO MADE IT decides who may remove it: the
+    # `mkdir` inside the helper is what proves this shell's call created it, so its
+    # success arm removes the directory and nothing outside that arm removes
+    # anything at all.
     # ── DOES A CHILD SEE THE PIN? ─────────────────────────────────────────
     #
     # THE SAME MOVE AS THE READ ABOVE. This was `RB_PIN_DIR`, `RB_PIN_OUT` and
@@ -846,11 +875,18 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] ) 2>/dev/null; then
-        /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR" \
-            && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+        # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
+        # above states: a refused call means the `mkdir` inside the helper found
+        # the name already taken, so the directory and the file in it are the
+        # OPERATOR'S — and `rm -f` deletes that file while `rmdir` deletes the
+        # directory whenever it is empty, which an operator's directory often is.
+        # Written after the call they ran on every path, including that one.
+        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
+            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
-        /usr/bin/env rm -f "$RB_PIN_DIR/pin"
-        /usr/bin/env rmdir "$RB_PIN_DIR"
+            /usr/bin/env rm -f "$RB_PIN_DIR/pin"
+            /usr/bin/env rmdir "$RB_PIN_DIR"
+        fi
         # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
         # rounds of review walked up to it and it is cheaper to state than to
         # rediscover. #102.

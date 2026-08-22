@@ -619,6 +619,74 @@ LOCAL
       && printf '%s' "$_relh_out" | grep -q 'neither TMPDIR nor HOME is an absolute directory'; } \
         && pass "…and with neither absolute, setup says so rather than building a path" \
         || die "a relative HOME was accepted (rc=$_relh_rc out='$_relh_out')"
+    # …AND AN ABSOLUTE BUT UNWRITABLE `TMPDIR` FALLS THROUGH TOO. `-d` says the
+    # name is a directory and nothing more: `/usr` satisfies it, was committed to,
+    # and the helper's `mkdir` then failed with a usable `HOME` sitting next to it —
+    # the candidate loop this replaced did fall through in that state. `-w` and `-x`
+    # are what make the selection answer "can hold a directory".
+    #
+    # STAGED WITH A REAL UNWRITABLE DIRECTORY, mode 500, rather than by naming a
+    # system path: `/usr` is writable under a container running as root, where the
+    # case would pass for the wrong reason.
+    # SKIPPED WHERE THE RUNNER IS ROOT, and said so out loud. Mode bits do not stop
+    # uid 0, so `-w` succeeds on a 500 directory there and the case would fail
+    # against correct code. A skip that reports nothing is the coverage this file
+    # exists to stop claiming, so it names itself.
+    mkdir -p "$_forge_dir/nowrite"
+    chmod 500 "$_forge_dir/nowrite"
+    if [ "$(id -u)" = 0 ]; then
+        pass "…(skipped: running as uid 0, where an unwritable directory is still writable)"
+    else
+        _unw_rc=0
+        _unw_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            TMPDIR="$_forge_dir/nowrite" HOME="$_forge_dir" bash -c '
+                '"$_read_block"'
+                printf "PINNED=%s\n" "$RB_REMOTE"
+            ' 2>&1)" || _unw_rc=$?
+        printf '%s' "$_unw_out" | grep -q '^PINNED=git@github.com:acme/widget.git' \
+            && pass "an absolute but unwritable TMPDIR falls through to HOME rather than ending the session" \
+            || die "an unwritable TMPDIR was committed to (rc=$_unw_rc out='$_unw_out')"
+        # AND THE FALLBACK IS WHERE IT WENT, not merely that it survived. A block
+        # that ignored `TMPDIR` altogether would satisfy the line above.
+        [ -z "$(ls -A "$_forge_dir/nowrite" 2>/dev/null)" ] \
+            && pass "…and builds nothing under the parent it refused" \
+            || die "the unwritable TMPDIR was written into after all"
+    fi
+    chmod 700 "$_forge_dir/nowrite"
+    # …AND A HELPER THAT REFUSES DOES NOT HAVE ITS TRANSPORT READ OR REMOVED, EVEN
+    # WITH `exit` SHADOWED. The helper's `mkdir` is the exclusion, so a refusal
+    # means the name was already something — and something is not ours. Written as
+    # a guard, a neutralised `exit` walked past the abort and the lines below read
+    # the transport anyway: a file owned by this user and regular passes `-O` and
+    # `-f`, so the session was pinned from it, and the `rm -f` and `rmdir` after it
+    # then deleted a file and a directory this shell never created. Containment is
+    # what a neutralised `exit` cannot step over.
+    #
+    # THE FORGED HELPER LEAVES A FOREIGN VALUE AND THEN REFUSES, which is the state
+    # that discriminates: a refusal that creates nothing is survived by the broken
+    # code too, since the read then fails on a missing file. `FORGE_VALUE` names a
+    # different repository, so a pin from it is visible rather than
+    # indistinguishable from the correct answer.
+    _pex_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        FORGE_VALUE='git@github.com:attacker/other.git' TMPDIR="$_forge_dir" \
+        'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+            '"$_read_block"'
+            printf "PINNED=[%s]\n" "${RB_REMOTE:-}"
+        ' 2>&1)" || true
+    case "$_pex_out" in
+        *attacker/other*) die "a refused helper had its transport read anyway: '$_pex_out'" ;;
+        *)                pass "…a refused read never reaches the transport, even with exit shadowed" ;;
+    esac
+    # …AND REMOVED NOTHING. The directory the forged helper made is still there,
+    # with its file in it: this shell did not create either, so neither is its to
+    # delete. An absence check on the pin is not enough — the broken code failed
+    # the `-O`/`-f` read and STILL ran both removals from the arm after it.
+    _pex_left=""
+    _pex_left="$(ls -d "$_forge_dir"/watch-pr.* 2>/dev/null | head -1)" || _pex_left=""
+    { [ -n "$_pex_left" ] && [ -d "$_pex_left" ] && [ -s "$_pex_left/origin" ]; } \
+        && pass "…and removes neither the directory nor the file, having created neither" \
+        || die "a refused read deleted what the helper left behind (left='$_pex_left')"
+    rm -rf "$_forge_dir"/watch-pr.* "$_forge_dir/nowrite"
     # ── WHAT THIS FILE NO LONGER ASSERTS, AND WHERE IT WENT ────────────────
     #
     # A readonly `RB_TMPDIR`, a replaceable parent, and a directory setup did not
@@ -1112,6 +1180,33 @@ if [ -n "$_forge_dir" ]; then
       && case "$_pf_out" in *OWNER=*) false ;; *) true ;; esac; } \
         && pass "…and a pin helper that writes the right value and then fails is not believed" \
         || die "setup accepted a pin from a helper that failed (rc=$_pf_rc out='$_pf_out')"
+fi
+# …AND A REFUSED PIN REMOVES NOTHING EITHER, which is the pin side of the same
+# finding. The helper's `mkdir` is the exclusion, so a refusal means the name was
+# already taken — and the `rm -f` and `rmdir` that used to follow the call ran on
+# that path too, deleting the operator's file and then their directory, which
+# `rmdir` removes whenever it is empty.
+#
+# WITH `exit` SHADOWED, because the postcondition below already refuses an empty
+# `RB_PIN_SEEN` — what has to be shown is that nothing is DESTROYED on the way to
+# that refusal, and the removals sat after the call rather than inside its arm.
+if [ -n "$_forge_dir" ]; then
+    _pxl_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+            '"$_pin_block"'
+        ' 2>&1)" || true
+    case "$_pxl_out" in
+        *OWNER=*) die "a refused pin reached the success line: '$_pxl_out'" ;;
+        *)        pass "…and a refused pin never reaches the success line" ;;
+    esac
+    _pxl_left=""
+    _pxl_left="$(ls -d "$RB_TMPBASE"/watch-pr-pin.* 2>/dev/null | head -1)" || _pxl_left=""
+    { [ -n "$_pxl_left" ] && [ -d "$_pxl_left" ] && [ -s "$_pxl_left/pin" ]; } \
+        && pass "…and removes neither the directory nor the file, having created neither" \
+        || die "a refused pin deleted what the helper left behind (left='$_pxl_left')"
+    rm -rf "$RB_TMPBASE"/watch-pr-pin.*
 fi
 # ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
 #
@@ -1832,7 +1927,7 @@ awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^ 
 # assertion below stays green while the real setup enters the loop with a name it
 # has just reported unusable.
 case "$(cat "$_rb_pb/parent.sh")" in
-    *'[[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"'*)
+    *'[[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \'*)
         pass "…and the excerpt contains the selection, so the cases below can see it" ;;
     *)
         die "the extracted probe block stops before the parent selection; the runtime cases below would pass against a guard" ;;

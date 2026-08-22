@@ -26,6 +26,26 @@
   before it stops. The driver does the same for the one refusal that is its own:
   a transport file that fails the ownership checks.
 
+- **A refused helper had its transport read and removed anyway.** The read and
+  both removals were statements after a guard, and `exit` is a name a startup
+  file can replace with one that RETURNS. With it neutralised, a helper that
+  refused because `mkdir` found the name already taken was walked past, and the
+  lines below opened that directory's `origin`: a regular file owned by this
+  user passes `-O` and `-f`, so the session was pinned from it — and the `rm -f`
+  and `rmdir` after it then deleted a file and a directory this shell never
+  created. Both are the helper's success arm now, on the read side and the pin
+  side alike; containment is what a neutralised `exit` cannot step over.
+
+- **An absolute but unwritable `TMPDIR` ended the session with a usable `HOME`
+  next to it.** `-d` says the name is a directory and nothing more — `/usr`
+  satisfies it — so the selection committed and the helper's `mkdir` then failed.
+  The candidate loop this replaced did fall through in that state. The selection
+  asks `-w` and `-x` as well, which is what "can hold a directory" means. A
+  parent whose ANCESTRY the helper refuses is still reported rather than routed
+  around: deciding that here means a second copy of the walk in the shell that
+  cannot be hardened, and an unsafe ancestry is a state an operator has to see
+  named.
+
 - **The transport parent is chosen inside the probe that proves it assignable.**
   A readonly `RB_TMPPARENT` makes the selection fail, and under `errexit` — which
   a driving shell may well be in — a failed readonly assignment ends the session
