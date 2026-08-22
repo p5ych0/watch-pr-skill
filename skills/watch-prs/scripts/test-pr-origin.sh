@@ -1181,12 +1181,20 @@ _res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXI
 # where the directory existed and no trap did — a signal there took its default
 # action and left the reservation behind. Nothing in those definitions needs the
 # reservation; the arming does, and it has to be the first thing after it.
+# NOTHING IS ALLOWLISTED HERE, and that is deliberate. The first version excluded
+# statement SPELLINGS — assignments, `echo`, `exit`, names beginning `_rb_` — and an
+# allowlist accepts whatever nobody thought of: a top-level
+# `_rb_pause="$(slow_command)"` matched the `_rb_` clause, so a TERM during that
+# substitution would again leave the reservation behind with this case green. This
+# repository records the same defect twice already, in the pin-suffix check.
+#
+# WHAT IS EXCLUDED IS POSITIONAL AND EXACT. The `mkdir`'s own failure arm is
+# CONTINUATION, so every line of it is indented; it runs only where nothing was
+# created and it ends in `exit 1`. Comments and blank lines are not statements.
+# Everything else left in the interval fails the case, whatever it says.
 _res_gap=""
-_res_gap="$(awk -v a="$_res_mk" -v b="$_res_tr" 'NR>a && NR<b && NF && $0 !~ /^ *#/ && $0 !~ /^ *(\|\||&&)/ && $0 !~ /^ *(\[\[|echo|exit|_rb_|\}| *[a-z_]*=)/' "$SCRIPT")" || _res_gap=""
-# THE `mkdir`'S OWN FAILURE ARM IS NOT A GAP: it runs only where nothing was
-# created, and it ends in `exit 1`. What the scan is for is a statement that runs
-# on the SUCCESS path, which is anything at column 0 that is not the trap itself.
-_res_gap="$(printf '%s\n' "$_res_gap" | grep -v '^ ' || true)"
+_res_gap="$(awk -v a="$_res_mk" -v b="$_res_tr" 'NR>a && NR<b' "$SCRIPT" \
+    | grep -v '^[[:space:]]' | grep -v '^#' | grep -v '^$' || true)"
 [ -z "$_res_gap" ] \
     && pass "…as the first thing after it, with nothing running in between" \
     || die "statements run between the reservation and the arming: '$_res_gap'"
