@@ -628,9 +628,18 @@ if [[ -z $RB_REMOTE ]]; then
         [[ -n $RB_TMPPARENT ]] \
             || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
                  && [[ -x ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
-        [[ -n $RB_TMPPARENT ]] \
-            || { echo "ABORT: neither TMPDIR nor HOME is an absolute directory this session can write to"; exit 1; }
-        RB_ORIGIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+        # AND AN EMPTY PARENT CANNOT PRODUCE A PATH AT ALL. Written as
+        # `[[ -n $RB_TMPPARENT ]] || { echo …; exit 1; }` this was a GUARD, and
+        # `exit` is a name a startup file can replace with one that RETURNS: the
+        # refusal printed, the next line built `/watch-pr.…` from the empty value,
+        # and for a root operator the helper could create it — so setup read an
+        # origin from the filesystem root and went on to announce success. The
+        # expansion is not a guard and has no name in it: `${VAR:?}` is the SHELL
+        # refusing to expand, and in a non-interactive shell it ends the shell
+        # where it stands whatever `exit` has become. Interactively it abandons
+        # only its own command, which leaves the variable unset and the helper
+        # refusing an empty argument — the same answer one step later.
+        RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
         # after a guard. `mkdir` is what proves this shell's helper created that
         # directory, and it is the helper that runs it — so a REFUSED call means
@@ -829,12 +838,21 @@ if [[ -z $RB_REMOTE ]]; then
     # `export` that assigns without setting the export attribute leaves this shell
     # holding the right value while every helper holds none. Reading the variable
     # back here answers a different question; only asking a child answers this one.
-    RB_PIN_DIR="$RB_TMPPARENT/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
-    RB_PIN_SEEN=
+    # THE PROBE COMES FIRST, AND THE REAL ASSIGNMENTS ARE ITS ARM. Written above
+    # the probe they were the very thing it exists to make safe: a readonly
+    # `RB_PIN_DIR` or `RB_PIN_SEEN` makes the assignment fail, and under `errexit`
+    # a failed readonly assignment ends the session AT THAT LINE with bash's own
+    # message and none of the diagnosis below — while a `declare -n` aimed at
+    # another transport variable mutates its target before anything has validated
+    # it. The transport read above settled this the same way.
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] ) 2>/dev/null; then
+        # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
+        # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
+        RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
+        RB_PIN_SEEN=
         # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
         # above states: a refused call means the `mkdir` inside the helper found
         # the name already taken, so the directory and the file in it are the

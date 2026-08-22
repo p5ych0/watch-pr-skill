@@ -335,7 +335,7 @@ if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; 
 #
 # WHAT IS LEFT HERE IS THE DRIVER'S HALF: it names a directory, it calls, it reads
 # the descriptor back, and it removes what it read. Those are the four.
-grep -qF 'RB_ORIGIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
+grep -qF 'RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" \
     && pass "the transport directory is named by expansion, so no command answers for it" \
     || die "SKILL.md does not build the transport directory name by expansion"
 grep -qF '9<"$RB_ORIGIN_DIR/origin"' "$SKILL" \
@@ -653,6 +653,40 @@ LOCAL
             || die "the unwritable TMPDIR was written into after all"
     fi
     chmod 700 "$_forge_dir/nowrite"
+    # …AND WITH NEITHER CANDIDATE USABLE AND `exit` SHADOWED, NO PATH IS BUILT AT
+    # ALL. This was a guard — `[[ -n $RB_TMPPARENT ]] || { echo …; exit 1; }` —
+    # and `exit` is a name a startup file can replace with one that RETURNS: the
+    # refusal printed, the next line built `/watch-pr.…` from the empty value, and
+    # for a root operator the helper could create it, read an origin from the
+    # filesystem root, and let setup announce success. `${RB_TMPPARENT:?…}` is the
+    # SHELL refusing to expand, which ends a non-interactive shell where it stands
+    # whatever `exit` has become.
+    #
+    # BOTH CANDIDATES RELATIVE, so the selection leaves the parent empty, and a
+    # WORKING helper, so nothing else can be what stops it.
+    _ep_rc=0
+    _ep_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR=.tmp HOME=.tmp 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+            '"$_read_block"'
+            printf "PINNED=[%s] DIR=[%s]\n" "${RB_REMOTE:-}" "${RB_ORIGIN_DIR:-}"
+        ' 2>&1)" || _ep_rc=$?
+    { [ "$_ep_rc" -ne 0 ] \
+      && case "$_ep_out" in *PINNED=*) false ;; *) true ;; esac; } \
+        && pass "…and with neither candidate usable, a shadowed exit cannot walk into a path built from nothing" \
+        || die "an empty transport parent was walked past (rc=$_ep_rc out='$_ep_out')"
+    # AND IT SAYS WHY. The expansion's own message names the variable and carries
+    # the sentence the guard used to print, so an operator sees a cause rather than
+    # a bare non-zero status.
+    printf '%s' "$_ep_out" | grep -qF 'neither TMPDIR nor HOME is an absolute directory' \
+        && pass "…and names the cause, which the expansion carries" \
+        || die "the empty-parent refusal is silent: '$_ep_out'"
+    # …AND NOTHING WAS BUILT UNDER THE FILESYSTEM ROOT, which is the concrete
+    # damage for a root operator and an absence check the status cannot make.
+    _ep_left=""
+    _ep_left="$(ls -d /watch-pr.* 2>/dev/null | head -1)" || _ep_left=""
+    [ -z "$_ep_left" ] \
+        && pass "…and built nothing at the filesystem root" \
+        || die "an empty transport parent produced '$_ep_left'"
     # …AND A HELPER THAT REFUSES DOES NOT HAVE ITS TRANSPORT READ OR REMOVED, EVEN
     # WITH `exit` SHADOWED. The helper's `mkdir` is the exclusion, so a refusal
     # means the name was already something — and something is not ours. Written as
@@ -1068,7 +1102,7 @@ _ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c
 # which the next case asserts.
 { [ "$_ero_rc" -ne 0 ] \
   && case "$_ero_out" in
-        *'ABORT: RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
+        *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
         *) false ;;
      esac; } \
     && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
@@ -2519,7 +2553,7 @@ mkdir -p "$_rb_bt/parent/watch-pr.anchor" "$_rb_bt/parent/attacker"
 # make every case below pass against nothing.
 awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
 case "$(cat "$_rb_bt/parent.sh")" in
-    *'RB_ORIGIN_DIR="$RB_TMPPARENT/watch-pr.'*) : ;;
+    *'RB_ORIGIN_DIR="${RB_TMPPARENT:?'*) : ;;
     *) die "the transport block did not lift for the RB_ORIGIN_DIR cases; they would prove nothing" ;;
 esac
 # `set -e` AND a shadowed `continue` AND the attribute, together — each alone is

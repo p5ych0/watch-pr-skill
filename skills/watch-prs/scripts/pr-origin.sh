@@ -16,8 +16,8 @@
 # `bash -p`: no functions are imported, no `BASH_ENV` is sourced, and these names
 # are this process's. #157.
 #
-# THE VALUE GOES TO A FILE THE CALLER NAMES, and that is the third mechanism this
-# script has used. The first two put it on a descriptor — stdout, then fd 9 — and
+# THE VALUE GOES TO A FILE, IN A DIRECTORY THE CALLER NAMES AND THIS SCRIPT
+# CREATES, and that is the third mechanism this script has used. The first two put it on a descriptor — stdout, then fd 9 — and
 # both spent rounds of review on the same problem from different angles: whichever
 # descriptor carries the value, a caller tracing to it has its trace written into
 # the value, and the redirections that would move one out of the way move the
@@ -25,18 +25,19 @@
 # restored, so the second call of a session returned nothing at all.
 #
 # A path has none of those properties. The caller's tracing goes wherever it
-# already went, this script writes where it was told, and there is no descriptor
-# for the two to collide over.
+# already went, this script writes inside the directory it was told to make, and
+# there is no descriptor for the two to collide over.
 #
 # `/usr/bin/env`, A PATH, BECAUSE `bash` IS A NAME. `bash -p …` calls a function
-# called `bash` if the caller has one, and such a function writes a forged URL to
-# the file it was handed and returns, without this script running at all. A path
-# cannot be shadowed.
+# called `bash` if the caller has one, and such a function creates the directory
+# it was handed, writes a forged URL into it and returns, without this script
+# running at all. A path cannot be shadowed.
 #
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
-# line. A hook needs to shadow nothing to use the gap: one that writes the value
-# file and exits is a complete attack, finished before this script's first line.
+# line. A hook needs to shadow nothing to use the gap: one that creates the
+# directory it sees as `$2`, writes the value file inside it and exits is a
+# complete attack, finished before this script's first line.
 # There is no fallback for a caller that forgets — see the block above the guard
 # for why one cannot work — so a missing `-p` is refused, not recovered from.
 #
@@ -180,8 +181,8 @@ esac
 # `set -C` MAKES `>` EXCLUSIVE. With noclobber, `> file` fails if the path exists
 # at all, and that is O_EXCL: it refuses a regular file, and it refuses a symlink
 # whether or not the target exists, because O_CREAT|O_EXCL fails on a symlink by
-# definition. Nothing legitimate is lost — the caller allocates a fresh private
-# directory per run, so this path never pre-exists. `>|` is deliberately NOT used;
+# definition. Nothing legitimate is lost — this script creates the directory
+# exclusively a few lines above, so this path never pre-exists. `>|` is deliberately NOT used;
 # that is the spelling that overrides noclobber, and it is what a later edit
 # reaches for when this refuses something.
 #
@@ -198,15 +199,16 @@ esac
 # the object, below, so there is no interval and no second lookup.
 #
 # NOTHING IS LEFT BEHIND ON A REFUSAL EITHER, which is what the truncation was
-# for: a run that refuses before its write creates no file at all, and the
-# caller — which allocates a fresh directory per run and opens the result once
-# to check and read it — sees the open fail rather than an empty file.
+# for: a run that refuses before its write creates no file at all, and a refusal
+# AFTER the directory exists goes through `rb_refuse`, which removes the file and
+# the directory before it stops. The caller opens the result once to check and
+# read it, and sees the open fail rather than an empty file.
 umask 077
 set -C
 # AND THE DIRECTORY IT SITS IN MUST BE ONE NOBODY ELSE CAN WRITE. Everything
-# above protects the object; this protects the NAME. The caller's `-O` test says
-# the parent belongs to the operator and cannot say whether the operator has left
-# it open to others — bash has no test for another account's write bit — so an
+# above protects the object; this protects the NAME. An `-O` test in the caller —
+# which is where this used to be — says the parent belongs to the operator and
+# cannot say whether the operator has left it open to others — bash has no test for another account's write bit — so an
 # owned mode-0777 `TMPDIR` passed it, and an account with write there can replace
 # the whole transport directory between this script closing its file and the
 # caller opening it. Both `-O` and `-f` then pass on the planted file, because the
@@ -217,8 +219,8 @@ set -C
 # process is privileged: `find` is a name, and in the driving shell a function by
 # that name would answer instead. What remains is `PATH`, which is #91.
 # EVERY DIRECTORY UP TO THE ROOT, not just the one holding the file. Checking the
-# file's own directory is not enough and was the first shape of this: the caller
-# creates that one mode 700, so it was always going to pass — while an account
+# file's own directory is not enough and was the first shape of this: it is
+# created mode 700 below, so it was always going to pass — while an account
 # with write on the directory ABOVE it can rename it after the check and put a
 # writable replacement at the same name. The question is not "can they write where
 # the file goes" but "can they rename anything on the way to it", and that is

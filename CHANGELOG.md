@@ -26,6 +26,15 @@
   before it stops. The driver does the same for the one refusal that is its own:
   a transport file that fails the ownership checks.
 
+- **A shadowed `exit` could build the transport at the filesystem root.** With
+  neither `TMPDIR` nor `HOME` usable the refusal was a GUARD, and `exit` is a name
+  a startup file can replace with one that RETURNS: measured, the refusal printed
+  and the next line built `/watch-pr.…` from the empty value. For a root operator
+  the helper can create that, so setup read an origin from the filesystem root and
+  went on to announce success. The parent is required by the expansion that spells
+  the path now — `${RB_TMPPARENT:?…}` is the shell refusing to expand, which has
+  no name in it and ends a non-interactive shell where it stands.
+
 - **A refused helper had its transport read and removed anyway.** The read and
   both removals were statements after a guard, and `exit` is a name a startup
   file can replace with one that RETURNS. With it neutralised, a helper that
