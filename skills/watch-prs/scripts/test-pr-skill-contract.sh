@@ -777,6 +777,23 @@ LOCAL
     printf '%s' "$_rx_out" | grep -qF 'EXPORTED=[unset]' \
         && pass "…and nothing is pinned from the stale value, whatever exit was replaced with" \
         || die "a stale RB_REMOTE was pinned past a neutralised exit: '$_rx_out'"
+    # …AND INTERACTIVELY, WHICH IS WHERE THE WALK ACTUALLY HAPPENS. Readonly
+    # assignment failures differ by shell mode: `bash -c` can end at `RB_REMOTE=`
+    # itself, so the case above can hold for a reason that has nothing to do with
+    # the containment. At a prompt the shell SURVIVES that failure and carries on —
+    # which is the state #155 describes — so the `else` has to be what stops it.
+    if [ -n "$_forge_dir" ] && [ -d "$_forge_dir" ]; then
+        printf 'exit() { return 0; }\nreadonly RB_REMOTE="git@github.com:WRONG/other.git"\nRB_SCRIPTS="$TMPDIR"\n%s\nprintf "EXPORTED=[%%s]\\n" "${REVIEW_BUS_REMOTE:-unset}"\nexit\n' \
+            "$_read_block" > "$_forge_dir/stalepin.sh"
+        _rxi_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV FORGE_RC=0 \
+            TMPDIR="$_forge_dir" bash --noprofile --norc -i < "$_forge_dir/stalepin.sh" 2>&1 || true)"
+        printf '%s' "$_rxi_out" | grep -qF 'ABORT: RB_REMOTE is readonly in this shell' \
+            && pass "…and interactively, where the shell survives the failed clear, the refusal still fires" \
+            || die "the interactive stale-pin case did not refuse: '$_rxi_out'"
+        printf '%s' "$_rxi_out" | grep -qF 'EXPORTED=[unset]' \
+            && pass "…and nothing is pinned there either" \
+            || die "a stale RB_REMOTE was pinned in an interactive shell: '$_rxi_out'"
+    fi
     # …AND A RELATIVE CANDIDATE FALLS THROUGH RATHER THAN ABORTING THE SESSION.
     # The helper walks every component of the output path to the root, so it
     # refuses a relative one — and a relative but perfectly usable `TMPDIR` such
@@ -1167,6 +1184,12 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c '
 [ "$_ro_rc" -ne 0 ] \
     && pass "…and a readonly REVIEW_BUS_REMOTE aborts setup rather than pinning nothing" \
     || die "setup continued with an empty readonly pin; every stage would route by the current directory"
+# THE STATUS IS WHAT THIS ONE ASSERTS, and an interactive variant was tried and
+# dropped rather than left flaky. Feeding the pin block to a prompt echoes every
+# line of it, and the run is bounded — so whether the abort lands inside the
+# budget depends on the block's length rather than on its behaviour. The stale-pin
+# case above is where the interactive mode is asserted, because there the walk is
+# what the mode changes; here a readonly `REVIEW_BUS_REMOTE` refuses in both.
 # …AND A SHADOWED `export` IS THE SAME FAILURE, caught by the same line. One that
 # returns 0 without assigning leaves the variable untouched, which the status
 # cannot see and the postcondition can — the reason the proof is a reserved word
