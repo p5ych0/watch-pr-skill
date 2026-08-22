@@ -29,6 +29,17 @@
   `$RB_TMPDIR` survives past the loop at all — asserted as an absence, because a
   list of uses is wrong by omission.
 
+  **And the path is spelled, not held.** `RB_ORIGIN_OUT` used to carry it, and a
+  name that carries a path can be *stale*: its assignment is abandoned by the
+  requirement whenever the directory is missing, and a value your shell already
+  had — `/origin`, or anything else — then survived into the read, into `rm -f`,
+  and into the unconditional cleanup. Requiring that name would not have helped,
+  because a pre-seeded value is not empty. So there is no name: every use spells
+  the path out of the directory it must come from, which cannot be stale because
+  it is not consulted. A pre-seeded `RB_ORIGIN_OUT` is now inert — the session
+  pins from its own file and never touches the one that name pointed at, which is
+  stronger than the refusal it replaces.
+
   Wrapping the region in an `if` was tried and taken back, and the reason is worth
   having: inside a compound command a failed readonly assignment ends the shell
   **before** the guard that would have named it, so `RB_ORIGIN_OUT` and

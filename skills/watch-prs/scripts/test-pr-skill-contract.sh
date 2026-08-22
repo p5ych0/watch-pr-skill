@@ -290,8 +290,11 @@ _read_block="$(awk '/^RB_TMPDIR=$/, /there is no repository to pin this session 
 # compound command a failed readonly assignment ends the shell BEFORE the guard
 # that would have named it — `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own
 # diagnostics to gain this one, which the cases below this file already prove.
-grep -qF 'RB_ORIGIN_OUT="${RB_TMPDIR:?' "$SKILL" \
-    && pass "the transport path requires its directory through the expansion that builds it" \
+# EVERY SPELLING OF THE PATH REQUIRES THE DIRECTORY, and there is no name holding
+# it — so this counts the uses rather than looking for one assignment.
+_rb_req_n="$(grep -c '${RB_TMPDIR:?' "$SKILL" || true)"
+[ "${_rb_req_n:-0}" -ge 4 ] \
+    && pass "the transport path requires its directory at every spelling ($_rb_req_n)" \
     || die "SKILL.md builds \$RB_TMPDIR/origin without requiring the directory; an emptied one is /origin"
 # AND THE MESSAGE CARRIES NO APOSTROPHE. Bash parses the `:?` word specially, so a
 # `'` inside it opens a quote even within double quotes and the whole block stops
@@ -484,11 +487,19 @@ LOCAL
             || die "a refused setup left the transport directory: '$_lk_left'"
         rm -rf "$_lk_dir"
     fi
-    # …AND A READONLY TRANSPORT VARIABLE STOPS SETUP RATHER THAN BEING IGNORED.
-    # The driving session's shell is long-lived, so `RB_ORIGIN_OUT` can already
-    # exist as a readonly naming a file somebody else can write. The assignment
-    # then fails, the variable keeps the old path, and the helper writes a
-    # perfectly good value into a file the attacker edits before the read.
+    # …AND A PRE-SEEDED TRANSPORT VARIABLE IS NOT CONSULTED AT ALL.
+    #
+    # THIS CASE CHANGED WITH ITS SUBJECT (#151). `RB_ORIGIN_OUT` used to hold the
+    # path, and a readonly one had to STOP setup — the assignment failed, the name
+    # kept the old value, and the helper wrote a good URL into a file somebody else
+    # could edit before the read. Stopping was the best available answer while the
+    # name existed. It does not any more: every use spells the path out of the
+    # directory it must come from, so a pre-seeded name is inert.
+    #
+    # WHICH MAKES THIS THE STRONGER ASSERTION. Not "setup refuses" but "setup
+    # ignores it, pins from its own file, and never touches the seeded one" — the
+    # last of those is what a refusal never proved.
+    printf '%s\n' "git@github.com:WRONG/other.git" > "$_forge_dir/elsewhere"
     _ro_out=""
     _ro_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
         TMPDIR="$_forge_dir" bash -c '
@@ -497,9 +508,15 @@ LOCAL
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || true
     case "$_ro_out" in
-        *PINNED=*) die "a readonly RB_ORIGIN_OUT was ignored and setup pinned anyway: '$_ro_out'" ;;
-        *)         pass "…and a readonly RB_ORIGIN_OUT stops setup rather than being ignored" ;;
+        *PINNED=git@github.com:acme/widget.git*)
+            pass "…and a pre-seeded RB_ORIGIN_OUT is ignored; setup pins from its own transport file" ;;
+        *)  die "a pre-seeded RB_ORIGIN_OUT changed what setup pinned: '$_ro_out'" ;;
     esac
+    _ro_left=""
+    [ -f "$_forge_dir/elsewhere" ] && _ro_left="$(cat "$_forge_dir/elsewhere")"
+    [ "$_ro_left" = "git@github.com:WRONG/other.git" ] \
+        && pass "…and the file that name pointed at is neither read nor removed" \
+        || die "the pre-seeded transport file was consumed or deleted (left='$_ro_left')"
     # …AND A READONLY `RB_REMOTE` IS REFUSED RATHER THAN KEPT. The driving shell
     # is long-lived and interactive; a readonly `RB_REMOTE` already in it survives
     # the assignment, and the checks that follow — non-empty, single-line,
@@ -1265,10 +1282,14 @@ unset RB_TMPBASE
 grep -qF 'RB_REMOTE="$(<"/dev/fd/9")"' <<<"$skill_flat" \
     && pass "…and the value is read back from the open transport, not from a captured stream" \
     || die "the origin value is not read back from the descriptor the checks validated"
-grep -qF '9<"$RB_ORIGIN_OUT"' <<<"$skill_flat" \
+# SPELLED OUT OF THE DIRECTORY, NOT HELD IN A NAME. `RB_ORIGIN_OUT` used to carry
+# this path, and a name that carries a path can be STALE: its assignment is
+# abandoned whenever the directory is missing, and a value the operator's shell
+# already had then survived into the read and the removals. #151.
+grep -qF '9<"${RB_TMPDIR:?' <<<"$skill_flat" \
     && pass "…with the descriptor bound by a redirection, which is not a name" \
     || die "the origin transport is not opened by a redirection"
-grep -qF 'rm -f "$RB_ORIGIN_OUT"' <<<"$skill_flat" \
+grep -qF 'rm -f "${RB_TMPDIR:?' <<<"$skill_flat" \
     && pass "…and the file is removed once its value has been read" \
     || die "the origin file is left behind"
 grep -qF 'CLOSE_RC=$?' <<<"$skill_flat" \
