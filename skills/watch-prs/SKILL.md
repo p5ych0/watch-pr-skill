@@ -606,194 +606,72 @@ RB_REMOTE=
 # what it pins is this value. With the continuation contained there is nothing
 # after the final `fi` at all.
 if [[ -z $RB_REMOTE ]]; then
-    if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
-        RB_TMPDIR=
-        # THE LOOP VARIABLE IS PROVED ASSIGNABLE FIRST, because `for` cannot report that
-        # it is not. A readonly `RB_TMPPARENT` in the long-lived driving shell makes every
-        # iteration's assignment fail, so no candidate is ever tried and setup refuses
-        # with a message about `TMPDIR` and `HOME` that describes neither — the operator
-        # is sent to look at their environment for a variable that is fine. The clear
-        # after the probe cannot fail once it has passed.
-        # ASKED IN A SUBSHELL, AND THAT IS WHAT MAKES IT SAFE TO ASK. It was two unequal
-        # assignments read back here, because one proves nothing against a readonly
-        # holding the probe's own value — and both were assignments in THIS shell, which
-        # is the operator's. Measured on bash 5: with `errexit` on, a failed readonly
-        # assignment is FATAL, so `RB_TMPPARENT=probe-a` ends the session in exactly the
-        # state the probe exists to detect. A subshell inherits the readonly attribute, so
-        # it fails for the same reason and answers the same question, and being a
-        # CONDITION it is exempt from `errexit`.
-        #
-        # AND THE SELECTION IS ITS SUCCESS ARM, not a statement after a guard. `exit` is a
-        # builtin your shell can replace with one that RETURNS, and the trailing
-        # `[[ -n "" ]]` only gives the `if` a false status nothing consumes — so a refused
-        # probe printed its message and then ran the loop anyway, on a name it had just
-        # reported unusable. `if` is a reserved word and nothing can stand in for it.
-        #
-        # AND THE VALUE IS COMPARED INSIDE IT, because the status alone is not the whole
-        # answer. A TRANSFORMING attribute — `declare -i RB_TMPPARENT` in the driving
-        # shell — lets the assignment SUCCEED and stores something else: measured on
-        # bash 5, `probe-a` becomes `0`. A status-only probe passes and every later
-        # assignment is silently rewritten. The comparison is what the two read-backs used
-        # to do, and inside the subshell it costs nothing and cannot end this shell.
-        #
-        # ONE VALUE IS ENOUGH NOW. Two existed because a readonly pre-seeded with exactly
-        # the probe's value leaves a comparison IN THIS SHELL holding; in the subshell
-        # that same readonly makes the assignment fail outright, so the comparison is
-        # never reached and the status is non-zero. #148.
-        #
-        # THE VALUE IS MIXED CASE, AND THAT IS THE POINT OF IT. `probe-a` is already
-        # lowercase, so `declare -l` leaves it unchanged and the probe passes — then the
-        # real assignment lowercases the path and setup fails somewhere else, about
-        # something else. `Probe-A` survives no case transformation in either direction.
-        #
-        # AND WHAT REJECTS `declare -i` IS THE COMPARISON, not the assignment. Measured on
-        # bash 5 with `nounset` off, which is the ordinary state here: `Probe-A` is
-        # evaluated as `Probe - A`, both names are unset, and `0` is stored — the
-        # assignment SUCCEEDS. The comparison is what sees that `0` is not `Probe-A`.
-        #
-        # AND THE REFUSAL NAMES BOTH ATTRIBUTES, because the probe now answers one
-        # question — can this name hold what this line writes — and two attributes make
-        # it "no". Saying only `readonly` sends the operator looking for one that is not
-        # there.
-        if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] && [[ ${RB_TMPDIR:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
-            # AND SO IS THE CANDIDATE NAME, ONCE, BEFORE THE LOOP. `RB_TRY` holds the path
-            # each iteration builds, and the prefix check below it matches a PREFIX: a
-            # startup file that has already made the name readonly leaves whatever it was
-            # seeded with, and a value such as `…/watch-pr.anchor/../elsewhere/session`
-            # satisfies that check while naming a directory under a parent nothing proved.
-            # `mkdir` resolves the `..`, and `mkdir` being the exclusion does not help —
-            # it excludes a name that already EXISTS, not one that resolves elsewhere. The
-            # origin every stage is addressed by would then be read from a directory
-            # another local account owns. #146.
-            #
-            # BEFORE THE LOOP, AND WITH ITS OWN REFUSAL, because whether this shell can
-            # assign the name does not change per candidate. Asked inside, its failure had
-            # nowhere to go: it `continue`d, every candidate was skipped, and the emptiness
-            # check afterwards blamed `TMPDIR` and `HOME` — sending the operator to look at
-            # an environment that is fine, which is the misdirected diagnostic the probe
-            # above it exists to prevent. One ask, one message, naming the variable. #150.
-            #
-            # IN A SUBSHELL BECAUSE THIS SHELL IS THE OPERATOR'S, AND A STANDALONE PROBE
-            # WOULD END IT. Measured on bash 5: with `errexit` on — this block is pasted
-            # into such a shell as often as it is typed — a failed readonly assignment is
-            # fatal, so `RB_TRY=Probe-A` on its own kills the session before the test
-            # after it can run. A subshell inherits the attribute, fails for the same
-            # reason, and as a CONDITION is exempt from `errexit`.
-            #
-            # AND THE VALUE IS COMPARED INSIDE IT, because the status alone is not the
-            # whole answer. A TRANSFORMING attribute lets the assignment SUCCEED and store
-            # something else — measured with `nounset` off, which is the ordinary state
-            # here, `declare -i` evaluates `Probe-A` as `Probe - A`, both names unset, and
-            # stores `0`. The comparison is what rejects that. The value is mixed case for
-            # the other half: `probe-a` is already lowercase, so `declare -l` would leave
-            # it unchanged and a probe using it would pass.
-            #
-            # ONE VALUE IS ENOUGH. Two existed because a readonly pre-seeded with the
-            # probe's own value leaves a comparison IN THIS SHELL holding; in the subshell
-            # that same readonly makes the assignment fail outright, so the comparison is
-            # never reached.
-            #
-            # AND THE LOOP IS ITS SUCCESS ARM. `exit` is a builtin your shell can replace
-            # with one that RETURNS, and the trailing `[[ -n "" ]]` only gives the `if` a
-            # false status nothing consumes — so a refused probe would print its message
-            # and run the loop anyway, on a name it had just reported unusable. `if` is a
-            # reserved word and nothing can stand in for it.
-            if ( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] && [[ ${RB_TMPDIR:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
-                RB_TMPPARENT=
-                for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
-                    [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
-                    RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-                    [[ $RB_TRY = "$RB_TMPPARENT"/watch-pr.* ]] || continue
-                    /usr/bin/env mkdir -m 700 "$RB_TRY" || continue
-                    # THE READ IS THE TEST. If the helper accepts this parent it has already
-                    # written the value, so there is nothing to repeat; if it refuses, the reason
-                    # is on stderr for the operator and this tries the next candidate.
-                    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"; then
-                        RB_TMPDIR="$RB_TRY"
-                        # AND THE ASSIGNMENT IS PROVED BEFORE THE BREAK. Leaving the loop on an
-                        # assignment that did not happen is what turns a readonly into a stale
-                        # directory the rest of setup then trusts.
-                        [[ $RB_TMPDIR = "$RB_TRY" ]] \
-                            || { /usr/bin/env rm -f "$RB_TRY/origin"; /usr/bin/env rmdir "$RB_TRY"; echo "ABORT: RB_TMPDIR is readonly in this shell; the transport directory cannot be chosen"; exit 1; }
-                        break
-                    fi
-                    /usr/bin/env rm -f "$RB_TRY/origin"
-                    /usr/bin/env rmdir "$RB_TRY"
-                done
-                [[ -n $RB_TMPDIR ]] \
-                    || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
-            else
-                echo "ABORT: RB_TRY is readonly, value-transforming, or aimed at another transport variable; the transport candidate cannot be named"
-                exit 1
-                [[ -n "" ]]
-            fi
-        else
-            echo "ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable; the transport parent cannot be chosen"
-            exit 1
-            [[ -n "" ]]
-        fi
-        # THE DIRECTORY IS REQUIRED BY THE EXPANSION, not by a check after it. `exit` is a
-        # builtin your shell can replace with one that RETURNS, and every refusal above --
-        # a name that cannot be assigned, a parent that could not be used, no candidate
-        # that worked -- then printed its message and CARRIED ON to this line, where
-        # `$RB_TMPDIR` is empty and the path built is `/origin`.
-        #
-        # AND THE PATH IS SPELLED, NOT HELD. `RB_ORIGIN_OUT` used to carry it, and a name
-        # that carries a path can be STALE: its assignment is abandoned by the requirement
-        # below whenever the directory is missing, and a value the operator's shell
-        # already had — `/origin`, or anything else — then survived into `rm -f`, into the
-        # read, and into the unconditional cleanup. Requiring the name would not have
-        # helped, since a pre-seeded value is not empty. So there is no name: every use
-        # spells the path out of the directory it must come from, which cannot be stale
-        # because it is not consulted. The postcondition that proved the assignment took
-        # went with it — there is no assignment left to prove.
-        #
-        # EVERY USE IN THIS REGION, NOT ONLY THE FIRST, and that is what an INTERACTIVE
-        # shell forces. There, `${...:?}` reports the error and abandons only the command
-        # it is in — the shell survives — so a walked-past refusal that stops at the line
-        # below would continue into the cleanup arms, where `rm -f "$RB_TMPDIR/origin"` is
-        # `rm -f /origin` and `rmdir "$RB_TMPDIR"` is `rmdir /`. With the requirement on
-        # each of them, every one of those commands refuses on its own and nothing here
-        # acts on `/` in either mode. The postcondition below carries it too, so the rule
-        # is simply that no bare `$RB_TMPDIR` survives past the loop -- a list of uses is
-        # wrong by omission, and one a `grep` can state is not a list anybody has to
-        # remember.
-        #
-        # WHAT THAT REACHES IS A FILE NOBODY HERE CREATED. The ownership test below is
-        # `[[ -O ]]`, so for an operator running as ROOT with a root-owned `/origin` it
-        # passes: the value is read as this session's origin, the `rm -f` further down
-        # DELETES that file, and every stage is then addressed by whatever repository it
-        # named. The cleanup arms are worse still -- they run `rmdir "$RB_TMPDIR"`, which
-        # with an empty value is `rmdir /`. #151.
-        #
-        # `${...:?}` IS AN EXPANSION, AND THAT IS WHY IT IS THIS AND NOT AN `if`. A
-        # parameter expansion error ends a non-interactive shell where it stands: there is
-        # no command name in it to shadow and no `exit` to neutralise, and it names the
-        # variable while doing it. Wrapping the region in an `if` was tried and taken back
-        # -- inside a compound command a failed readonly assignment ends the shell BEFORE
-        # the guard that would have named it, so `RB_ORIGIN_OUT` and `RB_REMOTE` lost
-        # their own diagnostics to gain this one.
-        # NO APOSTROPHE IN THAT MESSAGE, and it is not a style choice: bash parses the
-        # `:?` word specially, so a `'` inside it opens a quote even within double quotes
-        # and the whole block stops parsing. Measured -- `X="${V:?a session's origin}/o"`
-        # is `unexpected EOF while looking for matching`.
+    # ── THE ORIGIN, READ WHERE THIS SHELL'S NAMES CANNOT REACH ────────────
+    #
+    # ONE NAME, ONE CALL, ONE READ. This was thirty-five lines: a two-candidate
+    # loop, `RB_TMPPARENT`, `RB_TRY` and `RB_TMPDIR`, an assignability probe for
+    # each with cross-variable alias checks, an exclusive `mkdir`, two cleanup
+    # arms, a `${RB_TMPDIR:?…}` on every later use, and a containment arm around
+    # the whole region. Every line of it defended NAMES IN THIS SHELL — which is
+    # exactly what a startup file can have made readonly, `declare -i`, `declare
+    # -l`, or a `declare -n` aimed at another of them. #146, #148, #150, #151 and
+    # half of #155 are all that block.
+    #
+    # THE HELPER CREATES THE DIRECTORY NOW, and it runs `bash -p`: no functions
+    # imported, no `BASH_ENV` sourced, its names its own. The exclusion is where
+    # it can be relied on, so there is nothing here left to defend. #157.
+    #
+    # THE PARENT IS CHOSEN BY EXPANSION, and `TMPDIR` is tried before `HOME`
+    # because a session that cannot write its temporary directory has bigger
+    # problems than this read — but a relative or missing one is ordinary, and
+    # falls through rather than ending the session.
+    # THE PARENT IS CHOSEN ONCE, HERE, and the pin probe and the session's working
+    # files build under the same one. It was a `for` loop over both candidates
+    # with the helper's own answer as the acceptance test — which meant a bad
+    # ORIGIN sent it to try `HOME`, where the origin is just as bad. What the
+    # fallback is actually for is a `TMPDIR` that cannot hold a directory, and
+    # that is a question two expansions answer.
+    # AND BOTH NAMES ARE PROVED FIRST, because they are still names in this shell —
+    # the two that are left of the five. A subshell, one mixed-case value, compared
+    # inside, and `RB_REMOTE` read back to catch a nameref between them: the probe
+    # each of `RB_TMPPARENT`, `RB_TRY` and `RB_TMPDIR` used to carry, now carried
+    # by what remains.
+    #
+    # THE SELECTION IS THE PROBE'S SUCCESS ARM, NOT A LINE ABOVE IT. A readonly
+    # `RB_TMPPARENT` makes `RB_TMPPARENT="$TMPDIR"` fail, and under `errexit` — which
+    # a driving shell may well be in — a failed readonly assignment ends the session
+    # AT THAT LINE, with bash's own message and none of the diagnosis this refusal
+    # carries. Selecting inside the arm means the probe answers first and the
+    # operator is told which name is unusable. Reverting the containment restores
+    # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
+    # excerpt reaches the selection.
+    if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
+         && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
+         && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] ) 2>/dev/null; then
+        RB_TMPPARENT=
+        [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
+        [[ -n $RB_TMPPARENT ]] \
+            || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
+        [[ -n $RB_TMPPARENT ]] \
+            || { echo "ABORT: neither TMPDIR nor HOME is an absolute directory this session can write to"; exit 1; }
+        RB_ORIGIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+        /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR" \
+            || { echo "ABORT: could not read this session's origin"; exit 1; }
+        # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked of
+        # the OPEN DESCRIPTOR, so they describe the object this shell is about to
+        # read rather than a name it could be talked into looking up twice.
+        # AND A REFUSED READ REMOVES WHAT THE HELPER LEFT. The helper cleans up
+        # after its OWN refusals — it created the directory — but a read this
+        # side rejects leaves a written file in a directory nothing else will
+        # remove. The obligation follows whoever the refusal belongs to.
         { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-            && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"${RB_TMPDIR:?no transport directory was established}/origin" \
-            || { /usr/bin/env rm -f "${RB_TMPDIR:?no transport directory was established}/origin"; /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
-        /usr/bin/env rm -f "${RB_TMPDIR:?no transport directory was established}/origin"
-        # THE DIRECTORY GOES HERE, WHILE THE LIST OF PLACES THAT WOULD HAVE TO REMOVE IT
-        # IS STILL ONE LONG. It used to stand until the pin at the end of setup, which put
-        # eight aborts between allocation and cleanup — an empty origin, a multi-line one,
-        # an unparseable identity, a summary file that could not be created — and each of
-        # them left a private `watch-pr.*` directory behind that nothing else can remove.
-        # Adding `rmdir` to eight sites is the list-wrong-by-omission this repository has
-        # a rule about; the transport is dead the moment its value has been read, so it is
-        # removed the moment its value has been read, and every abort after this line has
-        # nothing to clean up. The pin allocates its own directory later, for the same
-        # reason and with the same lifetime.
-        /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"
+            && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" \
+            || { /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"; /usr/bin/env rmdir "$RB_ORIGIN_DIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
+        /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
+        /usr/bin/env rmdir "$RB_ORIGIN_DIR"
     else
-        echo "ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
+        echo "ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
         [[ -n "" ]]
     fi
@@ -950,78 +828,28 @@ if [[ -z $RB_REMOTE ]]; then
     # BEFORE that `mkdir` — the assignments are proved first — so there is nothing for
     # them to clean up, and a `mkdir` that failed means the path was already
     # something, and something is not ours.
-    RB_PIN_DIR="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-    [[ $RB_PIN_DIR = "$RB_TMPPARENT"/watch-pr.* ]] \
-        || { echo "ABORT: RB_PIN_DIR is readonly in this shell; the transport path cannot be set"; exit 1; }
-    # ONE BRANCH, AND ITS ARMS ARE IN THE ORDER THINGS CAN GO WRONG. Each refusal is
-    # an ARM rather than a guard, because `exit` is a name: a guard that a shadowed
-    # one walks past lands in the probe, where a pre-seeded readonly `RB_PIN_SEEN`
-    # certifies a pin no child ever saw. As arms, a bad state SELECTS its refusal and
-    # the probe is not reachable from it.
+    # ── DOES A CHILD SEE THE PIN? ─────────────────────────────────────────
     #
-    # AND THE ASSIGNMENTS COME FIRST, BEFORE ANYTHING IS CREATED. They were inside the
-    # `mkdir` arm, which leaks: a failed readonly assignment can end the shell on the
-    # spot — bash's own behaviour, and what the fixture's reset case observes — and by
-    # then the directory existed with nobody left to remove it. Proved here, a refusal
-    # happens while there is still nothing to clean up.
+    # THE SAME MOVE AS THE READ ABOVE. This was `RB_PIN_DIR`, `RB_PIN_OUT` and
+    # `RB_PIN_SEEN` with an assignability arm each, an exclusive `mkdir` and two
+    # cleanups — twenty-five lines defending three names in THIS shell. The helper
+    # creates the directory now, so `RB_PIN_DIR` is the only one of the three that
+    # has to exist here, and `RB_PIN_SEEN` holds the answer. #157.
     #
-    # THE `mkdir` IS THE LAST ARM BEFORE THE WORK, and it is what decides WHO MAY
-    # REMOVE THE DIRECTORY. It fails precisely when `RB_PIN_DIR` names something that
-    # already exists — which is what a readonly pre-seeded value points at — so its
-    # `else` removes nothing: a failure there means the path was already something,
-    # and something is not ours. Only the final arm, where the directory is
-    # demonstrably this shell's, cleans up.
-    RB_PIN_OUT="$RB_PIN_DIR/pin"
-    RB_PIN_SEEN=probe-a
-    # WRITABILITY IS PROVED BY THREE ASSIGNMENTS, AND THE VERDICT IS WHERE YOU ARE
-    # rather than a value anything can pre-seed. The first is here so the scan that
-    # checks every variable is assigned can see one; the other two are in the
-    # conditions themselves, where there is no value to pre-seed.
-    #
-    # `readonly RB_PIN_SEEN=''` defeats a single emptiness test: the reset fails, the
-    # value is already empty, `[[ -z … ]]` agrees — so the probe runs, and the
-    # assignment that would store the child's answer fails INSIDE the compound
-    # command, which can end the shell before either cleanup. The file and the
-    # directory are left behind and the pin is never proved.
-    #
-    # A FLAG WAS THE FIRST FIX AND IS NOT THIS ONE. A `writable=yes` variable is
-    # variable, and a readonly pre-seed of `yes` made every reset of it fail while the
-    # refusal was skipped — the same defect one name along, which is the shape this
-    # repository keeps deleting. An assignment inside an `elif` list leaves nothing to
-    # pre-seed: the arm is selected or it is not.
-    #
-    # THREE VALUES, BECAUSE THE LAST IS THE ONE THE PROBE NEEDS. `probe-a` and
-    # `probe-b` differ, so no readonly can satisfy both; the empty reset is what the
-    # child's answer overwrites. A shell where any of them fails to take either stops
-    # on the spot — bash's own behaviour for a failed readonly assignment — or selects
-    # that arm, and both happen BEFORE the `mkdir`, so nothing has been created.
-    if [[ $RB_PIN_OUT != "$RB_PIN_DIR/pin" ]]; then
-        echo "ABORT: RB_PIN_OUT is readonly in this shell; the transport path cannot be set"
-        exit 1
-        # A RESERVED WORD LAST, because `echo` and `exit` can both be taken away and
-        # the block's status is then the only signal left.
-        [[ -n "" ]]
-    elif [[ $RB_PIN_SEEN != probe-a ]]; then
-        echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
-        exit 1
-        [[ -n "" ]]
-    elif RB_PIN_SEEN=probe-b; [[ $RB_PIN_SEEN != probe-b ]]; then
-        echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
-        exit 1
-        [[ -n "" ]]
-    elif RB_PIN_SEEN=; [[ -n $RB_PIN_SEEN ]]; then
-        echo "ABORT: RB_PIN_SEEN is readonly in this shell; the pin proof would report a value no child produced"
-        exit 1
-        [[ -n "" ]]
-    elif ! /usr/bin/env mkdir -m 700 "$RB_PIN_DIR"; then
-        echo "ABORT: could not create a private directory for the pin probe"
-        exit 1
-        [[ -n "" ]]
-    else
-        /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_OUT" \
+    # THE PROBE IS STILL A REAL CHILD, and that is the point of the stage: an
+    # `export` that assigns without setting the export attribute leaves this shell
+    # holding the right value while every helper holds none. Reading the variable
+    # back here answers a different question; only asking a child answers this one.
+    RB_PIN_DIR="$RB_TMPPARENT/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
+    RB_PIN_SEEN=
+    if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
+         && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null \
+       && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
+         && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] ) 2>/dev/null; then
+        /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR" \
             && { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_OUT"
-        /usr/bin/env rm -f "$RB_PIN_OUT"
+                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
+        /usr/bin/env rm -f "$RB_PIN_DIR/pin"
         /usr/bin/env rmdir "$RB_PIN_DIR"
         # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
         # rounds of review walked up to it and it is cheaper to state than to
@@ -1190,6 +1018,10 @@ if [[ -z $RB_REMOTE ]]; then
             exit 1
             [[ -n "" ]]
         fi
+    else
+        echo "ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
+        exit 1
+        [[ -n "" ]]
     fi
 else
     echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"

@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   /usr/bin/env bash -p pr-origin.sh read "$RB_TRY/origin" || abort
+#   /usr/bin/env bash -p pr-origin.sh read "$RB_ORIGIN_DIR" || abort
 #   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-#     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"${RB_TMPDIR:?…}/origin" || abort
+#     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" || abort
 #
-# THE CALLER SPELLS THE PATH; IT DOES NOT HOLD IT IN A NAME. `SKILL.md` used to
-# carry it in `RB_ORIGIN_OUT`, and a name that carries a path can be STALE — its
-# assignment is abandoned whenever the directory is missing, and a value the
-# operator's shell already had survives into the read and the removals. There is
-# no such name now: the write side spells it from the candidate directory the loop
-# just created, and the read side from the one it settled on, which is required to
-# be non-empty by the expansion that spells it. #151.
+# THE DIRECTORY IS THIS SCRIPT'S TO CREATE, and the file inside it is this
+# script's to name. The caller passes a path that must NOT exist; `mkdir` here is
+# what makes it this run's. It used to pass a file inside a directory it had built
+# itself, and building it took a two-candidate loop, three names, three
+# assignability probes with cross-variable alias checks and two cleanup arms — in
+# the operator's own shell, where every one of those names can be readonly,
+# value-transforming or a nameref aimed at another. #146, #148, #150, #151 and
+# half of #155 are all that block. None of it is needed on this side of the
+# `bash -p`: no functions are imported, no `BASH_ENV` is sourced, and these names
+# are this process's. #157.
 #
 # THE VALUE GOES TO A FILE THE CALLER NAMES, and that is the third mechanism this
 # script has used. The first two put it on a descriptor — stdout, then fd 9 — and
@@ -144,9 +147,28 @@ case "$MODE" in
     "") echo "ABORT: a mode is required: 'read' (origin's URL) or 'pin' (REVIEW_BUS_REMOTE as a child sees it)" >&2; exit 1 ;;
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
-OUT="${2-}"
-[[ -n $OUT ]] \
-    || { echo "ABORT: pr-origin.sh writes its value to a file; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <path>" >&2; exit 1; }
+# THE ARGUMENT IS A DIRECTORY THIS SCRIPT CREATES, not a file the caller made a
+# place for. It was a file path, and the caller had to build a private directory
+# around it first — a two-candidate loop, three names of its own, three
+# assignability probes with cross-variable alias checks, an exclusive `mkdir`, and
+# two cleanup arms, all in the OPERATOR's shell where every one of those names can
+# be readonly, value-transforming or a nameref aimed at another. That is the whole
+# subject of #146, #148, #150, #151 and half of #155.
+#
+# NONE OF IT IS NEEDED HERE. This process is privileged: it imports no functions,
+# sources no `BASH_ENV`, and `RB_DIR` below is its own. Creating the directory
+# where the exclusion can actually be relied on deletes the thing those guards
+# were guarding rather than adding another. #157.
+RB_DIR="${2-}"
+[[ -n $RB_DIR ]] \
+    || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
+# THE FILE IS THIS SCRIPT'S TO NAME. The caller reads `<dir>/origin` or
+# `<dir>/pin`, and naming it here rather than taking it means there is no path
+# the caller can be talked into passing.
+case "$MODE" in
+    read) OUT="$RB_DIR/origin" ;;
+    pin)  OUT="$RB_DIR/pin" ;;
+esac
 # CREATED, NOT TRUNCATED, AND THE DIFFERENCE IS THE WHOLE POINT. `: > "$OUT"`
 # opens with O_TRUNC and FOLLOWS SYMLINKS: an account that can replace the
 # directory this path names can put a symlink there pointing at any file the
@@ -220,9 +242,12 @@ set -C
 #
 # `$EUID` IS AN EXPANSION, so the identity this compares against costs no command;
 # `-uid` is understood by both GNU and BSD `find`, like the rest of this test.
-[[ $OUT = /* ]] \
-    || { echo "ABORT: the output path must be absolute; '$OUT' cannot be checked to the root" >&2; exit 1; }
-_rb_dir="${OUT%/*}"
+[[ $RB_DIR = /* ]] \
+    || { echo "ABORT: the output directory must be absolute; '$RB_DIR' cannot be checked to the root" >&2; exit 1; }
+# THE ANCESTORS ARE WHAT THE WALK IS ABOUT, and the directory itself does not
+# exist yet — it is created below, exclusively, which is what makes IT safe. So
+# the walk starts one level up.
+_rb_dir="${RB_DIR%/*}"
 [[ -n $_rb_dir ]] || _rb_dir=/
 # THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
 # WRITTEN and as it RESOLVES, and neither covers the other.
@@ -305,6 +330,42 @@ _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
     || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
 [[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || exit 1
 
+# ── THE DIRECTORY IS CREATED HERE, EXCLUSIVELY ─────────────────────────────
+#
+# `mkdir` FAILS IF THE NAME EXISTS, and that is the exclusion the caller used to
+# perform. It refuses a directory, a file and a symlink alike — `mkdir` does not
+# follow the last component — so an account that guesses the name and gets there
+# first gets a refusal rather than a path this script then writes through.
+#
+# `-m 700` IS APPLIED BY `mkdir` ITSELF, so there is no interval between the
+# directory existing and being private. The `umask 077` above governs the file;
+# this governs the name it sits under, and together they say who may replace the
+# object and who may write it.
+#
+# HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
+# this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
+# readonly, `declare -i`, `declare -l` or a nameref aimed at another transport
+# variable — each of which took a probe, and each probe a containment arm once
+# `exit` turned out to be replaceable. Here the name is this process's own.
+/usr/bin/env mkdir -m 700 "$RB_DIR" \
+    || { echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2; exit 1; }
+# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal below happens
+# AFTER the directory exists — the git read, an empty origin, a newline in it, a
+# write that opens and then fails — and each used to leave nothing behind because
+# the CALLER owned the directory and cleaned up in its own arms. It does not own
+# it any more, so the obligation moved with the creation.
+#
+# `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a
+# path this script created one line ago cannot legitimately hold anything else,
+# and a recursive delete on a variable is the shape that turns a refusal into
+# data loss when the variable is not what anyone thought.
+rb_refuse() {   # rb_refuse <message> ; clean up and stop
+    echo "$1" >&2
+    /usr/bin/env rm -f "$OUT"
+    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+    exit 1
+}
+
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"
     # is a real answer it needs — the one that says the export did not take. An
@@ -315,7 +376,7 @@ if [[ $MODE = pin ]]; then
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
-        || { echo "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink" >&2; exit 1; }
+        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink"
     exit 0
 fi
 
@@ -435,7 +496,7 @@ done
 # recorded at the bottom of this file, where it already was.
 _rb_origin="$(/usr/bin/env -i "${_rb_env[@]}" \
     git remote get-url origin 2>/dev/null; _rb_s=$?; printf x; exit "$_rb_s")" || {
-    echo "ABORT: could not read origin in $(command pwd 2>/dev/null)" >&2; exit 1; }
+    rb_refuse "ABORT: could not read origin in $(command pwd 2>/dev/null)"; }
 _rb_origin="${_rb_origin%x}"
 # `git` TERMINATES ITS OUTPUT WITH ONE NEWLINE, and that one is not data. Anything
 # after it is — and the newline in this pattern is written literally for the same
@@ -445,7 +506,7 @@ _rb_origin="${_rb_origin%x}"
 # substitution has been wrong in this file.
 _rb_origin="${_rb_origin%'
 '}"
-[[ -n $_rb_origin ]] || { echo "ABORT: origin is empty; there is no repository to pin this session to" >&2; exit 1; }
+[[ -n $_rb_origin ]] || rb_refuse "ABORT: origin is empty; there is no repository to pin this session to"
 # ONE LINE, AND NOTHING THAT CAN BECOME TWO. A remote containing a newline would
 # otherwise arrive at the caller as two values, and the second is whatever the
 # first line's tail happened to be. `identitylib.sh` parses the URL itself; what
@@ -457,10 +518,10 @@ _rb_origin="${_rb_origin%'
 # refused every session.
 if [[ $_rb_origin != "${_rb_origin%%'
 '*}" ]]; then
-    echo "ABORT: origin contains a newline; it cannot be a single value" >&2; exit 1
+    rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
 fi
 printf '%s\n' "$_rb_origin" > "$OUT" \
-    || { echo "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink" >&2; exit 1; }
+    || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink"
 exit 0
 
 # ── WHAT THIS DOES NOT CLOSE ───────────────────────────────────────────────

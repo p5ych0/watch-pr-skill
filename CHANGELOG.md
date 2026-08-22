@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.0.57] — 2026-08-22
+
+- **The origin transport was thirty-five lines of driver-shell defence for one
+  string, and every one of those lines was a name the operator's shell could
+  replace.** `SKILL.md` chose a parent, built a candidate path, prefix-checked it,
+  created it with `mkdir`, derived the output file from it, proved three names
+  assignable and removed both on the way out — all in the long-lived shell that
+  `#!/usr/bin/env -S bash -p` exists precisely because nothing can harden.
+
+  `pr-origin.sh` now takes the DIRECTORY and creates it itself, exclusively, at
+  mode 700, having walked every ancestor to the root and refused one this user
+  cannot exclusively write. The helper runs privileged, so `mkdir`, `git` and the
+  ancestor walk are not names anything can shadow. What is left in the driver is
+  the name it hands over and the descriptor it reads back.
+
+  `RB_TMPDIR`, `RB_TRY` and `RB_PIN_OUT` are gone with it, and so are the
+  `${RB_TMPDIR:?…}` expansions that stood in for a variable that could not be
+  trusted. The identity block is 123 executable lines where it was 157.
+
+- **A refusal after the directory existed left it behind.** The helper's contract
+  is now a directory it creates, so every refusal past that point — an unreadable
+  origin, an empty one, a newline in it, a failed write — has something to clean
+  up. Each goes through one `rb_refuse`, which removes the file and the directory
+  before it stops. The driver does the same for the one refusal that is its own:
+  a transport file that fails the ownership checks.
+
+- **The transport parent is chosen inside the probe that proves it assignable.**
+  A readonly `RB_TMPPARENT` makes the selection fail, and under `errexit` — which
+  a driving shell may well be in — a failed readonly assignment ends the session
+  at that line, with bash's own message and no diagnosis. Selecting inside the
+  probe's success arm means the operator is told which name is unusable.
+
+---
+
 ## [2.0.56] — 2026-08-22
 
 - **A neutralised `exit` walked a readonly `RB_REMOTE` into pinning the session to
