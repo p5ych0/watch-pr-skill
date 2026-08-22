@@ -1057,8 +1057,29 @@ esac
 # quota'd filesystem, which is the same "making it fail means making it fail
 # everywhere" this repository already records for heredoc temporary files.
 #
-# The guards stay. `pr-selfcheck.sh` will not miss their removal, but a reader
-# will, so this says what they are and why nothing below reaches them.
+# WHAT REPLACES IT IS A STRUCTURAL ASSERTION OVER BOTH WRITES, and that is
+# weaker than running them — stated plainly, because the first version of this
+# paragraph said `pr-selfcheck.sh` would not miss the guards' removal and that is
+# simply untrue: it has no check for these writes, and every other case here
+# drives a `printf` that succeeds, so deleting either `|| rb_refuse` left the
+# whole suite green. A claim that a gap is covered elsewhere is worse than the
+# gap, because it stops anyone looking.
+#
+# What the check can see is that each write still HAS a refusal attached, and that
+# the refusal is `rb_refuse` rather than a bare `exit` — the difference being
+# whether the directory this script created goes with it. Both are matched whole,
+# with the redirection and the guard on one logical line, so a guard moved onto a
+# line of its own or replaced with `|| true` fails here.
+_wr_n=0
+_wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
+[ "$_wr_n" = 2 ] \
+    && pass "both transport writes are continued onto their guard" \
+    || die "expected two guarded writes in the helper, found $_wr_n"
+_wr_g=0
+_wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively and write' "$SCRIPT")" || _wr_g=0
+[ "$_wr_g" = 2 ] \
+    && pass "…and each takes its status through rb_refuse, so a failed write removes the directory too" \
+    || die "expected two rb_refuse guards on the writes, found $_wr_g"
 
 # ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
 #

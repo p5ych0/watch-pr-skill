@@ -371,8 +371,14 @@ if [ -n "$_forge_dir" ]; then
     # leaves the caller opening `<file>/origin`, which fails for a reason that has
     # nothing to do with the case — a stub that drifts from its subject is how a
     # fixture stops testing it.
-    cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
+    # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
+# cases assert the helper was never invoked, and the only alternative was scanning
+# a directory for what it would have created — which for the empty-parent case
+# meant scanning `/`, where an entry left by any earlier run of anything failed
+# the case against a block that created nothing.
+cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
+[ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
 mkdir -m 700 "$2" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
@@ -666,7 +672,8 @@ LOCAL
     # WORKING helper, so nothing else can be what stops it.
     _ep_rc=0
     _ep_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-        TMPDIR=.tmp HOME=.tmp 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+        TMPDIR=.tmp HOME=.tmp FORGE_LOG="$_forge_dir/epcalls" \
+        'BASH_FUNC_exit%%=() { return 0; }' bash -c '
             '"$_read_block"'
             printf "PINNED=[%s] DIR=[%s]\n" "${RB_REMOTE:-}" "${RB_ORIGIN_DIR:-}"
         ' 2>&1)" || _ep_rc=$?
@@ -680,13 +687,19 @@ LOCAL
     printf '%s' "$_ep_out" | grep -qF 'neither TMPDIR nor HOME is an absolute directory' \
         && pass "…and names the cause, which the expansion carries" \
         || die "the empty-parent refusal is silent: '$_ep_out'"
-    # …AND NOTHING WAS BUILT UNDER THE FILESYSTEM ROOT, which is the concrete
-    # damage for a root operator and an absence check the status cannot make.
-    _ep_left=""
-    _ep_left="$(ls -d /watch-pr.* 2>/dev/null | head -1)" || _ep_left=""
-    [ -z "$_ep_left" ] \
-        && pass "…and built nothing at the filesystem root" \
-        || die "an empty transport parent produced '$_ep_left'"
+    # …AND THE HELPER WAS NEVER INVOKED, which is the concrete damage — for a root
+    # operator the path it would have been handed is `/watch-pr.…`, which it can
+    # create and read an origin from — and an absence the status cannot make.
+    #
+    # ASKED OF THE FORGED HELPER, NOT OF THE FILESYSTEM. Scanning for `/watch-pr.*`
+    # made this case depend on host state: an entry left by any earlier run, of any
+    # version, on a machine this suite has never touched, failed it against a block
+    # that created nothing. The helper writes what it was called with into a log
+    # under this fixture's own scratch tree, so the question is answered by what
+    # this run did.
+    [ ! -e "$_forge_dir/epcalls" ] \
+        && pass "…and never invoked the helper, so no path was built from the empty parent" \
+        || die "an empty transport parent reached the helper: '$(cat "$_forge_dir/epcalls")'"
     # …AND A HELPER THAT REFUSES DOES NOT HAVE ITS TRANSPORT READ OR REMOVED, EVEN
     # WITH `exit` SHADOWED. The helper's `mkdir` is the exclusion, so a refusal
     # means the name was already something — and something is not ours. Written as
