@@ -65,14 +65,29 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # since `mkdir` refuses an existing name whatever it holds — and names the file
     # inside it itself. The caller reads `<dir>/origin` or `<dir>/pin`.
     #
-    # A FRESH NAME PER CALL, BUILT RATHER THAN COUNTED. A path this fixture has
-    # already handed to one case is one `mkdir` refuses for the next, which is the
-    # contract working — so every call needs a name of its own. A counter cannot
-    # give one: `run` is always called inside a command substitution, so the
-    # increment happens in a subshell and never reaches the next call. `$$` and
-    # `$RANDOM` are read in that same subshell and differ per call, which is what
-    # a counter was reaching for.
-    local vd="$TMP/value.$$.$RANDOM$RANDOM" vf diag
+    # A FRESH NAME PER CALL, AND `mktemp` IS WHAT GIVES ONE. A path this fixture
+    # has already handed to one case is one `mkdir` refuses for the next, which is
+    # the contract working — so every call needs a name of its own, and two earlier
+    # attempts did not give it.
+    #
+    # A COUNTER CANNOT: `run` is always called inside a command substitution, so the
+    # increment happens in a subshell and never reaches the next call.
+    #
+    # NOR CAN `$$` AND `$RANDOM`: on bash 3.2.57 a subshell inherits the parent's
+    # random state UNADVANCED, so successive command substitutions taken from the
+    # same parent state produce the same value — and `$$` is the parent's pid in
+    # both. Two calls then name one path, the first leaves a directory behind, and
+    # the second is refused by the exclusion. The `macos-shell` job is where that
+    # shows, which is the difference in BEHAVIOUR this repository records as the
+    # half a feature list does not contain.
+    #
+    # `mktemp -d` ASKS THE KERNEL, and the child under it is what the helper is
+    # given: the parent exists and is this run's, the child does not exist at all,
+    # which is exactly the contract. Under `$TMP`, so the EXIT trap collects it.
+    local vp vd vf diag
+    vp="$(mktemp -d "$TMP/run.XXXXXX")" \
+        || die "mktemp could not allocate a scratch parent for a run; the case below would share a path"
+    vd="$vp/dir"
     case "$mode" in read) vf="$vd/origin" ;; *) vf="$vd/pin" ;; esac
     # A CONTROLLED `HOME`, so these cases do not read the contributor's git
     # config. The helper carries `HOME` through on purpose — global
