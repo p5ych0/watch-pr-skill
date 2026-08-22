@@ -371,7 +371,16 @@ run_limited 20 bash -c '
 # reading `<file>/origin`, which is absent whatever happened — so the unprivileged
 # comparison below saw nothing and took its "this bash cannot reach the arguments"
 # branch on a shell where the attack lands perfectly.
-printf "mkdir -p \"\$2\" 2>/dev/null\nprintf '%%s\\n' '%s' > \"\$2/origin\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
+# AND IT REFUSES AN EMPTY ARGUMENT BEFORE BUILDING A LEAF FROM IT. On bash 3.2.57
+# a `BASH_ENV` hook does not get the script's positional parameters, so `$2` is
+# EMPTY there — `mkdir -p ""` fails, and the redirection after it still expands to
+# `/origin`. Run as root that creates or truncates a file at the filesystem root;
+# run unprivileged it fails silently and the case reads the absent value as the
+# version-dependent result. Either way the write escapes `$TMP` and the EXIT trap
+# cannot collect it. Exiting on the empty argument produces exactly the outcome
+# that shell should have — the hook writes nothing and the helper never runs —
+# and the `mkdir` status is taken for the same reason.
+printf "[ -n \"\${2:-}\" ] || exit 0\nmkdir -p \"\$2\" 2>/dev/null || exit 0\nprintf '%%s\\n' '%s' > \"\$2/origin\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
 got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
     && pass "a hook that writes the value file and exits never runs" \
@@ -513,7 +522,8 @@ chmod 770 "$OPENDIR"
 open_rc=0
 open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
-  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
+  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and so is a group-writable one" \
     || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND SO IS AN ANCESTOR, which is the case the first version of this check
