@@ -268,7 +268,11 @@ grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_TRY/origin"'
 # case the whole helper exists for: a read that writes a plausible URL and then
 # fails is accepted, and the session is pinned to it.
 _read_block=""
-_read_block="$(awk '/^RB_TMPDIR=$/, /there is no repository to pin this session to/' "$SKILL")" \
+# FROM THE PROBE, NOT FROM THE CLEAR. `RB_TMPDIR` is proved assignable before the
+# clear now (#151), and a lift that starts after that probe is a lift of the
+# region with its first refusal removed — the readonly case below would then be
+# exercising the defect rather than the fix.
+_read_block="$(awk '/^RB_REMOTE=$/, /there is no repository to pin this session to/' "$SKILL")" \
     || _read_block=""
 { [ -n "$_read_block" ] \
   && case "$_read_block" in *'/pr-origin.sh read "$RB_TRY/origin"'*) true ;; *) false ;; esac \
@@ -301,10 +305,17 @@ _rb_req_n="$(grep -c '${RB_TMPDIR:?' "$SKILL" || true)"
 # parsing — measured, `X="${V:?a session's origin}/o"` is `unexpected EOF`. A
 # fixture is the only thing that would notice, because the block that stops
 # parsing is the one nothing here executes.
-_rb_qm="$(grep -o 'RB_ORIGIN_OUT="${RB_TMPDIR:?[^}]*}' "$SKILL" || true)"
+# SCANNED FROM THE EXPANSIONS THEMSELVES, AND THE SCAN HAS TO FIND SOME. It looked
+# for `RB_ORIGIN_OUT="${RB_TMPDIR:?…}`, and when that name was removed the pattern
+# matched nothing — so the check reported success about text it never read, which
+# is the vacuous green this file exists to stop.
+_rb_qm="$(grep -o '${RB_TMPDIR:?[^}]*}' "$SKILL" || true)"
+[ -n "$_rb_qm" ] \
+    && pass "the requirement's messages are there to be read" \
+    || die "no \${RB_TMPDIR:?…} expansion was found; the apostrophe check below would pass vacuously"
 case "$_rb_qm" in
-    *"'"*) die "the transport path's :? message contains an apostrophe; the setup block will not parse" ;;
-    *)     pass "…and that requirement's message cannot break the block it lives in" ;;
+    *"'"*) die "a :? message contains an apostrophe; the setup block will not parse" ;;
+    *)     pass "…and none of them can break the block it lives in" ;;
 esac
 # AND NO BARE USE SURVIVES PAST THE LOOP. One requirement stops a NON-interactive
 # shell at the first line, and that is all it stops: interactively `${...:?}`
@@ -349,12 +360,40 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
         "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/interactive.sh"
     _rb_it_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/interactive.sh" 2>&1 || true)"
-    [ "$(printf '%s\n' "$_rb_it_out" | grep -cF 'RB_TMPDIR: no transport directory was established')" -ge 2 ] \
-        && pass "…and interactively every use of the directory refuses, not just the first" \
-        || die "the interactive case did not refuse at each use: '$_rb_it_out'"
+    # THE OUTCOME, NOT THE COUNT. How many refusals appear depends on how far the
+    # containment lets execution get, and that is not the invariant — "no path is
+    # built from an empty directory" is, and the line below asserts it. That every
+    # use carries the requirement is asserted where it can be exact: the absence
+    # of a bare `$RB_TMPDIR` in the region.
+    printf '%s' "$_rb_it_out" | grep -qF 'RB_TMPDIR: no transport directory was established' \
+        && pass "…and interactively the requirement still refuses, where the shell survives it" \
+        || die "the interactive case did not refuse: '$_rb_it_out'"
     printf '%s' "$_rb_it_out" | grep -qF 'origin_out=[/origin]' \
         && die "…but a path was built from an empty transport directory: '$_rb_it_out'" \
         || pass "…and no path is ever built from an empty one"
+    # …AND A STALE NON-EMPTY DIRECTORY IS REFUSED TOO, which the requirement alone
+    # cannot do: `${RB_TMPDIR:?}` proves a value is non-empty, not that this run
+    # established it. A readonly `RB_TMPDIR` naming a directory the operator owns
+    # survives the clear and the loop's assignment, and its `origin` would then be
+    # read as this session's remote and DELETED by the cleanup. The probe before
+    # the clear is what refuses it, and interactively is where that matters: a
+    # neutralised `exit` walks past anything that merely reports.
+    mkdir -p "$_rb_ex/stale"
+    printf '%s\n' "git@github.com:WRONG/other.git" > "$_rb_ex/stale/origin"
+    printf 'exit() { return 0; }\nreadonly RB_TMPDIR=%s/stale\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED remote=[%%s]\\n" "${RB_REMOTE:-unset}"\nexit\n' \
+        "$_rb_ex" "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/stale.sh"
+    _rb_st_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
+        bash --noprofile --norc -i < "$_rb_ex/stale.sh" 2>&1 || true)"
+    printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly or value-transforming' \
+        && pass "…and a stale readonly transport directory is refused by name, interactively" \
+        || die "the stale-directory case did not refuse: '$_rb_st_out'"
+    printf '%s' "$_rb_st_out" | grep -qF 'WRONG/other' \
+        && die "…but the stale directory's origin was read: '$_rb_st_out'" \
+        || pass "…and its origin is never read"
+    { [ -f "$_rb_ex/stale/origin" ] \
+      && [ "$(cat "$_rb_ex/stale/origin")" = "git@github.com:WRONG/other.git" ]; } \
+        && pass "…nor removed" \
+        || die "the stale directory's origin was consumed or deleted"
     rm -rf "$_rb_ex" 2>/dev/null || true
 fi
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -1891,7 +1930,7 @@ mkdir -p "$_rb_pb/parent" "$_rb_pb/bin"
 printf '#!/bin/sh\nprintf "git@github.com:acme/widget.git\\n" > "$2"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
 chmod +x "$_rb_pb/bin/pr-origin.sh"
 awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
-awk '/^if \( RB_TMPPARENT=Probe-A;/,/^fi$/' "$SKILL" > "$_rb_pb/parent.sh"
+awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
 # THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
 # range runs from the probe to the first `fi` at column 0 — which is the probe's
 # own when the selection is its success arm, and the GUARD's if it is not. Revert
@@ -2496,7 +2535,7 @@ grep -qF '( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] ) || continue' "$SKILL" \
 # the loop is its success arm. Extracting the loop alone leaves `RB_TRY` unprobed,
 # so the readonly traversal value goes straight to the prefix check — the cases
 # below would then be exercising the defect rather than the fix.
-_rb_loop="$(awk '/^[[:space:]]*if \( RB_TRY=Probe-A;/,/^    fi$/' "$SKILL")" || _rb_loop=""
+_rb_loop="$(awk '/^[[:space:]]*if \( RB_TRY=Probe-A;/,/^        fi$/' "$SKILL" | sed 's/^        //')" || _rb_loop=""
 { [ -n "$_rb_loop" ] \
   && case "$_rb_loop" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
     && pass "the RB_TRY probe and the loop it guards can be extracted together" \

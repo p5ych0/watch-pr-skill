@@ -29,6 +29,21 @@
   `$RB_TMPDIR` survives past the loop at all — asserted as an absence, because a
   list of uses is wrong by omission.
 
+  **And the directory itself is proved assignable before anything uses it.** The
+  requirement only rejects an *empty* value; it does not prove this run
+  established the directory. A readonly `RB_TMPDIR` naming somewhere the operator
+  owns survives the clear and the loop's assignment, and its `origin` was then
+  read as the session's remote and deleted by the cleanup — reachable
+  interactively, where a refusal that merely reports is walked past. The probe is
+  the one the three other transport names already had, and **the whole transport
+  region is its success arm**, because interactively nothing else stops the walk.
+
+  The clear of `RB_REMOTE` moved *above* that arm with its own proof. Inside a
+  compound command a failed readonly assignment ends the shell before the test
+  that would have named the variable, so the diagnostic has to live outside — and
+  up there it has nothing to clean up, which is two fewer commands taking a path
+  from a variable.
+
   **And the path is spelled, not held.** `RB_ORIGIN_OUT` used to carry it, and a
   name that carries a path can be *stale*: its assignment is abandoned by the
   requirement whenever the directory is missing, and a value your shell already
