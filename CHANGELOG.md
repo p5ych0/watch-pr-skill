@@ -1,5 +1,90 @@
 # Changelog
 
+## [2.0.55] — 2026-08-22
+
+- **A neutralised `exit` walked a refused setup into reading and deleting
+  `/origin`.** `SKILL.md`'s setup runs in your own long-lived shell, and `exit` is
+  a builtin a startup file can replace with one that RETURNS. Every refusal in the
+  transport block then printed its message and carried on to the next line — which
+  built `$RB_TMPDIR/origin` with `RB_TMPDIR` never set. That is `/origin`.
+
+  The ownership test below it is `[[ -O ]]`, so for an operator running as **root**
+  with a root-owned file there it passes: the value is read as this session's
+  origin, the `rm -f` two lines down **deletes that file**, and every stage —
+  signoffs, revocations, review requests — is then addressed by whatever
+  repository it named. The cleanup arms are worse still: they run
+  `rmdir "$RB_TMPDIR"`, which with an empty value is `rmdir /`.
+
+  The directory is required by the **expansion that builds the path**:
+  `${RB_TMPDIR:?…}`. A parameter expansion error ends a non-interactive shell
+  where it stands — there is no command name in it to shadow and no `exit` to
+  neutralise — and it names the variable while doing it.
+
+  **Every use in the region carries it, not just the first**, and that is what an
+  *interactive* shell forces. There `${…:?}` reports the error and abandons only
+  the command it is in — the shell survives — so a walked-past refusal would
+  continue into the cleanup arms, where `rm -f "$RB_TMPDIR/origin"` is
+  `rm -f /origin` and `rmdir "$RB_TMPDIR"` is `rmdir /`. With the requirement on
+  each of them, every one of those commands refuses on its own, and no bare
+  `$RB_TMPDIR` survives past the loop at all — asserted as an absence, because a
+  list of uses is wrong by omission.
+
+  **And the directory itself is proved assignable before anything uses it.** The
+  requirement only rejects an *empty* value; it does not prove this run
+  established the directory. A readonly `RB_TMPDIR` naming somewhere the operator
+  owns survives the clear and the loop's assignment, and its `origin` was then
+  read as the session's remote and deleted by the cleanup — reachable
+  interactively, where a refusal that merely reports is walked past. The probe is
+  the one the three other transport names already had, and **the whole transport
+  region is its success arm**, because interactively nothing else stops the walk.
+
+  The clear of `RB_REMOTE` moved *above* that arm with its own proof. Inside a
+  compound command a failed readonly assignment ends the shell before the test
+  that would have named the variable, so the diagnostic has to live outside — and
+  up there it has nothing to clean up, which is two fewer commands taking a path
+  from a variable.
+
+  **And each probe reads another name back, because reading its own cannot see an
+  alias.** `declare -n RB_TMPDIR=RB_REMOTE` passes an assign-and-read-back probe
+  perfectly — the assignment works and the value returns — and the two are then
+  the *same variable*, so the origin read silently changes `RB_TMPDIR` before the
+  cleanups run. With a local origin such as `/tmp/victim` they remove
+  `/tmp/victim/origin` and try to remove `/tmp/victim`, and the identity parser
+  rejects the value only afterwards. `RB_REMOTE` is cleared and proved clear just
+  above, so writing a sentinel to one name and finding it in the other is the
+  alias; each probe checks that way against `RB_TMPDIR` and `RB_REMOTE`, the two
+  names that can redirect the origin read or the cleanups. An alias between
+  `RB_TMPPARENT` and `RB_TRY` is not among them and does not need to be: the loop
+  refuses it at its prefix check, so nothing is read and nothing is removed —
+  what is lost there is the diagnostic, not the property.
+
+  **And the path is spelled, not held.** `RB_ORIGIN_OUT` used to carry it, and a
+  name that carries a path can be *stale*: its assignment is abandoned by the
+  requirement whenever the directory is missing, and a value your shell already
+  had — `/origin`, or anything else — then survived into the read, into `rm -f`,
+  and into the unconditional cleanup. Requiring that name would not have helped,
+  because a pre-seeded value is not empty. So there is no name: every use spells
+  the path out of the directory it must come from, which cannot be stale because
+  it is not consulted — and `pr-origin.sh`'s own header and `CLAUDE.md`'s entry
+  for it, which both showed the driver invoking and reading through that variable,
+  describe the spelled path now. A pre-seeded `RB_ORIGIN_OUT` is inert — the session
+  pins from its own file and never touches the one that name pointed at, which is
+  stronger than the refusal it replaces.
+
+  The expansion and the containment do different jobs, and both are here. The
+  `RB_TMPDIR` arm stops a walked-past refusal entering the region with a *stale*
+  directory; the requirement stops one entering it with an *empty* one, from a
+  refusal inside that same arm. What was tried and taken back is a third thing:
+  moving the region into the `RB_TMPPARENT` arm, three levels in. Inside a
+  compound command a failed readonly assignment ends the shell **before** the test
+  that would have named it, so `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own
+  diagnostics to gain this one — which is why `RB_REMOTE`'s clear sits above the
+  arm and `RB_ORIGIN_OUT` no longer exists at all.
+
+  One thing about that message is load-bearing: it carries **no apostrophe**. Bash
+  parses the `:?` word specially, so a `'` inside it opens a quote even within
+  double quotes and the whole setup block stops parsing.
+
 ## [2.0.54] — 2026-08-22
 
 - **`RB_TRY`'s probe read only a status, so a transforming attribute passed it.**
