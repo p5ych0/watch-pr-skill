@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.56] — 2026-08-22
+
+- **A neutralised `exit` walked a readonly `RB_REMOTE` into pinning the session to
+  the wrong repository.** `SKILL.md` clears the value the session is pinned by and
+  proves the clear took — but `exit` is a builtin a startup file can replace with
+  one that RETURNS, and the proof was a statement rather than a structure. With a
+  `readonly REVIEW_BUS_REMOTE`-shaped value already in the driving shell:
+
+  1. the clear fails and the value stands;
+  2. the guard fires, prints, and returns;
+  3. the descriptor assignment further down cannot replace it either, and its
+     refusal returns the same way;
+  4. the value is non-empty and well-formed, so the identity parser accepts it and
+     `REVIEW_BUS_REMOTE` is exported from it.
+
+  Every request, signoff, revocation and merge for that session was then addressed
+  at a repository the operator's environment chose.
+
+  The clear is a **condition** now, and everything that depends on the value — the
+  transport region, the identity parse and the pin — is its success arm. The
+  assignment stays outside it: inside a compound command a failed readonly
+  assignment ends the shell *before* the test that would have named the variable,
+  so the diagnostic has to live where its own failure is visible, and the TEST is
+  what gates the arm.
+
+  Verified with `exit` replaced by a function that returns: the refusal names
+  `RB_REMOTE` and nothing is exported.
+
 ## [2.0.55] — 2026-08-22
 
 - **A neutralised `exit` walked a refused setup into reading and deleting
