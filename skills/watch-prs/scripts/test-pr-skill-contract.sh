@@ -426,6 +426,8 @@ _rb_ex="$(mktemp_d)" || _rb_ex=""
 { [ -n "$_rb_ex" ] && [ -d "$_rb_ex" ]; } \
     || die "no scratch directory for the transport-path case; it proves nothing"
 if [ -n "$_rb_ex" ] && [ -d "$_rb_ex" ]; then
+    # THE LIFT CARRIES ITS LIBRARY LOAD, so the tree it runs in has to have it.
+    cp "$SCRIPT_DIR/identitylib.sh" "$_rb_ex/" 2>/dev/null || true
     printf '%s\n' "$_read_block" > "$_rb_ex/blk.sh"
     _rb_ex_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
         RB_SCRIPTS="$_rb_ex" TMPDIR="$_rb_ex" bash --noprofile --norc -c '
@@ -433,7 +435,7 @@ exit() { return 0; }
 readonly RB_TMPPARENT=/nonexistent-parent-for-this-case
 . "$1"
 printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh" 2>&1 || true)"
-    printf '%s' "$_rb_ex_out" | grep -qF 'RB_TMPDIR: no transport directory was established' \
+    printf '%s' "$_rb_ex_out" | grep -q 'RB_TMPDIR: no transport directory was established$' \
         && pass "…so a walked-past refusal stops at the expansion, naming the directory it lacks" \
         || die "the transport-path case gave '$_rb_ex_out'"
     printf '%s' "$_rb_ex_out" | grep -qF 'REACHED' \
@@ -457,7 +459,7 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # built from an empty directory" is, and the line below asserts it. That every
     # use carries the requirement is asserted where it can be exact: the absence
     # of a bare `$RB_TMPDIR` in the region.
-    printf '%s' "$_rb_it_out" | grep -qF 'RB_TMPDIR: no transport directory was established' \
+    printf '%s' "$_rb_it_out" | grep -q 'RB_TMPDIR: no transport directory was established$' \
         && pass "…and interactively the requirement still refuses, where the shell survives it" \
         || die "the interactive case did not refuse: '$_rb_it_out'"
     # THE PATH THE CLEANUP IS HANDED IS OBSERVED, not inferred. `RB_ORIGIN_OUT` was
@@ -532,7 +534,7 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     # `RB_TMPPARENT` or `RB_TRY` is caught by THAT name's probe, and demanding
     # `RB_TMPDIR`'s message would be asserting the wrong variable was blamed.
     _rb_st_var="${_rb_st_attr##* }"; _rb_st_var="${_rb_st_var%%=*}"
-    printf '%s' "$_rb_st_out" | grep -qF "ABORT: $_rb_st_var is readonly, value-transforming, or aimed at another transport variable" \
+    printf '%s' "$_rb_st_out" | grep -q "^ABORT: $_rb_st_var is readonly, value-transforming, or aimed at another transport variable" \
         && pass "…and an unusable transport variable is refused by its own name, interactively ($_rb_st_attr)" \
         || die "the unusable-variable case did not refuse as $_rb_st_var: '$_rb_st_out' ($_rb_st_attr)"
     printf '%s' "$_rb_st_out" | grep -qF 'WRONG/other' \
@@ -559,7 +561,7 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
             > "$_rb_ex/nameref.sh"
         _rb_nr_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
             bash --noprofile --norc "$_rb_ex/nameref.sh" 2>&1 || true)"
-        printf '%s' "$_rb_nr_out" | grep -qF 'aimed at another transport variable' \
+        printf '%s' "$_rb_nr_out" | grep -q '^ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable' \
             && pass "…and a nameref between two transport variables is refused" \
             || die "the nameref case did not refuse: '$_rb_nr_out'"
         { [ -f "$_rb_ex/victim/origin" ] && [ -d "$_rb_ex/victim" ]; } \
@@ -771,7 +773,7 @@ LOCAL
             '"$_read_block"'
             printf "EXPORTED=[%s]\n" "${REVIEW_BUS_REMOTE:-unset}"
         ' 2>&1)" || true
-    printf '%s' "$_rx_out" | grep -qF 'ABORT: RB_REMOTE is readonly in this shell' \
+    printf '%s' "$_rx_out" | grep -q '^ABORT: RB_REMOTE is readonly in this shell' \
         && pass "…and a neutralised exit does not change which refusal is printed" \
         || die "the neutralised-exit case did not refuse: '$_rx_out'"
     printf '%s' "$_rx_out" | grep -qF 'EXPORTED=[unset]' \
@@ -787,7 +789,7 @@ LOCAL
             "$_read_block" > "$_forge_dir/stalepin.sh"
         _rxi_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV FORGE_RC=0 \
             TMPDIR="$_forge_dir" bash --noprofile --norc -i < "$_forge_dir/stalepin.sh" 2>&1 || true)"
-        printf '%s' "$_rxi_out" | grep -qF 'ABORT: RB_REMOTE is readonly in this shell' \
+        printf '%s' "$_rxi_out" | grep -q '^ABORT: RB_REMOTE is readonly in this shell' \
             && pass "…and interactively, where the shell survives the failed clear, the refusal still fires" \
             || die "the interactive stale-pin case did not refuse: '$_rxi_out'"
         printf '%s' "$_rxi_out" | grep -qF 'EXPORTED=[unset]' \
@@ -2248,7 +2250,7 @@ while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
+    printf '%s' "$_rb_out" | grep -q '^ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
 done
@@ -2264,7 +2266,7 @@ done
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
 declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
+printf '%s' "$_rb_out" | grep -q '^ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
 printf '%s' "$_rb_out" | grep -qF 'could not read origin into a transport directory' \
@@ -2281,7 +2283,7 @@ while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -qF "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
+    printf '%s' "$_rb_out" | grep -q "^ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
         && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_WORK_DIR probe gave '$_rb_out' ($_rb_attr)"
     printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
@@ -2849,11 +2851,18 @@ continue() { return 0; }
 RB_SCRIPTS=/nonexistent-rb-scripts
 . "$1"
 printf "SURVIVED rb_tmpdir=[%s]\n" "${RB_TMPDIR:-}"' _ "$_rb_bt/loop.sh" 2>&1 || true)"; _rb_bt_rc=$?
-    # THE DIAGNOSTIC IS THE ASSERTION. Asked inside the loop the probe's failure
+    # ANCHORED AT THE START OF A LINE, AND THAT IS NOT TIDINESS. An interactive shell
+# ECHOES its input, so the transcript contains the source line that CONTAINS the
+# refusal — `|| { echo "ABORT: …"` — whether or not it ever ran. An unanchored
+# match is satisfied by the echo, and the suite would report a diagnostic the
+# operator never saw. Emitted output starts at column 0; echoed input carries the
+# prompt.
+#
+# THE DIAGNOSTIC IS THE ASSERTION. Asked inside the loop the probe's failure
     # had nowhere to go — every candidate was skipped and the emptiness check
     # afterwards blamed `TMPDIR` and `HOME`, which is an environment that is fine.
     # What must come out is this variable's own name.
-    printf '%s' "$_rb_bt_out" | grep -qF 'ABORT: RB_TRY is readonly, value-transforming, or aimed at another transport variable' \
+    printf '%s' "$_rb_bt_out" | grep -q '^ABORT: RB_TRY is readonly, value-transforming, or aimed at another transport variable' \
         && pass "…an unusable RB_TRY is refused by name ($_rb_bt_attr)" \
         || die "the RB_TRY case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
     printf '%s' "$_rb_bt_out" | grep -qF 'could not read origin into a transport directory' \
