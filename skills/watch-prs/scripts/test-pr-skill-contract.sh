@@ -1428,6 +1428,39 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
 else
     echo "ok   - (declare -n is unavailable on this bash, or no scratch tree; the pin nameref cases did not run)"
 fi
+# …AND THE PIN STAGE'S OWN CANDIDATE ALIASES ARE RUN, not only matched. The pin
+# probe compares against `HOME` and `TMPDIR` for the same reason the transport one
+# does — this stage removes what it creates too, so an alias onto a candidate ends
+# with the operator's variable naming a deleted path. Source-text matching says the
+# comparisons are present; only running them says they refuse.
+if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+    for _pal in 'declare -n RB_PIN_DIR=HOME:HOME' \
+                'declare -n RB_PIN_SEEN=TMPDIR:TMPDIR'; do
+        _pal_decl="${_pal%%:*}"; _pal_var="${_pal##*:}"
+        rm -f "$_forge_dir/palias.out"
+        _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" RB_ALIAS_OUT="$_forge_dir/palias.out" \
+            'BASH_FUNC_exit%%=() { return 0; }' bash -c '
+                trap '"'"'printf "CANDIDATE=[%s]\n" "${'"$_pal_var"':-}" > "$RB_ALIAS_OUT"'"'"' EXIT
+                RB_REMOTE="git@github.com:acme/widget.git"
+                RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+                '"$_pal_decl"'
+                '"$_pin_block"'
+            ' 2>&1)" || true
+        _pal_seen=""
+        [ -f "$_forge_dir/palias.out" ] && _pal_seen="$(<"$_forge_dir/palias.out")"
+        case "$_pal_seen" in
+            *"CANDIDATE=[$RB_TMPBASE]"*) pass "…and a pin-stage nameref onto \$$_pal_var leaves it as the operator had it ($_pal_decl)" ;;
+            *) die "a pin-stage nameref onto \$$_pal_var replaced it ($_pal_decl): seen='$_pal_seen' out='$_pal_out'" ;;
+        esac
+        case "$_pal_out" in
+            *OWNER=*) die "a pin-stage nameref onto \$$_pal_var still reported a pin ($_pal_decl): '$_pal_out'" ;;
+            *)        pass "…and setup reports no pin through it ($_pal_decl)" ;;
+        esac
+    done
+else
+    echo "ok   - (declare -n is unavailable on this bash, or no forge; the pin-stage alias cases did not run)"
+fi
 # ── BOTH HOSTILE STATES AT ONCE, WHICH IS WHERE THE STATUS STOPS HELPING ────
 #
 # `readonly REVIEW_BUS_REMOTE=''` makes the export return 1 and a function named

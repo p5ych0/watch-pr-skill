@@ -52,10 +52,16 @@
 #      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
 #      itself is the directory, never the file — a caller that opens it directly
 #      opens a directory.
-#   1  refused — the reason is on STDERR, and the value file is NOT created. It is
-#      written by the single redirection that creates it, so a refusal before that
-#      point leaves the leaf ABSENT rather than empty; a caller that opens it sees
-#      the open fail, which is what `SKILL.md` branches on.
+#   1  refused — the reason is on STDERR, and this script does NOT create a value
+#      file. The leaf is written by the single redirection that creates it, so
+#      nothing here ever leaves a half-written or empty one.
+#
+#      THAT IS NOT THE SAME AS "THE LEAF IS ABSENT", and the difference is the
+#      pre-existing case: where `<dir>` was already there and already held an
+#      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
+#      leaf — the caller's, or somebody else's — is still there afterwards. Absence
+#      is guaranteed only for a refusal AFTER this script created the directory,
+#      where `rb_refuse` removes the leaf and the directory together.
 #
 #      WHAT IS AT THE ARGUMENT ON STATUS 1 DEPENDS ON WHICH SIDE OF THE `mkdir`
 #      the refusal happened, and the two are opposite:
@@ -335,10 +341,88 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
     done
     return 0
 }
+# ── THE NAME IS RESERVED BEFORE IT IS WALKED ───────────────────────────────
+#
+# THE `mkdir` COMES FIRST, and that ordering is a fix rather than an accident. It
+# used to run AFTER both ancestry walks, and the candidate is visible to every
+# account on the machine the moment this process starts: it is an argv entry, which
+# `ps` and `/proc` publish. On a shared sticky parent such as `/tmp`, another local
+# account could read it, create the name while the walks ran, and this `mkdir`
+# would then refuse — repeatably, for as long as they watched. The random suffix
+# stops a name being GUESSED and does nothing about one being READ. The caller's
+# `mkdir` had reserved the name before the helper was invoked at all, so #157 lost
+# that property by moving the create without moving it far enough.
+#
+# `mkdir` FAILS IF THE NAME EXISTS, and that is the exclusion the caller used to
+# perform. It refuses a directory, a file and a symlink alike — `mkdir` does not
+# follow the last component — so an account that gets there first gets a refusal
+# rather than a path this script then writes through.
+#
+# `-m 700` IS APPLIED BY `mkdir` ITSELF, so there is no interval between the
+# directory existing and being private. The `umask 077` above governs the file;
+# this governs the name it sits under, and together they say who may replace the
+# object and who may write it.
+#
+# WALKING AFTERWARDS IS NOT WEAKER. The walk asks who may rename the components on
+# the way; creating a private child first does not change any of their answers, and
+# NOTHING IS WRITTEN into the child until the walk has passed. A refusal from the
+# walk removes the directory again, which is what `rb_refuse` is for — so the
+# reservation is given back rather than left behind.
+#
+# HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
+# this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
+# readonly, `declare -i`, `declare -l` or a nameref aimed at another transport
+# variable — each of which took a probe, and each probe a containment arm once
+# `exit` turned out to be replaceable. Here the name is this process's own.
+# AND A FAILED `mkdir` ASKS THE WALK WHY, BEFORE REFUSING. Reserving first costs
+# the DIAGNOSTIC otherwise: `mkdir` reports `Permission denied` where the real
+# answer is that a component belongs to another account, and an operator reading
+# that has nothing to act on. The walk runs on the failure path to produce the
+# precise reason, and its refusal is the one that comes out; the generic message
+# is what remains when the ancestry is fine and the name was simply taken. Nothing
+# was created on this path, so nothing is removed on it.
+/usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null \
+    || { _rb_walk "$_rb_dir" || exit 1
+         # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the
+         # case the lexical walk cannot answer: the link's own owner is fine and
+         # what it points at is not, so `mkdir` fails and only this pass can say
+         # why. Both walks run here for the same reason they both run below.
+         _rb_fail_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
+         # A PATH THAT WILL NOT RESOLVE IS ITS OWN REFUSAL, and it is the answer for
+         # a link into a tree this account cannot enter: the lexical walk sees only
+         # the link, which we own, and `cd -P` is what fails. Reporting the generic
+         # message there would hide the one fact the operator needs.
+         [[ -n $_rb_fail_real ]] \
+             || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
+         [[ $_rb_fail_real != "$_rb_dir" ]] \
+             && { _rb_walk "$_rb_fail_real" || exit 1; }
+         echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
+         exit 1; }
+# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal from here on
+# happens AFTER the directory exists — the two ancestry walks, the git read, an
+# empty origin, a newline in it, a write that opens and then fails — and each used
+# to leave nothing behind because the CALLER owned the directory and cleaned up in
+# its own arms. It does not own it any more, so the obligation moved with the
+# creation.
+#
+# `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a
+# path this script created cannot legitimately hold anything else, and a recursive
+# delete on a variable is the shape that turns a refusal into data loss when the
+# variable is not what anyone thought.
+#
+# AN EMPTY MESSAGE PRINTS NOTHING, for the callers whose own refusal has already
+# said why — the ancestry walks name the component and the reason, and a second
+# line after them would say less.
+rb_refuse() {   # rb_refuse [message] ; clean up and stop
+    [[ -n ${1-} ]] && echo "$1" >&2
+    /usr/bin/env rm -f "$OUT"
+    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
+    exit 1
+}
 # THE PATH AS WRITTEN, which is where the SYMLINKS live. `find` without `-L`
 # examines the link rather than what it points at, so this pass asks who owns each
 # link on the way — an account that owns one can repoint it.
-_rb_walk "$_rb_dir" || exit 1
+_rb_walk "$_rb_dir" || rb_refuse
 # …AND THE PATH AS IT RESOLVES, which is where the FILE lives. A lexical walk
 # never sees the real ancestry: `TMPDIR=/home/me/t` pointing at `/srv/other/mine`
 # checks `/home/me` and never `/srv/other`, and the account that owns that one can
@@ -350,44 +434,9 @@ _rb_walk "$_rb_dir" || exit 1
 # function can stand in front of either. In the driving shell they would be names.
 _rb_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
 [[ -n $_rb_real ]] \
-    || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
-[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || exit 1
+    || rb_refuse "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads"
+[[ $_rb_real = "$_rb_dir" ]] || _rb_walk "$_rb_real" || rb_refuse
 
-# ── THE DIRECTORY IS CREATED HERE, EXCLUSIVELY ─────────────────────────────
-#
-# `mkdir` FAILS IF THE NAME EXISTS, and that is the exclusion the caller used to
-# perform. It refuses a directory, a file and a symlink alike — `mkdir` does not
-# follow the last component — so an account that guesses the name and gets there
-# first gets a refusal rather than a path this script then writes through.
-#
-# `-m 700` IS APPLIED BY `mkdir` ITSELF, so there is no interval between the
-# directory existing and being private. The `umask 077` above governs the file;
-# this governs the name it sits under, and together they say who may replace the
-# object and who may write it.
-#
-# HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
-# this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
-# readonly, `declare -i`, `declare -l` or a nameref aimed at another transport
-# variable — each of which took a probe, and each probe a containment arm once
-# `exit` turned out to be replaceable. Here the name is this process's own.
-/usr/bin/env mkdir -m 700 "$RB_DIR" \
-    || { echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2; exit 1; }
-# AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal below happens
-# AFTER the directory exists — the git read, an empty origin, a newline in it, a
-# write that opens and then fails — and each used to leave nothing behind because
-# the CALLER owned the directory and cleaned up in its own arms. It does not own
-# it any more, so the obligation moved with the creation.
-#
-# `rmdir`, NOT `rm -rf`. This removes only what it made and only while empty: a
-# path this script created one line ago cannot legitimately hold anything else,
-# and a recursive delete on a variable is the shape that turns a refusal into
-# data loss when the variable is not what anyone thought.
-rb_refuse() {   # rb_refuse <message> ; clean up and stop
-    echo "$1" >&2
-    /usr/bin/env rm -f "$OUT"
-    /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
-    exit 1
-}
 
 if [[ $MODE = pin ]]; then
     # NO VALIDATION HERE. The caller is asking what a child inherits, and "nothing"

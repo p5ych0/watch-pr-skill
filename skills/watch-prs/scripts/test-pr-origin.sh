@@ -1135,6 +1135,33 @@ _wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively a
     && pass "…and each takes its status through rb_refuse, so a failed write removes the directory too" \
     || die "expected two rb_refuse guards on the writes, found $_wr_g"
 
+# ── THE NAME IS RESERVED BEFORE THE WALKS, NOT AFTER THEM ──────────────────
+#
+# The candidate is an argv entry, which `ps` and `/proc` publish to every account
+# on the machine the moment this process starts. With the `mkdir` after both
+# ancestry walks, another local account on a shared sticky parent could read it and
+# create the name while those walks ran; `mkdir` then refused, repeatably, for as
+# long as they watched. The random suffix stops a name being GUESSED and does
+# nothing about one being READ.
+#
+# ASSERTED ON THE ORDER IN THE SOURCE, because the race is a race: staging it means
+# winning a window this fixture cannot make deterministic. What CAN be checked is
+# that the create precedes the walks, which is the property that closes it — and
+# that a walk refusal after the create still removes the directory, which the case
+# below the exclusions already proves behaviourally.
+_res_mk=0; _res_mk="$(grep -n 'env mkdir -m 700 "\$RB_DIR"' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_mk=0
+_res_w1=0; _res_w1="$(grep -n '^_rb_walk "\$_rb_dir"' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_w1=0
+{ [ "$_res_mk" -gt 0 ] && [ "$_res_w1" -gt 0 ] && [ "$_res_mk" -lt "$_res_w1" ]; } \
+    && pass "the transport directory is reserved before the ancestry walks run" \
+    || die "the mkdir does not precede the walks (mkdir=$_res_mk walk=$_res_w1); the name is observable while they run"
+# …AND THE WALKS STILL REFUSE AFTER IT, which is what makes reserving first safe
+# rather than merely earlier. Both walk refusals go through `rb_refuse`, so the
+# reservation is given back.
+_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCRIPT")" || _res_g=0
+[ "$_res_g" = 2 ] \
+    && pass "…and both walk refusals give the reservation back through rb_refuse" \
+    || die "expected both walks to refuse through rb_refuse, found $_res_g"
+
 # ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
 #
 # `die` records a failure and returns, so a `die` with nothing after it left `run`
