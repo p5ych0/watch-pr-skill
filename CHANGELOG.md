@@ -65,7 +65,9 @@
   and into the unconditional cleanup. Requiring that name would not have helped,
   because a pre-seeded value is not empty. So there is no name: every use spells
   the path out of the directory it must come from, which cannot be stale because
-  it is not consulted. A pre-seeded `RB_ORIGIN_OUT` is now inert — the session
+  it is not consulted — and `pr-origin.sh`'s own header and `CLAUDE.md`'s entry
+  for it, which both showed the driver invoking and reading through that variable,
+  describe the spelled path now. A pre-seeded `RB_ORIGIN_OUT` is inert — the session
   pins from its own file and never touches the one that name pointed at, which is
   stronger than the refusal it replaces.
 

@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   /usr/bin/env bash -p pr-origin.sh read "$RB_ORIGIN_OUT" || abort
-#   RB_REMOTE="$(<"$RB_ORIGIN_OUT")"
+#   /usr/bin/env bash -p pr-origin.sh read "$RB_TRY/origin" || abort
+#   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+#     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"${RB_TMPDIR:?…}/origin" || abort
+#
+# THE CALLER SPELLS THE PATH; IT DOES NOT HOLD IT IN A NAME. `SKILL.md` used to
+# carry it in `RB_ORIGIN_OUT`, and a name that carries a path can be STALE — its
+# assignment is abandoned whenever the directory is missing, and a value the
+# operator's shell already had survives into the read and the removals. There is
+# no such name now: the write side spells it from the candidate directory the loop
+# just created, and the read side from the one it settled on, which is required to
+# be non-empty by the expansion that spells it. #151.
 #
 # THE VALUE GOES TO A FILE THE CALLER NAMES, and that is the third mechanism this
 # script has used. The first two put it on a descriptor — stdout, then fd 9 — and
