@@ -305,12 +305,21 @@ if ( declare -l _rb_probe_l=A ) 2>/dev/null; then _rb_has_l=yes; fi
 # there reads it as this session's origin, the `rm -f` below DELETES it, and the
 # cleanup arms run `rmdir "$RB_TMPDIR"` — `rmdir /`. #151.
 #
-# AN EXPANSION, NOT AN `if`. A parameter expansion error ends a non-interactive
-# shell where it stands: no command name to shadow, no `exit` to neutralise, and
-# it names the variable. The `if` was tried and taken back, because inside a
-# compound command a failed readonly assignment ends the shell BEFORE the guard
-# that would have named it — `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own
-# diagnostics to gain this one, which the cases below this file already prove.
+# AN EXPANSION AND AN ARM, DOING DIFFERENT JOBS. The region IS inside an `if` —
+# the `RB_TMPDIR` probe's success arm — and that arm is what keeps a walked-past
+# refusal from entering with a STALE directory. The requirement is what keeps one
+# from entering with an EMPTY one, from a refusal INSIDE that arm: the parent
+# probe, the candidate probe and the emptiness check all sit there, and a
+# neutralised `exit` carries any of them down to the read. A parameter expansion
+# error ends a non-interactive shell where it stands — no command name to shadow,
+# no `exit` to neutralise — and it names the variable.
+#
+# THE CONTAINMENT THAT WAS TAKEN BACK is a third thing: moving the region into the
+# `RB_TMPPARENT` arm, three levels in. Inside a compound command a failed readonly
+# assignment ends the shell BEFORE the test that would have named it, so
+# `RB_ORIGIN_OUT` and `RB_REMOTE` lost their own diagnostics to gain this one.
+# That is why `RB_REMOTE`'s clear sits above the arm and `RB_ORIGIN_OUT` is gone —
+# both protections are load-bearing and neither replaces the other.
 # EVERY SPELLING OF THE PATH REQUIRES THE DIRECTORY, and there is no name holding
 # it — so this counts the uses rather than looking for one assignment.
 # COUNTED OUTSIDE COMMENTS. The comments in this region quote the expansion while
