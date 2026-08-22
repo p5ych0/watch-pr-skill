@@ -44,6 +44,16 @@
   up there it has nothing to clean up, which is two fewer commands taking a path
   from a variable.
 
+  **And each probe reads another name back, because reading its own cannot see an
+  alias.** `declare -n RB_TMPDIR=RB_REMOTE` passes an assign-and-read-back probe
+  perfectly — the assignment works and the value returns — and the two are then
+  the *same variable*, so the origin read silently changes `RB_TMPDIR` before the
+  cleanups run. With a local origin such as `/tmp/victim` they remove
+  `/tmp/victim/origin` and try to remove `/tmp/victim`, and the identity parser
+  rejects the value only afterwards. `RB_REMOTE` is cleared and proved clear just
+  above, so writing a sentinel to one name and finding it in the other is the
+  alias; each probe checks that way against the names it could be aimed at.
+
   **And the path is spelled, not held.** `RB_ORIGIN_OUT` used to carry it, and a
   name that carries a path can be *stale*: its assignment is abandoned by the
   requirement whenever the directory is missing, and a value your shell already

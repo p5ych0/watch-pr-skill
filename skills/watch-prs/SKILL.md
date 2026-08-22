@@ -549,6 +549,24 @@ unset -f rb_identity 2>/dev/null \
 #
 # A SUBSHELL, ONE MIXED-CASE VALUE, COMPARED INSIDE: the probe the three names
 # after it use, for the reasons they give. #151.
+#
+# AND IT READS ANOTHER NAME BACK, because reading its OWN back cannot see an
+# ALIAS. `declare -n RB_TMPDIR=RB_REMOTE` passes an assign-and-read-back probe
+# perfectly: the assignment works and the value returns. The two are then the SAME
+# VARIABLE, so the origin read — which sets `RB_REMOTE` — silently changes
+# `RB_TMPDIR` before the cleanups run. For a local origin such as `/tmp/victim`
+# they remove `/tmp/victim/origin` and try to remove `/tmp/victim`, and the
+# identity parser only rejects the value afterwards.
+#
+# DISTINCT VALUES ARE WHAT MAKES IT VISIBLE, which is the pattern `clocklib.sh`
+# already uses and states: one value says nothing about whether two names are one
+# variable. `RB_REMOTE` was cleared and proved clear immediately above, so it
+# holds the empty string — writing `Probe-A` here and finding it there is an
+# alias, and finding it unchanged is not. Each probe below checks the same way
+# against the names it could be aimed at, so every pair is covered and each
+# refusal still names ITS OWN variable rather than a class.
+#
+# `2>/dev/null` because a nameref loop is a message, not an answer.
 # THE VALUE THIS SESSION PINS BY IS CLEARED AND PROVED CLEARED HERE, ABOVE THE
 # TRANSPORT REGION AND OUTSIDE IT. A readonly `RB_REMOTE` already in the driving
 # shell survives the assignment further down, and the checks after it — non-empty,
@@ -567,7 +585,7 @@ unset -f rb_identity 2>/dev/null \
 RB_REMOTE=
 [[ -z $RB_REMOTE ]] \
     || { echo "ABORT: RB_REMOTE is readonly in this shell; setup would pin the session to a stale value"; exit 1; }
-if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] ); then
+if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
     RB_TMPDIR=
     # THE LOOP VARIABLE IS PROVED ASSIGNABLE FIRST, because `for` cannot report that
     # it is not. A readonly `RB_TMPPARENT` in the long-lived driving shell makes every
@@ -616,7 +634,7 @@ if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] ); then
     # question — can this name hold what this line writes — and two attributes make
     # it "no". Saying only `readonly` sends the operator looking for one that is not
     # there.
-    if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] ); then
+    if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] && [[ ${RB_TMPDIR:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
         # AND SO IS THE CANDIDATE NAME, ONCE, BEFORE THE LOOP. `RB_TRY` holds the path
         # each iteration builds, and the prefix check below it matches a PREFIX: a
         # startup file that has already made the name readonly leaves whatever it was
@@ -659,7 +677,7 @@ if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] ); then
         # false status nothing consumes — so a refused probe would print its message
         # and run the loop anyway, on a name it had just reported unusable. `if` is a
         # reserved word and nothing can stand in for it.
-        if ( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] ); then
+        if ( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] && [[ ${RB_TMPDIR:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] ) 2>/dev/null; then
             RB_TMPPARENT=
             for RB_TMPPARENT in "${TMPDIR:-}" "${HOME:-}"; do
                 [[ $RB_TMPPARENT = /* ]] && [[ -d $RB_TMPPARENT ]] || continue
@@ -684,12 +702,12 @@ if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] ); then
             [[ -n $RB_TMPDIR ]] \
                 || { echo "ABORT: could not read origin into a transport directory under TMPDIR or HOME; neither is an absolute directory this user owns and nobody else can replace"; exit 1; }
         else
-            echo "ABORT: RB_TRY is readonly or value-transforming in this shell; the transport candidate cannot be named"
+            echo "ABORT: RB_TRY is readonly, value-transforming, or aimed at another transport variable; the transport candidate cannot be named"
             exit 1
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: RB_TMPPARENT is readonly or value-transforming in this shell; the transport parent cannot be chosen"
+        echo "ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable; the transport parent cannot be chosen"
         exit 1
         [[ -n "" ]]
     fi
@@ -754,7 +772,7 @@ if ( RB_TMPDIR=Probe-A; [[ $RB_TMPDIR = Probe-A ]] ); then
     # reason and with the same lifetime.
     /usr/bin/env rmdir "${RB_TMPDIR:?no transport directory was established}"
 else
-    echo "ABORT: RB_TMPDIR is readonly or value-transforming in this shell; the transport directory cannot be chosen"
+    echo "ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
     exit 1
     [[ -n "" ]]
 fi

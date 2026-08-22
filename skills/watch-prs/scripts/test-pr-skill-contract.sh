@@ -426,7 +426,7 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
         "$_rb_st_attr" "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/stale.sh"
     _rb_st_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         bash --noprofile --norc -i < "$_rb_ex/stale.sh" 2>&1 || true)"
-    printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly or value-transforming' \
+    printf '%s' "$_rb_st_out" | grep -qF 'ABORT: RB_TMPDIR is readonly, value-transforming, or aimed at another transport variable' \
         && pass "…and an unusable transport directory is refused by name, interactively ($_rb_st_attr)" \
         || die "the unusable-directory case did not refuse: '$_rb_st_out' ($_rb_st_attr)"
     printf '%s' "$_rb_st_out" | grep -qF 'WRONG/other' \
@@ -437,6 +437,33 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
         && pass "…nor removed ($_rb_st_attr)" \
         || die "an origin outside this run was consumed or deleted ($_rb_st_attr)"
     done
+    # …AND A NAMEREF BETWEEN TWO OF THEM, which one name at a time cannot see:
+    # `declare -n RB_TMPDIR=RB_REMOTE` passes assignability and read-back, and the
+    # two are then the SAME VARIABLE — the origin read sets `RB_REMOTE` and so
+    # changes `RB_TMPDIR` before the cleanups, which for a local origin such as
+    # `/tmp/victim` remove `/tmp/victim/origin` and try to remove `/tmp/victim`.
+    # Distinct probe values are what makes it visible; `declare -n` is bash 4.3+,
+    # so the shell is asked and the skip announced.
+    _rb_has_n=no
+    if ( declare -n _rb_probe_n=_rb_probe_target ) 2>/dev/null; then _rb_has_n=yes; fi
+    if [ "$_rb_has_n" = yes ]; then
+        mkdir -p "$_rb_ex/victim"
+        printf 'origin-file\n' > "$_rb_ex/victim/origin"
+        printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s/victim" > "$2"\nexit 0\n' "$_rb_ex" > "$_rb_ex/pr-origin.sh"
+        chmod +x "$_rb_ex/pr-origin.sh"
+        printf 'declare -n RB_TMPDIR=RB_REMOTE\nRB_SCRIPTS=%s\n. "%s"\nprintf "REACHED\\n"\n' \
+            "$_rb_ex" "$_rb_ex/blk.sh" > "$_rb_ex/nameref.sh"
+        _rb_nr_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
+            bash --noprofile --norc "$_rb_ex/nameref.sh" 2>&1 || true)"
+        printf '%s' "$_rb_nr_out" | grep -qF 'aimed at another transport variable' \
+            && pass "…and a nameref between two transport variables is refused" \
+            || die "the nameref case did not refuse: '$_rb_nr_out'"
+        { [ -f "$_rb_ex/victim/origin" ] && [ -d "$_rb_ex/victim" ]; } \
+            && pass "…so the directory it aimed at is neither emptied nor removed" \
+            || die "the nameref case removed what it aimed at"
+    else
+        pass "…and this shell has no declare -n, so the nameref case is skipped by name"
+    fi
     rm -rf "$_rb_ex" 2>/dev/null || true
 fi
 # THE FORGED HELPER WRITES A USABLE VALUE AND THEN CHOOSES ITS STATUS, which is
@@ -2022,7 +2049,7 @@ while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
+    printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
 done
@@ -2038,7 +2065,7 @@ done
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
 declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly or value-transforming in this shell' \
+printf '%s' "$_rb_out" | grep -qF 'ABORT: RB_TMPPARENT is readonly, value-transforming, or aimed at another transport variable' \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
 printf '%s' "$_rb_out" | grep -qF 'could not read origin into a transport directory' \
@@ -2537,7 +2564,7 @@ grep -qF 'RB_WORK_DIR="$RB_TMPPARENT/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"' "$
 # `errexit` exemption comes from too, a command run as a condition being exempt —
 # and whose success arm is the rest of the candidate, so a shadowed `continue`
 # has nothing to walk past. #146.
-_rb_try_ln="$(grep -n '^[[:space:]]*if ( RB_TRY=Probe-A; \[\[ $RB_TRY = Probe-A \]\] ); then$' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
+_rb_try_ln="$(grep -n '^[[:space:]]*if ( RB_TRY=Probe-A; \[\[ $RB_TRY = Probe-A \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_ln=""
 _rb_try_path_ln="$(grep -n 'RB_TRY="$RB_TMPPARENT/watch-pr.$$.$RANDOM$RANDOM$RANDOM"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_try_path_ln=""
 { [ -n "$_rb_try_ln" ] && [ -n "$_rb_try_path_ln" ] && [ "$_rb_try_ln" -lt "$_rb_try_path_ln" ]; } \
     && pass "the transport candidate is probed in a subshell before its path is built" \
@@ -2627,7 +2654,7 @@ printf "SURVIVED rb_tmpdir=[%s]\n" "${RB_TMPDIR:-}"' _ "$_rb_bt/loop.sh" 2>&1 ||
     # had nowhere to go — every candidate was skipped and the emptiness check
     # afterwards blamed `TMPDIR` and `HOME`, which is an environment that is fine.
     # What must come out is this variable's own name.
-    printf '%s' "$_rb_bt_out" | grep -qF 'ABORT: RB_TRY is readonly or value-transforming in this shell' \
+    printf '%s' "$_rb_bt_out" | grep -qF 'ABORT: RB_TRY is readonly, value-transforming, or aimed at another transport variable' \
         && pass "…an unusable RB_TRY is refused by name ($_rb_bt_attr)" \
         || die "the RB_TRY case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
     printf '%s' "$_rb_bt_out" | grep -qF 'could not read origin into a transport directory' \
