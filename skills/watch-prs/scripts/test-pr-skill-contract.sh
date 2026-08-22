@@ -272,14 +272,33 @@ _read_block=""
 # clear now (#151), and a lift that starts after that probe is a lift of the
 # region with its first refusal removed — the readonly case below would then be
 # exercising the defect rather than the fix.
-_read_block="$(awk '/^RB_REMOTE=$/, /there is no repository to pin this session to/' "$SKILL")" \
+# THE WHOLE REGION, TO THE `fi` THAT CLOSES IT. It used to stop inside the
+# identity parser and have closers added — and since #155 that loses the arms
+# that REFUSE: the clear of the pinned value is a condition now, so its `else` is
+# at the bottom, and a lift that stops short falls through where the real block
+# stops. One range, whole by construction.
+#
+# WITH THE LIBRARY THE SURROUNDING SETUP SOURCES. `rb_identity` is loaded at the
+# top of the block, far above this range, so the lift calls a function it does not
+# carry. Prepending the load is the lift's own scaffolding and is stated as such —
+# `$RB_SCRIPTS` is where each case below points anyway.
+_read_block="$(awk '/^RB_REMOTE=$/, /^fi$/' "$SKILL")" \
     || _read_block=""
+[ -z "$_read_block" ] || _read_block='. "$RB_SCRIPTS/identitylib.sh"
+'"$_read_block"
 { [ -n "$_read_block" ] \
   && case "$_read_block" in *'/pr-origin.sh read "$RB_TRY/origin"'*) true ;; *) false ;; esac \
   && case "$_read_block" in *'mkdir -m 700'*) true ;; *) false ;; esac \
-  && case "$_read_block" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
+  && case "$_read_block" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac \
+  && case "$_read_block" in *'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with its transport directory" \
     || die "the read block is truncated or has lost its directory: '$_read_block'"
+# AND IT PARSES, which is the check the closing loop used to be. A range that is
+# whole by construction can still be broken by a nesting change, and this is where
+# that shows up with a reason instead of inside a probe.
+printf '%s\n' "$_read_block" | bash -n 2>/dev/null \
+    && pass "…and the lift parses on its own" \
+    || die "the lifted read block does not parse; SKILL.md's nesting changed and the lift did not"
 # ── whether this shell has a case-transforming attribute ──────────────────
 # `declare -l` is bash 4.0+, and the cases below use it to prove that a probe
 # reading only an assignment's STATUS is not enough. On the 3.2.57 path the
@@ -372,7 +391,7 @@ _rb_bare=""
 # apostrophe check had, one assertion along. It runs from the probe that opens the
 # region to the `rmdir` that closes it, and the range having found something is
 # asserted before its contents are.
-_rb_region="$(awk '/^if \( RB_TMPDIR=Probe-A;/,/rmdir "\$\{RB_TMPDIR[^}]*\}"$/' "$SKILL")" || _rb_region=""
+_rb_region="$(awk '/^[[:space:]]*if \( RB_TMPDIR=Probe-A;/,/rmdir "\$\{RB_TMPDIR[^}]*\}"$/' "$SKILL" | sed 's/^    //')" || _rb_region=""
 case "$_rb_region" in
     *'rmdir "${RB_TMPDIR:?'*) pass "the transport region lifts out whole for the scan below" ;;
     *) die "the transport region could not be lifted; the bare-use scan below would pass vacuously" ;;
@@ -564,6 +583,7 @@ _forge_dir="$(mktemp_d)" || die "no scratch directory for the read-status probe"
 # reported as the leak it is.
 [ -n "$_forge_dir" ] && export RB_TMPBASE="$_forge_dir"
 if [ -n "$_forge_dir" ]; then
+    cp "$SCRIPT_DIR/identitylib.sh" "$_forge_dir/" 2>/dev/null || true
     cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 printf '%s\n' "git@github.com:acme/widget.git" > "$2"
@@ -631,6 +651,7 @@ exit 0
 SWAP
     mkdir -p "$_forge_dir/swap"
     cp "$_forge_dir/pr-origin-swap.sh" "$_forge_dir/swap/pr-origin.sh"
+    cp "$SCRIPT_DIR/identitylib.sh" "$_forge_dir/swap/" 2>/dev/null || true
     if [ -e /etc/hostname ] && [ ! -O /etc/hostname ]; then
         _sw_rc=0
         _sw_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/swap" \
@@ -670,11 +691,15 @@ exit 0
 LOCAL
         mkdir -p "$_forge_dir/local"
         cp "$_forge_dir/pr-origin-local.sh" "$_forge_dir/local/pr-origin.sh"
+        cp "$SCRIPT_DIR/identitylib.sh" "$_forge_dir/local/" 2>/dev/null || true
+        # THE STATUS IS DISCARDED, and that is not laxity: the lift now runs to the
+        # end of setup, so it exits non-zero whenever anything in it refuses — which
+        # is the point of this case. What is asserted is the DIRECTORY, below.
         env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/local" \
             TMPDIR="$_lk_dir" bash -c '
                 '"$_read_block"'
                 echo "PINNED=$RB_REMOTE"
-            ' >/dev/null 2>&1
+            ' >/dev/null 2>&1 || true
         _lk_left="$(ls -A "$_lk_dir" 2>/dev/null)"
         [ -z "$_lk_left" ] \
             && pass "…and a setup that refuses later leaves no transport directory behind" \
@@ -728,6 +753,30 @@ LOCAL
         *WRONG/other*) die "a readonly RB_REMOTE survived and setup pinned it: '$_rr_out'" ;;
         *)             pass "…and a readonly RB_REMOTE is refused rather than pinned" ;;
     esac
+    # …AND THAT REFUSAL IS STRUCTURAL, NOT A STATEMENT. With `exit` replaced by a
+    # function that RETURNS, the guard printed and carried on: the descriptor
+    # assignment could not overwrite a readonly either, its refusal returned the
+    # same way, and the stale non-empty URL reached the identity parser, passed it,
+    # and was exported. Every request, signoff, revocation and merge for that
+    # session then addressed a repository the operator's environment chose. #155.
+    #
+    # THE ASSERTION IS THE EXPORT, because that is what the rest of the session
+    # reads — the variable keeping its stale value is what a readonly MEANS, and
+    # asserting on it would be asserting that bash works.
+    _rx_out=""
+    _rx_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        TMPDIR="$_forge_dir" bash -c '
+            exit() { return 0; }
+            readonly RB_REMOTE="git@github.com:WRONG/other.git"
+            '"$_read_block"'
+            printf "EXPORTED=[%s]\n" "${REVIEW_BUS_REMOTE:-unset}"
+        ' 2>&1)" || true
+    printf '%s' "$_rx_out" | grep -qF 'ABORT: RB_REMOTE is readonly in this shell' \
+        && pass "…and a neutralised exit does not change which refusal is printed" \
+        || die "the neutralised-exit case did not refuse: '$_rx_out'"
+    printf '%s' "$_rx_out" | grep -qF 'EXPORTED=[unset]' \
+        && pass "…and nothing is pinned from the stale value, whatever exit was replaced with" \
+        || die "a stale RB_REMOTE was pinned past a neutralised exit: '$_rx_out'"
     # …AND A RELATIVE CANDIDATE FALLS THROUGH RATHER THAN ABORTING THE SESSION.
     # The helper walks every component of the output path to the root, so it
     # refuses a relative one — and a relative but perfectly usable `TMPDIR` such
@@ -972,14 +1021,25 @@ grep -qF 'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \' <<<"$skill_flat" \
 # written to forbid exactly that, and the mutation passed. What is asked here is
 # not "does anything unusual follow" but "does ANYTHING follow": the next
 # meaningful line after the guard's `fi` must be the closing fence.
-_pin_ln=""; _pin_ln="$(grep -n '^export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
+_pin_ln=""; _pin_ln="$(grep -n '^[[:space:]]*export REVIEW_BUS_REMOTE=' "$SKILL" | head -1 | cut -d: -f1)" || _pin_ln=""
 _pin_fi=""
-_pin_fi="$(awk -v n="${_pin_ln:-0}" 'NR>n && /^fi$/ {print NR; exit}' "$SKILL")" || _pin_fi=""
-_next=""
-_next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL")" || _next=""
-{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ "$_next" = '```' ]; } \
+# AT THE PIN'S OWN INDENTATION. `[[:space:]]*` matched the first `fi` at ANY
+# depth, which since #155 is one nested four levels inside the arm — so the body
+# lifted below was a fragment and every arm came out empty. The pin's `if` sits at
+# four spaces, so its closer does too.
+_pin_fi="$(awk -v n="${_pin_ln:-0}" 'NR>n && /^    fi$/ {print NR; exit}' "$SKILL")" || _pin_fi=""
+# WHAT FOLLOWS IS CLOSERS, NOT STATEMENTS. Since #155 the pin sits inside the arm
+# that contains the value it pins, so after its own `fi` come that arm's `else`,
+# its refusal and its `fi`, and then the fence. "Nothing follows" therefore means
+# nothing that RUNS — and an added statement is still caught, because a statement
+# is none of those.
+_after=""
+_after="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^[[:space:]]*#/ {print; if ($0 == "```") exit}' "$SKILL")" || _after=""
+_pin_stray=""
+_pin_stray="$(printf '%s\n' "$_after" | grep -vE '^[[:space:]]*(fi|else|exit 1|\[\[ -n "" \]\]|echo "ABORT: [^"]*"|```)$' || true)"
+{ [ -n "$_pin_ln" ] && [ -n "$_pin_fi" ] && [ -z "$_pin_stray" ]; } \
     && pass "…and nothing in setup runs after the pin, so a neutralised abort cannot be stepped over" \
-    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi next='$_next')"
+    || die "setup continues past the repository pin (pin=$_pin_ln fi=$_pin_fi stray='$_pin_stray')"
 # …AND SETUP'S SUCCESS LINE IS INSIDE THE SUCCESSFUL BRANCH. Below the `fi` it
 # would run whatever the pin did, once `exit` is shadowed — the driver would be
 # told setup completed with no pin in place, which is the whole failure.
@@ -989,8 +1049,19 @@ _next="$(awk -v n="${_pin_fi:-0}" 'NR>n && NF && !/^#/ {print $0; exit}' "$SKILL
 # so the probe's empty answer cannot overwrite it and the equality would agree on a
 # pin no child ever saw. The refusal is the outer `if`'s FIRST arm, so the probe
 # and the success line both sit in its `else` — unreachable whatever `exit` does.
+# DEDENTED ONCE, HERE, so every pattern below stays anchored at column 0. Since
+# #155 the pin sits inside the arm that contains the value it pins; rewriting a
+# dozen `^`-anchored lifts to tolerate that would be a dozen chances to loosen one
+# too far. Stripping the four spaces the arm adds keeps them exact — and the strip
+# is CHECKED, so a further nesting change fails here by name instead of making
+# every arm below lift empty.
 _pin_body=""
-_pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL")" || _pin_body=""
+_pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed 's/^    //')" || _pin_body=""
+case "$_pin_body" in
+    *'
+if [[ $RB_PIN_OUT != '*) pass "the pin branch dedents to column 0 for the lifts below" ;;
+    *) die "the pin branch did not dedent as expected; SKILL.md's nesting changed and the lifts below would all be empty" ;;
+esac
 _pin_refuse=""
 _pin_refuse="$(printf '%s\n' "$_pin_body" | sed -n '1,/^else$/p')" || _pin_refuse=""
 _pin_then=""
@@ -1076,8 +1147,11 @@ esac
 # LIFTED AND RUN, in a child that already holds the readonly. Describing this was
 # what let it through: the export reads correctly at a glance, and its failure is
 # visible only in what the variable holds afterwards.
+# DEDENTED LIKE THE BRANCH ABOVE, and for the same reason: the cases that RUN this
+# lift set their own state at column 0. The range ends at the pin's own `fi` — the
+# first at that indentation — so the arm's closers stay out of the excerpt.
 _pin_block=""
-_pin_block="$(awk '/^export REVIEW_BUS_REMOTE=/, /^fi$/' "$SKILL")" || _pin_block=""
+_pin_block="$(awk '/^[[:space:]]*export REVIEW_BUS_REMOTE=/, /^    fi$/' "$SKILL" | sed 's/^    //')" || _pin_block=""
 { [ -n "$_pin_block" ] \
   && case "$_pin_block" in *'[[ $RB_PIN_SEEN = "$RB_REMOTE" ]]'*) true ;; *) false ;; esac \
   && case "$_pin_block" in *'exit 1'*) true ;; *) false ;; esac; } \
@@ -2084,8 +2158,15 @@ mkdir -p "$_rb_pb/parent" "$_rb_pb/bin"
 # two refusal cases for a reason that has nothing to do with the probe.
 printf '#!/bin/sh\nprintf "git@github.com:acme/widget.git\\n" > "$2"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
 chmod +x "$_rb_pb/bin/pr-origin.sh"
-awk '/^    if \[\[ -n \$RB_PIN_SEEN \]\]/,/^    fi$/' "$SKILL" > "$_rb_pb/alloc.sh"
-awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
+# THE ALLOCATION LIFTS WITH ITS OWN INDENT STRIPPED. It sits inside the pin's work
+# arm, which sits inside the arm that contains the pinned value (#155) — eight
+# spaces in — and the cases below set their own state at column 0.
+awk '/^[[:space:]]*if \[\[ -n \$RB_PIN_SEEN \]\]/,/^        fi$/' "$SKILL" | sed 's/^        //' > "$_rb_pb/alloc.sh"
+case "$(cat "$_rb_pb/alloc.sh")" in
+    *'mkdir -m 700 "$RB_WORK_DIR"'*) pass "the working-directory allocation lifts out for the cases below" ;;
+    *) die "the working-directory allocation did not lift; the cases below prove nothing" ;;
+esac
+awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^        fi$/' "$SKILL" | sed 's/^        //' > "$_rb_pb/parent.sh"
 # THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
 # range runs from the probe to the first `fi` at column 0 — which is the probe's
 # own when the selection is its success arm, and the GUARD's if it is not. Revert
@@ -2681,7 +2762,7 @@ grep -qF '( RB_TRY=Probe-A; [[ $RB_TRY = Probe-A ]] ) || continue' "$SKILL" \
 # the loop is its success arm. Extracting the loop alone leaves `RB_TRY` unprobed,
 # so the readonly traversal value goes straight to the prefix check — the cases
 # below would then be exercising the defect rather than the fix.
-_rb_loop="$(awk '/^[[:space:]]*if \( RB_TRY=Probe-A;/,/^        fi$/' "$SKILL" | sed 's/^        //')" || _rb_loop=""
+_rb_loop="$(awk '/^[[:space:]]*if \( RB_TRY=Probe-A;/,/^            fi$/' "$SKILL" | sed 's/^            //')" || _rb_loop=""
 { [ -n "$_rb_loop" ] \
   && case "$_rb_loop" in *'for RB_TMPPARENT in'*) true ;; *) false ;; esac; } \
     && pass "the RB_TRY probe and the loop it guards can be extracted together" \
@@ -2789,7 +2870,7 @@ fi
 # out there; the parser is `identitylib.sh` now, and a text check left pointing at
 # SKILL.md would have gone on passing against a driver that derived nothing at
 # all. So: the driver must DELEGATE, and the parser must derive.
-grep -q '^REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \\$' "$SKILL" \
+grep -q '^[[:space:]]*REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \\$' "$SKILL" \
     && pass "the driver derives its identity through the shared parser" \
     || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
 grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \
