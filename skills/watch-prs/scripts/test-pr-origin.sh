@@ -1172,7 +1172,7 @@ _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
   && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
     && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
     || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
-_res_tr=0; _res_tr="$(grep -n "^trap 'rb_cleanup' EXIT$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
+_res_tr=0; _res_tr="$(grep -n "^trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_mk" -lt "$_res_tr" ]; } \
     && pass "…and a cleanup trap is armed after the reservation is taken" \
     || die "no cleanup trap after the mkdir (mkdir=$_res_mk trap=$_res_tr); an interrupted run leaks its directory"
@@ -1204,10 +1204,31 @@ _res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT$' "$SCRIPT")" || _res_dis=0
 [ "$_res_dis" = 2 ] \
     && pass "…and both success paths reset EXIT" \
     || die "expected EXIT reset on both success paths, found $_res_dis"
-_res_bad=0; _res_bad="$(grep -c 'trap - EXIT HUP INT TERM' "$SCRIPT")" || _res_bad=0
+# ASKED OF WHAT PRECEDES EACH `exit 0`, not of the file as a whole: the four-signal
+# reset is CORRECT inside the cleanup paths, where it is what stops the cleanup
+# being re-entered, and wrong immediately before a success exit.
+_res_bad=0
+_res_bad="$(awk '/^ *exit 0$/ { if (prev ~ /trap - EXIT HUP INT TERM/) n++ } { prev = $0 } END { print n+0 }' "$SCRIPT")" || _res_bad=0
 [ "$_res_bad" = 0 ] \
     && pass "…and neither disarms the signal handlers before the final command" \
     || die "a success path resets the signal traps early, leaving a window with no cleanup"
+# …AND THE CLEANUP IS NOT RE-ENTRANT. Every trap is removed BEFORE the first
+# removal, in one statement, on both exit paths: a signal arriving while the
+# cleanup runs would otherwise invoke it again, and after the first pass has freed
+# the candidate an account watching a shared parent can put a symlink there before
+# the second `rm -f "$OUT"` resolves it.
+_res_sig=""
+_res_sig="$(awk '/^rb_on_signal\(\) \{/,/^\}/' "$SCRIPT")" || _res_sig=""
+_res_sig_ok=no
+case "$_res_sig" in
+    *'trap - EXIT HUP INT TERM'*rb_cleanup*) _res_sig_ok=yes ;;
+esac
+[ "$_res_sig_ok" = yes ] \
+    && pass "…and the signal handler disarms every trap before it cleans up" \
+    || die "the signal handler cleans up while still armed: '$_res_sig'"
+grep -qF "trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT" "$SCRIPT" \
+    && pass "…and so does the EXIT handler" \
+    || die "the EXIT handler cleans up while the signal traps are still armed"
 # …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
 # `mkdir` ahead of the walks narrows the interval between exec and reservation; it
 # does not remove it, because the candidate is an argv entry published at exec. A

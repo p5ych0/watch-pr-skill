@@ -61,7 +61,8 @@
 #      `origin` or a `pin`, the `mkdir` refuses before anything is written and that
 #      leaf — the caller's, or somebody else's — is still there afterwards. Absence
 #      is guaranteed only for a refusal AFTER this script created the directory,
-#      where `rb_refuse` removes the leaf and the directory together.
+#      where the EXIT cleanup, in its post-write phase, removes the leaf and the
+#      directory together.
 #
 #      WHAT IS AT THE ARGUMENT ON STATUS 1 DEPENDS ON WHICH SIDE OF THE `mkdir`
 #      the refusal happened, and the two are opposite:
@@ -78,13 +79,15 @@
 #          the directory back before stopping. Nothing is left at the argument and
 #          there is nothing for the caller to collect.
 #
-#          THE CLEANUP HAS TWO SHAPES ON THIS LIST, and which one runs is decided
-#          by whether a leaf can exist yet. BEFORE either write — the two ancestry
-#          walks and the unresolvable-path refusal — it is `rmdir` ALONE, through
-#          `rb_refuse`: there is no leaf to remove, and removing one by NAME
+#          THE CLEANUP IS ONE `EXIT` TRAP AND IT HAS TWO SHAPES, chosen by
+#          `RB_PHASE` — by whether a leaf can exist yet. BEFORE either write, which
+#          is the two ancestry walks and the unresolvable-path refusal, it is
+#          `rmdir` ALONE: there is no leaf to remove, and removing one by NAME
 #          would resolve a path the walk has just decided not to trust, which is a
-#          symlink an attacker can substitute while it runs. AFTER the writes it is
-#          `rb_refuse`, which removes the leaf and then the directory.
+#          symlink an attacker can substitute while it runs. AFTER the writes it
+#          removes the leaf and then the directory. The refusals themselves clean
+#          up nothing — they say why and stop — so the removal happens exactly
+#          once, whichever way the run ends.
 #
 #      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
 #      The walks used to run first, so an unsafe component was refused before
@@ -246,8 +249,8 @@ esac
 #
 # NOTHING IS LEFT BEHIND ON A REFUSAL EITHER, which is what the truncation was
 # for: a run that refuses before its write creates no file at all, and a refusal
-# AFTER the directory exists goes through `rb_refuse`, which removes the file and
-# the directory before it stops. The caller opens the result once to check and
+# AFTER the directory exists is given back by the EXIT cleanup, which removes the
+# file and the directory before the process ends. The caller opens the result once to check and
 # read it, and sees the open fail rather than an empty file.
 umask 077
 set -C
@@ -407,8 +410,8 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # WALKING AFTERWARDS IS NOT WEAKER. The walk asks who may rename the components on
 # the way; creating a private child first does not change any of their answers, and
 # NOTHING IS WRITTEN into the child until the walk has passed. A refusal from the
-# walk removes the directory again, which is what `rb_refuse` is for — so the
-# reservation is given back rather than left behind.
+# walk removes the directory again — the EXIT cleanup does it, in its pre-write
+# phase — so the reservation is given back rather than left behind.
 #
 # HERE RATHER THAN IN THE CALLER, which is the whole of #157. In the driving shell
 # this was `mkdir -m 700 "$RB_TRY"` with `RB_TRY` a name that shell may have made
@@ -502,12 +505,23 @@ rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans u
 # is a name anything can stand in for. `EXIT` is removed with the signal's trap in
 # the same statement: without that the re-raise runs the EXIT handler as well,
 # which is the second pass this whole block exists to prevent.
+# AND EVERY TRAP IS DISARMED BEFORE THE CLEANUP RUNS, NOT AFTER IT. Disarming
+# afterwards leaves the cleanup RE-ENTRANT: a signal arriving while it runs — or a
+# second signal arriving while the first handler is between its two statements —
+# invokes it again, and the second pass is the dangerous one for the reason the
+# refusals gave up their own cleanup. After the first pass has freed the candidate,
+# an account watching that path on a shared parent can recreate it as a symlink
+# before the second `rm -f "$OUT"` resolves it.
+#
+# ALL FOUR IN ONE STATEMENT, in both exit paths, and BEFORE the first removal.
+# Removing only the signal that fired leaves the other two armed; removing them
+# after `rb_cleanup` leaves the whole window open.
 rb_on_signal() {   # rb_on_signal <signal-name> ; give the reservation back and die of it
+    trap - EXIT HUP INT TERM
     rb_cleanup
-    trap - EXIT "$1"
     kill -s "$1" "$$"
 }
-trap 'rb_cleanup' EXIT
+trap 'trap - EXIT HUP INT TERM; rb_cleanup' EXIT
 trap 'rb_on_signal HUP' HUP
 trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM
