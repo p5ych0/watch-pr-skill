@@ -52,7 +52,11 @@
   `/tmp/victim/origin` and try to remove `/tmp/victim`, and the identity parser
   rejects the value only afterwards. `RB_REMOTE` is cleared and proved clear just
   above, so writing a sentinel to one name and finding it in the other is the
-  alias; each probe checks that way against the names it could be aimed at.
+  alias; each probe checks that way against `RB_TMPDIR` and `RB_REMOTE`, the two
+  names that can redirect the origin read or the cleanups. An alias between
+  `RB_TMPPARENT` and `RB_TRY` is not among them and does not need to be: the loop
+  refuses it at its prefix check, so nothing is read and nothing is removed —
+  what is lost there is the diagnostic, not the property.
 
   **And the path is spelled, not held.** `RB_ORIGIN_OUT` used to carry it, and a
   name that carries a path can be *stale*: its assignment is abandoned by the

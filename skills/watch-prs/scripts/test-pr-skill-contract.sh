@@ -429,7 +429,19 @@ printf "REACHED origin_out=[%s]\\n" "${RB_ORIGIN_OUT:-unset}"' _ "$_rb_ex/blk.sh
     run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV TMPDIR="$_rb_ex" \
         RB_ARGLOG="$_rb_ex/arglog" PATH="$_rb_ex/bin:$PATH" \
         bash --noprofile --norc -i < "$_rb_ex/interactive.sh" >/dev/null 2>&1 || true
-    _rb_arg_bad="$(grep -vE "^(-f|$_rb_ex(/.*)?)$" "$_rb_ex/arglog" || true)"
+    # COMPARED AS DATA, NOT AS A PATTERN. The root comes from `TMPDIR` and may
+    # legally contain ERE metacharacters — a parent with a `[` in it makes the
+    # interpolated regex invalid, `grep` errors, and `|| true` turns that into an
+    # empty result: an out-of-tree argument reported clean. A quoted `case` pattern
+    # is literal.
+    _rb_arg_bad=""
+    while IFS= read -r _rb_a; do
+        case "$_rb_a" in
+            -f) ;;
+            "$_rb_ex"|"$_rb_ex"/*) ;;
+            *) _rb_arg_bad="$_rb_a"; break ;;
+        esac
+    done < "$_rb_ex/arglog"
     [ -z "$_rb_arg_bad" ] \
         && pass "…and no cleanup is handed a path outside this session's own tree" \
         || die "a cleanup was handed '$_rb_arg_bad' — with an empty directory that is /origin"

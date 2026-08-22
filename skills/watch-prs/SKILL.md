@@ -562,9 +562,15 @@ unset -f rb_identity 2>/dev/null \
 # already uses and states: one value says nothing about whether two names are one
 # variable. `RB_REMOTE` was cleared and proved clear immediately above, so it
 # holds the empty string — writing `Probe-A` here and finding it there is an
-# alias, and finding it unchanged is not. Each probe below checks the same way
-# against the names it could be aimed at, so every pair is covered and each
-# refusal still names ITS OWN variable rather than a class.
+# alias, and finding it unchanged is not. Each probe below checks the same way,
+# and each refusal still names ITS OWN variable rather than a class.
+#
+# WHICH PAIRS THESE COVER, STATED NARROWLY. Every probe compares against
+# `RB_TMPDIR` and `RB_REMOTE` — the two names that can REDIRECT the origin read or
+# the cleanups, which is the damage. `RB_TMPPARENT` aliased to `RB_TRY` is NOT
+# detected here, and does not need to be: the loop refuses it at the prefix check,
+# so nothing is read and nothing is removed. What is lost there is the diagnostic,
+# not the property.
 #
 # `2>/dev/null` because a nameref loop is a message, not an answer.
 # THE VALUE THIS SESSION PINS BY IS CLEARED AND PROVED CLEARED HERE, ABOVE THE
