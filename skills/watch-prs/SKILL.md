@@ -665,7 +665,12 @@ if [[ -z $RB_REMOTE ]]; then
     # change #160 needs for reserve-before-publish and #161 for the `TMPDIR`
     # fallback, and #162 carries all three as one design. What is here is the
     # interim: it covers every name this driver reads, and it does not cover the
-    # ones only the helpers' tools read.
+    # ones only the helpers' tools read — nor the ones the SHELL ITSELF consults,
+    # which `CDPATH` added after the set was supposedly closed: it is neither read
+    # nor assigned here, and an alias onto it silently changes what a later `cd`
+    # searches. Three inventories would have to be unioned — what this driver
+    # reads, what its tools read, what the shell consults — and the last grows with
+    # the shell version.
     #
     # WHAT IS EXEMPT AND WHY: `PWD`, `SECONDS`, `RANDOM` and `BASH_SOURCE` are
     # maintained by the shell itself and an assignment to one is not a corruption

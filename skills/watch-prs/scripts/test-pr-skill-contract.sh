@@ -1089,14 +1089,18 @@ for _pv in Probe-A Probe-B Probe-C Probe-D; do
     # `OWNER` by `REVIEW_BUS_OWNER` — so deleting either comparison left this green
     # while a nameref to that identity field passed the arm.
     #
-    # THE ARM'S OWN NAME IS THE EXCEPTION, and it is handled by name: it appears as
-    # the ASSIGNMENT and the equality that follows it, never as a `!=`.
+    # THE ARM'S OWN NAME IS THE EXCEPTION, and BOTH halves of it are required: the
+    # ASSIGNMENT and the equality that reads it back. Accepting the assignment alone
+    # let `[[ $RB_PIN_DIR = Probe-A ]]` be deleted with this green — and that
+    # equality is the half that catches a TRANSFORMING attribute, where the
+    # assignment succeeds and stores something else. `declare -i RB_PIN_DIR=0` then
+    # passes the arm, and the real assignment leaves the helper a relative `0`.
     for _pn in $_assigned RB_PIN_DIR RB_PIN_SEEN; do
         case "$_pa" in
             *"\${$_pn:-} != $_pv"*) continue ;;
         esac
         case "$_pa" in
-            *"( $_pn=$_pv; "*) continue ;;
+            *"( $_pn=$_pv; [[ \$$_pn = $_pv ]]"*) continue ;;
         esac
         die "the pin probe's $_pv arm does not compare against \$$_pn"
     done
@@ -1153,7 +1157,7 @@ for _kn_v in Probe-A Probe-B Probe-C Probe-D; do
             *"\${$_kn_a:-} != $_kn_v"*) continue ;;
         esac
         case "$_kn_arm" in
-            *"( $_kn_a=$_kn_v; "*) continue ;;
+            *"( $_kn_a=$_kn_v; [[ \$$_kn_a = $_kn_v ]]"*) continue ;;
         esac
         _kn_missing="$_kn_missing $_kn_v/$_kn_a"
     done
@@ -1590,7 +1594,13 @@ fi
 # with the operator's variable naming a deleted path. Source-text matching says the
 # comparisons are present; only running them says they refuse.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
-    for _pal in "declare -n RB_PIN_DIR=HOME|HOME|$RB_TMPBASE" \
+    # A TRANSFORMING ATTRIBUTE IS IN THIS LOOP TOO, not only namerefs. `declare -i`
+    # makes the subshell'"'"'s assignment SUCCEED and store `0`, so only the equality
+    # read-back refuses it — the half the drift guard above now requires. The
+    # "candidate" it protects is the stage'"'"'s own name, so the expected value is what
+    # the operator'"'"'s declaration left there.
+    for _pal in "declare -i RB_PIN_DIR=0|RB_PIN_DIR|0" \
+                "declare -n RB_PIN_DIR=HOME|HOME|$RB_TMPBASE" \
                 "declare -n RB_PIN_SEEN=TMPDIR|TMPDIR|$RB_TMPBASE" \
                 "declare -n RB_PIN_DIR=REPO_DIR|REPO_DIR|$RB_TMPBASE" \
                 "declare -n RB_PIN_SEEN=REPO_DIR|REPO_DIR|$RB_TMPBASE" \
