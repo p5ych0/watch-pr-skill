@@ -450,7 +450,8 @@ got="$(sha_run)"
 # `pr-phase-state.sh` read a malformed record as a closed phase.
 world; comments "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`whenever\`" > "$TMP/out"
 got="$(sha_run)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "$got" | cut -d'|' -f3 | grep -qF 'reason=bad_verdict_at'; } \
+{ [ "${got%%|*}" = 2 ] \
+  && grep -qF 'reason=bad_verdict_at' <<<"$(cut -d'|' -f3 <<<"$got")"; } \
     && pass "…and refuses a record whose verdict time is not a time" \
     || die "sha accepted a malformed verdict time: '$got'"
 [ -z "$(printf '%s' "$got" | cut -d'|' -f2)" ] \

@@ -641,7 +641,10 @@ done
 #
 # SO IT TAKES THE SHAPE, NOT A LIST: either quoting of the format string, any
 # `command`/`builtin` prefix on either side, any number of separate option words
-# before the one carrying `q`, and free spacing throughout. What it still cannot
+# before the one carrying `q`, any number of INTERMEDIATE filters between the
+# producer and the reader — `printf … | cut … | grep -qF` raced exactly the same
+# way, with `cut` taking the signal instead of `printf` — and free spacing
+# throughout. What it still cannot
 # see is a pipeline assembled at runtime, which is the limit of reading text and is
 # why this is a gate rather than a proof.
 #
@@ -659,7 +662,7 @@ pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
     hits=""
-    hits="$(grep -nE "(builtin +)?printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\| *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q" "$f")"
+    hits="$(grep -nE "(builtin +)?printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\|([^|]*\\|)* *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q" "$f")"
     grc=$?
     if [ "$grc" -gt 1 ]; then
         note scan_failed "could not scan $(basename "$f") for racy pipelines (grep exited $grc)"

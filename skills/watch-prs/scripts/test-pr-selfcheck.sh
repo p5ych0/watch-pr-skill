@@ -298,9 +298,10 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -Fq y || true" \
           "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true" \
           "builtin printf '%s' \"\$x\" BAR command grep -q y || true" \
-          "printf '%s' \"\$x\" BAR grep -F -q y || true"; do
+          "printf '%s' \"\$x\" BAR grep -F -q y || true" \
+          "printf '%s' \"\$x\" BAR cut -d: -f1 BAR grep -qF y || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
-      printf '%s\n' "${_v/BAR/$_bar}"
+      printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
     out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
