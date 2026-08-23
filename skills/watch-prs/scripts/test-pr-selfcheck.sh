@@ -571,12 +571,17 @@ out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>
     && grep -q 'test-pr-omega.sh' <<<"$out"; } \
     && pass "a runner reporting backwards still names both files" \
     || die "the reversed runner lost a failure (rc=$rc out='$out')"
-# THE NESTED READS MAY FAIL, and that is their ordinary answer: `grep -n` exits 1
-# when it matches nothing. It fails CLOSED here — no match means an empty value,
-# which the outer reader cannot match, so the assertion reports the failure rather
-# than passing on a partial read.
-{ grep -q 'alpha' \
-    <<<"$(sed -n '1p' <<<"$(grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' <<<"$out" | head -2)")"; } \
+# THE FIRST MATCH IS TAKEN BY EXPANSION, not by a second reader. This was
+# `grep -n … | head -2` inside a `sed` inside the assertion: `head` closes after two
+# lines, the `grep` behind it takes `SIGPIPE`, and both substitution statuses were
+# discarded — which is #152 itself, one level down, in the fixture proving the gate
+# against it. The outer read's status IS taken, and what selects the first line is
+# `${_m%%$'\n'*}`, which has no status to lose. An empty extraction needs no guard
+# of its own here: the match is positive, and `alpha` is not the empty line a
+# herestring supplies — a guard was written and removed as untestable.
+_m=""; _m="$(grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' <<<"$out")" || _m=""
+_first="${_m%%$'\n'*}"
+grep -q 'alpha' <<<"$_first" \
     && pass "…in the glob's order rather than the order they were reported in" \
     || die "the failures were not ordered: $out"
 rm -rf "$REVSTUB"
