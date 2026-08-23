@@ -384,6 +384,31 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…nor a -q that -e has taken as its pattern" \
     || die "a -q consumed by -e was reported as racy (rc=$rc out=$out)"
+# …NOR AN ATTACHED ONE. A bundled short-option word ends at the first `e` or `f`,
+# which takes the REST of the word as its pattern — `grep -eq` searches for `q`
+# and reads to EOF, exactly as `grep -e -q` does. `-qe` is the other way round and
+# IS the quiet option, so the class admits `e` and `f` after the `q` and not
+# before it.
+for _sp in '-eq' '-fq' '-eqFOO'; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_bar grep $_sp || true"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+        || die "grep $_sp was reported as racy (rc=$rc out=$out)"
+done
+pass "…nor a q attached to -e or -f as its pattern"
+# …WHILE THE SAME LETTERS THE OTHER WAY ROUND STILL ARE. `-qe` is `-q` followed by
+# `-e`, and `-f/tmp/p -q` carries its file attached and the quiet option after it.
+for _sp in '-qe y' '-f/tmp/p -q' '-iq'; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_bar grep $_sp || true"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
+        || die "grep $_sp was not reported as racy (rc=$rc out=$out)"
+done
+pass "…while -qe, an attached -f and a bundled -iq still are"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`

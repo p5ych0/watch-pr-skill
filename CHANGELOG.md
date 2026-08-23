@@ -28,8 +28,8 @@
   operator, so the match stops at `|`, `||`, `&&`, `;` and `)` rather than
   crossing into the next command — a `grep -c` on a line that later contains `-eq`
   is not reported, whichever operator separates them. And `-e` and `-f` take the
-  next word, so `grep -e -q` is a pattern rather than a quiet option and is not
-  reported either. Those two rules replaced an option grammar that five review
+  pattern, so the `q` in `grep -e -q` and in `grep -eq` alike is what grep searches
+  FOR and is not reported, while `grep -qe y` is. Those two rules replaced an option grammar that five review
   rounds had each widened by one legal spelling.
   It reads folded LOGICAL lines rather than physical ones — a pipeline continues
   across a `\` and across a bare trailing `|`, and both halves scanned separately

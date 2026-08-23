@@ -717,14 +717,18 @@ for f in "$SCRIPTS"/test-*.sh; do
           # CONTAIN a control operator — that is the rule, and enumerating the
           # operators is not the same as enumerating spellings of `grep`.
           #
-          # `-e` AND `-f` TAKE THE NEXT WORD, so that word is an operand and never
-          # an option: in `grep -e -q` the `-q` is the PATTERN, grep reads to EOF,
-          # and there is no race to report. The pair is removed before the match,
-          # which is the one piece of grep grammar here — the two options that
-          # consume a pattern — rather than a model of the option syntax.
+          # `-e` AND `-f` TAKE THE PATTERN, so what follows them is an operand and
+          # never an option: in `grep -e -q` the `-q` is the PATTERN, grep reads to
+          # EOF, and there is no race to report. That holds in BOTH short-option
+          # forms and the rule is one rule — a separate word is removed by the
+          # substitution below, and an ATTACHED one is handled by the option class
+          # in the match, which admits no `e` or `f` BEFORE the `q`: in `-eq` the
+          # `q` is the pattern, while in `-qe` it is the quiet option. This is the
+          # one piece of grep grammar here — the two options that consume a pattern
+          # — rather than a model of the option syntax.
           t = line; gsub(/\|\|/, ")", t)
           gsub(/(^|[ \t])-[ef][ \t]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^ \t)\"'"'"'|&;(<>]+)/, " -eARG", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|&;(<>]+))*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|&;(<>]+))*[[:space:]]+-[A-Za-dg-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
