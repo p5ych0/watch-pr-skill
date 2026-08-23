@@ -262,8 +262,8 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
     || die "an untested library was not reported (rc=$rc out=$out)"
 # ── A FIXTURE THAT PIPES A VALUE INTO `grep -q` IS A FINDING ───────────────
 #
-# `printf … | grep -q` is racy under `pipefail`, which every fixture sets: `grep -q`
-# exits on its first match, `printf` takes `SIGPIPE`, and the PIPELINE reports 141
+# A piped `printf` is racy under `pipefail`, which every fixture sets: the reader
+# exits on its first match, the producer takes `SIGPIPE`, and the PIPELINE reports 141
 # — so a line that IS present reads as missing, intermittently. That is #152, and
 # it cost three review rounds on one file before the cause was found.
 #
@@ -295,12 +295,16 @@ grep -q 'grep -q y' <<<"$out" \
 # `printf "%s\n" …` and `grep -Fq` walked past it — equivalent code, and the gate
 # reporting clean.
 #
-# THE OPTIONS ARE PLANTED, BUT NOTHING ASKS ABOUT THEM. The scan stops at `grep`,
-# so `-q`, `-c`, `--`, `-qm1`, `-ie -q`, `--quiet` and a locale assignment in front
-# are all one case rather than seven — five review rounds went into a grammar that
-# tried to tell the early-exiting ones apart, each round widening it by one legal
-# spelling. They stay planted because a later change could reintroduce a class the
-# rule does not need.
+# EVERY SPELLING IS PLANTED AND NOTHING ASKS ABOUT ANY OF THEM. Seven review rounds
+# went into telling these apart — grep's options first (`-qm1`, `-ie -q`, `--`,
+# `--quiet`), then the syntax around them (`%b`, an unquoted `$fmt`, a quoted
+# assignment value, `2>&1` before the pipe, `/usr/bin/grep`, `myprintf` matching on
+# its suffix) — and each round widened a rule by one legal spelling and produced the
+# next. The rule is now three substring tests, so none of them is a separate case.
+# They stay planted BECAUSE they are what a narrower rule would miss: any change
+# that reintroduces one has to turn a light off here first. `myprintf` is in the
+# list deliberately — it is a producer this rule does not distinguish, reported and
+# fixed the same way, and that over-report is the price of the tests being three.
 for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -Fq y || true" \
           "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true" \
@@ -326,7 +330,15 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%b' \"\$large\" BAR grep -q marker || true" \
           "printf %s \"\$x\" BAR grep -q y || true" \
           "printf \"\$fmt\" \"\$x\" BAR grep -q y || true" \
-          "printf '%s' \"\$x\" BAR LC_ALL=\"\$locale\" grep -q y || true"; do
+          "printf '%s' \"\$x\" BAR LC_ALL=\"\$locale\" grep -q y || true" \
+          "printf '%s' \"\$large\" 2>/dev/null BAR grep -q marker || true" \
+          "printf '%s' \"\$large\" 2>&1 BAR grep -q marker || true" \
+          "fmt=%s; printf \$fmt \"\$large\" BAR grep -q marker || true" \
+          "printf '%s' \"\$x\" BAR IGNORED=\"two words\" grep -q marker || true" \
+          "printf '%s' \"\$large\" BAR /usr/bin/grep -q marker || true" \
+          "printf '%s' \"\$large\" BAR \\grep -q marker || true" \
+          "printf '%s' \"\$large\" BAR command -p grep -q marker || true" \
+          "myprintf '%s' \"\$x\" BAR grep -c . || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -336,8 +348,8 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
         || die "a spelling variant walked past the gate ($_v): rc=$rc out=$out"
 done
 # …AND A PIPELINE SPLIT ACROSS A CONTINUATION IS CAUGHT. Every version of this
-# scan before the last read PHYSICAL lines, so `printf … | \` with the `grep -q` on
-# the next one walked past all of them — the same assertion, one newline apart.
+# scan before the last read PHYSICAL lines, so a producer ending in a bare pipe with
+# the reader on the next one walked past all of them — one assertion, one newline apart.
 # BOTH SPLITS ARE PLANTED SEPARATELY, because they fold by DIFFERENT conditions:
 # a trailing `\` and a trailing bare `|`. A single fixture ending `| \` folds by
 # the backslash arm alone, so the bare-pipe arm could be deleted with it green.
@@ -362,22 +374,29 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…and a logical OR is not reported as a pipeline" \
     || die "an OR was reported as a racy pipeline (rc=$rc out=$out)"
-# …AND A PIPE IN THE NEXT COMMAND IS NOT THIS `printf`'S. `printf '%s' "$x"; true |
-# grep -c .` has no printf-to-grep pipeline at all, and the text between the two
-# was unbounded, so the separator was crossed and the later pipe read as this
-# one's. The producer match stops at `;` and `&` — which is also what keeps a
-# `2>&1` before an unrelated pipe from reading as one.
+# …AND A SEPARATOR IS NOT A PARSER, so this IS reported. The line names a producer,
+# a pipe and a reader, and nothing here decides that the pipe belongs to the `true`
+# rather than to what precedes it — deciding that is reading shell out of text,
+# which is the seven rounds this check spent and stopped spending. Over-reporting
+# is the price, and it is paid where it can be seen: the line says
+# `racy-pipeline-ok` and the finding goes away.
 for _sep in ';' '&&'; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "printf '%s' \"\$x\" $_sep true $_bar grep -c . || true"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
     out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
+        || die "a line separated by '$_sep' was not reported (rc=$rc out=$out)"
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_sep true $_bar grep -c . || true   # racy-pipeline-ok"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
     { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-        || die "a pipe after '$_sep' was read as this printf's (rc=$rc out=$out)"
+        || die "the marker did not clear the '$_sep' line (rc=$rc out=$out)"
 done
-pass "…and a pipe in the command after a ; or && is not this printf's"
-# …AND A PRODUCER THAT IS NOT `printf` IS NOT THIS GATE'S JOB. `bodies | grep -q`
-# races identically, and telling that pipe from a `|` in `${x%%|*}`, in a quoted
+pass "…and a line the rule cannot parse is reported, and the marker clears it"
+# …AND A PRODUCER THAT IS NOT NAMED `printf` IS NOT THIS GATE'S JOB. A `bodies`
+# pipeline races identically, and telling that pipe from a `|` in `${x%%|*}`, in a quoted
 # `awk` program or in a `case` pattern needs a shell parser — the generalised scan
 # reported 140 false positives on a clean tree. The boundary is stated in
 # `AGENTS.md` and in `.github/copilot-instructions.md`, so it is review's job

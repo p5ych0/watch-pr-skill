@@ -697,41 +697,36 @@ for f in "$SCRIPTS"/test-*.sh; do
           # than a modelled option-and-argument grammar. Four rounds were spent
           # widening that grammar one legal spelling at a time — an option with an
           # argument, an argument with a hyphen in it, a quoted argument, a
-          # THE SCAN STOPS AT `grep`, and asks nothing about its options. Five
-          # review rounds were spent modelling them — an option with an argument,
-          # an argument with a hyphen, a quoted argument, a dash-leading operand,
-          # `-e` attached to its pattern — each round widening a grammar by one
-          # legal spelling, and each producing the next. `--`, `-qm1`, `-ie -q`,
-          # `--quiet` and `--silent` were the ones still outstanding when it
-          # stopped. That is the treadmill `CLAUDE.md` records paying 2,200 lines
-          # and fifty-two rounds for once.
+          # THE SCAN ASKS THREE SUBSTRING QUESTIONS AND PARSES NOTHING. Does the
+          # logical line name `printf`, does it carry a pipe, does it name `grep`.
           #
-          # SO THE RULE IS NOT "an early-exiting reader" but "a `printf` piped into
-          # `grep`", which needs no grep grammar at all: the herestring is the fix
-          # for every one of them, `grep -c` and `grep -v` included, and it is
-          # never worse. The thirteen lines in the tree that read to EOF were
-          # converted rather than exempted, so the rule has no exceptions to model.
+          # EVERYTHING ELSE WAS TRIED FIRST, and this is what it cost. Six review
+          # rounds went into modelling grep'"'"'s options — an option with an argument,
+          # a hyphenated argument, a quoted argument, a dash-leading operand, `-e`
+          # attached to its pattern, `--`, `-qm1`, `--quiet` — each round widening a
+          # grammar by one legal spelling and producing the next. Dropping the
+          # options bought one round: the next found `%b`, an unquoted `$fmt`, a
+          # quoted assignment value, `2>&1` before the pipe, `/usr/bin/grep`, and
+          # `myprintf` matching on its suffix. Every one of those was a fact about
+          # SHELL SYNTAX, and reading shell syntax out of text needs a shell.
           #
-          # `||` IS REPLACED WITH A CHARACTER THAT CANNOT BE A PIPE, because a
-          # logical OR is not a pipeline: `printf '"'"'%s'"'"' "$x" || grep -q y` has
-          # no second process and no race. NEITHER IS A PIPE IN THE NEXT COMMAND:
-          # the text between the `printf` and the pipe stops at `;` and `&`, so
-          # `printf … ; true | grep -c .` is not this printf'"'"'s pipeline. That is
-          # also what keeps a `2>&1` before an unrelated pipe from reading as one.
+          # So the rule stops trying. There is no spelling of `printf`, of a pipe or
+          # of `grep` that walks past a substring test, which is the whole class of
+          # finding that took those seven rounds. `CLAUDE.md` records the same
+          # treadmill costing 2,200 lines and fifty-two rounds once already.
           #
-          # THE FORMAT IS ANY FIRST ARGUMENT, quoted either way or a bare word
-          # carrying a `%`. It was `%s` and `%s\n` literally, so `printf '"'"'%b'"'"' …`
-          # walked past — and a bare word with no `%` in it is prose rather than a
-          # format, which is what keeps this file'"'"'s own comments out.
+          # THE PRICE IS OVER-REPORTING, and it is paid in a form that is visible.
+          # A line naming all three where the pipe is not the printf'"'"'s — a `printf`
+          # inside a process substitution beside an unrelated pipeline, say — says
+          # `racy-pipeline-ok`, which is the escape this check already had. There
+          # are two in the tree. A false negative would be invisible and this is
+          # not, which is why the price is paid in this direction.
           #
-          # AN ASSIGNMENT IS A COMMAND PREFIX, so `LC_ALL=C grep` is `grep`. That
-          # is a shell fact and it is bounded — an assignment word — unlike the
-          # grammar this replaced. THE VALUE IS ONE WORD and quotes are ordinary
-          # characters in it, so `LC_ALL="$locale"` needs no alternative of its own:
-          # one was written and removed, because it matched nothing the word class
-          # did not already match and no fixture could tell the two apart.
+          # `||` IS NOT A PIPE, and that is the one thing still worth spelling: it
+          # is replaced with a character that cannot be one, so
+          # `printf '"'"'%s'"'"' "$x" || grep -q y` has no pipeline and no race.
           t = line; gsub(/\|\|/, ")", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:]|;&]*%[^[:space:]|;&]*)[[:space:]]+[^|;&]*\|([^|;&]*\|)*[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]|;&]*[[:space:]]+|command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]|$)/)
+          if (t ~ /printf/ && t ~ /\|/ && t ~ /grep/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?

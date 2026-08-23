@@ -533,12 +533,14 @@ present reads as missing, intermittently. A herestring — `grep -q PATTERN
 <<<"$value"` — has no second process to kill. A line that carries the spelling as
 DATA rather than as code says so with `racy-pipeline-ok`.
 
-The gate reports **every** `printf` piped into `grep`, not only the readers that
-exit early. Deciding which options make `grep` quiet means parsing its command
-line — `-q`, `-qm1`, `--quiet`, `-e -q` where the `-q` is the pattern — and five
-review rounds went into a grammar that was wrong in a new way each time. The
-herestring is the fix for all of them and is never worse, so the rule needs no
-grammar: do not pipe a `printf` into a `grep`.
+The gate asks three questions of a line and parses nothing: does it name `printf`,
+does it carry a pipe, does it name `grep`. Not which options make `grep` quiet, not
+which spelling of `printf` it is — deciding either means reading shell out of text,
+and seven review rounds went into rules that tried. The herestring is the fix for
+`grep -c` and `grep -v` as much as for `grep -q` and is never worse, so nothing is
+lost by asking less. The cost is the other direction: a line that names all three
+where the pipe is not the `printf`'s is reported, and says `racy-pipeline-ok` to
+clear it.
 
 The suite is the slow part, so it runs four files at a time — they share no
 state, and four at a time is ~85s where one after another is ~208s.

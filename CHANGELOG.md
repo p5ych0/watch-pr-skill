@@ -18,30 +18,31 @@
   pre-push gate reports the shape rather than letting it back in — and the suite
   it gates stops failing for reasons that are not there.
 
-  The check takes the SHAPE rather than a list of spellings — ANY format, quoted
-  either way or a bare word carrying a `%`, any `command`/`builtin` prefix on
-  EITHER side, an environment assignment such as `LC_ALL=C` or `LC_ALL="$locale"`
-  in front of `grep`, any intermediate filters between the producer and the reader,
-  tabs as well as spaces at every word boundary, and a pipeline split across a `\`
-  continuation or a bare trailing `|`. What it does NOT cross is a command
-  separator: the text between the `printf` and the pipe stops at `;` and `&`, so
-  `printf … ; true | grep -c .` is another command's pipeline and is not reported —
-  which is also what keeps a `2>&1` before an unrelated pipe from reading as one.
-  It reads folded LOGICAL lines rather than physical ones — a pipeline continues
-  across a `\` and across a bare trailing `|`, and both halves scanned separately
-  read clean — and reporting the first physical line number keeps the finding
-  useful. An input it cannot read exits 2, the could-not-run status, rather than
-  reporting an actionable finding nobody looked for.
+  The check asks three substring questions of a folded LOGICAL line and parses
+  nothing: does it name `printf`, does it carry a pipe that is not `||`, does it
+  name `grep`. Folding matters — a pipeline continues across a `\` and across a
+  bare trailing `|`, and both halves scanned separately read clean — and reporting
+  the first physical line number keeps the finding useful. An input it cannot read
+  exits 2, the could-not-run status, rather than reporting an actionable finding
+  nobody looked for.
 
-  **It stops at `grep` and asks nothing about the options.** Which of them make
-  `grep` exit early is a question about ITS command line — `-q`, `-qm1`, `--quiet`,
-  `--silent`, `-e -q` and `-eq` where the `q` is the pattern, `--` where every
-  following word is one — and five review rounds each widened a grammar by one
-  legal spelling and produced the next. The herestring is the fix for `grep -c` and
-  `grep -v` as much as for `grep -q`, and it is never worse, so the rule drops the
-  grammar: do not pipe a `printf` into a `grep`. The thirteen lines in the tree
-  that read to EOF were converted rather than exempted, so there are no exceptions
-  to carry. A logical `||` is still not a pipe.
+  **Everything narrower was tried first, and this is what it cost.** Six review
+  rounds went into modelling grep's options — an option with an argument, a
+  hyphenated argument, a quoted one, a dash-leading operand, `-e` attached to its
+  pattern, `--`, `-qm1`, `--quiet`. Dropping the options bought one round: the next
+  found `%b`, an unquoted `$fmt`, a quoted assignment value, `2>&1` before the
+  pipe, `/usr/bin/grep`, and `myprintf` matching on its suffix. Every one of those
+  was a fact about SHELL SYNTAX, and reading shell syntax out of text needs a
+  shell. There is no spelling of `printf`, of a pipe or of `grep` that walks past a
+  substring test.
+
+  Nothing is lost by asking less: the herestring is the fix for `grep -c` and
+  `grep -v` as much as for `grep -q`, and it is never worse. The thirteen lines in
+  the tree that read to EOF were converted rather than exempted.
+
+  The price is over-reporting, and it is paid where it can be seen. A line naming
+  all three where the pipe is not the `printf`'s says `racy-pipeline-ok`; there are
+  two in the tree. A false negative would be invisible, and this is not.
 
   It is anchored on `printf`, and any other producer is review's job. Generalising
   to "a pipeline whose last stage is `grep -q`" was tried and reverted: `|` also

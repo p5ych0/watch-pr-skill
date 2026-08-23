@@ -453,15 +453,28 @@ rediscovering them.
   intermittent and a green run proves nothing about the next one. A line carrying
   the spelling as DATA says so with `racy-pipeline-ok`.
 
-  **The gate reports every `printf` piped into `grep`, and asks nothing about the
-  options.** Which of them make `grep` quiet is a question about ITS command line
-  — `-q`, `-qm1`, `--quiet`, `--silent`, `-e -q` where the `-q` is the pattern,
-  `--` where every following word is — and five review rounds each widened a
-  grammar by one legal spelling and produced the next, which is the treadmill this
-  file records paying for once already. The herestring is the fix for `grep -c` and
-  `grep -v` as much as for `grep -q`, and it is never worse, so the rule drops the
-  grammar instead of modelling it. The thirteen lines in the tree that read to EOF
-  were converted rather than exempted, so the rule has no exceptions to carry.
+  **The gate asks three substring questions of a folded line and parses nothing:**
+  does it name `printf`, does it carry a pipe that is not `||`, does it name
+  `grep`. It does not ask which options make `grep` quiet, which spelling of
+  `printf` this is, or whose pipe it is.
+
+  Everything narrower was tried first. Six rounds went into modelling grep's
+  options — an option with an argument, a hyphenated argument, a quoted one, a
+  dash-leading operand, `-e` attached to its pattern, `--`, `-qm1`, `--quiet`.
+  Dropping the options bought one round: the next found `%b`, an unquoted `$fmt`,
+  a quoted assignment value, `2>&1` before the pipe, `/usr/bin/grep`, and
+  `myprintf` matching on its suffix. Every one was a fact about SHELL SYNTAX, and
+  reading shell syntax out of text needs a shell — which is this file's own
+  scanner warning, arrived at a second time.
+
+  The herestring is the fix for `grep -c` and `grep -v` as much as for `grep -q`
+  and is never worse, so there is nothing the narrower rule bought. The thirteen
+  lines in the tree that read to EOF were converted rather than exempted.
+
+  **The price is over-reporting, and it is paid where it can be seen.** A line
+  naming all three where the pipe is not the `printf`'s says `racy-pipeline-ok`;
+  there are two in the tree. A false negative would be invisible, and this is not.
+  Do not narrow this rule to remove a marker.
 
   **Any other producer is review's job, and that boundary is deliberate.** `bodies
   | grep -qF …` races identically — every producer does — and generalising the scan

@@ -3965,7 +3965,7 @@ grep -q 'proposal rather than an instruction' "$SKILL" \
 # routinely span continuation lines: a line-based match saw only one token of a
 # split invocation and reported clean. Third time line-wrapping has defeated a
 # check in this PR, which is why the flattened copy is taken once and reused.
-# The scans below use herestrings rather than `printf | grep`: under `pipefail`,
+# The scans below use herestrings rather than a piped `printf`: under `pipefail`,
 # `grep -q` exiting at the first match SIGPIPEs the producer and the pipeline
 # reports the match as ABSENT — the fail-open direction. The fixture demonstrating
 # that hazard, and the counting machinery for CHANGELOG consistency, are held back
@@ -4223,7 +4223,7 @@ grep -qE 'A \*different\* pre-existing defect found while fixing this one is not
     && pass "…and that defect is stated to be OUT of scope" \
     || die "the contract does not state the out-of-scope outcome"
 # ── the SIGPIPE hazard these scans avoid, demonstrated ────────────────────
-# Every scan in this file uses a herestring rather than `printf | grep`. This is
+# Every scan in this file uses a herestring rather than a piped `printf`. This is
 # the fixture that shows why, and it was held back from the documentation PR
 # because it tests THIS FILE's idiom rather than anything the contract says.
 #
