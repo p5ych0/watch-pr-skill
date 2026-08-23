@@ -612,6 +612,14 @@ if [[ -z $RB_REMOTE ]]; then
     # a different thing from inheriting one already poisoned; the second is stated
     # as a limit at the foot of `pr-origin.sh` and #91, and the first is a defect.
     #
+    # AND `HOST`, `OWNER` AND `REPO`, which are the PARSED IDENTITY. An alias onto
+    # one of them let the assignments overwrite it with a transport path, and setup
+    # could then announce success with an identity component that is a directory
+    # name — every later `gh` call addressed at a repository that does not exist.
+    # They were named in the enumeration below before they were compared against,
+    # which is the enumeration being wrong by omission in the one place it should
+    # not have been.
+    #
     # THIS IS AN ENUMERATION, AND IT IS BOUNDED BY WHAT THIS SHELL HOLDS HERE.
     # `HOST`, `OWNER`, `REPO`, `REPO_DIR`, `RB_SCRIPTS`, `RB_REMOTE`, `PATH`, `HOME`
     # and `TMPDIR` are the names in scope that an assignment in this block can
@@ -649,17 +657,30 @@ if [[ -z $RB_REMOTE ]]; then
     if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
          && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
+         && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
+         && [[ ${REPO:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
          && [[ ${REPO_DIR:-} != Probe-B ]] && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
          && [[ ${PATH:-} != Probe-B ]] \
+         && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
+         && [[ ${REPO:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
         # the helper's `mkdir` then failed with a usable `HOME` sitting next to it.
         # The candidate loop this replaced did fall through in that state.
+        #
+        # AND WHAT `-w`/`-x` STILL CANNOT SEE: they are MODE BITS. A `TMPDIR` that
+        # passes all three can fail to hold a directory anyway — an exhausted quota,
+        # a full filesystem — and setup then aborts with a usable `HOME` next to it.
+        # Restoring that fallback needs the retry to tell a RESERVATION failure
+        # apart from an ancestry refusal or a bad origin, which means either a
+        # second copy of the read-back or a branch on the helper's status outside
+        # the arm that contains it — and both re-open the walked-past-guard class
+        # this block exists to close. #161 carries it, with the shapes considered.
         #
         # WHAT IS NOT RETRIED, AND WHY. A parent whose ANCESTRY the helper refuses —
         # another account owning a component, a world-writable non-sticky one, an
@@ -919,11 +940,15 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
+         && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
+         && [[ ${REPO:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-B ]] && [[ ${REPO_DIR:-} != Probe-B ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-B ]] && [[ ${PATH:-} != Probe-B ]] \
+         && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
+         && [[ ${REPO:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.

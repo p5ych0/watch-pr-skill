@@ -95,7 +95,7 @@
 
 - **A nameref from a transport name onto another name in scope replaced that
   variable with a path setup then deleted.** `HOME`, `TMPDIR`, `REPO_DIR`,
-  `RB_SCRIPTS` and `PATH` were each found this way, one review round apiece. Each probe compared only
+  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER` and `REPO` were each found this way. Each probe compared only
   against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
   passed both subshells — neither read `HOME`. The assignments then cleared it and
   set it to the transport path, and the cleanup a few lines later removed that
@@ -105,7 +105,10 @@
   be unable to inspect or merge it; `RB_SCRIPTS` made the next line invoke a helper
   from a directory that does not contain it; `PATH` left `/usr/bin/env` unable to
   find `bash` — setup CORRUPTING `PATH`, which is a different thing from inheriting
-  one already poisoned. Every probe reads back every name in scope that an
+  one already poisoned; and an alias onto `HOST`, `OWNER` or `REPO` let setup
+  announce success with an identity component that is a directory name, so every
+  later `gh` call addressed a repository that does not exist. Every probe reads
+  back every name in scope that an
   assignment there can reach — which is the rule, rather than every name the stage
   introduces — and `SKILL.md` writes the set down, with why the one-line generic
   test is unavailable: `[[ -R name ]]` is bash 4.3+, and an unknown unary operator

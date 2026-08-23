@@ -741,13 +741,16 @@ LOCAL
                    "declare -n RB_ORIGIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
-                   "declare -n RB_TMPPARENT=PATH|PATH|$PATH"; do
+                   "declare -n RB_TMPPARENT=PATH|PATH|$PATH" \
+                   "declare -n RB_ORIGIN_DIR=OWNER|OWNER|acme" \
+                   "declare -n RB_TMPPARENT=REPO|REPO|widget"; do
             _al_decl="${_al%%|*}"; _al_rest="${_al#*|}"
             _al_var="${_al_rest%%|*}"; _al_want="${_al_rest#*|}"
             rm -f "$_forge_dir/alias.out"
             _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
                 RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
-                REPO_DIR="$_forge_dir" RB_ALIAS_OUT="$_forge_dir/alias.out" \
+                REPO_DIR="$_forge_dir" HOST=github.com OWNER=acme REPO=widget \
+                RB_ALIAS_OUT="$_forge_dir/alias.out" \
                 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                     trap '"'"'printf "CANDIDATE=[%s] PINNED=[%s]\n" "${'"$_al_var"':-}" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
                     '"$_al_decl"'
@@ -1010,11 +1013,15 @@ for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
           '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
           '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] && \[\[ ${REPO_DIR:-} != Probe-A \]\] \\' \
           '     && \[\[ ${RB_SCRIPTS:-} != Probe-A \]\] && \[\[ ${PATH:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${HOST:-} != Probe-A \]\] && \[\[ ${OWNER:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${REPO:-} != Probe-A \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-A \]\] && \[\[ ${TMPDIR:-} != Probe-A \]\] ) 2>/dev/null \\' \
           '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
           '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
           '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] && \[\[ ${REPO_DIR:-} != Probe-B \]\] \\' \
           '     && \[\[ ${RB_SCRIPTS:-} != Probe-B \]\] && \[\[ ${PATH:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${HOST:-} != Probe-B \]\] && \[\[ ${OWNER:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${REPO:-} != Probe-B \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-B \]\] && \[\[ ${TMPDIR:-} != Probe-B \]\] ) 2>/dev/null; then'; do
     grep -q "^$_v\$" <<<"$_pin_body" \
         || die "the pin probe is missing a line: $_v"
@@ -1455,12 +1462,15 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
                 "declare -n RB_PIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                 "declare -n RB_PIN_SEEN=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                 "declare -n RB_PIN_DIR=PATH|PATH|$PATH" \
-                "declare -n RB_PIN_SEEN=PATH|PATH|$PATH"; do
+                "declare -n RB_PIN_SEEN=PATH|PATH|$PATH" \
+                "declare -n RB_PIN_DIR=OWNER|OWNER|acme" \
+                "declare -n RB_PIN_SEEN=HOST|HOST|github.com"; do
         _pal_decl="${_pal%%|*}"; _pal_rest="${_pal#*|}"
         _pal_var="${_pal_rest%%|*}"; _pal_want="${_pal_rest#*|}"
         rm -f "$_forge_dir/palias.out"
         _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
             TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" REPO_DIR="$RB_TMPBASE" \
+            HOST=github.com OWNER=acme REPO=widget \
             RB_ALIAS_OUT="$_forge_dir/palias.out" \
             'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                 trap '"'"'printf "CANDIDATE=[%s]\n" "${'"$_pal_var"':-}" > "$RB_ALIAS_OUT"'"'"' EXIT
