@@ -24,9 +24,13 @@
   reader, any words at all between `grep` and the option carrying `q` — options,
   their arguments, quoted patterns, dash-leading operands — tabs
   as well as spaces at every word boundary, and a pipeline split across a `\`
-  continuation or a bare trailing `|`. It does not report a logical `||`, nor a
-  `grep -c` on a line that later contains `-eq` — because four review
-  rounds each found an equivalent spelling the previous version reported clean.
+  continuation or a bare trailing `|`. A word cannot CONTAIN a shell control
+  operator, so the match stops at `|`, `||`, `&&`, `;` and `)` rather than
+  crossing into the next command — a `grep -c` on a line that later contains `-eq`
+  is not reported, whichever operator separates them. And `-e` and `-f` take the
+  next word, so `grep -e -q` is a pattern rather than a quiet option and is not
+  reported either. Those two rules replaced an option grammar that five review
+  rounds had each widened by one legal spelling.
   It reads folded LOGICAL lines rather than physical ones — a pipeline continues
   across a `\` and across a bare trailing `|`, and both halves scanned separately
   read clean — and reporting the first physical line number keeps the finding

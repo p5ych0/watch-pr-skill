@@ -710,8 +710,21 @@ for f in "$SCRIPTS"/test-*.sh; do
           # match crossed into what followed, and
           # `printf … | grep -c . || test 1 -eq 2` was reported because `-eq` looked
           # like a quiet option. `)` is already excluded, so the match stops there.
+          #
+          # THE WORD CLASS EXCLUDES EVERY SHELL CONTROL OPERATOR, not one at a time.
+          # `)` and `|` were excluded and `&&` and `;` were not, so the same false
+          # positive came back one operator along. A word in a command cannot
+          # CONTAIN a control operator — that is the rule, and enumerating the
+          # operators is not the same as enumerating spellings of `grep`.
+          #
+          # `-e` AND `-f` TAKE THE NEXT WORD, so that word is an operand and never
+          # an option: in `grep -e -q` the `-q` is the PATTERN, grep reads to EOF,
+          # and there is no race to report. The pair is removed before the match,
+          # which is the one piece of grep grammar here — the two options that
+          # consume a pattern — rather than a model of the option syntax.
           t = line; gsub(/\|\|/, ")", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|]+))*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
+          gsub(/(^|[ \t])-[ef][ \t]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^ \t)\"'"'"'|&;(<>]+)/, " -eARG", t)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|&;(<>]+))*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?

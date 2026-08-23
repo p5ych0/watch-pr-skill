@@ -362,6 +362,28 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…nor a grep -c whose line continues into an arithmetic test" \
     || die "a grep -c before an OR was reported as racy (rc=$rc out=$out)"
+# …NOR THE SAME LINE ONE CONTROL OPERATOR ALONG. `||` was excluded and `&&` and
+# `;` were not, so the match crossed them into `test 1 -eq 2` exactly as it had
+# crossed `@@`. A word in a command cannot contain a control operator.
+for _op in '&&' ';'; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_bar grep -c . $_op test 1 -eq 2 || true"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+        || die "a grep -c before '$_op' was reported as racy (rc=$rc out=$out)"
+done
+pass "…nor a grep -c before && or ; and an arithmetic test"
+# …NOR A `-q` THAT IS THE PATTERN. `-e` takes the next word, so in `grep -e -q`
+# the `-q` is what grep searches FOR: it reads the whole input and cannot take
+# SIGPIPE. The widened word class read that operand as the quiet option.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s' \"\$x\" $_bar grep -e -q || true"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…nor a -q that -e has taken as its pattern" \
+    || die "a -q consumed by -e was reported as racy (rc=$rc out=$out)"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
