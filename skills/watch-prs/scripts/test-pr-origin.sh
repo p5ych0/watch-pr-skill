@@ -1138,7 +1138,8 @@ esac
 #
 # What the check can see is that each write still HAS a refusal attached, and that
 # the refusal is `rb_refuse` rather than a bare `exit` — the difference being
-# whether the directory this script created goes with it. Both are matched whole,
+# whether the directory this script created goes with it, which `rb_refuse` gets
+# by leaving it to the `EXIT` trap rather than by doing it. Both are matched whole,
 # with the redirection and the guard on one logical line, so a guard moved onto a
 # line of its own or replaced with `|| true` fails here.
 _wr_n=0
@@ -1149,7 +1150,7 @@ _wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
 _wr_g=0
 _wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively and write' "$SCRIPT")" || _wr_g=0
 [ "$_wr_g" = 2 ] \
-    && pass "…and each takes its status through rb_refuse, so a failed write removes the directory too" \
+    && pass "…and each takes its status through rb_refuse, so a failed write gives the directory back too" \
     || die "expected two rb_refuse guards on the writes, found $_wr_g"
 
 # ── THE NAME IS RESERVED BEFORE THE WALKS, NOT AFTER THEM ──────────────────
@@ -1505,6 +1506,12 @@ else
 fi
 rm -rf "$_sig_bin"; rm -f "$_sig_mark"
 
+# NOTE ON WHICH CLEANUP RUNS HERE: a SIGNAL does not go through the `EXIT` trap.
+# Its handler disables `EXIT`, calls the cleanup directly and re-raises — routing
+# it through `EXIT` would mean handling the signal by returning, which is the
+# defect that made the helper resume the work it was killed during. The cases above
+# exercise that path, not the refusal one.
+#
 # WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
 # before the disarm is the phase where the handler must remove the leaf as well.
 # It is asserted structurally by the `RB_PHASE` ordering cases above and not run, because the interval cannot be

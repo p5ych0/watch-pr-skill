@@ -389,9 +389,19 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
 # path can recreate it as a symlink between the two, and the second `rm -f "$OUT"`
 # follows the replacement into a file this run never created.
 #
-# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap is what gives the
-# reservation back, on every path out — a refusal, a signal, or a fall off the end
-# — and there is nothing left to do twice.
+# SO THE REFUSALS ONLY SAY WHY AND STOP. The EXIT trap gives the reservation back
+# for them and for any other abnormal end, and there is nothing left to do twice.
+#
+# A SIGNAL DOES NOT COME THROUGH `EXIT`, and that is deliberate: its handler
+# disables `EXIT`, calls the cleanup DIRECTLY, and re-raises. Routing it through
+# `EXIT` would mean handling the signal by RETURNING, which leaves bash resuming
+# the work it was killed during — and, between a successful write and the disarm,
+# returning status 0 for a run somebody killed.
+#
+# AND A SUCCESSFUL RUN DOES NOT CLEAN UP AT ALL: it resets `EXIT` and leaves the
+# directory for the caller, which is the point of the call. "The EXIT trap cleans
+# up on every path out" is the sentence that invites removing the direct signal
+# cleanup, or cleaning up a successful result.
 #
 # THE PHASE IS WHAT PICKS THE SHAPE, and it replaces the two refusal functions
 # exactly: `rmdir` alone while no leaf can exist, and leaf-then-directory once a

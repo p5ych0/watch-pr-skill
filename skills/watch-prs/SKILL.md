@@ -605,6 +605,25 @@ if [[ -z $RB_REMOTE ]]; then
     # operator is told which name is unusable. Reverting the containment restores
     # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
     # excerpt reaches the selection.
+    # AND `PATH` WITH THEM, which is not this loop's at all: an alias onto it made
+    # the assignments replace a working `PATH` with the transport path, so the very
+    # next `/usr/bin/env bash -p …` could not find `bash` — and the operator's
+    # long-lived shell was left that way. That is setup CORRUPTING `PATH`, which is
+    # a different thing from inheriting one already poisoned; the second is stated
+    # as a limit at the foot of `pr-origin.sh` and #91, and the first is a defect.
+    #
+    # THIS IS AN ENUMERATION, AND IT IS BOUNDED BY WHAT THIS SHELL HOLDS HERE.
+    # `HOST`, `OWNER`, `REPO`, `REPO_DIR`, `RB_SCRIPTS`, `RB_REMOTE`, `PATH`, `HOME`
+    # and `TMPDIR` are the names in scope that an assignment in this block can
+    # reach through a nameref, plus the transport names each probe already compares
+    # against. A GENERIC test would be better and is not available: `[[ -R name ]]`
+    # answers "is this a nameref" in one line, and it is bash 4.3+ — on 3.2 an
+    # unknown unary operator inside `[[ ]]` is a PARSE error, so the whole block
+    # would fail to parse on the shell `macos-shell` exists to cover. An
+    # enumeration that is wrong by omission is the shape `CLAUDE.md` warns about,
+    # and the answer here is to write the SET down rather than to keep discovering
+    # it one review round at a time.
+    #
     # AND `RB_SCRIPTS` WITH IT, which is where every helper is found. An alias onto
     # it passed both probes, the assignments replaced the plugin directory with a
     # transport path, and the very next line invoked `"$RB_SCRIPTS"/pr-origin.sh`
@@ -629,11 +648,12 @@ if [[ -z $RB_REMOTE ]]; then
     # only against the names its own stage introduces cannot see that.
     if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
          && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-A ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
          && [[ ${REPO_DIR:-} != Probe-B ]] && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
+         && [[ ${PATH:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -898,12 +918,12 @@ if [[ -z $RB_REMOTE ]]; then
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-A ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-B ]] && [[ ${REPO_DIR:-} != Probe-B ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-B ]] && [[ ${PATH:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.

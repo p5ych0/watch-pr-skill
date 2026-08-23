@@ -728,14 +728,22 @@ LOCAL
     # before the block runs on that exit and writes the candidate to a file, so the
     # observation survives however the shell leaves.
     if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
-        for _al in 'declare -n RB_ORIGIN_DIR=HOME:HOME' \
-                   'declare -n RB_ORIGIN_DIR=TMPDIR:TMPDIR' \
-                   'declare -n RB_TMPPARENT=HOME:HOME' \
-                   'declare -n RB_ORIGIN_DIR=REPO_DIR:REPO_DIR' \
-                   'declare -n RB_TMPPARENT=REPO_DIR:REPO_DIR' \
-                   'declare -n RB_ORIGIN_DIR=RB_SCRIPTS:RB_SCRIPTS' \
-                   'declare -n RB_TMPPARENT=RB_SCRIPTS:RB_SCRIPTS'; do
-            _al_decl="${_al%%:*}"; _al_var="${_al##*:}"
+        # THE EXPECTED VALUE TRAVELS WITH EACH ENTRY, because `PATH` is not one of
+        # the names this case sets. Every other alias target is pointed at the
+        # forge directory on the way in; `PATH` is whatever the child inherited,
+        # and comparing it against the forge directory would fail for a reason that
+        # has nothing to do with the probe.
+        for _al in "declare -n RB_ORIGIN_DIR=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR=TMPDIR|TMPDIR|$_forge_dir" \
+                   "declare -n RB_TMPPARENT=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR=REPO_DIR|REPO_DIR|$_forge_dir" \
+                   "declare -n RB_TMPPARENT=REPO_DIR|REPO_DIR|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                   "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
+                   "declare -n RB_TMPPARENT=PATH|PATH|$PATH"; do
+            _al_decl="${_al%%|*}"; _al_rest="${_al#*|}"
+            _al_var="${_al_rest%%|*}"; _al_want="${_al_rest#*|}"
             rm -f "$_forge_dir/alias.out"
             _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
                 RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
@@ -748,7 +756,7 @@ LOCAL
             _al_seen=""
             [ -f "$_forge_dir/alias.out" ] && _al_seen="$(<"$_forge_dir/alias.out")"
             case "$_al_seen" in
-                *"CANDIDATE=[$_forge_dir]"*) pass "…and a nameref onto \$$_al_var leaves it as the operator had it ($_al_decl)" ;;
+                *"CANDIDATE=[$_al_want]"*) pass "…and a nameref onto \$$_al_var leaves it as the operator had it ($_al_decl)" ;;
                 *) die "a nameref onto \$$_al_var replaced it ($_al_decl): seen='$_al_seen' out='$_al_out'" ;;
             esac
             case "$_al_seen" in
@@ -1001,12 +1009,12 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
           '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
           '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] && \[\[ ${REPO_DIR:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${RB_SCRIPTS:-} != Probe-A \]\] \\' \
+          '     && \[\[ ${RB_SCRIPTS:-} != Probe-A \]\] && \[\[ ${PATH:-} != Probe-A \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-A \]\] && \[\[ ${TMPDIR:-} != Probe-A \]\] ) 2>/dev/null \\' \
           '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
           '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
           '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] && \[\[ ${REPO_DIR:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${RB_SCRIPTS:-} != Probe-B \]\] \\' \
+          '     && \[\[ ${RB_SCRIPTS:-} != Probe-B \]\] && \[\[ ${PATH:-} != Probe-B \]\] \\' \
           '     && \[\[ ${HOME:-} != Probe-B \]\] && \[\[ ${TMPDIR:-} != Probe-B \]\] ) 2>/dev/null; then'; do
     grep -q "^$_v\$" <<<"$_pin_body" \
         || die "the pin probe is missing a line: $_v"
@@ -1440,13 +1448,16 @@ fi
 # with the operator's variable naming a deleted path. Source-text matching says the
 # comparisons are present; only running them says they refuse.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
-    for _pal in 'declare -n RB_PIN_DIR=HOME:HOME' \
-                'declare -n RB_PIN_SEEN=TMPDIR:TMPDIR' \
-                'declare -n RB_PIN_DIR=REPO_DIR:REPO_DIR' \
-                'declare -n RB_PIN_SEEN=REPO_DIR:REPO_DIR' \
-                'declare -n RB_PIN_DIR=RB_SCRIPTS:RB_SCRIPTS' \
-                'declare -n RB_PIN_SEEN=RB_SCRIPTS:RB_SCRIPTS'; do
-        _pal_decl="${_pal%%:*}"; _pal_var="${_pal##*:}"
+    for _pal in "declare -n RB_PIN_DIR=HOME|HOME|$RB_TMPBASE" \
+                "declare -n RB_PIN_SEEN=TMPDIR|TMPDIR|$RB_TMPBASE" \
+                "declare -n RB_PIN_DIR=REPO_DIR|REPO_DIR|$RB_TMPBASE" \
+                "declare -n RB_PIN_SEEN=REPO_DIR|REPO_DIR|$RB_TMPBASE" \
+                "declare -n RB_PIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                "declare -n RB_PIN_SEEN=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                "declare -n RB_PIN_DIR=PATH|PATH|$PATH" \
+                "declare -n RB_PIN_SEEN=PATH|PATH|$PATH"; do
+        _pal_decl="${_pal%%|*}"; _pal_rest="${_pal#*|}"
+        _pal_var="${_pal_rest%%|*}"; _pal_want="${_pal_rest#*|}"
         rm -f "$_forge_dir/palias.out"
         _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
             TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" REPO_DIR="$RB_TMPBASE" \
@@ -1461,7 +1472,7 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
         _pal_seen=""
         [ -f "$_forge_dir/palias.out" ] && _pal_seen="$(<"$_forge_dir/palias.out")"
         case "$_pal_seen" in
-            *"CANDIDATE=[$RB_TMPBASE]"*) pass "…and a pin-stage nameref onto \$$_pal_var leaves it as the operator had it ($_pal_decl)" ;;
+            *"CANDIDATE=[$_pal_want]"*) pass "…and a pin-stage nameref onto \$$_pal_var leaves it as the operator had it ($_pal_decl)" ;;
             *) die "a pin-stage nameref onto \$$_pal_var replaced it ($_pal_decl): seen='$_pal_seen' out='$_pal_out'" ;;
         esac
         case "$_pal_out" in
