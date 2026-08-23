@@ -1101,11 +1101,38 @@ pass "the transport probe detects an alias generically, and an attribute by the 
 # `$RANDOM` alone becomes the literal `RbProbe`, which an operator can hold, after
 # which `${!name}` reads THEIR variable and a valid shell is refused. `$$` is the
 # shell's own pid and cannot be unset, so it is in every sentinel.
-_ur=0; _ur="$(grep -c 'RbProbe\$\$\$RANDOM\$RANDOM' "$SKILL")" || _ur=0
-_ur_all=0; _ur_all="$(grep -c 'RbProbe\$' "$SKILL")" || _ur_all=0
+# COUNTED OVER THE CODE, NOT THE PROSE. The comment beside the probes discusses
+# `RbProbe$$` as the attacker's pre-seed, and a file-wide count read that as a
+# sentinel spelled without the pid.
+_ur_src=""; _ur_src="$(grep -v '^[[:space:]]*#' "$SKILL")" || _ur_src=""
+_ur=0; _ur="$(grep -c 'RbProbe\$\$\$RANDOM\$RANDOM' <<<"$_ur_src")" || _ur=0
+_ur_all=0; _ur_all="$(grep -c 'RbProbe\$' <<<"$_ur_src")" || _ur_all=0
 { [ "$_ur" -gt 0 ] && [ "$_ur" = "$_ur_all" ]; } \
     && pass "every probe sentinel carries the pid, so unset RANDOM cannot make it fixed" \
     || die "a probe sentinel is built from \$RANDOM alone (with-pid=$_ur total=$_ur_all)"
+# …AND A PRE-SEEDED SENTINEL SLOT FAILS CLOSED, which is the limit rather than a
+# defence. A startup file runs IN THE DRIVER'S SHELL, so it knows `$$` and can read
+# this source: with `RANDOM` unset it can pre-seed `RbProbe$$` and the probe reads
+# their value through `${!name}` and concludes "nameref". No mechanism here can
+# close that — every input to the sentinel is public or unsettable by the same file
+# — so what is asserted is the CONSEQUENCE: setup refuses, and nothing is pinned.
+if [ -n "$_forge_dir" ]; then
+    _ps_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+        RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
+        bash -c '
+            unset RANDOM
+            eval "RbProbe$$=occupied"
+            '"$_read_block"'
+            printf "PINNED=[%s]\n" "${RB_REMOTE:-}"
+        ' 2>&1)" || true
+    case "$_ps_out" in
+        *'PINNED=[git@'*) die "a pre-seeded probe slot let setup pin the session: '$_ps_out'" ;;
+        *) pass "a pre-seeded probe slot fails closed — setup refuses and pins nothing" ;;
+    esac
+    printf '%s' "$_ps_out" | grep -q 'readonly, value-transforming, or aimed at another' \
+        && pass "…refusing by the probe's own message, so an operator is told which names it is about" \
+        || die "the pre-seeded case refused for some other reason: '$_ps_out'"
+fi
 # …AND NO FIXED SENTINEL SURVIVES ANYWHERE IN EITHER PROBE. A fixed value COLLIDES:
 # with two fixed pairs and an operator holding one value from each, both pairs
 # failed and a shell nothing had corrupted was refused.

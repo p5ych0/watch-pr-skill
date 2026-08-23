@@ -124,6 +124,14 @@
   value an operator can hold, after which `${!name}` reads THEIR variable and a
   valid shell is refused. The pid cannot be unset.
 
+  What that still does not stop is stated rather than chased: a startup file runs
+  in the driver's shell, so it knows the pid and can read this source, and with
+  `RANDOM` unset it can pre-seed the sentinel's slot and make the probe conclude
+  "nameref". No mechanism there can close it — every input is public or unsettable
+  by the same file — and the failure is fail-CLOSED: setup refuses, nothing is
+  forged or pinned. A startup file that wants to stop the session can call `exit`
+  in its first line.
+
   The randomised value also removes the collision the fixed sentinels had: an
   operator holding one sentinel from each of two fixed pairs failed both, and a
   shell nothing had corrupted was refused. The prefix match carries the other half,

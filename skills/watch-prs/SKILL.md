@@ -603,6 +603,22 @@ if [[ -z $RB_REMOTE ]]; then
     # own pid and cannot be unset, so the sentinel stays per-session whatever has
     # been done to `RANDOM`.
     #
+    # AND WHAT THAT STILL DOES NOT STOP, STATED RATHER THAN CHASED. A startup file
+    # runs IN THIS SHELL, so it knows `$$` and it can read this file: with `RANDOM`
+    # unset it can pre-seed `RbProbe$$` and the probe reads their value through
+    # `${!name}`, concludes "nameref", and refuses. No mechanism here can close
+    # that, because every input to the sentinel is either public or something the
+    # same file can unset — which is the boundary `CLAUDE.md` records as "nothing
+    # inside a process can distinguish the honest version of something it
+    # inherited", and #102 and #91 draw in the same place.
+    #
+    # WHAT IT COSTS IS A REFUSAL, WHICH IS WHY IT IS ACCEPTABLE. The failure is
+    # fail-CLOSED: setup stops, nothing is forged, nothing is pinned. A startup
+    # file that wants to stop this session can call `exit` in its first line, so
+    # the attack buys an adversary nothing they did not already have — and the
+    # honest version of the same state, an operator who happens to hold that
+    # variable, is vanishingly unlikely to have a name shaped like this one.
+    #
     # AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
     # old value, `declare -i` stores `0`, `declare -l` lower-cases it and
     # `declare -u` upper-cases it — and an ALL-CAPS sentinel survives `declare -u`
