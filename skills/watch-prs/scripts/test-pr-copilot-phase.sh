@@ -1004,7 +1004,7 @@ grep -qF 'another Codex pass' <<<"${got#*|}" \
 # pass is reoffered over commits that do not exist and the check stays green.
 # Every option line is matched against the exact allowed set, so a reworded (b)
 # and an added (c) both fail.
-_ft_opts="$(printf '%s' "${got#*|}" | grep '^    ([a-z]) ')"
+_ft_opts="$(grep '^    ([a-z]) ' <<<"${got#*|}")"
 [ "$_ft_opts" = "    (a) merge — run pr-merge-gate.sh
     (b) stop and leave the PR open" ] \
     && pass "…and the unchanged-head menu is merge or stop, and nothing else" \

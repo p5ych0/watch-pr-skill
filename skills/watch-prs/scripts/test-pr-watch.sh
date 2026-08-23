@@ -133,7 +133,7 @@ grep -q 'findings=2' <<<"$out" \
 # ── it prints on CHANGE, not on every poll ─────────────────────────────────
 seq_set none none none none pending reviewed
 out="$(run 7 "$BOT" --interval 1 --timeout 30 2>&1)"
-n_none=$(printf '%s\n' "$out" | grep -c 'state=none')
+n_none=$(grep -c 'state=none' <<<"$out")
 [ "$n_none" -eq 1 ] \
     && pass "a repeated state is reported once, not once per poll" \
     || die "state=none printed $n_none times"

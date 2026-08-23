@@ -523,8 +523,8 @@ look is green about an incomplete picture.
 
 `pr-selfcheck.sh` runs over the plugin's own sources before a round is pushed:
 every variable `SKILL.md` uses is assigned in it, every script parses, every
-helper it drives is shipped, every script has a test, no fixture pipes a value
-into `grep -q`, and the suite passes.
+helper it drives is shipped, every script has a test, no fixture pipes a `printf`
+into `grep`, and the suite passes.
 
 That middle one looks like style and is not. `printf … | grep -q` is racy under
 `pipefail`, which every fixture sets: `grep -q` exits on its first match, `printf`
@@ -532,6 +532,13 @@ takes `SIGPIPE`, and the pipeline reports 141 — so an assertion whose line IS
 present reads as missing, intermittently. A herestring — `grep -q PATTERN
 <<<"$value"` — has no second process to kill. A line that carries the spelling as
 DATA rather than as code says so with `racy-pipeline-ok`.
+
+The gate reports **every** `printf` piped into `grep`, not only the readers that
+exit early. Deciding which options make `grep` quiet means parsing its command
+line — `-q`, `-qm1`, `--quiet`, `-e -q` where the `-q` is the pattern — and five
+review rounds went into a grammar that was wrong in a new way each time. The
+herestring is the fix for all of them and is never worse, so the rule needs no
+grammar: do not pipe a `printf` into a `grep`.
 
 The suite is the slow part, so it runs four files at a time — they share no
 state, and four at a time is ~85s where one after another is ~208s.

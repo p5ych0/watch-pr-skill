@@ -350,9 +350,9 @@ for ((i=1; i<=15; i++)); do specs+=("$COPILOT|z$i|\"u$i\""); done
 mk "${specs[@]}"
 paused="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 3 ] || die "expected a pause to harvest the instruction from (rc=$rc)"
-emitted="$(printf '%s\n' "$paused" | grep -F '**Review-Pause-Acknowledged:**')" \
+emitted="$(grep -F '**Review-Pause-Acknowledged:**' <<<"$paused")" \
     || die "the pause printed no acknowledgement lines to copy"
-[ "$(printf '%s\n' "$emitted" | grep -c .)" -eq 2 ] \
+[ "$(grep -c . <<<"$emitted")" -eq 2 ] \
     && pass "the pause prints one acknowledgement line per reviewer" \
     || die "expected two emitted lines, got: '$emitted'"
 jq -n --arg b "$(printf 'Continuing.\n\n%s\n' "$emitted")" \

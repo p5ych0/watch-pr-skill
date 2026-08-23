@@ -697,38 +697,30 @@ for f in "$SCRIPTS"/test-*.sh; do
           # than a modelled option-and-argument grammar. Four rounds were spent
           # widening that grammar one legal spelling at a time — an option with an
           # argument, an argument with a hyphen in it, a quoted argument, a
-          # DASH-LEADING operand after `-e` — which is the scanner treadmill this
-          # repository records paying for once already. What actually matters is
-          # that a `-…q…` option appears, and what has to be bounded is only how far
-          # the match may run: not past a `)`, a quote or a `|`, which is what
-          # stopped it reaching the `q` of a later `[ … -eq 2 ]`.
+          # THE SCAN STOPS AT `grep`, and asks nothing about its options. Five
+          # review rounds were spent modelling them — an option with an argument,
+          # an argument with a hyphen, a quoted argument, a dash-leading operand,
+          # `-e` attached to its pattern — each round widening a grammar by one
+          # legal spelling, and each producing the next. `--`, `-qm1`, `-ie -q`,
+          # `--quiet` and `--silent` were the ones still outstanding when it
+          # stopped. That is the treadmill `CLAUDE.md` records paying 2,200 lines
+          # and fifty-two rounds for once.
           #
-          # A QUOTED WORD IS ONE WORD, so `grep -e '"'"'foo bar'"'"' -q` is still a match.
+          # SO THE RULE IS NOT "an early-exiting reader" but "a `printf` piped into
+          # `grep`", which needs no grep grammar at all: the herestring is the fix
+          # for every one of them, `grep -c` and `grep -v` included, and it is
+          # never worse. The thirteen lines in the tree that read to EOF were
+          # converted rather than exempted, so the rule has no exceptions to model.
           #
-          # REPLACED WITH A CHARACTER THE WORD CLASS EXCLUDES, so it forms a
-          # BOUNDARY. Written as `@@` it did not: the word class accepted it, the
-          # match crossed into what followed, and
-          # `printf … | grep -c . || test 1 -eq 2` was reported because `-eq` looked
-          # like a quiet option. `)` is already excluded, so the match stops there.
+          # `||` IS REPLACED WITH A CHARACTER THAT CANNOT BE A PIPE, because a
+          # logical OR is not a pipeline: `printf '"'"'%s'"'"' "$x" || grep -q y` has
+          # no second process and no race.
           #
-          # THE WORD CLASS EXCLUDES EVERY SHELL CONTROL OPERATOR, not one at a time.
-          # `)` and `|` were excluded and `&&` and `;` were not, so the same false
-          # positive came back one operator along. A word in a command cannot
-          # CONTAIN a control operator — that is the rule, and enumerating the
-          # operators is not the same as enumerating spellings of `grep`.
-          #
-          # `-e` AND `-f` TAKE THE PATTERN, so what follows them is an operand and
-          # never an option: in `grep -e -q` the `-q` is the PATTERN, grep reads to
-          # EOF, and there is no race to report. That holds in BOTH short-option
-          # forms and the rule is one rule — a separate word is removed by the
-          # substitution below, and an ATTACHED one is handled by the option class
-          # in the match, which admits no `e` or `f` BEFORE the `q`: in `-eq` the
-          # `q` is the pattern, while in `-qe` it is the quiet option. This is the
-          # one piece of grep grammar here — the two options that consume a pattern
-          # — rather than a model of the option syntax.
+          # AN ASSIGNMENT IS A COMMAND PREFIX, so `LC_ALL=C grep` is `grep`. That
+          # is a shell fact and it is bounded — an assignment word — unlike the
+          # grammar this replaced.
           t = line; gsub(/\|\|/, ")", t)
-          gsub(/(^|[ \t])-[ef][ \t]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^ \t)\"'"'"'|&;(<>]+)/, " -eARG", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|&;(<>]+))*[[:space:]]+-[A-Za-dg-z]*q[A-Za-z]*([[:space:]]|$)/)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:])"'"'"'|&;(<>]*[[:space:]]+|command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
@@ -747,7 +739,7 @@ $hits
 EOF
 done
 
-[ "$pipeq" -eq 0 ] && ok "no fixture pipes a value into grep -q, which pipefail turns into a false failure"
+[ "$pipeq" -eq 0 ] && ok "no fixture pipes a printf into grep, which pipefail can turn into a false failure"
 
 # ── 5. the suite passes ────────────────────────────────────────────────────
 #

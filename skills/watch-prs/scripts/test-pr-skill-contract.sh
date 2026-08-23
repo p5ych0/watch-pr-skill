@@ -725,7 +725,7 @@ LOCAL
     _dj="$(awk '/^ *if \{ \[\[ -O \/dev\/fd\/9 \]\]/,/^ *fi$/' "$SKILL")" || _dj=""
     _dj_then=""; _dj_then="$(printf '%s\n' "$_dj" | sed -n '1,/^ *else$/p')" || _dj_then=""
     _dj_else=""; _dj_else="$(printf '%s\n' "$_dj" | sed -n '/^ *else$/,$p')" || _dj_else=""
-    _dj_n=0; _dj_n="$(printf '%s\n' "$_dj" | grep -c 'rm -f "$RB_ORIGIN_DIR/origin"')" || _dj_n=0
+    _dj_n=0; _dj_n="$(grep -c 'rm -f "$RB_ORIGIN_DIR/origin"' <<<"$_dj")" || _dj_n=0
     { [ -n "$_dj_then" ] && [ -n "$_dj_else" ] && [ "$_dj_n" = 2 ] \
       && case "$_dj_then" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
       && case "$_dj_else" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
@@ -2746,7 +2746,7 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
 # rather than on the loop's shape, so a reformat does not silently empty this.
 _mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'" "$SCRIPT_DIR/recordlib.sh" \
     | sed "s/^'\*\*//; s/\*\*'$//" | sort -u)" || true
-_mk_n="$(printf '%s\n' "$_mk_set" | grep -c . )" || _mk_n=0
+_mk_n="$(grep -c . <<<"$_mk_set")" || _mk_n=0
 [ "$_mk_n" -eq 3 ] \
     && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
     || die "the reserved-marker set changed ($_mk_n markers, expected 3: $(printf '%s' "$_mk_set" | tr '\n' ' ')) — update SKILL.md and README.md, then this count"
@@ -3833,7 +3833,7 @@ hd="$(grep -n 'cat >>\{0,1\} "\$SUMMARY_FILE" <<' "$SKILL" || true)"
 if [ -z "$hd" ]; then
     die "no summary heredoc found in SKILL.md — has the recipe moved?"
 else
-    bad="$(printf '%s\n' "$hd" | grep -v "<<'EOF'" || true)"
+    bad="$(grep -v "<<'EOF'" <<<"$hd" || true)"
     [ -z "$bad" ] \
         && pass "every summary heredoc is quoted, so prose is written, not executed" \
         || die "an unquoted summary heredoc executes the prose it writes: $bad"
@@ -4851,7 +4851,7 @@ _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^``
 # THE CODE, NOT THE COMMENTS. The block explains at length why `set +x` was not
 # used, so a scan over the raw text finds that spelling in the prose arguing
 # against it and reports the defect the prose exists to prevent.
-_setup_code="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#')"
+_setup_code="$(grep -v '^[[:space:]]*#' <<<"$_setup_block")"
 # ANY `set +…`, NOT ONE SPELLING. `set +x` and `set +o xtrace` do the same thing,
 # and a check for the first stays green for the second — while every behavioural
 # case here lifts the guard alone and would miss a disabling line placed after it.
@@ -4862,7 +4862,7 @@ tr_no_set_minus() {   # tr_no_set_minus <code> ; 0 if no `set +…` appears
     # `grep -E`, NOT `\b`. Word boundaries are a GNU extension: BSD `grep` can
     # match `\b` literally, so the pattern would find nothing and the check would
     # pass everything — fail-open, on the platform the suite exists to cover.
-    _n="$(printf '%s\n' "$1" | grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' || true)"
+    _n="$(grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' <<<"$1" || true)"
     [ "$_n" -eq 0 ]
 }
 tr_no_set_minus "$_setup_code" \
@@ -5097,7 +5097,7 @@ else
     # wrong the first time a new one is written: `RB_TRACE_SAVED` would pass a
     # scan for `RB_XTRACE_SAVED` while reintroducing exactly what it forbids. The
     # guard is three lines; requiring it to BE those three lines admits no fourth.
-    _tr_shape="$(printf '%s\n' "$_tr_guard" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')"
+    _tr_shape="$(grep -v '^[[:space:]]*#' <<<"$_tr_guard" | grep -v '^[[:space:]]*$')"
     [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi' ] \
@@ -5113,10 +5113,10 @@ fi' ] \
     # names `BASH_XTRACEFD` twice, in its writability probe and in the move it
     # gates. What must hold is that NOTHING ELSE in the block names it — a restore
     # has to write it again, wherever it puts the value it remembers.
-    _tr_guard_names="$(printf '%s\n' "$_tr_guard" | grep -c 'BASH_XTRACEFD' || true)"
+    _tr_guard_names="$(grep -c 'BASH_XTRACEFD' <<<"$_tr_guard" || true)"
     tr_writes_once() {   # tr_writes_once <block-code> ; 0 if only the guard names it
         local _n
-        _n="$(printf '%s\n' "$1" | grep -c 'BASH_XTRACEFD' || true)"
+        _n="$(grep -c 'BASH_XTRACEFD' <<<"$1" || true)"
         [ "$_n" -eq "$_tr_guard_names" ]
     }
     tr_writes_once "$_setup_code" \

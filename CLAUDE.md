@@ -453,6 +453,16 @@ rediscovering them.
   intermittent and a green run proves nothing about the next one. A line carrying
   the spelling as DATA says so with `racy-pipeline-ok`.
 
+  **The gate reports every `printf` piped into `grep`, and asks nothing about the
+  options.** Which of them make `grep` quiet is a question about ITS command line
+  — `-q`, `-qm1`, `--quiet`, `--silent`, `-e -q` where the `-q` is the pattern,
+  `--` where every following word is — and five review rounds each widened a
+  grammar by one legal spelling and produced the next, which is the treadmill this
+  file records paying for once already. The herestring is the fix for `grep -c` and
+  `grep -v` as much as for `grep -q`, and it is never worse, so the rule drops the
+  grammar instead of modelling it. The thirteen lines in the tree that read to EOF
+  were converted rather than exempted, so the rule has no exceptions to carry.
+
   **Any other producer is review's job, and that boundary is deliberate.** `bodies
   | grep -qF …` races identically — every producer does — and generalising the scan
   to "a pipeline whose last stage is `grep -q`" was tried and reverted in one

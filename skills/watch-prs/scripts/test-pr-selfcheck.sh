@@ -294,6 +294,13 @@ grep -q 'grep -q y' <<<"$out" \
 # `printf '%s'` with SINGLE quotes and `grep -q` with the `q` first, so
 # `printf "%s\n" …` and `grep -Fq` walked past it — equivalent code, and the gate
 # reporting clean.
+#
+# THE OPTIONS ARE PLANTED, BUT NOTHING ASKS ABOUT THEM. The scan stops at `grep`,
+# so `-q`, `-c`, `--`, `-qm1`, `-ie -q`, `--quiet` and a locale assignment in front
+# are all one case rather than seven — five review rounds went into a grammar that
+# tried to tell the early-exiting ones apart, each round widening it by one legal
+# spelling. They stay planted because a later change could reintroduce a class the
+# rule does not need.
 for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -Fq y || true" \
           "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true" \
@@ -305,7 +312,17 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -e y -q || true" \
           "printf '%s' \"\$x\" BAR grep -e foo-bar -q || true" \
           "printf '%s' \"\$x\" BAR grep -e 'foo bar' -q || true" \
-          "printf '%s' \"\$x\" BAR grep -e -1 -q || true"; do
+          "printf '%s' \"\$x\" BAR grep -e -1 -q || true" \
+          "printf '%s' \"\$x\" BAR grep -- -q || true" \
+          "printf '%s' \"\$x\" BAR grep -qm1 y || true" \
+          "printf '%s' \"\$x\" BAR grep -ie -q || true" \
+          "printf '%s' \"\$x\" BAR grep --quiet y || true" \
+          "printf '%s' \"\$x\" BAR grep --silent y || true" \
+          "printf '%s' \"\$x\" BAR grep -eq || true" \
+          "printf '%s' \"\$x\" BAR LC_ALL=C grep -q y || true" \
+          "printf '%s' \"\$x\" BAR grep -c . || true" \
+          "printf '%s' \"\$x\" BAR grep -v y || true" \
+          "[ \"\$(printf '%s' \"\$x\" BAR grep -c .)\" -eq 2 ] || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -341,74 +358,20 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…and a logical OR is not reported as a pipeline" \
     || die "an OR was reported as a racy pipeline (rc=$rc out=$out)"
-# …AND NEITHER IS A `grep -c` FOLLOWED BY AN ARITHMETIC TEST. `[ "$(… | grep -c .)"
-# -eq 2 ]` was reported, because a loose match ran off the end of the grep command
-# and found the `q` of `-eq`.
+# …AND A PRODUCER THAT IS NOT `printf` IS NOT THIS GATE'S JOB. `bodies | grep -q`
+# races identically, and telling that pipe from a `|` in `${x%%|*}`, in a quoted
+# `awk` program or in a `case` pattern needs a shell parser — the generalised scan
+# reported 140 false positives on a clean tree. The boundary is stated in
+# `AGENTS.md` and in `.github/copilot-instructions.md`, so it is review's job
+# rather than an unnoticed hole, and asserting it here is what stops the
+# generalisation being tried a second time.
 { printf '#!/usr/bin/env bash\nset -o pipefail\n'
-  printf '%s\n' "[ \"\$(printf '%s' \"\$x\" $_bar grep -c .)\" -eq 2 ] || true"
+  printf '%s\n' "bodies $_bar grep -q y || true"
 } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
 out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-    && pass "…nor a grep -c whose line later contains -eq" \
-    || die "a grep -c was reported as a racy pipeline (rc=$rc out=$out)"
-# …NOR A `grep -c` FOLLOWED BY AN OR AND AN ARITHMETIC TEST, which is the same
-# false positive one operator along: replacing `||` with a placeholder the word
-# class ACCEPTS let the match cross into `test 1 -eq 2` and read `-eq` as a quiet
-# option. The replacement has to be a character the class excludes.
-{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
-  printf '%s\n' "printf '%s' \"\$x\" $_bar grep -c . || test 1 -eq 2 || true"
-} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-    && pass "…nor a grep -c whose line continues into an arithmetic test" \
-    || die "a grep -c before an OR was reported as racy (rc=$rc out=$out)"
-# …NOR THE SAME LINE ONE CONTROL OPERATOR ALONG. `||` was excluded and `&&` and
-# `;` were not, so the match crossed them into `test 1 -eq 2` exactly as it had
-# crossed `@@`. A word in a command cannot contain a control operator.
-for _op in '&&' ';'; do
-    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
-      printf '%s\n' "printf '%s' \"\$x\" $_bar grep -c . $_op test 1 -eq 2 || true"
-    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-    { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-        || die "a grep -c before '$_op' was reported as racy (rc=$rc out=$out)"
-done
-pass "…nor a grep -c before && or ; and an arithmetic test"
-# …NOR A `-q` THAT IS THE PATTERN. `-e` takes the next word, so in `grep -e -q`
-# the `-q` is what grep searches FOR: it reads the whole input and cannot take
-# SIGPIPE. The widened word class read that operand as the quiet option.
-{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
-  printf '%s\n' "printf '%s' \"\$x\" $_bar grep -e -q || true"
-} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-    && pass "…nor a -q that -e has taken as its pattern" \
-    || die "a -q consumed by -e was reported as racy (rc=$rc out=$out)"
-# …NOR AN ATTACHED ONE. A bundled short-option word ends at the first `e` or `f`,
-# which takes the REST of the word as its pattern — `grep -eq` searches for `q`
-# and reads to EOF, exactly as `grep -e -q` does. `-qe` is the other way round and
-# IS the quiet option, so the class admits `e` and `f` after the `q` and not
-# before it.
-for _sp in '-eq' '-fq' '-eqFOO'; do
-    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
-      printf '%s\n' "printf '%s' \"\$x\" $_bar grep $_sp || true"
-    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-    { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
-        || die "grep $_sp was reported as racy (rc=$rc out=$out)"
-done
-pass "…nor a q attached to -e or -f as its pattern"
-# …WHILE THE SAME LETTERS THE OTHER WAY ROUND STILL ARE. `-qe` is `-q` followed by
-# `-e`, and `-f/tmp/p -q` carries its file attached and the quiet option after it.
-for _sp in '-qe y' '-f/tmp/p -q' '-iq'; do
-    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
-      printf '%s\n' "printf '%s' \"\$x\" $_bar grep $_sp || true"
-    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-    { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
-        || die "grep $_sp was not reported as racy (rc=$rc out=$out)"
-done
-pass "…while -qe, an attached -f and a bundled -iq still are"
+    && pass "…while a producer that is not printf is left to review" \
+    || die "a non-printf producer was reported (rc=$rc out=$out)"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
@@ -668,7 +631,7 @@ addscript "$NLROOT" pr-thing.sh 'exit 0'
 printf '#!/usr/bin/env bash\nexit 1\n' > "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
 chmod +x "$NLROOT/skills/watch-prs/scripts/test-pr-thing.sh"
 out="$("$SCRIPT" "$NLROOT" 2>&1)"; rc=$?
-nfind="$(printf '%s\n' "$out" | grep -c 'finding=failing_test')" || nfind=0
+nfind="$(grep -c 'finding=failing_test' <<<"$out")" || nfind=0
 { [ "$rc" -eq 1 ] && [ "$nfind" -eq 1 ]; } \
     && pass "a newline in the checkout path is one finding, not two" \
     || die "the newline split the failure record (rc=$rc findings=$nfind out='$out')"

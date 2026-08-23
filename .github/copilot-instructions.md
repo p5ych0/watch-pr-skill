@@ -203,7 +203,12 @@ dies with 141, and that becomes the pipeline's status — so an assertion whose 
 IS present reads as missing, intermittently, and an `|| x=""` capture silently
 becomes empty. Use a herestring: `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh`
 gates the `printf`-produced form; a line carrying the spelling as DATA says so
-with `racy-pipeline-ok`. **Any other producer is review's job** — `bodies |
+with `racy-pipeline-ok`. **The gate reports every `printf` piped into `grep`,
+whatever the options** — which of them make `grep` quiet is a question about its
+command line (`-qm1`, `--quiet`, `-e -q` where the `-q` is the pattern, `--`), and
+five review rounds each widened that grammar by one legal spelling and produced
+the next. The herestring is the fix for `grep -c` and `grep -v` too and is never
+worse, so a finding on one of those is correct rather than a false positive. **Any other producer is review's job** — `bodies |
 grep -qF …` races identically, and the gate cannot see it, because telling a pipe
 from `||`, from `${x%%|*}` and from a `|` inside a quoted `awk` program needs a
 shell parser.

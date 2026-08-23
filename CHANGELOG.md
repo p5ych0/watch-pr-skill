@@ -2,7 +2,7 @@
 
 ## [2.0.58] — 2026-08-23
 
-- **The pre-push gate now refuses a fixture that pipes a value into `grep -q`.**
+- **The pre-push gate now refuses a fixture that pipes a `printf` into `grep`.**
   That shape is RACY under `set -o pipefail`, which every fixture sets: `grep -q`
   exits the moment it matches, `printf` takes `SIGPIPE` and dies with 141, and
   `pipefail` makes that the pipeline's status — so a line that IS present reads as
@@ -13,29 +13,31 @@
   capture, a good extraction silently becomes an empty one and every assertion
   built on it passes against nothing.
 
-  Nothing a user installs changes behaviour: the 498 converted sites are all in
+  Nothing a user installs changes behaviour: the 511 converted sites are all in
   `test-*.sh`. What ships is `pr-selfcheck.sh`'s new check, so a contributor's
   pre-push gate reports the shape rather than letting it back in — and the suite
   it gates stops failing for reasons that are not there.
 
   The check takes the SHAPE rather than a list of spellings — either quoting of the
-  format string, any `command`/`builtin` prefix on EITHER side, any option order
-  including split options, any intermediate filters between the producer and the
-  reader, any words at all between `grep` and the option carrying `q` — options,
-  their arguments, quoted patterns, dash-leading operands — tabs
-  as well as spaces at every word boundary, and a pipeline split across a `\`
-  continuation or a bare trailing `|`. A word cannot CONTAIN a shell control
-  operator, so the match stops at `|`, `||`, `&&`, `;` and `)` rather than
-  crossing into the next command — a `grep -c` on a line that later contains `-eq`
-  is not reported, whichever operator separates them. And `-e` and `-f` take the
-  pattern, so the `q` in `grep -e -q` and in `grep -eq` alike is what grep searches
-  FOR and is not reported, while `grep -qe y` is. Those two rules replaced an option grammar that five review
-  rounds had each widened by one legal spelling.
+  format string, any `command`/`builtin` prefix on EITHER side, an environment
+  assignment such as `LC_ALL=C` in front of `grep`, any intermediate filters
+  between the producer and the reader, tabs as well as spaces at every word
+  boundary, and a pipeline split across a `\` continuation or a bare trailing `|`.
   It reads folded LOGICAL lines rather than physical ones — a pipeline continues
   across a `\` and across a bare trailing `|`, and both halves scanned separately
   read clean — and reporting the first physical line number keeps the finding
   useful. An input it cannot read exits 2, the could-not-run status, rather than
   reporting an actionable finding nobody looked for.
+
+  **It stops at `grep` and asks nothing about the options.** Which of them make
+  `grep` exit early is a question about ITS command line — `-q`, `-qm1`, `--quiet`,
+  `--silent`, `-e -q` and `-eq` where the `q` is the pattern, `--` where every
+  following word is one — and five review rounds each widened a grammar by one
+  legal spelling and produced the next. The herestring is the fix for `grep -c` and
+  `grep -v` as much as for `grep -q`, and it is never worse, so the rule drops the
+  grammar: do not pipe a `printf` into a `grep`. The thirteen lines in the tree
+  that read to EOF were converted rather than exempted, so there are no exceptions
+  to carry. A logical `||` is still not a pipe.
 
   It is anchored on `printf`, and any other producer is review's job. Generalising
   to "a pipeline whose last stage is `grep -q`" was tried and reverted: `|` also
