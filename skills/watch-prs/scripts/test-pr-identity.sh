@@ -811,7 +811,7 @@ for f in "$ROOT"/pr-*.sh; do
     # the file does not rely on and cannot enforce. Both halves are asserted
     # below, so the exemption cannot quietly become a hole.
     [ "$_b" = pr-origin.sh ] && continue
-    head -n 1 "$f" | grep -qxF '#!/usr/bin/env -S bash -p' \
+    grep -qxF '#!/usr/bin/env -S bash -p' <<<"$(head -n 1 "$f")" \
         || priv_missing="$priv_missing $_b"
 done
 if [ -f "$ROOT/pr-origin.sh" ]; then
@@ -853,7 +853,7 @@ done
 [ -z "$nested_bare" ] \
     && echo "ok   - …and no helper calls another by pathname alone" \
     || { echo "FAIL - nested call(s) not started privileged:$nested_bare"; idfail=1; }
-head -n 1 "$ROOT/pr-selfcheck.sh" | grep -qxF '#!/usr/bin/env bash' \
+grep -qxF '#!/usr/bin/env bash' <<<"$(head -n 1 "$ROOT/pr-selfcheck.sh")" \
     && echo "ok   - …and pr-selfcheck.sh is the stated exception, which re-execs its own way" \
     || { echo "FAIL - pr-selfcheck.sh's shebang changed; its exemption is no longer what it says"; idfail=1; }
 # AND IT IS TRUE AT RUNTIME, not only in the text. A shebang that a platform's

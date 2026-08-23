@@ -268,9 +268,12 @@ a value. See `CLAUDE.md § Bash conventions`.
 `pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` and dies
 with 141, and that becomes the pipeline's status — so an assertion whose line IS
 present reads as missing, intermittently, and an `|| x=""` capture silently becomes
-empty. Use `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh` gates it, and
-`racy-pipeline-ok` marks a line that carries the spelling as data rather than as
-code. Only early-exiting readers matter: `grep -c`, `sed` and `awk` without an
+empty. Use `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh` gates the `printf`-produced
+form, and `racy-pipeline-ok` marks a line that carries the spelling as data rather
+than as code. **Any other producer is review's job** — `bodies | grep -qF …` races
+identically, and the gate cannot see it: telling a pipe from `||`, from
+`${x%%|*}` and from a `|` inside a quoted `awk` program needs a shell parser, and
+the generalised version reported 140 false positives on a clean tree. Only early-exiting readers matter: `grep -c`, `sed` and `awk` without an
 `exit` read to end of input.
 
 **Behaviour changes need tests.** A change to script behaviour with no matching

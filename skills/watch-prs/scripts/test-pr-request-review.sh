@@ -86,10 +86,10 @@ world; rc="$(run 7 no)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
     && pass "the manual path posts and returns the baseline on stdout, alone" \
     || die "the manual path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
-bodies | grep -qF '@codex review' \
+grep -qF '@codex review' <<<"$(bodies)" \
     && pass "…in one comment carrying the mention that IS the request" \
     || die "the manual path posted no mention: $(bodies)"
-bodies | grep -qF 'A one-paragraph account' \
+grep -qF 'A one-paragraph account' <<<"$(bodies)" \
     && pass "…and the account travels with it, rather than in a second comment" \
     || die "the account was not posted with the mention: $(bodies)"
 [ "$(grep -c '^gh ' "$TMP/calls")" = 1 ] \
@@ -141,7 +141,7 @@ world; rc="$(run 7 yes)"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
     || pass "…and never looks one up"
-bodies | grep -qF '@codex review' \
+grep -qF '@codex review' <<<"$(bodies)" \
     && die "…but it posted a mention, queuing a second pass: $(bodies)" \
     || pass "…and posts the account WITHOUT a mention, so no second pass is queued"
 
@@ -153,7 +153,7 @@ for _mode in no yes; do
     world
     printf '**Review-Signoff:** `%s` `%s`\n' "$CODEXBOT" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$TMP/body.md"
     rc="$(run 7 "$_mode")"
-    { [ "$rc" = 1 ] && stderr | grep -qF 'marker the loop reads as a record'; } \
+    { [ "$rc" = 1 ] && grep -qF 'marker the loop reads as a record' <<<"$(stderr)"; } \
         && pass "a body reproducing a signoff marker is refused ($_mode)" \
         || die "a marker body on the $_mode path gave rc=$rc '$(stderr)'"
     nothing_posted \
@@ -180,7 +180,7 @@ rc="$(run 7 no)"
 # head, which is the duplicate the branch exists to prevent.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
 rc="$(run 7 yes)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'queues a second one'; } \
+{ [ "$rc" = 1 ] && grep -qF 'queues a second one' <<<"$(stderr)"; } \
     && pass "an automatic-path body containing the mention is refused" \
     || die "a quoted mention on the automatic path gave rc=$rc '$(stderr)'"
 nothing_posted \
@@ -210,7 +210,7 @@ rc="$(run 7 yes)"
 # the watch then accepts the PREVIOUS review as this round's.
 world; printf '2\n' > "$W/prior.rc"
 rc="$(run 7 no)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'do not request a review blind'; } \
+{ [ "$rc" = 1 ] && grep -qF 'do not request a review blind' <<<"$(stderr)"; } \
     && pass "an unreadable baseline stops the request" \
     || die "an unreadable baseline gave rc=$rc '$(stderr)'"
 nothing_posted \
@@ -227,7 +227,7 @@ nothing_posted \
 for _mode in no yes; do
     world; printf '1\n' > "$W/gh.rc"
     rc="$(run 7 "$_mode")"
-    { [ "$rc" = 1 ] && stderr | grep -qF 'do not enter the wait step'; } \
+    { [ "$rc" = 1 ] && grep -qF 'do not enter the wait step' <<<"$(stderr)"; } \
         && pass "a failed post stops rather than reporting a request ($_mode)" \
         || die "a failed post on the $_mode path gave rc=$rc '$(stderr)'"
 done
@@ -256,17 +256,17 @@ world; BODY_IN="$TMP"; rc="$(run 7 no)"
     && pass "a body that cannot be read stops before posting" \
     || die "an unreadable body gave rc=$rc, posted=$(cat "$TMP/calls")"
 world; : > "$TMP/body.md"; rc="$(run 7 no)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'empty' && nothing_posted; } \
+{ [ "$rc" = 1 ] && grep -qF 'empty' <<<"$(stderr)" && nothing_posted; } \
     && pass "…and an empty one is refused rather than posted as an account" \
     || die "an empty body gave rc=$rc '$(stderr)'"
 
 # ── THE ARGUMENTS ARE REQUIRED AND CHECKED ─────────────────────────────────
 world; rc="$(run)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'a PR number is required'; } \
+{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$(stderr)"; } \
     && pass "a missing PR number refuses" \
     || die "a missing PR gave rc=$rc '$(stderr)'"
 world; rc="$(run notanumber no)"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'a PR number is required'; } \
+{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$(stderr)"; } \
     && pass "…and so does one that is not a number" \
     || die "a non-numeric PR gave rc=$rc '$(stderr)'"
 
@@ -274,12 +274,12 @@ world; rc="$(run notanumber no)"
 # a duplicate pass and a review nobody asked for, so an unrecognised value cannot
 # fall into either branch — which is what `[ "$X" = yes ]` on its own does.
 world; rc="$(run 7 '')"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'auto-review mode is required' && nothing_posted; } \
+{ [ "$rc" = 1 ] && grep -qF 'auto-review mode is required' <<<"$(stderr)" && nothing_posted; } \
     && pass "a missing auto-review mode refuses rather than defaulting" \
     || die "a missing mode gave rc=$rc '$(stderr)'"
 for _bad in YES true on 1 y; do
     world; rc="$(run 7 "$_bad")"
-    { [ "$rc" = 1 ] && stderr | grep -qF "'$_bad' is not an auto-review mode" && nothing_posted; } \
+    { [ "$rc" = 1 ] && grep -qF "'$_bad' is not an auto-review mode" <<<"$(stderr)" && nothing_posted; } \
         && pass "…and '$_bad' is refused by name" \
         || die "the mode '$_bad' gave rc=$rc '$(stderr)', posted=$(cat "$TMP/calls")"
 done
@@ -287,7 +287,7 @@ done
 # reading whatever stdin happened to be — a terminal, or the previous command's
 # output, posted as this PR's account.
 world; rc="$(run 7 no "$TMP/body.md")"
-{ [ "$rc" = 1 ] && stderr | grep -qF 'the body is no longer a file' && nothing_posted; } \
+{ [ "$rc" = 1 ] && grep -qF 'the body is no longer a file' <<<"$(stderr)" && nothing_posted; } \
     && pass "a caller still passing a body file is refused, not silently ignored" \
     || die "the old three-argument form gave rc=$rc '$(stderr)'"
 

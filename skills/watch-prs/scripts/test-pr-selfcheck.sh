@@ -339,10 +339,14 @@ chmod 000 "$_rq/skills/watch-prs/scripts/test-racy.sh"
 if [ "$(id -u)" = 0 ]; then
     pass "…(skipped: running as uid 0, where an unreadable file is still readable)"
 else
+    # STATUS 2, NOT 1. This script reserves 1 for actionable SOURCE findings and 2
+    # for a check that could not run — so an unreadable input is 2, or the driver
+    # tells the operator to fix findings that were never looked for, and a caller
+    # cannot tell infrastructure failure from a defect.
     out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-    { [ "$rc" -eq 1 ] && grep -q 'scan_failed' <<<"$out"; } \
-        && pass "…and a fixture the scan cannot read is a finding rather than a clean result" \
-        || die "an unreadable fixture scanned clean (rc=$rc out=$out)"
+    { [ "$rc" -eq 2 ] && grep -q 'reason=racy_scan_failed' <<<"$out"; } \
+        && pass "…and a fixture the scan cannot read exits 2, the could-not-run status" \
+        || die "an unreadable fixture did not report as could-not-run (rc=$rc out=$out)"
 fi
 chmod 644 "$_rq/skills/watch-prs/scripts/test-racy.sh"
 # …AND THE HERESTRING FORM IS NOT A FINDING, which is what makes the gate usable:

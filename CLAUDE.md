@@ -449,8 +449,18 @@ rediscovering them.
   a glob. Only the EARLY-EXITING readers matter — `grep -c`, `sed` and `awk`
   without an `exit` read to end of input, so their pipelines never signal.
 
-  `pr-selfcheck.sh` gates it, because the failure is intermittent and a green run
-  proves nothing about the next one. #152.
+  `pr-selfcheck.sh` gates the `printf`-produced form, because the failure is
+  intermittent and a green run proves nothing about the next one. A line carrying
+  the spelling as DATA says so with `racy-pipeline-ok`.
+
+  **Any other producer is review's job, and that boundary is deliberate.** `bodies
+  | grep -qF …` races identically — every producer does — and generalising the scan
+  to "a pipeline whose last stage is `grep -q`" was tried and reverted in one
+  round: `|` is not only a pipe. It appears in `||`, in `${x%%|*}`, inside quoted
+  `awk` programs and inside `case` patterns, and telling those apart needs a shell
+  PARSER. This file already records paying for one of those, and the generalised
+  version reported 140 false positives on a tree with no defect in it — a gate
+  nobody can push past rather than one that catches anything. #152.
 
 - **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
   verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`

@@ -3461,7 +3461,7 @@ fi
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.
-if grep -vE '^[[:space:]]*#' "$SKILL" | grep -q 'sort -V'; then
+if grep -q 'sort -V' <<<"$(grep -vE '^[[:space:]]*#' "$SKILL")"; then
     die "skill uses GNU-only 'sort -V' while README advertises portability"
 else
     pass "no GNU-only sort in the script-resolution fallback"

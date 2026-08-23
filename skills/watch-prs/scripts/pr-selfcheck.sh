@@ -639,6 +639,21 @@ done
 # `q` second, `builtin printf … | command grep -q` — which twenty-four assertions
 # in `test-pr-selfcheck.sh` used — and `grep -F -q` with the options split.
 #
+# WHAT IT DOES NOT DETECT IS THE PRODUCER BEING ANYTHING ELSE, and that is a
+# stated limit rather than an oversight. `bodies | grep -qF …` races identically —
+# any producer does — and generalising the pattern to "a pipeline whose last stage
+# is `grep -q`" was tried and reverted in one round: `|` is not only a pipe. It
+# appears in `||`, in `${got%%|*}`, inside quoted `awk` programs and inside `case`
+# patterns, and telling those apart needs a shell PARSER. This repository has paid
+# for one of those already — 2,200 lines and fifty-two review rounds — and the
+# generalised version reported 140 false positives on a tree with no defect in it,
+# which is a gate that cannot be pushed past rather than one that catches anything.
+#
+# SO THE GATE IS ANCHORED ON `printf`, which is the shape every occurrence in this
+# suite actually had, and the OTHER producers are review's job — the reviewer files
+# carry the rule. The sites Codex found by hand are converted; what is not
+# guaranteed is that a new one is caught automatically.
+#
 # SO IT TAKES THE SHAPE, NOT A LIST: either quoting of the format string, any
 # `command`/`builtin` prefix on EITHER side — the producer takes them too, which
 # `command printf … | grep -q` walked past — any number of separate option words
@@ -662,22 +677,21 @@ done
 pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
-    hits=""
-    # ONE `awk`, NOT `grep`, BECAUSE A PIPELINE CAN SPAN LINES. `grep` reads each
-    # PHYSICAL line, so `printf … | \` with the `grep -q` on the next one walked
-    # past every version of this. `awk` folds a `\`-continued line into the logical
-    # one and reports the FIRST physical line number, which is where an author looks.
     hits="$(awk '
         { line = $0; n = FNR
-          while (sub(/\\$/, "", line) && (getline nxt) > 0) line = line " " nxt
+          # A CONTINUED LINE AND A LINE ENDING IN A PIPE ARE BOTH ONE COMMAND.
+          # `\` at the end is the obvious one; a trailing `|` continues just as
+          # legally and needs no backslash, and the two halves scanned separately
+          # were reported clean.
+          while ((sub(/\\$/, "", line) || line ~ /\|[ \t]*$/) && (getline nxt) > 0)
+              line = line " " nxt
           if (line ~ /(command +|builtin +)*printf +["'"'"']%s(\\n)?["'"'"'] +[^|]*\|([^|]*\|)* *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
     if [ "$grc" -ne 0 ]; then
-        note scan_failed "could not scan $(basename "$f") for racy pipelines (awk exited $grc)"
-        pipeq=1
-        continue
+        echo "PR_SELFCHECK status=error reason=racy_scan_failed file=$(basename "$f") rc=$grc" >&2
+        exit 2
     fi
     [ -n "$hits" ] || continue
     while IFS= read -r hit; do

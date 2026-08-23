@@ -265,20 +265,20 @@ nothing_posted "…with no signoff recorded for it"
 # erases the evidence. #137, for #122.
 world; got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] || die "the ordinary record did not post: '${got}'"
-posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\` \`2026-02-02T00:00:00Z\`" \
+grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\` \`2026-02-02T00:00:00Z\`" <<<"$(posted)" \
     && pass "the signoff marker carries the time of the verdict it answers" \
     || die "the marker does not carry the verdict time: '$(posted)'"
 
 # The marker's format is `pr-signoff.sh`'s: the name and the sha in backticks, on
 # a line of their own. Composed here rather than left to the caller's prose,
 # because a marker one character off signs nothing off and still looks posted.
-posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" \
+grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" <<<"$(posted)" \
     && pass "the summary carries the signoff marker in the form pr-signoff.sh reads" \
     || die "the posted marker was: $(posted | head -3)"
-posted | grep -qF 'the paragraph about what changed' \
+grep -qF 'the paragraph about what changed' <<<"$(posted)" \
     && pass "…and the caller's account of the phase" \
     || die "the caller's body is not in what was posted"
-posted | grep -qF 'Review-Phase: copilot' \
+grep -qF 'Review-Phase: copilot' <<<"$(posted)" \
     && pass "…and the trailer the merge gate depends on" \
     || die "the trailer note is missing from the summary"
 
@@ -292,7 +292,7 @@ run record 7 "$TMP/body.md" >/dev/null
 { [ ! -f "$W/PWNED" ] && [ ! -f "$W/PWNED2" ]; } \
     && pass "a body containing shell substitutions is not executed while being written" \
     || die "the body was executed: $(ls "$W")"
-posted | grep -qF '$(touch' \
+grep -qF '$(touch' <<<"$(posted)" \
     && pass "…and reaches the PR verbatim rather than silently emptied" \
     || die "the substitution vanished from the posted body: $(posted)"
 
@@ -497,10 +497,10 @@ got="$(run record 7 "$TMP/body.md")"
 grep -qF 'will not carry one' <<<"${got#*|}" \
     && pass "…and it says the signoff carries none, rather than degrading in silence" \
     || die "the record was posted without a verdict time and did not say so: '${got#*|}'"
-posted | grep -qF '**Review-Signoff:**' \
+grep -qF '**Review-Signoff:**' <<<"$(posted)" \
     && pass "…with the marker still posted" \
     || die "no signoff marker was posted: '$(posted)'"
-posted | grep -qE '\*\*Review-Signoff:\*\* `[^`]+` `[0-9a-f]{40}` `' \
+grep -qE '\*\*Review-Signoff:\*\* `[^`]+` `[0-9a-f]{40}` `' <<<"$(posted)" \
     && die "…but it carried an empty verdict field, which pr-signoff.sh refuses" \
     || pass "…and no empty third field, which the reader would refuse"
 
@@ -639,7 +639,7 @@ got="$(run record 7 "$TMP/body.md")"
 # operator neither a durable signoff for a later session nor the sha the
 # codex-only merge needs — they had to acknowledge the boundary and re-run this
 # stage to recover a phase that was already proved clean.
-posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" \
+grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" <<<"$(posted)" \
     && pass "…with the signoff recorded, since the pause offers merging on it" \
     || die "the pause discarded the signoff it offers to merge on: $(posted)"
 grep -qF "codex-sha=$HEAD40" <<<"${got#*|}" \
@@ -746,7 +746,7 @@ world; got="$(run open 7 "$HEAD40")"
 grep -q -- '--add-reviewer @copilot' "$TMP/calls" \
     && pass "…by --add-reviewer, which is the only thing that requests Copilot" \
     || die "Copilot was not requested: $(cat "$TMP/calls")"
-posted | grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`" \
+grep -qF "**Review-Signoff-Revoked:** \`$COPILOTBOT\`" <<<"$(posted)" \
     && pass "…and any earlier Copilot signoff is revoked" \
     || die "no revocation was posted: $(posted)"
 before 'gh pr comment' 'gh pr edit' \
@@ -1014,7 +1014,7 @@ _ft_opts="$(printf '%s' "${got#*|}" | grep '^    ([a-z]) ')"
 # the sha in backticks on a line of their own. A stage that posted a paragraph
 # saying the same thing in prose would satisfy every assertion above and leave
 # nothing a later session can read back.
-posted | grep -qF "**Review-Signoff:** \`$COPILOTBOT\` \`$HEAD40\`" \
+grep -qF "**Review-Signoff:** \`$COPILOTBOT\` \`$HEAD40\`" <<<"$(posted)" \
     && pass "…and the posted body carries the signoff marker for Copilot" \
     || die "no Copilot signoff marker in the posted body: $(posted)"
 
@@ -1213,7 +1213,7 @@ grep -qF 'PR_COPILOT_PHASE_CLOSED' <<<"${got#*|}" \
 grep -q 'pr edit' "$TMP/calls" \
     && die "close with a shadowed [ requested a Copilot pass: $(cat "$TMP/calls")" \
     || pass "…and requests no Copilot pass"
-posted | grep -qF 'Review-Signoff-Revoked' \
+grep -qF 'Review-Signoff-Revoked' <<<"$(posted)" \
     && die "close with a shadowed [ revoked a signoff: $(posted)" \
     || pass "…and revokes nothing"
 
@@ -1281,7 +1281,7 @@ grep -qF 'PAUSE' <<<"${got#*|}" \
     || die "the boundary pause was not announced: '${got#*|}'"
 # THE SIGNOFF IS STILL PUBLISHED BEFORE THE PAUSE, which is the whole point of
 # that ordering: a later session reads it back rather than re-proving the phase.
-posted | grep -qF 'Review-Signoff' \
+grep -qF 'Review-Signoff' <<<"$(posted)" \
     && pass "…while the signoff was published before pausing" \
     || die "the pause swallowed the signoff: $(posted)"
 world; _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"

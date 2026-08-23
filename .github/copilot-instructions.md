@@ -202,7 +202,11 @@ sets `pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` an
 dies with 141, and that becomes the pipeline's status — so an assertion whose line
 IS present reads as missing, intermittently, and an `|| x=""` capture silently
 becomes empty. Use a herestring: `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh`
-gates it; a line carrying the spelling as DATA says so with `racy-pipeline-ok`.
+gates the `printf`-produced form; a line carrying the spelling as DATA says so
+with `racy-pipeline-ok`. **Any other producer is review's job** — `bodies |
+grep -qF …` races identically, and the gate cannot see it, because telling a pipe
+from `||`, from `${x%%|*}` and from a `|` inside a quoted `awk` program needs a
+shell parser.
 Only early-exiting readers matter — `grep -c`, `sed` and `awk` without an `exit`
 read to end of input.
 

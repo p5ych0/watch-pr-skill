@@ -23,9 +23,17 @@
   including split options, any intermediate filters between the producer and the
   reader, and a pipeline split across a `\` continuation — because four review
   rounds each found an equivalent spelling the previous version reported clean.
-  It reads folded LOGICAL lines rather than physical ones, which is what the last
-  of those needed, and reporting the first physical line number keeps the finding
-  useful. A line that carries the
+  It reads folded LOGICAL lines rather than physical ones — a pipeline continues
+  across a `\` and across a bare trailing `|`, and both halves scanned separately
+  read clean — and reporting the first physical line number keeps the finding
+  useful. An input it cannot read exits 2, the could-not-run status, rather than
+  reporting an actionable finding nobody looked for.
+
+  It is anchored on `printf`, and any other producer is review's job. Generalising
+  to "a pipeline whose last stage is `grep -q`" was tried and reverted: `|` also
+  appears in `||`, in `${x%%|*}` and inside quoted `awk` programs, and telling
+  those apart needs a shell parser — the generalised version reported 140 false
+  positives on a clean tree. A line that carries the
   spelling as DATA — a comment, a stub, a heredoc — says so with
   `racy-pipeline-ok`; nothing else is exempt. And a fixture the scan cannot READ is
   a finding of its own rather than a clean result, because `grep` exits 1 for "no
