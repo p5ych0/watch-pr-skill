@@ -290,6 +290,46 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 grep -q 'grep -q y' <<<"$out" \
     && pass "…naming the line, so the author does not have to search for it" \
     || die "the racy-pipeline finding does not quote the line: $out"
+# …AND THE SPELLING VARIANTS ARE CAUGHT TOO. The first version of the scan matched
+# `printf '%s'` with SINGLE quotes and `grep -q` with the `q` first, so
+# `printf "%s\n" …` and `grep -Fq` walked past it — equivalent code, and the gate
+# reporting clean.
+for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
+          "printf '%s' \"\$x\" BAR grep -Fq y || true" \
+          "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true"; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "${_v/BAR/$_bar}"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
+        && pass "…and the variant is caught: ${_v%% BAR*}" \
+        || die "a spelling variant walked past the gate ($_v): rc=$rc out=$out"
+done
+# …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
+# comment, a stub or a heredoc carrying the spelling cannot be told from code —
+# and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
+# declares a line data; nothing else is exempt.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s\\n' \"\$x\" $_bar grep -q y || true   # racy-pipeline-ok: data"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…while a line marked racy-pipeline-ok is data and not a finding" \
+    || die "the marked line was reported anyway (rc=$rc out=$out)"
+# …AND AN UNREADABLE FIXTURE IS A FINDING OF ITS OWN, not a clean scan. A blanket
+# `|| true` on the scan turned `grep` exiting 2 into an empty hit stream and a
+# green gate — the fail-open shape this repository forbids.
+: > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+chmod 000 "$_rq/skills/watch-prs/scripts/test-racy.sh"
+if [ "$(id -u)" = 0 ]; then
+    pass "…(skipped: running as uid 0, where an unreadable file is still readable)"
+else
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && grep -q 'scan_failed' <<<"$out"; } \
+        && pass "…and a fixture the scan cannot read is a finding rather than a clean result" \
+        || die "an unreadable fixture scanned clean (rc=$rc out=$out)"
+fi
+chmod 644 "$_rq/skills/watch-prs/scripts/test-racy.sh"
 # …AND THE HERESTRING FORM IS NOT A FINDING, which is what makes the gate usable:
 # it is the fix, and a check that flagged it too would have no clean state.
 { printf '#!/usr/bin/env bash\nset -o pipefail\n'

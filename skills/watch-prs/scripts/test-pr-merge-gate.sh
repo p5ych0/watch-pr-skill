@@ -411,10 +411,29 @@ for _bad in 'verdict=findings findings= source=replies-only' \
         > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
     printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
     got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = 1 ] && grep -qv 'merging on the signoff' <<<"$body"; } \
+    { [ "$rc" = 1 ] && { [ -n "$body" ] && grep -qv 'merging on the signoff' <<<"$body"; }; } \
         && pass "a near-miss replies-only record is not authorised: ${_bad#verdict=findings }" \
         || die "a loose record was authorised: '$_bad' rc=$rc out='$body'"
 done
+
+# …AND AN EMPTY BODY IS NOT A PASS, which is what the non-emptiness test above is
+# for. A herestring supplies one newline even for an empty value, so a bare
+# `grep -qv PATTERN <<<"$body"` MATCHES that blank line and succeeds — where the
+# pipe it replaced fed zero bytes and returned 1. Without the guard, a `run_gate`
+# that regressed to status 1 with no diagnostic at all would satisfy every
+# not-authorised assertion above against nothing.
+#
+# ASSERTED ON THE EXPRESSION, not through the gate. Staging a gate that produces an
+# empty body means breaking the gate; what has to hold is that the guarded form
+# refuses an empty value, and that the bare form would have accepted it — both of
+# which are properties of the expression and are shown here directly.
+_eb=""
+{ [ -n "$_eb" ] && grep -qv 'merging on the signoff' <<<"$_eb"; } \
+    && die "the guarded form accepted an empty body" \
+    || pass "an empty body does not satisfy the not-authorised assertion"
+grep -qv 'merging on the signoff' <<<"$_eb" \
+    && pass "…and the unguarded herestring would have, which is why the guard is there" \
+    || die "the empty-body case proves nothing: an unguarded herestring refused it too"
 
 # A HEAD IS NOT A MOMENT. A signoff recorded for an EARLIER clean review on the
 # same head must not vouch for a LATER replies-only review that nobody read —
@@ -579,7 +598,7 @@ printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
 # earlier and equally final — so what this asserts is the OUTCOME and the absence
 # of the note, not which line said no.
 got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 1 ] && grep -qv 'merging on the signoff' <<<"$body"; } \
+{ [ "$rc" = 1 ] && { [ -n "$body" ] && grep -qv 'merging on the signoff' <<<"$body"; }; } \
     && pass "…while a signoff does not carry a review that has findings" \
     || die "a signoff carried a review with findings — rc=$rc out='$body'"
 

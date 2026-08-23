@@ -633,14 +633,44 @@ done
 #
 # ONLY THE EARLY-EXITING READERS MATTER. `grep -c`, `sed` and `awk` without an
 # `exit` read to end of input, so their pipelines never signal.
+# THE SPELLINGS IT RECOGNISES, AND WHY THEY ARE NOT A LIST OF ONE. The first
+# version matched `printf '%s'` with SINGLE quotes and `grep -q` with the `q`
+# first, and `printf "%s\n" …` or `grep -Fq` walked past it — equivalent code, and
+# the gate reporting clean. The format string may be quoted either way, the flags
+# may be in any order as long as one of them is `q`, and the spacing is free.
+#
+# AND WHAT IS EXEMPT IS MARKED, not guessed. This scans raw text, so a comment, a
+# stub or a heredoc containing the spelling AS DATA cannot be told from code — and
+# the fixture proving this gate works has to contain it. A line carrying
+# `racy-pipeline-ok` is data by declaration; nothing else is exempt, and the marker
+# is deliberately ugly so it is not reached for casually.
+#
+# THE SCAN'S OWN FAILURE IS NOT A CLEAN RESULT. `grep` exits 1 for "no match" and
+# 2 or more for an error, and a blanket `|| true` turned an unreadable fixture into
+# an empty hit stream and a green gate. Status 1 is the answer; anything above it
+# is a finding of its own.
 pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
-    while IFS= read -r hit; do
-        note racy_pipeline "$(basename "$f"): $hit"
+    hits=""
+    hits="$(grep -nE "printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\| *grep +-[A-Za-z]*q" "$f")"
+    grc=$?
+    if [ "$grc" -gt 1 ]; then
+        note scan_failed "could not scan $(basename "$f") for racy pipelines (grep exited $grc)"
         pipeq=1
-    done < <(grep -nE "printf '%s(\\\\n)?' [^|]*\\| *grep -q" "$f" | cut -c1-120 || true)
+        continue
+    fi
+    [ -n "$hits" ] || continue
+    while IFS= read -r hit; do
+        [ -n "$hit" ] || continue
+        case "$hit" in *racy-pipeline-ok*) continue ;; esac
+        note racy_pipeline "$(basename "$f"): $(printf '%s' "$hit" | cut -c1-120)"
+        pipeq=1
+    done <<EOF
+$hits
+EOF
 done
+
 [ "$pipeq" -eq 0 ] && ok "no fixture pipes a value into grep -q, which pipefail turns into a false failure"
 
 # ── 5. the suite passes ────────────────────────────────────────────────────

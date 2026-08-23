@@ -1594,7 +1594,9 @@ wait, so a finding caught here is worth several caught there.
 
 It checks what can be checked without judgement: every variable used in this
 file is assigned in it, every script parses, every helper this file drives is
-shipped, every script has a test, and the suite passes. That set is not
+shipped, every script has a test, no fixture pipes a value into `grep -q` — that
+shape is racy under `pipefail` and reports a present line as missing — and the
+suite passes. That set is not
 arbitrary — each one is a mistake that actually shipped from this repository.
 
 **Then read your own diff against the list below.** These are the classes that

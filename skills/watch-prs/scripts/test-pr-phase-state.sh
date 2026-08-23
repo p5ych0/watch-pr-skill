@@ -216,7 +216,8 @@ got="$(run 7)"
 world; printf 'not-a-sha\n' > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf 'not-a-sha\n' > "$W/head.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && grep -qvF 'state=after-copilot' <<<"${got#*|}"; } \
+{ [ "${got%%|*}" = 2 ] && [ -n "${got#*|}" ] \
+  && grep -qvF 'state=after-copilot' <<<"${got#*|}"; } \
     && pass "…and a head malformed the same way does not select the post-Copilot arm" \
     || die "two matching malformed values selected an arm: '${got}'"
 

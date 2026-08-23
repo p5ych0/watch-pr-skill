@@ -373,7 +373,7 @@ printf '[%s]' "$(mk_rc 3 '"this is wrong"')" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'verdict=findings findings=1' <<<"$out"; } \
-    && grep -qv 'replies-only' <<<"$out" \
+    && { [ -n "$out" ] && grep -qv 'replies-only' <<<"$out"; } \
     && pass "…while a top-level comment is a finding like any other" \
     || die "a top-level comment gave rc=$rc '$out'"
 
@@ -383,7 +383,7 @@ printf '[%s,%s]' "$(mk_rc 4 '"one"')" "$(mk_rc 5 '"a follow-up"' 4)" \
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'findings=2' <<<"$out"; } \
-    && grep -qv 'replies-only' <<<"$out" \
+    && { [ -n "$out" ] && grep -qv 'replies-only' <<<"$out"; } \
     && pass "…and a review carrying both counts both, without the name" \
     || die "a mixed review gave rc=$rc '$out'"
 
@@ -398,7 +398,7 @@ printf '[{"user":{"login":"%s"},"id":9,"body":"x","created_at":"2026-01-01T00:00
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -q 'verdict=findings findings=1' <<<"$out"; } \
-    && grep -qv 'replies-only' <<<"$out" \
+    && { [ -n "$out" ] && grep -qv 'replies-only' <<<"$out"; } \
     && pass "a null in_reply_to_id is a top-level finding, not a reply and not malformed" \
     || die "a null in_reply_to_id gave rc=$rc '$out'"
 

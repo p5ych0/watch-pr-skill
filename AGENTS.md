@@ -264,6 +264,15 @@ this — a structural scanner was built and removed after six versions were each
 defeated by legal Bash — so read every `return` in the diff and confirm it states
 a value. See `CLAUDE.md § Bash conventions`.
 
+**Piping a value into `grep -q` is a defect in a fixture.** Every `test-*.sh` sets
+`pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` and dies
+with 141, and that becomes the pipeline's status — so an assertion whose line IS
+present reads as missing, intermittently, and an `|| x=""` capture silently becomes
+empty. Use `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh` gates it, and
+`racy-pipeline-ok` marks a line that carries the spelling as data rather than as
+code. Only early-exiting readers matter: `grep -c`, `sed` and `awk` without an
+`exit` read to end of input.
+
 **Behaviour changes need tests.** A change to script behaviour with no matching
 `skills/watch-prs/scripts/test-*.sh` coverage is a finding. Tests must stay
 self-contained — throwaway git repos, stubbed `gh`, no network — because CI runs

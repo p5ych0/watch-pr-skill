@@ -4258,7 +4258,7 @@ $body"'
 #   0 no race · 9 unbuildable · 20 producer lost, consumer matched · 21 consumer failed
 sigpipe_rc=0
 bash -c "$sigpipe_probe"'
-    printf "%s" "$multi" | grep -q EARLYMATCH
+    printf "%s" "$multi" | grep -q EARLYMATCH   # racy-pipeline-ok: this IS the race
     rcs=("${PIPESTATUS[@]}")
     prod=${rcs[0]}; cons=${rcs[1]}
     [ "$cons" -eq 0 ] || exit 21

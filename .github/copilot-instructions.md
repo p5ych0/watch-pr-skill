@@ -197,6 +197,15 @@ correct where the caller consumes stdout.
 inherits the failed test's exit status 1. No automated check covers this, so read
 every `return` in the diff and confirm it states a value.
 
+**Piping a value into `grep -q` is a defect in a fixture.** Every `test-*.sh`
+sets `pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` and
+dies with 141, and that becomes the pipeline's status — so an assertion whose line
+IS present reads as missing, intermittently, and an `|| x=""` capture silently
+becomes empty. Use a herestring: `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh`
+gates it; a line carrying the spelling as DATA says so with `racy-pipeline-ok`.
+Only early-exiting readers matter — `grep -c`, `sed` and `awk` without an `exit`
+read to end of input.
+
 **Behaviour changes need tests** — a matching
 `skills/watch-prs/scripts/test-*.sh` case, self-contained, with `gh` stubbed and
 no network.
