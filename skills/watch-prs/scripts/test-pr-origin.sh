@@ -1115,20 +1115,17 @@ esac
 
 # ── AN OUTPUT THAT OPENS AND THEN REJECTS THE WRITE ────────────────────────
 #
-# BOTH WRITES STILL TAKE THEIR STATUS, and nothing here exercises it any more.
-# That is a loss and it is recorded rather than quietly dropped.
-#
 # WHAT THE GUARDS ARE FOR: a target can open and then reject data. Without the
 # status, `pin` leaves an empty file and exits 0 — byte-for-byte what a
 # legitimately unset pin leaves — and `read` leaves an empty file and exits 0,
 # which the caller reads back as an origin.
 #
-# WHY THE CASE IS GONE: it drove `/dev/full` in as the output PATH, and since #157
-# the argument is a DIRECTORY this script creates. `mkdir /dev/full` refuses
-# before any write is attempted, and there is no directory a fixture can make
-# whose creation succeeds and whose writes then fail — that needs a full or
-# quota'd filesystem, which is the same "making it fail means making it fail
-# everywhere" this repository already records for heredoc temporary files.
+# THE `/dev/full` CASE WENT WITH #157 and something better replaced it. It drove
+# `/dev/full` in as the output PATH, and the argument is a DIRECTORY this script
+# creates now — `mkdir /dev/full` refuses before any write is attempted. For two
+# rounds the guards were covered by source matching alone, which is recorded here
+# because the note that replaced the case claimed `pr-selfcheck.sh` would catch
+# their removal and that was untrue.
 #
 # ── AN OPEN-THEN-FAIL WRITE, RUN RATHER THAN MATCHED ───────────────────────
 #
@@ -1169,20 +1166,11 @@ for _wf_mode in read pin; do
 done
 rm -rf "$_wf_bin"
 
-# WHAT REPLACES IT IS A STRUCTURAL ASSERTION OVER BOTH WRITES, and that is
-# weaker than running them — stated plainly, because the first version of this
-# paragraph said `pr-selfcheck.sh` would not miss the guards' removal and that is
-# simply untrue: it has no check for these writes, and every other case here
-# drives a `printf` that succeeds, so deleting either `|| rb_refuse` left the
-# whole suite green. A claim that a gap is covered elsewhere is worse than the
-# gap, because it stops anyone looking.
-#
-# What the check can see is that each write still HAS a refusal attached, and that
-# the refusal is `rb_refuse` rather than a bare `exit` — the difference being
-# whether the directory this script created goes with it, which `rb_refuse` gets
-# by leaving it to the `EXIT` trap rather than by doing it. Both are matched whole,
-# with the redirection and the guard on one logical line, so a guard moved onto a
-# line of its own or replaced with `|| true` fails here.
+# THE STRUCTURAL ASSERTIONS BELOW ARE SUPPLEMENTARY NOW, not the coverage. The
+# runtime cases above execute both write paths; what these add is that the guard is
+# `rb_refuse` rather than a bare `exit` — the difference being whether the directory
+# goes back — and that the two writes are continued onto their guards at all, which
+# a run cannot distinguish from a guard that happens not to fire.
 _wr_n=0
 _wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
 [ "$_wr_n" = 2 ] \

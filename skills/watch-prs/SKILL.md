@@ -460,9 +460,17 @@ unset -f rb_identity 2>/dev/null \
 # line, and a driving shell tracing to fd 1 would put the trace of `mktemp` inside
 # the value — so the variable holds trace text and a path, and the helper cannot
 # open it. `$$` and `$RANDOM` are the shell's own, so nothing runs and there is
-# nothing to trace. Three `$RANDOM` draws make the name unguessable enough that
-# nobody can hold the session open by squatting it; the exclusion, not the
-# randomness, is what makes a guess harmless.
+# nothing to trace. Three `$RANDOM` draws make the name unguessable, and the
+# exclusion — `mkdir` refusing a name that exists — is what makes a guess harmless
+# rather than a path written through.
+#
+# WHAT THE RANDOMNESS DOES NOT STOP is squatting by an account that does not have
+# to GUESS. The candidate is an argv entry, published by `ps` and `/proc` the moment
+# the helper starts, so a watcher can create the name in the interval before the
+# helper's `mkdir` and make setup refuse — repeatably, for as long as they watch.
+# `pr-origin.sh` states that window where it reserves the name, and #160 carries the
+# protocol change that would close it. The consequence is fail-CLOSED: setup stops,
+# nothing is forged, and the directory is mode 700 so nothing is read.
 #
 # THE PARENT HAS TO BE ONE NOBODY ELSE CAN REPLACE THE DIRECTORY IN, and mode 700
 # does not give that. It protects what is INSIDE the directory; it says nothing
