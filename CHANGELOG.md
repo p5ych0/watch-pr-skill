@@ -13,11 +13,11 @@
   capture, a good extraction silently becomes an empty one and every assertion
   built on it passes against nothing.
 
-  The 511 converted sites are all in `test-*.sh`, so nothing a user RUNS changes.
-  What ships is `pr-selfcheck.sh`'s new check — a new refusal on the pre-push gate,
-  which is what this version names: a contributor's gate reports the shape rather
-  than letting it back in, and the suite it gates stops failing for reasons that
-  are not there.
+  None of the 511 converted assertions changes runtime behaviour — they are all in
+  `test-*.sh`. What ships is `pr-selfcheck.sh`'s new check, and a contributor DOES
+  see it: the pre-push gate has a new refusal, which is what this version names. It
+  reports the shape rather than letting it back in, and the suite it gates stops
+  failing for reasons that are not there.
 
   The check asks three substring questions of a folded LOGICAL line and parses
   nothing: does it name `printf`, does it carry a pipe that is not `||`, does it

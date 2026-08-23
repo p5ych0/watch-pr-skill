@@ -1594,9 +1594,11 @@ wait, so a finding caught here is worth several caught there.
 
 It checks what can be checked without judgement: every variable used in this
 file is assigned in it, every script parses, every helper this file drives is
-shipped, every script has a test, no fixture pipes a `printf` into `grep` — that
-shape is racy under `pipefail` and reports a present line as missing, and a
-producer the check does not name is left to review — and the suite passes. That set is not
+shipped, every script has a test, no fixture pipes a `printf` into `grep` — the
+gate reports that shape whatever the reader, while the race itself needs an
+early-exiting one such as `grep -q`, which under `pipefail` reports a present line
+as missing; a producer the check does not name is left to review — and the suite
+passes. That set is not
 arbitrary — each one is a mistake that actually shipped from this repository.
 
 **Then read your own diff against the list below.** These are the classes that
