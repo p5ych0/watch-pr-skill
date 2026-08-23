@@ -14,22 +14,31 @@ name: tests
 # different. They were turned off together while the backlog was worked through —
 # the suite was the largest fixed cost in each review round, paid locally and then
 # again here. That cost is down: `test-pr-skill-contract.sh` went 174s to 10s in
-# #165, and the contributor gate with it. The `test` job runs the SAME bash 5 that
-# gate runs, so it cannot go red on a correct change for a reason the contributor
-# has not already seen — which is why nothing had to be audited before restoring
-# it. `macos-shell` is the opposite case: it went red three times on correct
-# changes, each time because a fixture required the ROUTE bash 5 takes to a
+# #165, and the contributor gate with it. The `test` job has never gone red on a
+# correct change — it runs the same fixtures the contributor's own gate runs, on
+# an Ubuntu runner with bash 5, which is a shell those fixtures are written and
+# reviewed against every round. That is not a claim that the contributor's shell
+# IS bash 5: a macOS contributor's `pr-selfcheck.sh` resolves whatever `bash` is on
+# their `PATH`, which may be 3.2.57. It is a claim about this job's record, which
+# is why nothing had to be audited before restoring it. `macos-shell` is the
+# opposite case: it went red three times on correct changes, each time because a
+# fixture required the ROUTE bash 5 takes to a
 # defence rather than the defence holding. #93's first acceptance criterion is
 # auditing every fixture against that, and its `if:` stays until then.
 #
-# `workflow_dispatch` is kept, not left over: `gh workflow run tests.yml --ref
-# <branch>` is how `macos-shell` is exercised deliberately while its `if:` stands,
-# and how a branch is checked without opening a pull request.
+# `workflow_dispatch` is kept so a branch can be checked without opening a pull
+# request — `gh workflow run tests.yml --ref <branch>`. It does NOT reach
+# `macos-shell`: that `if: false` is job-level and unconditional, so a dispatch
+# runs the `test` job alone. Nothing exercises bash 3.2.57 while it stands, by any
+# route, and an event-conditional guard is #93's to decide rather than a comment's
+# to imply.
 #
 # WHAT IT MEANS FOR THE LOOP that the second job is off: `pr-ci-state.sh` reports
 # on the checks that EXIST, so a green round now means the suite ran on Ubuntu —
 # it does not mean it ran on bash 3.2.57 or on a mac-shaped PATH. A post-3.2
-# construct can still merge. #93 carries the rest.
+# construct can still merge. And a push to a branch with no pull request open
+# still produces no check at all: `push` is `main` only, so that state has not
+# gone away, it has narrowed. #93 carries the rest.
 on:
   push:
     branches: [main]

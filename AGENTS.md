@@ -14,7 +14,8 @@ there is one place to change it.
 ## Portability: what CI cannot see, and you can
 
 **THE SECOND CI JOB IS NOT RUNNING, so read this section as work that is now
-yours.** The normal job runs on every push and pull request, but `macos-shell`
+yours.** The normal job runs on every push to `main` and every pull request, but
+`macos-shell`
 carries `if: false`; nothing checks bash 3.2.57 or a mac-shaped `PATH`. While that
 stands, post-3.2 constructs and absent commands reach `main` unless a reader
 catches them, so check for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
@@ -380,8 +381,10 @@ no equivalent — this is the loader itself, and it has nothing to fall back on.
 Decided on #96 and recorded beside the check.
 
 **`macos-shell` is off, deliberately and temporarily, and that is not a
-finding.** The normal job in `.github/workflows/tests.yml` runs on every push and
-pull request; `macos-shell` carries `if: false`. The operator turned that one off
+finding.** The normal job in `.github/workflows/tests.yml` runs on every push to
+`main` and every pull request; `macos-shell` carries `if: false`, and a
+`workflow_dispatch` does not reach it either — that guard is job-level. The
+operator turned that one off
 because it went red three times on correct changes, each time because a fixture
 required the ROUTE bash 5 takes to a defence rather than the defence holding.
 

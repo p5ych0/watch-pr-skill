@@ -223,18 +223,18 @@ the suite never takes; a GNU-only *flag* on a command that exists everywhere
 
 **Half of it is running.** `.github/workflows/tests.yml` runs the normal job on
 every push to `main` and on every pull request; `macos-shell` carries `if: false`
-and does not run. So a green check means the suite passed on Ubuntu with bash 5 —
-the same shell the pre-push gate uses — and says nothing about bash 3.2.57 or a
-mac-shaped `PATH`. A regression that needs the second machine to see it can still
-merge. The suite is also still the mandatory pre-push gate; `pr-selfcheck.sh` is
+and does not run — a `workflow_dispatch` does not reach it either, that guard
+being job-level. So a green check means the suite passed on Ubuntu with bash 5,
+and says nothing about bash 3.2.57 or a mac-shaped `PATH`. A regression that needs
+the second machine to see it can still merge, and a push to a branch with no pull
+request open produces no check at all. The suite is also still the mandatory pre-push gate; `pr-selfcheck.sh` is
 unchanged, and it is what a contributor actually runs.
 
 Both were off. The normal job came back once its cost came down — the slowest
-fixture went 174s to 10s — because it runs the same shell the contributor already
-runs and so cannot fail on anything they have not already seen. `macos-shell` is
-the opposite case: it went red three times on correct changes, each time because a
-fixture required the ROUTE bash 5 takes to a defence rather than the defence
-holding. #93 owns turning that job back on — it is named in its
+fixture went 174s to 10s — on its record: it has never gone red on a correct
+change. `macos-shell` is the opposite case: it went red three times on correct
+changes, each time because a fixture required the ROUTE bash 5 takes to a defence
+rather than the defence holding. #93 owns turning that job back on — it is named in its
 acceptance criteria — after those fixtures are audited.
 
 ## Install

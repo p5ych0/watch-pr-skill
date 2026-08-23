@@ -353,13 +353,17 @@ rediscovering them.
 
   **That job is switched off; the workflow around it is not.**
   `.github/workflows/tests.yml` runs the normal job on every push to `main` and
-  every pull request, and `macos-shell` carries `if: false`. So the paragraph above
+  every pull request, and `macos-shell` carries `if: false` — which a
+  `workflow_dispatch` does not lift, that guard being job-level. A push to a branch
+  with no pull request open therefore still produces no check at all. So the paragraph above
   describes what the SECOND job is for, not what it is doing — while this stands,
   bash 3.2.57 and a mac-shaped `PATH` are proven by nothing, and a regression that
   needs them to be seen can merge. Both were off; the normal one came back in #167
-  once its cost came down, because it runs the same bash 5 the contributor's own
-  gate runs and so cannot block a change on anything that gate has not already
-  seen. `macos-shell` is the opposite case — it went red three times on correct
+  once its cost came down, on its record: it has never gone red on a correct
+  change, running the same fixtures the contributor's gate runs on a bash the
+  fixtures are reviewed against every round. That is not a claim that the
+  contributor's shell IS bash 5 — a macOS `pr-selfcheck.sh` resolves whatever
+  `bash` is on that `PATH`, which may be 3.2.57. `macos-shell` is the opposite case — it went red three times on correct
   changes, each time on a fixture requiring the ROUTE bash 5 takes to a defence —
   and #93 owns restoring it, after the fixtures are audited against *assert the
   invariant, not the version's route to it*.
