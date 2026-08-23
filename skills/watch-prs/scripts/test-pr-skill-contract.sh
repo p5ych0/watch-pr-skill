@@ -9,6 +9,7 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$SCRIPT_DIR/../SKILL.md"
+SELFCHECK="$SCRIPT_DIR/pr-selfcheck.sh"
 ROOT="$SCRIPT_DIR/../../.."
 # The shared fixture helpers. This was the one test file in the suite that never
 # sourced them, and it was the one still holding a bare `mktemp -d`.
@@ -1056,6 +1057,44 @@ for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
         || die "the pin probe is missing a line: $_v"
 done
 pass "…proved by one subshell per name, each cross-checking the others"
+# ── EVERY NAME THE DRIVER READS WITHOUT ASSIGNING IS PROTECTED FROM A NAMEREF ──
+#
+# Eleven names were found one review round apiece, which is the "list wrong by
+# omission" `CLAUDE.md` warns about — and writing the set down in a comment was not
+# enough, because the round after it was written omitted three names the comment
+# itself listed. A list nobody checks is a list that drifts.
+#
+# SO IT IS TIED TO ONE `pr-selfcheck.sh` ALREADY MAINTAINS. That file's `KNOWN`
+# list is the inventory of names `SKILL.md` reads without assigning — it has to be,
+# or its undefined-variable check fires — so requiring every entry to be compared
+# against in the probes makes the two move together: add a knob there without
+# protecting it here and this turns red.
+#
+# THE EXEMPTIONS ARE NAMED, not filtered by shape. `PWD`, `SECONDS`, `RANDOM` and
+# `BASH_SOURCE` are maintained by the shell itself, so an assignment to one is not
+# a corruption this loop can cause; the positional and special parameters are not
+# names a nameref can target. Anything else appearing in `KNOWN` must be compared.
+_kn=""
+_kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
+[ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
+_kn="${_kn#*\'}"; _kn="${_kn%\'*}"
+_kn_missing=""
+_kn_rest="$_kn"
+while [ -n "$_kn_rest" ]; do
+    _kn_one="${_kn_rest%%|*}"
+    case "$_kn_rest" in *'|'*) _kn_rest="${_kn_rest#*|}" ;; *) _kn_rest="" ;; esac
+    case "$_kn_one" in
+        PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
+        [A-Z]*) : ;;
+        *) continue ;;
+    esac
+    case "$_read_block" in
+        *"\${$_kn_one:-} != Probe-A"*) : ;;
+        *) _kn_missing="$_kn_missing $_kn_one" ;;
+    esac
+done
+[ -z "$_kn_missing" ]     && pass "every environment name pr-selfcheck.sh knows about is protected from a transport nameref"     || die "the transport probes do not compare against:$_kn_missing"
+
 # THE SUCCESS LINE IS IN THE WORK ARM AND NOWHERE ELSE.
 case "$_arm_work" in
     *'echo "OWNER='*) pass "…and setup announces itself only from the arm the probe guards" ;;

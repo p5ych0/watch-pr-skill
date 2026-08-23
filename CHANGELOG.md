@@ -122,12 +122,17 @@
   replaced the operator's field separator with a transport path, so every later
   unquoted expansion in that long-lived shell split on the characters of a
   directory name — with setup completing, so nothing announced it. Every probe
-  reads
-  back every name in scope that an
-  assignment there can reach — which is the rule, rather than every name the stage
-  introduces — and `SKILL.md` writes the set down, with why the one-line generic
-  test is unavailable: `[[ -R name ]]` is bash 4.3+, and an unknown unary operator
-  inside `[[ ]]` is a PARSE error on 3.2.
+  reads back every name in scope that an assignment there can reach — which is the
+  rule, rather than every name the stage introduces.
+
+  Writing that set down in a comment was not enough: the round after it was
+  written omitted three names the comment itself listed. It is TIED to
+  `pr-selfcheck.sh`'s `KNOWN` list instead — the inventory of names the driver
+  reads without assigning, which that file has to maintain anyway — and the suite
+  requires every entry to be compared against, so adding a knob there without
+  protecting it turns it red. The shell-managed names are exempt BY NAME. A
+  one-line generic test is unavailable: `[[ -R name ]]` is bash 4.3+, and an
+  unknown unary operator inside `[[ ]]` is a PARSE error on 3.2.
 
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so

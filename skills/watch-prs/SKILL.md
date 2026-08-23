@@ -635,17 +635,28 @@ if [[ -z $RB_REMOTE ]]; then
     # addresses. The knobs are read from the ENVIRONMENT, so the transport probes
     # can corrupt them before the loop ever looks.
     #
-    # THIS IS AN ENUMERATION, AND IT IS BOUNDED BY WHAT THIS SHELL HOLDS HERE.
-    # `HOST`, `OWNER`, `REPO`, `REPO_DIR`, `RB_SCRIPTS`, `RB_REMOTE`, `PATH`, `HOME`
-    # and `TMPDIR` are the names in scope that an assignment in this block can
-    # reach through a nameref, plus the transport names each probe already compares
-    # against. A GENERIC test would be better and is not available: `[[ -R name ]]`
+    # THIS IS AN ENUMERATION, AND IT IS NOW A CHECKED ONE. Eleven names were found
+    # one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`, `PATH`,
+    # `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs and the reviewer logins —
+    # which is exactly the "list wrong by omission" `CLAUDE.md` warns about, and
+    # writing the set down was not enough: the round after it was written omitted
+    # three names the comment itself listed.
+    #
+    # SO THE SET IS TIED TO ONE `pr-selfcheck.sh` ALREADY MAINTAINS. That file's
+    # `KNOWN` list is the inventory of names this driver reads without assigning —
+    # it has to be, or the undefined-variable check fires — and
+    # `test-pr-skill-contract.sh` requires every entry in it to be compared against
+    # here, so adding a knob there without protecting it turns the suite red.
+    #
+    # WHAT IS EXEMPT AND WHY: `PWD`, `SECONDS`, `RANDOM` and `BASH_SOURCE` are
+    # maintained by the shell itself and an assignment to one is not a corruption
+    # this loop can cause, and the positional parameters are not names a nameref can
+    # target.
+    #
+    # A GENERIC test would still be better and is not available: `[[ -R name ]]`
     # answers "is this a nameref" in one line, and it is bash 4.3+ — on 3.2 an
     # unknown unary operator inside `[[ ]]` is a PARSE error, so the whole block
-    # would fail to parse on the shell `macos-shell` exists to cover. An
-    # enumeration that is wrong by omission is the shape `CLAUDE.md` warns about,
-    # and the answer here is to write the SET down rather than to keep discovering
-    # it one review round at a time.
+    # would fail to parse on the shell `macos-shell` exists to cover.
     #
     # AND `RB_SCRIPTS` WITH IT, which is where every helper is found. An alias onto
     # it passed both probes, the assignments replaced the plugin directory with a
@@ -680,6 +691,12 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
          && [[ ${IFS:-} != Probe-A ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-A ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-A ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
@@ -693,6 +710,12 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
          && [[ ${IFS:-} != Probe-B ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-B ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -989,6 +1012,12 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
          && [[ ${IFS:-} != Probe-A ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-A ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-A ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-A ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
@@ -1002,6 +1031,12 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
          && [[ ${IFS:-} != Probe-B ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-B ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
