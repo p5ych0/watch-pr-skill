@@ -387,6 +387,14 @@ if [ -n "$_forge_dir" ]; then
 # whose whole job is to stop the refusal cases passing vacuously — and an exported
 # `FORGE_VALUE` makes every case comparing against the forged origin compare against
 # something else. A list of one is the by-omission defect `CLAUDE.md` records.
+#
+# THE POISON IS SEEDED HERE, so the clearing is what removes it. Left to the
+# invoking environment, the proof below observes the defaults on a clean machine
+# whether the names are cleared or not, and only fails where the caller happens to
+# have exported them — a fixture that passes against the unfixed code, which is the
+# vacuous shape `CLAUDE.md` warns about.
+_fe_log="$_forge_dir/forge-log-that-must-not-exist"
+export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git'
 unset FORGE_LOG FORGE_RC FORGE_VALUE
 # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
 # cases assert the helper was never invoked, and the only alternative was scanning
@@ -410,9 +418,10 @@ FORGE
 _fe_dir="$_forge_dir/envproof"
 _fe_rc=0; bash "$_forge_dir/pr-origin.sh" read "$_fe_dir" || _fe_rc=$?
 _fe_val=""; _fe_val="$(cat "$_fe_dir/origin" 2>/dev/null)" || _fe_val=""
-{ [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = 'git@github.com:acme/widget.git' ]; } \
-    && pass "the forged helper inherits no FORGE_RC or FORGE_VALUE from the environment" \
-    || die "the forge saw an inherited value (rc=$_fe_rc value='$_fe_val')"
+{ [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = 'git@github.com:acme/widget.git' ] \
+  && [ ! -e "$_fe_log" ]; } \
+    && pass "the forged helper inherits none of FORGE_LOG, FORGE_RC or FORGE_VALUE" \
+    || die "the forge saw an inherited value (rc=$_fe_rc value='$_fe_val' log-exists=$([ -e "$_fe_log" ] && echo yes || echo no))"
 rm -rf "$_fe_dir"
     _rs_rc=0
     _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
