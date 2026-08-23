@@ -687,7 +687,20 @@ for f in "$SCRIPTS"/test-*.sh; do
               line = line " " nxt
           # WHITESPACE CLASSES, NOT LITERAL SPACES. `printf\t'"'"'%s'"'"'\t"$x"\t|\tgrep\t-q y` is
           # a legal fixture line and walked past a pattern written with ` +`.
-          if (line ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*q/)
+          #
+          # `||` IS NOT A PIPE, and it consumed the mandatory bar: `printf … || grep
+          # -q y` has no pipeline and no risk, and was reported. Replacing it before
+          # the test is safe HERE, where the match is anchored on `printf`, in a way
+          # it was not for the generalised version.
+          #
+          # AND AN OPTION MAY TAKE AN ARGUMENT before the one carrying `q`:
+          # `grep -e y -q` puts a pattern between them, and a group that consumed
+          # only option WORDS never reached the `-q`. The argument may not contain
+          # `)`, a quote or a dash-leading word, which is what stops the scan
+          # running off the end of the command — `[^|]*` there reached the `-eq` of
+          # a later `[ … -eq 2 ]` and reported a `grep -c` as a `grep -q`.
+          t = line; gsub(/\|\|/, "@@", t)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+-[A-Za-z]+([[:space:]]+[^-[:space:])\"'"'"']+)?)*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?

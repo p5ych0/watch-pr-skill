@@ -301,7 +301,8 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -F -q y || true" \
           "printf '%s' \"\$x\" BAR cut -d: -f1 BAR grep -qF y || true" \
           "command printf '%s' \"\$x\" BAR grep -q y || true" \
-          "$(printf 'printf\t%s\t"$x"\tBAR\tgrep\t-q y || true' "'%s'")"; do
+          "$(printf 'printf\t%s\t"$x"\tBAR\tgrep\t-q y || true' "'%s'")" \
+          "printf '%s' \"\$x\" BAR grep -e y -q || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -326,6 +327,27 @@ for _tail in ' \' ''; do
         && pass "…and a pipeline split after a '${_tail:-bare pipe}' is caught" \
         || die "a continued pipeline walked past the gate (tail='$_tail' rc=$rc out=$out)"
 done
+# …AND `||` IS NOT A PIPE. `printf '%s' "$x" || grep -q y` has no pipeline and no
+# risk, and an earlier version consumed the first bar of the operator as one —
+# blocking every push on a line with nothing wrong with it. A gate that cannot be
+# pushed past is worse than no gate.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s' \"\$x\" || grep -q y || true"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…and a logical OR is not reported as a pipeline" \
+    || die "an OR was reported as a racy pipeline (rc=$rc out=$out)"
+# …AND NEITHER IS A `grep -c` FOLLOWED BY AN ARITHMETIC TEST. `[ "$(… | grep -c .)"
+# -eq 2 ]` was reported, because a loose match ran off the end of the grep command
+# and found the `q` of `-eq`.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "[ \"\$(printf '%s' \"\$x\" $_bar grep -c .)\" -eq 2 ] || true"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…nor a grep -c whose line later contains -eq" \
+    || die "a grep -c was reported as a racy pipeline (rc=$rc out=$out)"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
