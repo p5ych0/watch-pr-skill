@@ -803,6 +803,14 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
+- **`ABORT: could not read this session's origin`:** setup could not create the
+  private directory the origin value travels in. It picks that directory's parent
+  on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is writable and
+  executable can still fail to hold one — a quota reached on that filesystem, a
+  full one, or a read-only mount. The abort names the step: `unset TMPDIR` and
+  re-run, and setup uses `HOME` instead. The line above it, from the helper, says
+  which component refused and why — an ancestry another account owns is a
+  different failure, and unsetting `TMPDIR` will not fix that one.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
 - **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge

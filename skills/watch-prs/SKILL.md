@@ -734,7 +734,21 @@ if [[ -z $RB_REMOTE ]]; then
                 [[ -n "" ]]
             fi
         else
+            # THE RECOVERY IS NAMED, because the operator has one and nothing on
+            # screen said so. The parent is chosen by mode bits — `-d`, `-w`, `-x`
+            # — and a `TMPDIR` that passes all three can still fail to hold a
+            # directory: a quota reached on that filesystem, a full one, or a
+            # read-only mount none of those bits describe. The helper then refuses,
+            # and a perfectly usable `HOME` sits next to it untried, because the
+            # fallthrough happens on the mode bits and not on the failure. #161
+            # carries the automatic retry and why it is not here; this is the step
+            # the operator can take without one.
+            #
+            # ONE LINE, NOT A DIAGNOSIS. The helper has already said which component
+            # refused and why, on stderr, and a second opinion from this side would
+            # be a worse copy of it — this says only what to do next.
             echo "ABORT: could not read this session's origin"
+            echo "       If TMPDIR is set, its filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup uses HOME instead."
             exit 1
             [[ -n "" ]]
         fi

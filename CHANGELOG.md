@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.59] — 2026-08-24
+
+- **The origin-read abort now tells you how to recover.** Setup picks the
+  transport parent on mode bits — `-d`, `-w`, `-x` — and prefers `TMPDIR`. A
+  `TMPDIR` that passes all three can still fail to hold a directory: a quota
+  reached on that filesystem, a full one, or a read-only mount none of those bits
+  describe. The helper refused, setup printed `ABORT: could not read this
+  session's origin`, and stopped — with a perfectly usable `HOME` beside it
+  untried, because the fallthrough happens on the mode bits and not on the
+  failure.
+
+  The abort now names the step: unset `TMPDIR` and re-run, and setup uses `HOME`.
+  Nothing else changes — the automatic retry is #161, and it is not here because
+  the driver would need three more assignable names in a shell where a startup
+  file can make any of them readonly, and neither a function nor a status branch
+  is available to it.
+
 ## [2.0.58] — 2026-08-23
 
 - **The pre-push gate now refuses a fixture that pipes a `printf` into `grep`.**

@@ -466,6 +466,16 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _rs_rc=$?
+    # …AND THE ABORT NAMES THE RECOVERY. The parent is chosen on mode bits, so a
+    # `TMPDIR` that passes `-d`, `-w` and `-x` and still cannot hold a directory —
+    # a quota, a full filesystem, a read-only mount — refuses here with a usable
+    # `HOME` untried beside it. #161 carries the automatic retry; this is the step
+    # the operator can take without one, and asserting it here is what stops the
+    # text and the behaviour drifting apart.
+    case "$_rs_out" in
+        *'unset TMPDIR'*) pass "…and the abort names the one-step recovery" ;;
+        *) die "the origin abort no longer tells the operator to unset TMPDIR: '$_rs_out'" ;;
+    esac
     { [ "$_rs_rc" -ne 0 ] \
       && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…so a helper that writes a URL and then fails does not pin the session" \
