@@ -112,7 +112,7 @@ for badremote in '/srv/mirrors/acme/widget.git' '../acme/widget.git' './acme/wid
     [ "$rc" -eq 2 ] \
         && pass "origin '$badremote' is refused rather than assumed to be GitHub" \
         || die "origin '$badremote' gave rc=$rc '$out'"
-    printf '%s' "$out" | grep -q 'origin_has_no_host' \
+    grep -q 'origin_has_no_host' <<<"$out" \
         && pass "…and named as hostless" \
         || die "the hostless origin was not named: $out"
 done
@@ -129,14 +129,14 @@ do
     st="${case%%|*}"; rest="${case#*|}"; sub="${rest%%|*}"; want="${rest##*|}"
     mk_reviews "$st" "$sub" 11
     out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run state 7 "$BOT" 2>&1)"
-    printf '%s' "$out" | grep -q "state=$want" \
+    grep -q "state=$want" <<<"$out" \
         && pass "state: $st => $want" \
         || die "state: $st gave '$out' (want $want)"
 done
 
 printf '[]' > "$TMP/none.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/none.json" run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' && pass "state: no review => none" \
+grep -q 'state=none' <<<"$out" && pass "state: no review => none" \
     || die "state: empty review list gave '$out'"
 
 # A review on ANOTHER head says nothing about this one.
@@ -146,7 +146,7 @@ OTHER40="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-01T00:00:00Z","id":12}]' \
     "$BOT" "$OTHER40" > "$TMP/other.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/other.json" run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' && pass "state: a review on another head does not count" \
+grep -q 'state=none' <<<"$out" && pass "state: a review on another head does not count" \
     || die "state: an other-head review leaked in: $out"
 
 # ── an unrecognised state is unreadable, not a dismissal ──────────────────
@@ -160,10 +160,10 @@ for badstate in 'null' '"WIBBLE"' '"approved"' '"APPROVED "' '123'; do
     printf '[{"user":{"login":"%s"},"commit_id":"%s","state":%s,"submitted_at":"2026-01-01T00:00:00Z","id":31}]' \
         "$BOT" "$HEAD40" "$badstate" > "$TMP/badstate.json"
     out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badstate.json" run state 7 "$BOT" 2>&1)"; rc=$?
-    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'status=error'; } \
+    { [ "$rc" -eq 2 ] && grep -q 'status=error' <<<"$out"; } \
         && pass "state: $badstate is unreadable, not a dismissal" \
         || die "state: $badstate gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'state=dismissed' \
+    grep -q 'state=dismissed' <<<"$out" \
         && die "state: $badstate was reported as a withdrawn review: $out"
 done
 # The control: every value in the known set must still be accepted, or "reject
@@ -172,7 +172,7 @@ for goodstate in APPROVED CHANGES_REQUESTED COMMENTED DISMISSED; do
     printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"%s","submitted_at":"2026-01-01T00:00:00Z","id":32}]' \
         "$BOT" "$HEAD40" "$goodstate" > "$TMP/goodstate.json"
     out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/goodstate.json" run state 7 "$BOT" 2>&1)"
-    printf '%s' "$out" | grep -q 'status=error' \
+    grep -q 'status=error' <<<"$out" \
         && die "state: the valid state $goodstate was rejected: $out" \
         || pass "state: $goodstate is still accepted"
 done
@@ -182,13 +182,13 @@ done
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":21},{"user":{"login":"%s"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-02T00:00:00Z","id":22}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/seq.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/seq.json" run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=dismissed' \
+grep -q 'state=dismissed' <<<"$out" \
     && pass "state: a later dismissal overrides an earlier clean review" \
     || die "state: old-clean-then-dismissed gave '$out'"
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"DISMISSED","submitted_at":"2026-01-01T00:00:00Z","id":23},{"user":{"login":"%s"},"commit_id":"%s","state":"APPROVED","submitted_at":"2026-01-02T00:00:00Z","id":24}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/seq2.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/seq2.json" run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=reviewed' \
+grep -q 'state=reviewed' <<<"$out" \
     && pass "state: a later approval supersedes an earlier dismissal" \
     || die "state: dismissed-then-approved gave '$out'"
 
@@ -196,7 +196,7 @@ printf '%s' "$out" | grep -q 'state=reviewed' \
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"COMMENTED","submitted_at":"2026-01-01T00:00:00Z","id":25},{"user":{"login":"%s"},"commit_id":"%s","state":"PENDING","submitted_at":null,"id":26}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/draft.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/draft.json" run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=pending' \
+grep -q 'state=pending' <<<"$out" \
     && pass "state: an in-flight re-review outranks the earlier clean one" \
     || die "state: clean-plus-draft gave '$out'"
 
@@ -263,12 +263,12 @@ printf '[]' > "$TMP/noreviews.json"
 mk_clean_comment "${HEAD40:0:10}"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=reviewed' \
+grep -q 'state=reviewed' <<<"$out" \
     && pass "a clean-pass comment bound to this head is a reviewed state" \
     || die "clean comment gave '$out'"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean findings=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'verdict=clean findings=0' <<<"$out"; } \
     && pass "…and yields a clean verdict, so the phase can complete" \
     || die "clean comment verdict gave rc=$rc '$out'"
 
@@ -276,7 +276,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/ico
 mk_clean_comment "bbbbbbbbbb"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' \
+grep -q 'state=none' <<<"$out" \
     && pass "a clean comment for another head does not count" \
     || die "other-head clean comment leaked in: $out"
 
@@ -285,7 +285,7 @@ printf '%s' "$out" | grep -q 'state=none' \
 mk_clean_comment "${HEAD40:0:10}" "Some unrelated remark about the diff"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' \
+grep -q 'state=none' <<<"$out" \
     && pass "a comment quoting the head without the clean phrasing is not a signoff" \
     || die "an unrelated comment was read as clean: $out"
 
@@ -293,7 +293,7 @@ printf '%s' "$out" | grep -q 'state=none' \
 mk_clean_comment "${HEAD40:0:10}" "$CLEAN_PHRASE" "somebody"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' \
+grep -q 'state=none' <<<"$out" \
     && pass "a clean comment from another account is not this reviewer's signoff" \
     || die "another account signed off: $out"
 
@@ -303,7 +303,7 @@ mk_clean_comment "${HEAD40:0:10}" "$CLEAN_PHRASE" "$BOT" "2026-01-01T00:00:00Z"
 mk_reviews CHANGES_REQUESTED '"2026-01-02T00:00:00Z"' 903
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=blocked' \
+grep -q 'state=blocked' <<<"$out" \
     && pass "an older clean comment does not mask a newer blocking review" \
     || die "a stale clean comment masked a newer blocking review: $out"
 
@@ -329,12 +329,12 @@ mk_reviews CHANGES_REQUESTED '"2026-01-01T00:00:00Z"' 940
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=reviewed' \
+grep -q 'state=reviewed' <<<"$out" \
     && pass "a newer clean comment supersedes an older blocking review" \
     || die "the stale review stayed authoritative: $out"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'verdict=clean' <<<"$out"; } \
     && pass "…and the verdict is clean, so the phase can move on" \
     || die "newer clean comment gave rc=$rc '$out'"
 
@@ -353,7 +353,7 @@ printf '[%s]' "$(mk_rc 1 '"## Review\n\nNo blocking findings on `aaaaaaa`."' 42)
     > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1 source=replies-only'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'verdict=findings findings=1 source=replies-only' <<<"$out"; } \
     && pass "a review whose only comment is a reply is named, not read as either answer" \
     || die "a reply-only review gave rc=$rc '$out'"
 
@@ -364,7 +364,7 @@ printf '[%s]' "$(mk_rc 2 '"No blocking findings on `aaaaaaa`.\n\nCorrection: thi
     > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=1'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'findings=1' <<<"$out"; } \
     && pass "…so a reply that carries a verdict line and then retracts it never clears" \
     || die "a retracting reply gave rc=$rc '$out'"
 
@@ -372,8 +372,8 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
 printf '[%s]' "$(mk_rc 3 '"this is wrong"')" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-    && printf '%s' "$out" | grep -qv 'replies-only' \
+{ [ "$rc" -eq 1 ] && grep -q 'verdict=findings findings=1' <<<"$out"; } \
+    && grep -qv 'replies-only' <<<"$out" \
     && pass "…while a top-level comment is a finding like any other" \
     || die "a top-level comment gave rc=$rc '$out'"
 
@@ -382,8 +382,8 @@ printf '[%s,%s]' "$(mk_rc 4 '"one"')" "$(mk_rc 5 '"a follow-up"' 4)" \
     > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
-    && printf '%s' "$out" | grep -qv 'replies-only' \
+{ [ "$rc" -eq 1 ] && grep -q 'findings=2' <<<"$out"; } \
+    && grep -qv 'replies-only' <<<"$out" \
     && pass "…and a review carrying both counts both, without the name" \
     || die "a mixed review gave rc=$rc '$out'"
 
@@ -397,8 +397,8 @@ printf '[{"user":{"login":"%s"},"id":9,"body":"x","created_at":"2026-01-01T00:00
     "$BOT" > "$TMP/comments-950.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_FIXTURE_DIR="$TMP" \
         run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'verdict=findings findings=1'; } \
-    && printf '%s' "$out" | grep -qv 'replies-only' \
+{ [ "$rc" -eq 1 ] && grep -q 'verdict=findings findings=1' <<<"$out"; } \
+    && grep -qv 'replies-only' <<<"$out" \
     && pass "a null in_reply_to_id is a top-level finding, not a reply and not malformed" \
     || die "a null in_reply_to_id gave rc=$rc '$out'"
 
@@ -418,7 +418,7 @@ mk_reviews CHANGES_REQUESTED '"2026-01-03T00:00:00Z"' 941
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-02T00:00:00Z"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=blocked' \
+grep -q 'state=blocked' <<<"$out" \
     && pass "an older clean comment does not supersede a newer review" \
     || die "a stale clean comment won: $out"
 
@@ -428,7 +428,7 @@ printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"PENDING","submitted_at
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-09T00:00:00Z"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=pending' \
+grep -q 'state=pending' <<<"$out" \
     && pass "an in-flight draft outranks even a newer clean comment" \
     || die "a clean comment overrode a draft: $out"
 
@@ -462,7 +462,7 @@ jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE"
     > "$TMP/icomments.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' \
+grep -q 'state=none' <<<"$out" \
     && pass "the current prefix in prose is not a signoff; only the footer counts" \
     || die "a prose mention was read as the reviewed commit: $out"
 
@@ -475,7 +475,7 @@ jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE"
     > "$TMP/icomments.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=none' \
+grep -q 'state=none' <<<"$out" \
     && pass "a decoy footer line in prose does not sign off; the last footer wins" \
     || die "a decoy footer was read as the reviewed commit: $out"
 
@@ -486,7 +486,7 @@ jq -n --arg login "$BOT" --arg cur "${HEAD40:0:10}" --arg phrase "$CLEAN_PHRASE"
     > "$TMP/icomments.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/noreviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=reviewed' \
+grep -q 'state=reviewed' <<<"$out" \
     && pass "…and the real footer still signs off when it is the last one" \
     || die "the genuine footer was not read: $out"
 
@@ -501,7 +501,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
 [ "$rc" -eq 2 ] \
     && pass "a same-second review and clean comment => 2, not a silent winner" \
     || die "same-second tie gave rc=$rc '$out'"
-printf '%s' "$out" | grep -q 'ambiguous_verdict_order' \
+grep -q 'ambiguous_verdict_order' <<<"$out" \
     && pass "…named as an ambiguous ordering" \
     || die "the tie was not named: $out"
 
@@ -509,13 +509,13 @@ printf '%s' "$out" | grep -q 'ambiguous_verdict_order' \
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-07T12:00:01Z"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=reviewed' \
+grep -q 'state=reviewed' <<<"$out" \
     && pass "a comment one second later still supersedes" \
     || die "a later comment did not win: $out"
 mk_clean_comment_at "${HEAD40:0:10}" "2026-01-07T11:59:59Z"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" \
         run state 7 "$BOT" 2>&1)"
-printf '%s' "$out" | grep -q 'state=blocked' \
+grep -q 'state=blocked' <<<"$out" \
     && pass "…and one second earlier still does not" \
     || die "an earlier comment won: $out"
 
@@ -523,13 +523,13 @@ printf '%s' "$out" | grep -q 'state=blocked' \
 mk_reviews APPROVED '"2026-01-01T00:00:00Z"' 31
 printf '[]' > "$TMP/comments-31.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'verdict=clean' <<<"$out"; } \
     && pass "verdict: approved with zero comments => clean (0)" \
     || die "verdict: clean case gave rc=$rc '$out'"
 
 printf '[%s,%s]' "$(mk_rc 1 '"x"')" "$(mk_rc 2 '"y"')" > "$TMP/comments-31.json"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'findings=2'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'findings=2' <<<"$out"; } \
     && pass "verdict: inline comments => findings (1)" \
     || die "verdict: findings case gave rc=$rc '$out'"
 
@@ -596,7 +596,7 @@ for shorthead in abc abc123 0123456789abcdef; do
     [ "$rc" -eq 2 ] \
         && pass "an explicit short head ('$shorthead') => 2, not state=none" \
         || die "short head '$shorthead' gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'state=none' \
+    grep -q 'state=none' <<<"$out" \
         && die "short head '$shorthead' was reported as state=none" \
         || pass "short head '$shorthead' is not reported as an absent review"
 done
@@ -615,7 +615,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/badts.json" run verdict 7 "$BOT" 2>&1)
 [ "$rc" -eq 2 ] \
     && pass "a non-timestamp submitted_at => 2 (never sorted above a real review)" \
     || die "bad timestamp gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'verdict=clean' \
+grep -q 'verdict=clean' <<<"$out" \
     && die "a stale APPROVED with a junk timestamp reported CLEAN: $out" \
     || pass "no clean verdict from a junk timestamp"
 # Canonical UTC works; the non-canonical forms are rejected below, because the
@@ -650,7 +650,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/prefixts.json" run verdict 7 "$BOT" 2>
 [ "$rc" -eq 2 ] \
     && pass "a same-prefix malformed timestamp => 2" \
     || die "prefix-matching timestamp gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'verdict=clean' \
+grep -q 'verdict=clean' <<<"$out" \
     && die "a stale APPROVED with a prefix-valid timestamp reported CLEAN: $out" \
     || pass "no clean verdict from a prefix-valid timestamp"
 
@@ -667,7 +667,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/offsetts.json" run verdict 7 "$BOT" 2>
 [ "$rc" -eq 2 ] \
     && pass "an offset timestamp => 2, rather than sorting above a newer UTC review" \
     || die "offset timestamp gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'verdict=clean' \
+grep -q 'verdict=clean' <<<"$out" \
     && die "an older APPROVED (+02:00) outranked a newer CHANGES_REQUESTED: $out" \
     || pass "no clean verdict from an offset-timestamped approval"
 
@@ -680,7 +680,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/fracts.json" run verdict 7 "$BOT" 2>&1
 [ "$rc" -eq 2 ] \
     && pass "a fractional-second timestamp => 2" \
     || die "fractional timestamp gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'verdict=clean' \
+grep -q 'verdict=clean' <<<"$out" \
     && die "a newer CHANGES_REQUESTED sorted below an older APPROVED: $out" \
     || pass "no clean verdict from a fractional-second timestamp"
 
@@ -706,7 +706,7 @@ SH
 chmod +x "$TMP/bin/gh"
 rm -f "$TMP/seen"
 out="$(run verdict 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'review_state_changed'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'review_state_changed' <<<"$out"; } \
     && pass "verdict: a review that changes between snapshots is reported as changed" \
     || die "verdict: judged one snapshot and counted another (rc=$rc '$out')"
 
@@ -765,7 +765,7 @@ out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomm
 # AND AN UNREADABLE FETCH IS 2, with nothing on stdout.
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_REVIEWS_RC=1 \
         run clean-at 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and an unreadable reviews fetch is 2" \
     || die "clean-at on an unreadable fetch gave (rc=$rc out='$out')"
 out="$(GH_HEAD="$HEAD40" GH_REVIEWS="$TMP/reviews.json" GH_REVIEWS_RC=1 \
@@ -850,13 +850,13 @@ printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviou
     "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]')" \
     > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…while a truncated review page is unreadable" \
     || die "a truncated review page gave (rc=$rc out='$out')"
 printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":true},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}}]}}}}}' \
     "$BOT" "$HEAD40" > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and so is a truncated comment page" \
     || die "a truncated comment page gave (rc=$rc out='$out')"
 # A 200 CAN CARRY BOTH `errors` AND A STRUCTURALLY VALID `data`, and the partial
@@ -864,14 +864,14 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 printf '{"errors":[{"message":"nope"}],"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[]}}}}}' \
     > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a response carrying errors beside data is unreadable" \
     || die "an errors-bearing response gave (rc=$rc out='$out')"
 # A COMMENT ROW THIS CANNOT READ IS A PAYLOAD, NOT A COMMENT.
 gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
     '[{"databaseId":9001,"createdAt":"whenever","replyTo":{"databaseId":8001}}]')"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a comment row with an unreadable time refuses rather than being skipped" \
     || die "a malformed comment row gave (rc=$rc out='$out')"
 out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
@@ -886,7 +886,7 @@ out="$(run escape-snapshot 7 "$BOT" 2>/dev/null)"
 printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":null,"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
     "$BOT" "$HEAD40" "$HEAD40" > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a malformed NEWER review is unreadable, not filtered past" \
     || die "a malformed newer review was discarded (rc=$rc out='$out')"
 # AND THE COMMIT OID IS A COMMIT, not merely a string. A truncated head passes a
@@ -896,7 +896,7 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"2026-02-02T00:00:00Z","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"aaaaaaa"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
     "$BOT" "$HEAD40" "$BOT" > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a newer review whose commit is not a commit cannot be filtered past" \
     || die "a truncated oid was discarded (rc=$rc out='$out')"
 
@@ -908,7 +908,7 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 printf '{"data":{"repository":{"pullRequest":{"reviews":{"pageInfo":{"hasPreviousPage":false},"nodes":[{"databaseId":42,"submittedAt":"2026-01-01T00:00:00Z","state":"COMMENTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":8001}}]}},{"databaseId":43,"submittedAt":"0000","state":"CHANGES_REQUESTED","author":{"login":"%s"},"commit":{"oid":"%s"},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}}' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/gql.json"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a newer review whose time is not a time cannot hand the decision to an older one" \
     || die "a low-sorting malformed time selected an older review (rc=$rc out='$out')"
 
@@ -919,13 +919,13 @@ out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
 gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
     '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":"8001"}]')"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and a reply link that is not an object is unreadable, not a reply" \
     || die "a malformed reply link was classified (rc=$rc out='$out')"
 gql "$(gql_review COMMENTED 2026-01-01T00:00:00Z 42 \
     '[{"databaseId":9001,"createdAt":"2026-01-05T00:00:00Z","replyTo":{"databaseId":"8001"}}]')"
 out="$(run escape-snapshot 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=unreadable' <<<"$out"; } \
     && pass "…and neither is one whose id is not a number" \
     || die "a reply link with a non-numeric id was classified (rc=$rc out='$out')"
 

@@ -33,7 +33,7 @@ arg_case() {   # arg_case <label> [args…]
     local out rc=0 label="$1"
     shift
     out="$(run_limited 10 "$SCRIPT" "$@" 2>&1)" || rc=$?
-    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'the CI gate needs'; } \
+    { [ "$rc" -eq 1 ] && grep -q 'the CI gate needs' <<<"$out"; } \
         && pass "$label" \
         || die "$label — rc=$rc out='$out'"
 }
@@ -420,7 +420,7 @@ DATESH
             GATE_PROBE="$GATETMP/probe" PR_CI_INTERVAL=1 PR_CI_TIMEOUT=5 PR_CI_GRACE=2 \
             "$GATETMP/s/pr-ci-gate.sh" 7 0123456789abcdef0123456789abcdef01234567 2>&1)" || rc=$?
         calls="$(grep -c call "$GATETMP/calls" 2>/dev/null)" || calls=0
-        { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'clock'; } \
+        { [ "$rc" -eq 1 ] && grep -q 'clock' <<<"$out"; } \
             && pass "$label" \
             || die "$label — rc=$rc out='$out' (wanted 1 and a clock refusal)"
         [ "${calls:-0}" -eq "$wantcalls" ] \

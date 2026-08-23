@@ -201,10 +201,10 @@ last_after() {
 
 # ── the phase advances at all ──────────────────────────────────────────────
 world; got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_PHASE_RECORDED pr=7 reviewer=$CODEXBOT codex-sha=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF "PR_PHASE_RECORDED pr=7 reviewer=$CODEXBOT codex-sha=$HEAD40" <<<"${got#*|}"; } \
     && pass "a clean Codex verdict records the phase" \
     || die "record gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
+grep -qF "pr-copilot-phase.sh open 7 $HEAD40" <<<"${got#*|}" \
     && pass "…and the stop names the command that opens the phase" \
     || die "the operator stop does not say how to resume: '${got#*|}'"
 
@@ -221,7 +221,7 @@ printf '%s' "${got#*|}" | grep -qF "pr-copilot-phase.sh open 7 $HEAD40" \
 # would name it.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-late"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the head moved to' <<<"${got#*|}"; } \
     && pass "a push landing during the verdict-time probes stops the record" \
     || die "a push during the time probes gave '${got}'"
 nothing_posted "…with no signoff naming the commit it outlived"
@@ -235,7 +235,7 @@ nothing_posted "…with no signoff naming the commit it outlived"
 # recording at all, not a value the record carries.
 world; printf '1\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no longer clean' <<<"${got#*|}"; } \
     && pass "a verdict that stopped being clean while its time was read stops the record" \
     || die "a moved verdict gave '${got}'"
 nothing_posted "…with no signoff recorded for it"
@@ -246,7 +246,7 @@ nothing_posted "…with no signoff recorded for it"
 # record still carries no time.
 world; printf '2\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'will not carry one'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'will not carry one' <<<"${got#*|}"; } \
     && pass "…while an unreadable one records without the field rather than stopping" \
     || die "an unreadable clean-at gave '${got}'"
 # AND THAT RE-PROOF IS A REFUSAL WHERE IT COMES BACK NON-CLEAN.
@@ -254,7 +254,7 @@ world; printf '2\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 printf '1\n' > "$W/verdict.2.rc"
 printf 'PR_REVIEW_STATE verdict=findings findings=1\n' > "$W/verdict.2.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no longer clean' <<<"${got#*|}"; } \
     && pass "…and a blocking verdict landing during that failed read still stops it" \
     || die "an unreadable clean-at skipped the cleanliness re-proof: '${got}'"
 nothing_posted "…with no signoff recorded for it"
@@ -325,7 +325,7 @@ grep -qF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
 # failure this whole file exists to prevent.
 world; printf '1\n' > "$W/verdict.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'Codex is not clean on the sha being recorded'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'Codex is not clean on the sha being recorded' <<<"${got#*|}"; } \
     && pass "a verdict that is not clean stops the phase" \
     || die "an unclean verdict gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -339,14 +339,14 @@ nothing_posted "…with no signoff recorded"
 
 world; printf '1\n' > "$W/head.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not capture the Codex-signed-off head'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not capture the Codex-signed-off head' <<<"${got#*|}"; } \
     && pass "an unreadable head stops the phase" \
     || die "an unreadable head gave '${got}'"
 nothing_posted "…with no signoff recorded"
 
 world; printf 'not-a-sha\n' > "$W/head.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'is not a full OID' <<<"${got#*|}"; } \
     && pass "a head that is not a full OID stops the phase" \
     || die "a malformed head gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -418,7 +418,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-03-03T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'this phase was reopened' <<<"${got#*|}"; } \
     && pass "a revocation newer than the verdict stops the record" \
     || die "a cancelling revocation was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded, so it cannot supersede the revocation"
@@ -429,7 +429,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-02-02T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'this phase was reopened' <<<"${got#*|}"; } \
     && pass "…and one at the same second refuses, since nothing here can order them" \
     || die "a same-second revocation was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -439,7 +439,7 @@ nothing_posted "…with no signoff recorded"
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none reason=revoked\n' "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'carries no time'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'carries no time' <<<"${got#*|}"; } \
     && pass "…and an untimed revocation refuses rather than being assumed older" \
     || die "an untimed revocation was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -451,7 +451,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=yesterday id=906 s
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'its time is unreadable'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'its time is unreadable' <<<"${got#*|}"; } \
     && pass "…and a revocation time of another shape refuses rather than sorting low" \
     || die "an unshaped revocation time was compared: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -459,7 +459,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"; printf 'soon\n' > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'readable time'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'readable time' <<<"${got#*|}"; } \
     && pass "…and the same on the verdict's side" \
     || die "an unshaped verdict time was compared: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -471,7 +471,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"; printf '2\n' > "$W/clean-at.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no verdict on'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no verdict on' <<<"${got#*|}"; } \
     && pass "…and an unreadable verdict time refuses with a revocation standing" \
     || die "an unreadable verdict time was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -479,7 +479,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
     "$CODEXBOT" > "$W/signoff.out"
 printf '1\n' > "$W/signoff.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'readable time'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'readable time' <<<"${got#*|}"; } \
     && pass "…and an empty one, which is 'no verdict on this head at all'" \
     || die "an untimed verdict was recorded over: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -494,7 +494,7 @@ got="$(run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while an unreadable verdict time does not stop an ordinary phase" \
     || die "an unreadable verdict time stopped the record: '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'will not carry one' \
+grep -qF 'will not carry one' <<<"${got#*|}" \
     && pass "…and it says the signoff carries none, rather than degrading in silence" \
     || die "the record was posted without a verdict time and did not say so: '${got#*|}'"
 posted | grep -qF '**Review-Signoff:**' \
@@ -518,7 +518,7 @@ printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-03-03T00:00:00Z id=9
     "$CODEXBOT" > "$W/signoff.2.out"
 printf '1\n' > "$W/signoff.2.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'this phase was reopened'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'this phase was reopened' <<<"${got#*|}"; } \
     && pass "a revocation landing while the verdict's time is read is the one compared" \
     || die "a revocation posted during the fetch was ordered as the stale one: '${got}'"
 nothing_posted "…with no signoff recorded over it"
@@ -533,7 +533,7 @@ printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-03-03T00:00:00Z id=9
     "$CODEXBOT" "$HEAD40" > "$W/signoff.2.out"
 printf '0\n' > "$W/signoff.2.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the newest record changed'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the newest record changed' <<<"${got#*|}"; } \
     && pass "…and a newest record that stopped being a revocation refuses" \
     || die "a changed record was acted on anyway: '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -557,7 +557,7 @@ last_before 'pr-signoff.sh' 'gh pr comment' \
 # question is asked at all, and the re-read decides the answer.
 world; printf '2\n' > "$W/signoff.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not read the signoff record'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not read the signoff record' <<<"${got#*|}"; } \
     && pass "an unreadable signoff probe stops the record rather than reading as no revocation" \
     || die "an unreadable signoff probe gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -566,7 +566,7 @@ world; printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-01T00:00:0
 printf '1\n' > "$W/signoff.rc"
 printf '2\n' > "$W/signoff.2.rc"; : > "$W/signoff.2.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not re-read the signoff record'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not re-read the signoff record' <<<"${got#*|}"; } \
     && pass "…and so does an unreadable re-read, which is the one the comparison uses" \
     || die "an unreadable re-read gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -575,7 +575,7 @@ nothing_posted "…with no signoff recorded"
 # fires on the FIRST verdict call, so this is a push landing before the CI gate.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the head moved to' <<<"${got#*|}"; } \
     && pass "…and a push landing in that window stops it too" \
     || die "a moved head gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -588,7 +588,7 @@ nothing_posted "…with no signoff recorded"
 for _n in 2 3; do
     world; printf '1\n' > "$W/head.rc.$_n"
     got="$(run record 7 "$TMP/body.md")"
-    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not re-read the head'; } \
+    { [ "${got%%|*}" = 1 ] && grep -qF 'could not re-read the head' <<<"${got#*|}"; } \
         && pass "…and head read #$_n failing after printing a plausible sha stops it" \
         || die "head read #$_n failing gave '${got}'"
     nothing_posted "…with no signoff recorded"
@@ -601,7 +601,7 @@ done
 # change lands after the first head check and before the post.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-late"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the head moved to'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the head moved to' <<<"${got#*|}"; } \
     && pass "…and one landing during the later probes stops it as well" \
     || die "a head moved during the signoff probe gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -611,7 +611,7 @@ nothing_posted "…with no signoff recorded"
 # was one. #139 folded the separate re-read into it.
 world; printf '1\n' > "$W/clean-at.rc"; : > "$W/clean-at.out"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean on'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no longer clean on' <<<"${got#*|}"; } \
     && pass "…and a verdict withdrawn in that window stops it" \
     || die "a withdrawn verdict gave '${got}'"
 nothing_posted "…with no signoff recorded"
@@ -631,7 +631,7 @@ got="$(run record 7 "$TMP/body.md")"
 # exists for: long enough to reach the boundary AND about to commit to more work.
 world; printf '3\n' > "$W/pr-round-count.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'round boundary reached'; } \
+{ [ "${got%%|*}" = 3 ] && grep -qF 'round boundary reached' <<<"${got#*|}"; } \
     && pass "a round boundary pauses the transition" \
     || die "a boundary gave '${got}'"
 # THE RECORD SURVIVES THE PAUSE. The boundary message offers "merge on the Codex
@@ -642,7 +642,7 @@ got="$(run record 7 "$TMP/body.md")"
 posted | grep -qF "**Review-Signoff:** \`$CODEXBOT\` \`$HEAD40\`" \
     && pass "…with the signoff recorded, since the pause offers merging on it" \
     || die "the pause discarded the signoff it offers to merge on: $(posted)"
-printf '%s' "${got#*|}" | grep -qF "codex-sha=$HEAD40" \
+grep -qF "codex-sha=$HEAD40" <<<"${got#*|}" \
     && pass "…and the sha reported, so the codex-only merge path has it" \
     || die "the pause reported no sha: '${got#*|}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -656,7 +656,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # anyone having established whether a boundary was due.
 world; printf '2\n' > "$W/pr-round-count.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'nothing recorded'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'nothing recorded' <<<"${got#*|}"; } \
     && pass "an unreadable round count is a stop, not a pause and not a pass" \
     || die "an unreadable count gave '${got}'"
 nothing_posted "…with no signoff a later session could act on"
@@ -665,7 +665,7 @@ before 'pr-round-count' 'gh pr comment' \
 
 # ── THE CALLER'S ACCOUNT IS REQUIRED ───────────────────────────────────────
 world; got="$(run record 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a body file is required'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a body file is required' <<<"${got#*|}"; } \
     && pass "the phase body is required" \
     || die "a missing body argument gave '${got}'"
 world; got="$(run record 7 "$TMP/nope.md")"
@@ -673,7 +673,7 @@ world; got="$(run record 7 "$TMP/nope.md")"
     && pass "…and a body file that is not there is a stop" \
     || die "a missing body file gave '${got}'"
 world; : > "$TMP/empty.md"; got="$(run record 7 "$TMP/empty.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the phase body is empty'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the phase body is empty' <<<"${got#*|}"; } \
     && pass "…and an empty one is too" \
     || die "an empty body gave '${got}'"
 grep -q 'gh pr view' "$TMP/calls" \
@@ -685,7 +685,7 @@ grep -q 'gh pr view' "$TMP/calls" \
 # failed" must not look alike.
 world; printf '1\n' > "$W/comment.rc"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the signoff is not recorded'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the signoff is not recorded' <<<"${got#*|}"; } \
     && pass "a failed post stops the phase and says the signoff is not recorded" \
     || die "a failed post gave '${got}'"
 
@@ -700,7 +700,7 @@ for _mk in '**Review-Pause-Acknowledged:** `chatgpt-codex-connector[bot]` `10`' 
            '**Review-Signoff-Revoked:** `chatgpt-codex-connector[bot]`'; do
     world; printf 'the finding said it should read:\n%s\nand that is why\n' "$_mk" > "$TMP/body.md"
     got="$(run record 7 "$TMP/body.md")"
-    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reads as a record'; } \
+    { [ "${got%%|*}" = 1 ] && grep -qF 'reads as a record' <<<"${got#*|}"; } \
         && pass "a body line that is a control marker is refused: ${_mk%% *}" \
         || die "a body carrying ${_mk%% *} gave '${got}'"
     nothing_posted "…and nothing was published under the operator's identity"
@@ -710,7 +710,7 @@ done
 # after — so the quoted mention starts a Codex pass that answers nobody.
 world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/body.md"
 got="$(run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "contains '@codex review'"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "contains '@codex review'" <<<"${got#*|}"; } \
     && pass "a body quoting the Codex trigger is refused" \
     || die "a body quoting @codex review gave '${got}'"
 nothing_posted "…and nothing was posted to request that pass"
@@ -740,7 +740,7 @@ got="$(run record 7 "$TMP/body.md")"
 
 # ── open: THE PHASE OPENS ON THE HEAD THAT WAS SIGNED OFF ──────────────────
 world; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_COPILOT_PHASE_OPENED pr=7 head=$HEAD40 prior-review=42"; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF "PR_COPILOT_PHASE_OPENED pr=7 head=$HEAD40 prior-review=42" <<<"${got#*|}"; } \
     && pass "the operator's answer opens the Copilot phase" \
     || die "open gave '${got}'"
 grep -q -- '--add-reviewer @copilot' "$TMP/calls" \
@@ -758,7 +758,7 @@ before 'gh pr comment' 'gh pr edit' \
 # merge gate on another, and only the gate finds out.
 world; printf '%s\n' "$OTHER40" > "$W/head.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the head is $OTHER40, not the $HEAD40"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "the head is $OTHER40, not the $HEAD40" <<<"${got#*|}"; } \
     && pass "a head that moved since the signoff stops the phase from opening" \
     || die "a moved head gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -773,7 +773,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # the verdict the whole Copilot phase is spent before the merge gate discovers the
 # signoff no longer describes a clean review.
 world; printf '1\n' > "$W/verdict.rc"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "Codex is no longer clean on $HEAD40"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "Codex is no longer clean on $HEAD40" <<<"${got#*|}"; } \
     && pass "a Codex review dismissed on an unchanged head stops the phase from opening" \
     || die "a same-head dismissal gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -794,7 +794,7 @@ world; printf '1\n' > "$W/head.rc"; got="$(run open 7 "$HEAD40")"
 # THE BASELINE IS READ BEFORE THE REQUEST, and a failed read is fatal: without it
 # the watch cannot tell the new pass from the old one on an unchanged head.
 world; printf '1\n' > "$W/review-id.rc"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'do not request a review blind'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'do not request a review blind' <<<"${got#*|}"; } \
     && pass "an unreadable review id stops the phase from opening" \
     || die "an unreadable review id gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -804,7 +804,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # AN EMPTY BASELINE IS AN ANSWER: a head with no Copilot review yet has no id, and
 # `pr-watch.sh` takes that as "wait on any terminal review".
 world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$'; } \
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_COPILOT_PHASE_OPENED .* prior-review=$' <<<"${got#*|}"; } \
     && pass "a head with no Copilot review yet opens, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
 
@@ -814,7 +814,7 @@ world; : > "$W/review-id.out"; got="$(run open 7 "$HEAD40")"
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.2.out"
 printf '1\n' > "$W/signoff.2.rc"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no current Codex signoff' <<<"${got#*|}"; } \
     && pass "a Codex signoff revoked while the phase was being proved stops it" \
     || die "a mid-probe revocation gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -824,7 +824,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 world; printf '1\n' > "$W/verdict.2.rc"
 printf 'PR_REVIEW_STATE verdict=none reason=dismissed\n' > "$W/verdict.2.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no longer clean'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no longer clean' <<<"${got#*|}"; } \
     && pass "…and so does a verdict dismissed while it was being proved" \
     || die "a mid-probe dismissal gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -837,7 +837,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # pre-request review as the answer to a request made after it.
 world; printf '7\n' > "$W/review-id.out"; printf '99\n' > "$W/review-id.after.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'prior-review=99'; } \
+{ [ "${got%%|*}" = 0 ] && grep -q 'prior-review=99' <<<"${got#*|}"; } \
     && pass "the baseline is read after the revocation, so a pass landing meanwhile is waited past" \
     || die "the baseline was captured before the revocation: '${got}'"
 before 'gh pr comment' 'pr-review-state.sh review-id' \
@@ -851,7 +851,7 @@ before 'gh pr comment' 'pr-review-state.sh review-id' \
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.3.out"
 printf '1\n' > "$W/signoff.3.rc"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no current Codex signoff' <<<"${got#*|}"; } \
     && pass "a phase reopened during the revocation stops the request" \
     || die "a revocation-window reopen gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -879,7 +879,7 @@ _proof="$(awk -v a="$_rev" -v b="$_base" 'NR>a && NR<b && /pr-signoff.sh/ {print
 # the phase on a head Codex never signed off.
 world; printf '%s\n' "$OTHER40" > "$W/move-head-on-probe"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the head moved to $OTHER40"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "the head moved to $OTHER40" <<<"${got#*|}"; } \
     && pass "a push landing while the phase is being proved stops it from opening" \
     || die "a head moving mid-probe gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -895,7 +895,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # check passes and only the recorded signoff says what happened.
 world; printf '1\n' > "$W/signoff.rc"; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=none\n' "$CODEXBOT" > "$W/signoff.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no current Codex signoff'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no current Codex signoff' <<<"${got#*|}"; } \
     && pass "a revoked Codex signoff stops the phase from opening" \
     || die "a revoked signoff gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -908,7 +908,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
 # …AND A SIGNOFF FOR A DIFFERENT HEAD IS NOT THIS ONE.
 world; printf 'PR_SIGNOFF pr=7 reviewer=%s sha=%s\n' "$CODEXBOT" "$OTHER40" > "$W/signoff.out"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'not for'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'not for' <<<"${got#*|}"; } \
     && pass "a recorded signoff naming another head stops the phase from opening" \
     || die "a mismatched signoff gave '${got}'"
 
@@ -918,7 +918,7 @@ got="$(run open 7 "$HEAD40")"
 # path the published signoff exists to enable.
 world; printf '3\n' > "$W/pr-round-count.rc"
 got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'not acknowledged'; } \
+{ [ "${got%%|*}" = 3 ] && grep -qF 'not acknowledged' <<<"${got#*|}"; } \
     && pass "an unacknowledged round boundary pauses the phase from opening" \
     || die "an unacknowledged boundary gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -934,7 +934,7 @@ got="$(run open 7 "$HEAD40")"
     || die "an unreadable count on open gave '${got}'"
 
 world; printf '1\n' > "$W/comment.rc"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not revoke'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not revoke' <<<"${got#*|}"; } \
     && pass "a failed revocation stops the phase from opening" \
     || die "a failed revocation gave '${got}'"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -942,16 +942,16 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     || pass "…with Copilot not requested"
 
 world; printf '1\n' > "$W/edit.rc"; got="$(run open 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'not permission to skip the pass'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'not permission to skip the pass' <<<"${got#*|}"; } \
     && pass "a failed request stops, and says so rather than reading as a slow reviewer" \
     || die "a failed --add-reviewer gave '${got}'"
 
 world; got="$(run open 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'open' needs the head"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'open' needs the head" <<<"${got#*|}"; } \
     && pass "open without the signed-off head is refused" \
     || die "open with no sha gave '${got}'"
 world; got="$(run open 7 "${HEAD40:0:7}")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'is not a full OID' <<<"${got#*|}"; } \
     && pass "…and an abbreviated one is refused, since the merge gate needs forty" \
     || die "open with a short sha gave '${got}'"
 
@@ -960,15 +960,15 @@ world; got="$(run open 7 "${HEAD40:0:7}")"
 # when it meant the other has either skipped that decision or re-asked a question
 # already answered.
 world; got="$(run)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a stage is required'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a stage is required' <<<"${got#*|}"; } \
     && pass "an absent stage is refused" \
     || die "no stage gave '${got}'"
 world; got="$(run 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'7' is not a stage"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'7' is not a stage" <<<"${got#*|}"; } \
     && pass "a PR number in stage position is refused by name" \
     || die "a stageless call gave '${got}'"
 world; got="$(run start 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'start' is not a stage"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'start' is not a stage" <<<"${got#*|}"; } \
     && pass "an unknown stage is refused by name" \
     || die "an unknown stage gave '${got}'"
 world; got="$(run record x "$TMP/body.md")"
@@ -986,15 +986,15 @@ world; got="$(run record x "$TMP/body.md")"
 # fault-tolerance pass must NOT be offered: taking it costs a revocation, a round
 # and a reopened phase for a verdict that cannot differ (#55).
 world; got="$(run close 7 "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "PR_COPILOT_PHASE_CLOSED pr=7 reviewer=$COPILOTBOT copilot-sha=$HEAD40 codex-sha=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF "PR_COPILOT_PHASE_CLOSED pr=7 reviewer=$COPILOTBOT copilot-sha=$HEAD40 codex-sha=$HEAD40" <<<"${got#*|}"; } \
     && pass "a clean Copilot verdict closes the phase and names both shas" \
     || die "close on a matching head gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'stop and leave the PR open' \
+grep -qF 'stop and leave the PR open' <<<"${got#*|}" \
     && pass "…and the stop offers merge or stop" \
     || die "the matching-head stop did not offer to leave it open: ${got#*|}"
 # THE ABSENCE AS WELL AS THE PRESENCE. "Offers merge" is true of both stops, so
 # only asserting what must NOT be there tells them apart.
-printf '%s' "${got#*|}" | grep -qF 'another Codex pass' \
+grep -qF 'another Codex pass' <<<"${got#*|}" \
     && die "a fault-tolerance pass was offered over a head Codex already reviewed: ${got#*|}" \
     || pass "…and offers no fault-tolerance pass over an unchanged head"
 # …AND THE MENU IS A WHITELIST, not one forbidden phrase. Carried over from the
@@ -1021,13 +1021,13 @@ posted | grep -qF "**Review-Signoff:** \`$COPILOTBOT\` \`$HEAD40\`" \
 # WHERE THE PHASE PRODUCED COMMITS the head has moved past the Codex signoff, and
 # the pass IS offered — with the revocation that has to precede it.
 world; got="$(run close 7 "$OTHER40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF "copilot-sha=$HEAD40 codex-sha=$OTHER40"; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF "copilot-sha=$HEAD40 codex-sha=$OTHER40" <<<"${got#*|}"; } \
     && pass "a moved head closes the phase naming both commits" \
     || die "close on a moved head gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'another Codex pass' \
+grep -qF 'another Codex pass' <<<"${got#*|}" \
     && pass "…and the stop offers the fault-tolerance pass" \
     || die "no fault-tolerance option after a phase that moved the head: ${got#*|}"
-printf '%s' "${got#*|}" | grep -qF 'Review-Signoff-Revoked' \
+grep -qF 'Review-Signoff-Revoked' <<<"${got#*|}" \
     && pass "…and requires the revocation before it" \
     || die "the fault-tolerance option omitted the revocation: ${got#*|}"
 # …AND IT DOES NOT CLAIM BOTH REVIEWERS READ THE HEAD. Once Copilot's fixes have
@@ -1036,14 +1036,14 @@ printf '%s' "${got#*|}" | grep -qF 'Review-Signoff-Revoked' \
 # signed off on <head>" at the merge-versus-another-pass decision is a false
 # two-reviews-on-this-commit assurance at precisely the moment it matters. Carried
 # over from the contract test with the block.
-printf '%s' "${got#*|}" | grep -qi 'has not run yet' \
+grep -qi 'has not run yet' <<<"${got#*|}" \
     && pass "…and says the delta check has not run yet" \
     || die "the stop presents an unvalidated delta as though it were checked: ${got#*|}"
 
 # `codex-only` HAS NOTHING TO RECORD, and saying so is not the same as doing it.
 # Running the rest in that mode is how a previous round's fix stayed unreachable.
 world; got="$(run close 7 "$HEAD40" codex-only)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'mode=codex-only copilot-sha=none'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'mode=codex-only copilot-sha=none' <<<"${got#*|}"; } \
     && pass "codex-only closes with nothing recorded" \
     || die "codex-only gave '${got}'"
 grep -q 'pr comment' "$TMP/calls" \
@@ -1054,7 +1054,7 @@ grep -q 'pr-review-state.sh verdict' "$TMP/calls" \
     || pass "…and re-checked no Copilot verdict"
 
 world; got="$(run close 7 "$HEAD40" neither)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'neither' is not a reviewers mode"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'neither' is not a reviewers mode" <<<"${got#*|}"; } \
     && pass "an unknown reviewers mode is refused by name" \
     || die "an unknown mode gave '${got}'"
 
@@ -1084,7 +1084,7 @@ close_stops "$(run close 7 "$HEAD40")" "…and a Copilot verdict that is not cle
 # signoff that is not on the PR.
 world; printf '1\n' > "$W/comment.rc"
 got="$(run close 7 "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && ! printf '%s' "${got#*|}" | grep -q 'PR_COPILOT_PHASE_CLOSED'; } \
+{ [ "${got%%|*}" = 1 ] && ! grep -q 'PR_COPILOT_PHASE_CLOSED' <<<"${got#*|}"; } \
     && pass "a failed post is a stop and announces no closed phase" \
     || die "a failed post gave '${got}'"
 
@@ -1195,16 +1195,16 @@ forger_lies "…and the empty-string forger lies about -n ''" \
 # that broke the identity parse would fail them for a reason that is not the
 # defect. So: the lie lands, and the rest of the run still works.
 world; got="$(shadow_run notastage 7)"
-printf '%s' "${got#*|}" | grep -qF "'notastage' is not a stage" \
+grep -qF "'notastage' is not a stage" <<<"${got#*|}" \
     && pass "the inherited [ reaches the script at all" \
     || die "the [ import did not take effect: '${got}'"
 world; got="$(shadow_run record 7 "$TMP/body.md")"
-printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+grep -qF 'PR_PHASE_RECORDED' <<<"${got#*|}" \
     && pass "…and is narrow enough that the rest of the script still runs" \
     || die "the shadowed [ broke the harness rather than the dispatch: '${got}'"
 
 world; got="$(shadow_run close 7 "$HEAD40")"
-printf '%s' "${got#*|}" | grep -qF 'PR_COPILOT_PHASE_CLOSED' \
+grep -qF 'PR_COPILOT_PHASE_CLOSED' <<<"${got#*|}" \
     && pass "an inherited [ does not divert close into another stage" \
     || die "close with a shadowed [ gave '${got}'"
 # THE CONSEQUENCE, NOT JUST THE STATUS. `open`'s mutations are a revocation and a
@@ -1246,7 +1246,7 @@ _RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run open 7 "$HEAD40")"
     && pass "a lying [ cannot open the phase on a verdict that is no longer clean" \
     || die "open with a dismissed verdict and a status-forging [ gave '${got}' posted='$(posted)'"
 world; _RB_SHADOW="$_RB_SHADOW_RC" got="$(shadow_run record 7 "$TMP/body.md")"
-printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+grep -qF 'PR_PHASE_RECORDED' <<<"${got#*|}" \
     && pass "…and the status forger is narrow enough that the script still runs" \
     || die "the status forger broke the harness rather than the check: '${got}'"
 # …AND `record` HAS ITS OWN COPY OF THAT CHECK, which the case above does not
@@ -1276,7 +1276,7 @@ _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
 [ "${got%%|*}" = 3 ] \
     && pass "a lying [ cannot skip the operator round boundary" \
     || die "record at a boundary with an -ne-forging [ gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'PAUSE' \
+grep -qF 'PAUSE' <<<"${got#*|}" \
     && pass "…and the pause is still reported" \
     || die "the boundary pause was not announced: '${got#*|}'"
 # THE SIGNOFF IS STILL PUBLISHED BEFORE THE PAUSE, which is the whole point of
@@ -1285,7 +1285,7 @@ posted | grep -qF 'Review-Signoff' \
     && pass "…while the signoff was published before pausing" \
     || die "the pause swallowed the signoff: $(posted)"
 world; _RB_SHADOW="$_RB_SHADOW_NE" got="$(shadow_run record 7 "$TMP/body.md")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'PR_PHASE_RECORDED' <<<"${got#*|}"; } \
     && pass "…and the -ne forger is narrow enough that the script still runs" \
     || die "the -ne forger broke the harness rather than the boundary: '${got}'"
 
@@ -1330,7 +1330,7 @@ _RB_SHADOW="$_RB_SHADOW_N" got="$(shadow_run record 7 "$TMP/empty.md")"
     && pass "a lying [ cannot record a signoff with no account of the phase" \
     || die "record with an empty body and an -n-forging [ gave '${got}' posted='$(posted)'"
 world; _RB_SHADOW="$_RB_SHADOW_N" got="$(shadow_run record 7 "$TMP/body.md")"
-printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+grep -qF 'PR_PHASE_RECORDED' <<<"${got#*|}" \
     && pass "…and the -n forger is narrow enough that the script still runs" \
     || die "the -n forger broke the harness rather than the guard: '${got}'"
 
@@ -1338,7 +1338,7 @@ printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
 # LAND, and it has to leave the rest of the script working. Without this, both
 # cases above would pass against a forger that never took effect.
 world; _RB_SHADOW="$_RB_SHADOW_EQ" got="$(shadow_run record 7 "$TMP/body.md")"
-printf '%s' "${got#*|}" | grep -qF 'PR_PHASE_RECORDED' \
+grep -qF 'PR_PHASE_RECORDED' <<<"${got#*|}" \
     && pass "the equality forger is narrow enough that the script still runs" \
     || die "the equality forger broke the harness rather than the comparison: '${got}'"
 world; printf '%s\n' "$OTHER40" > "$W/head.out"

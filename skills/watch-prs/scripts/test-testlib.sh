@@ -243,7 +243,7 @@ case "$out" in
     *"rc=125"*) pass "a failing watchdog sleep returns 125, not an ordinary timeout" ;;
     *) die "broken sleep gave '$out' (want rc=125)" ;;
 esac
-printf '%s' "$out" | grep -q 'rc=124' \
+grep -q 'rc=124' <<<"$out" \
     && die "a broken clock was reported as a timeout" \
     || pass "…and is distinguishable from the limit actually being hit"
 # BOTH halves, and the first is what the shared stub cannot satisfy. When the
@@ -531,32 +531,32 @@ grep -q 'test-oneline.sh' "$TMP/seen.out" \
     || die "the offender was not named in the report: $(cat "$TMP/seen.out")"
 seen="$(scan_watchdog_path_misuse "$SEENTMP")"; seen_rc=$?
 [ "$seen_rc" -eq 0 ] || die "the scan failed on the violation fixtures (rc=$seen_rc)"
-printf '%s' "$seen" | grep -q 'test-oneline.sh' \
+grep -q 'test-oneline.sh' <<<"$seen" \
     && pass "the scan catches a single-line violation" \
     || die "a single-line PATH-on-watchdog call was not caught: '$seen'"
-printf '%s' "$seen" | grep -q 'test-split.sh' \
+grep -q 'test-split.sh' <<<"$seen" \
     && pass "…and one split across a continuation" \
     || die "a continued-line PATH-on-watchdog call was not caught: '$seen'"
 # THE ACCEPTED COST, PINNED — both shapes of it. A hash line is reported whether
 # it is prose or quoted data, because nothing local tells them apart. Reword the
 # comment; #64 carries the redesign. A change that makes either of these stop
 # being reported has re-opened the fail-open hole #63 measured four times.
-printf '%s' "$seen" | grep -q 'test-comment.sh' \
+grep -q 'test-comment.sh' <<<"$seen" \
     && pass "a comment naming both tokens is questioned, which is the price — #64" \
     || die "comments stopped being reported; #64's four shapes go fail-open first: '$seen'"
-printf '%s' "$seen" | grep -q 'test-contcomment.sh' \
+grep -q 'test-contcomment.sh' <<<"$seen" \
     && pass "…and so is one after a continuation" \
     || die "a continued comment stopped being reported; read #64 before changing this: '$seen'"
-printf '%s' "$seen" | grep -q 'test-quotehash.sh' \
+grep -q 'test-quotehash.sh' <<<"$seen" \
     && pass "…and a hash that is quoted data across a continuation is not a comment" \
     || die "a quoted '#' across a continuation hid a real violation: '$seen'"
-printf '%s' "$seen" | grep -q 'test-pathassign.sh' \
+grep -q 'test-pathassign.sh' <<<"$seen" \
     && pass "…and an assignment persisting past a comment is still a violation" \
     || die "a PATH assignment before a comment hid the run_limited after it: '$seen'"
-printf '%s' "$seen" | grep -q 'test-openquote.sh' \
+grep -q 'test-openquote.sh' <<<"$seen" \
     && pass "…and a hash line inside a quote opened on an earlier line" \
     || die "an open multiline quote hid a real violation: '$seen'"
-printf '%s' "$seen" | grep -q 'test-hashstring.sh' \
+grep -q 'test-hashstring.sh' <<<"$seen" \
     && pass "…and a violation carrying a '#' inside a string is still caught" \
     || die "stripping went past a whole-line comment and lost a real violation: '$seen'"
 rm -rf "$SEENTMP"

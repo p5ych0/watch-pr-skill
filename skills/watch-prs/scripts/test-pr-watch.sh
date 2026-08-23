@@ -123,10 +123,10 @@ seq_set none none reviewed
 out="$(run 7 "$BOT" --interval 1 --timeout 30 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] || [ "$rc" -eq 0 ]; } && pass "watch exits when the state turns terminal" \
     || die "watch did not exit on a terminal state (rc=$rc)"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && pass "the terminal line is distinguishable (PR_REVIEW_READY)" \
     || die "no PR_REVIEW_READY line: $out"
-printf '%s' "$out" | grep -q 'findings=2' \
+grep -q 'findings=2' <<<"$out" \
     && pass "the verdict is reported without a second round-trip" \
     || die "the verdict was not attached: $out"
 
@@ -137,7 +137,7 @@ n_none=$(printf '%s\n' "$out" | grep -c 'state=none')
 [ "$n_none" -eq 1 ] \
     && pass "a repeated state is reported once, not once per poll" \
     || die "state=none printed $n_none times"
-printf '%s' "$out" | grep -q 'state=pending' \
+grep -q 'state=pending' <<<"$out" \
     && pass "an intermediate state change is reported" || die "the pending transition was not shown"
 
 # ── an unreadable state is NOT 'still waiting' ─────────────────────────────
@@ -146,14 +146,14 @@ out="$(run 7 "$BOT" --interval 1 --timeout 30 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "an unreadable state exits 2 rather than polling on" \
     || die "unreadable state gave rc=$rc (must fail closed)"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "an unreadable state produced a READY line" \
     || pass "no READY line from an unreadable state"
 
 # ── a clean verdict propagates 0 ───────────────────────────────────────────
 seq_set reviewed
 out="$(VERDICT='verdict=clean findings=0' VERDICT_RC=0 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'verdict=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'verdict=clean' <<<"$out"; } \
     && pass "a clean verdict exits 0" || die "clean verdict gave rc=$rc out='$out'"
 
 # An unreadable VERDICT after a terminal state must also fail closed.
@@ -165,7 +165,7 @@ out="$(VERDICT='verdict=error reason=unreadable' VERDICT_RC=2 run 7 "$BOT" --int
 # ── the timeout is honoured and distinguishable ────────────────────────────
 seq_set none
 out="$(run 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
     && pass "the timeout exits 1 with a timeout line" || die "timeout gave rc=$rc out='$out'"
 # …AND NO PROBE STARTS AFTER THE DEADLINE HAS PASSED — #46. The case above is
 # satisfied by the wrong mechanism: `pr-watch.sh` reports a timeout from THREE
@@ -190,10 +190,10 @@ out="$(run 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
 # a remainder of zero. No wall clock is involved, so this is not a race.
 seq_set none reviewed
 out="$(run 7 "$BOT" --interval 5 --timeout 2 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
     && pass "an exhausted deadline is the timeout, not one more probe" \
     || die "a spent deadline gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a probe ran after the deadline and reported a verdict: $out" \
     || pass "…and no verdict was produced from after the deadline"
 
@@ -225,7 +225,7 @@ SH
     [ "$rc" -eq 2 ] \
         && pass "a helper exiting $rc_case => 2, not a timeout" \
         || die "helper rc=$rc_case gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'state=timeout' \
+    grep -q 'state=timeout' <<<"$out" \
         && die "helper rc=$rc_case was reported as a timeout" \
         || pass "helper rc=$rc_case is not reported as a timeout"
 done
@@ -236,7 +236,7 @@ done
 # be read — and the line is what gets noticed.
 seq_set reviewed
 out="$(VERDICT='verdict=error reason=unreadable' VERDICT_RC=2 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "an unreadable verdict still emitted the READY signal: $out" \
     || pass "no READY line when the verdict could not be read"
 [ "$rc" -eq 2 ] && pass "and it exits 2" || die "unreadable verdict gave rc=$rc"
@@ -249,14 +249,14 @@ for vrc_case in 2 126 127 3; do
     [ "$rc" -eq 2 ] \
         && pass "a verdict helper exiting $vrc_case => 2" \
         || die "verdict rc=$vrc_case gave rc=$rc"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "verdict rc=$vrc_case still emitted the READY signal" \
         || pass "verdict rc=$vrc_case emitted no READY signal"
 done
 # rc 1 IS an answer — "not clean" — and must still be reported as actionable.
 seq_set reviewed
 out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-{ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' && printf '%s' "$out" | grep -q 'findings=3'; } \
+{ grep -q 'PR_REVIEW_READY' <<<"$out" && grep -q 'findings=3' <<<"$out"; } \
     && pass "a not-clean verdict is still an actionable READY" \
     || die "rc 1 was treated as unreadable (rc=$rc out='$out')"
 
@@ -270,8 +270,8 @@ out="$(VERDICT='verdict=findings findings=3' VERDICT_RC=1 run 7 "$BOT" --interva
 seq_set reviewed
 out="$(VERDICT='verdict=findings findings=1 source=replies-only' VERDICT_RC=1 \
         run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-{ printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
-    && printf '%s' "$out" | grep -q 'source=replies-only'; } \
+{ grep -q 'PR_REVIEW_READY' <<<"$out" \
+    && grep -q 'source=replies-only' <<<"$out"; } \
     && pass "a replies-only verdict is READY, and says so where the operator reads it" \
     || die "the replies-only stop did not surface (rc=$rc out='$out')"
 # AND IT HAS ITS OWN STATUS, because every caller branches on status. Saying it
@@ -304,7 +304,7 @@ for badtail in 'verdict=findings findings=1 source=whatever' \
                'verdict=findings findings=1 replies-only'; do
     seq_set reviewed
     out="$(VERDICT="$badtail" VERDICT_RC=1 run 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'inconsistent_verdict'; } \
+    { [ "$rc" -eq 2 ] && grep -q 'inconsistent_verdict' <<<"$out"; } \
         && pass "…while an unagreed tail ('${badtail#verdict=findings }') is still refused" \
         || die "a malformed tail was accepted: '$badtail' (rc=$rc out='$out')"
 done
@@ -322,7 +322,7 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/garbage.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "
 [ "$rc" -eq 2 ] \
     && pass "a state line with no state= field => 2, not a timeout" \
     || die "unparseable state line gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'state=timeout' \
+grep -q 'state=timeout' <<<"$out" \
     && die "an unparseable state was reported as a timeout" \
     || pass "an unparseable state is not reported as a timeout"
 
@@ -339,7 +339,7 @@ SH
     [ "$rc" -eq 2 ] \
         && pass "rc-0 noise around a state token ('$noisy') => 2" \
         || die "noisy state line '$noisy' gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "noisy state line '$noisy' reached the READY path" \
         || pass "noisy state line '$noisy' never reaches READY"
 done
@@ -371,7 +371,7 @@ for vout in 'truncated wrapper output' '' 'PR_REVIEW_STATE pr=7 sha=abc1234 revi
     [ "$rc" -eq 2 ] \
         && pass "an unparseable verdict line ('${vout:-<empty>}') => 2" \
         || die "unparseable verdict '${vout:-<empty>}' gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "an unparseable verdict still emitted the READY signal" \
         || pass "no READY signal from an unparseable verdict"
 done
@@ -383,7 +383,7 @@ for spec in 'verdict=clean findings=0|0|reviewed' 'verdict=findings findings=3|1
     vout="${spec%%|*}"; rest="${spec#*|}"; vrc="${rest%%|*}"; vstate="${rest#*|}"
     seq_set "$vstate"
     out="$(VERDICT="$vout" VERDICT_RC="$vrc" run 7 "$BOT" --interval 1 --timeout 5 2>&1)"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && pass "a verdict agreeing with state=$vstate ('$vout') is reported as READY" \
         || die "valid verdict '$vout' for state=$vstate was rejected: $out"
 done
@@ -406,10 +406,10 @@ for spec in 'reviewed|verdict=none reason=pending|1' \
     vstate="${spec%%|*}"; rest="${spec#*|}"; vout="${rest%%|*}"; vrc="${rest#*|}"
     seq_set "$vstate"
     out="$(VERDICT="$vout" VERDICT_RC="$vrc" run 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "state=$vstate with '$vout' was announced as READY: $out" \
         || pass "state=$vstate with '$vout' is not READY"
-    printf '%s' "$out" | grep -q 'state=moved_between_probes' \
+    grep -q 'state=moved_between_probes' <<<"$out" \
         && pass "…and the disagreement is reported rather than swallowed" \
         || die "no moved_between_probes line for state=$vstate / '$vout': $out"
     [ "$rc" -eq 1 ] \
@@ -430,7 +430,7 @@ for spec in 'verdict=clean|0' 'verdict=clean findings=0|1' 'verdict=clean findin
     [ "$rc" -eq 2 ] \
         && pass "an inconsistent verdict ('$vout' with rc $vrc) => 2" \
         || die "inconsistent verdict '$vout'/rc $vrc gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "inconsistent verdict '$vout'/rc $vrc still emitted READY" \
         || pass "no READY from an inconsistent verdict ('$vout', rc $vrc)"
 done
@@ -451,7 +451,7 @@ SH
     [ "$rc" -eq 2 ] \
         && pass "a state record for '$bad' => 2" \
         || die "misrouted state '$bad' gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "misrouted state '$bad' reached the READY path" \
         || pass "misrouted state '$bad' never reaches READY"
 done
@@ -467,7 +467,7 @@ SH
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/skew.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a verdict for a different sha than the state => 2" \
     || die "sha-skewed verdict gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a sha-skewed verdict still emitted READY" \
     || pass "no READY from a sha-skewed verdict"
 
@@ -494,7 +494,7 @@ exit 2
 SH
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/smuggle.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a smuggling helper still exits 2" || die "smuggling helper gave rc=$rc"
-printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
+grep -q '^PR_REVIEW_READY' <<<"$out" \
     && die "a failed helper smuggled a READY line to the start of a line: $out" \
     || pass "smuggled READY text cannot begin a line"
 
@@ -506,7 +506,7 @@ SH
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/smuggle2.sh" SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "an rc-0 helper smuggling a READY line still exits 2" \
     || die "rc-0 smuggling helper gave rc=$rc"
-printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
+grep -q '^PR_REVIEW_READY' <<<"$out" \
     && die "an rc-0 helper smuggled a READY line: $out" \
     || pass "rc-0 smuggled READY text cannot begin a line"
 
@@ -566,7 +566,7 @@ for spec in 'HEAD_RC=2' 'HEAD_OUT=abc1234' 'HEAD_OUT=' 'HEAD_OUT=zzzz' "HEAD_OUT
     [ "$rc" -eq 2 ] \
         && pass "an unusable head ($spec) => 2" \
         || die "unusable head $spec gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "an unusable head ($spec) still emitted READY" \
         || pass "no READY from an unusable head ($spec)"
 done
@@ -597,13 +597,13 @@ SH
 chmod +x "$TMP/wide.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/wide.sh" HEAD40="$HEAD40" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && pass "a state and verdict carrying the full forty-hex head are accepted" \
     || die "a full-width record was not accepted (rc=$rc): $out"
-printf '%s' "$out" | grep -q 'verdict=clean' \
+grep -q 'verdict=clean' <<<"$out" \
     && pass "…and the clean verdict is what it reports" \
     || die "the full-width verdict was not reported: $out"
-printf '%s' "$out" | grep -q 'identity_mismatch' \
+grep -q 'identity_mismatch' <<<"$out" \
     && die "a full-width record was read as being about another head: $out" \
     || pass "…with no identity mismatch, since the width grew rather than the check weakening"
 
@@ -628,10 +628,10 @@ chmod +x "$TMP/moving.sh"
 rm -f "$TMP/move.n"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/moving.sh" MOVE_N="$TMP/move.n" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 3 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a verdict for a superseded head was announced as READY: $out" \
     || pass "a verdict for a superseded head is not announced as READY"
-printf '%s' "$out" | grep -q 'state=head_moved' \
+grep -q 'state=head_moved' <<<"$out" \
     && pass "the moved head is reported, so the wait is explainable" \
     || die "no head_moved line when the head changed mid-poll: $out"
 [ "$rc" -eq 1 ] \
@@ -659,10 +659,10 @@ chmod +x "$TMP/settling.sh"
 rm -f "$TMP/move.n"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/settling.sh" MOVE_N="$TMP/move.n" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PR_REVIEW_READY'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
     && pass "a head that moves once still reaches READY on the new head" \
     || die "settling head never reached READY (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q "${OTHER40:0:7}" \
+grep -q "${OTHER40:0:7}" <<<"$out" \
     && pass "…and the verdict announced is the one for the NEW head" \
     || die "READY did not name the new head: $out"
 
@@ -685,7 +685,7 @@ elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -le 14 ] \
     && pass "…within the configured bound, because probe time counts against it" \
     || die "a 6s timeout took ${elapsed}s: probe time is escaping the deadline"
-printf '%s' "$out" | grep -q 'state=timeout' \
+grep -q 'state=timeout' <<<"$out" \
     && pass "…and reports the timeout record" \
     || die "no timeout record from the slow-probe watch: $out"
 
@@ -722,7 +722,7 @@ out="$(run_limited 30 env PATH="$CLOCKBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/sta
 [ "$rc" -eq 2 ] \
     && pass "a clock read that prints and then fails => 2" \
     || die "failing clock gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'clock_unreadable' \
+grep -q 'clock_unreadable' <<<"$out" \
     && pass "…reported as an unreadable clock" \
     || die "the failing clock was not named: $out"
 
@@ -744,17 +744,17 @@ out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=99 \
 [ "$rc" -eq 1 ] \
     && pass "a terminal state that is still the pre-request review is not READY" \
     || die "same-head stale review gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "the previous review was announced as this round's: $out" \
     || pass "…and no READY line is emitted for it"
-printf '%s' "$out" | grep -q 'state=awaiting_new_review' \
+grep -q 'state=awaiting_new_review' <<<"$out" \
     && pass "…and the wait is explainable" \
     || die "no awaiting_new_review line: $out"
 
 # A NEW review id on the same head is the answer.
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/samehead.sh" CUR_ID=100 \
        run_limited 30 "$SCRIPT" 7 "$BOT" --after-review 99 --interval 1 --timeout 6 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'PR_REVIEW_READY'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'PR_REVIEW_READY' <<<"$out"; } \
     && pass "a new review on the same head IS reported" \
     || die "new same-head review gave rc=$rc out='$out'"
 
@@ -788,7 +788,7 @@ out="$(run_limited 30 env PATH="$CATBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state
 [ "$rc" -eq 2 ] \
     && pass "a probe buffer read that prints and then fails => 2" \
     || die "failing buffer read gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$out" \
     && die "a failed buffer read still produced a READY line: $out" \
     || pass "…and never reaches READY"
 
@@ -822,7 +822,7 @@ out="$(run_limited 30 env PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/sta
 [ "$rc" -eq 2 ] \
     && pass "a failing sleep => 2, not a timeout the driver re-arms" \
     || die "failing sleep gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'state=timeout' \
+grep -q 'state=timeout' <<<"$out" \
     && die "a broken scheduler was reported as an ordinary timeout: $out" \
     || pass "…and is not reported as a timeout"
 
@@ -859,7 +859,7 @@ rm -f "$TMP/movesleep.n"
 # out. If it does not, the fixture below would prove nothing about the guard.
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/movesleep.sh" MOVE_N="$TMP/movesleep.n" \
        run_limited 40 "$SCRIPT" 7 "$BOT" --interval 1 --timeout 4 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'state=head_moved' \
+grep -q 'state=head_moved' <<<"$out" \
     && pass "the moved-head branch is the one this fixture exercises" \
     || die "the fixture never reached the moved-head branch: $out"
 
@@ -871,7 +871,7 @@ out="$(run_limited 40 env PATH="$SLEEPBIN:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/mov
 [ "$rc" -eq 2 ] \
     && pass "a failing sleep on the moved-head path => 2 (not isolating; see note)" \
     || die "moved-head failing sleep gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'reason=sleep_failed' \
+grep -q 'reason=sleep_failed' <<<"$out" \
     && pass "…reported as a failed sleep, not an ordinary timeout" \
     || die "the moved-head sleep failure was not named: $out"
 
@@ -906,10 +906,10 @@ out="$(run_limited 30 env PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT
 [ "$rc" -eq 2 ] \
     && pass "a clock that fails at the timeout read => 2, not a re-armable timeout" \
     || die "late clock failure gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'clock_unreadable' \
+grep -q 'clock_unreadable' <<<"$out" \
     && pass "…named as an unreadable clock" \
     || die "the late clock failure was not named: $out"
-printf '%s' "$out" | grep -q 'state=timeout' \
+grep -q 'state=timeout' <<<"$out" \
     && die "a broken clock was reported as an ordinary timeout: $out" \
     || pass "…and not as a timeout the driver would re-arm"
 
@@ -922,7 +922,7 @@ rm -f "$TMP/clk.n"
 out="$(run_limited 30 env PATH="$LATECLOCK:$PATH" CLK_N="$TMP/clk.n" CLK_FAIL_AT=999 \
        PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
        "$SCRIPT" 7 "$BOT" --interval 1 --timeout 0 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'state=timeout'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'state=timeout' <<<"$out"; } \
     && pass "…while a working clock at the same deadline is a plain timeout" \
     || die "control case gave rc=$rc out='$out'"
 
@@ -946,7 +946,7 @@ SH
     [ "$rc" -eq 2 ] \
         && pass "a review id of '${badid:-<empty>}' => 2" \
         || die "malformed id '$badid' gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'PR_REVIEW_READY' \
+    grep -q 'PR_REVIEW_READY' <<<"$out" \
         && die "malformed id '$badid' still announced READY: $out" \
         || pass "…and never reaches READY"
 done
@@ -964,7 +964,7 @@ chmod +x "$TMP/badid.sh"
 out="$(PR_WATCH_STATE_SCRIPT="$TMP/badid.sh" run_limited 30 "$SCRIPT" 7 "$BOT" \
        --after-review 99 --interval 1 --timeout 4 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] && pass "a newline-bearing review id => 2" || die "newline id gave rc=$rc"
-printf '%s\n' "$out" | grep -q '^PR_REVIEW_READY' \
+grep -q '^PR_REVIEW_READY' <<<"$out" \
     && die "a smuggled READY line reached the start of a line: $out" \
     || pass "…and cannot smuggle a READY line"
 
@@ -1014,7 +1014,7 @@ for huge in 18446744073709551616 340282366920938463463374607431768211456; do
     else
         die "timeout=$huge exited early (rc=$rc out='$out')"
     fi
-    printf '%s' "$out" | grep -q 'state=timeout' \
+    grep -q 'state=timeout' <<<"$out" \
         && die "…and it announced an immediate timeout from a wrapped deadline" \
         || pass "…and announced no timeout"
 done
@@ -1175,10 +1175,10 @@ for big in 18446744073709551616 99999999999999999999; do
     seq_set none
     out="$(run_limited 20 env PATH="$BIGCLOCK:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
            SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 5 2>&1)"; rc=$?
-    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+    { [ "$rc" -eq 2 ] && grep -q 'clock_unreadable' <<<"$out"; } \
         && pass "an out-of-range epoch ($big) is an unreadable clock, not a deadline" \
         || die "epoch $big gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'state=timeout' \
+    grep -q 'state=timeout' <<<"$out" \
         && die "…and it was reported as a timeout the driver would re-arm: $out" \
         || pass "…and not as an ordinary timeout"
 done
@@ -1199,7 +1199,7 @@ for good in 1754000000 10000000000 99999999999; do
     seq_set reviewed
     out="$(run_limited 20 env PATH="$BIGCLOCK:$PATH" PR_WATCH_STATE_SCRIPT="$TMP/state.sh" \
            SEQ_FILE="$TMP/seq" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 2 2>&1)"; rc=$?
-    printf '%s' "$out" | grep -q 'clock_unreadable' \
+    grep -q 'clock_unreadable' <<<"$out" \
         && die "a valid epoch ($good, ${#good} digits) was rejected as unreadable: $out" \
         || pass "a ${#good}-digit epoch ($good) is accepted as a clock"
 done
@@ -1216,10 +1216,10 @@ exit 124
 SH
 out="$(run_limited 20 env PR_WATCH_STATE_SCRIPT="$TMP/rc124.sh" SEQ_FILE="$TMP/seq" \
         HEAD40="$HEAD40" "$SCRIPT" 7 "$BOT" --interval 1 --timeout 10 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'probe_unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'probe_unreadable' <<<"$out"; } \
     && pass "a helper exiting 124 is an unreadable probe, not a timeout" \
     || die "helper rc=124 gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'state=timeout' \
+grep -q 'state=timeout' <<<"$out" \
     && die "…and it was reported as a timeout the driver would re-arm: $out" \
     || pass "…so the driver stops instead of re-arming forever"
 
@@ -1240,7 +1240,7 @@ rm -f "$TMP/back.n"; seq_set none
 out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
         PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'clock_unreadable' <<<"$out"; } \
     && pass "a clock that steps backward is unreadable, not a longer deadline" \
     || die "backward clock gave rc=$rc out='$out'"
 
@@ -1266,7 +1266,7 @@ rm -f "$TMP/back.n"; seq_set none
 out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
         PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 8 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'clock_unreadable'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'clock_unreadable' <<<"$out"; } \
     && pass "…including a retreat that stays above the start time" \
     || die "a retreat above the start was accepted (rc=$rc out='$out')"
 
@@ -1282,7 +1282,7 @@ rm -f "$TMP/back.n"; seq_set none
 out="$(run_limited 25 env PATH="$BACKCLOCK:$PATH" BACK_N="$TMP/back.n" \
         PR_WATCH_STATE_SCRIPT="$TMP/state.sh" SEQ_FILE="$TMP/seq" \
         "$SCRIPT" 7 "$BOT" --interval 1 --timeout 4 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'clock_unreadable' \
+grep -q 'clock_unreadable' <<<"$out" \
     && die "a monotonically advancing clock was rejected: $out" \
     || pass "…and a clock that only advances is accepted"
 
@@ -1324,10 +1324,10 @@ iv_out="$(run_limited 20 env PR_WATCH_STATE_SCRIPT="$TMP/loose.sh" \
 # The CONSEQUENCE, not just the status: nothing may have been reported ready. An
 # rc-only assertion passes on a watch that emitted READY and then failed for some
 # other reason on its way out.
-printf '%s' "$iv_out" | grep -q 'PR_REVIEW_READY' \
+grep -q 'PR_REVIEW_READY' <<<"$iv_out" \
     && die "the watch reported READY on output an inherited validator accepted" \
     || pass "…and nothing was reported ready"
-printf '%s' "$iv_out" | grep -q 'reason=recordlib_empty' \
+grep -q 'reason=recordlib_empty' <<<"$iv_out" \
     && pass "…and it says which library failed to load" \
     || die "the refusal does not name the library (out='$iv_out')"
 

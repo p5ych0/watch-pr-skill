@@ -436,6 +436,22 @@ rediscovering them.
   it is not derived from the core count, because the `macos-shell` job asserts
   `nproc` is unreachable. See issue #52.
 
+- **Never pipe a value into a reader that exits early.** `printf … | grep -q` is
+  RACY under `set -o pipefail`, which every fixture sets: `grep -q` exits the
+  moment it matches, `printf` takes `SIGPIPE` and dies with 141, and `pipefail`
+  makes that the pipeline's status — so a line that IS present reads as missing, at
+  whatever rate the scheduler decides. Measured at roughly one run in three on one
+  file, and it cost three review rounds on `test-pr-skill-contract.sh` before the
+  cause was found rather than the symptom.
+
+  Use a herestring: `grep -q PATTERN <<<"$value"` is a redirection, not a pipeline,
+  so there is no second process to kill. `case … in` works too where the pattern is
+  a glob. Only the EARLY-EXITING readers matter — `grep -c`, `sed` and `awk`
+  without an `exit` read to end of input, so their pipelines never signal.
+
+  `pr-selfcheck.sh` gates it, because the failure is intermittent and a green run
+  proves nothing about the next one. #152.
+
 - **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
   verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
   in the operator's shell turns a good library into `reason=<lib>_empty`. #88

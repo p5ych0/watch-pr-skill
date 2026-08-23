@@ -50,9 +50,9 @@ NODE_OK='[{"id":"T_1","isResolved":false,"path":"a.sh","line":1,"comments":{"nod
 # ── list: the happy path ───────────────────────────────────────────────────
 page false null "$NODE_OK" > "$TMP/p1.json"
 out="$(GH_PAGE1="$TMP/p1.json" run list 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'finding one' <<<"$out"; } \
     && pass "list: prints unresolved findings" || die "list happy path (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q 'old' \
+grep -q 'old' <<<"$out" \
     && die "list: printed a RESOLVED thread" || pass "list: resolved threads are skipped"
 
 # No unresolved threads is an empty, successful answer.
@@ -65,7 +65,7 @@ out="$(GH_PAGE1="$TMP/empty.json" run list 7 2>&1)"; rc=$?
 page true '"CUR"' "$NODE_OK" > "$TMP/p1.json"
 page false null '[{"id":"T_3","isResolved":false,"path":"c.sh","line":3,"comments":{"nodes":[{"databaseId":11,"author":{"login":"bot"},"body":"finding two"}]}}]' > "$TMP/p2.json"
 out="$(GH_PAGE1="$TMP/p1.json" GH_PAGE2="$TMP/p2.json" run list 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one' && printf '%s' "$out" | grep -q 'finding two'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'finding one' <<<"$out" && grep -q 'finding two' <<<"$out"; } \
     && pass "list: follows the cursor to the next page" || die "pagination (rc=$rc out='$out')"
 
 # hasNextPage=true with no cursor would loop or truncate silently.
@@ -91,7 +91,7 @@ do
     page false null "$bad" > "$TMP/bad$i.json"
     out="$(GH_PAGE1="$TMP/bad$i.json" run list 7 2>&1)"; rc=$?
     [ "$rc" -eq 2 ] && pass "list: malformed nodes #$i => 2" || die "malformed #$i gave rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'null' \
+    grep -q 'null' <<<"$out" \
         && die "list: malformed #$i emitted 'null' as finding text" \
         || pass "list: malformed #$i emitted no bogus finding"
 done
@@ -104,7 +104,7 @@ out="$(GH_GQL_RC=1 run list 7 2>&1)"; rc=$?
 printf '[{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"please change X"}]' \
     "$BOT" "$HEAD40" > "$TMP/rev.json"
 out="$(GH_REVIEWS="$TMP/rev.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'please change X'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'please change X' <<<"$out"; } \
     && pass "blocked-body: prints the blocking body for this head" || die "blocked-body (rc=$rc out='$out')"
 
 # A stale CHANGES_REQUESTED on an OLDER commit is not an active finding.
@@ -197,7 +197,7 @@ out="$(GH_REVIEWS="$TMP/superseded.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&
 printf '[{"user":{"login":"%s"},"id":701,"state":"APPROVED","commit_id":"%s","submitted_at":"2026-01-01T00:00:00Z","body":"fine"},{"user":{"login":"%s"},"id":701,"state":"CHANGES_REQUESTED","commit_id":"%s","submitted_at":"2026-01-02T00:00:00Z","body":"actually, change Y"}]' \
     "$BOT" "$HEAD40" "$BOT" "$HEAD40" > "$TMP/relatest.json"
 out="$(GH_REVIEWS="$TMP/relatest.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'change Y'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'change Y' <<<"$out"; } \
     && pass "blocked-body: a request newer than an approval is still active" \
     || die "the latest request was suppressed (rc=$rc out='$out')"
 
@@ -206,19 +206,19 @@ out="$(GH_REVIEWS="$TMP/relatest.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)
 # fix commit shifts the lines anyway.
 page false null "$NODE_OK" > "$TMP/p1.json"
 out="$(GH_PAGE1="$TMP/p1.json" run list 7 2>&1)"
-printf '%s' "$out" | grep -q 'thread=T_1' \
+grep -q 'thread=T_1' <<<"$out" \
     && pass "list: each finding carries its thread id" \
     || die "no thread id in the findings output: $out"
 # The COMMENT id too: resolving takes the thread id over GraphQL, a reaction
 # takes the comment's REST id, and neither substitutes for the other.
-printf '%s' "$out" | grep -q 'comment=11' \
+grep -q 'comment=11' <<<"$out" \
     && pass "list: each finding carries its comment id, for the reaction" \
     || die "no comment id in the findings output: $out"
 # A node with no databaseId cannot be reacted to and is malformed like any other.
 page false null '[{"id":"T_9","isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/nodbid.json"
 out2="$(GH_PAGE1="$TMP/nodbid.json" run list 7 2>&1)"; rc2=$?
 [ "$rc2" -eq 2 ] && pass "list: a comment with no databaseId => 2" || die "missing databaseId gave rc=$rc2"
-printf '%s' "$out" | grep -q 'thread=T_2' \
+grep -q 'thread=T_2' <<<"$out" \
     && die "list: printed a resolved thread's id" || pass "list: only unresolved threads are listed"
 # A node without an id is malformed: the driver would have nothing to resolve.
 page false null '[{"isResolved":false,"path":"a","line":1,"comments":{"nodes":[{"databaseId":11,"author":{"login":"b"},"body":"x"}]}}]' > "$TMP/noid.json"
@@ -245,7 +245,7 @@ out="$(GH_PAGE1="$TMP/partial2.json" run list 7 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "list: errors alongside real findings still => 2" \
     || die "partial page with findings gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'thread=T_1' \
+grep -q 'thread=T_1' <<<"$out" \
     && die "a partial page's findings were printed as if complete" \
     || pass "list: nothing is printed from a partial page"
 
@@ -353,7 +353,7 @@ out="$(run_limited 20 env PATH="$FAKEBIN:$PATH" JQ_N="$TMP/jq.n" \
 [ "$rc" -eq 2 ] \
     && pass "list: an endCursor parse that prints then fails => 2" \
     || die "failing endCursor parse gave rc=$rc (124 = it walked on forever) out='$out'"
-printf '%s' "$out" | grep -q 'cursor_unreadable' \
+grep -q 'cursor_unreadable' <<<"$out" \
     && pass "…reported as an unreadable cursor, not as a cycle" \
     || die "the failing parse was not attributed to the cursor read: $out"
 
@@ -380,7 +380,7 @@ chmod +x "$STRICTBIN/gh"
 page false null "$NODE_OK" > "$TMP/strict.json"
 out="$(PATH="$STRICTBIN:$PATH" GH_PAGE1="$TMP/strict.json" \
        REVIEW_BUS_REMOTE='git@github.com:true/true.git' "$SCRIPT" list 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'finding one'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'finding one' <<<"$out"; } \
     && pass "list: owner and repo are sent as raw strings, so a repo named 'true' works" \
     || die "owner/repo were type-converted (rc=$rc out='$out')"
 
@@ -403,7 +403,7 @@ done
 printf '[{"user":{"login":"%s"},"commit_id":"%s","state":"CHANGES_REQUESTED","submitted_at":"2026-01-02T00:00:00Z","body":"the request","id":1}]' \
     "$BOT" "$HEAD40" > "$TMP/goodstate.json"
 out="$(GH_REVIEWS="$TMP/goodstate.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the request'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'the request' <<<"$out"; } \
     && pass "blocked-body: a real blocking body is still returned" \
     || die "valid CHANGES_REQUESTED body was lost (rc=$rc out='$out')"
 
@@ -439,7 +439,7 @@ out="$(GH_REVIEWS="$TMP/inflight.json" run blocked-body 7 "$BOT" "$HEAD40" 2>&1)
 [ "$rc" -eq 2 ] \
     && pass "blocked-body: an in-flight draft on the head => 2, not the old body" \
     || die "in-flight draft gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'the old request' \
+grep -q 'the old request' <<<"$out" \
     && die "the superseded request was returned as current: $out" \
     || pass "…and the superseded request is not returned"
 

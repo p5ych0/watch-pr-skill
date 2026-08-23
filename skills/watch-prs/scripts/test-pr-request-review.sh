@@ -317,7 +317,7 @@ world
 out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     bash "$DIR/pr-request-review.sh" 7 no <"$TMP/body.md" 2>&1)"; rc=$?
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'reason=not_privileged'; } \
+{ [ "$rc" = 1 ] && grep -qF 'reason=not_privileged' <<<"$out"; } \
     && pass "an unprivileged interpreter is refused" \
     || die "an unprivileged run gave rc=$rc '$out'"
 

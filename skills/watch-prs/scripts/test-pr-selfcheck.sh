@@ -48,7 +48,7 @@ echo "$OWNER/$REPO $RB_SCRIPTS $SUMMARY_FILE"
 # ── the clean case is clean ────────────────────────────────────────────────
 R="$(mkroot "$OK_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "a well-formed tree reports clean" \
     || die "clean tree gave rc=$rc out='$out'"
 
@@ -62,10 +62,10 @@ gh pr comment N --body "$(cat "$SUMMARY_FILE")"
 ```
 ')"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'undefined_variable'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'undefined_variable' <<<"$out"; } \
     && pass "a variable used and never assigned is a finding" \
     || die "undefined \$SUMMARY_FILE was not caught (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q 'SUMMARY_FILE' \
+grep -q 'SUMMARY_FILE' <<<"$out" \
     && pass "…and the finding names it" \
     || die "the finding does not name the variable: $out"
 
@@ -82,7 +82,7 @@ echo "$OWNER $D"
 ```
 ')"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…while a shell-supplied variable is not a finding" \
     || die "TMPDIR or RANDOM was reported as unassigned (rc=$rc out='$out')"
 
@@ -97,7 +97,7 @@ echo "OWNER=$OWNER SUMMARY_FILE=$SUMMARY_FILE"
 ```
 ')"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'SUMMARY_FILE' <<<"$out"; } \
     && pass "a name appearing only inside an echo string is not an assignment" \
     || die "echo-string mention counted as an assignment (rc=$rc out='$out')"
 
@@ -123,7 +123,7 @@ R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-broken.sh 'if [ 1 -eq 1 ]; then echo yes'   # no fi
 addtest "$R" test-pr-broken.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'syntax_error'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'syntax_error' <<<"$out"; } \
     && pass "a script that does not parse is a finding" \
     || die "unparseable script not caught (rc=$rc out='$out')"
 
@@ -154,7 +154,7 @@ rb_identity() {
 }'
 addtest "$R" test-identitylib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "a variable assigned by a sourced library is not reported undefined" \
     || die "a sourced library assignment was not seen (rc=$rc out=$out)"
 
@@ -174,7 +174,7 @@ addscript "$R" identitylib.sh '# rb-assigns: HOST
 rb_identity() { HOST=h; }'
 addtest "$R" test-identitylib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'SUMMARY_FILE' <<<"$out"; } \
     && pass "…and a name no library assigns is still a finding" \
     || die "sourcing a library suppressed an unrelated undefined variable (rc=$rc out=$out)"
 
@@ -206,12 +206,12 @@ unused() {
 }'
 addtest "$R" test-identitylib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'TOKEN'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'TOKEN' <<<"$out"; } \
     && pass "an undeclared name is not credited, wherever the body assigns it" \
     || die "a never-executed assignment was credited (rc=$rc out=$out)"
 # …and the called function's assignment still is, so the rule is about reachability
 # and not about being inside a function at all.
-printf '%s' "$out" | grep -q 'uses \$HOST' \
+grep -q 'uses \$HOST' <<<"$out" \
     && die "an assignment in a function the skill DOES call was dropped: $out" \
     || pass "…while a called function's assignment still is"
 
@@ -225,7 +225,7 @@ addscript "$R" identitylib.sh 'rb_identity() {
 }'
 addtest "$R" test-identitylib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=lib_declares_no_assignments'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=lib_declares_no_assignments' <<<"$out"; } \
     && pass "a sourced library that declares no assignments is an error" \
     || die "an undeclared library did not fail closed (rc=$rc out=$out)"
 
@@ -236,7 +236,7 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
 R="$(mkroot "$LIB_SKILL")"
 addtest "$R" test-identitylib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=sourced_lib_missing'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=sourced_lib_missing' <<<"$out"; } \
     && pass "a library SKILL.md sources but does not ship is an error" \
     || die "a missing sourced library did not fail closed (rc=$rc out=$out)"
 
@@ -257,14 +257,54 @@ echo "$OWNER/$REPO $RB_SCRIPTS"
 R="$(mkroot "$LIBTEST_SKILL")"
 addscript "$R" widgetlib.sh 'true'
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script.*widgetlib'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'untested_script.*widgetlib' <<<"$out"; } \
     && pass "a shared library with no matching test is a finding" \
     || die "an untested library was not reported (rc=$rc out=$out)"
+# ── A FIXTURE THAT PIPES A VALUE INTO `grep -q` IS A FINDING ───────────────
+#
+# `printf … | grep -q` is racy under `pipefail`, which every fixture sets: `grep -q`
+# exits on its first match, `printf` takes `SIGPIPE`, and the PIPELINE reports 141
+# — so a line that IS present reads as missing, intermittently. That is #152, and
+# it cost three review rounds on one file before the cause was found.
+#
+# THE FINDING IS ASSERTED, AND SO IS ITS ABSENCE. A gate that reports nothing on a
+# tree containing the shape would be worse than no gate, and one that reports on a
+# clean tree would stop every push.
+_rq="$(mkroot "$OK_SKILL")"
+# THE STUB USES THE REAL SHAPE — a single-quoted `'"'"'%s\n'"'"' format — because that is
+# what the gate scans for, and it exits 0 so the suite section does not report it
+# for a different reason.
+# THE PIPE IS ASSEMBLED, NOT WRITTEN, so this line is not itself the shape. The
+# gate scans every `test-*.sh` including this one, and a scanner that flags the
+# test data proving it works is the shape `CLAUDE.md` records twice — a check whose
+# own fixture cannot be written without tripping it.
+_bar='|'
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s\\n' \"\$x\" $_bar grep -q y || true"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+chmod +x "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'racy_pipeline.*test-racy' <<<"$out"; } \
+    && pass "a fixture piping a value into grep -q is a finding" \
+    || die "the racy pipeline was not reported (rc=$rc out=$out)"
+grep -q 'grep -q y' <<<"$out" \
+    && pass "…naming the line, so the author does not have to search for it" \
+    || die "the racy-pipeline finding does not quote the line: $out"
+# …AND THE HERESTRING FORM IS NOT A FINDING, which is what makes the gate usable:
+# it is the fix, and a check that flagged it too would have no clean state.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' 'grep -q y <<<"$x" || true'
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…while the herestring form it is replaced with is clean" \
+    || die "the herestring form was reported too (rc=$rc out=$out)"
+
 # …and adding the test clears it, so the finding tracks the missing test rather
 # than the mere presence of a library.
 addtest "$R" test-widgetlib.sh
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'status=clean'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…and shipping its test clears the finding" \
     || die "an untested-library finding survived its test being added (rc=$rc out=$out)"
 
@@ -276,7 +316,7 @@ RB_SCRIPTS=/tmp/s
 ```
 ')"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'missing_script'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'missing_script' <<<"$out"; } \
     && pass "a helper driven but not shipped is a finding" \
     || die "missing helper not caught (rc=$rc out='$out')"
 
@@ -284,7 +324,7 @@ out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
 R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-lonely.sh 'exit 0'
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'untested_script' <<<"$out"; } \
     && pass "a script with no matching test is a finding" \
     || die "untested script not caught (rc=$rc out='$out')"
 
@@ -302,16 +342,16 @@ for lib in testlib.sh recordlib.sh; do
     R="$(mkroot "$OK_SKILL")"
     printf '#!/usr/bin/env bash\n: \n' > "$R/skills/watch-prs/scripts/$lib"
     out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-    { [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untested_script'; } \
+    { [ "$rc" -eq 1 ] && grep -q 'untested_script' <<<"$out"; } \
         && pass "$lib with no matching test is a finding" \
         || die "$lib was not required to have a test (rc=$rc out='$out')"
-    printf '%s' "$out" | grep -q "$base" \
+    grep -q "$base" <<<"$out" \
         && pass "…and the finding names it" \
         || die "the finding did not name $lib: $out"
     printf '#!/usr/bin/env bash\necho "RESULT: PASS"\n' > "$R/skills/watch-prs/scripts/test-$base.sh"
     chmod +x "$R/skills/watch-prs/scripts/test-$base.sh"
     out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-    printf '%s' "$out" | grep -q 'untested_script' \
+    grep -q 'untested_script' <<<"$out" \
         && die "$lib still reported untested after its test was added: $out" \
         || pass "…and adding test-$base.sh clears it"
 done
@@ -322,14 +362,14 @@ addscript "$R" pr-thing.sh 'exit 0'
 printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
 chmod +x "$R/skills/watch-prs/scripts/test-pr-thing.sh"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'failing_test'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'failing_test' <<<"$out"; } \
     && pass "a failing test is a finding" \
     || die "failing test not caught (rc=$rc out='$out')"
 # AND IT NAMES THE FILE. The suite runs concurrently now, so the name no longer
 # comes from the loop variable of the thing being run — it is carried back out of
 # a runner that is writing several files' results into one stream. A finding that
 # says only "a test fails" would satisfy the assertion above.
-printf '%s' "$out" | grep -q 'test-pr-thing.sh' \
+grep -q 'test-pr-thing.sh' <<<"$out" \
     && pass "…and the finding names which one" \
     || die "the finding did not name test-pr-thing.sh: $out"
 
@@ -343,8 +383,8 @@ for n in alpha omega; do
     chmod +x "$R/skills/watch-prs/scripts/test-pr-$n.sh"
 done
 out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
-    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+{ grep -q 'test-pr-alpha.sh' <<<"$out" \
+    && grep -q 'test-pr-omega.sh' <<<"$out"; } \
     && pass "two failing tests are both reported" \
     || die "not both failures were reported (rc=$rc out='$out')"
 
@@ -379,8 +419,8 @@ chmod +x "$REVSTUB/xargs"
 # path as well as the subject's. `test-testlib.sh` enforces that, and
 # enforced it against this very line while it was written the other way.
 out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ printf '%s' "$out" | grep -q 'test-pr-alpha.sh' \
-    && printf '%s' "$out" | grep -q 'test-pr-omega.sh'; } \
+{ grep -q 'test-pr-alpha.sh' <<<"$out" \
+    && grep -q 'test-pr-omega.sh' <<<"$out"; } \
     && pass "a runner reporting backwards still names both files" \
     || die "the reversed runner lost a failure (rc=$rc out='$out')"
 { printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
@@ -419,7 +459,7 @@ in="\$(cat)"
 # The gate's own sort is handed one record per test: a verdict letter, a space,
 # and an index. Section 1 sorts variable names, which are not that. Empty input
 # passes through, since the clean-tree case sorts an empty list there.
-if [ -z "\$in" ] || printf '%s' "\$in" | grep -qv '^[PFM] [0-9][0-9]*\$'; then
+if [ -z "\$in" ] || grep -qv '^[PFM] [0-9][0-9]*\$' <<<"\$in"; then
     printf '%s' "\$in" | "$REAL_SORT" "\$@"
     exit \$?
 fi
@@ -438,10 +478,10 @@ broken_case() {   # broken_case <tool> <expected reason> <make the suite fail?>
     [ "$failing" = yes ] && printf '#!/usr/bin/env bash\nexit 1\n' \
         > "$R/skills/watch-prs/scripts/test-pr-thing.sh"
     out="$(PATH="$only:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
-    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q "$reason"; } \
+    { [ "$rc" -eq 2 ] && grep -q "$reason" <<<"$out"; } \
         && pass "a broken $tool fails the check closed rather than reporting clean" \
         || die "a broken $tool did not fail closed (rc=$rc out='$out')"
-    printf '%s' "$out" | grep -q 'the whole suite passes' \
+    grep -q 'the whole suite passes' <<<"$out" \
         && die "a broken $tool still reported the suite as passing: $out" \
         || pass "…and does not claim the suite passed"
 }
@@ -460,7 +500,7 @@ mkdir -p "$BSROOT/skills/watch-prs/scripts" \
 addscript "$BSROOT" pr-thing.sh 'exit 0'
 addtest "$BSROOT" test-pr-thing.sh
 out="$("$SCRIPT" "$BSROOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a checkout path containing a backslash still runs its tests" \
     || die "the backslash path was not preserved (rc=$rc out='$out')"
 
@@ -484,7 +524,7 @@ nfind="$(printf '%s\n' "$out" | grep -c 'finding=failing_test')" || nfind=0
 { [ "$rc" -eq 1 ] && [ "$nfind" -eq 1 ]; } \
     && pass "a newline in the checkout path is one finding, not two" \
     || die "the newline split the failure record (rc=$rc findings=$nfind out='$out')"
-printf '%s' "$out" | grep -q 'test-pr-thing.sh fails' \
+grep -q 'test-pr-thing.sh fails' <<<"$out" \
     && pass "…and the one it reports is the test that actually failed" \
     || die "the reported name was fabricated: $out"
 
@@ -795,14 +835,14 @@ chmod +x "$R/skills/watch-prs/scripts/test-pr-thing.sh"
 out="$(sort() { command sed 's/^F /P /'; }
        export -f sort
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "an exported sort cannot turn a failing record into a passing one" \
     || die "a forged pass was accepted (rc=$rc out='$out')"
 # …AND THE SAME FOR THE RUNNER, which can forge the whole set rather than edit it.
 out="$(xargs() { printf 'P 1\n'; }
        export -f xargs
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "…and an exported xargs cannot answer for tests it never ran" \
     || die "a forged result set was accepted (rc=$rc out='$out')"
 
@@ -825,7 +865,7 @@ out="$(xargs() { printf 'P 1\n'; }
 out="$(bash() { if [ "${1#*/test-}" != "$1" ]; then return 0; fi; command bash "$@"; }
        export -f bash
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "…and an exported bash cannot stand in for the test itself" \
     || die "the test run was forged by a function (rc=$rc out='$out')"
 
@@ -1075,10 +1115,10 @@ noop_case() {   # noop_case <tool> <label>
     addscript "$R" pr-thing.sh 'exit 0'
     addtest "$R" test-pr-thing.sh
     out="$(PATH="$only:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
-    { [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_incomplete'; } \
+    { [ "$rc" -eq 2 ] && grep -q 'suite_incomplete' <<<"$out"; } \
         && pass "$label" \
         || die "$label — rc=$rc out='$out'"
-    printf '%s' "$out" | grep -q 'the whole suite passes' \
+    grep -q 'the whole suite passes' <<<"$out" \
         && die "$label — it reported the suite as passing: $out" \
         || pass "…and does not claim the suite passed"
     rm -rf "$only"
@@ -1105,10 +1145,10 @@ for n in alpha omega; do
     addtest "$R" "test-pr-$n.sh"
 done
 out="$(PATH="$DUPSTUB:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_record_unexpected'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'suite_record_unexpected' <<<"$out"; } \
     && pass "two answers for one file are not two files having run" \
     || die "a duplicated index satisfied the count (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q 'the whole suite passes' \
+grep -q 'the whole suite passes' <<<"$out" \
     && die "…and it reported the suite as passing: $out" \
     || pass "…and does not claim the suite passed"
 rm -rf "$DUPSTUB"
@@ -1127,7 +1167,7 @@ addscript "$R" pr-zulu.sh 'exit 0'
 printf '#!/usr/bin/env bash\nrm "$0"\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
 chmod +x "$R/skills/watch-prs/scripts/test-pr-zulu.sh"
 out="$(run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-zulu.sh fails'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'test-pr-zulu.sh fails' <<<"$out"; } \
     && pass "a failing test that deleted itself is still reported, by name" \
     || die "a self-deleting failure went unreported (rc=$rc out='$out')"
 
@@ -1153,7 +1193,7 @@ printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bb
 chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
          "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
 out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'test-pr-bbb.sh fails' <<<"$out"; } \
     && pass "a test that renames itself does not make another one vanish" \
     || die "the renamed test displaced the failing one (rc=$rc out='$out')"
 
@@ -1180,7 +1220,7 @@ deep_len="$(printf '%s' "$DEEPROOT/skills/watch-prs/scripts/test-pr-thing.sh" | 
     && pass "the deep-checkout fixture really is past the 255-byte limit ($deep_len)" \
     || die "the deep-checkout fixture is only $deep_len bytes; it proves nothing"
 out="$(run_limited 60 "$SCRIPT" "$DEEPROOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "…and a checkout that deep still runs its suite" \
     || die "a deeply nested checkout could not run (rc=$rc out='$out')"
 rm -rf "$DEEP"
@@ -1205,10 +1245,10 @@ printf '#!/usr/bin/env bash\nexit 1\n' > "$R/skills/watch-prs/scripts/test-pr-bb
 chmod +x "$R/skills/watch-prs/scripts/test-pr-aaa.sh" \
          "$R/skills/watch-prs/scripts/test-pr-bbb.sh"
 out="$(run_limited 60 env RB_SUITE_JOBS=1 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_index_unmapped'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'suite_index_unmapped' <<<"$out"; } \
     && pass "a test whose file vanished before it ran is not a result" \
     || die "a vanished test was not refused (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q 'test-pr-bbb.sh fails' \
+grep -q 'test-pr-bbb.sh fails' <<<"$out" \
     && die "…and it was reported as an ordinary failure: $out" \
     || pass "…and is not reported as an ordinary failing test"
 
@@ -1232,7 +1272,7 @@ R="$(mkroot "$OK_SKILL")"
 addscript "$R" pr-thing.sh 'exit 0'
 addtest "$R" test-pr-thing.sh
 out="$(PATH="$OFFSTUB:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'suite_index_unmapped'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'suite_index_unmapped' <<<"$out"; } \
     && pass "an index that names no file is an error, not a pass" \
     || die "an unmapped index was not refused (rc=$rc out='$out')"
 rm -rf "$OFFSTUB"
@@ -1245,7 +1285,7 @@ UNRELATED="$TMP/unrelated"
 mkdir -p "$UNRELATED"; git -C "$UNRELATED" init -q 2>/dev/null
 printf 'print("hi")\n' > "$UNRELATED/app.py"
 out="$("$SCRIPT" "$UNRELATED" 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'status=not_applicable' <<<"$out"; } \
     && pass "a repo with no plugin sources reports not_applicable" \
     || die "unrelated repo gave rc=$rc out='$out'"
 # EXIT STATUS, not just a line. A distinguished record printed with exit 0 was
@@ -1260,7 +1300,7 @@ out="$("$SCRIPT" "$UNRELATED" 2>&1)"; rc=$?
 
 # Run from INSIDE that repo with no argument, which is how SKILL.md invokes it.
 out="$(cd "$UNRELATED" && "$SCRIPT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'status=not_applicable'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'status=not_applicable' <<<"$out"; } \
     && pass "…and the same holds for the no-argument invocation the contract uses" \
     || die "no-arg run from an unrelated repo gave rc=$rc out='$out'"
 
@@ -1278,7 +1318,7 @@ gh pr comment N --body "$(cat "$SUMMARY_FILE")"
 '
 R="$(mkroot "$KEYWORD_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'SUMMARY_FILE' <<<"$out"; } \
     && pass "a comment containing a shell keyword does not define a loop variable" \
     || die "a keyword-bearing comment silenced the check (rc=$rc out='$out')"
 
@@ -1294,7 +1334,7 @@ out="$(PATH="$BROKEN_BIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "an extraction that prints and then fails => 2, not clean" \
     || die "broken extraction gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a run whose extraction failed reported clean: $out" \
     || pass "…and never reports clean"
 
@@ -1312,7 +1352,7 @@ gh pr comment N --body "$(cat "$SUMMARY_FILE")"
 '
 R="$(mkroot "$COMMENT_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'SUMMARY_FILE'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'SUMMARY_FILE' <<<"$out"; } \
     && pass "a comment reading for-NAME does not count as defining NAME" \
     || die "a comment silenced the undefined-variable check (rc=$rc out='$out')"
 
@@ -1325,7 +1365,7 @@ for THING in a b c; do echo "$THING $OWNER"; done
 '
 R="$(mkroot "$LOOP_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'THING' \
+grep -q 'THING' <<<"$out" \
     && die "a real for-loop variable was reported as undefined: $out" \
     || pass "a real for-loop variable is recognised as assigned"
 [ "$rc" -eq 0 ] && pass "…and that tree is otherwise clean" || die "loop fixture gave rc=$rc out='$out'"
@@ -1343,7 +1383,7 @@ out="$(PATH="$AWKBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "an awk that prints and then exits 1 => 2, not treated as no-matches" \
     || die "awk exiting 1 gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a run whose block extraction failed reported clean: $out" \
     || pass "…and never reports clean"
 
@@ -1368,7 +1408,7 @@ out="$(PATH="$HELPBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a failed helper-discovery pipeline => 2, not an empty helper list" \
     || die "helper discovery failure gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a run whose helper discovery failed reported clean: $out" \
     || pass "…and never reports clean"
 
@@ -1384,7 +1424,7 @@ out="$(PATH="$SORTBIN:$PATH" "$SCRIPT" "$R" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a downstream sort that prints and exits 1 => 2, not no-matches" \
     || die "downstream status 1 gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a run whose sort failed reported clean: $out" \
     || pass "…and never reports clean"
 
@@ -1426,10 +1466,10 @@ out="$(cd "$TMP" && PATH="$ROOTBIN:$PATH" FAKE_ROOT="$R" "$SCRIPT" 2>&1)"; rc=$?
 # unguarded code and proves nothing. `repo_root_lookup_failed` is reachable only
 # when the lookup's status was actually taken. This is the second fixture in two
 # rounds to need this correction.
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'reason=repo_root_lookup_failed'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'reason=repo_root_lookup_failed' <<<"$out"; } \
     && pass "a repo-root lookup that prints and then fails => 2, on its own reason" \
     || die "failed root lookup gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a failed root lookup produced a clean report: $out" \
     || pass "…and never reports clean"
 
@@ -1446,7 +1486,7 @@ gh pr comment 7 --body "hello"
 '
 R="$(mkroot "$UNPINNED_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'unpinned_gh_call' <<<"$out"; } \
     && pass "a gh pr call without --repo is a finding" \
     || die "unpinned gh call not caught (rc=$rc out='$out')"
 
@@ -1509,7 +1549,7 @@ gh pr comment 7 \
 '
 R="$(mkroot "$CONT_BAD")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'unpinned_gh_call' <<<"$out"; } \
     && pass "an unpinned continued call is still a finding" \
     || die "joining continuations hid an unpinned call (rc=$rc out='$out')"
 
@@ -1525,7 +1565,7 @@ gh pr comment 7 --body "remember --repo when posting"
 '
 R="$(mkroot "$MISLEADING_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'unpinned_gh_call' <<<"$out"; } \
     && pass "a body merely mentioning --repo does not count as pinning" \
     || die "a misleading body passed the pin check (rc=$rc out='$out')"
 
@@ -1541,7 +1581,7 @@ BODY="gh pr comment 7 --repo $OWNER/$REPO"; gh pr comment 7 --body "$BODY"
 '
 R="$(mkroot "$MASKING_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'unpinned_gh_call' <<<"$out"; } \
     && pass "a pinned assignment does not vouch for an unpinned call on the same line" \
     || die "same-line masking passed the pin check (rc=$rc out='$out')"
 
@@ -1556,7 +1596,7 @@ BODY="gh pr comment 7 --repo $OWNER/$REPO" && gh pr comment 7 --body "$BODY"
 '
 R="$(mkroot "$AND_SKILL")"
 out="$("$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'unpinned_gh_call'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'unpinned_gh_call' <<<"$out"; } \
     && pass "an && between a pinned assignment and an unpinned call is caught" \
     || die "&& masking passed the pin check (rc=$rc out='$out')"
 
@@ -1581,7 +1621,7 @@ out="$(PATH="$WCBIN:$PATH" WC_N="$TMP/wc.n" "$SCRIPT" "$R" 2>&1)"; rc=$?
 [ "$rc" -eq 2 ] \
     && pass "a wc that prints and then fails => 2, not a trusted count" \
     || die "failing wc gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'status=clean' \
+grep -q 'status=clean' <<<"$out" \
     && die "a failed occurrence count reported clean: $out" \
     || pass "…and never reports clean"
 

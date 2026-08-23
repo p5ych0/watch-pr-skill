@@ -60,7 +60,7 @@ run() {   # run <reviewer> ; prints "<rc>|<stdout+stderr>"
 case_is() {   # case_is <want rc> <needle> <label> [reviewer]
     local got rc body
     got="$(run "${4:-$BOT}")"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = "$1" ] && printf '%s' "$body" | grep -qF "$2"; } \
+    { [ "$rc" = "$1" ] && grep -qF "$2" <<<"$body"; } \
         && pass "$3" \
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
@@ -362,7 +362,7 @@ page false 'null' "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\`" > "$TMP/out.2"
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     GH_PAGE="$TMP/page" LAST_PAGE=2 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$got" | grep -qF "sha=$SHA"; } \
+{ [ "$rc" -eq 0 ] && grep -qF "sha=$SHA" <<<"$got"; } \
     && pass "a signoff buried under a page of later comments is still found" \
     || die "the walk stopped at one page (rc=$rc '$got')"
 # THE REVOCATION ON PAGE ONE, THE SIGNOFF ON PAGE TWO. The candidate has to
@@ -376,7 +376,7 @@ page false 'null' "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-01-01T00:0
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     GH_PAGE="$TMP/page" LAST_PAGE=2 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'reason=revoked'; } \
+{ [ "$rc" -eq 1 ] && grep -qF 'reason=revoked' <<<"$got"; } \
     && pass "a revocation on an earlier page still reopens the phase" \
     || die "the earlier page's revocation was forgotten (rc=$rc '$got')"
 # AND ONE OLDER THAN THE VERDICT STILL DOES NOT, across pages either.
@@ -386,7 +386,7 @@ page false 'null' "OWNER|**Review-Signoff:** \`$BOT\` \`$SHA\` \`2026-02-02T00:0
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     GH_PAGE="$TMP/page" LAST_PAGE=2 REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     "$SCRIPT" 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$got" | grep -qF "sha=$SHA"; } \
+{ [ "$rc" -eq 0 ] && grep -qF "sha=$SHA" <<<"$got"; } \
     && pass "…while one older than the verdict leaves the signoff standing across pages" \
     || die "an earlier page's older revocation reopened the phase (rc=$rc '$got')"
 
@@ -414,12 +414,12 @@ chmod +x "$TMP/bin/gh"
 world; comments "OWNER|x" > "$TMP/out"
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" seven "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$got" | grep -q usage; } \
+{ [ "$rc" -eq 2 ] && grep -q usage <<<"$got"; } \
     && pass "a non-numeric PR is refused" \
     || die "a non-numeric PR gave rc=$rc '$got'"
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$got" | grep -q usage; } \
+{ [ "$rc" -eq 2 ] && grep -q usage <<<"$got"; } \
     && pass "…and a missing reviewer" \
     || die "a missing reviewer gave rc=$rc '$got'"
 
@@ -495,7 +495,7 @@ case_is 0 "PR_SIGNOFF pr=7 reviewer=$BOT" "…while the default mode still print
 # lands in the PR argument, which is validated as digits.
 got="$(run_limited 15 env PATH="$TMP/bin:$PATH" GH_OUT="$TMP/out" GH_RC="$TMP/rc" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' "$SCRIPT" head 7 "$BOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$got" | grep -q usage; } \
+{ [ "$rc" -eq 2 ] && grep -q usage <<<"$got"; } \
     && pass "…and an unknown subcommand is refused" \
     || die "an unknown subcommand gave rc=$rc '$got'"
 

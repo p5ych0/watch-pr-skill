@@ -37,7 +37,7 @@ cat > "$TMP/symbols.sh" <<'SYMS'
 before="$(declare -F | awk '{print $3}')"
 . "$RB_LIB" || exit 9
 declare -F | awk '{print $3}' | while read -r f; do
-    printf '%s\n' "$before" | grep -qxF "$f" || printf '%s\n' "$f"
+    grep -qxF "$f" <<<"$before" || printf '%s\n' "$f"
 done
 SYMS
 _added="$(env -u SHELLOPTS RB_LIB="$SELF_DIR/clocklib.sh" bash "$TMP/symbols.sh" 2>/dev/null | sort -u | tr '\n' ' ')"

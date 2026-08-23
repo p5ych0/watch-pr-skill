@@ -227,11 +227,11 @@ pin_out="$(<"$TMP/pin.value/pin")"
 
 # ── MODES ARE NAMED, AND AN UNKNOWN ONE IS REFUSED ─────────────────────────
 got="$(run '')"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a mode is required'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a mode is required' <<<"${got#*|}"; } \
     && pass "a missing mode is refused by name" \
     || die "a missing mode gave '${got}'"
 got="$(run sideways)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'sideways' is not a mode"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'sideways' is not a mode" <<<"${got#*|}"; } \
     && pass "…and an unknown one says which it was" \
     || die "an unknown mode gave '${got}'"
 
@@ -243,7 +243,7 @@ got="$(run sideways)"
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
 rm -rf "$TMP/v";  out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
+{ [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
 case "$out" in
@@ -255,7 +255,7 @@ esac
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
 rm -rf "$TMP/v";  out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
+{ [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
 
@@ -276,7 +276,7 @@ GITSH
 chmod +x "$STUB/git"
 rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
+{ [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "a remote read that prints and then fails is refused" \
     || die "a printing-then-failing git gave rc=$rc '$out'"
 case "$out" in
@@ -298,7 +298,7 @@ GITSH
 chmod +x "$STUB/git"
 rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
+{ [ "$rc" = 1 ] && grep -qF 'newline' <<<"$out"; } \
     && pass "a multi-line remote is refused rather than split" \
     || die "a two-line remote gave rc=$rc '$out'"
 
@@ -323,7 +323,7 @@ GITSH
 chmod +x "$STUB/git"
 rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
-{ [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
+{ [ "$rc" = 1 ] && grep -qF 'newline' <<<"$out"; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
 # …AND PLAIN COMMAND SUBSTITUTION WOULD HAVE ACCEPTED IT, which is what makes the
@@ -1633,7 +1633,7 @@ _leak_out="$(cd "$TMP/notarepo" && run_limited 20 env HOME="$TMP/nohome" \
     /usr/bin/env bash -p "$SCRIPT" read "$_leak_dir" 2>&1)" || _leak_rc=$?
 # THE REFUSAL FIRST, or the absence below means the directory was never made and
 # the case passes against a script that cannot create one at all.
-{ [ "$_leak_rc" -ne 0 ] && printf '%s' "$_leak_out" | grep -qF 'could not read origin'; } \
+{ [ "$_leak_rc" -ne 0 ] && grep -qF 'could not read origin' <<<"$_leak_out"; } \
     && pass "a read outside a checkout is refused after the directory exists" \
     || die "the post-mkdir refusal case did not refuse (rc=$_leak_rc out='$_leak_out')"
 [ ! -e "$_leak_dir" ] \

@@ -613,6 +613,36 @@ for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/*lib.sh; do
 done
 [ "$untested" -eq 0 ] && ok "every helper and shared library has a matching test"
 
+# ── 4b. no fixture pipes a value into an early-exiting reader ──────────────
+#
+# `printf … | grep -q PATTERN` is RACY under `set -o pipefail`, which every fixture
+# sets. `grep -q` exits the moment it matches; `printf` is still writing, takes
+# `SIGPIPE`, and dies with 141 — and `pipefail` makes that the PIPELINE's status.
+# So a line that IS present reads as missing, at whatever rate the scheduler
+# decides. Measured at roughly one run in three on one file.
+#
+# THAT IS WHY IT IS A GATE AND NOT A CONVENTION. The failure is intermittent, so a
+# green run proves nothing about the next one, and every occurrence is a case that
+# can report a defect that is not there — or, on an `|| x=""` capture, silently
+# read as "nothing found". `test-pr-skill-contract.sh` spent three review rounds
+# chasing one before the cause was found.
+#
+# A HERESTRING IS THE FIX: `grep -q PATTERN <<<"$value"` is a redirection, not a
+# pipeline, so there is no second process to kill. `case … in` works too where the
+# pattern is a glob.
+#
+# ONLY THE EARLY-EXITING READERS MATTER. `grep -c`, `sed` and `awk` without an
+# `exit` read to end of input, so their pipelines never signal.
+pipeq=0
+for f in "$SCRIPTS"/test-*.sh; do
+    [ -e "$f" ] || continue
+    while IFS= read -r hit; do
+        note racy_pipeline "$(basename "$f"): $hit"
+        pipeq=1
+    done < <(grep -nE "printf '%s(\\\\n)?' [^|]*\\| *grep -q" "$f" | cut -c1-120 || true)
+done
+[ "$pipeq" -eq 0 ] && ok "no fixture pipes a value into grep -q, which pipefail turns into a false failure"
+
 # ── 5. the suite passes ────────────────────────────────────────────────────
 #
 # RUN CONCURRENTLY, because the files are independent and this is the gate a
