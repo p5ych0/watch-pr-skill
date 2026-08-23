@@ -1083,11 +1083,22 @@ for _pv in Probe-A Probe-B Probe-C Probe-D; do
         esac
     done
     # …AND THE ASSIGNED NAMES WITH THEM, this stage's two included.
+    #
+    # MATCHED AS THE WHOLE COMPARISON, not as two substrings. `*"$_pn"*"$_pv"*` was
+    # satisfied for `REPO` by an arm containing `REPO_DIR` and the sentinel, and for
+    # `OWNER` by `REVIEW_BUS_OWNER` — so deleting either comparison left this green
+    # while a nameref to that identity field passed the arm.
+    #
+    # THE ARM'S OWN NAME IS THE EXCEPTION, and it is handled by name: it appears as
+    # the ASSIGNMENT and the equality that follows it, never as a `!=`.
     for _pn in $_assigned RB_PIN_DIR RB_PIN_SEEN; do
         case "$_pa" in
-            *"$_pn"*"$_pv"*) : ;;
-            *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
+            *"\${$_pn:-} != $_pv"*) continue ;;
         esac
+        case "$_pa" in
+            *"( $_pn=$_pv; "*) continue ;;
+        esac
+        die "the pin probe's $_pv arm does not compare against \$$_pn"
     done
 done
 pass "…with four probe arms, each comparing against every name in scope"
@@ -1134,12 +1145,17 @@ for _kn_v in Probe-A Probe-B Probe-C Probe-D; do
             *) _kn_missing="$_kn_missing $_kn_v/$_kn_one" ;;
         esac
     done
-    # …AND THE ASSIGNED NAMES, this stage's one included.
+    # …AND THE ASSIGNED NAMES, this stage's one included, matched as the whole
+    # comparison for the reason the pin loop gives — with the arm's own name
+    # recognised by its assignment instead.
     for _kn_a in $_assigned RB_ORIGIN_DIR; do
         case "$_kn_arm" in
-            *"$_kn_a"*"$_kn_v"*) : ;;
-            *) _kn_missing="$_kn_missing $_kn_v/$_kn_a" ;;
+            *"\${$_kn_a:-} != $_kn_v"*) continue ;;
         esac
+        case "$_kn_arm" in
+            *"( $_kn_a=$_kn_v; "*) continue ;;
+        esac
+        _kn_missing="$_kn_missing $_kn_v/$_kn_a"
     done
 done
 [ -z "$_kn_missing" ] \
