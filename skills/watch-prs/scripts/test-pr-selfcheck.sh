@@ -304,7 +304,8 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "$(printf 'printf\t%s\t"$x"\tBAR\tgrep\t-q y || true' "'%s'")" \
           "printf '%s' \"\$x\" BAR grep -e y -q || true" \
           "printf '%s' \"\$x\" BAR grep -e foo-bar -q || true" \
-          "printf '%s' \"\$x\" BAR grep -e 'foo bar' -q || true"; do
+          "printf '%s' \"\$x\" BAR grep -e 'foo bar' -q || true" \
+          "printf '%s' \"\$x\" BAR grep -e -1 -q || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"

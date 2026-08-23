@@ -693,14 +693,20 @@ for f in "$SCRIPTS"/test-*.sh; do
           # the test is safe HERE, where the match is anchored on `printf`, in a way
           # it was not for the generalised version.
           #
-          # AND AN OPTION MAY TAKE AN ARGUMENT before the one carrying `q`:
-          # `grep -e y -q` puts a pattern between them, and a group that consumed
-          # only option WORDS never reached the `-q`. The argument may not contain
-          # `)`, a quote or a dash-leading word, which is what stops the scan
-          # running off the end of the command — `[^|]*` there reached the `-eq` of
-          # a later `[ … -eq 2 ]` and reported a `grep -c` as a `grep -q`.
+          # AND ANY WORD MAY SIT BETWEEN `grep` AND THE OPTION CARRYING `q`, rather
+          # than a modelled option-and-argument grammar. Four rounds were spent
+          # widening that grammar one legal spelling at a time — an option with an
+          # argument, an argument with a hyphen in it, a quoted argument, a
+          # DASH-LEADING operand after `-e` — which is the scanner treadmill this
+          # repository records paying for once already. What actually matters is
+          # that a `-…q…` option appears, and what has to be bounded is only how far
+          # the match may run: not past a `)`, a quote or a `|`, which is what
+          # stopped it reaching the `q` of a later `[ … -eq 2 ]`.
+          #
+          # A QUOTED WORD IS ONE WORD, so `grep -e '"'"'foo bar'"'"' -q` is still a match.
+          #
           t = line; gsub(/\|\|/, "@@", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+-[A-Za-z]+([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^-[:space:])\"'"'"'][^[:space:])\"'"'"']*))?)*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|]+))*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
