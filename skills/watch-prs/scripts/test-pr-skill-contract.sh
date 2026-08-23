@@ -1028,6 +1028,15 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 { [ -n "$_arm_work" ] && [ -n "$_arm_refuse" ]; } \
     && pass "…and both arms of the pin branch lift out separately" \
     || die "an arm of the pin branch could not be lifted (work=${#_arm_work} refuse=${#_arm_refuse})"
+# THE INVENTORY IS READ ONCE, HERE, because both the pin arms below and the
+# transport arms further down check against it. It was read AFTER the pin loop,
+# so that loop's `$_kn` was empty and its coverage check silently did nothing —
+# the vacuous pass this file exists to stop.
+_kn=""
+_kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
+[ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
+_kn="${_kn#*\'}"; _kn="${_kn%\'*}"
+
 # THE PROBE IS TWO SENTINEL PAIRS, AND EVERY ARM CARRIES EVERY NAME. Four arms —
 # `Probe-A`/`Probe-B` and `Probe-C`/`Probe-D` — because ONE pair is a fixed value
 # and a fixed value collides: an operator whose `IFS`, or any other protected name,
@@ -1047,8 +1056,29 @@ for _pv in Probe-A Probe-B Probe-C Probe-D; do
     _pa="$(awk -v v="$_pv" '$0 ~ ("=" v "; ") {f=1} f {print} f && /2>\/dev\/null/ {exit}' <<<"$_pin_body")" || _pa=""
     [ -n "$_pa" ] \
         || die "the pin probe has no $_pv arm; the coverage check below proves nothing"
-    for _pn in RB_PIN_DIR RB_PIN_SEEN RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS PATH \
-               HOST OWNER REPO IFS HOME TMPDIR; do
+    # THE PIN INVENTORY IS THE SAME SET AS THE TRANSPORT ONE, derived rather than
+    # written out. Hand-listing it here omitted `CODEX_BOT`, `COPILOT_BOT`, the CI
+    # and watch knobs, `REVIEW_MERGE_STRICT`, `RB_SUITE_JOBS`, `REVIEW_BUS_*` and
+    # `CLAUDE_PLUGIN_ROOT` — every one of them present in the probe and unchecked,
+    # so deleting a comparison from a pin arm left this green. Two inventories for
+    # one rule is the shape this repository records as the cause of its worst bugs.
+    _pn_rest="$_kn"
+    while [ -n "$_pn_rest" ]; do
+        _pn="${_pn_rest%%|*}"
+        case "$_pn_rest" in *'|'*) _pn_rest="${_pn_rest#*|}" ;; *) _pn_rest="" ;; esac
+        case "$_pn" in
+            PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
+            [A-Z]*) : ;;
+            *) continue ;;
+        esac
+        case "$_pa" in
+            *"\${$_pn:-} != $_pv"*) : ;;
+            *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
+        esac
+    done
+    # …AND THIS STAGE'S OWN NAMES WITH THEM, which the shared set does not carry:
+    # the driver ASSIGNS these, so `pr-selfcheck.sh` never lists them.
+    for _pn in RB_PIN_DIR RB_PIN_SEEN RB_REMOTE RB_TMPPARENT REPO_DIR HOST OWNER REPO; do
         case "$_pa" in
             *"$_pn"*"$_pv"*) : ;;
             *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
@@ -1073,10 +1103,6 @@ pass "…with four probe arms, each comparing against every name in scope"
 # `BASH_SOURCE` are maintained by the shell itself, so an assignment to one is not
 # a corruption this loop can cause; the positional and special parameters are not
 # names a nameref can target. Anything else appearing in `KNOWN` must be compared.
-_kn=""
-_kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
-[ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
-_kn="${_kn#*\'}"; _kn="${_kn%\'*}"
 # ASKED OF EACH ARM SEPARATELY. An existential search over the whole block passed
 # with a comparison deleted from ONE arm, because the same sentinel still appeared
 # in another — so a later edit could let a nameref through while this stayed green.

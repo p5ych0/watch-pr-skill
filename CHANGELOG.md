@@ -138,10 +138,22 @@
   reads without assigning, which that file has to maintain anyway — and the suite
   requires every entry to be compared against, so adding a knob there without
   protecting it turns it red, and every one of the four probe arms is checked
-  separately — an existential search over the whole block passed with a comparison
+  separately — the pin arms against the same derived set, not a second hand-written
+  one — an existential search over the whole block passed with a comparison
   deleted from ONE arm. The shell-managed names are exempt BY NAME. A
   one-line generic test is unavailable: `[[ -R name ]]` is bash 4.3+, and an
   unknown unary operator inside `[[ ]]` is a PARSE error on 3.2.
+
+  **That is still not the whole set, and the limit is stated rather than
+  extended.** `KNOWN` lists what the DRIVER reads; it does not list what the
+  helpers' tools read. `GIT_DIR` is never read by `SKILL.md` and is read by `git`
+  several stages later, so a nameref replacing it with a transport path setup then
+  deletes leaves the round close and the merge range unable to inspect the
+  checkout. The full set is every environment variable that changes the behaviour
+  of any program the session runs, which is not enumerable. The replacement is to
+  stop assigning: a nameref can only ride an assignment, so if the helper chooses
+  the transport directory and the driver never holds it, the class goes with it —
+  the same protocol change #160 and #161 need, carried as one design in #162.
 
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so

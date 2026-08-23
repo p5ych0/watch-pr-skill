@@ -429,6 +429,17 @@ RB_PHASE=pre
 # did, then a directory there afterwards is one this run made, whatever the flag
 # has had time to say.
 #
+# AND IT IS AN INFERENCE, NOT A HANDOFF, which is the limit rather than a defect to
+# guard further. Two interleavings defeat it: a concurrent SAME-UID process that
+# creates this name between the `[[ -e ]]` and the `mkdir` makes the cleanup remove
+# a directory this run did not create, and one that removes an observed entry
+# before the `mkdir` succeeds leaks this run's directory if a signal lands before
+# `RB_OWNED=yes`. Both need that process to hit a window on a name carrying this
+# session's pid and three `$RANDOM` draws. The fix is not a third fact: it is the
+# helper choosing the name as well as creating it, after which nothing outside this
+# process can have created what it finds. #162 carries that with #160 and #161,
+# which want the same change for other reasons.
+#
 # AND AN OWNED, EMPTY, PRE-EXISTING DIRECTORY IS THE CASE THAT MAKES BOTH
 # NECESSARY. `-O` alone cannot see it: the operator own empty directory at that
 # name passes every test a created one passes, and removing it contradicts the

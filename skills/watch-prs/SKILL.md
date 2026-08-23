@@ -646,7 +646,26 @@ if [[ -z $RB_REMOTE ]]; then
     # `KNOWN` list is the inventory of names this driver reads without assigning —
     # it has to be, or the undefined-variable check fires — and
     # `test-pr-skill-contract.sh` requires every entry in it to be compared against
-    # here, so adding a knob there without protecting it turns the suite red.
+    # here, in every arm, so adding a knob there without protecting it turns the
+    # suite red.
+    #
+    # AND THAT IS STILL NOT THE WHOLE SET, WHICH IS THE LIMIT TO STATE RATHER THAN
+    # THE ONE TO KEEP EXTENDING. `KNOWN` lists what THIS DRIVER reads. It does not
+    # list what the HELPERS' tools read: `GIT_DIR` is never read here and is read
+    # by `git` several stages later, so a nameref replacing it with a transport
+    # path this setup then deletes leaves the round close and the merge range
+    # unable to inspect the checkout. The full set is every environment variable
+    # that changes the behaviour of any program this session runs — `GIT_*`,
+    # `GH_*`, the locale — which is not enumerable, and a list that cannot be
+    # completed is the shape `CLAUDE.md` says to replace rather than lengthen.
+    #
+    # THE REPLACEMENT IS TO STOP ASSIGNING. A nameref can only ride an assignment;
+    # if the helper chooses the transport directory and this shell never holds it,
+    # the class is gone along with these four probes. That is the same protocol
+    # change #160 needs for reserve-before-publish and #161 for the `TMPDIR`
+    # fallback, and #162 carries all three as one design. What is here is the
+    # interim: it covers every name this driver reads, and it does not cover the
+    # ones only the helpers' tools read.
     #
     # WHAT IS EXEMPT AND WHY: `PWD`, `SECONDS`, `RANDOM` and `BASH_SOURCE` are
     # maintained by the shell itself and an assignment to one is not a corruption
