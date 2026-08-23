@@ -531,9 +531,12 @@ unset -f rb_identity 2>/dev/null \
 # indirect expansion of a name nothing has set. One line, no list, and it catches
 # targets no list would have carried.
 #
-# WHICH PAIRS THESE COVER, STATED NARROWLY. Each stage's probe compares against
-# `RB_REMOTE` and against the other name in that stage — the ones that can REDIRECT
-# the read or the cleanups, which is the damage.
+# WHAT IT COVERS, STATED WITHOUT A LIST. There are no pairs any more: the probe
+# names ONE variable — the one it is about to assign — and asks whether that
+# assignment reaches anything else. Which "anything else" is not this file's
+# business, and that is the improvement: `RB_REMOTE`, the other transport name, the
+# operator's `HOME`, `GIT_DIR`, `CDPATH` and whatever the next tool reads are all
+# the same answer.
 #
 # `2>/dev/null` because a nameref loop is a message, not an answer.
 # THE VALUE THIS SESSION PINS BY IS CLEARED AND PROVED CLEARED HERE, ABOVE THE

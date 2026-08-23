@@ -1130,6 +1130,45 @@ esac
 # quota'd filesystem, which is the same "making it fail means making it fail
 # everywhere" this repository already records for heredoc temporary files.
 #
+# ── AN OPEN-THEN-FAIL WRITE, RUN RATHER THAN MATCHED ───────────────────────
+#
+# `ulimit -f 0` sets the file-size limit to zero: the redirection creates the leaf,
+# and the `printf` into it fails. `SIGXFSZ` would kill the shell first, so the case
+# ignores it — after which the write returns an ERROR, which is exactly the state
+# the guards are for and the one `/dev/full` used to stage before the argument
+# became a directory `mkdir` refuses.
+#
+# BOTH MODES, because the two writes have different consequences: without its
+# status `pin` leaves an empty file and exits 0 — byte-for-byte what a legitimately
+# unset pin leaves — and `read` leaves an empty file the caller reads back as an
+# origin.
+#
+# AND THE DIRECTORY IS ASSERTED GONE, which is the half only the cleanup provides:
+# the write happens after `RB_PHASE=post`, so the leaf is removed with it.
+_wf_bin="$TMP/wfbin"; mkdir -p "$_wf_bin"
+for _wf_mode in read pin; do
+    _wf_dir="$TMP/wf.$_wf_mode.$$"
+    rm -rf "$_wf_dir"
+    _wf_rc=0
+    _wf_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+        bash -c 'ulimit -f 0 2>/dev/null || exit 97
+                 trap "" XFSZ
+                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wf_mode" "$_wf_dir" 2>&1)" || _wf_rc=$?
+    if [ "$_wf_rc" = 97 ]; then
+        echo "ok   - (this shell cannot set a zero file-size limit; the $_wf_mode write-failure case did not run)"
+        continue
+    fi
+    { [ "$_wf_rc" -ne 0 ] \
+      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac; } \
+        && pass "a write that opens and then fails is refused by name ($_wf_mode)" \
+        || die "the $_wf_mode write-failure case gave rc=$_wf_rc '$_wf_out'"
+    [ ! -e "$_wf_dir" ] \
+        && pass "…and the directory it had reserved is given back ($_wf_mode)" \
+        || die "a failed $_wf_mode write left '$_wf_dir' behind"
+done
+rm -rf "$_wf_bin"
+
 # WHAT REPLACES IT IS A STRUCTURAL ASSERTION OVER BOTH WRITES, and that is
 # weaker than running them — stated plainly, because the first version of this
 # paragraph said `pr-selfcheck.sh` would not miss the guards' removal and that is
@@ -1327,6 +1366,10 @@ if [ -d "$_int_dir" ]; then
     while kill -0 "$_int_pid" 2>/dev/null && [ "$_int_w" -lt 150 ]; do
         _int_w=$(( _int_w + 1 )); sleep 0.1
     done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_int_pid" 2>/dev/null; then kill -KILL "$_int_pid" 2>/dev/null; fi
     [ "$_int_w" -lt 150 ] \
         && pass "…and the interrupted helper ends rather than hanging" \
         || die "the helper was still running fifteen seconds after TERM"
@@ -1369,6 +1412,10 @@ if [ -d "$_pin_dir" ]; then
     while kill -0 "$_pin_pid" 2>/dev/null && [ "$_pin_w" -lt 150 ]; do
         _pin_w=$(( _pin_w + 1 )); sleep 0.1
     done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_pin_pid" 2>/dev/null; then kill -KILL "$_pin_pid" 2>/dev/null; fi
     _pin_rc=0
     wait "$_pin_pid" 2>/dev/null || _pin_rc=$?
     { [ "$_pin_rc" = 143 ] && [ ! -e "$_pin_dir" ]; } \
@@ -1414,6 +1461,10 @@ if [ -e "$_mkd_mark" ]; then
     while kill -0 "$_mkd_pid" 2>/dev/null && [ "$_mkd_w" -lt 150 ]; do
         _mkd_w=$(( _mkd_w + 1 )); sleep 0.1
     done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_mkd_pid" 2>/dev/null; then kill -KILL "$_mkd_pid" 2>/dev/null; fi
     _mkd_rc=0
     wait "$_mkd_pid" 2>/dev/null || _mkd_rc=$?
     [ ! -e "$_mkd_dir" ] \
@@ -1490,6 +1541,10 @@ if [ -d "$_sig_dir" ]; then
     while kill -0 "$_sig_pid" 2>/dev/null && [ "$_sig_w" -lt 150 ]; do
         _sig_w=$(( _sig_w + 1 )); sleep 0.1
     done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_sig_pid" 2>/dev/null; then kill -KILL "$_sig_pid" 2>/dev/null; fi
     _sig_rc=0
     wait "$_sig_pid" 2>/dev/null || _sig_rc=$?
     [ ! -e "$_sig_dir" ] \

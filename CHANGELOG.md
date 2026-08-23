@@ -26,6 +26,13 @@
   the two, and the second `rm -f` follows it into a file this run never created.
   The read-back is a branch whose arms each clean up once.
 
+- **The write-failure guards were only matched, not run.** The `/dev/full` cases
+  went when the argument became a directory `mkdir` refuses, and nothing replaced
+  the execution. `ulimit -f 0` with `SIGXFSZ` ignored is a portable substitute: the
+  redirection creates the leaf and the `printf` into it fails, which is exactly the
+  state the guards are for. Both modes are exercised, and each asserts the refusal
+  names the write and the reserved directory is given back.
+
 - **A refusal after the directory existed left it behind.** The helper's contract
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean

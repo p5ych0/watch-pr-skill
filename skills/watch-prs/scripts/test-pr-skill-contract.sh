@@ -1556,17 +1556,17 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
 else
     echo "ok   - (declare -n is unavailable on this bash, or no scratch tree; the pin nameref cases did not run)"
 fi
-# …AND THE PIN STAGE'S OWN CANDIDATE ALIASES ARE RUN, not only matched. The pin
-# probe compares against `HOME` and `TMPDIR` for the same reason the transport one
-# does — this stage removes what it creates too, so an alias onto a candidate ends
-# with the operator's variable naming a deleted path. Source-text matching says the
-# comparisons are present; only running them says they refuse.
+# …AND THE PIN STAGE'S ALIASES ARE RUN, not only matched. The probe is generic —
+# `${!name}` — so there are no per-name comparisons left to match; what the source
+# assertion says is that both halves of the check are present, and what these runs
+# say is that they REFUSE. This stage removes what it creates too, so an alias onto
+# any name ends with the operator's variable naming a deleted path.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # A TRANSFORMING ATTRIBUTE IS IN THIS LOOP TOO, not only namerefs. `declare -i`
-    # makes the subshell'"'"'s assignment SUCCEED and store `0`, so only the equality
-    # read-back refuses it — the half the drift guard above now requires. The
-    # "candidate" it protects is the stage'"'"'s own name, so the expected value is what
-    # the operator'"'"'s declaration left there.
+    # makes the subshell's assignment SUCCEED and store `0`, and `declare -u`
+    # upper-cases it — so only the `RbProbe*` prefix match refuses them, which is why
+    # the sentinel is mixed case. The "candidate" they protect is the stage's own
+    # name, so the expected value is what the operator's declaration left there.
     for _pal in "declare -i RB_PIN_DIR=0|RB_PIN_DIR|0" \
                 "declare -u RB_PIN_DIR=x|RB_PIN_DIR|X" \
                 "declare -u RB_PIN_SEEN=x|RB_PIN_SEEN|X" \
