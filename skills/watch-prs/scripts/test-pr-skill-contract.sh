@@ -750,6 +750,13 @@ LOCAL
     # before the block runs on that exit and writes the candidate to a file, so the
     # observation survives however the shell leaves.
     if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+        # `GIT_DIR` AND `CDPATH` ARE HERE BECAUSE NO LIST EVER CARRIED THEM. One is
+        # read by `git` inside the helpers, the other by the SHELL on a later `cd`,
+        # and neither is read or assigned by `SKILL.md` — they are the two names that
+        # showed the enumeration could not be completed, and they pass now for the
+        # same reason every other one does: `${!name}` names the target whatever it
+        # is.
+        #
         # `IFS` IS SET IN THE SCRIPT, NOT THROUGH `env`: bash resets it to its
         # default at startup whatever the environment says, so an `IFS=xyz` on the
         # invocation never reaches the block and the case compares against the
@@ -767,6 +774,8 @@ LOCAL
                    "declare -n RB_TMPPARENT=REPO_DIR|REPO_DIR|$_forge_dir" \
                    "declare -n RB_ORIGIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR=GIT_DIR|GIT_DIR|/somewhere/.git" \
+                   "declare -n RB_TMPPARENT=CDPATH|CDPATH|/projects" \
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
                    "declare -n RB_TMPPARENT=PATH|PATH|$PATH" \
                    "declare -n RB_ORIGIN_DIR=OWNER|OWNER|acme" \
@@ -779,6 +788,7 @@ LOCAL
             _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
                 RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
                 REPO_DIR="$_forge_dir" HOST=github.com OWNER=acme REPO=widget \
+                GIT_DIR=/somewhere/.git CDPATH=/projects \
                 REVIEW_MERGE_STRICT=1 \
                 RB_ALIAS_OUT="$_forge_dir/alias.out" \
                 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
@@ -1012,7 +1022,7 @@ _pin_body=""
 _pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed 's/^    //')" || _pin_body=""
 case "$_pin_body" in
     *'
-if { ( RB_PIN_DIR=Probe-A; '*) pass "the pin branch dedents to column 0 for the lifts below" ;;
+if ( RB_PIN_DIR="RBPROBE'*) pass "the pin branch dedents to column 0 for the lifts below" ;;
     *) die "the pin branch did not dedent as expected; SKILL.md's nesting changed and the lifts below would all be empty" ;;
 esac
 # TWO ARMS NOW, NOT FOUR. Until #157 this branch was `RB_PIN_DIR`, `RB_PIN_OUT`
@@ -1022,7 +1032,7 @@ esac
 # are all gone from here; what is left is one probe over the two names that still
 # exist and the work arm behind it.
 _arm_work=""
-_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/; }; then$/,$p')" || _arm_work=""
+_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/) 2>\/dev\/null; then$/,$p')" || _arm_work=""
 _arm_refuse=""
 _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refuse=""
 { [ -n "$_arm_work" ] && [ -n "$_arm_refuse" ]; } \
@@ -1043,128 +1053,53 @@ _kn="${_kn#*\'}"; _kn="${_kn%\'*}"
 # of their comparisons from a pin arm left the drift guard green.
 _assigned="RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS HOST OWNER REPO CODEX_BOT COPILOT_BOT"
 
-# THE PROBE IS TWO SENTINEL PAIRS, AND EVERY ARM CARRIES EVERY NAME. Four arms —
-# `Probe-A`/`Probe-B` and `Probe-C`/`Probe-D` — because ONE pair is a fixed value
-# and a fixed value collides: an operator whose `IFS`, or any other protected name,
-# happens to hold exactly `Probe-A` failed a comparison nothing had corrupted. A
-# real nameref fails BOTH pairs, since the assignment writes the sentinel into the
-# target every time; a collision fails only the pair it collides with.
+# THE PROBE IS ONE GENERIC TEST NOW, NOT AN ENUMERATION. Thirteen names were found
+# one review round apiece, and the last two — `GIT_DIR` and `CDPATH` — showed the
+# list could never be completed: it would have to union what the driver reads, what
+# its tools read, and what the shell itself consults.
 #
-# EACH ARM IS CHECKED SEPARATELY, which the first version did not do. Asked of the
-# whole block, an existential search passed with a comparison deleted from ONE arm,
-# because the same sentinel still appeared in another — so a later edit could let a
-# nameref through while the guard stayed green.
-for _pv in Probe-A Probe-B Probe-C Probe-D; do
-    _pa=""
-    # A HERESTRING, for the reason the transport coverage check gives: `awk` exits
-    # early, `printf` takes SIGPIPE, and `pipefail` turns a good extraction into an
-    # empty one. #152.
-    _pa="$(awk -v v="$_pv" '$0 ~ ("=" v "; ") {f=1} f {print} f && /2>\/dev\/null/ {exit}' <<<"$_pin_body")" || _pa=""
-    [ -n "$_pa" ] \
-        || die "the pin probe has no $_pv arm; the coverage check below proves nothing"
-    # THE PIN INVENTORY IS THE SAME SET AS THE TRANSPORT ONE, derived rather than
-    # written out. Hand-listing it here omitted `CODEX_BOT`, `COPILOT_BOT`, the CI
-    # and watch knobs, `REVIEW_MERGE_STRICT`, `RB_SUITE_JOBS`, `REVIEW_BUS_*` and
-    # `CLAUDE_PLUGIN_ROOT` — every one of them present in the probe and unchecked,
-    # so deleting a comparison from a pin arm left this green. Two inventories for
-    # one rule is the shape this repository records as the cause of its worst bugs.
-    _pn_rest="$_kn"
-    while [ -n "$_pn_rest" ]; do
-        _pn="${_pn_rest%%|*}"
-        case "$_pn_rest" in *'|'*) _pn_rest="${_pn_rest#*|}" ;; *) _pn_rest="" ;; esac
-        case "$_pn" in
-            PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
-            [A-Z]*) : ;;
-            *) continue ;;
-        esac
-        case "$_pa" in
-            *"\${$_pn:-} != $_pv"*) : ;;
-            *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
-        esac
-    done
-    # …AND THE ASSIGNED NAMES WITH THEM, this stage's two included.
-    #
-    # MATCHED AS THE WHOLE COMPARISON, not as two substrings. `*"$_pn"*"$_pv"*` was
-    # satisfied for `REPO` by an arm containing `REPO_DIR` and the sentinel, and for
-    # `OWNER` by `REVIEW_BUS_OWNER` — so deleting either comparison left this green
-    # while a nameref to that identity field passed the arm.
-    #
-    # THE ARM'S OWN NAME IS THE EXCEPTION, and BOTH halves of it are required: the
-    # ASSIGNMENT and the equality that reads it back. Accepting the assignment alone
-    # let `[[ $RB_PIN_DIR = Probe-A ]]` be deleted with this green — and that
-    # equality is the half that catches a TRANSFORMING attribute, where the
-    # assignment succeeds and stores something else. `declare -i RB_PIN_DIR=0` then
-    # passes the arm, and the real assignment leaves the helper a relative `0`.
-    for _pn in $_assigned RB_PIN_DIR RB_PIN_SEEN; do
-        case "$_pa" in
-            *"\${$_pn:-} != $_pv"*) continue ;;
-        esac
-        case "$_pa" in
-            *"( $_pn=$_pv; [[ \$$_pn = $_pv ]]"*) continue ;;
-        esac
-        die "the pin probe's $_pv arm does not compare against \$$_pn"
-    done
+# `${!name}` ANSWERS IT IN ONE LINE. For a NAMEREF it expands to the target's NAME;
+# for an ordinary variable it is indirect expansion, the value of the variable NAMED
+# by this one. Assign a legal-but-unset variable name and ask whether `${!name}` is
+# empty: an ordinary variable names nothing, and a nameref names whatever it points
+# at — including names no list here would have carried.
+#
+# WHAT IS ASSERTED IS THE SHAPE OF BOTH SUBSHELLS, and both halves of each: the
+# `RBPROBE*` prefix match, which is what catches a readonly or a transforming
+# attribute, and the indirect-expansion emptiness, which is what catches the alias.
+for _pn in RB_PIN_DIR RB_PIN_SEEN; do
+    grep -q "( $_pn=\"RBPROBE\$RANDOM\$RANDOM\"; \[\[ \$$_pn = RBPROBE\* \]\]" <<<"$_pin_body" \
+        || die "the pin probe does not assign a random RBPROBE sentinel to \$$_pn and match it"
+    grep -q "\[\[ -z \${!$_pn:-} \]\]" <<<"$_pin_body" \
+        || die "the pin probe does not test \${!$_pn} for a nameref"
 done
-pass "…with four probe arms, each comparing against every name in scope"
-# ── EVERY NAME THE DRIVER READS WITHOUT ASSIGNING IS PROTECTED FROM A NAMEREF ──
+pass "the pin probe detects an alias generically, and an attribute by the prefix match"
+# ── THE TRANSPORT PROBE DETECTS AN ALIAS GENERICALLY ──────────────────────
 #
-# Eleven names were found one review round apiece, which is the "list wrong by
-# omission" `CLAUDE.md` warns about — and writing the set down in a comment was not
-# enough, because the round after it was written omitted three names the comment
-# itself listed. A list nobody checks is a list that drifts.
+# It used to be an enumeration tied to `pr-selfcheck.sh`'s `KNOWN` list, and that
+# was the wrong inventory: `KNOWN` is what the DRIVER reads, and `GIT_DIR` is read
+# by `git` in the helpers while `CDPATH` is consulted by the shell itself. Three
+# inventories, the last growing with the shell version — a list that cannot be
+# completed.
 #
-# SO IT IS TIED TO ONE `pr-selfcheck.sh` ALREADY MAINTAINS. That file's `KNOWN`
-# list is the inventory of names `SKILL.md` reads without assigning — it has to be,
-# or its undefined-variable check fires — so requiring every entry to be compared
-# against in the probes makes the two move together: add a knob there without
-# protecting it here and this turns red.
-#
-# THE EXEMPTIONS ARE NAMED, not filtered by shape. `PWD`, `SECONDS`, `RANDOM` and
-# `BASH_SOURCE` are maintained by the shell itself, so an assignment to one is not
-# a corruption this loop can cause; the positional and special parameters are not
-# names a nameref can target. Anything else appearing in `KNOWN` must be compared.
-# ASKED OF EACH ARM SEPARATELY. An existential search over the whole block passed
-# with a comparison deleted from ONE arm, because the same sentinel still appeared
-# in another — so a later edit could let a nameref through while this stayed green.
-_kn_missing=""
-for _kn_v in Probe-A Probe-B Probe-C Probe-D; do
-    _kn_arm=""
-    # A HERESTRING, NOT A PIPE. `awk` exits at the end of the arm, `printf` takes
-    # SIGPIPE, and under `pipefail` the pipeline reports 141 — so `|| _kn_arm=""`
-    # cleared a perfectly good extraction, intermittently. #152.
-    _kn_arm="$(awk -v v="$_kn_v" '$0 ~ ("=" v "; ") {f=1} f {print} f && /2>\/dev\/null/ {exit}' <<<"$_read_block")" || _kn_arm=""
-    [ -n "$_kn_arm" ] \
-        || die "the transport probe has no $_kn_v arm; the coverage check proves nothing"
-    _kn_rest="$_kn"
-    while [ -n "$_kn_rest" ]; do
-        _kn_one="${_kn_rest%%|*}"
-        case "$_kn_rest" in *'|'*) _kn_rest="${_kn_rest#*|}" ;; *) _kn_rest="" ;; esac
-        case "$_kn_one" in
-            PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
-            [A-Z]*) : ;;
-            *) continue ;;
-        esac
-        case "$_kn_arm" in
-            *"\${$_kn_one:-} != $_kn_v"*) : ;;
-            *) _kn_missing="$_kn_missing $_kn_v/$_kn_one" ;;
-        esac
-    done
-    # …AND THE ASSIGNED NAMES, this stage's one included, matched as the whole
-    # comparison for the reason the pin loop gives — with the arm's own name
-    # recognised by its assignment instead.
-    for _kn_a in $_assigned RB_ORIGIN_DIR; do
-        case "$_kn_arm" in
-            *"\${$_kn_a:-} != $_kn_v"*) continue ;;
-        esac
-        case "$_kn_arm" in
-            *"( $_kn_a=$_kn_v; [[ \$$_kn_a = $_kn_v ]]"*) continue ;;
-        esac
-        _kn_missing="$_kn_missing $_kn_v/$_kn_a"
-    done
+# `${!name}` REPLACES ALL OF IT. For a nameref it expands to the target's NAME; for
+# an ordinary variable it is indirect expansion. Assign a legal-but-unset variable
+# name and require `${!name}` to be empty.
+for _tn in RB_TMPPARENT RB_ORIGIN_DIR; do
+    grep -q "( $_tn=\"RBPROBE\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RBPROBE\* \]\]" <<<"$_read_block" \
+        || die "the transport probe does not assign a random RBPROBE sentinel to \$$_tn and match it"
+    grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_read_block" \
+        || die "the transport probe does not test \${!$_tn} for a nameref"
 done
-[ -z "$_kn_missing" ] \
-    && pass "every environment name pr-selfcheck.sh knows about is protected in every probe arm" \
-    || die "the transport probes do not compare against:$_kn_missing"
+pass "the transport probe detects an alias generically, and an attribute by the prefix match"
+# …AND NO FIXED SENTINEL SURVIVES ANYWHERE IN EITHER PROBE. A fixed value COLLIDES:
+# with two fixed pairs and an operator holding one value from each, both pairs
+# failed and a shell nothing had corrupted was refused.
+case "$_read_block$_pin_body" in
+    *Probe-A*|*Probe-B*|*Probe-C*|*Probe-D*)
+        die "a fixed probe sentinel remains; an operator holding that value is refused" ;;
+    *) pass "…with no fixed sentinel left to collide with an operator's own value" ;;
+esac
 
 # THE SUCCESS LINE IS IN THE WORK ARM AND NOWHERE ELSE.
 case "$_arm_work" in
@@ -1607,6 +1542,8 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
                 "declare -n RB_PIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                 "declare -n RB_PIN_SEEN=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                 "declare -n RB_PIN_DIR=PATH|PATH|$PATH" \
+                "declare -n RB_PIN_DIR=GIT_DIR|GIT_DIR|/somewhere/.git" \
+                "declare -n RB_PIN_SEEN=CDPATH|CDPATH|/projects" \
                 "declare -n RB_PIN_SEEN=PATH|PATH|$PATH" \
                 "declare -n RB_PIN_DIR=OWNER|OWNER|acme" \
                 "declare -n RB_PIN_SEEN=HOST|HOST|github.com" \
@@ -1618,6 +1555,7 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
         _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
             TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" REPO_DIR="$RB_TMPBASE" \
             HOST=github.com OWNER=acme REPO=widget CODEX_BOT='codex[bot]' \
+            GIT_DIR=/somewhere/.git CDPATH=/projects \
             RB_ALIAS_OUT="$_forge_dir/palias.out" \
             'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                 trap '"'"'printf "CANDIDATE=[%s]\n" "${'"$_pal_var"':-}" > "$RB_ALIAS_OUT"'"'"' EXIT
@@ -2294,7 +2232,7 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
 # else — a status-only probe accepts that, and the request goes out with the
 # baseline rewritten. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW=Probe-A; \[\[ $PRIOR_REVIEW = Probe-A \]\] )' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RBPROBE\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RBPROBE\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
 { [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
@@ -2350,7 +2288,7 @@ case "$(cat "$_rb_pb/alloc.sh")" in
     *'mkdir -m 700 "$RB_WORK_DIR"'*) pass "the working-directory allocation lifts out for the cases below" ;;
     *) die "the working-directory allocation did not lift; the cases below prove nothing" ;;
 esac
-awk '/^[[:space:]]*if \{ \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
+awk '/^[[:space:]]*if \( RB_TMPPARENT="RBPROBE/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
 # THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
 # range runs from the probe to the first `fi` at column 0 — which is the probe's
 # own when the selection is its success arm, and the GUARD's if it is not. Revert
@@ -2450,7 +2388,7 @@ fi
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW=Probe-A; \[\[ $PRIOR_REVIEW = Probe-A \]\] )' "$SKILL" \
+grep -q '^if { ( PRIOR_REVIEW="RBPROBE\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RBPROBE\* \]\]' "$SKILL" \
     && pass "…and the probe is a condition whose success arm holds the request" \
     || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
@@ -2949,7 +2887,7 @@ mkdir -p "$_rb_bt/parent/watch-pr.anchor" "$_rb_bt/parent/attacker"
 # ITS OWN LIFT, because the probe cases above remove their scratch tree when they
 # finish. Same range, same dedent, and CHECKED — a lift that came out empty would
 # make every case below pass against nothing.
-awk '/^[[:space:]]*if \{ \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
+awk '/^[[:space:]]*if \( RB_TMPPARENT="RBPROBE/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
 case "$(cat "$_rb_bt/parent.sh")" in
     *'RB_ORIGIN_DIR="${RB_TMPPARENT:?'*) : ;;
     *) die "the transport block did not lift for the RB_ORIGIN_DIR cases; they would prove nothing" ;;

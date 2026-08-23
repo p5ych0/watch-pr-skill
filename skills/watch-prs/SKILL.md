@@ -524,9 +524,12 @@ unset -f rb_identity 2>/dev/null \
 # DISTINCT VALUES ARE WHAT MAKES IT VISIBLE, which is the pattern `clocklib.sh`
 # already uses and states: one value says nothing about whether two names are one
 # variable. `RB_REMOTE` was cleared and proved clear immediately above, so it
-# holds the empty string — writing `Probe-A` here and finding it there is an
-# alias, and finding it unchanged is not. Each probe checks the same way, and the
-# refusal names its own variables rather than a class.
+# holds the empty string — writing a sentinel here and finding it there was an
+# alias, and finding it unchanged was not. That comparison is GONE, replaced by
+# `${!name}`, which asks the same question without naming the other side: for a
+# nameref it expands to the TARGET'S NAME, and for an ordinary variable it is
+# indirect expansion of a name nothing has set. One line, no list, and it catches
+# targets no list would have carried.
 #
 # WHICH PAIRS THESE COVER, STATED NARROWLY. Each stage's probe compares against
 # `RB_REMOTE` and against the other name in that stage — the ones that can REDIRECT
@@ -566,228 +569,41 @@ RB_REMOTE=
 # what it pins is this value. With the continuation contained there is nothing
 # after the final `fi` at all.
 if [[ -z $RB_REMOTE ]]; then
-    # ── THE ORIGIN, READ WHERE THIS SHELL'S NAMES CANNOT REACH ────────────
+    # ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
+    # found one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`,
+    # `PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer
+    # logins, `GIT_DIR`, `CDPATH` — and the last two showed the list could never be
+    # completed: it would have to union what this driver reads, what its tools read,
+    # and what the SHELL ITSELF consults, and the last grows with the shell version.
     #
-    # ONE NAME, ONE CALL, ONE READ. This was thirty-five lines: a two-candidate
-    # loop, `RB_TMPPARENT`, `RB_TRY` and `RB_TMPDIR`, an assignability probe for
-    # each with cross-variable alias checks, an exclusive `mkdir`, two cleanup
-    # arms, a `${RB_TMPDIR:?…}` on every later use, and a containment arm around
-    # the whole region. Every line of it defended NAMES IN THIS SHELL — which is
-    # exactly what a startup file can have made readonly, `declare -i`, `declare
-    # -l`, or a `declare -n` aimed at another of them. #146, #148, #150, #151 and
-    # half of #155 are all that block.
+    # `${!name}` IS THE ANSWER, and it is portable. For a NAMEREF it expands to the
+    # TARGET'S NAME; for an ordinary variable it is indirect expansion — the value
+    # of the variable NAMED by this one. So assign a value that is a legal variable
+    # name and cannot be a set one, and ask whether `${!name}` is empty: an ordinary
+    # variable names nothing and gives nothing, and a nameref gives whatever it
+    # points at, whether that is `HOME`, `GIT_DIR`, `CDPATH` or something no list
+    # here would ever have carried.
     #
-    # THE HELPER CREATES THE DIRECTORY NOW, and it runs `bash -p`: no functions
-    # imported, no `BASH_ENV` sourced, its names its own. The exclusion is where
-    # it can be relied on, so there is nothing here left to defend. #157.
+    # AND IT WORKS WHERE `[[ -R ]]` CANNOT. `-R` answers the same question in one
+    # word and is bash 4.3+, and on 3.2 an unknown unary operator inside `[[ ]]` is
+    # a PARSE error, so the whole block would fail to parse on the shell
+    # `macos-shell` exists to cover. Indirect expansion is bash 2, and on a shell
+    # with no namerefs it simply reports nothing — which is the right answer there,
+    # since nothing can be one.
     #
-    # THE PARENT IS CHOSEN BY EXPANSION, and `TMPDIR` is tried before `HOME`
-    # because a session that cannot write its temporary directory has bigger
-    # problems than this read — but a relative or missing one is ordinary, and
-    # falls through rather than ending the session.
-    # THE PARENT IS CHOSEN ONCE, HERE, and the pin probe and the session's working
-    # files build under the same one. It was a `for` loop over both candidates
-    # with the helper's own answer as the acceptance test — which meant a bad
-    # ORIGIN sent it to try `HOME`, where the origin is just as bad. What the
-    # fallback is actually for is a `TMPDIR` that cannot hold a directory, and
-    # that is a question two expansions answer.
-    # AND BOTH NAMES ARE PROVED FIRST, because they are still names in this shell —
-    # the two that are left of the five. A subshell, one mixed-case value, compared
-    # inside, and `RB_REMOTE` read back to catch a nameref between them: the probe
-    # each of `RB_TMPPARENT`, `RB_TRY` and `RB_TMPDIR` used to carry, now carried
-    # by what remains.
+    # THE VALUE IS BUILT FROM `$RANDOM`, not fixed. A fixed sentinel COLLIDES: with
+    # two fixed pairs and an operator holding one value from each, both pairs failed
+    # and a shell nothing had corrupted was refused. `RBPROBE$RANDOM$RANDOM` is a
+    # legal name, re-rolled per session, and the only way to collide is to have a
+    # variable of exactly that name already set.
     #
-    # THE SELECTION IS THE PROBE'S SUCCESS ARM, NOT A LINE ABOVE IT. A readonly
-    # `RB_TMPPARENT` makes `RB_TMPPARENT="$TMPDIR"` fail, and under `errexit` — which
-    # a driving shell may well be in — a failed readonly assignment ends the session
-    # AT THAT LINE, with bash's own message and none of the diagnosis this refusal
-    # carries. Selecting inside the arm means the probe answers first and the
-    # operator is told which name is unusable. Reverting the containment restores
-    # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
-    # excerpt reaches the selection.
-    # AND `PATH` WITH THEM, which is not this loop's at all: an alias onto it made
-    # the assignments replace a working `PATH` with the transport path, so the very
-    # next `/usr/bin/env bash -p …` could not find `bash` — and the operator's
-    # long-lived shell was left that way. That is setup CORRUPTING `PATH`, which is
-    # a different thing from inheriting one already poisoned; the second is stated
-    # as a limit at the foot of `pr-origin.sh` and #91, and the first is a defect.
-    #
-    # AND `HOST`, `OWNER` AND `REPO`, which are the PARSED IDENTITY. An alias onto
-    # one of them let the assignments overwrite it with a transport path, and setup
-    # could then announce success with an identity component that is a directory
-    # name — every later `gh` call addressed at a repository that does not exist.
-    # They were named in the enumeration below before they were compared against,
-    # which is the enumeration being wrong by omission in the one place it should
-    # not have been.
-    #
-    # AND `IFS`, WHICH IS THE SHELL'S OWN. An alias onto it replaced the operator's
-    # field separator with the transport path, and every later unquoted expansion in
-    # that long-lived shell split on the characters of a directory name. Setup can
-    # complete, so nothing announces it. It is the one name on this list that is not
-    # something this loop or its operator set — which is why it was missed, and why
-    # the rule is "reachable", not "ours".
-    #
-    # AND THE OPERATOR'S KNOBS AND THE REVIEWER NAMES. `REVIEW_MERGE_STRICT` is
-    # the sharpest: an alias onto it replaced the exported `1` with a transport
-    # path, the pin succeeded, and `pr-merge-gate.sh` stopped seeing strict mode —
-    # silently restoring the `--admin` merge that bypasses a base branch's
-    # protections. `CODEX_BOT` and `COPILOT_BOT` decide which reviewer every stage
-    # addresses. The knobs are read from the ENVIRONMENT, so the transport probes
-    # can corrupt them before the loop ever looks.
-    #
-    # THIS IS AN ENUMERATION, AND IT IS NOW A CHECKED ONE. Eleven names were found
-    # one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`, `PATH`,
-    # `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs and the reviewer logins —
-    # which is exactly the "list wrong by omission" `CLAUDE.md` warns about, and
-    # writing the set down was not enough: the round after it was written omitted
-    # three names the comment itself listed.
-    #
-    # SO THE SET IS TIED TO ONE `pr-selfcheck.sh` ALREADY MAINTAINS. That file's
-    # `KNOWN` list is the inventory of names this driver reads without assigning —
-    # it has to be, or the undefined-variable check fires — and
-    # `test-pr-skill-contract.sh` requires every entry in it to be compared against
-    # here, in every arm, so adding a knob there without protecting it turns the
-    # suite red.
-    #
-    # AND THAT IS STILL NOT THE WHOLE SET, WHICH IS THE LIMIT TO STATE RATHER THAN
-    # THE ONE TO KEEP EXTENDING. `KNOWN` lists what THIS DRIVER reads. It does not
-    # list what the HELPERS' tools read: `GIT_DIR` is never read here and is read
-    # by `git` several stages later, so a nameref replacing it with a transport
-    # path this setup then deletes leaves the round close and the merge range
-    # unable to inspect the checkout. The full set is every environment variable
-    # that changes the behaviour of any program this session runs — `GIT_*`,
-    # `GH_*`, the locale — which is not enumerable, and a list that cannot be
-    # completed is the shape `CLAUDE.md` says to replace rather than lengthen.
-    #
-    # THE REPLACEMENT IS TO STOP ASSIGNING. A nameref can only ride an assignment;
-    # if the helper chooses the transport directory and this shell never holds it,
-    # the class is gone along with these four probes. That is the same protocol
-    # change #160 needs for reserve-before-publish and #161 for the `TMPDIR`
-    # fallback, and #162 carries all three as one design. What is here is the
-    # interim: it covers every name this driver reads, and it does not cover the
-    # ones only the helpers' tools read — nor the ones the SHELL ITSELF consults,
-    # which `CDPATH` added after the set was supposedly closed: it is neither read
-    # nor assigned here, and an alias onto it silently changes what a later `cd`
-    # searches. Three inventories would have to be unioned — what this driver
-    # reads, what its tools read, what the shell consults — and the last grows with
-    # the shell version.
-    #
-    # WHAT IS EXEMPT AND WHY: `PWD`, `SECONDS`, `RANDOM` and `BASH_SOURCE` are
-    # maintained by the shell itself and an assignment to one is not a corruption
-    # this loop can cause, and the positional parameters are not names a nameref can
-    # target.
-    #
-    # A GENERIC test would still be better and is not available: `[[ -R name ]]`
-    # answers "is this a nameref" in one line, and it is bash 4.3+ — on 3.2 an
-    # unknown unary operator inside `[[ ]]` is a PARSE error, so the whole block
-    # would fail to parse on the shell `macos-shell` exists to cover.
-    #
-    # AND `RB_SCRIPTS` WITH IT, which is where every helper is found. An alias onto
-    # it passed both probes, the assignments replaced the plugin directory with a
-    # transport path, and the very next line invoked `"$RB_SCRIPTS"/pr-origin.sh`
-    # from a directory that does not contain it — a setup that aborts and leaves the
-    # long-lived name corrupted for whatever the operator does next.
-    #
-    # AND `REPO_DIR` WITH THEM, which is neither a candidate nor a transport name
-    # but is in scope and is what the MERGE stage runs `cd` into. An alias onto it
-    # passed both probes — neither read it — and the assignments then replaced the
-    # captured repository root with a transport path this setup deletes a few lines
-    # later, so the merge could not inspect the pull request it had just approved.
-    # The rule is every name in scope that an assignment here can reach, not every
-    # name this stage introduces; that narrower reading is what left `HOME`,
-    # `TMPDIR` and now this one out, one round each.
-    #
-    # AND `HOME` AND `TMPDIR` ARE READ BACK TOO, because they are the CANDIDATES and
-    # a nameref onto one is not a nameref between two of these names. With
-    # `declare -n RB_ORIGIN_DIR=HOME` the probe passed — it read neither — and the
-    # assignments below then cleared the operator's `HOME` and replaced it with a
-    # transient path this setup removes a few lines later, leaving their long-lived
-    # shell pointing at a directory that no longer exists. A probe that compares
-    # only against the names its own stage introduces cannot see that.
-    # TWO SENTINEL PAIRS, AND EITHER COMPLETE PASS IS ACCEPTED. One pair is a
-    # fixed value, and a fixed value COLLIDES: an operator whose `IFS` — or any
-    # other protected name — happens to hold exactly `Probe-A` failed a comparison
-    # nothing had corrupted, and a perfectly good shell was refused as if it were.
-    # A real nameref fails BOTH pairs, because the probe assignment writes the
-    # sentinel into the target every time; a collision fails only the pair it
-    # collides with. So the accept is "one pair passed completely", not "no
-    # comparison anywhere failed".
-    if { ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
-         && [[ ${RB_ORIGIN_DIR:-} != Probe-A ]] \
-         && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
-         && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
-         && [[ ${REPO:-} != Probe-A ]] \
-         && [[ ${CODEX_BOT:-} != Probe-A ]] && [[ ${COPILOT_BOT:-} != Probe-A ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-A ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
-         && [[ ${IFS:-} != Probe-A ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-A ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-A ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-A ]] \
-         && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
-         && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
-         && [[ ${REPO_DIR:-} != Probe-B ]] && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
-         && [[ ${PATH:-} != Probe-B ]] \
-         && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
-         && [[ ${REPO:-} != Probe-B ]] \
-         && [[ ${CODEX_BOT:-} != Probe-B ]] && [[ ${COPILOT_BOT:-} != Probe-B ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-B ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
-         && [[ ${IFS:-} != Probe-B ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-B ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
-         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; } \
-       || { ( RB_TMPPARENT=Probe-C; [[ $RB_TMPPARENT = Probe-C ]] \
-         && [[ ${RB_ORIGIN_DIR:-} != Probe-C ]] \
-         && [[ ${RB_REMOTE:-} != Probe-C ]] && [[ ${REPO_DIR:-} != Probe-C ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-C ]] && [[ ${PATH:-} != Probe-C ]] \
-         && [[ ${HOST:-} != Probe-C ]] && [[ ${OWNER:-} != Probe-C ]] \
-         && [[ ${REPO:-} != Probe-C ]] \
-         && [[ ${CODEX_BOT:-} != Probe-C ]] && [[ ${COPILOT_BOT:-} != Probe-C ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-C ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-C ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-C ]] && [[ ${RB_SUITE_JOBS:-} != Probe-C ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-C ]] \
-         && [[ ${IFS:-} != Probe-C ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-C ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-C ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-C ]] \
-         && [[ ${HOME:-} != Probe-C ]] && [[ ${TMPDIR:-} != Probe-C ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR=Probe-D; [[ $RB_ORIGIN_DIR = Probe-D ]] \
-         && [[ ${RB_REMOTE:-} != Probe-D ]] && [[ ${RB_TMPPARENT:-} != Probe-D ]] \
-         && [[ ${REPO_DIR:-} != Probe-D ]] && [[ ${RB_SCRIPTS:-} != Probe-D ]] \
-         && [[ ${PATH:-} != Probe-D ]] \
-         && [[ ${HOST:-} != Probe-D ]] && [[ ${OWNER:-} != Probe-D ]] \
-         && [[ ${REPO:-} != Probe-D ]] \
-         && [[ ${CODEX_BOT:-} != Probe-D ]] && [[ ${COPILOT_BOT:-} != Probe-D ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-D ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-D ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-D ]] && [[ ${RB_SUITE_JOBS:-} != Probe-D ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-D ]] \
-         && [[ ${IFS:-} != Probe-D ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-D ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-D ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-D ]] \
-         && [[ ${HOME:-} != Probe-D ]] && [[ ${TMPDIR:-} != Probe-D ]] ) 2>/dev/null; }; then
+    # AND THE PREFIX MATCH IS THE OTHER HALF. A readonly leaves the old value, a
+    # `declare -i` stores `0`, a `declare -l` lower-cases it — none of them matches
+    # `RBPROBE*`, so the same two lines catch every attribute as well as the alias.
+    if ( RB_TMPPARENT="RBPROBE$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RBPROBE* ]] \
+         && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RBPROBE* ]] \
+         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -991,170 +807,41 @@ if [[ -z $RB_REMOTE ]]; then
     # message here, which is #84 along with `git` and `bash`.
     export REVIEW_BUS_REMOTE="$RB_REMOTE" \
         || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-    # THE PROOF IS TAKEN FROM A CHILD, because a child is what the pin is FOR. Reading
-    # the variable back here answers a different question: an `export` that assigns
-    # without setting the export attribute leaves this shell holding the right value
-    # and every helper holding none, so the parent-side check passes and the stages
-    # still derive from wherever the session later stands. What has to be true is that
-    # a new process sees it, so that is what is asked — and asking it also subsumes the
-    # parent-side check, since a wrong value here is a wrong value there.
+    # ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
+    # found one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`,
+    # `PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer
+    # logins, `GIT_DIR`, `CDPATH` — and the last two showed the list could never be
+    # completed: it would have to union what this driver reads, what its tools read,
+    # and what the SHELL ITSELF consults, and the last grows with the shell version.
     #
-    # ASKED THROUGH THE HELPER, NOT WITH `bash -c`. That was the first form and it was
-    # a name: a function called `bash` runs in a shell copy which inherits NON-exported
-    # variables, so it agreed the pin had arrived while the real stages — which exec
-    # through `#!/usr/bin/env bash` and resolve on `PATH` — inherited nothing. The
-    # helper is reached by path and is a real child, so its answer is the one the
-    # stages will get. #84.
-    # NO FALLBACK ON FAILURE, because `:` is a name. `… || : > "$RB_PIN_OUT"` called
-    # whatever the operator's shell had defined as `:`, and one that wrote `$RB_REMOTE`
-    # into that file made the equality below pass while the child probe had actually
-    # failed.
+    # `${!name}` IS THE ANSWER, and it is portable. For a NAMEREF it expands to the
+    # TARGET'S NAME; for an ordinary variable it is indirect expansion — the value
+    # of the variable NAMED by this one. So assign a value that is a legal variable
+    # name and cannot be a set one, and ask whether `${!name}` is empty: an ordinary
+    # variable names nothing and gives nothing, and a nameref gives whatever it
+    # points at, whether that is `HOME`, `GIT_DIR`, `CDPATH` or something no list
+    # here would ever have carried.
     #
-    # WHAT REPLACED IT IS NOT ANOTHER FALLBACK: THE FILE IS READ ONLY IF THE HELPER
-    # SUCCEEDED. Relying on the truncation was relying on the helper having reached it,
-    # and a helper that cannot start — missing, unreadable, or `env` unable to exec it —
-    # never truncates anything. The status was ignored, so what got read was whatever
-    # was at that path already, and it only had to equal `$RB_REMOTE` to report that a
-    # child had inherited the pin when no child had run. Branching removes the
-    # dependency on the file's contents rather than adding a guard over them; an
-    # unset `RB_PIN_SEEN` cannot match a non-empty remote, so the failure lands on the
-    # postcondition that is already here.
+    # AND IT WORKS WHERE `[[ -R ]]` CANNOT. `-R` answers the same question in one
+    # word and is bash 4.3+, and on 3.2 an unknown unary operator inside `[[ ]]` is
+    # a PARSE error, so the whole block would fail to parse on the shell
+    # `macos-shell` exists to cover. Indirect expansion is bash 2, and on a shell
+    # with no namerefs it simply reports nothing — which is the right answer there,
+    # since nothing can be one.
     #
-    # WRITTEN AS `if` RATHER THAN AS `&&`, WHICH IS THE OPPOSITE OF WHAT STOOD HERE.
-    # The `&&` form was chosen because the postcondition below is lifted out of this
-    # file and executed by `test-pr-skill-contract.sh`, and that lift used to end at
-    # the first `fi` at COLUMN 0 — so an `if` around this call ended it before the
-    # postcondition and nine assertions ran against a truncated block. The lift ends
-    # at the pin branch's own `fi`, four spaces in, since #155; an `if` around the
-    # call closes eight spaces in and the lift is unaffected. The `&&` form's real
-    # cost is the one the round after found: the removals that followed it ran on
-    # every path, including the one where the helper refused because the directory
-    # was already the operator's.
+    # THE VALUE IS BUILT FROM `$RANDOM`, not fixed. A fixed sentinel COLLIDES: with
+    # two fixed pairs and an operator holding one value from each, both pairs failed
+    # and a shell nothing had corrupted was refused. `RBPROBE$RANDOM$RANDOM` is a
+    # legal name, re-rolled per session, and the only way to collide is to have a
+    # variable of exactly that name already set.
     #
-    # ITS OWN DIRECTORY, ALLOCATED HERE AND GONE ON EVERY PATH OUT OF THE ARM BELOW.
-    # The origin read removed the first one as soon as it had its value; this is the
-    # second half of that. Same parent, same rules, same lifetime — and the lifetime
-    # is the HELPER'S ANSWER, because WHO MADE IT decides who may remove it: the
-    # `mkdir` inside the helper is what proves this shell's call created it, so its
-    # success arm removes the directory and nothing outside that arm removes
-    # anything at all.
-    # ── DOES A CHILD SEE THE PIN? ─────────────────────────────────────────
-    #
-    # THE SAME MOVE AS THE READ ABOVE. This was `RB_PIN_DIR`, `RB_PIN_OUT` and
-    # `RB_PIN_SEEN` with an assignability arm each, an exclusive `mkdir` and two
-    # cleanups — twenty-five lines defending three names in THIS shell. The helper
-    # creates the directory now, so `RB_PIN_DIR` is the only one of the three that
-    # has to exist here, and `RB_PIN_SEEN` holds the answer. #157.
-    #
-    # THE PROBE IS STILL A REAL CHILD, and that is the point of the stage: an
-    # `export` that assigns without setting the export attribute leaves this shell
-    # holding the right value while every helper holds none. Reading the variable
-    # back here answers a different question; only asking a child answers this one.
-    # THE PROBE COMES FIRST, AND THE REAL ASSIGNMENTS ARE ITS ARM. Written above
-    # the probe they were the very thing it exists to make safe: a readonly
-    # `RB_PIN_DIR` or `RB_PIN_SEEN` makes the assignment fail, and under `errexit`
-    # a failed readonly assignment ends the session AT THAT LINE with bash's own
-    # message and none of the diagnosis below — while a `declare -n` aimed at
-    # another transport variable mutates its target before anything has validated
-    # it. The transport read above settled this the same way.
-    # AND `RB_TMPPARENT` IS CROSS-CHECKED HERE TOO, which the first version of this
-    # probe left out. It compares only against the names this STAGE introduces, and
-    # `declare -n RB_PIN_SEEN=RB_TMPPARENT` therefore passes both subshells —
-    # neither reads that name — after which the real pin read assigns the inherited
-    # origin through the nameref and REPLACES the parent this setup proved. For a
-    # local origin such as `/tmp/repo` the session's working directory is then
-    # created inside that repository. The transport probe above already compares
-    # against every name it can reach; this one now does the same.
-    # AND `HOME` AND `TMPDIR` HERE TOO, for the reason the transport probe gives.
-    # This stage removes what it creates as well, so an alias onto a candidate has
-    # the same end: the operator's variable is replaced with a path and the path is
-    # then deleted. Written into ONE of two identical probes it is the shape this
-    # repository records as the cause of its worst bugs — a rule that reached two
-    # of three helpers and sat missing from the third for eleven rounds.
-    # TWO SENTINEL PAIRS, AND EITHER COMPLETE PASS IS ACCEPTED. One pair is a
-    # fixed value, and a fixed value COLLIDES: an operator whose `IFS` — or any
-    # other protected name — happens to hold exactly `Probe-A` failed a comparison
-    # nothing had corrupted, and a perfectly good shell was refused as if it were.
-    # A real nameref fails BOTH pairs, because the probe assignment writes the
-    # sentinel into the target every time; a collision fails only the pair it
-    # collides with. So the accept is "one pair passed completely", not "no
-    # comparison anywhere failed".
-    if { ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
-         && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
-         && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
-         && [[ ${REPO:-} != Probe-A ]] \
-         && [[ ${CODEX_BOT:-} != Probe-A ]] && [[ ${COPILOT_BOT:-} != Probe-A ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-A ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
-         && [[ ${IFS:-} != Probe-A ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-A ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-A ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-A ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-A ]] \
-         && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
-       && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
-         && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-B ]] && [[ ${REPO_DIR:-} != Probe-B ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-B ]] && [[ ${PATH:-} != Probe-B ]] \
-         && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
-         && [[ ${REPO:-} != Probe-B ]] \
-         && [[ ${CODEX_BOT:-} != Probe-B ]] && [[ ${COPILOT_BOT:-} != Probe-B ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-B ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
-         && [[ ${IFS:-} != Probe-B ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-B ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
-         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; } \
-       || { ( RB_PIN_DIR=Probe-C; [[ $RB_PIN_DIR = Probe-C ]] \
-         && [[ ${RB_PIN_SEEN:-} != Probe-C ]] && [[ ${RB_REMOTE:-} != Probe-C ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-C ]] && [[ ${REPO_DIR:-} != Probe-C ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-C ]] && [[ ${PATH:-} != Probe-C ]] \
-         && [[ ${HOST:-} != Probe-C ]] && [[ ${OWNER:-} != Probe-C ]] \
-         && [[ ${REPO:-} != Probe-C ]] \
-         && [[ ${CODEX_BOT:-} != Probe-C ]] && [[ ${COPILOT_BOT:-} != Probe-C ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-C ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-C ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-C ]] && [[ ${RB_SUITE_JOBS:-} != Probe-C ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-C ]] \
-         && [[ ${IFS:-} != Probe-C ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-C ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-C ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-C ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-C ]] \
-         && [[ ${HOME:-} != Probe-C ]] && [[ ${TMPDIR:-} != Probe-C ]] ) 2>/dev/null \
-       && ( RB_PIN_SEEN=Probe-D; [[ $RB_PIN_SEEN = Probe-D ]] \
-         && [[ ${RB_PIN_DIR:-} != Probe-D ]] && [[ ${RB_REMOTE:-} != Probe-D ]] \
-         && [[ ${RB_TMPPARENT:-} != Probe-D ]] && [[ ${REPO_DIR:-} != Probe-D ]] \
-         && [[ ${RB_SCRIPTS:-} != Probe-D ]] && [[ ${PATH:-} != Probe-D ]] \
-         && [[ ${HOST:-} != Probe-D ]] && [[ ${OWNER:-} != Probe-D ]] \
-         && [[ ${REPO:-} != Probe-D ]] \
-         && [[ ${CODEX_BOT:-} != Probe-D ]] && [[ ${COPILOT_BOT:-} != Probe-D ]] \
-         && [[ ${PR_CI_INTERVAL:-} != Probe-D ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${PR_CI_GRACE:-} != Probe-D ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-D ]] && [[ ${RB_SUITE_JOBS:-} != Probe-D ]] \
-         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-D ]] \
-         && [[ ${IFS:-} != Probe-D ]] \
-         && [[ ${PR_WATCH_INTERVAL:-} != Probe-D ]] \
-         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_OWNER:-} != Probe-D ]] \
-         && [[ ${REVIEW_BUS_REPO:-} != Probe-D ]] \
-         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-D ]] \
-         && [[ ${HOME:-} != Probe-D ]] && [[ ${TMPDIR:-} != Probe-D ]] ) 2>/dev/null; }; then
+    # AND THE PREFIX MATCH IS THE OTHER HALF. A readonly leaves the old value, a
+    # `declare -i` stores `0`, a `declare -l` lower-cases it — none of them matches
+    # `RBPROBE*`, so the same two lines catch every attribute as well as the alias.
+    if ( RB_PIN_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RBPROBE* ]] \
+         && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
+       && ( RB_PIN_SEEN="RBPROBE$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RBPROBE* ]] \
+         && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
         # CLEARED FIRST, for the reason the origin read gives: interactively the
@@ -1277,7 +964,8 @@ if [[ -z $RB_REMOTE ]]; then
             # accepts. One value is enough: a readonly pre-seeded with the probe's own
             # value makes the subshell's assignment fail outright, so the comparison
             # is never reached. #148.
-            if { ( RB_WORK_DIR=Probe-A; [[ $RB_WORK_DIR = Probe-A ]] ) \
+            if { ( RB_WORK_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RBPROBE* ]] \
+                    && [[ -z ${!RB_WORK_DIR:-} ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
                     # THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, and it is
@@ -1476,7 +1164,8 @@ WHO="$CODEX_BOT"
 # trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
-if { ( PRIOR_REVIEW=Probe-A; [[ $PRIOR_REVIEW = Probe-A ]] ) \
+if { ( PRIOR_REVIEW="RBPROBE$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RBPROBE* ]] \
+                    && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then

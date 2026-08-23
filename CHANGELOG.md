@@ -100,60 +100,30 @@
   machine, it fails closed, and `pr-origin.sh` states it beside the ordering.
   #160.
 
-- **A nameref from a transport name onto another name in scope replaced that
-  variable with a path setup then deleted.** `HOME`, `TMPDIR`, `REPO_DIR`,
-  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the six operator knobs and
-  both reviewer logins were each found this way. Each probe compared only
-  against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
-  passed both subshells — neither read `HOME`. The assignments then cleared it and
-  set it to the transport path, and the cleanup a few lines later removed that
-  directory, leaving the operator's long-lived shell pointing at a path that no
-  longer exists. `REPO_DIR` is the same defect with a worse end: it is what the
-  merge stage runs `cd` into, so the session could approve a pull request and then
-  be unable to inspect or merge it; `RB_SCRIPTS` made the next line invoke a helper
-  from a directory that does not contain it; `PATH` left `/usr/bin/env` unable to
-  find `bash` — setup CORRUPTING `PATH`, which is a different thing from inheriting
-  one already poisoned; and an alias onto `HOST`, `OWNER` or `REPO` let setup
-  announce success with an identity component that is a directory name, so every
-  later `gh` call addressed a repository that does not exist; and an alias onto
-  `REVIEW_MERGE_STRICT` replaced the exported `1` with a transport path, so
-  `pr-merge-gate.sh` stopped seeing strict mode and silently restored the
-  `--admin` merge that bypasses a base branch's protections; and an alias onto `IFS`
-  replaced the operator's field separator with a transport path, so every later
-  unquoted expansion in that long-lived shell split on the characters of a
-  directory name — with setup completing, so nothing announced it. Every probe
-  reads back every name in scope that an assignment there can reach — which is the
-  rule, rather than every name the stage introduces.
+- **A nameref from a transport name onto any other name replaced that variable
+  with a path setup then deleted.** Thirteen names were found this way, one review
+  round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`, `PATH`, `HOST`,
+  `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer logins, `GIT_DIR`,
+  `CDPATH`. Consequences ranged from a corrupted `PATH` to `REVIEW_MERGE_STRICT`
+  being replaced so the merge gate silently restored `--admin`, and from a
+  `REPO_DIR` naming a deleted path to a `cd` that stopped searching the operator's
+  configured roots.
 
-  The probe is TWO sentinel pairs, because one is a fixed value and a fixed value
-  collides: an operator whose `IFS` — or any other protected name — happened to
-  hold exactly the sentinel failed a comparison nothing had corrupted, and a
-  perfectly good shell was refused as if it were. A real nameref fails both pairs,
-  since the assignment writes the sentinel into the target every time; a collision
-  fails only the pair it collides with.
+  **The probes no longer enumerate.** The list could never be completed: it would
+  have to union what the driver reads, what its tools read, and what the shell
+  itself consults, and the last grows with the shell version. `${!name}` answers
+  the question in one line — for a NAMEREF it expands to the target's NAME, and
+  for an ordinary variable it is indirect expansion — so each probe assigns a legal
+  variable name built from `$RANDOM` and requires `${!name}` to be empty. It is
+  bash 2 syntax, so it works where `[[ -R ]]` cannot: an unknown unary operator
+  inside `[[ ]]` is a PARSE error on 3.2, and the whole setup block would fail to
+  parse there.
 
-  Writing that set down in a comment was not enough: the round after it was
-  written omitted three names the comment itself listed. It is TIED to
-  `pr-selfcheck.sh`'s `KNOWN` list instead — the inventory of names the driver
-  reads without assigning, which that file has to maintain anyway — and the suite
-  requires every entry to be compared against, so adding a knob there without
-  protecting it turns it red, and every one of the four probe arms is checked
-  separately — the pin arms against the same derived set, not a second hand-written
-  one — an existential search over the whole block passed with a comparison
-  deleted from ONE arm. The shell-managed names are exempt BY NAME. A
-  one-line generic test is unavailable: `[[ -R name ]]` is bash 4.3+, and an
-  unknown unary operator inside `[[ ]]` is a PARSE error on 3.2.
-
-  **That is still not the whole set, and the limit is stated rather than
-  extended.** `KNOWN` lists what the DRIVER reads; it does not list what the
-  helpers' tools read. `GIT_DIR` is never read by `SKILL.md` and is read by `git`
-  several stages later, so a nameref replacing it with a transport path setup then
-  deletes leaves the round close and the merge range unable to inspect the
-  checkout. The full set is every environment variable that changes the behaviour
-  of any program the session runs, which is not enumerable. The replacement is to
-  stop assigning: a nameref can only ride an assignment, so if the helper chooses
-  the transport directory and the driver never holds it, the class goes with it —
-  the same protocol change #160 and #161 need, carried as one design in #162.
+  The `$RANDOM` value also removes the collision the fixed sentinels had: an
+  operator holding one sentinel from each of two fixed pairs failed both, and a
+  shell nothing had corrupted was refused. The prefix match carries the other half
+  — a readonly leaves the old value, `declare -i` stores `0`, `declare -l`
+  lower-cases it, and none matches.
 
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so
