@@ -300,7 +300,8 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "builtin printf '%s' \"\$x\" BAR command grep -q y || true" \
           "printf '%s' \"\$x\" BAR grep -F -q y || true" \
           "printf '%s' \"\$x\" BAR cut -d: -f1 BAR grep -qF y || true" \
-          "command printf '%s' \"\$x\" BAR grep -q y || true"; do
+          "command printf '%s' \"\$x\" BAR grep -q y || true" \
+          "$(printf 'printf\t%s\t"$x"\tBAR\tgrep\t-q y || true' "'%s'")"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -312,14 +313,19 @@ done
 # …AND A PIPELINE SPLIT ACROSS A CONTINUATION IS CAUGHT. Every version of this
 # scan before the last read PHYSICAL lines, so `printf … | \` with the `grep -q` on
 # the next one walked past all of them — the same assertion, one newline apart.
-{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
-  printf '%s\n' "printf '%s' \"\$x\" $_bar \\"
-  printf '%s\n' '    grep -q y || true'
-} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
-out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
-    && pass "…and a pipeline split across a continuation is caught" \
-    || die "a continued pipeline walked past the gate (rc=$rc out=$out)"
+# BOTH SPLITS ARE PLANTED SEPARATELY, because they fold by DIFFERENT conditions:
+# a trailing `\` and a trailing bare `|`. A single fixture ending `| \` folds by
+# the backslash arm alone, so the bare-pipe arm could be deleted with it green.
+for _tail in ' \' ''; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_bar$_tail"
+      printf '%s\n' '    grep -q y || true'
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
+        && pass "…and a pipeline split after a '${_tail:-bare pipe}' is caught" \
+        || die "a continued pipeline walked past the gate (tail='$_tail' rc=$rc out=$out)"
+done
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`

@@ -685,7 +685,9 @@ for f in "$SCRIPTS"/test-*.sh; do
           # were reported clean.
           while ((sub(/\\$/, "", line) || line ~ /\|[ \t]*$/) && (getline nxt) > 0)
               line = line " " nxt
-          if (line ~ /(command +|builtin +)*printf +["'"'"']%s(\\n)?["'"'"'] +[^|]*\|([^|]*\|)* *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q/)
+          # WHITESPACE CLASSES, NOT LITERAL SPACES. `printf\t'"'"'%s'"'"'\t"$x"\t|\tgrep\t-q y` is
+          # a legal fixture line and walked past a pattern written with ` +`.
+          if (line ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep[[:space:]]+(-[A-Za-z]+[[:space:]]+)*-[A-Za-z]*q/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?

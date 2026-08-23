@@ -21,7 +21,8 @@
   The check takes the SHAPE rather than a list of spellings — either quoting of the
   format string, any `command`/`builtin` prefix on EITHER side, any option order
   including split options, any intermediate filters between the producer and the
-  reader, and a pipeline split across a `\` continuation — because four review
+  reader, tabs as well as spaces at every word boundary, and a pipeline split
+  across a `\` continuation or a bare trailing `|` — because four review
   rounds each found an equivalent spelling the previous version reported clean.
   It reads folded LOGICAL lines rather than physical ones — a pipeline continues
   across a `\` and across a bare trailing `|`, and both halves scanned separately
