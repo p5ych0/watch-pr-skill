@@ -11,10 +11,10 @@
   It is the directory. Setup picks its parent on mode bits — `-d`, `-w`, `-x` —
   and prefers `TMPDIR`. A `TMPDIR` that passes all three can still fail to hold a
   directory: a quota reached on that filesystem, a full one, or a read-only mount
-  none of those bits describe. The helper refused, setup printed `ABORT: could not
-  read this session's origin`, and stopped — with a perfectly usable `HOME` beside
-  it untried, because the fallthrough happens on the mode bits and not on the
-  failure.
+  none of those bits describe. The helper refused, setup printed a bare
+  `could not read this session's origin`, and stopped — with a perfectly usable
+  `HOME` beside it untried, because the fallthrough happens on the mode bits and
+  not on the failure.
 
   The abort now names the step, and names what it applies to: **if the helper's
   line above says the transport directory could not be created and the path it
@@ -24,7 +24,9 @@
   are failures unsetting `TMPDIR` cannot fix, and selection can reject a set
   `TMPDIR` and be using `HOME` already, where unsetting it changes nothing.
 
-  It is emitted as a `${VAR:?…}` expansion rather than through `echo`. The driver
+  It is emitted as a `${VAR:?…}` expansion rather than through `echo`, so the line
+  you see now begins with your shell's name and `RB_REMOTE:`; the troubleshooting
+  entry in `README.md` is keyed to that text. The driver
   runs in your own shell, where `echo` may be a function that returns without
   printing — and this line is the whole of what the change does, so an `echo` was
   the one shape that could silently undo it. The shell refusing to expand a

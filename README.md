@@ -803,12 +803,19 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
-- **`ABORT: could not read this session's origin`:** `pr-origin.sh` refused, for
-  any of the reasons it refuses for — it could not create the private directory
+- **`RB_REMOTE: could not read the origin for this session`:** `pr-origin.sh`
+  refused, for any of the reasons it refuses for — it could not create the private directory
   the value travels in, it would not trust an ancestor of that directory, it could
   not resolve the path, or it could not read a usable `origin` from the checkout.
   **The helper's own line above says which**, and it is the one to read first:
   only one of those has a recovery you can perform from here.
+
+  The line begins with your shell's name and `RB_REMOTE:` because setup emits it
+  as a parameter expansion the shell refuses rather than through `echo`, which in
+  your own shell may be a function that prints nothing. Where a startup file has
+  pre-set `RB_REMOTE`, the expansion does not fire and you see
+  `ABORT: could not read this session's origin` instead — the same failure, said
+  the other way.
 
   That one is the directory. Setup picks the parent on mode bits and prefers
   `TMPDIR`, and a `TMPDIR` that is writable and executable can still fail to hold
