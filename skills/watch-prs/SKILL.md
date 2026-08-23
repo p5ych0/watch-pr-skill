@@ -597,12 +597,15 @@ if [[ -z $RB_REMOTE ]]; then
     # legal name, re-rolled per session, and the only way to collide is to have a
     # variable of exactly that name already set.
     #
-    # AND THE PREFIX MATCH IS THE OTHER HALF. A readonly leaves the old value, a
-    # `declare -i` stores `0`, a `declare -l` lower-cases it — none of them matches
-    # `RBPROBE*`, so the same two lines catch every attribute as well as the alias.
-    if ( RB_TMPPARENT="RBPROBE$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RBPROBE* ]] \
+    # AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
+    # old value, `declare -i` stores `0`, `declare -l` lower-cases it and
+    # `declare -u` upper-cases it — and an ALL-CAPS sentinel survives `declare -u`
+    # unchanged, which is how that one attribute got through. `RbProbe*` matches
+    # neither transformation, so the same two lines catch every attribute as well as
+    # the alias.
+    if ( RB_TMPPARENT="RbProbe$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RBPROBE* ]] \
+       && ( RB_ORIGIN_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -835,12 +838,15 @@ if [[ -z $RB_REMOTE ]]; then
     # legal name, re-rolled per session, and the only way to collide is to have a
     # variable of exactly that name already set.
     #
-    # AND THE PREFIX MATCH IS THE OTHER HALF. A readonly leaves the old value, a
-    # `declare -i` stores `0`, a `declare -l` lower-cases it — none of them matches
-    # `RBPROBE*`, so the same two lines catch every attribute as well as the alias.
-    if ( RB_PIN_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RBPROBE* ]] \
+    # AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
+    # old value, `declare -i` stores `0`, `declare -l` lower-cases it and
+    # `declare -u` upper-cases it — and an ALL-CAPS sentinel survives `declare -u`
+    # unchanged, which is how that one attribute got through. `RbProbe*` matches
+    # neither transformation, so the same two lines catch every attribute as well as
+    # the alias.
+    if ( RB_PIN_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
-       && ( RB_PIN_SEEN="RBPROBE$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RBPROBE* ]] \
+       && ( RB_PIN_SEEN="RbProbe$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
@@ -964,7 +970,7 @@ if [[ -z $RB_REMOTE ]]; then
             # accepts. One value is enough: a readonly pre-seeded with the probe's own
             # value makes the subshell's assignment fail outright, so the comparison
             # is never reached. #148.
-            if { ( RB_WORK_DIR="RBPROBE$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RBPROBE* ]] \
+            if { ( RB_WORK_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
                     && [[ -z ${!RB_WORK_DIR:-} ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
@@ -1164,7 +1170,7 @@ WHO="$CODEX_BOT"
 # trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
-if { ( PRIOR_REVIEW="RBPROBE$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RBPROBE* ]] \
+if { ( PRIOR_REVIEW="RbProbe$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
                     && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then

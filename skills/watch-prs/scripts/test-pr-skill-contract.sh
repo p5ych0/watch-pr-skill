@@ -774,6 +774,8 @@ LOCAL
                    "declare -n RB_TMPPARENT=REPO_DIR|REPO_DIR|$_forge_dir" \
                    "declare -n RB_ORIGIN_DIR=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
+                   "declare -u RB_TMPPARENT=x|RB_TMPPARENT|X" \
+                   "declare -u RB_ORIGIN_DIR=x|RB_ORIGIN_DIR|X" \
                    "declare -n RB_ORIGIN_DIR=GIT_DIR|GIT_DIR|/somewhere/.git" \
                    "declare -n RB_TMPPARENT=CDPATH|CDPATH|/projects" \
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
@@ -1022,7 +1024,7 @@ _pin_body=""
 _pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed 's/^    //')" || _pin_body=""
 case "$_pin_body" in
     *'
-if ( RB_PIN_DIR="RBPROBE'*) pass "the pin branch dedents to column 0 for the lifts below" ;;
+if ( RB_PIN_DIR="RbProbe'*) pass "the pin branch dedents to column 0 for the lifts below" ;;
     *) die "the pin branch did not dedent as expected; SKILL.md's nesting changed and the lifts below would all be empty" ;;
 esac
 # TWO ARMS NOW, NOT FOUR. Until #157 this branch was `RB_PIN_DIR`, `RB_PIN_OUT`
@@ -1065,11 +1067,13 @@ _assigned="RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS HOST OWNER REPO CODEX_BOT 
 # at — including names no list here would have carried.
 #
 # WHAT IS ASSERTED IS THE SHAPE OF BOTH SUBSHELLS, and both halves of each: the
-# `RBPROBE*` prefix match, which is what catches a readonly or a transforming
-# attribute, and the indirect-expansion emptiness, which is what catches the alias.
+# `RbProbe*` prefix match, which is what catches a readonly or a transforming
+# attribute — MIXED CASE, because an all-caps sentinel survives `declare -u`
+# unchanged and that attribute got through — and the indirect-expansion emptiness,
+# which is what catches the alias.
 for _pn in RB_PIN_DIR RB_PIN_SEEN; do
-    grep -q "( $_pn=\"RBPROBE\$RANDOM\$RANDOM\"; \[\[ \$$_pn = RBPROBE\* \]\]" <<<"$_pin_body" \
-        || die "the pin probe does not assign a random RBPROBE sentinel to \$$_pn and match it"
+    grep -q "( $_pn=\"RbProbe\$RANDOM\$RANDOM\"; \[\[ \$$_pn = RbProbe\* \]\]" <<<"$_pin_body" \
+        || die "the pin probe does not assign a random RbProbe sentinel to \$$_pn and match it"
     grep -q "\[\[ -z \${!$_pn:-} \]\]" <<<"$_pin_body" \
         || die "the pin probe does not test \${!$_pn} for a nameref"
 done
@@ -1086,8 +1090,8 @@ pass "the pin probe detects an alias generically, and an attribute by the prefix
 # an ordinary variable it is indirect expansion. Assign a legal-but-unset variable
 # name and require `${!name}` to be empty.
 for _tn in RB_TMPPARENT RB_ORIGIN_DIR; do
-    grep -q "( $_tn=\"RBPROBE\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RBPROBE\* \]\]" <<<"$_read_block" \
-        || die "the transport probe does not assign a random RBPROBE sentinel to \$$_tn and match it"
+    grep -q "( $_tn=\"RbProbe\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_read_block" \
+        || die "the transport probe does not assign a random RbProbe sentinel to \$$_tn and match it"
     grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_read_block" \
         || die "the transport probe does not test \${!$_tn} for a nameref"
 done
@@ -1535,6 +1539,8 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # "candidate" it protects is the stage'"'"'s own name, so the expected value is what
     # the operator'"'"'s declaration left there.
     for _pal in "declare -i RB_PIN_DIR=0|RB_PIN_DIR|0" \
+                "declare -u RB_PIN_DIR=x|RB_PIN_DIR|X" \
+                "declare -u RB_PIN_SEEN=x|RB_PIN_SEEN|X" \
                 "declare -n RB_PIN_DIR=HOME|HOME|$RB_TMPBASE" \
                 "declare -n RB_PIN_SEEN=TMPDIR|TMPDIR|$RB_TMPBASE" \
                 "declare -n RB_PIN_DIR=REPO_DIR|REPO_DIR|$RB_TMPBASE" \
@@ -2232,7 +2238,7 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
 # else — a status-only probe accepts that, and the request goes out with the
 # baseline rewritten. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RBPROBE\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RBPROBE\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RbProbe\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
 { [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
@@ -2288,7 +2294,7 @@ case "$(cat "$_rb_pb/alloc.sh")" in
     *'mkdir -m 700 "$RB_WORK_DIR"'*) pass "the working-directory allocation lifts out for the cases below" ;;
     *) die "the working-directory allocation did not lift; the cases below prove nothing" ;;
 esac
-awk '/^[[:space:]]*if \( RB_TMPPARENT="RBPROBE/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
+awk '/^[[:space:]]*if \( RB_TMPPARENT="RbProbe/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
 # THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
 # range runs from the probe to the first `fi` at column 0 — which is the probe's
 # own when the selection is its success arm, and the GUARD's if it is not. Revert
@@ -2388,7 +2394,7 @@ fi
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW="RBPROBE\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RBPROBE\* \]\]' "$SKILL" \
+grep -q '^if { ( PRIOR_REVIEW="RbProbe\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" \
     && pass "…and the probe is a condition whose success arm holds the request" \
     || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
@@ -2887,7 +2893,7 @@ mkdir -p "$_rb_bt/parent/watch-pr.anchor" "$_rb_bt/parent/attacker"
 # ITS OWN LIFT, because the probe cases above remove their scratch tree when they
 # finish. Same range, same dedent, and CHECKED — a lift that came out empty would
 # make every case below pass against nothing.
-awk '/^[[:space:]]*if \( RB_TMPPARENT="RBPROBE/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
+awk '/^[[:space:]]*if \( RB_TMPPARENT="RbProbe/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
 case "$(cat "$_rb_bt/parent.sh")" in
     *'RB_ORIGIN_DIR="${RB_TMPPARENT:?'*) : ;;
     *) die "the transport block did not lift for the RB_ORIGIN_DIR cases; they would prove nothing" ;;

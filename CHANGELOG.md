@@ -121,9 +121,10 @@
 
   The `$RANDOM` value also removes the collision the fixed sentinels had: an
   operator holding one sentinel from each of two fixed pairs failed both, and a
-  shell nothing had corrupted was refused. The prefix match carries the other half
-  — a readonly leaves the old value, `declare -i` stores `0`, `declare -l`
-  lower-cases it, and none matches.
+  shell nothing had corrupted was refused. The prefix match carries the other half,
+  in MIXED case — a readonly leaves the old value, `declare -i` stores `0`,
+  `declare -l` lower-cases it and `declare -u` upper-cases it, and an all-caps
+  sentinel survives that last one unchanged, which is how it got through.
 
 - **A nameref between a pin name and the transport parent replaced the parent.**
   The pin's probe compared only against the names that stage introduces, so

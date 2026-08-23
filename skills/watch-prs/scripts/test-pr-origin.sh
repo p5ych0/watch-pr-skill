@@ -560,11 +560,13 @@ open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOM
     && pass "…and so is a group-writable one" \
     || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND SO IS AN ANCESTOR, which is the case the first version of this check
-# missed. The directory holding the file is created mode 700 by the caller, so
-# checking only that one always passed — while an account with write on the
-# directory ABOVE it can rename it after the check and leave a writable
-# replacement at the same name. What must be refused is a writable component
-# anywhere on the way to the file.
+# missed. THIS SCRIPT creates the transport directory itself, mode 700 — the
+# caller used to, and #157 moved it here precisely so `mkdir` is not a name the
+# operator's shell can replace — so checking only that child always passed, while
+# an account with write on the directory ABOVE it can rename it after the check and
+# leave a writable replacement at the same name. What must be refused is a writable
+# component anywhere on the way, which is why the walk runs over the ANCESTORS and
+# not over the child.
 chmod 700 "$OPENDIR"
 ANCESTOR="$TMP/anc"
 mkdir -p "$ANCESTOR/mid/leaf"
