@@ -21,7 +21,8 @@
   The check takes the SHAPE rather than a list of spellings — either quoting of the
   format string, any `command`/`builtin` prefix on EITHER side, any option order
   including split options, any intermediate filters between the producer and the
-  reader, an option that takes its own argument before the one carrying `q`, tabs
+  reader, an option that takes its own argument — quoted, or containing hyphens —
+  before the one carrying `q`, tabs
   as well as spaces at every word boundary, and a pipeline split across a `\`
   continuation or a bare trailing `|`. It does not report a logical `||`, nor a
   `grep -c` on a line that later contains `-eq` — because four review

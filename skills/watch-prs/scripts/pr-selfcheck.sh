@@ -700,7 +700,7 @@ for f in "$SCRIPTS"/test-*.sh; do
           # running off the end of the command — `[^|]*` there reached the `-eq` of
           # a later `[ … -eq 2 ]` and reported a `grep -c` as a `grep -q`.
           t = line; gsub(/\|\|/, "@@", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+-[A-Za-z]+([[:space:]]+[^-[:space:])\"'"'"']+)?)*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+-[A-Za-z]+([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^-[:space:])\"'"'"'][^[:space:])\"'"'"']*))?)*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
