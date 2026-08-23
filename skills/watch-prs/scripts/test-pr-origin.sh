@@ -7,9 +7,16 @@
 # code when it runs inline in `SKILL.md`; that is the whole point of the script.
 #
 # THE CONTRACT UNDER TEST: the caller starts it with `/usr/bin/env bash -p` and
-# names a file; the VALUE goes to that file and every REASON goes to stderr, and
-# nothing is ever written to stdout. `run` below joins the two only so a single
-# assertion can look at both.
+# names a DIRECTORY that must not exist; the helper creates it, exclusively and at
+# mode 700, and names the leaf inside it itself — `<dir>/origin` for `read`,
+# `<dir>/pin` for `pin`. The VALUE goes to that leaf and every REASON goes to
+# stderr, and nothing is ever written to stdout. `run` below joins the two only so
+# a single assertion can look at both.
+#
+# It was a FILE the caller had already created, until #157 moved the creation into
+# the helper — where `mkdir` runs privileged and is not a name the operator's shell
+# can replace. A case written to the old contract would hand a file path to
+# something that means to `mkdir` it.
 set -uo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/testlib.sh"
@@ -60,13 +67,46 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # arrange that: there is no hop inside the file and it is not executable. A
     # hook needs to shadow nothing to use the gap — one that writes the transport
     # file it can see as `$2` and exits has already answered.
-    local vf="$TMP/value.out" diag
-    # REMOVED, NOT TRUNCATED. The helper creates its output with `set -C`, which
-    # is O_EXCL — a pre-created file is refused, symlink or not, and that is the
-    # point of it. A caller hands over a path in a directory it just made; it does
-    # not hand over a file. Truncating here made every case in this file fail with
-    # `cannot overwrite existing file`, which is the contract working.
-    rm -f "$vf"
+    # A DIRECTORY THE HELPER CREATES, and a fresh name per run. Since #157 the
+    # argument is the DIRECTORY: the helper `mkdir`s it — which is the exclusion,
+    # since `mkdir` refuses an existing name whatever it holds — and names the file
+    # inside it itself. The caller reads `<dir>/origin` or `<dir>/pin`.
+    #
+    # A FRESH NAME PER CALL, AND `mktemp` IS WHAT GIVES ONE. A path this fixture
+    # has already handed to one case is one `mkdir` refuses for the next, which is
+    # the contract working — so every call needs a name of its own, and two earlier
+    # attempts did not give it.
+    #
+    # A COUNTER CANNOT: `run` is always called inside a command substitution, so the
+    # increment happens in a subshell and never reaches the next call.
+    #
+    # NOR CAN `$$` AND `$RANDOM`: on bash 3.2.57 a subshell inherits the parent's
+    # random state UNADVANCED, so successive command substitutions taken from the
+    # same parent state produce the same value — and `$$` is the parent's pid in
+    # both. Two calls then name one path, the first leaves a directory behind, and
+    # the second is refused by the exclusion. The `macos-shell` job is where that
+    # shows, which is the difference in BEHAVIOUR this repository records as the
+    # half a feature list does not contain.
+    #
+    # `mktemp -d` ASKS THE KERNEL, and the child under it is what the helper is
+    # given: the parent exists and is this run's, the child does not exist at all,
+    # which is exactly the contract. Under `$TMP`, so the EXIT trap collects it.
+    local vp vd vf diag
+    # AND THE ALLOCATION'S FAILURE STOPS THIS CALL. `die` records the failure and
+    # RETURNS — it does not end the fixture — so a `die` alone left `vp` empty and
+    # the function carried on with `vd=/dir`: a root-run fixture then creates
+    # `/dir/origin` outside `$TMP`, and every later case collides with that same
+    # path and stops exercising its own state. The value is read back too, because
+    # a `mktemp` that succeeds and prints nothing is the same empty variable by
+    # another route.
+    vp=""
+    vp="$(mktemp -d "$TMP/run.XXXXXX")" || vp=""
+    if [ -z "$vp" ] || [ ! -d "$vp" ]; then
+        die "mktemp could not allocate a scratch parent for a run; this call is abandoned rather than aimed at /dir"
+        return 1
+    fi
+    vd="$vp/dir"
+    case "$mode" in read) vf="$vd/origin" ;; *) vf="$vd/pin" ;; esac
     # A CONTROLLED `HOME`, so these cases do not read the contributor's git
     # config. The helper carries `HOME` through on purpose — global
     # `url.<base>.insteadOf` rules are part of what `git remote get-url` answers —
@@ -83,7 +123,7 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # themselves.
     diag="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
         GIT_CONFIG_NOSYSTEM=1 \
-        "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vf" 2>&1)" || rc=$?
+        "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vd" 2>&1)" || rc=$?
     # THE VALUE AND THE DIAGNOSTICS ARE SEPARATE STREAMS, which is the point of the
     # file: the caller reads one and never sees the other. They are joined here
     # only so a single assertion can look at both.
@@ -178,9 +218,9 @@ got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
 # …AND ABSENCE IS AN ANSWER, NOT A REFUSAL. "The export did not take" is exactly
 # what the caller needs to distinguish, so it is an empty line and status 0 rather
 # than an abort, which would look like every other failure from that side.
-rm -f "$TMP/pin.value"
+rm -rf "$TMP/pin.value"
 run_limited 20 env -u REVIEW_BUS_REMOTE HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" pin "$TMP/pin.value" >/dev/null 2>&1; pin_rc=$?
-pin_out="$(<"$TMP/pin.value")"
+pin_out="$(<"$TMP/pin.value/pin")"
 { [ "$pin_rc" = 0 ] && [ -z "$pin_out" ]; } \
     && pass "…and an unset pin is an empty answer, not an error" \
     || die "an unset pin gave rc=$pin_rc out='$pin_out'"
@@ -202,7 +242,7 @@ got="$(run sideways)"
 # and used, so the absence is asserted as well as the status.
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
-rm -f "$TMP/v"; out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
@@ -214,7 +254,7 @@ esac
 # NOT A REPOSITORY AT ALL is the same answer, since `git` fails rather than
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
-rm -f "$TMP/v"; out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
@@ -234,8 +274,8 @@ printf '%s\n' "$FORGED"
 exit 1
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
-out="$(<"$TMP/v")$out"
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'ABORT:'; } \
     && pass "a remote read that prints and then fails is refused" \
     || die "a printing-then-failing git gave rc=$rc '$out'"
@@ -256,8 +296,8 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
-out="$(<"$TMP/v")$out"
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a multi-line remote is refused rather than split" \
     || die "a two-line remote gave rc=$rc '$out'"
@@ -281,8 +321,8 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
-rm -f "$TMP/v"; out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
-out="$(<"$TMP/v")$out"
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF 'newline'; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
     || die "a trailing data newline gave rc=$rc '$out'"
@@ -307,9 +347,9 @@ naive="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$T
 # for every trace target, and both are run.
 cat > "$TMP/tr.sh" <<TRSH
 cd "$REPO" || exit 1
-rm -f "$TMP/tr.value"
+rm -rf "$TMP/tr.value"
 /usr/bin/env bash -p "$SCRIPT" read "$TMP/tr.value" || printf 'CALL_FAILED\n' >&2
-printf 'VALUE=%s\n' "\$(<"$TMP/tr.value")" >&2
+printf 'VALUE=%s\n' "\$(<"$TMP/tr.value/origin")" >&2
 TRSH
 for _fd in 1 9; do
     tr_out="$(run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 SHELLOPTS=xtrace BASH_XTRACEFD="$_fd" bash "$TMP/tr.sh" \
@@ -331,12 +371,12 @@ esac
 # The call says `/usr/bin/env bash -p` because `bash -p` alone is a NAME: a
 # function called `bash` runs instead, and it can write the value file itself and
 # return without the subject running at all.
-rm -f "$TMP/fn.value"
+rm -rf "$TMP/fn.value"
 run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
     /usr/bin/env bash -p "'"$SCRIPT"'" read "'"$TMP/fn.value"'"' >/dev/null 2>&1 || true
-[ "$(<"$TMP/fn.value")" = "$REAL" ] \
+[ "$(<"$TMP/fn.value/origin")" = "$REAL" ] \
     && pass "a bash function in the caller does not stand in for the interpreter" \
     || die "a shadowed bash wrote the value: '$(<"$TMP/fn.value")'"
 # …AND THE SAME CALL WITHOUT THE PATH IS TAKEN BY IT, so the path is load-bearing.
@@ -357,9 +397,23 @@ run_limited 20 bash -c '
 # any defence that lives inside this file. `bash -p` at the CALL SITE is the
 # answer, because privileged mode is what stops the hook being sourced at all, and
 # nothing inside the file can undo work that happened before its first line.
-# THE HOOK WRITES THE VALUE FILE, whose path it can see as `$2` — it is sourced
-# inside the script's own shell, so the script's arguments are its arguments.
-printf "printf '%%s\\n' '%s' > \"\$2\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
+# THE HOOK FOLLOWS THE HELPER'S CONTRACT, whose argument it can see as `$2` — it
+# is sourced inside the script's own shell, so the script's arguments are its
+# arguments. Since #157 that argument is a DIRECTORY, so the hook creates it and
+# writes the leaf inside; one that still wrote a FILE at `$2` left the caller
+# reading `<file>/origin`, which is absent whatever happened — so the unprivileged
+# comparison below saw nothing and took its "this bash cannot reach the arguments"
+# branch on a shell where the attack lands perfectly.
+# AND IT REFUSES AN EMPTY ARGUMENT BEFORE BUILDING A LEAF FROM IT. On bash 3.2.57
+# a `BASH_ENV` hook does not get the script's positional parameters, so `$2` is
+# EMPTY there — `mkdir -p ""` fails, and the redirection after it still expands to
+# `/origin`. Run as root that creates or truncates a file at the filesystem root;
+# run unprivileged it fails silently and the case reads the absent value as the
+# version-dependent result. Either way the write escapes `$TMP` and the EXIT trap
+# cannot collect it. Exiting on the empty argument produces exactly the outcome
+# that shell should have — the hook writes nothing and the helper never runs —
+# and the `mkdir` status is taken for the same reason.
+printf "[ -n \"\${2:-}\" ] || exit 0\nmkdir -p \"\$2\" 2>/dev/null || exit 0\nprintf '%%s\\n' '%s' > \"\$2/origin\"\nexit 0\n" "$FORGED" > "$TMP/hook-direct.sh"
 got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
     && pass "a hook that writes the value file and exits never runs" \
@@ -373,11 +427,11 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 # as "the attack did not land on this version". It proved nothing and would have
 # stayed green with the attack setup broken. An interpreter has to be started for
 # the comparison to mean anything.
-rm -f "$TMP/unprot.value"
+rm -rf "$TMP/unprot.value"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 BASH_ENV="$TMP/hook-direct.sh" \
     /usr/bin/env bash "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
 unprot=""
-[ -f "$TMP/unprot.value" ] && unprot="$(<"$TMP/unprot.value")"
+[ -f "$TMP/unprot.value/origin" ] && unprot="$(<"$TMP/unprot.value/origin")"
 # REPORTED, NOT REQUIRED, because the ROUTE is version-dependent. This hook writes
 # the value file whose path it reads as `$2` — the script's own arguments, since
 # `BASH_ENV` is sourced inside the script's shell. bash 5 gives it those arguments;
@@ -429,9 +483,9 @@ plain_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HO
 # …AND THE OBJECT IT DOES CREATE IS PRIVATE. O_EXCL says who may replace it; the
 # mode says who may write it once it is there.
 rm -f "$TMP/modecheck.marker"
-rm -f "$TMP/modecheck"
+rm -rf "$TMP/modecheck"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/modecheck" ) >/dev/null 2>&1
-mode="$(ls -l "$TMP/modecheck" 2>/dev/null | cut -c1-10)"
+mode="$(ls -l "$TMP/modecheck/origin" 2>/dev/null | cut -c1-10)"
 case "$mode" in
     -rw-------) pass "…and the object it creates is readable only by this user" ;;
     *)          die "the transport was created with mode '$mode'" ;;
@@ -451,9 +505,9 @@ IOREPO="$TMP/insteadof-repo"
 mkdir -p "$IOREPO"
 ( cd "$IOREPO" && git init -q . && git remote add origin 'work:acme/widget.git' ) >/dev/null 2>&1 \
     || die "could not build the insteadOf checkout"
-rm -f "$TMP/io.value"
+rm -rf "$TMP/io.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/io.value" ) >/dev/null 2>&1
-io_got="$(cat "$TMP/io.value" 2>/dev/null)"
+io_got="$(cat "$TMP/io.value/origin" 2>/dev/null)"
 [ "$io_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "a global insteadOf rule is expanded, not returned as the alias" \
     || die "insteadOf was not expanded (got '$io_got')"
@@ -469,10 +523,10 @@ IOOTHER="$TMP/insteadof-other"
 mkdir -p "$IOOTHER"
 ( cd "$IOOTHER" && git init -q . && git remote add origin "$FORGED" ) >/dev/null 2>&1 \
     || die "could not build the second insteadOf checkout"
-rm -f "$TMP/io2.value"
+rm -rf "$TMP/io2.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_CONFIG_NOSYSTEM=1 GIT_DIR="$IOOTHER/.git" \
     /usr/bin/env bash -p "$SCRIPT" read "$TMP/io2.value" ) >/dev/null 2>&1
-io2_got="$(cat "$TMP/io2.value" 2>/dev/null)"
+io2_got="$(cat "$TMP/io2.value/origin" 2>/dev/null)"
 [ "$io2_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "…while GIT_DIR still cannot redirect the read" \
     || die "GIT_DIR reached the read once HOME was carried (got '$io2_got')"
@@ -490,45 +544,48 @@ OPENDIR="$TMP/open"
 mkdir -p "$OPENDIR"
 chmod 777 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "a transport directory other accounts can write is refused" \
     || die "the helper wrote into a world-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND A GROUP-WRITABLE ONE TOO, which is the shape a shared machine actually has.
 chmod 770 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
-  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
+  && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and so is a group-writable one" \
     || die "the helper wrote into a group-writable directory (rc=$open_rc diag='$open_diag')"
 # …AND SO IS AN ANCESTOR, which is the case the first version of this check
-# missed. The directory holding the file is created mode 700 by the caller, so
-# checking only that one always passed — while an account with write on the
-# directory ABOVE it can rename it after the check and leave a writable
-# replacement at the same name. What must be refused is a writable component
-# anywhere on the way to the file.
+# missed. THIS SCRIPT creates the transport directory itself, mode 700 — the
+# caller used to, and #157 moved it here precisely so `mkdir` is not a name the
+# operator's shell can replace — so checking only that child always passed, while
+# an account with write on the directory ABOVE it can rename it after the check and
+# leave a writable replacement at the same name. What must be refused is a writable
+# component anywhere on the way, which is why the walk runs over the ANCESTORS and
+# not over the child.
 chmod 700 "$OPENDIR"
 ANCESTOR="$TMP/anc"
 mkdir -p "$ANCESTOR/mid/leaf"
 chmod 777 "$ANCESTOR/mid"
 chmod 700 "$ANCESTOR/mid/leaf"
 anc_rc=0
-anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" 2>&1 )" || anc_rc=$?
+anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/dir" 2>&1 )" || anc_rc=$?
 { [ "$anc_rc" -ne 0 ] \
   && case "$anc_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
-  && [ ! -e "$ANCESTOR/mid/leaf/origin" ]; } \
+  && [ ! -e "$ANCESTOR/mid/leaf/dir/origin" ]; } \
     && pass "…and a writable ANCESTOR is refused, not just the directory itself" \
     || die "an ancestor that can rename the transport directory was accepted (rc=$anc_rc diag='$anc_diag')"
 # …WHILE STICKY IS ACCEPTED, which is why `/tmp` still works: anyone may create an
 # entry there and nobody may rename another account's. Without this the check
 # would refuse the directory it was written for.
 chmod 1777 "$ANCESTOR/mid"
-rm -f "$ANCESTOR/mid/leaf/origin"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/origin" ) >/dev/null 2>&1
-[ "$(cat "$ANCESTOR/mid/leaf/origin" 2>/dev/null)" = "$REAL" ] \
+rm -rf "$ANCESTOR/mid/leaf/dir"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/dir" ) >/dev/null 2>&1
+[ "$(cat "$ANCESTOR/mid/leaf/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a sticky ancestor is accepted, as /tmp is" \
     || die "a sticky ancestor was refused; this would refuse every ordinary session"
 
@@ -558,7 +615,7 @@ for _cand in /lost+found /run/user/* /var/lib/* /home/*; do
 done
 if [ -n "$FOREIGN" ]; then
     foreign_rc=0
-    foreign_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/origin" 2>&1 )" || foreign_rc=$?
+    foreign_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/dir" 2>&1 )" || foreign_rc=$?
     { [ "$foreign_rc" -ne 0 ] \
       && case "$foreign_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
         && pass "…and a component owned by another account is refused ($FOREIGN)" \
@@ -582,7 +639,7 @@ if [ -n "$FOREIGN" ]; then
     mkdir -p "$LINKDIR"
     ln -sfn "$FOREIGN" "$LINKDIR/t"
     link_rc=0
-    link_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/origin" 2>&1 )" || link_rc=$?
+    link_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/dir" 2>&1 )" || link_rc=$?
     { [ "$link_rc" -ne 0 ] \
       && case "$link_diag" in *"could be replaced between this write"*|*"could not examine"*|*"could not resolve"*) true ;; *) false ;; esac; } \
         && pass "…and a symlink into a third account's tree is refused, not walked lexically" \
@@ -596,9 +653,9 @@ SAFELINK="$TMP/safelink"
 mkdir -p "$SAFELINK"
 ln -sfn "$OPENDIR" "$SAFELINK/t"
 chmod 700 "$OPENDIR"
-rm -f "$OPENDIR/origin"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/origin" ) >/dev/null 2>&1
-[ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
+rm -rf "$OPENDIR/dir"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/dir" ) >/dev/null 2>&1
+[ "$(cat "$SAFELINK/t/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a symlink to a directory this user owns is followed as before" \
     || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
 
@@ -618,10 +675,10 @@ if command -v setfacl >/dev/null 2>&1; then
     # the first version of this case asserted.
     if setfacl -m u:nobody:r-x "$ACLDIR" >/dev/null 2>&1; then
         acl_rc=0
-        acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/origin" 2>&1 )" || acl_rc=$?
+        acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/dir" 2>&1 )" || acl_rc=$?
         { [ "$acl_rc" -ne 0 ] \
           && case "$acl_diag" in *"access-control list"*) true ;; *) false ;; esac \
-          && [ ! -e "$ACLDIR/origin" ]; } \
+          && [ ! -e "$ACLDIR/dir" ]; } \
             && pass "…and a component carrying an ACL is refused" \
             || die "an ACL-bearing directory was accepted (rc=$acl_rc diag='$acl_diag')"
         # THE FIXTURE'S OWN REACH: the ACL must actually be there, or the case
@@ -655,10 +712,10 @@ printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 
 chmod +x "$XASTUB/ls"
 xa_rc=0
 xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$XASTUB:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$XADIR/origin" 2>&1 )" || xa_rc=$?
+    /usr/bin/env bash -p "$SCRIPT" read "$XADIR/dir" 2>&1 )" || xa_rc=$?
 { [ "$xa_rc" -ne 0 ] \
   && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
-  && [ ! -e "$XADIR/origin" ]; } \
+  && [ ! -e "$XADIR/dir" ]; } \
     && pass "…and a component marked '@' is refused, which is how macOS shows an ACL beside an xattr" \
     || die "an '@'-marked component was accepted (rc=$xa_rc diag='$xa_diag')"
 
@@ -671,14 +728,14 @@ LSFAIL="$TMP/lsfail"
 mkdir -p "$LSFAIL"
 printf '#!/usr/bin/env bash\nexit 3\n' > "$LSFAIL/ls"
 chmod +x "$LSFAIL/ls"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 chmod 700 "$OPENDIR"
 lsf_rc=0
 lsf_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$LSFAIL:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || lsf_rc=$?
+    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || lsf_rc=$?
 { [ "$lsf_rc" -ne 0 ] \
   && case "$lsf_diag" in *"could not read the permissions"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and an ACL probe that cannot run refuses rather than reading empty as unmarked" \
     || die "a failing ls was treated as a clean result (rc=$lsf_rc diag='$lsf_diag')"
 
@@ -691,21 +748,21 @@ FINDSTUB="$TMP/findstub"
 mkdir -p "$FINDSTUB"
 printf '#!/usr/bin/env bash\nexit 2\n' > "$FINDSTUB/find"
 chmod +x "$FINDSTUB/find"
-rm -f "$OPENDIR/origin"
+rm -rf "$OPENDIR/dir"
 probe_rc=0
 probe_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$FINDSTUB:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" 2>&1 )" || probe_rc=$?
+    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || probe_rc=$?
 { [ "$probe_rc" -ne 0 ] \
   && case "$probe_diag" in *"could not examine"*) true ;; *) false ;; esac \
-  && [ ! -e "$OPENDIR/origin" ]; } \
+  && [ ! -e "$OPENDIR/dir" ]; } \
     && pass "…and a probe that cannot run refuses rather than reading empty as safe" \
     || die "a failing probe was treated as a clean result (rc=$probe_rc diag='$probe_diag')"
 
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"
-rm -f "$OPENDIR/origin"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/origin" ) >/dev/null 2>&1
-[ "$(cat "$OPENDIR/origin" 2>/dev/null)" = "$REAL" ] \
+rm -rf "$OPENDIR/dir"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" ) >/dev/null 2>&1
+[ "$(cat "$OPENDIR/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a private directory is written as before" \
     || die "a private directory was refused"
 
@@ -753,10 +810,10 @@ nop_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash "$SCRIPT" read "$TMP
 # against, and the helper must say the same thing.
 HOSTILE="$TMP/hostile-global"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "origin"]\n\turl = %s\n' "$FORGED" > "$HOSTILE"
-rm -f "$TMP/hg1.value"
+rm -rf "$TMP/hg1.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL="$HOSTILE" /usr/bin/env bash -p "$SCRIPT" read "$TMP/hg1.value" ) >/dev/null 2>&1
-hg_got="$(cat "$TMP/hg1.value" 2>/dev/null)"
+hg_got="$(cat "$TMP/hg1.value/origin" 2>/dev/null)"
 hg_git="$(cd "$IOREPO" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOSTILE" git remote get-url origin 2>/dev/null)"
 [ -n "$hg_git" ] && [ "$hg_got" = "$hg_git" ] \
     && pass "under a carried config the helper answers exactly as git remote get-url does" \
@@ -782,10 +839,10 @@ mkdir -p "$NAMEREPO"
     || die "could not build the name-collision checkout"
 NAMECFG="$TMP/namecollide.gitconfig"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "work:acme/widget.git"]\n\turl = %s\n' "$FORGED" > "$NAMECFG"
-rm -f "$TMP/nc.value"
+rm -rf "$TMP/nc.value"
 ( cd "$NAMEREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL="$NAMECFG" /usr/bin/env bash -p "$SCRIPT" read "$TMP/nc.value" ) >/dev/null 2>&1
-nc_got="$(cat "$TMP/nc.value" 2>/dev/null)"
+nc_got="$(cat "$TMP/nc.value/origin" 2>/dev/null)"
 nc_git="$(cd "$NAMEREPO" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$NAMECFG" git remote get-url origin 2>/dev/null)"
 { [ "$nc_got" = 'git@ghe.example:acme/widget.git' ] && [ "$nc_got" = "$nc_git" ]; } \
     && pass "an origin that also names a carried remote is rewritten, not resolved" \
@@ -822,10 +879,10 @@ mkdir -p "$WTMAIN"
     && cd "$TMP/wtlinked" && git config --worktree remote.origin.url "$FORGED" ) >/dev/null 2>&1
 if [ -d "$TMP/wtlinked" ] && [ -n "$(cd "$TMP/wtlinked" && git config --worktree --get remote.origin.url 2>/dev/null)" ]; then
     wt_git="$(cd "$TMP/wtlinked" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 git remote get-url origin 2>/dev/null)"
-    rm -f "$TMP/wt.value"
+    rm -rf "$TMP/wt.value"
     ( cd "$TMP/wtlinked" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
         /usr/bin/env bash -p "$SCRIPT" read "$TMP/wt.value" ) >/dev/null 2>&1
-    wt_got="$(cat "$TMP/wt.value" 2>/dev/null)"
+    wt_got="$(cat "$TMP/wt.value/origin" 2>/dev/null)"
     [ -n "$wt_got" ] && [ "$wt_got" = "$wt_git" ] \
         && pass "inside a linked worktree the helper answers exactly as git remote get-url does" \
         || die "the helper and git disagree in a worktree (helper '$wt_got', git '$wt_git')"
@@ -853,10 +910,10 @@ mkdir -p "$RTREPO"
 rt_case() {   # rt_case <label> <expect-pass-text> [env-entries…]
     local _label="$1" _text="$2"; shift 2
     local _got _git
-    rm -f "$TMP/rt.value"
+    rm -rf "$TMP/rt.value"
     ( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         GIT_CONFIG_NOSYSTEM=1 "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
-    _got="$(cat "$TMP/rt.value" 2>/dev/null)"
+    _got="$(cat "$TMP/rt.value/origin" 2>/dev/null)"
     _git="$(cd "$RTREPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         GIT_CONFIG_NOSYSTEM=1 "$@" git remote get-url origin 2>/dev/null)"
     # THE PROBE'S OWN REACH FIRST: the rule must really expand for git here, or the
@@ -873,10 +930,10 @@ rt_case 'parameters' '…and one supplied through GIT_CONFIG_PARAMETERS reaches 
     GIT_CONFIG_PARAMETERS="'url.git@ghe.example:.insteadOf'='work:'"
 # AND WITHOUT THEM THE ALIAS COMES BACK, or the two cases above pass against a
 # checkout that was never aliased.
-rm -f "$TMP/rt.value"
+rm -rf "$TMP/rt.value"
 ( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
-[ "$(cat "$TMP/rt.value" 2>/dev/null)" = 'work:acme/widget.git' ] \
+[ "$(cat "$TMP/rt.value/origin" 2>/dev/null)" = 'work:acme/widget.git' ] \
     && pass "…while with no rule at all the alias is what comes back" \
     || die "the alias did not survive an unrewritten read; the cases above prove nothing"
 
@@ -900,7 +957,7 @@ printf 'git@github.com:seen/repo.git
 NSSH
 chmod +x "$NSSTUB/git"
 ns_env() {   # ns_env [env-entries…] ; prints what the subject's git saw
-    rm -f "$TMP/ns.value" "$NSSTUB/git.log"
+    rm -rf "$TMP/ns.value"; rm -f "$NSSTUB/git.log"
     ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         PATH="$NSSTUB:$PATH" "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns.value" ) >/dev/null 2>&1
     cat "$NSSTUB/git.log" 2>/dev/null
@@ -961,47 +1018,639 @@ reach="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_
 # rule supplied through it must therefore apply.
 IOGLOBAL="$TMP/insteadof-global"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n' > "$IOGLOBAL"
-rm -f "$TMP/iog.value"
+rm -rf "$TMP/iog.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     GIT_CONFIG_GLOBAL="$IOGLOBAL" /usr/bin/env bash -p "$SCRIPT" read "$TMP/iog.value" ) >/dev/null 2>&1
-iog_got="$(cat "$TMP/iog.value" 2>/dev/null)"
+iog_got="$(cat "$TMP/iog.value/origin" 2>/dev/null)"
 [ "$iog_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "…and a GIT_CONFIG_GLOBAL the operator chose is honoured, as their own git honours it" \
     || die "GIT_CONFIG_GLOBAL was dropped; the helper read a different config from the session (got '$iog_got')"
 
+# ── THE DIRECTORY IS THIS SCRIPT'S TO CREATE, AND CREATING IT IS THE EXCLUSION ─
+#
+# Since #157 the argument is a directory rather than a file, and `mkdir` is what
+# refuses a name somebody else got to first. That moved the exclusion off the
+# CALLER, where it took three shell names, a probe apiece and a containment arm
+# — every one of them a thing the operator's shell could have made readonly,
+# value-transforming or a nameref. Here the name is this process's own.
+#
+# EVERY KIND OF EXISTING NAME, because `mkdir` refuses the lot and a reader should
+# not have to know that: a directory, a regular file, and a symlink — which
+# `mkdir` does not follow on the last component, so a link aimed at somewhere the
+# operator owns is refused rather than written through.
+_ex_base="$TMP/excl"; mkdir -p "$_ex_base"
+# `emptydir` IS A KIND OF ITS OWN, and it is the one the others hide. `dir` puts a
+# `keepme` inside, so `rmdir` refuses it and the case passes for a reason that has
+# nothing to do with ownership — while an EMPTY pre-existing directory owned by
+# this account passes every test a directory this run created passes. Removing it
+# contradicts the status-1 contract that a pre-existing argument survives
+# untouched, and only this case can see that.
+for _ex_kind in dir emptydir file link; do
+    _ex_path="$_ex_base/$_ex_kind"
+    rm -rf "$_ex_path"
+    # WITH CONTENTS, so their SURVIVAL can be asserted and not only the absence of
+    # a write. A refusal before the `mkdir` created nothing, so it must remove
+    # nothing — and a child-absence check alone passes just as well if the helper
+    # deleted the whole argument, which is the opposite failure.
+    case "$_ex_kind" in
+        dir)  mkdir "$_ex_path"; printf 'DO NOT DELETE\n' > "$_ex_path/keepme" ;;
+        emptydir) mkdir "$_ex_path" ;;
+        file) printf 'DO NOT DELETE\n' > "$_ex_path" ;;
+        link) mkdir -p "$_ex_base/linktarget"
+              printf 'DO NOT DELETE\n' > "$_ex_base/linktarget/keepme"
+              ln -s "$_ex_base/linktarget" "$_ex_path" ;;
+    esac
+    _ex_rc=0
+    _ex_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$_ex_path" 2>&1 )" || _ex_rc=$?
+    { [ "$_ex_rc" -ne 0 ] \
+      && case "$_ex_diag" in *"could not create"*) true ;; *) false ;; esac; } \
+        && pass "read refuses a transport directory that already exists as a $_ex_kind" \
+        || die "an existing $_ex_kind was accepted as the transport directory (rc=$_ex_rc diag='$_ex_diag')"
+    [ ! -e "$_ex_path/origin" ] \
+        && pass "…and writes nothing through it" \
+        || die "an existing $_ex_kind was written through"
+    # …AND LEAVES IT WHERE IT WAS, which the child-absence check above cannot see:
+    # a helper that deleted the argument outright satisfies it perfectly. The
+    # refusal happens BEFORE the `mkdir`, so this script created nothing and must
+    # remove nothing — a name somebody else got to first is theirs.
+    case "$_ex_kind" in
+        dir)  { [ -d "$_ex_path" ] && [ -s "$_ex_path/keepme" ]; } \
+                  && pass "…and leaves the existing directory and its contents alone" \
+                  || die "an existing directory or its contents were removed" ;;
+        emptydir) [ -d "$_ex_path" ] \
+                  && pass "…and leaves an existing EMPTY directory alone, which rmdir would have taken" \
+                  || die "an existing empty directory was removed" ;;
+        file) { [ -f "$_ex_path" ] && [ -s "$_ex_path" ]; } \
+                  && pass "…and leaves the existing file alone" \
+                  || die "an existing file was removed or truncated" ;;
+        # A DEDICATED TARGET WITH A MARKER IN IT, because the symlink pointed at the
+        # shared `$_ex_base` and the check asked only whether that still existed.
+        # A regression that FOLLOWED the link and deleted entries inside the target,
+        # leaving the link and the directory in place, passed — which is precisely
+        # the write-through this case is here to refuse, and the "contents included"
+        # half of the guarantee went unasserted for links alone.
+        link) { [ -L "$_ex_path" ] && [ -d "$_ex_base/linktarget" ] \
+                && [ -s "$_ex_base/linktarget/keepme" ]; } \
+                  && pass "…and leaves the symlink, its target and the target's contents alone" \
+                  || die "an existing symlink, its target or the target's contents were removed" ;;
+    esac
+done
+# …AND THE ORDINARY CASE STILL CREATES IT, so the three above are not passing
+# because every path is refused.
+rm -rf "$_ex_base/fresh"
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$_ex_base/fresh" ) >/dev/null 2>&1
+[ "$(cat "$_ex_base/fresh/origin" 2>/dev/null)" = "$REAL" ] \
+    && pass "…while a name nobody has taken is created and written" \
+    || die "the ordinary create-and-write case failed"
+# AND THE DIRECTORY IS PRIVATE, which is the other half of what the caller's
+# `mkdir -m 700` used to do: `-m` is applied by `mkdir` itself, so there is no
+# interval between the name existing and being closed.
+_ex_mode="$(ls -ld "$_ex_base/fresh" 2>/dev/null | cut -c1-10)"
+case "$_ex_mode" in
+    drwx------) pass "…at mode 700, with no interval where it is not" ;;
+    *)          die "the transport directory was created with mode '$_ex_mode'" ;;
+esac
+
 # ── AN OUTPUT THAT OPENS AND THEN REJECTS THE WRITE ────────────────────────
 #
-# Both writes take their status, and until now nothing exercised the state that
-# distinguishes taking it from not. The truncation succeeds — `/dev/full` opens
-# and accepts `: >` — so the script reaches its `printf` believing the target is
-# usable, and only the write fails. Without the status, `pin` leaves an empty file
-# and exits 0, which is byte-for-byte what a legitimately unset pin leaves, and
-# `read` leaves an empty file and exits 0, which the caller reads back as an
-# origin. A refactor that dropped either guard would keep every other case here
-# green.
+# WHAT THE GUARDS ARE FOR: a target can open and then reject data. Without the
+# status, `pin` leaves an empty file and exits 0 — byte-for-byte what a
+# legitimately unset pin leaves — and `read` leaves an empty file and exits 0,
+# which the caller reads back as an origin.
 #
-# `/dev/full` IS A LINUX DEVICE and stock macOS does not have it, so its absence
-# is announced rather than passed over: a case that quietly does not run is the
-# green tick this repository has paid for twice.
-if [ -c /dev/full ] && [ -w /dev/full ]; then
-    _full_rc=0
-    _full_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read /dev/full 2>&1 )" \
-        || _full_rc=$?
-    { [ "$_full_rc" -ne 0 ] \
-      && case "$_full_diag" in *"write the origin"*) true ;; *) false ;; esac; } \
-        && pass "read refuses an output that opens and then rejects the write" \
-        || die "read accepted a rejected write (rc=$_full_rc diag='$_full_diag')"
+# THE `/dev/full` CASE WENT WITH #157 and something better replaced it. It drove
+# `/dev/full` in as the output PATH, and the argument is a DIRECTORY this script
+# creates now — `mkdir /dev/full` refuses before any write is attempted. For two
+# rounds the guards were covered by source matching alone, which is recorded here
+# because the note that replaced the case claimed `pr-selfcheck.sh` would catch
+# their removal and that was untrue.
+#
+# ── AN OPEN-THEN-FAIL WRITE, RUN RATHER THAN MATCHED ───────────────────────
+#
+# `ulimit -f 0` sets the file-size limit to zero: the redirection creates the leaf,
+# and the `printf` into it fails. `SIGXFSZ` would kill the shell first, so the case
+# ignores it — after which the write returns an ERROR, which is exactly the state
+# the guards are for and the one `/dev/full` used to stage before the argument
+# became a directory `mkdir` refuses.
+#
+# BOTH MODES, because the two writes have different consequences: without its
+# status `pin` leaves an empty file and exits 0 — byte-for-byte what a legitimately
+# unset pin leaves — and `read` leaves an empty file the caller reads back as an
+# origin.
+#
+# AND THE DIRECTORY IS ASSERTED GONE, which is the half only the cleanup provides:
+# the write happens after `RB_PHASE=post`, so the leaf is removed with it.
+_wf_bin="$TMP/wfbin"; mkdir -p "$_wf_bin"
+for _wf_mode in read pin; do
+    _wf_dir="$TMP/wf.$_wf_mode.$$"
+    rm -rf "$_wf_dir"
+    _wf_rc=0
+    _wf_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+        bash -c 'ulimit -f 0 2>/dev/null || exit 97
+                 trap "" XFSZ
+                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wf_mode" "$_wf_dir" 2>&1)" || _wf_rc=$?
+    if [ "$_wf_rc" = 97 ]; then
+        echo "ok   - (this shell cannot set a zero file-size limit; the $_wf_mode write-failure case did not run)"
+        continue
+    fi
+    { [ "$_wf_rc" -ne 0 ] \
+      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac; } \
+        && pass "a write that opens and then fails is refused by name ($_wf_mode)" \
+        || die "the $_wf_mode write-failure case gave rc=$_wf_rc '$_wf_out'"
+    [ ! -e "$_wf_dir" ] \
+        && pass "…and the directory it had reserved is given back ($_wf_mode)" \
+        || die "a failed $_wf_mode write left '$_wf_dir' behind"
+done
+rm -rf "$_wf_bin"
 
-    _full_rc=0
-    _full_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-        /usr/bin/env bash -p "$SCRIPT" pin /dev/full 2>&1 )" || _full_rc=$?
-    { [ "$_full_rc" -ne 0 ] \
-      && case "$_full_diag" in *"write the pin"*) true ;; *) false ;; esac; } \
-        && pass "…and pin refuses it too, rather than reporting an unset pin" \
-        || die "pin reported success on a rejected write (rc=$_full_rc diag='$_full_diag')"
+# THE ASSERTIONS BELOW ARE SOURCE-SHAPE ONLY, and that is all they claim. The
+# runtime cases above are the coverage: they execute both write paths and assert
+# the refusal, the status and the cleanup.
+#
+# WHAT THEY ARE NOT is a cleanup guarantee. `|| exit 1` in place of `|| rb_refuse`
+# would still give the directory back, because the EXIT trap does the cleanup and
+# is already armed — the `rb_refuse` spelling is uniformity, not a mechanism. And
+# deleting a guard entirely is caught by the runtime cases, by status and by
+# diagnostic. What is left is worth keeping and worth stating honestly: both writes
+# take their status, and both name the write in their message, so a future edit
+# cannot quietly make one of the two silent.
+_wr_n=0
+_wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
+[ "$_wr_n" = 2 ] \
+    && pass "both transport writes are continued onto their guard" \
+    || die "expected two guarded writes in the helper, found $_wr_n"
+_wr_g=0
+_wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively and write' "$SCRIPT")" || _wr_g=0
+[ "$_wr_g" = 2 ] \
+    && pass "…and each names the write in its refusal, so neither can quietly go silent" \
+    || die "expected two rb_refuse guards on the writes, found $_wr_g"
+
+# ── THE NAME IS RESERVED BEFORE THE WALKS, NOT AFTER THEM ──────────────────
+#
+# The candidate is an argv entry, which `ps` and `/proc` publish to every account
+# on the machine the moment this process starts. With the `mkdir` after both
+# ancestry walks, another local account on a shared sticky parent could read it and
+# create the name while those walks ran; `mkdir` then refused, repeatably, for as
+# long as they watched. The random suffix stops a name being GUESSED and does
+# nothing about one being READ.
+#
+# ASSERTED ON THE ORDER IN THE SOURCE, because the race is a race: staging it means
+# winning a window this fixture cannot make deterministic. What CAN be checked is
+# that the create precedes the walks, which is the property that closes it — and
+# that a walk refusal after the create still removes the directory, which the case
+# below the exclusions already proves behaviourally.
+_res_mk=0; _res_mk="$(grep -n 'env mkdir -m 700 "\$RB_DIR"' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_mk=0
+_res_w1=0; _res_w1="$(grep -n '^_rb_walk "\$_rb_dir"' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_w1=0
+{ [ "$_res_mk" -gt 0 ] && [ "$_res_w1" -gt 0 ] && [ "$_res_mk" -lt "$_res_w1" ]; } \
+    && pass "the transport directory is reserved before the ancestry walks run" \
+    || die "the mkdir does not precede the walks (mkdir=$_res_mk walk=$_res_w1); the name is observable while they run"
+# …AND THE WALKS STILL REFUSE AFTER IT, which is what makes reserving first safe
+# rather than merely earlier.
+_res_g=0; _res_g="$(grep -c '_rb_walk "\$_rb_\(dir\|real\)" || rb_refuse$' "$SCRIPT")" || _res_g=0
+[ "$_res_g" = 2 ] \
+    && pass "…and both walk refusals stop through rb_refuse" \
+    || die "expected both walks to refuse through rb_refuse, found $_res_g"
+# …AND NO REFUSAL CLEANS UP ITSELF, which is what makes the cleanup run ONCE. It
+# used to live in the refusals AND in the EXIT trap, so a refusal cleaned up and
+# then `exit` fired the trap and cleaned again — and the second pass is the
+# dangerous one: an account watching the published path can recreate it as a
+# symlink between the two, and a second `rm -f "$OUT"` follows the replacement.
+_res_ref=""
+_res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
+{ [ -n "$_res_ref" ] \
+  && case "$_res_ref" in *'rm -f'*|*rmdir*|*rb_cleanup*) false ;; *) true ;; esac \
+  && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
+    && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
+    || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
+_res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXIT$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
+_res_tl=0; _res_tl="$(grep -n "^trap 'rb_on_signal TERM' TERM$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tl=0
+{ [ "$_res_tr" -gt 0 ] && [ "$_res_tl" -gt 0 ] && [ "$_res_tl" -lt "$_res_mk" ]; } \
+    && pass "…and the cleanup traps are armed BEFORE the reservation is attempted" \
+    || die "the traps are not armed before the mkdir (trap=$_res_tr..$_res_tl mkdir=$_res_mk); a signal during it leaks the directory"
+# …WITH NOTHING EXECUTABLE BETWEEN THEM. Armed AFTER the `mkdir` they protected
+# only what follows the command RETURNING: a signal while the external `mkdir` ran
+# terminated this shell while the child went on to create the directory. Armed
+# before it, what matters is that nothing runs in between — every statement there
+# is another moment with the arming spent and the reservation not yet taken, and
+# nothing needs to happen there at all.
+#
+# NOTHING IS ALLOWLISTED, and that is deliberate. An earlier version excluded
+# statement SPELLINGS and then INDENTATION, and both are filters: a top-level
+# `_rb_pause="$(slow_command)"` matched the first, and the same line written with
+# four spaces in front matched the second. This repository records the same defect
+# twice more in the pin-suffix check. Every non-comment, non-blank line in the
+# interval fails the case, whatever it says and wherever it starts.
+_res_gap=""
+_res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
+    | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' || true)"
+[ -z "$_res_gap" ] \
+    && pass "…with nothing running between the arming and the reservation" \
+    || die "statements run between the arming and the reservation: '$_res_gap'"
+# …AND THE PHASE FLIPS AFTER THE WALKS AND BEFORE ANY WRITE. `RB_PHASE` is what
+# decides whether the cleanup removes a leaf, and the leaf is removed BY NAME — so
+# moving `RB_PHASE=post` above either ancestry walk would let a signal during an
+# UNTRUSTED walk resolve `$OUT` through a path an attacker can have replaced. The
+# interruption cases cannot see that: they stage neither a replacement nor a victim
+# leaf, so they stay green.
+#
+# THESE ASSERTIONS WENT MISSING when this block was rewritten, and their absence is
+# why the paragraph that claimed structural cover was false for two rounds. All
+# three line numbers must be positive before they are ordered — a pattern that
+# stops matching leaves zero, and zero precedes everything.
+_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
+_res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
+_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
+{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
+  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
+    && pass "…and the phase flips after the walks and before any write" \
+    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
+# …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
+# means the cleanup can run at a moment when the `mkdir` had already failed because
+# the name was taken, and a directory there that belongs to somebody else is
+# theirs.
+_res_own=""
+_res_own="$(awk '/^rb_cleanup\(\) \{/,/^\}/' "$SCRIPT")" || _res_own=""
+case "$_res_own" in
+    *'[[ -d $RB_DIR ]] && [[ -O $RB_DIR ]] || return 0'*)
+        pass "…and the cleanup removes nothing this account does not own" ;;
+    *)  die "the cleanup has no ownership test, so it can remove a name somebody else took: '$_res_own'" ;;
+esac
+_res_dis=0; _res_dis="$(grep -c '^ *trap - EXIT$' "$SCRIPT")" || _res_dis=0
+[ "$_res_dis" = 2 ] \
+    && pass "…and both success paths reset EXIT" \
+    || die "expected EXIT reset on both success paths, found $_res_dis"
+# ASKED OF WHAT PRECEDES EACH `exit 0`, not of the file as a whole: the four-signal
+# reset is CORRECT inside the cleanup paths, where it is what stops the cleanup
+# being re-entered, and wrong immediately before a success exit.
+_res_bad=0
+_res_bad="$(awk '/^ *exit 0$/ { if (prev ~ /trap - EXIT HUP INT TERM/) n++ } { prev = $0 } END { print n+0 }' "$SCRIPT")" || _res_bad=0
+[ "$_res_bad" = 0 ] \
+    && pass "…and neither disarms the signal handlers before the final command" \
+    || die "a success path resets the signal traps early, leaving a window with no cleanup"
+# …AND THE CLEANUP IS NOT RE-ENTRANT. Every trap is removed BEFORE the first
+# removal, in one statement, on both exit paths: a signal arriving while the
+# cleanup runs would otherwise invoke it again, and after the first pass has freed
+# the candidate an account watching a shared parent can put a symlink there before
+# the second `rm -f "$OUT"` resolves it.
+_res_sig=""
+_res_sig="$(awk '/^rb_on_signal\(\) \{/,/^\}/' "$SCRIPT")" || _res_sig=""
+_res_sig_ok=no
+case "$_res_sig" in
+    *"trap '' EXIT HUP INT TERM"*rb_cleanup*) _res_sig_ok=yes ;;
+esac
+[ "$_res_sig_ok" = yes ] \
+    && pass "…and the signal handler disarms every trap before it cleans up" \
+    || die "the signal handler cleans up while still armed: '$_res_sig'"
+grep -qF 'trap '"'"'trap "" EXIT HUP INT TERM; rb_cleanup'"'"' EXIT' "$SCRIPT" \
+    && pass "…and so does the EXIT handler" \
+    || die "the EXIT handler cleans up while the signal traps are still armed"
+# …AND THE LIMIT THE ORDERING DOES NOT CLOSE IS STATED IN THE FILE. Moving the
+# `mkdir` ahead of the walks narrows the interval between exec and reservation; it
+# does not remove it, because the candidate is an argv entry published at exec. A
+# maintainer reading the reservation ordering has to learn what it does not buy, or
+# the next round re-derives it — which is what happened twice on #158. #160.
+grep -qF 'WHAT THIS ORDERING DOES NOT CLOSE' "$SCRIPT" \
+    && pass "…and the file states the interval the ordering cannot remove" \
+    || die "the reservation ordering claims a property it does not have; the argv limit is unstated"
+
+# ── AN INTERRUPTED RUN GIVES ITS RESERVATION BACK ──────────────────────────
+#
+# The caller performs no cleanup after a non-zero helper status, deliberately: it
+# cannot know who created the path. So a signal arriving between the `mkdir` and
+# either end used to leak a `watch-pr.*` directory for the life of the machine.
+#
+# STAGED WITH A SLOW `git`, so the signal lands after the reservation and before
+# the write. `git` is reached through `PATH` — the helper runs privileged, so a
+# FUNCTION cannot stand in for it, but a directory on `PATH` can.
+_int_bin="$TMP/intbin"; mkdir -p "$_int_bin"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_int_bin/git"
+chmod +x "$_int_bin/git"
+_int_dir="$TMP/int.$$"
+rm -rf "$_int_dir"
+# `exec`, SO `$!` IS THE HELPER. Without it the background job is the SUBSHELL and
+# the helper is its child: a TERM to the subshell leaves the helper running, the
+# subshell waits for it, and the case reports the defect it exists to detect
+# against a correct handler. `exec` replaces the subshell, so the pid is the one
+# the signal has to reach.
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    PATH="$_int_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_int_dir" ) >/dev/null 2>&1 &
+_int_pid=$!
+# WAIT FOR THE RESERVATION, rather than sleeping a guessed interval: the case is
+# about what happens after the directory exists, so it has to exist first.
+_int_n=0
+while [ ! -d "$_int_dir" ] && [ "$_int_n" -lt 100 ]; do _int_n=$(( _int_n + 1 )); sleep 0.1; done
+if [ -d "$_int_dir" ]; then
+    pass "the helper reserves its directory before reading origin"
+    kill -TERM "$_int_pid" 2>/dev/null
+    # BOUNDED, so a handler that hangs is a failure rather than a fixture that
+    # never returns.
+    #
+    # AND THE STATUS IS THE DISCRIMINATING ASSERTION, not the absence of the
+    # directory. Bash does not run a trap while it waits for a foreign command: the
+    # TERM is noticed and handled only once `git` returns, so BOTH shapes end with
+    # the directory gone and a non-zero status — a handler that RETURNS lets bash
+    # resume, the empty `git` output is refused, and `rb_refuse` cleans up and
+    # exits 1. What tells them apart is WHICH non-zero: 143 is 128+TERM, the status
+    # of a process that died of the signal, and 1 is a refusal reported by a run
+    # that carried on after being killed.
+    _int_w=0
+    while kill -0 "$_int_pid" 2>/dev/null && [ "$_int_w" -lt 150 ]; do
+        _int_w=$(( _int_w + 1 )); sleep 0.1
+    done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_int_pid" 2>/dev/null; then kill -KILL "$_int_pid" 2>/dev/null; fi
+    [ "$_int_w" -lt 150 ] \
+        && pass "…and the interrupted helper ends rather than hanging" \
+        || die "the helper was still running fifteen seconds after TERM"
+    _int_rc=0
+    wait "$_int_pid" 2>/dev/null || _int_rc=$?
+    [ "$_int_rc" = 143 ] \
+        && pass "…dying of the signal (143 = 128+TERM) rather than resuming and reporting a refusal" \
+        || die "a helper killed after its reservation exited $_int_rc; the handler returned instead of re-raising"
+    # THE TRAP RUNS IN THE HELPER, and `wait` returns when the backgrounded
+    # SUBSHELL ends — which can be before its child has finished handling the
+    # signal. A bounded wait for the absence, rather than one assertion racing a
+    # process teardown.
+    _int_n=0
+    while [ -e "$_int_dir" ] && [ "$_int_n" -lt 100 ]; do _int_n=$(( _int_n + 1 )); sleep 0.1; done
+    [ ! -e "$_int_dir" ] \
+        && pass "…and a TERM between the reservation and the write gives it back" \
+        || die "an interrupted helper leaked '$_int_dir'"
 else
-    echo "NOTE: /dev/full is absent; the rejecting-write cases did not run"
+    kill -KILL "$_int_pid" 2>/dev/null; wait "$_int_pid" 2>/dev/null || true
+    die "the helper never created its directory; the interruption case proves nothing"
 fi
+rm -rf "$_int_dir" "$_int_bin"
+# …AND `pin` MODE TOO, which reaches no `git` at all. Its only external command
+# before the write is the ancestry walk's `find`, so that is what the signal lands
+# during — the pre-write phase, where the handler is `rmdir` alone.
+_pin_bin="$TMP/pinbin"; mkdir -p "$_pin_bin"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_pin_bin/find"
+chmod +x "$_pin_bin/find"
+_pin_dir="$TMP/pint.$$"
+rm -rf "$_pin_dir"
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    REVIEW_BUS_REMOTE="$REAL" PATH="$_pin_bin:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" pin "$_pin_dir" ) >/dev/null 2>&1 &
+_pin_pid=$!
+_pin_n=0
+while [ ! -d "$_pin_dir" ] && [ "$_pin_n" -lt 100 ]; do _pin_n=$(( _pin_n + 1 )); sleep 0.1; done
+if [ -d "$_pin_dir" ]; then
+    kill -TERM "$_pin_pid" 2>/dev/null
+    _pin_w=0
+    while kill -0 "$_pin_pid" 2>/dev/null && [ "$_pin_w" -lt 150 ]; do
+        _pin_w=$(( _pin_w + 1 )); sleep 0.1
+    done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_pin_pid" 2>/dev/null; then kill -KILL "$_pin_pid" 2>/dev/null; fi
+    _pin_rc=0
+    wait "$_pin_pid" 2>/dev/null || _pin_rc=$?
+    { [ "$_pin_rc" = 143 ] && [ ! -e "$_pin_dir" ]; } \
+        && pass "…and an interrupted pin gives its reservation back and dies of the signal too" \
+        || die "an interrupted pin exited $_pin_rc leaving '$(ls -A "$_pin_dir" 2>&1)'"
+else
+    kill -KILL "$_pin_pid" 2>/dev/null; wait "$_pin_pid" 2>/dev/null || true
+    die "the pin helper never created its directory; that interruption case proves nothing"
+fi
+rm -rf "$_pin_dir" "$_pin_bin"
+# ── A SIGNAL DURING THE RESERVATION ITSELF LEAVES NOTHING BEHIND ───────────
+#
+# `mkdir` is an external command. Armed after it returned, the traps protected only
+# what came later: a signal arriving while the child ran terminated this shell
+# while that child went on to create the directory, and the caller — which removes
+# nothing after a non-zero status — was left with it.
+#
+# STAGED WITH A SLOW `mkdir` THAT CREATES FIRST AND RETURNS LATE, which is the
+# shape the race has: the directory exists, the command has not returned, and no
+# handler would have been installed. The stub announces itself so the signal lands
+# inside that interval rather than at a guessed moment.
+_mkd_real=""
+_mkd_real="$(command -v mkdir 2>/dev/null)" || _mkd_real=""
+_mkd_bin="$TMP/mkdbin"; mkdir -p "$_mkd_bin"
+_mkd_mark="$TMP/mkd.created"
+rm -f "$_mkd_mark"
+printf '#!/usr/bin/env bash\n%s "$@" || exit 1\n: > "$RB_MKD_MARK"\nsleep 3\n' "$_mkd_real" > "$_mkd_bin/mkdir"
+chmod +x "$_mkd_bin/mkdir"
+_mkd_dir="$TMP/mkdt.$$"
+rm -rf "$_mkd_dir"
+if [ -n "$_mkd_real" ] && [ -x "$_mkd_real" ]; then
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    RB_MKD_MARK="$_mkd_mark" PATH="$_mkd_bin:$PATH" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_mkd_dir" ) >/dev/null 2>&1 &
+_mkd_pid=$!
+_mkd_n=0
+while [ ! -e "$_mkd_mark" ] && [ "$_mkd_n" -lt 150 ]; do _mkd_n=$(( _mkd_n + 1 )); sleep 0.1; done
+if [ -e "$_mkd_mark" ]; then
+    pass "the reservation is created before its command returns, as the race requires"
+    kill -TERM "$_mkd_pid" \
+        || die "the helper was already gone; no signal was delivered during the reservation"
+    _mkd_w=0
+    while kill -0 "$_mkd_pid" 2>/dev/null && [ "$_mkd_w" -lt 150 ]; do
+        _mkd_w=$(( _mkd_w + 1 )); sleep 0.1
+    done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_mkd_pid" 2>/dev/null; then kill -KILL "$_mkd_pid" 2>/dev/null; fi
+    _mkd_rc=0
+    wait "$_mkd_pid" 2>/dev/null || _mkd_rc=$?
+    [ ! -e "$_mkd_dir" ] \
+        && pass "…and a signal delivered during it still gives the directory back" \
+        || die "a signal during the reservation leaked '$_mkd_dir' (rc=$_mkd_rc)"
+else
+    kill -KILL "$_mkd_pid" 2>/dev/null; wait "$_mkd_pid" 2>/dev/null || true
+    die "the slow mkdir never reported creating the directory; that case proves nothing"
+fi
+rm -rf "$_mkd_dir"
+else
+    echo "ok   - (mkdir could not be resolved; the reservation-interruption case did not run)"
+fi
+rm -rf "$_mkd_bin"; rm -f "$_mkd_mark"
+
+# ── A SECOND SIGNAL DURING THE CLEANUP DOES NOT INTERRUPT IT ───────────────
+#
+# `trap -` restores a signal's DEFAULT action, which for these three is to
+# terminate: disarming that way stops the cleanup being RE-ENTERED and makes it
+# INTERRUPTIBLE instead, so a second signal between the `rm` and the `rmdir` kills
+# the shell and the caller — which removes nothing after a non-zero status — is
+# left with the directory. `trap ''` ignores them, which stops both.
+#
+# STAGED WITH A SLOW `rmdir`, so there is an interval to aim at. The cleanup
+# reaches it through `/usr/bin/env`, which resolves on `PATH`, so a stub is enough:
+# it sleeps, then execs the real one, and the second TERM is sent during that
+# sleep. Without the ignore, that TERM lands while the stub runs and the directory
+# survives.
+# THE REAL `rmdir` IS RESOLVED BEFORE THE STUB DIRECTORY GOES ON `PATH`, and it is
+# resolved rather than named: `/usr/bin/rmdir` is where Linux keeps it and stock
+# macOS keeps it at `/bin/rmdir`, so testing for the Linux path took a
+# success-looking skip on exactly the platform whose shell this suite exists to
+# cover — and the mac-shaped CI job cannot see that, because it runs on an Ubuntu
+# filesystem.
+_sig_real=""
+_sig_real="$(command -v rmdir 2>/dev/null)" || _sig_real=""
+_sig_bin="$TMP/sigbin"; mkdir -p "$_sig_bin"
+# AND THE STUB ANNOUNCES ITSELF. The interval to aim at is the one where the
+# cleanup is inside `rmdir`, and a fixed sleep is a guess at when that starts: too
+# early and the second signal joins the first one still pending, too late and it
+# lands after the helper has gone. Either way the case observes 143 and an absent
+# directory from the FIRST signal and passes without ever delivering a second one.
+# The stub writes a marker, this waits for it, and the second `kill` is required to
+# succeed.
+printf '#!/usr/bin/env bash\n: > "$RB_SIG_MARK"\nsleep 2\nexec %s "$@"\n' "$_sig_real" > "$_sig_bin/rmdir"
+printf '#!/usr/bin/env bash\nsleep 3\n' > "$_sig_bin/git"
+chmod +x "$_sig_bin/rmdir" "$_sig_bin/git"
+_sig_dir="$TMP/sigt.$$"
+rm -rf "$_sig_dir"
+_sig_mark="$TMP/sig.cleanup-started"
+rm -f "$_sig_mark"
+if [ -n "$_sig_real" ] && [ -x "$_sig_real" ]; then
+( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+_sig_pid=$!
+_sig_n=0
+while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
+if [ -d "$_sig_dir" ]; then
+    kill -TERM "$_sig_pid" 2>/dev/null
+    # THE FIRST SIGNAL IS HANDLED ONLY AFTER `git` RETURNS — bash defers it while
+    # waiting on a foreign command — so the cleanup starts when `git` does, and the
+    # marker is what says it has. Waiting for the marker rather than for a fixed
+    # interval is what makes the second signal land INSIDE the cleanup.
+    _sig_m=0
+    while [ ! -e "$_sig_mark" ] && [ "$_sig_m" -lt 150 ]; do _sig_m=$(( _sig_m + 1 )); sleep 0.1; done
+    [ -e "$_sig_mark" ] \
+        || die "the cleanup never reached rmdir; no second signal was delivered during it"
+    # AND THE SECOND `kill` MUST SUCCEED. Ignoring its status let the case pass
+    # having delivered nothing: the helper had already gone, and the consequence
+    # checked below was the FIRST signal's.
+    kill -TERM "$_sig_pid" \
+        || die "the helper was already gone; no signal was delivered during the cleanup"
+    _sig_w=0
+    while kill -0 "$_sig_pid" 2>/dev/null && [ "$_sig_w" -lt 150 ]; do
+        _sig_w=$(( _sig_w + 1 )); sleep 0.1
+    done
+    # KILLED ON AN EXHAUSTED POLL, or the `wait` below is unbounded: `die` records
+    # a failure and RETURNS, so a helper still alive here would hang the whole
+    # suite instead of reporting the timeout.
+    if kill -0 "$_sig_pid" 2>/dev/null; then kill -KILL "$_sig_pid" 2>/dev/null; fi
+    _sig_rc=0
+    wait "$_sig_pid" 2>/dev/null || _sig_rc=$?
+    [ ! -e "$_sig_dir" ] \
+        && pass "a second signal during the cleanup does not interrupt it" \
+        || die "a signal during cleanup left '$_sig_dir' behind (rc=$_sig_rc)"
+    [ "$_sig_rc" = 143 ] \
+        && pass "…and the run still dies of the signal it was sent" \
+        || die "the interrupted cleanup exited $_sig_rc rather than 143"
+else
+    kill -KILL "$_sig_pid" 2>/dev/null; wait "$_sig_pid" 2>/dev/null || true
+    die "the helper never created its directory; the cleanup-interruption case proves nothing"
+fi
+rm -rf "$_sig_dir"
+else
+    echo "ok   - (no /usr/bin/rmdir to exec through; the cleanup-interruption case did not run)"
+fi
+rm -rf "$_sig_bin"; rm -f "$_sig_mark"
+
+# NOTE ON WHICH CLEANUP RUNS HERE: a SIGNAL does not go through the `EXIT` trap.
+# Its handler disables `EXIT`, calls the cleanup directly and re-raises — routing
+# it through `EXIT` would mean handling the signal by returning, which is the
+# defect that made the helper resume the work it was killed during. The cases above
+# exercise that path, not the refusal one.
+#
+# WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
+# before the disarm is the phase where the handler must remove the leaf as well.
+# It is asserted structurally by the `RB_PHASE` ordering cases above and not run, because the interval cannot be
+# reached: bash defers a signal until the foreign command it is waiting on
+# returns, so a TERM sent during `git` is handled BEFORE the write, and the only
+# thing between the write and the disarm is a builtin. Racing a builtin is not a
+# case, it is a coin. The structural assertions cover which shape the handler
+# takes and where the phase flips; the runs above cover that the handler fires,
+# cleans up and re-raises, in both modes.
+
+# ── AN ALLOCATION THAT FAILS ABANDONS THE CALL, RATHER THAN AIMING AT `/` ──
+#
+# `die` records a failure and returns, so a `die` with nothing after it left `run`
+# carrying on with an empty parent and `vd=/dir`. Under a root-run fixture that
+# creates `/dir/origin` outside `$TMP`, and every later case collides with it.
+#
+# RUN IN A SUBSHELL WITH ITS OWN `die`, so exercising the failure does not record
+# one: the point is what `run` DOES next, not that the allocation failed.
+#
+# AND THE INVOCATION IS RECORDED UNDER `$TMP`, not asked of the filesystem root.
+# `[ ! -e /dir ]` was the first shape and it made the case HOST-DEPENDENT: a
+# machine with a legitimate `/dir` failed it against code that returned before
+# invoking anything. `run` reaches the helper through `env`, which is a name, so a
+# function by that name logs what it was asked to run and refuses — and the
+# assertion is that this case's own log was never written.
+rm -f "$TMP/alloccalls"
+_alloc_out="$( { mktemp() { return 1; }
+                 env() { printf '%s\n' "$*" >> "$TMP/alloccalls"; return 1; }
+                 die() { printf 'DIED[%s]\n' "$1" >&2; }   # stderr, or it lands IN the value
+                 _r=0
+                 _v="$(run read)" || _r=$?
+                 printf 'RC=%s VALUE=[%s]\n' "$_r" "$_v"
+               } 2>&1 )"
+case "$_alloc_out" in
+    *DIED*) pass "a failed scratch allocation is recorded" ;;
+    *)      die "a failed scratch allocation was not recorded: '$_alloc_out'" ;;
+esac
+case "$_alloc_out" in
+    *'RC=1 VALUE=[]'*) pass "…and the call is abandoned rather than continuing with an empty parent" ;;
+    *)                 die "run continued past a failed allocation: '$_alloc_out'" ;;
+esac
+[ ! -e "$TMP/alloccalls" ] \
+    && pass "…so the helper is never invoked, and nothing is aimed at /dir" \
+    || die "a failed allocation still reached the helper: '$(cat "$TMP/alloccalls")'"
+
+# ── A REFUSAL AFTER THE DIRECTORY EXISTS TAKES THE DIRECTORY WITH IT ───────
+#
+# Since #157 this script creates the transport directory, so every refusal PAST
+# that `mkdir` — the git read, an empty origin, a newline in it, a failed write —
+# owns something nothing else will collect. `rb_refuse` is what removes it, and
+# nothing observed the directory after such a failure: the cases above assert
+# status and output, and each `run` now takes a fresh name, so removing the
+# `rmdir` from `rb_refuse` left every one of them green while each refused read
+# leaked a `watch-pr.*` directory into the operator's `TMPDIR` for the life of the
+# machine.
+#
+# SELF-CONTAINED, AND NOT THROUGH `run`. The assertion is about the DIRECTORY, and
+# `run` builds its name inside a command substitution where this shell cannot see
+# it. The failure is staged by running the helper from a directory that is not a
+# git checkout, so `git remote get-url origin` fails on its own — a forged `git`
+# would not do it, because `bash -p` is what stops an imported function being seen
+# at all, which is the property half this file exists to prove.
+_leak_dir="$TMP/leak.$$.$RANDOM$RANDOM"
+mkdir -p "$TMP/notarepo"
+_leak_rc=0
+_leak_out="$(cd "$TMP/notarepo" && run_limited 20 env HOME="$TMP/nohome" \
+    XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" read "$_leak_dir" 2>&1)" || _leak_rc=$?
+# THE REFUSAL FIRST, or the absence below means the directory was never made and
+# the case passes against a script that cannot create one at all.
+{ [ "$_leak_rc" -ne 0 ] && printf '%s' "$_leak_out" | grep -qF 'could not read origin'; } \
+    && pass "a read outside a checkout is refused after the directory exists" \
+    || die "the post-mkdir refusal case did not refuse (rc=$_leak_rc out='$_leak_out')"
+[ ! -e "$_leak_dir" ] \
+    && pass "…and the directory it created is gone, not left for nobody to collect" \
+    || die "a refusal after the mkdir leaked '$_leak_dir' ($(ls -A "$_leak_dir" 2>&1))"
+# AND THE ORDINARY READ STILL LEAVES THE DIRECTORY FOR ITS CALLER, which is the
+# other half: a script that removed the directory on every path would satisfy the
+# line above and hand back nothing to read.
+_keep_dir="$TMP/keep.$$.$RANDOM$RANDOM"
+_keep_rc=0
+_keep_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" \
+    XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+    /usr/bin/env bash -p "$SCRIPT" read "$_keep_dir" 2>&1)" || _keep_rc=$?
+{ [ "$_keep_rc" -eq 0 ] && [ -s "$_keep_dir/origin" ]; } \
+    && pass "…while a successful read leaves the directory and its file for the caller" \
+    || die "a successful read left nothing to read (rc=$_keep_rc out='$_keep_out')"
+rm -rf "$_keep_dir" "$TMP/notarepo"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

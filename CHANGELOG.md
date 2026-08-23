@@ -1,5 +1,208 @@
 # Changelog
 
+## [2.0.57] — 2026-08-22
+
+- **The origin transport was thirty-five lines of driver-shell defence for one
+  string, and every one of those lines was a name the operator's shell could
+  replace.** `SKILL.md` chose a parent, built a candidate path, prefix-checked it,
+  created it with `mkdir`, derived the output file from it, proved three names
+  assignable and removed both on the way out — all in the long-lived shell that
+  `#!/usr/bin/env -S bash -p` exists precisely because nothing can harden.
+
+  `pr-origin.sh` now takes the DIRECTORY and creates it itself, exclusively, at
+  mode 700, having walked every ancestor to the root and refused one this user
+  cannot exclusively write. The helper runs privileged, so `mkdir`, `git` and the
+  ancestor walk are not names anything can shadow. What is left in the driver is
+  the name it hands over and the descriptor it reads back.
+
+  `RB_TMPDIR`, `RB_TRY` and `RB_PIN_OUT` are gone with it, and so are the
+  `${RB_TMPDIR:?…}` expansions that stood in for a variable that could not be
+  trusted. The identity block is 123 executable lines where it was 157.
+
+- **A rejected transport read cleaned up twice.** The rejection arm removed the
+  leaf and the directory and then `exit` — a name — returned, and the unconditional
+  pair below removed them again. On a shared sticky parent a watcher that learned
+  the candidate from the helper's argv can put a symlink at the freed name between
+  the two, and the second `rm -f` follows it into a file this run never created.
+  The read-back is a branch whose arms each clean up once.
+
+- **The write-failure guards were only matched, not run.** The `/dev/full` cases
+  went when the argument became a directory `mkdir` refuses, and nothing replaced
+  the execution. `ulimit -f 0` with `SIGXFSZ` ignored is a portable substitute: the
+  redirection creates the leaf and the `printf` into it fails, which is exactly the
+  state the guards are for. Both modes are exercised, and each asserts the refusal
+  names the write and the reserved directory is given back.
+
+- **A refusal after the directory existed left it behind.** The helper's contract
+  is now a directory it creates, so every refusal past that point — an unreadable
+  origin, an empty one, a newline in it, a failed write — has something to clean
+  up. The cleanup is one body with three ways in, each running it at most once: an
+  ordinary refusal and any other abnormal end go through an `EXIT` trap, a SIGNAL
+  goes directly from its own handler and then re-raises, and a SUCCESSFUL run does
+  not go at all — it resets `EXIT` and leaves the directory for the caller, which
+  is the point of the call. The trap is armed BEFORE the reservation is
+  attempted, since `mkdir` is an external command and a signal while it ran left
+  the shell dead and the child creating the directory. Two recorded facts and an
+  ownership test are what make arming first safe: `RB_OWNED` after a successful
+  `mkdir`, certain but late — a signal during that external command is handled
+  once it returns and before the `&&` after it — `RB_PREEXISTED`, a `[[ -e ]]`
+  taken before the traps are armed, and `-O` for a name another account holds. An
+  EMPTY pre-existing directory owned by the operator is the case that needs all
+  three: it passes every test a created one passes, and removing it would
+  contradict the contract that a pre-existing argument survives untouched. Every signal is IGNORED before the cleanup begins, so one arriving during
+  it can neither re-enter it nor interrupt it. `RB_PHASE` picks its shape:
+  `rmdir` alone while no leaf can exist, leaf-then-directory once a write has
+  happened. The driver does the same for the one refusal that is its own: a
+  transport file that fails the ownership checks.
+
+- **An abandoned assignment left the previous run's transport path standing.**
+  `${VAR:?}` ends a non-interactive shell where it stands; interactively the shell
+  survives, so the assignment that would have built this run's path did not happen
+  and whatever an earlier run left in that name stood. Each destination is cleared
+  immediately before its guarded assignment now, so an abandoned one leaves EMPTY
+  — which the helper refuses by name — rather than a path from another session.
+  The session's working directory carries the same requirement: its prefix check
+  compares against `$RB_TMPPARENT`, so an empty parent made it read
+  `[[ /watch-pr-work.X = /watch-pr-work.* ]]` and agree.
+
+- **A pre-write refusal could delete a file it never created.** The ancestry walks
+  run after the reservation now, and their refusal went through the same cleanup
+  as every other — which removes the value file by NAME. On that path no value
+  file exists, so the removal was a path resolution rather than a removal: an
+  account able to write a non-sticky ancestor, which is exactly what the walk is
+  detecting, could rename the reserved directory and leave a symlink at its name
+  while the walk ran, and the refusal then followed it. The pre-write path gives
+  the reservation back with `rmdir` alone, which refuses a symlink outright.
+
+- **An interrupted helper leaked its directory.** The caller performs no cleanup
+  after a non-zero status, deliberately — it cannot know who created the path — so
+  a signal between the reservation and either end left a `watch-pr.*` directory
+  behind for the life of the machine. A trap gives it back, and is disarmed on the
+  success paths. It has the same two phases the refusals do: `rmdir` alone while
+  no leaf can exist, and leaf-then-directory once a write has happened, since
+  `rmdir` necessarily fails on a directory holding its leaf. The phase flips after
+  the ancestry walks — where the name becomes trusted, and still before either
+  write. The handlers re-raise rather than returning, because a trap REPLACES a
+  signal's terminating action and one that returned left bash resuming the work it
+  was killed during, and returning status 0 for a run somebody killed. The success
+  paths reset `EXIT` alone: resetting the signal traps too left a window in which a
+  `TERM` terminated the helper with no cleanup, and the caller removes nothing
+  after a non-zero status.
+
+- **Another account could keep a session from starting, repeatably — narrowed,
+  and the remainder written down.** The
+  transport directory's name is an argv entry, which `ps` and `/proc` publish the
+  moment the helper starts, and the `mkdir` ran only after both ancestry walks. On
+  a shared sticky parent such as `/tmp` another local account could read the name
+  and create it while those walks ran, so the `mkdir` refused — for as long as they
+  watched. The random suffix stops a name being guessed and does nothing about one
+  being read. The directory is reserved first now, and a failed `mkdir` asks the
+  walks why before refusing, so the precise diagnostic survives the reordering.
+
+  That narrows the interval to process startup rather than removing it: the name
+  is in argv, which is published at exec. Removing it entirely means the caller
+  creating the directory, which puts a `mkdir` back in the operator's own shell on
+  a name that shell may have made readonly or a nameref — the class #157 exists to
+  remove. The remainder is a denial of service by an account already on the
+  machine, it fails closed, and `pr-origin.sh` states it beside the ordering.
+  #160.
+
+- **A nameref from a transport name onto any other name replaced that variable
+  with a path setup then deleted.** Thirteen names were found this way, one review
+  round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`, `PATH`, `HOST`,
+  `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer logins, `GIT_DIR`,
+  `CDPATH`. Consequences ranged from a corrupted `PATH` to `REVIEW_MERGE_STRICT`
+  being replaced so the merge gate silently restored `--admin`, and from a
+  `REPO_DIR` naming a deleted path to a `cd` that stopped searching the operator's
+  configured roots.
+
+  **The probes no longer enumerate,** and the machinery that kept the enumeration
+  honest is gone with it — the tie to `pr-selfcheck.sh`'s `KNOWN` list, the derived
+  assigned-names list, the per-arm coverage loops, and the two allowlist entries
+  that existed only because the probes named those variables directly. The list could never be completed: it would
+  have to union what the driver reads, what its tools read, and what the shell
+  itself consults, and the last grows with the shell version. `${!name}` answers
+  the question in one line — for a NAMEREF it expands to the target's NAME, and
+  for an ordinary variable it is indirect expansion — so each probe assigns a legal
+  variable name built from `$RANDOM` and requires `${!name}` to be empty. It is
+  bash 2 syntax, so it works where `[[ -R ]]` cannot: an unknown unary operator
+  inside `[[ ]]` is a PARSE error on 3.2, and the whole setup block would fail to
+  parse there.
+
+  The sentinel carries `$$` as well as `$RANDOM`, because `unset RANDOM` removes
+  its special behaviour and would otherwise leave a FIXED `RbProbe` — back to a
+  value an operator can hold, after which `${!name}` reads THEIR variable and a
+  valid shell is refused. The pid cannot be unset.
+
+  What that still does not stop is stated rather than chased: a startup file runs
+  in the driver's shell, so it knows the pid and can read this source, and with
+  `RANDOM` unset it can pre-seed the sentinel's slot and make the probe conclude
+  "nameref". No mechanism there can close it — every input is public or unsettable
+  by the same file — and the failure is fail-CLOSED: setup refuses, nothing is
+  forged or pinned. A startup file that wants to stop the session can call `exit`
+  in its first line.
+
+  The randomised value also removes the collision the fixed sentinels had: an
+  operator holding one sentinel from each of two fixed pairs failed both, and a
+  shell nothing had corrupted was refused. The prefix match carries the other half,
+  in MIXED case — a readonly leaves the old value, `declare -i` stores `0`,
+  `declare -l` lower-cases it and `declare -u` upper-cases it, and an all-caps
+  sentinel survives that last one unchanged, which is how it got through.
+
+- **A nameref between a pin name and the transport parent replaced the parent.**
+  The pin's probe compared only against the names that stage introduces, so
+  `declare -n RB_PIN_SEEN=RB_TMPPARENT` passed both subshells — neither read that
+  name — and the real pin read then assigned the inherited origin THROUGH the
+  nameref, replacing the parent setup had just proved. For a local origin such as
+  `/tmp/repo` the session's working directory was created inside that repository.
+  Both subshells cross-check `RB_TMPPARENT` now, as the transport probe already
+  did.
+
+- **A shadowed `exit` could build the transport at the filesystem root.** With
+  neither `TMPDIR` nor `HOME` usable the refusal was a GUARD, and `exit` is a name
+  a startup file can replace with one that RETURNS: measured, the refusal printed
+  and the next line built `/watch-pr.…` from the empty value. For a root operator
+  the helper can create that, so setup read an origin from the filesystem root and
+  went on to announce success. The parent is required by the expansion that spells
+  the path now — `${RB_TMPPARENT:?…}` is the shell refusing to expand, which has
+  no name in it and ends a non-interactive shell where it stands.
+
+- **A refused helper had its transport read and removed anyway.** The read and
+  both removals were statements after a guard, and `exit` is a name a startup
+  file can replace with one that RETURNS. With it neutralised, a helper that
+  refused because `mkdir` found the name already taken was walked past, and the
+  lines below opened that directory's `origin`: a regular file owned by this
+  user passes `-O` and `-f`, so the session was pinned from it — and the `rm -f`
+  and `rmdir` after it then deleted a file and a directory this shell never
+  created. Both are the helper's success arm now, on the read side and the pin
+  side alike; containment is what a neutralised `exit` cannot step over.
+
+- **An absolute but unwritable `TMPDIR` ended the session with a usable `HOME`
+  next to it.** `-d` says the name is a directory and nothing more — `/usr`
+  satisfies it — so the selection committed and the helper's `mkdir` then failed.
+  The candidate loop this replaced did fall through in that state. The selection
+  asks `-w` and `-x` as well, which is what "can hold a directory" means. A
+  parent whose ANCESTRY the helper refuses is still reported rather than routed
+  around: deciding that here means a second copy of the walk in the shell that
+  cannot be hardened, and an unsafe ancestry is a state an operator has to see
+  named.
+
+- **`SKILL.md` still carried the removed loop as an instruction.** A hundred and
+  thirty lines of commentary above the transport described what the driver used to
+  do: both transport files in one directory this setup created, a `mkdir` here
+  whose refusal moved to the next candidate, `HOME` tried whenever the helper
+  refused, and probes over `RB_TMPDIR`, `RB_TRY` and `RB_ORIGIN_OUT`. A comment
+  that argues against the code beside it is an instruction, and this one invited
+  the deleted loop back. It is rewritten to describe what is there.
+
+- **The transport parent is chosen inside the probe that proves it assignable.**
+  A readonly `RB_TMPPARENT` makes the selection fail, and under `errexit` — which
+  a driving shell may well be in — a failed readonly assignment ends the session
+  at that line, with bash's own message and no diagnosis. Selecting inside the
+  probe's success arm means the operator is told which name is unusable.
+
+---
+
 ## [2.0.56] — 2026-08-22
 
 - **A neutralised `exit` walked a readonly `RB_REMOTE` into pinning the session to
