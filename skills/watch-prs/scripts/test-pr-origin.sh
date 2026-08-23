@@ -1166,11 +1166,17 @@ for _wf_mode in read pin; do
 done
 rm -rf "$_wf_bin"
 
-# THE STRUCTURAL ASSERTIONS BELOW ARE SUPPLEMENTARY NOW, not the coverage. The
-# runtime cases above execute both write paths; what these add is that the guard is
-# `rb_refuse` rather than a bare `exit` — the difference being whether the directory
-# goes back — and that the two writes are continued onto their guards at all, which
-# a run cannot distinguish from a guard that happens not to fire.
+# THE ASSERTIONS BELOW ARE SOURCE-SHAPE ONLY, and that is all they claim. The
+# runtime cases above are the coverage: they execute both write paths and assert
+# the refusal, the status and the cleanup.
+#
+# WHAT THEY ARE NOT is a cleanup guarantee. `|| exit 1` in place of `|| rb_refuse`
+# would still give the directory back, because the EXIT trap does the cleanup and
+# is already armed — the `rb_refuse` spelling is uniformity, not a mechanism. And
+# deleting a guard entirely is caught by the runtime cases, by status and by
+# diagnostic. What is left is worth keeping and worth stating honestly: both writes
+# take their status, and both name the write in their message, so a future edit
+# cannot quietly make one of the two silent.
 _wr_n=0
 _wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
 [ "$_wr_n" = 2 ] \
@@ -1179,7 +1185,7 @@ _wr_n="$(grep -c '> "\$OUT" *\\$' "$SCRIPT")" || _wr_n=0
 _wr_g=0
 _wr_g="$(grep -c '^ *|| rb_refuse "ABORT: could not create .\$OUT. exclusively and write' "$SCRIPT")" || _wr_g=0
 [ "$_wr_g" = 2 ] \
-    && pass "…and each takes its status through rb_refuse, so a failed write gives the directory back too" \
+    && pass "…and each names the write in its refusal, so neither can quietly go silent" \
     || die "expected two rb_refuse guards on the writes, found $_wr_g"
 
 # ── THE NAME IS RESERVED BEFORE THE WALKS, NOT AFTER THEM ──────────────────

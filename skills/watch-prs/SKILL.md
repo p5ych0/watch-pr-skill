@@ -469,8 +469,14 @@ unset -f rb_identity 2>/dev/null \
 # the helper starts, so a watcher can create the name in the interval before the
 # helper's `mkdir` and make setup refuse — repeatably, for as long as they watch.
 # `pr-origin.sh` states that window where it reserves the name, and #160 carries the
-# protocol change that would close it. The consequence is fail-CLOSED: setup stops,
-# nothing is forged, and the directory is mode 700 so nothing is read.
+# protocol change that would close it.
+#
+# THE CONSEQUENCE IS FAIL-CLOSED, AND CONTROL FLOW IS WHY. The squatted object is
+# the attacker's — the helper's `mkdir -m 700` FAILS rather than creating or
+# re-moding anything, so its mode is whatever they chose and proves nothing.
+# What stops the value being read from it is that the read below is inside the
+# helper's status-0 arm: a refused call does not reach it. Setup stops, and
+# nothing is forged or pinned.
 #
 # THE PARENT HAS TO BE ONE NOBODY ELSE CAN REPLACE THE DIRECTORY IN, and mode 700
 # does not give that. It protects what is INSIDE the directory; it says nothing
