@@ -299,7 +299,8 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true" \
           "builtin printf '%s' \"\$x\" BAR command grep -q y || true" \
           "printf '%s' \"\$x\" BAR grep -F -q y || true" \
-          "printf '%s' \"\$x\" BAR cut -d: -f1 BAR grep -qF y || true"; do
+          "printf '%s' \"\$x\" BAR cut -d: -f1 BAR grep -qF y || true" \
+          "command printf '%s' \"\$x\" BAR grep -q y || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -308,6 +309,17 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
         && pass "…and the variant is caught: ${_v%% BAR*}" \
         || die "a spelling variant walked past the gate ($_v): rc=$rc out=$out"
 done
+# …AND A PIPELINE SPLIT ACROSS A CONTINUATION IS CAUGHT. Every version of this
+# scan before the last read PHYSICAL lines, so `printf … | \` with the `grep -q` on
+# the next one walked past all of them — the same assertion, one newline apart.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s' \"\$x\" $_bar \\"
+  printf '%s\n' '    grep -q y || true'
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 1 ] && grep -q 'racy_pipeline' <<<"$out"; } \
+    && pass "…and a pipeline split across a continuation is caught" \
+    || die "a continued pipeline walked past the gate (rc=$rc out=$out)"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
@@ -466,8 +478,8 @@ out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>
     && grep -q 'test-pr-omega.sh' <<<"$out"; } \
     && pass "a runner reporting backwards still names both files" \
     || die "the reversed runner lost a failure (rc=$rc out='$out')"
-{ printf '%s' "$out" | grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' | head -2 \
-    | sed -n '1p' | grep -q 'alpha'; } \
+{ grep -q 'alpha' \
+    <<<"$(sed -n '1p' <<<"$(grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' <<<"$out" | head -2)")"; } \
     && pass "…in the glob's order rather than the order they were reported in" \
     || die "the failures were not ordered: $out"
 rm -rf "$REVSTUB"

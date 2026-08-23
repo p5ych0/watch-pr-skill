@@ -142,8 +142,8 @@ run() {   # run [args…] ; prints "<rc>|<output>"
 
 # ── THE TWO ANSWERS THAT ARE PERMISSION TO CONTINUE ────────────────────────
 world; got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" \
-    | grep -qF "PR_PHASE pr=7 state=before-copilot codex-sha=$HEAD40 head=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] \
+  && grep -qF "PR_PHASE pr=7 state=before-copilot codex-sha=$HEAD40 head=$HEAD40" <<<"${got#*|}"; } \
     && pass "a Codex signoff on the current head reads as the phase before Copilot" \
     || die "the before-Copilot state gave '${got}'"
 
@@ -153,8 +153,8 @@ world; got="$(run 7)"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" \
-    | grep -qF "PR_PHASE pr=7 state=after-copilot codex-sha=$OTHER40 copilot-sha=$HEAD40 head=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] \
+  && grep -qF "PR_PHASE pr=7 state=after-copilot codex-sha=$OTHER40 copilot-sha=$HEAD40 head=$HEAD40" <<<"${got#*|}"; } \
     && pass "…and a Copilot signoff on the head reads as the phase after it, with an older Codex sha" \
     || die "the after-Copilot state gave '${got}'"
 

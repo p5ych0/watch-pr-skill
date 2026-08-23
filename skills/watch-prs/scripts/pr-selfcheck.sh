@@ -640,7 +640,8 @@ done
 # in `test-pr-selfcheck.sh` used — and `grep -F -q` with the options split.
 #
 # SO IT TAKES THE SHAPE, NOT A LIST: either quoting of the format string, any
-# `command`/`builtin` prefix on either side, any number of separate option words
+# `command`/`builtin` prefix on EITHER side — the producer takes them too, which
+# `command printf … | grep -q` walked past — any number of separate option words
 # before the one carrying `q`, any number of INTERMEDIATE filters between the
 # producer and the reader — `printf … | cut … | grep -qF` raced exactly the same
 # way, with `cut` taking the signal instead of `printf` — and free spacing
@@ -654,18 +655,27 @@ done
 # `racy-pipeline-ok` is data by declaration; nothing else is exempt, and the marker
 # is deliberately ugly so it is not reached for casually.
 #
-# THE SCAN'S OWN FAILURE IS NOT A CLEAN RESULT. `grep` exits 1 for "no match" and
-# 2 or more for an error, and a blanket `|| true` turned an unreadable fixture into
-# an empty hit stream and a green gate. Status 1 is the answer; anything above it
-# is a finding of its own.
+# THE SCAN'S OWN FAILURE IS NOT A CLEAN RESULT. A blanket `|| true` turned an
+# unreadable fixture into an empty hit stream and a green gate. `awk` reports 0
+# whether or not it matched anything, and non-zero only when it could not read the
+# file or could not run — so any non-zero is a finding of its own.
 pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
     hits=""
-    hits="$(grep -nE "(builtin +)?printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\|([^|]*\\|)* *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q" "$f")"
+    # ONE `awk`, NOT `grep`, BECAUSE A PIPELINE CAN SPAN LINES. `grep` reads each
+    # PHYSICAL line, so `printf … | \` with the `grep -q` on the next one walked
+    # past every version of this. `awk` folds a `\`-continued line into the logical
+    # one and reports the FIRST physical line number, which is where an author looks.
+    hits="$(awk '
+        { line = $0; n = FNR
+          while (sub(/\\$/, "", line) && (getline nxt) > 0) line = line " " nxt
+          if (line ~ /(command +|builtin +)*printf +["'"'"']%s(\\n)?["'"'"'] +[^|]*\|([^|]*\|)* *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q/)
+              printf "%d:%s\n", n, line
+        }' "$f")"
     grc=$?
-    if [ "$grc" -gt 1 ]; then
-        note scan_failed "could not scan $(basename "$f") for racy pipelines (grep exited $grc)"
+    if [ "$grc" -ne 0 ]; then
+        note scan_failed "could not scan $(basename "$f") for racy pipelines (awk exited $grc)"
         pipeq=1
         continue
     fi

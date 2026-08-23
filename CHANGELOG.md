@@ -19,10 +19,13 @@
   it gates stops failing for reasons that are not there.
 
   The check takes the SHAPE rather than a list of spellings — either quoting of the
-  format string, any `command`/`builtin` prefix on either side, any option order
+  format string, any `command`/`builtin` prefix on EITHER side, any option order
   including split options, any intermediate filters between the producer and the
-  reader, free spacing — because three review rounds each found an equivalent
-  spelling the previous version reported clean. A line that carries the
+  reader, and a pipeline split across a `\` continuation — because four review
+  rounds each found an equivalent spelling the previous version reported clean.
+  It reads folded LOGICAL lines rather than physical ones, which is what the last
+  of those needed, and reporting the first physical line number keeps the finding
+  useful. A line that carries the
   spelling as DATA — a comment, a stub, a heredoc — says so with
   `racy-pipeline-ok`; nothing else is exempt. And a fixture the scan cannot READ is
   a finding of its own rather than a clean result, because `grep` exits 1 for "no
