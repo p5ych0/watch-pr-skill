@@ -27,6 +27,37 @@ fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
+# THE COUNTER FIXTURE'S SCRATCH DIRECTORY IS TAKEN HERE, at the top, and it is the
+# FIRST `mktemp_d` in this file. Its guard is what the scratch probe far below
+# re-runs this file to observe, and where the acquisition sat beside its fixtures
+# each of those two children executed four thousand lines before reaching it —
+# eighty-eight seconds of the file's runtime spent arriving at a guard that fires
+# in a tenth of one. Nothing between here and there uses `$TMP_CL`, and the words
+# the probe greps for are the same words.
+# The scratch directory for the fixtures below — through the VALIDATED helper,
+# and stopping rather than recording.
+#
+# This was a bare `mktemp -d` guarded by `die`, and `die` RETURNS 0: it records a
+# failure and lets the file carry on. So a full or read-only $TMPDIR left
+# `TMP_CL` empty, `CNTB` below became `/bin`, and the `mkdir -p` and `ln -sf`
+# that build the fixture wrote symlinks over the system binaries they were meant
+# to be shadowing inside a scratch tree.
+#
+# `die` is right for an assertion — every remaining check should still run — and
+# wrong here, because everything after this point dereferences the path. And a
+# status check alone is not enough: `mktemp` can print a plausible path and then
+# fail, or print one it never created, and command substitution keeps the output
+# either way. `mktemp_d` is the definition of "a path that was actually created".
+TMP_CL="$(mktemp_d)" || {
+    die "no scratch directory for the counter fixture"
+    echo "RESULT: FAIL"
+    exit 1
+}
+# …and it is removed. There was no cleanup here at all, so every run of the suite
+# left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
+# `mktemp_d` has already established the path is non-empty, absolute and not `/`.
+trap 'rm -rf "$TMP_CL"' EXIT
+
 if [ ! -f "$SKILL" ]; then
     echo "ok   - skill not present in this checkout; contract checks skipped"
     echo "RESULT: PASS"
@@ -2602,15 +2633,23 @@ grep -q 'SELF_RC' "$SKILL" \
 # assignment is one of the two things `CLAUDE.md` says cannot be taken over.
 RB_SKILL_BODY="$(<"$SKILL")"
 RB_LINE=""
+# CUT ONCE, THEN COUNT NEWLINES. This walked the document one line at a time,
+# peeling the front off a 140 KB string on every iteration — quadratic, and nine
+# seconds of this file's runtime for two lookups. Cutting at the needle and
+# measuring how many newlines the prefix lost is two expansions and no loop, and
+# it is still command-free, which is the property the case below asserts.
+#
+# ABSENCE IS A LENGTH, not a second search. `%%` returns the string UNCHANGED
+# when the needle is not in it, so the prefix being the whole body is what
+# "absent" means — asking `[[ $body == *"$1"* ]]` first is a second full match
+# over the same string for an answer the cut already gave.
 rb_line_of() {   # rb_line_of <needle> ; sets RB_LINE, empty when absent
-    local _rest="$RB_SKILL_BODY" _line _n=0
+    local _pre _nl
     RB_LINE=""
-    while [[ -n $_rest ]]; do
-        _line="${_rest%%$'\n'*}"
-        if [[ $_rest == *$'\n'* ]]; then _rest="${_rest#*$'\n'}"; else _rest=""; fi
-        _n=$((_n + 1))
-        if [[ $_line == *"$1"* ]]; then RB_LINE="$_n"; return 0; fi
-    done
+    _pre="${RB_SKILL_BODY%%"$1"*}"
+    [ "${#_pre}" -eq "${#RB_SKILL_BODY}" ] && return 0
+    _nl="${_pre//$'\n'/}"
+    RB_LINE=$(( ${#_pre} - ${#_nl} + 1 ))
     return 0
 }
 rb_line_of 'AUTO_REVIEW=no';                    sel="$RB_LINE"
@@ -2628,14 +2667,35 @@ rb_line_of 'Request the review — Codex first';  req="$RB_LINE"
 # source and passing. Each needle must appear TWICE: once here and once as the
 # lookup, so losing the lookup drops the count.
 _rb_self="$(<"$0")"
+# COUNTED BY WHAT THE STRIP REMOVED, for the same reason. Each iteration of the
+# loop this replaced ran a `*needle*` match over 330 KB, and two counts cost
+# twenty-nine seconds. Removing every occurrence and dividing the lost length by
+# the needle's is one expansion, and it counts the same non-overlapping
+# occurrences the loop did.
 rb_occurrences() {   # sets RB_N to how many times $1 appears in this file
-    local _rest="$_rb_self"
+    local _stripped
     RB_N=0
-    while [[ $_rest == *"$1"* ]]; do
-        RB_N=$((RB_N + 1))
-        _rest="${_rest#*"$1"}"
-    done
+    [ -n "$1" ] || return 0
+    _stripped="${_rb_self//"$1"/}"
+    RB_N=$(( (${#_rb_self} - ${#_stripped}) / ${#1} ))
+    return 0
 }
+# BOTH ABSENCE ARMS ARE EXERCISED, because neither is reachable from the lookups
+# above: every needle they use is present, so removing either arm left the file
+# green while an absent needle produced the document's line count and a needle of
+# no length divided by zero. An arm no case can reach is worse than no arm.
+rb_line_of 'a needle this document does not contain anywhere at all'
+[ -z "$RB_LINE" ] \
+    && pass "a needle the document does not carry reports no line rather than its last" \
+    || die "an absent needle reported line '$RB_LINE'"
+# THE STDERR IS PART OF IT. Without the guard the count divides by a needle of
+# length zero, and bash reports that on stderr and returns non-zero — which under
+# `set -e` ends this file before any assertion prints, so `RB_N` alone cannot tell
+# the arm from its absence.
+rb_occurrences "" 2>"$TMP_CL/occ.err"
+{ [ "$RB_N" -eq 0 ] && [ ! -s "$TMP_CL/occ.err" ]; } \
+    && pass "…and a needle of no length counts zero rather than dividing by it" \
+    || die "an empty needle counted $RB_N ($(tr '\n' ';' <"$TMP_CL/occ.err"))"
 rb_occurrences "rb_line_of 'AUTO_REVIEW=no'";                   _rb_sel_n="$RB_N"
 rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB_N"
 { [ "$_rb_sel_n" -ge 2 ] && [ "$_rb_req_n" -ge 2 ]; } \
@@ -4376,29 +4436,6 @@ cl_count() {   # cl_count <claim-pattern> <qualified-pattern> <label>
         && pass "every mention in the release entry is qualified: $3 ($qualified/$total)" \
         || die "the release entry states $3 unqualified in $((total - qualified)) of $total places"
 }
-# The scratch directory for the fixtures below — through the VALIDATED helper,
-# and stopping rather than recording.
-#
-# This was a bare `mktemp -d` guarded by `die`, and `die` RETURNS 0: it records a
-# failure and lets the file carry on. So a full or read-only $TMPDIR left
-# `TMP_CL` empty, `CNTB` below became `/bin`, and the `mkdir -p` and `ln -sf`
-# that build the fixture wrote symlinks over the system binaries they were meant
-# to be shadowing inside a scratch tree.
-#
-# `die` is right for an assertion — every remaining check should still run — and
-# wrong here, because everything after this point dereferences the path. And a
-# status check alone is not enough: `mktemp` can print a plausible path and then
-# fail, or print one it never created, and command substitution keeps the output
-# either way. `mktemp_d` is the definition of "a path that was actually created".
-TMP_CL="$(mktemp_d)" || {
-    die "no scratch directory for the counter fixture"
-    echo "RESULT: FAIL"
-    exit 1
-}
-# …and it is removed. There was no cleanup here at all, so every run of the suite
-# left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
-# `mktemp_d` has already established the path is non-empty, absolute and not `/`.
-trap 'rm -rf "$TMP_CL"' EXIT
 
 # ── THE RESUME RECIPE'S PHASE BRANCH, EXECUTED ─────────────────────────────
 # The assertions beside the recipe itself are about SHAPE. These run the
