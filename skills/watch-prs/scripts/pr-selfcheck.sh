@@ -308,16 +308,7 @@ ok()   { printf 'ok   - %s\n' "$1"; }
 # them keeps the finding meaning what it says: a variable the driver reads and
 # nothing supplies.
 if [ -f "$SKILL" ]; then
-    # `IFS` IS THE SHELL'S OWN and is never assigned by the driver — it is on this
-    # list because the transport probes read it back, to catch a nameref that would
-    # replace the operator's field separator with a transport path.
-    #
-    # `RB_SUITE_JOBS` IS ON THIS LIST FOR THE SAME REASON THE OTHERS ARE: it is an
-    # operator knob read from the environment and never assigned by the driver. It
-    # was invisible while the only mention was the indirect `${!_rb_knob}` in the
-    # export loop; the transport probes name it directly now, because a nameref
-    # onto it is one more way to corrupt a value the session carries.
-    KNOWN='HOME|PATH|PWD|SECONDS|TMPDIR|RANDOM|IFS|BASH_SOURCE|CLAUDE_PLUGIN_ROOT|REVIEW_BUS_REMOTE|REVIEW_BUS_OWNER|REVIEW_BUS_REPO|REVIEW_ROUND_THRESHOLD|REVIEW_MERGE_STRICT|PR_WATCH_INTERVAL|PR_WATCH_TIMEOUT|PR_CI_INTERVAL|PR_CI_TIMEOUT|PR_CI_GRACE|PR_CI_PROBE_TIMEOUT|RB_SUITE_JOBS|1|2|3|4|5|6|7|8|9|0|@|\*|\?|#|!|_'
+    KNOWN='HOME|PATH|PWD|SECONDS|TMPDIR|RANDOM|BASH_SOURCE|CLAUDE_PLUGIN_ROOT|REVIEW_BUS_REMOTE|REVIEW_BUS_OWNER|REVIEW_BUS_REPO|REVIEW_ROUND_THRESHOLD|REVIEW_MERGE_STRICT|PR_WATCH_INTERVAL|PR_WATCH_TIMEOUT|PR_CI_INTERVAL|PR_CI_TIMEOUT|PR_CI_GRACE|PR_CI_PROBE_TIMEOUT|1|2|3|4|5|6|7|8|9|0|@|\*|\?|#|!|_'
 
     # Every extraction below has its STATUS taken. `set -uo pipefail` does not
     # stop an unchecked assignment, so a failed pipeline left the variable empty

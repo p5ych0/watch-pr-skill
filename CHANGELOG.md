@@ -109,7 +109,10 @@
   `REPO_DIR` naming a deleted path to a `cd` that stopped searching the operator's
   configured roots.
 
-  **The probes no longer enumerate.** The list could never be completed: it would
+  **The probes no longer enumerate,** and the machinery that kept the enumeration
+  honest is gone with it — the tie to `pr-selfcheck.sh`'s `KNOWN` list, the derived
+  assigned-names list, the per-arm coverage loops, and the two allowlist entries
+  that existed only because the probes named those variables directly. The list could never be completed: it would
   have to union what the driver reads, what its tools read, and what the shell
   itself consults, and the last grows with the shell version. `${!name}` answers
   the question in one line — for a NAMEREF it expands to the target's NAME, and

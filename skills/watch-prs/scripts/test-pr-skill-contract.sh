@@ -9,7 +9,6 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$SCRIPT_DIR/../SKILL.md"
-SELFCHECK="$SCRIPT_DIR/pr-selfcheck.sh"
 ROOT="$SCRIPT_DIR/../../.."
 # The shared fixture helpers. This was the one test file in the suite that never
 # sourced them, and it was the one still holding a bare `mktemp -d`.
@@ -1040,20 +1039,13 @@ _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refus
 { [ -n "$_arm_work" ] && [ -n "$_arm_refuse" ]; } \
     && pass "…and both arms of the pin branch lift out separately" \
     || die "an arm of the pin branch could not be lifted (work=${#_arm_work} refuse=${#_arm_refuse})"
-# THE INVENTORY IS READ ONCE, HERE, because both the pin arms below and the
-# transport arms further down check against it. It was read AFTER the pin loop,
-# so that loop's `$_kn` was empty and its coverage check silently did nothing —
-# the vacuous pass this file exists to stop.
-_kn=""
-_kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
-[ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
-_kn="${_kn#*\'}"; _kn="${_kn%\'*}"
-# AND THE NAMES THE DRIVER ASSIGNS, which `KNOWN` cannot supply: `pr-selfcheck.sh`
-# lists what `SKILL.md` READS without assigning, so everything the setup block sets
-# for itself is absent from it. Written once and used by both stages — a per-stage
-# copy of this omitted `RB_SCRIPTS`, `CODEX_BOT` and `COPILOT_BOT`, so deleting one
-# of their comparisons from a pin arm left the drift guard green.
-_assigned="RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS HOST OWNER REPO CODEX_BOT COPILOT_BOT"
+# THE INVENTORY AND THE ASSIGNED-NAMES LIST ARE GONE, AND THAT IS THE POINT.
+# They existed to check that every name in scope was compared against, one
+# comparison per name per probe arm — thirteen names, two derived lists and a
+# per-arm loop over each. `${!name}` asks the same question generically, so
+# there is nothing left to enumerate and nothing left to check for drift. What
+# replaced them is the shape assertion below and the behavioural alias cases,
+# which now include `GIT_DIR` and `CDPATH` — names no inventory carried.
 
 # THE PROBE IS ONE GENERIC TEST NOW, NOT AN ENUMERATION. Thirteen names were found
 # one review round apiece, and the last two — `GIT_DIR` and `CDPATH` — showed the
