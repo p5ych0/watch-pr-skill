@@ -2,13 +2,18 @@
 
 ## [2.0.59] — 2026-08-24
 
-- **The origin-read abort now tells you how to recover.** Setup picks the
-  transport parent on mode bits — `-d`, `-w`, `-x` — and prefers `TMPDIR`. A
-  `TMPDIR` that passes all three can still fail to hold a directory: a quota
-  reached on that filesystem, a full one, or a read-only mount none of those bits
-  describe. The helper refused, setup printed `ABORT: could not read this
-  session's origin`, and stopped — with a perfectly usable `HOME` beside it
-  untried, because the fallthrough happens on the mode bits and not on the
+- **The origin-read abort now tells you how to recover.** That abort is reached
+  whenever `pr-origin.sh` refuses — an ancestor it will not trust, a path it
+  cannot resolve, an `origin` the checkout does not have, or a transport directory
+  it could not create — and the helper's own line above says which. One of those
+  has a recovery you can perform, and nothing said so.
+
+  It is the directory. Setup picks its parent on mode bits — `-d`, `-w`, `-x` —
+  and prefers `TMPDIR`. A `TMPDIR` that passes all three can still fail to hold a
+  directory: a quota reached on that filesystem, a full one, or a read-only mount
+  none of those bits describe. The helper refused, setup printed `ABORT: could not
+  read this session's origin`, and stopped — with a perfectly usable `HOME` beside
+  it untried, because the fallthrough happens on the mode bits and not on the
   failure.
 
   The abort now names the step, and names what it applies to: **if the helper's

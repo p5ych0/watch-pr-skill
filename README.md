@@ -803,17 +803,22 @@ plugin docs and open an issue.
   requests, and a `cd` into a second checkout used to send those to whatever pull
   request of *that* repository shared the number. If you genuinely need to switch
   repositories, start a new session rather than unsetting the pin.
-- **`ABORT: could not read this session's origin`:** setup could not create the
-  private directory the origin value travels in. It picks that directory's parent
-  on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is writable and
-  executable can still fail to hold one — a quota reached on that filesystem, a
-  full one, or a read-only mount. The abort names the step **and what it applies
-  to**: if the helper's line above says the transport directory could not be
-  created and `TMPDIR` is set, unset it and re-run — setup then uses `HOME`,
-  provided `HOME` is an absolute directory you can write to. Both conditions
-  matter: that arm is reached for every refusal the helper makes, and an ancestry
-  another account owns or an `origin` it cannot read is a different failure that
-  unsetting `TMPDIR` will not fix.
+- **`ABORT: could not read this session's origin`:** `pr-origin.sh` refused, for
+  any of the reasons it refuses for — it could not create the private directory
+  the value travels in, it would not trust an ancestor of that directory, it could
+  not resolve the path, or it could not read a usable `origin` from the checkout.
+  **The helper's own line above says which**, and it is the one to read first:
+  only one of those has a recovery you can perform from here.
+
+  That one is the directory. Setup picks the parent on mode bits and prefers
+  `TMPDIR`, and a `TMPDIR` that is writable and executable can still fail to hold
+  a directory — a quota reached on that filesystem, a full one, or a read-only
+  mount. So **if the line above says the transport directory could not be created**
+  and `TMPDIR` is set, unset it and re-run: setup then uses `HOME`, provided `HOME`
+  is an absolute directory you can write to. The abort itself carries both
+  conditions for the same reason. An ancestry another account owns, or an `origin`
+  the checkout does not have, is a different failure and unsetting `TMPDIR` will
+  not fix it.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
 - **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge
