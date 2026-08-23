@@ -17,11 +17,12 @@
   failure.
 
   The abort now names the step, and names what it applies to: **if the helper's
-  line above says the transport directory could not be created** and `TMPDIR` is
-  set, unset it and re-run — setup then uses `HOME`, **provided `HOME` is an
-  absolute directory you can write to**. Both conditions are in the text because
-  that arm is reached for every refusal the helper makes, including ones unsetting
-  `TMPDIR` cannot fix.
+  line above says the transport directory could not be created and the path it
+  names is inside `TMPDIR`**, unset `TMPDIR` and re-run — setup then uses `HOME`,
+  **provided `HOME` is an absolute directory you can write to**. Every condition is
+  in the text because that arm is reached for every refusal the helper makes: some
+  are failures unsetting `TMPDIR` cannot fix, and selection can reject a set
+  `TMPDIR` and be using `HOME` already, where unsetting it changes nothing.
 
   It is emitted as a `${VAR:?…}` expansion rather than through `echo`. The driver
   runs in your own shell, where `echo` may be a function that returns without

@@ -482,9 +482,26 @@ rm -rf "$_fe_dir"
     # is unset, relative or unwritable. An unconditional recommendation here would
     # send an operator round a loop that cannot end.
     { case "$_rs_out" in *'the transport directory could not be created'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'the path it names is inside TMPDIR'*) true ;; *) false ;; esac \
       && case "$_rs_out" in *'provided HOME is an absolute directory'*) true ;; *) false ;; esac; } \
-        && pass "…and names the report it applies to and the condition it needs" \
+        && pass "…and names the report it applies to and the conditions it needs" \
         || die "the recovery is stated unconditionally: '$_rs_out'"
+    # …AND THE CONDITION IS THE PATH, NOT `TMPDIR` BEING SET. Selection rejects a
+    # RELATIVE `TMPDIR` and chooses `HOME`, so a creation failure is then under
+    # `HOME` — and advice reading "if TMPDIR is set" sends the operator to unset
+    # something already ignored and re-run into the same parent. This is the run
+    # where that happens: `TMPDIR` is set and refused, the helper fails anyway, and
+    # the abort must still state a condition the operator can evaluate against the
+    # path the helper named.
+    _rs_r=0
+    _rs_ro="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        TMPDIR=.tmp HOME="$_forge_dir" bash -c '
+            '"$_read_block"'
+        ' 2>&1)" || _rs_r=$?
+    { [ "$_rs_r" -ne 0 ] \
+      && case "$_rs_ro" in *'the path it names is inside TMPDIR'*) true ;; *) false ;; esac; } \
+        && pass "…and states it against the path even where TMPDIR was refused" \
+        || die "a refused TMPDIR still got 'unset TMPDIR' unconditionally (rc=$_rs_r out='$_rs_ro')"
     # …AND IT SURVIVES A SHADOWED `echo`, which is the whole of what this change
     # does: an `echo` that returns without printing leaves the operator where they
     # started. The message is a `${VAR:?…}` expansion — the shell refusing, with no

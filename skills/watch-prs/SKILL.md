@@ -766,13 +766,21 @@ if [[ -z $RB_REMOTE ]]; then
             # earlier. So the advice names the report it applies to and the
             # condition it needs, and the helper's own line above is what says which
             # failure this was.
+            #
+            # ON THE PATH, NOT ON `TMPDIR` BEING SET. Selection can REJECT a set
+            # `TMPDIR` — a relative one, or one the mode bits refuse — and choose
+            # `HOME`; a creation failure is then under `HOME`, and "if TMPDIR is set"
+            # sends the operator to unset something already ignored and re-run into
+            # the same parent. The helper names the directory it could not create,
+            # so the condition the operator can actually evaluate is whether THAT
+            # path is inside `TMPDIR`.
             # AND NO APOSTROPHE IN IT. Inside `${…}` bash treats a single quote as
             # a QUOTE even within double quotes, so one apostrophe in this message
             # leaves the brace expansion unterminated and the whole block fails to
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            : "${RB_REMOTE:?could not read the origin for this session. If the line above says the transport directory could not be created and TMPDIR is set, that filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup then uses HOME — provided HOME is an absolute directory you can write to.}"
+            : "${RB_REMOTE:?could not read the origin for this session. If the line above says the transport directory could not be created, and the path it names is inside TMPDIR, that filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup then uses HOME — provided HOME is an absolute directory you can write to.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]
