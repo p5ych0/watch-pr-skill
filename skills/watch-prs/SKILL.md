@@ -620,6 +620,13 @@ if [[ -z $RB_REMOTE ]]; then
     # which is the enumeration being wrong by omission in the one place it should
     # not have been.
     #
+    # AND `IFS`, WHICH IS THE SHELL'S OWN. An alias onto it replaced the operator's
+    # field separator with the transport path, and every later unquoted expansion in
+    # that long-lived shell split on the characters of a directory name. Setup can
+    # complete, so nothing announces it. It is the one name on this list that is not
+    # something this loop or its operator set — which is why it was missed, and why
+    # the rule is "reachable", not "ours".
+    #
     # AND THE OPERATOR'S KNOBS AND THE REVIEWER NAMES. `REVIEW_MERGE_STRICT` is
     # the sharpest: an alias onto it replaced the exported `1` with a transport
     # path, the pin succeeded, and `pr-merge-gate.sh` stopped seeing strict mode —
@@ -672,6 +679,7 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
+         && [[ ${IFS:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
@@ -684,6 +692,7 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
+         && [[ ${IFS:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -979,6 +988,7 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
+         && [[ ${IFS:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
@@ -991,6 +1001,7 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
          && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
          && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
+         && [[ ${IFS:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.

@@ -749,6 +749,11 @@ LOCAL
     # before the block runs on that exit and writes the candidate to a file, so the
     # observation survives however the shell leaves.
     if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+        # `IFS` IS SET IN THE SCRIPT, NOT THROUGH `env`: bash resets it to its
+        # default at startup whatever the environment says, so an `IFS=xyz` on the
+        # invocation never reaches the block and the case compares against the
+        # default it did not expect.
+        #
         # THE EXPECTED VALUE TRAVELS WITH EACH ENTRY, because `PATH` is not one of
         # the names this case sets. Every other alias target is pointed at the
         # forge directory on the way in; `PATH` is whatever the child inherited,
@@ -764,13 +769,16 @@ LOCAL
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
                    "declare -n RB_TMPPARENT=PATH|PATH|$PATH" \
                    "declare -n RB_ORIGIN_DIR=OWNER|OWNER|acme" \
-                   "declare -n RB_TMPPARENT=REPO|REPO|widget"; do
+                   "declare -n RB_TMPPARENT=REPO|REPO|widget" \
+                   "declare -n RB_ORIGIN_DIR=REVIEW_MERGE_STRICT|REVIEW_MERGE_STRICT|1" \
+                   "IFS=xyz; declare -n RB_TMPPARENT=IFS|IFS|xyz"; do
             _al_decl="${_al%%|*}"; _al_rest="${_al#*|}"
             _al_var="${_al_rest%%|*}"; _al_want="${_al_rest#*|}"
             rm -f "$_forge_dir/alias.out"
             _al_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
                 RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" \
                 REPO_DIR="$_forge_dir" HOST=github.com OWNER=acme REPO=widget \
+                REVIEW_MERGE_STRICT=1 \
                 RB_ALIAS_OUT="$_forge_dir/alias.out" \
                 'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                     trap '"'"'printf "CANDIDATE=[%s] PINNED=[%s]\n" "${'"$_al_var"':-}" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
@@ -1485,13 +1493,15 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
                 "declare -n RB_PIN_DIR=PATH|PATH|$PATH" \
                 "declare -n RB_PIN_SEEN=PATH|PATH|$PATH" \
                 "declare -n RB_PIN_DIR=OWNER|OWNER|acme" \
-                "declare -n RB_PIN_SEEN=HOST|HOST|github.com"; do
+                "declare -n RB_PIN_SEEN=HOST|HOST|github.com" \
+                "declare -n RB_PIN_DIR=CODEX_BOT|CODEX_BOT|codex[bot]" \
+                "IFS=xyz; declare -n RB_PIN_SEEN=IFS|IFS|xyz"; do
         _pal_decl="${_pal%%|*}"; _pal_rest="${_pal#*|}"
         _pal_var="${_pal_rest%%|*}"; _pal_want="${_pal_rest#*|}"
         rm -f "$_forge_dir/palias.out"
         _pal_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
             TMPDIR="$RB_TMPBASE" HOME="$RB_TMPBASE" REPO_DIR="$RB_TMPBASE" \
-            HOST=github.com OWNER=acme REPO=widget \
+            HOST=github.com OWNER=acme REPO=widget CODEX_BOT='codex[bot]' \
             RB_ALIAS_OUT="$_forge_dir/palias.out" \
             'BASH_FUNC_exit%%=() { return 0; }' bash -c '
                 trap '"'"'printf "CANDIDATE=[%s]\n" "${'"$_pal_var"':-}" > "$RB_ALIAS_OUT"'"'"' EXIT

@@ -102,8 +102,8 @@
 
 - **A nameref from a transport name onto another name in scope replaced that
   variable with a path setup then deleted.** `HOME`, `TMPDIR`, `REPO_DIR`,
-  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER`, `REPO`, the six operator knobs and both
-  reviewer logins were each found this way. Each probe compared only
+  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the six operator knobs and
+  both reviewer logins were each found this way. Each probe compared only
   against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
   passed both subshells — neither read `HOME`. The assignments then cleared it and
   set it to the transport path, and the cleanup a few lines later removed that
@@ -118,7 +118,11 @@
   later `gh` call addressed a repository that does not exist; and an alias onto
   `REVIEW_MERGE_STRICT` replaced the exported `1` with a transport path, so
   `pr-merge-gate.sh` stopped seeing strict mode and silently restored the
-  `--admin` merge that bypasses a base branch's protections. Every probe reads
+  `--admin` merge that bypasses a base branch's protections; and an alias onto `IFS`
+  replaced the operator's field separator with a transport path, so every later
+  unquoted expansion in that long-lived shell split on the characters of a
+  directory name — with setup completing, so nothing announced it. Every probe
+  reads
   back every name in scope that an
   assignment there can reach — which is the rule, rather than every name the stage
   introduces — and `SKILL.md` writes the set down, with why the one-line generic
