@@ -11,7 +11,19 @@
   untried, because the fallthrough happens on the mode bits and not on the
   failure.
 
-  The abort now names the step: unset `TMPDIR` and re-run, and setup uses `HOME`.
+  The abort now names the step, and names what it applies to: **if the helper's
+  line above says the transport directory could not be created** and `TMPDIR` is
+  set, unset it and re-run — setup then uses `HOME`, **provided `HOME` is an
+  absolute directory you can write to**. Both conditions are in the text because
+  that arm is reached for every refusal the helper makes, including ones unsetting
+  `TMPDIR` cannot fix.
+
+  It is emitted as a `${VAR:?…}` expansion rather than through `echo`. The driver
+  runs in your own shell, where `echo` may be a function that returns without
+  printing — and this line is the whole of what the change does, so an `echo` was
+  the one shape that could silently undo it. The shell refusing to expand a
+  parameter runs no command and has nothing to shadow.
+
   Nothing else changes — the automatic retry is #161, and it is not here because
   the driver would need three more assignable names in a shell where a startup
   file can make any of them readonly, and neither a function nor a status branch

@@ -744,11 +744,36 @@ if [[ -z $RB_REMOTE ]]; then
             # carries the automatic retry and why it is not here; this is the step
             # the operator can take without one.
             #
-            # ONE LINE, NOT A DIAGNOSIS. The helper has already said which component
-            # refused and why, on stderr, and a second opinion from this side would
-            # be a worse copy of it — this says only what to do next.
+            # THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
+            # the whole of what the change does: an `echo` that returns without
+            # printing leaves the arm silent, and the operator back where they
+            # started. `${VAR:?…}` is the shell refusing to expand — no command runs,
+            # so there is nothing to shadow — and it is the same form the parent
+            # selection above already uses. `RB_REMOTE` is the name because it is
+            # the one this arm is reached with UNSET: the read-back never assigned
+            # it. No new name is introduced, so nothing new has to be probed.
+            #
+            # THE `echo` STAYS BEHIND IT for the one case the expansion cannot
+            # cover: a startup file that pre-set `RB_REMOTE` leaves `:?` silent, and
+            # this arm must still say something. Where both are defeated the driver
+            # is in the state #102 describes and no line written here changes it.
+            #
+            # QUALIFIED, BECAUSE THIS ARM IS EVERY REFUSAL. The helper refuses for an
+            # unreadable `origin`, an ancestry another account owns and an
+            # unresolvable path as well as for a directory it could not create, and
+            # unsetting `TMPDIR` fixes none of those — nor does it help when `HOME`
+            # is unset, relative or unwritable, where the re-run aborts one step
+            # earlier. So the advice names the report it applies to and the
+            # condition it needs, and the helper's own line above is what says which
+            # failure this was.
+            # AND NO APOSTROPHE IN IT. Inside `${…}` bash treats a single quote as
+            # a QUOTE even within double quotes, so one apostrophe in this message
+            # leaves the brace expansion unterminated and the whole block fails to
+            # parse — five hundred lines below, where nothing points back here.
+            # `test-pr-skill-contract.sh` parses the lifted block, which is what
+            # caught it; the phrasing avoids the character rather than escaping it.
+            : "${RB_REMOTE:?could not read the origin for this session. If the line above says the transport directory could not be created and TMPDIR is set, that filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup then uses HOME — provided HOME is an absolute directory you can write to.}"
             echo "ABORT: could not read this session's origin"
-            echo "       If TMPDIR is set, its filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup uses HOME instead."
             exit 1
             [[ -n "" ]]
         fi

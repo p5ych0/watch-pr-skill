@@ -476,6 +476,28 @@ rm -rf "$_fe_dir"
         *'unset TMPDIR'*) pass "…and the abort names the one-step recovery" ;;
         *) die "the origin abort no longer tells the operator to unset TMPDIR: '$_rs_out'" ;;
     esac
+    # …AND IT IS QUALIFIED, because this arm is reached for EVERY refusal — an
+    # unreadable origin, an ancestry another account owns, a path that will not
+    # resolve — and unsetting `TMPDIR` fixes none of those, nor helps where `HOME`
+    # is unset, relative or unwritable. An unconditional recommendation here would
+    # send an operator round a loop that cannot end.
+    { case "$_rs_out" in *'the transport directory could not be created'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'provided HOME is an absolute directory'*) true ;; *) false ;; esac; } \
+        && pass "…and names the report it applies to and the condition it needs" \
+        || die "the recovery is stated unconditionally: '$_rs_out'"
+    # …AND IT SURVIVES A SHADOWED `echo`, which is the whole of what this change
+    # does: an `echo` that returns without printing leaves the operator where they
+    # started. The message is a `${VAR:?…}` expansion — the shell refusing, with no
+    # command to shadow — so this stages the function the previous shape lost to.
+    _rs_e=0
+    _rs_eo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
+            echo() { :; }
+            '"$_read_block"'
+        ' 2>&1)" || _rs_e=$?
+    { [ "$_rs_e" -ne 0 ] \
+      && case "$_rs_eo" in *'unset TMPDIR'*) true ;; *) false ;; esac; } \
+        && pass "…and reaches the operator with echo shadowed" \
+        || die "a shadowed echo silenced the recovery (rc=$_rs_e out='$_rs_eo')"
     { [ "$_rs_rc" -ne 0 ] \
       && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…so a helper that writes a URL and then fails does not pin the session" \

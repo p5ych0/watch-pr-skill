@@ -807,10 +807,13 @@ plugin docs and open an issue.
   private directory the origin value travels in. It picks that directory's parent
   on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is writable and
   executable can still fail to hold one — a quota reached on that filesystem, a
-  full one, or a read-only mount. The abort names the step: `unset TMPDIR` and
-  re-run, and setup uses `HOME` instead. The line above it, from the helper, says
-  which component refused and why — an ancestry another account owns is a
-  different failure, and unsetting `TMPDIR` will not fix that one.
+  full one, or a read-only mount. The abort names the step **and what it applies
+  to**: if the helper's line above says the transport directory could not be
+  created and `TMPDIR` is set, unset it and re-run — setup then uses `HOME`,
+  provided `HOME` is an absolute directory you can write to. Both conditions
+  matter: that arm is reached for every refusal the helper makes, and an ancestry
+  another account owns or an `origin` it cannot read is a different failure that
+  unsetting `TMPDIR` will not fix.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh
   round summary and re-request.
 - **"merge queued: … the PR is OPEN, not MERGED":** the base branch uses a merge
