@@ -381,7 +381,13 @@ if [ -n "$_forge_dir" ]; then
 # file it mutates that file, naming `/dev/full` it injects diagnostics into
 # unrelated cases' output, and naming a FIFO with no reader it hangs the run
 # before the helper reaches its subject.
-unset FORGE_LOG
+#
+# ALL THREE NAMES, not the one that bit. `FORGE_RC` exported as 1 turns every case
+# that expects the forged helper to SUCCEED into a refusal — including the controls
+# whose whole job is to stop the refusal cases passing vacuously — and an exported
+# `FORGE_VALUE` makes every case comparing against the forged origin compare against
+# something else. A list of one is the by-omission defect `CLAUDE.md` records.
+unset FORGE_LOG FORGE_RC FORGE_VALUE
 # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
 # cases assert the helper was never invoked, and the only alternative was scanning
 # a directory for what it would have created — which for the empty-parent case
@@ -395,6 +401,19 @@ case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
 exit "${FORGE_RC:-0}"
 FORGE
+# …AND THE CLEARING IS PROVEN, by asking the forge what its environment says. It
+# reads all three names from there, so an invocation that adds nothing must give the
+# defaults: rc 0 and the forged origin. An inherited `FORGE_RC=1` shows up as the
+# refusal every success case would have got, and an inherited `FORGE_VALUE` as a
+# value no case expects — which is what makes this a proof rather than a restatement
+# of the `unset` above it.
+_fe_dir="$_forge_dir/envproof"
+_fe_rc=0; bash "$_forge_dir/pr-origin.sh" read "$_fe_dir" || _fe_rc=$?
+_fe_val=""; _fe_val="$(cat "$_fe_dir/origin" 2>/dev/null)" || _fe_val=""
+{ [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = 'git@github.com:acme/widget.git' ]; } \
+    && pass "the forged helper inherits no FORGE_RC or FORGE_VALUE from the environment" \
+    || die "the forge saw an inherited value (rc=$_fe_rc value='$_fe_val')"
+rm -rf "$_fe_dir"
     _rs_rc=0
     _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
             '"$_read_block"'
