@@ -1012,7 +1012,7 @@ _pin_body=""
 _pin_body="$(awk -v a="${_pin_ln:-0}" -v b="${_pin_fi:-0}" 'NR>a && NR<b' "$SKILL" | sed 's/^    //')" || _pin_body=""
 case "$_pin_body" in
     *'
-if ( RB_PIN_DIR=Probe-A; '*) pass "the pin branch dedents to column 0 for the lifts below" ;;
+if { ( RB_PIN_DIR=Probe-A; '*) pass "the pin branch dedents to column 0 for the lifts below" ;;
     *) die "the pin branch did not dedent as expected; SKILL.md's nesting changed and the lifts below would all be empty" ;;
 esac
 # TWO ARMS NOW, NOT FOUR. Until #157 this branch was `RB_PIN_DIR`, `RB_PIN_OUT`
@@ -1022,41 +1022,40 @@ esac
 # are all gone from here; what is left is one probe over the two names that still
 # exist and the work arm behind it.
 _arm_work=""
-_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/^   && ( RB_PIN_SEEN=Probe-B/,$p' | sed -n '/; then$/,$p')" || _arm_work=""
+_arm_work="$(printf '%s\n' "$_pin_body" | sed -n '/; }; then$/,$p')" || _arm_work=""
 _arm_refuse=""
 _arm_refuse="$(printf '%s\n' "$_pin_body" | sed -n '/^else$/,$p')" || _arm_refuse=""
 { [ -n "$_arm_work" ] && [ -n "$_arm_refuse" ]; } \
     && pass "…and both arms of the pin branch lift out separately" \
     || die "an arm of the pin branch could not be lifted (work=${#_arm_work} refuse=${#_arm_refuse})"
-# THE PROBE COVERS BOTH NAMES, AND EACH SUBSHELL CROSS-CHECKS THE OTHERS. A
-# readonly refuses the assignment, a `declare -i` or `declare -l` transforms the
-# value so the comparison fails, and a `declare -n` aimed at another transport
-# variable is caught by the arms that read those back — the same three questions
-# the transport probe above asks, asked here over the two names this stage adds.
-# MATCHED FROM A HERESTRING, NOT THROUGH A PIPE. `printf … | grep -q` is racy
-# under `pipefail`: `grep -q` exits on its FIRST match, `printf` takes SIGPIPE, and
-# the pipeline reports 141 — so a line that IS present reads as missing, at
-# whatever rate the scheduler decides. That is #152, and it is why this loop uses a
-# herestring, which is a redirection rather than a pipeline and has no second
-# process to kill.
-for _v in 'if ( RB_PIN_DIR=Probe-A; \[\[ $RB_PIN_DIR = Probe-A \]\] \\' \
-          '     && \[\[ ${RB_PIN_SEEN:-} != Probe-A \]\] && \[\[ ${RB_REMOTE:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-A \]\] && \[\[ ${REPO_DIR:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${RB_SCRIPTS:-} != Probe-A \]\] && \[\[ ${PATH:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${HOST:-} != Probe-A \]\] && \[\[ ${OWNER:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${REPO:-} != Probe-A \]\] \\' \
-          '     && \[\[ ${HOME:-} != Probe-A \]\] && \[\[ ${TMPDIR:-} != Probe-A \]\] ) 2>/dev/null \\' \
-          '   && ( RB_PIN_SEEN=Probe-B; \[\[ $RB_PIN_SEEN = Probe-B \]\] \\' \
-          '     && \[\[ ${RB_PIN_DIR:-} != Probe-B \]\] && \[\[ ${RB_REMOTE:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${RB_TMPPARENT:-} != Probe-B \]\] && \[\[ ${REPO_DIR:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${RB_SCRIPTS:-} != Probe-B \]\] && \[\[ ${PATH:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${HOST:-} != Probe-B \]\] && \[\[ ${OWNER:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${REPO:-} != Probe-B \]\] \\' \
-          '     && \[\[ ${HOME:-} != Probe-B \]\] && \[\[ ${TMPDIR:-} != Probe-B \]\] ) 2>/dev/null; then'; do
-    grep -q "^$_v\$" <<<"$_pin_body" \
-        || die "the pin probe is missing a line: $_v"
+# THE PROBE IS TWO SENTINEL PAIRS, AND EVERY ARM CARRIES EVERY NAME. Four arms —
+# `Probe-A`/`Probe-B` and `Probe-C`/`Probe-D` — because ONE pair is a fixed value
+# and a fixed value collides: an operator whose `IFS`, or any other protected name,
+# happens to hold exactly `Probe-A` failed a comparison nothing had corrupted. A
+# real nameref fails BOTH pairs, since the assignment writes the sentinel into the
+# target every time; a collision fails only the pair it collides with.
+#
+# EACH ARM IS CHECKED SEPARATELY, which the first version did not do. Asked of the
+# whole block, an existential search passed with a comparison deleted from ONE arm,
+# because the same sentinel still appeared in another — so a later edit could let a
+# nameref through while the guard stayed green.
+for _pv in Probe-A Probe-B Probe-C Probe-D; do
+    _pa=""
+    # A HERESTRING, for the reason the transport coverage check gives: `awk` exits
+    # early, `printf` takes SIGPIPE, and `pipefail` turns a good extraction into an
+    # empty one. #152.
+    _pa="$(awk -v v="$_pv" '$0 ~ ("=" v "; ") {f=1} f {print} f && /2>\/dev\/null/ {exit}' <<<"$_pin_body")" || _pa=""
+    [ -n "$_pa" ] \
+        || die "the pin probe has no $_pv arm; the coverage check below proves nothing"
+    for _pn in RB_PIN_DIR RB_PIN_SEEN RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS PATH \
+               HOST OWNER REPO IFS HOME TMPDIR; do
+        case "$_pa" in
+            *"$_pn"*"$_pv"*) : ;;
+            *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
+        esac
+    done
 done
-pass "…proved by one subshell per name, each cross-checking the others"
+pass "…with four probe arms, each comparing against every name in scope"
 # ── EVERY NAME THE DRIVER READS WITHOUT ASSIGNING IS PROTECTED FROM A NAMEREF ──
 #
 # Eleven names were found one review round apiece, which is the "list wrong by
@@ -1078,22 +1077,36 @@ _kn=""
 _kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
 [ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
 _kn="${_kn#*\'}"; _kn="${_kn%\'*}"
+# ASKED OF EACH ARM SEPARATELY. An existential search over the whole block passed
+# with a comparison deleted from ONE arm, because the same sentinel still appeared
+# in another — so a later edit could let a nameref through while this stayed green.
 _kn_missing=""
-_kn_rest="$_kn"
-while [ -n "$_kn_rest" ]; do
-    _kn_one="${_kn_rest%%|*}"
-    case "$_kn_rest" in *'|'*) _kn_rest="${_kn_rest#*|}" ;; *) _kn_rest="" ;; esac
-    case "$_kn_one" in
-        PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
-        [A-Z]*) : ;;
-        *) continue ;;
-    esac
-    case "$_read_block" in
-        *"\${$_kn_one:-} != Probe-A"*) : ;;
-        *) _kn_missing="$_kn_missing $_kn_one" ;;
-    esac
+for _kn_v in Probe-A Probe-B Probe-C Probe-D; do
+    _kn_arm=""
+    # A HERESTRING, NOT A PIPE. `awk` exits at the end of the arm, `printf` takes
+    # SIGPIPE, and under `pipefail` the pipeline reports 141 — so `|| _kn_arm=""`
+    # cleared a perfectly good extraction, intermittently. #152.
+    _kn_arm="$(awk -v v="$_kn_v" '$0 ~ ("=" v "; ") {f=1} f {print} f && /2>\/dev\/null/ {exit}' <<<"$_read_block")" || _kn_arm=""
+    [ -n "$_kn_arm" ] \
+        || die "the transport probe has no $_kn_v arm; the coverage check proves nothing"
+    _kn_rest="$_kn"
+    while [ -n "$_kn_rest" ]; do
+        _kn_one="${_kn_rest%%|*}"
+        case "$_kn_rest" in *'|'*) _kn_rest="${_kn_rest#*|}" ;; *) _kn_rest="" ;; esac
+        case "$_kn_one" in
+            PWD|SECONDS|RANDOM|BASH_SOURCE) continue ;;
+            [A-Z]*) : ;;
+            *) continue ;;
+        esac
+        case "$_kn_arm" in
+            *"\${$_kn_one:-} != $_kn_v"*) : ;;
+            *) _kn_missing="$_kn_missing $_kn_v/$_kn_one" ;;
+        esac
+    done
 done
-[ -z "$_kn_missing" ]     && pass "every environment name pr-selfcheck.sh knows about is protected from a transport nameref"     || die "the transport probes do not compare against:$_kn_missing"
+[ -z "$_kn_missing" ] \
+    && pass "every environment name pr-selfcheck.sh knows about is protected in every probe arm" \
+    || die "the transport probes do not compare against:$_kn_missing"
 
 # THE SUCCESS LINE IS IN THE WORK ARM AND NOWHERE ELSE.
 case "$_arm_work" in
@@ -2273,7 +2286,7 @@ case "$(cat "$_rb_pb/alloc.sh")" in
     *'mkdir -m 700 "$RB_WORK_DIR"'*) pass "the working-directory allocation lifts out for the cases below" ;;
     *) die "the working-directory allocation did not lift; the cases below prove nothing" ;;
 esac
-awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
+awk '/^[[:space:]]*if \{ \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_pb/parent.sh"
 # THE EXCERPT HAS TO CONTAIN THE SELECTION, or the cases below prove nothing. The
 # range runs from the probe to the first `fi` at column 0 — which is the probe's
 # own when the selection is its success arm, and the GUARD's if it is not. Revert
@@ -2872,7 +2885,7 @@ mkdir -p "$_rb_bt/parent/watch-pr.anchor" "$_rb_bt/parent/attacker"
 # ITS OWN LIFT, because the probe cases above remove their scratch tree when they
 # finish. Same range, same dedent, and CHECKED — a lift that came out empty would
 # make every case below pass against nothing.
-awk '/^[[:space:]]*if \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
+awk '/^[[:space:]]*if \{ \( RB_TMPPARENT=Probe-A;/,/^    fi$/' "$SKILL" | sed 's/^    //' > "$_rb_bt/parent.sh"
 case "$(cat "$_rb_bt/parent.sh")" in
     *'RB_ORIGIN_DIR="${RB_TMPPARENT:?'*) : ;;
     *) die "the transport block did not lift for the RB_ORIGIN_DIR cases; they would prove nothing" ;;

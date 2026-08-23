@@ -680,7 +680,15 @@ if [[ -z $RB_REMOTE ]]; then
     # transient path this setup removes a few lines later, leaving their long-lived
     # shell pointing at a directory that no longer exists. A probe that compares
     # only against the names its own stage introduces cannot see that.
-    if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
+    # TWO SENTINEL PAIRS, AND EITHER COMPLETE PASS IS ACCEPTED. One pair is a
+    # fixed value, and a fixed value COLLIDES: an operator whose `IFS` — or any
+    # other protected name — happens to hold exactly `Probe-A` failed a comparison
+    # nothing had corrupted, and a perfectly good shell was refused as if it were.
+    # A real nameref fails BOTH pairs, because the probe assignment writes the
+    # sentinel into the target every time; a collision fails only the pair it
+    # collides with. So the accept is "one pair passed completely", not "no
+    # comparison anywhere failed".
+    if { ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
          && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
@@ -716,7 +724,44 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
          && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
          && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
-         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
+         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; } \
+       || { ( RB_TMPPARENT=Probe-C; [[ $RB_TMPPARENT = Probe-C ]] \
+         && [[ ${RB_REMOTE:-} != Probe-C ]] && [[ ${REPO_DIR:-} != Probe-C ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-C ]] && [[ ${PATH:-} != Probe-C ]] \
+         && [[ ${HOST:-} != Probe-C ]] && [[ ${OWNER:-} != Probe-C ]] \
+         && [[ ${REPO:-} != Probe-C ]] \
+         && [[ ${CODEX_BOT:-} != Probe-C ]] && [[ ${COPILOT_BOT:-} != Probe-C ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-C ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-C ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-C ]] && [[ ${RB_SUITE_JOBS:-} != Probe-C ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-C ]] \
+         && [[ ${IFS:-} != Probe-C ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-C ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-C ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-C ]] \
+         && [[ ${HOME:-} != Probe-C ]] && [[ ${TMPDIR:-} != Probe-C ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_DIR=Probe-D; [[ $RB_ORIGIN_DIR = Probe-D ]] \
+         && [[ ${RB_REMOTE:-} != Probe-D ]] && [[ ${RB_TMPPARENT:-} != Probe-D ]] \
+         && [[ ${REPO_DIR:-} != Probe-D ]] && [[ ${RB_SCRIPTS:-} != Probe-D ]] \
+         && [[ ${PATH:-} != Probe-D ]] \
+         && [[ ${HOST:-} != Probe-D ]] && [[ ${OWNER:-} != Probe-D ]] \
+         && [[ ${REPO:-} != Probe-D ]] \
+         && [[ ${CODEX_BOT:-} != Probe-D ]] && [[ ${COPILOT_BOT:-} != Probe-D ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-D ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-D ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-D ]] && [[ ${RB_SUITE_JOBS:-} != Probe-D ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-D ]] \
+         && [[ ${IFS:-} != Probe-D ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-D ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-D ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-D ]] \
+         && [[ ${HOME:-} != Probe-D ]] && [[ ${TMPDIR:-} != Probe-D ]] ) 2>/dev/null; }; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -1000,7 +1045,15 @@ if [[ -z $RB_REMOTE ]]; then
     # then deleted. Written into ONE of two identical probes it is the shape this
     # repository records as the cause of its worst bugs — a rule that reached two
     # of three helpers and sat missing from the third for eleven rounds.
-    if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
+    # TWO SENTINEL PAIRS, AND EITHER COMPLETE PASS IS ACCEPTED. One pair is a
+    # fixed value, and a fixed value COLLIDES: an operator whose `IFS` — or any
+    # other protected name — happens to hold exactly `Probe-A` failed a comparison
+    # nothing had corrupted, and a perfectly good shell was refused as if it were.
+    # A real nameref fails BOTH pairs, because the probe assignment writes the
+    # sentinel into the target every time; a collision fails only the pair it
+    # collides with. So the accept is "one pair passed completely", not "no
+    # comparison anywhere failed".
+    if { ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
@@ -1037,7 +1090,45 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${REVIEW_BUS_OWNER:-} != Probe-B ]] \
          && [[ ${REVIEW_BUS_REPO:-} != Probe-B ]] \
          && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
-         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
+         && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; } \
+       || { ( RB_PIN_DIR=Probe-C; [[ $RB_PIN_DIR = Probe-C ]] \
+         && [[ ${RB_PIN_SEEN:-} != Probe-C ]] && [[ ${RB_REMOTE:-} != Probe-C ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-C ]] && [[ ${REPO_DIR:-} != Probe-C ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-C ]] && [[ ${PATH:-} != Probe-C ]] \
+         && [[ ${HOST:-} != Probe-C ]] && [[ ${OWNER:-} != Probe-C ]] \
+         && [[ ${REPO:-} != Probe-C ]] \
+         && [[ ${CODEX_BOT:-} != Probe-C ]] && [[ ${COPILOT_BOT:-} != Probe-C ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-C ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-C ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-C ]] && [[ ${RB_SUITE_JOBS:-} != Probe-C ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-C ]] \
+         && [[ ${IFS:-} != Probe-C ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-C ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-C ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-C ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-C ]] \
+         && [[ ${HOME:-} != Probe-C ]] && [[ ${TMPDIR:-} != Probe-C ]] ) 2>/dev/null \
+       && ( RB_PIN_SEEN=Probe-D; [[ $RB_PIN_SEEN = Probe-D ]] \
+         && [[ ${RB_PIN_DIR:-} != Probe-D ]] && [[ ${RB_REMOTE:-} != Probe-D ]] \
+         && [[ ${RB_TMPPARENT:-} != Probe-D ]] && [[ ${REPO_DIR:-} != Probe-D ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-D ]] && [[ ${PATH:-} != Probe-D ]] \
+         && [[ ${HOST:-} != Probe-D ]] && [[ ${OWNER:-} != Probe-D ]] \
+         && [[ ${REPO:-} != Probe-D ]] \
+         && [[ ${CODEX_BOT:-} != Probe-D ]] && [[ ${COPILOT_BOT:-} != Probe-D ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-D ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-D ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-D ]] && [[ ${RB_SUITE_JOBS:-} != Probe-D ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-D ]] \
+         && [[ ${IFS:-} != Probe-D ]] \
+         && [[ ${PR_WATCH_INTERVAL:-} != Probe-D ]] \
+         && [[ ${PR_WATCH_TIMEOUT:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_REMOTE:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_OWNER:-} != Probe-D ]] \
+         && [[ ${REVIEW_BUS_REPO:-} != Probe-D ]] \
+         && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-D ]] \
+         && [[ ${HOME:-} != Probe-D ]] && [[ ${TMPDIR:-} != Probe-D ]] ) 2>/dev/null; }; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
         # CLEARED FIRST, for the reason the origin read gives: interactively the

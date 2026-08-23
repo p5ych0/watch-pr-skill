@@ -125,12 +125,21 @@
   reads back every name in scope that an assignment there can reach — which is the
   rule, rather than every name the stage introduces.
 
+  The probe is TWO sentinel pairs, because one is a fixed value and a fixed value
+  collides: an operator whose `IFS` — or any other protected name — happened to
+  hold exactly the sentinel failed a comparison nothing had corrupted, and a
+  perfectly good shell was refused as if it were. A real nameref fails both pairs,
+  since the assignment writes the sentinel into the target every time; a collision
+  fails only the pair it collides with.
+
   Writing that set down in a comment was not enough: the round after it was
   written omitted three names the comment itself listed. It is TIED to
   `pr-selfcheck.sh`'s `KNOWN` list instead — the inventory of names the driver
   reads without assigning, which that file has to maintain anyway — and the suite
   requires every entry to be compared against, so adding a knob there without
-  protecting it turns it red. The shell-managed names are exempt BY NAME. A
+  protecting it turns it red, and every one of the four probe arms is checked
+  separately — an existential search over the whole block passed with a comparison
+  deleted from ONE arm. The shell-managed names are exempt BY NAME. A
   one-line generic test is unavailable: `[[ -R name ]]` is bash 4.3+, and an
   unknown unary operator inside `[[ ]]` is a PARSE error on 3.2.
 
