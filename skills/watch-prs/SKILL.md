@@ -708,6 +708,7 @@ if [[ -z $RB_REMOTE ]]; then
     # collides with. So the accept is "one pair passed completely", not "no
     # comparison anywhere failed".
     if { ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
+         && [[ ${RB_ORIGIN_DIR:-} != Probe-A ]] \
          && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
@@ -745,6 +746,7 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${CLAUDE_PLUGIN_ROOT:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; } \
        || { ( RB_TMPPARENT=Probe-C; [[ $RB_TMPPARENT = Probe-C ]] \
+         && [[ ${RB_ORIGIN_DIR:-} != Probe-C ]] \
          && [[ ${RB_REMOTE:-} != Probe-C ]] && [[ ${REPO_DIR:-} != Probe-C ]] \
          && [[ ${RB_SCRIPTS:-} != Probe-C ]] && [[ ${PATH:-} != Probe-C ]] \
          && [[ ${HOST:-} != Probe-C ]] && [[ ${OWNER:-} != Probe-C ]] \

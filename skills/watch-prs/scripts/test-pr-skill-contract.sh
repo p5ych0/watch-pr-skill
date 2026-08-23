@@ -1036,6 +1036,12 @@ _kn=""
 _kn="$(grep -n "^ *KNOWN='" "$SELFCHECK" | head -1 | cut -d: -f2-)" || _kn=""
 [ -n "$_kn" ]     || die "could not read pr-selfcheck.sh's KNOWN list; the probe-coverage check proves nothing"
 _kn="${_kn#*\'}"; _kn="${_kn%\'*}"
+# AND THE NAMES THE DRIVER ASSIGNS, which `KNOWN` cannot supply: `pr-selfcheck.sh`
+# lists what `SKILL.md` READS without assigning, so everything the setup block sets
+# for itself is absent from it. Written once and used by both stages — a per-stage
+# copy of this omitted `RB_SCRIPTS`, `CODEX_BOT` and `COPILOT_BOT`, so deleting one
+# of their comparisons from a pin arm left the drift guard green.
+_assigned="RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS HOST OWNER REPO CODEX_BOT COPILOT_BOT"
 
 # THE PROBE IS TWO SENTINEL PAIRS, AND EVERY ARM CARRIES EVERY NAME. Four arms —
 # `Probe-A`/`Probe-B` and `Probe-C`/`Probe-D` — because ONE pair is a fixed value
@@ -1076,9 +1082,8 @@ for _pv in Probe-A Probe-B Probe-C Probe-D; do
             *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
         esac
     done
-    # …AND THIS STAGE'S OWN NAMES WITH THEM, which the shared set does not carry:
-    # the driver ASSIGNS these, so `pr-selfcheck.sh` never lists them.
-    for _pn in RB_PIN_DIR RB_PIN_SEEN RB_REMOTE RB_TMPPARENT REPO_DIR HOST OWNER REPO; do
+    # …AND THE ASSIGNED NAMES WITH THEM, this stage's two included.
+    for _pn in $_assigned RB_PIN_DIR RB_PIN_SEEN; do
         case "$_pa" in
             *"$_pn"*"$_pv"*) : ;;
             *) die "the pin probe's $_pv arm does not compare against \$$_pn" ;;
@@ -1127,6 +1132,13 @@ for _kn_v in Probe-A Probe-B Probe-C Probe-D; do
         case "$_kn_arm" in
             *"\${$_kn_one:-} != $_kn_v"*) : ;;
             *) _kn_missing="$_kn_missing $_kn_v/$_kn_one" ;;
+        esac
+    done
+    # …AND THE ASSIGNED NAMES, this stage's one included.
+    for _kn_a in $_assigned RB_ORIGIN_DIR; do
+        case "$_kn_arm" in
+            *"$_kn_a"*"$_kn_v"*) : ;;
+            *) _kn_missing="$_kn_missing $_kn_v/$_kn_a" ;;
         esac
     done
 done
