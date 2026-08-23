@@ -18,11 +18,15 @@
   pre-push gate reports the shape rather than letting it back in — and the suite
   it gates stops failing for reasons that are not there.
 
-  The check takes the SHAPE rather than a list of spellings — either quoting of the
-  format string, any `command`/`builtin` prefix on EITHER side, an environment
-  assignment such as `LC_ALL=C` in front of `grep`, any intermediate filters
-  between the producer and the reader, tabs as well as spaces at every word
-  boundary, and a pipeline split across a `\` continuation or a bare trailing `|`.
+  The check takes the SHAPE rather than a list of spellings — ANY format, quoted
+  either way or a bare word carrying a `%`, any `command`/`builtin` prefix on
+  EITHER side, an environment assignment such as `LC_ALL=C` or `LC_ALL="$locale"`
+  in front of `grep`, any intermediate filters between the producer and the reader,
+  tabs as well as spaces at every word boundary, and a pipeline split across a `\`
+  continuation or a bare trailing `|`. What it does NOT cross is a command
+  separator: the text between the `printf` and the pipe stops at `;` and `&`, so
+  `printf … ; true | grep -c .` is another command's pipeline and is not reported —
+  which is also what keeps a `2>&1` before an unrelated pipe from reading as one.
   It reads folded LOGICAL lines rather than physical ones — a pipeline continues
   across a `\` and across a bare trailing `|`, and both halves scanned separately
   read clean — and reporting the first physical line number keeps the finding

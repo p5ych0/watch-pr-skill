@@ -322,7 +322,11 @@ for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR LC_ALL=C grep -q y || true" \
           "printf '%s' \"\$x\" BAR grep -c . || true" \
           "printf '%s' \"\$x\" BAR grep -v y || true" \
-          "[ \"\$(printf '%s' \"\$x\" BAR grep -c .)\" -eq 2 ] || true"; do
+          "[ \"\$(printf '%s' \"\$x\" BAR grep -c .)\" -eq 2 ] || true" \
+          "printf '%b' \"\$large\" BAR grep -q marker || true" \
+          "printf %s \"\$x\" BAR grep -q y || true" \
+          "printf \"\$fmt\" \"\$x\" BAR grep -q y || true" \
+          "printf '%s' \"\$x\" BAR LC_ALL=\"\$locale\" grep -q y || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v//BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -358,6 +362,20 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…and a logical OR is not reported as a pipeline" \
     || die "an OR was reported as a racy pipeline (rc=$rc out=$out)"
+# …AND A PIPE IN THE NEXT COMMAND IS NOT THIS `printf`'S. `printf '%s' "$x"; true |
+# grep -c .` has no printf-to-grep pipeline at all, and the text between the two
+# was unbounded, so the separator was crossed and the later pipe read as this
+# one's. The producer match stops at `;` and `&` — which is also what keeps a
+# `2>&1` before an unrelated pipe from reading as one.
+for _sep in ';' '&&'; do
+    { printf '#!/usr/bin/env bash\nset -o pipefail\n'
+      printf '%s\n' "printf '%s' \"\$x\" $_sep true $_bar grep -c . || true"
+    } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+    out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+    { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+        || die "a pipe after '$_sep' was read as this printf's (rc=$rc out=$out)"
+done
+pass "…and a pipe in the command after a ; or && is not this printf's"
 # …AND A PRODUCER THAT IS NOT `printf` IS NOT THIS GATE'S JOB. `bodies | grep -q`
 # races identically, and telling that pipe from a `|` in `${x%%|*}`, in a quoted
 # `awk` program or in a `case` pattern needs a shell parser — the generalised scan

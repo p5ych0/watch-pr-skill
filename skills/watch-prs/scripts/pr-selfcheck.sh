@@ -714,13 +714,24 @@ for f in "$SCRIPTS"/test-*.sh; do
           #
           # `||` IS REPLACED WITH A CHARACTER THAT CANNOT BE A PIPE, because a
           # logical OR is not a pipeline: `printf '"'"'%s'"'"' "$x" || grep -q y` has
-          # no second process and no race.
+          # no second process and no race. NEITHER IS A PIPE IN THE NEXT COMMAND:
+          # the text between the `printf` and the pipe stops at `;` and `&`, so
+          # `printf … ; true | grep -c .` is not this printf'"'"'s pipeline. That is
+          # also what keeps a `2>&1` before an unrelated pipe from reading as one.
+          #
+          # THE FORMAT IS ANY FIRST ARGUMENT, quoted either way or a bare word
+          # carrying a `%`. It was `%s` and `%s\n` literally, so `printf '"'"'%b'"'"' …`
+          # walked past — and a bare word with no `%` in it is prose rather than a
+          # format, which is what keeps this file'"'"'s own comments out.
           #
           # AN ASSIGNMENT IS A COMMAND PREFIX, so `LC_ALL=C grep` is `grep`. That
           # is a shell fact and it is bounded — an assignment word — unlike the
-          # grammar this replaced.
+          # grammar this replaced. THE VALUE IS ONE WORD and quotes are ordinary
+          # characters in it, so `LC_ALL="$locale"` needs no alternative of its own:
+          # one was written and removed, because it matched nothing the word class
+          # did not already match and no fixture could tell the two apart.
           t = line; gsub(/\|\|/, ")", t)
-          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:])"'"'"'|&;(<>]*[[:space:]]+|command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]|$)/)
+          if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:]|;&]*%[^[:space:]|;&]*)[[:space:]]+[^|;&]*\|([^|;&]*\|)*[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]|;&]*[[:space:]]+|command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"
     grc=$?
