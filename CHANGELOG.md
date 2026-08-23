@@ -119,7 +119,12 @@
   inside `[[ ]]` is a PARSE error on 3.2, and the whole setup block would fail to
   parse there.
 
-  The `$RANDOM` value also removes the collision the fixed sentinels had: an
+  The sentinel carries `$$` as well as `$RANDOM`, because `unset RANDOM` removes
+  its special behaviour and would otherwise leave a FIXED `RbProbe` — back to a
+  value an operator can hold, after which `${!name}` reads THEIR variable and a
+  valid shell is refused. The pid cannot be unset.
+
+  The randomised value also removes the collision the fixed sentinels had: an
   operator holding one sentinel from each of two fixed pairs failed both, and a
   shell nothing had corrupted was refused. The prefix match carries the other half,
   in MIXED case — a readonly leaves the old value, `declare -i` stores `0`,

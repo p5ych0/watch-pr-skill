@@ -591,11 +591,17 @@ if [[ -z $RB_REMOTE ]]; then
     # with no namerefs it simply reports nothing — which is the right answer there,
     # since nothing can be one.
     #
-    # THE VALUE IS BUILT FROM `$RANDOM`, not fixed. A fixed sentinel COLLIDES: with
-    # two fixed pairs and an operator holding one value from each, both pairs failed
-    # and a shell nothing had corrupted was refused. `RBPROBE$RANDOM$RANDOM` is a
-    # legal name, re-rolled per session, and the only way to collide is to have a
-    # variable of exactly that name already set.
+    # THE VALUE IS BUILT FROM `$$` AND `$RANDOM`, not fixed. A fixed sentinel
+    # COLLIDES: with two fixed pairs and an operator holding one value from each,
+    # both pairs failed and a shell nothing had corrupted was refused.
+    # `RbProbe$$$RANDOM$RANDOM` is a legal variable name, and the only way to
+    # collide is to have a variable of exactly that name already set.
+    #
+    # `$$` IS THERE BECAUSE `RANDOM` CAN BE UNSET. `unset RANDOM` removes its
+    # special behaviour and every later `$RANDOM` is empty, which would leave a
+    # FIXED `RbProbe` — back to a value an operator can hold. `$$` is the shell's
+    # own pid and cannot be unset, so the sentinel stays per-session whatever has
+    # been done to `RANDOM`.
     #
     # AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
     # old value, `declare -i` stores `0`, `declare -l` lower-cases it and
@@ -603,9 +609,9 @@ if [[ -z $RB_REMOTE ]]; then
     # unchanged, which is how that one attribute got through. `RbProbe*` matches
     # neither transformation, so the same two lines catch every attribute as well as
     # the alias.
-    if ( RB_TMPPARENT="RbProbe$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
+    if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
-       && ( RB_ORIGIN_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
+       && ( RB_ORIGIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -832,11 +838,17 @@ if [[ -z $RB_REMOTE ]]; then
     # with no namerefs it simply reports nothing — which is the right answer there,
     # since nothing can be one.
     #
-    # THE VALUE IS BUILT FROM `$RANDOM`, not fixed. A fixed sentinel COLLIDES: with
-    # two fixed pairs and an operator holding one value from each, both pairs failed
-    # and a shell nothing had corrupted was refused. `RBPROBE$RANDOM$RANDOM` is a
-    # legal name, re-rolled per session, and the only way to collide is to have a
-    # variable of exactly that name already set.
+    # THE VALUE IS BUILT FROM `$$` AND `$RANDOM`, not fixed. A fixed sentinel
+    # COLLIDES: with two fixed pairs and an operator holding one value from each,
+    # both pairs failed and a shell nothing had corrupted was refused.
+    # `RbProbe$$$RANDOM$RANDOM` is a legal variable name, and the only way to
+    # collide is to have a variable of exactly that name already set.
+    #
+    # `$$` IS THERE BECAUSE `RANDOM` CAN BE UNSET. `unset RANDOM` removes its
+    # special behaviour and every later `$RANDOM` is empty, which would leave a
+    # FIXED `RbProbe` — back to a value an operator can hold. `$$` is the shell's
+    # own pid and cannot be unset, so the sentinel stays per-session whatever has
+    # been done to `RANDOM`.
     #
     # AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
     # old value, `declare -i` stores `0`, `declare -l` lower-cases it and
@@ -844,9 +856,9 @@ if [[ -z $RB_REMOTE ]]; then
     # unchanged, which is how that one attribute got through. `RbProbe*` matches
     # neither transformation, so the same two lines catch every attribute as well as
     # the alias.
-    if ( RB_PIN_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
+    if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
-       && ( RB_PIN_SEEN="RbProbe$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
+       && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
@@ -970,7 +982,7 @@ if [[ -z $RB_REMOTE ]]; then
             # accepts. One value is enough: a readonly pre-seeded with the probe's own
             # value makes the subshell's assignment fail outright, so the comparison
             # is never reached. #148.
-            if { ( RB_WORK_DIR="RbProbe$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
+            if { ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
                     && [[ -z ${!RB_WORK_DIR:-} ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
@@ -1170,7 +1182,7 @@ WHO="$CODEX_BOT"
 # trailing `[[ -n "" ]]` only gives the `if` a false status that nothing consumes
 # — so execution reached the request and posted it anyway, which is the state
 # these probes exist to prevent. Only containment excludes it.
-if { ( PRIOR_REVIEW="RbProbe$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
+if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
                     && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then

@@ -1072,7 +1072,7 @@ _assigned="RB_REMOTE RB_TMPPARENT REPO_DIR RB_SCRIPTS HOST OWNER REPO CODEX_BOT 
 # unchanged and that attribute got through — and the indirect-expansion emptiness,
 # which is what catches the alias.
 for _pn in RB_PIN_DIR RB_PIN_SEEN; do
-    grep -q "( $_pn=\"RbProbe\$RANDOM\$RANDOM\"; \[\[ \$$_pn = RbProbe\* \]\]" <<<"$_pin_body" \
+    grep -q "( $_pn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_pn = RbProbe\* \]\]" <<<"$_pin_body" \
         || die "the pin probe does not assign a random RbProbe sentinel to \$$_pn and match it"
     grep -q "\[\[ -z \${!$_pn:-} \]\]" <<<"$_pin_body" \
         || die "the pin probe does not test \${!$_pn} for a nameref"
@@ -1090,12 +1090,22 @@ pass "the pin probe detects an alias generically, and an attribute by the prefix
 # an ordinary variable it is indirect expansion. Assign a legal-but-unset variable
 # name and require `${!name}` to be empty.
 for _tn in RB_TMPPARENT RB_ORIGIN_DIR; do
-    grep -q "( $_tn=\"RbProbe\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_read_block" \
+    grep -q "( $_tn=\"RbProbe\$\$\$RANDOM\$RANDOM\"; \[\[ \$$_tn = RbProbe\* \]\]" <<<"$_read_block" \
         || die "the transport probe does not assign a random RbProbe sentinel to \$$_tn and match it"
     grep -q "\[\[ -z \${!$_tn:-} \]\]" <<<"$_read_block" \
         || die "the transport probe does not test \${!$_tn} for a nameref"
 done
 pass "the transport probe detects an alias generically, and an attribute by the prefix match"
+# …AND `unset RANDOM` DOES NOT MAKE THE SENTINEL FIXED. `unset RANDOM` removes its
+# special behaviour, so every later `$RANDOM` is empty — and a sentinel built from
+# `$RANDOM` alone becomes the literal `RbProbe`, which an operator can hold, after
+# which `${!name}` reads THEIR variable and a valid shell is refused. `$$` is the
+# shell's own pid and cannot be unset, so it is in every sentinel.
+_ur=0; _ur="$(grep -c 'RbProbe\$\$\$RANDOM\$RANDOM' "$SKILL")" || _ur=0
+_ur_all=0; _ur_all="$(grep -c 'RbProbe\$' "$SKILL")" || _ur_all=0
+{ [ "$_ur" -gt 0 ] && [ "$_ur" = "$_ur_all" ]; } \
+    && pass "every probe sentinel carries the pid, so unset RANDOM cannot make it fixed" \
+    || die "a probe sentinel is built from \$RANDOM alone (with-pid=$_ur total=$_ur_all)"
 # …AND NO FIXED SENTINEL SURVIVES ANYWHERE IN EITHER PROBE. A fixed value COLLIDES:
 # with two fixed pairs and an operator holding one value from each, both pairs
 # failed and a shell nothing had corrupted was refused.
@@ -2238,7 +2248,7 @@ grep -q 'PRIOR_REVIEW="$(<"$PRIOR_FILE")"' "$SKILL" \
 # `declare -i PRIOR_REVIEW`, where the assignment SUCCEEDS and stores something
 # else — a status-only probe accepts that, and the request goes out with the
 # baseline rewritten. #148.
-_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RbProbe\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
+_rb_prp_ln="$(grep -n '( PRIOR_REVIEW="RbProbe\$\$\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" | head -1 | cut -d: -f1)" || _rb_prp_ln=""
 _rb_req_ln="$(grep -n 'pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE"' "$SKILL" | head -1 | cut -d: -f1)" || _rb_req_ln=""
 { [ -n "$_rb_prp_ln" ] && [ -n "$_rb_req_ln" ] && [ "$_rb_prp_ln" -lt "$_rb_req_ln" ]; } \
     && pass "…and PRIOR_REVIEW is proven assignable BEFORE the request is posted" \
@@ -2336,8 +2346,8 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # where the attribute it tests does not exist. The skip is announced rather than
 # silent: a case that quietly does not run is the coverage this file exists to
 # stop claiming.
-_rb_attrs="readonly RB_TMPPARENT=Probe-A|declare -i RB_TMPPARENT=0"
-if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x"; fi
+_rb_attrs="readonly RB_TMPPARENT=/tmp|declare -i RB_TMPPARENT=0"
+if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x|declare -u RB_TMPPARENT=x"; fi
 _rb_rest="$_rb_attrs"
 while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
@@ -2369,8 +2379,12 @@ _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/par
 printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
     && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
     || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
+# `declare -u` IS ON THIS LIST TOO, and it is the attribute an ALL-CAPS sentinel
+# survived: upper-casing `RBPROBE…` leaves it matching, so the probe passed and the
+# real path was upper-cased afterwards. It is bash 4.0+ like `declare -l`, so the
+# same feature test gates it.
 _rb_attrs="readonly RB_WORK_DIR=/tmp|declare -i RB_WORK_DIR=0"
-if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_WORK_DIR=x"; fi
+if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_WORK_DIR=x|declare -u RB_WORK_DIR=x"; fi
 _rb_rest="$_rb_attrs"
 while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
@@ -2394,7 +2408,7 @@ fi
 # `exit` is a builtin a startup file can replace with one that RETURNS, and a
 # trailing reserved word only gives the `if` a false status nothing consumes, so
 # execution reached the request and posted it anyway.
-grep -q '^if { ( PRIOR_REVIEW="RbProbe\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" \
+grep -q '^if { ( PRIOR_REVIEW="RbProbe\$\$\$RANDOM\$RANDOM"; \[\[ $PRIOR_REVIEW = RbProbe\* \]\]' "$SKILL" \
     && pass "…and the probe is a condition whose success arm holds the request" \
     || die "the PRIOR_REVIEW probe is a standalone guard; a shadowed exit walks past it into the request"
 grep -q '^    if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh' "$SKILL" \
