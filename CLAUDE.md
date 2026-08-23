@@ -351,17 +351,18 @@ rediscovering them.
   one from the day it was written. Absence covers the other half: a command name
   assembled at runtime is invisible to text and dies at once here.
 
-  **That job is switched off, and so is the workflow that would run the normal
-  one.** `.github/workflows/tests.yml` triggers on `workflow_dispatch` only and
-  `macos-shell` carries `if: false`; a push produces no check, and the gates read
-  `none`, which they document as nothing to assert. The paragraph above therefore
-  describes what CI *is for*, not what it is doing — while this stands, the suite
-  is proven only by `pr-selfcheck.sh` on the contributor's own machine, and a
-  regression that needs the second shell to see can merge. It came off because the
-  suite was the largest fixed cost per round and several of the assertions doing
-  the blocking were themselves wrong; #93 owns restoring the triggers and the job
-  alike — both are named in its acceptance criteria — after the fixtures
-  are audited against *assert the invariant, not the version's route to it*.
+  **That job is switched off; the workflow around it is not.**
+  `.github/workflows/tests.yml` runs the normal job on every push to `main` and
+  every pull request, and `macos-shell` carries `if: false`. So the paragraph above
+  describes what the SECOND job is for, not what it is doing — while this stands,
+  bash 3.2.57 and a mac-shaped `PATH` are proven by nothing, and a regression that
+  needs them to be seen can merge. Both were off; the normal one came back in #167
+  once its cost came down, because it runs the same bash 5 the contributor's own
+  gate runs and so cannot block a change on anything that gate has not already
+  seen. `macos-shell` is the opposite case — it went red three times on correct
+  changes, each time on a fixture requiring the ROUTE bash 5 takes to a defence —
+  and #93 owns restoring it, after the fixtures are audited against *assert the
+  invariant, not the version's route to it*.
 
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
   than an oversight: ~950 lines of executable shell live in a Markdown file, and

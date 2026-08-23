@@ -4,30 +4,37 @@ name: tests
 # push to a PR branch — the whole workflow twice, for the same commit, telling us
 # the same thing. Pushes to the default branch are covered directly; everything
 # else is covered as a pull request.
-# ── AUTOMATIC RUNS ARE OFF, DELIBERATELY AND TEMPORARILY ───────────────────
+# ── WHAT RUNS AUTOMATICALLY, AND WHAT DOES NOT ─────────────────────────────
 #
-# Turned off by the operator while the open issue backlog is worked through: the
-# suite is the largest fixed cost in each review round, paid locally and then
-# again here, and it was blocking rounds on portability assertions that were
-# themselves wrong. See #93: uncommenting these triggers is one of its acceptance
-# criteria, alongside deleting `macos-shell`'s `if:`.
+# The `test` job below runs on every push to `main` and on every pull request.
+# `macos-shell` does NOT: it carries `if: false`, and that is the one thing still
+# switched off here.
 #
-# `workflow_dispatch` keeps the workflow runnable by hand — `gh workflow run
-# tests.yml --ref <branch>` — so nothing is deleted and a branch can still be
-# checked deliberately.
+# BOTH WERE OFF, and they came back separately because their blockers are
+# different. They were turned off together while the backlog was worked through —
+# the suite was the largest fixed cost in each review round, paid locally and then
+# again here. That cost is down: `test-pr-skill-contract.sh` went 174s to 10s in
+# #165, and the contributor gate with it. The `test` job runs the SAME bash 5 that
+# gate runs, so it cannot go red on a correct change for a reason the contributor
+# has not already seen — which is why nothing had to be audited before restoring
+# it. `macos-shell` is the opposite case: it went red three times on correct
+# changes, each time because a fixture required the ROUTE bash 5 takes to a
+# defence rather than the defence holding. #93's first acceptance criterion is
+# auditing every fixture against that, and its `if:` stays until then.
 #
-# WHAT THIS MEANS FOR THE LOOP, so nobody mistakes a clean gate for a tested head:
-# with no checks configured, `pr-ci-state.sh` reports `none`, and both
-# `pr-ci-gate.sh` and `pr-merge-gate.sh` treat that as "nothing to assert" and
-# carry on. That is a supported state rather than a bypass — but while this is
-# off, a green round means the reviewers were happy, NOT that the suite ran.
+# `workflow_dispatch` is kept, not left over: `gh workflow run tests.yml --ref
+# <branch>` is how `macos-shell` is exercised deliberately while its `if:` stands,
+# and how a branch is checked without opening a pull request.
 #
-# RESTORE by deleting `workflow_dispatch:` and uncommenting the two triggers.
+# WHAT IT MEANS FOR THE LOOP that the second job is off: `pr-ci-state.sh` reports
+# on the checks that EXIST, so a green round now means the suite ran on Ubuntu —
+# it does not mean it ran on bash 3.2.57 or on a mac-shaped PATH. A post-3.2
+# construct can still merge. #93 carries the rest.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
-  # push:
-  #   branches: [main]
-  # pull_request:
 
 permissions:
   contents: read
