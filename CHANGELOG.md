@@ -19,6 +19,13 @@
   `${RB_TMPDIR:?…}` expansions that stood in for a variable that could not be
   trusted. The identity block is 123 executable lines where it was 157.
 
+- **A rejected transport read cleaned up twice.** The rejection arm removed the
+  leaf and the directory and then `exit` — a name — returned, and the unconditional
+  pair below removed them again. On a shared sticky parent a watcher that learned
+  the candidate from the helper's argv can put a symlink at the freed name between
+  the two, and the second `rm -f` follows it into a file this run never created.
+  The read-back is a branch whose arms each clean up once.
+
 - **A refusal after the directory existed left it behind.** The helper's contract
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean
@@ -95,7 +102,8 @@
 
 - **A nameref from a transport name onto another name in scope replaced that
   variable with a path setup then deleted.** `HOME`, `TMPDIR`, `REPO_DIR`,
-  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER` and `REPO` were each found this way. Each probe compared only
+  `RB_SCRIPTS`, `PATH`, `HOST`, `OWNER`, `REPO`, the six operator knobs and both
+  reviewer logins were each found this way. Each probe compared only
   against the names its own stage introduces, so `declare -n RB_ORIGIN_DIR=HOME`
   passed both subshells — neither read `HOME`. The assignments then cleared it and
   set it to the transport path, and the cleanup a few lines later removed that
@@ -107,7 +115,10 @@
   find `bash` — setup CORRUPTING `PATH`, which is a different thing from inheriting
   one already poisoned; and an alias onto `HOST`, `OWNER` or `REPO` let setup
   announce success with an identity component that is a directory name, so every
-  later `gh` call addressed a repository that does not exist. Every probe reads
+  later `gh` call addressed a repository that does not exist; and an alias onto
+  `REVIEW_MERGE_STRICT` replaced the exported `1` with a transport path, so
+  `pr-merge-gate.sh` stopped seeing strict mode and silently restored the
+  `--admin` merge that bypasses a base branch's protections. Every probe reads
   back every name in scope that an
   assignment there can reach — which is the rule, rather than every name the stage
   introduces — and `SKILL.md` writes the set down, with why the one-line generic

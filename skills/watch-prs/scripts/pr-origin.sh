@@ -373,14 +373,15 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
     done
     return 0
 }
-# THE HANDLERS ARE DEFINED BEFORE THE RESERVATION AND ARMED IMMEDIATELY AFTER IT.
-# Defining them afterwards left an interval between the `mkdir` succeeding and the
-# traps existing — a phase assignment and three function definitions wide — in
-# which a signal took its DEFAULT action and terminated the helper with the
-# directory already created. The caller performs no cleanup after a non-zero
-# status, so that directory stayed for the life of the machine. Nothing in these
-# definitions needs the reservation to exist; the arming is what does, and it is
-# the first thing after it.
+# THE HANDLERS ARE DEFINED AND ARMED BEFORE THE RESERVATION, both of them. The
+# definitions used to come after the `mkdir`, leaving an interval — a phase
+# assignment and three function definitions wide — in which a signal took its
+# DEFAULT action and terminated the helper with the directory already created; and
+# the arming used to come after it too, which left the same gap for the duration of
+# the external `mkdir` itself. The caller performs no cleanup after a non-zero
+# status, so either way that directory stayed for the life of the machine. Nothing
+# here needs the reservation to exist, and the ownership facts below are what make
+# arming before it safe.
 #
 # THE CLEANUP EXISTS ONCE AND RUNS ONCE, and both halves of that are the fix. It
 # used to live in two refusal functions AND an EXIT trap, so a refusal cleaned up

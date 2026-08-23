@@ -711,6 +711,27 @@ LOCAL
     [ ! -e "$_forge_dir/epcalls" ] \
         && pass "…and never invoked the helper, so no path was built from the empty parent" \
         || die "an empty transport parent reached the helper: '$(cat "$_forge_dir/epcalls")'"
+    # …AND THE TWO CLEANUPS AROUND THE READ-BACK ARE DISJOINT ARMS. Written as a
+    # rejection arm followed by an unconditional pair, a rejected read removed the
+    # leaf and the directory, then `exit` — a name — returned and the lines below
+    # removed them AGAIN. On a shared sticky parent a watcher that learned the
+    # candidate from the helper's argv can put a symlink at the freed name between
+    # the two, and the second `rm -f` follows it.
+    #
+    # ASSERTED ON THE SOURCE, because staging it means winning that window. What is
+    # checked is that the read-back is a BRANCH and that each arm carries its own
+    # pair — so neither arm can run the other's.
+    _dj=""
+    _dj="$(awk '/^ *if \{ \[\[ -O \/dev\/fd\/9 \]\]/,/^ *fi$/' "$SKILL")" || _dj=""
+    _dj_then=""; _dj_then="$(printf '%s\n' "$_dj" | sed -n '1,/^ *else$/p')" || _dj_then=""
+    _dj_else=""; _dj_else="$(printf '%s\n' "$_dj" | sed -n '/^ *else$/,$p')" || _dj_else=""
+    _dj_n=0; _dj_n="$(printf '%s\n' "$_dj" | grep -c 'rm -f "$RB_ORIGIN_DIR/origin"')" || _dj_n=0
+    { [ -n "$_dj_then" ] && [ -n "$_dj_else" ] && [ "$_dj_n" = 2 ] \
+      && case "$_dj_then" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
+      && case "$_dj_else" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
+      && case "$_dj_else" in *'exit 1'*) true ;; *) false ;; esac; } \
+        && pass "the read-back is a branch whose arms each clean up exactly once" \
+        || die "the transport cleanup can run twice on a rejected read (then=${#_dj_then} else=${#_dj_else} rm=$_dj_n)"
     # …AND A NAMEREF ONTO A CANDIDATE — `HOME` OR `TMPDIR` — IS REFUSED, WITH THAT
     # CANDIDATE LEFT AS IT WAS. The probe compared only against the names this stage
     # introduces, so `declare -n RB_ORIGIN_DIR=HOME` passed it: neither subshell read

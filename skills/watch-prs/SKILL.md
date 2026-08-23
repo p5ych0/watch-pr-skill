@@ -620,6 +620,14 @@ if [[ -z $RB_REMOTE ]]; then
     # which is the enumeration being wrong by omission in the one place it should
     # not have been.
     #
+    # AND THE OPERATOR'S KNOBS AND THE REVIEWER NAMES. `REVIEW_MERGE_STRICT` is
+    # the sharpest: an alias onto it replaced the exported `1` with a transport
+    # path, the pin succeeded, and `pr-merge-gate.sh` stopped seeing strict mode —
+    # silently restoring the `--admin` merge that bypasses a base branch's
+    # protections. `CODEX_BOT` and `COPILOT_BOT` decide which reviewer every stage
+    # addresses. The knobs are read from the ENVIRONMENT, so the transport probes
+    # can corrupt them before the loop ever looks.
+    #
     # THIS IS AN ENUMERATION, AND IT IS BOUNDED BY WHAT THIS SHELL HOLDS HERE.
     # `HOST`, `OWNER`, `REPO`, `REPO_DIR`, `RB_SCRIPTS`, `RB_REMOTE`, `PATH`, `HOME`
     # and `TMPDIR` are the names in scope that an assignment in this block can
@@ -659,6 +667,11 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
          && [[ ${REPO:-} != Probe-A ]] \
+         && [[ ${CODEX_BOT:-} != Probe-A ]] && [[ ${COPILOT_BOT:-} != Probe-A ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-A ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
@@ -666,6 +679,11 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${PATH:-} != Probe-B ]] \
          && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
          && [[ ${REPO:-} != Probe-B ]] \
+         && [[ ${CODEX_BOT:-} != Probe-B ]] && [[ ${COPILOT_BOT:-} != Probe-B ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-B ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -735,11 +753,25 @@ if [[ -z $RB_REMOTE ]]; then
             # after its OWN refusals — it created the directory — but a read this
             # side rejects leaves a written file in a directory nothing else will
             # remove. The obligation follows whoever the refusal belongs to.
-            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" \
-                || { /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"; /usr/bin/env rmdir "$RB_ORIGIN_DIR"; echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"; exit 1; }
-            /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-            /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+            # AND THE TWO CLEANUPS ARE DISJOINT ARMS, not a rejection arm followed
+            # by an unconditional one. Written that way the rejected path removed
+            # the leaf and the directory, then `exit` — a name — returned, and the
+            # lines below removed them AGAIN: on a shared sticky parent a watcher
+            # that learned the candidate from the helper's argv can put a symlink
+            # at the freed name between the two, and the second `rm -f` follows it
+            # into a file this run never created. Same defect the helper's own
+            # cleanup had, on this side of the call.
+            if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin"; then
+                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+            else
+                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+                echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
+                exit 1
+                [[ -n "" ]]
+            fi
         else
             echo "ABORT: could not read this session's origin"
             exit 1
@@ -942,6 +974,11 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_SCRIPTS:-} != Probe-A ]] && [[ ${PATH:-} != Probe-A ]] \
          && [[ ${HOST:-} != Probe-A ]] && [[ ${OWNER:-} != Probe-A ]] \
          && [[ ${REPO:-} != Probe-A ]] \
+         && [[ ${CODEX_BOT:-} != Probe-A ]] && [[ ${COPILOT_BOT:-} != Probe-A ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-A ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-A ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-A ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-A ]] && [[ ${RB_SUITE_JOBS:-} != Probe-A ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
@@ -949,6 +986,11 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ ${RB_SCRIPTS:-} != Probe-B ]] && [[ ${PATH:-} != Probe-B ]] \
          && [[ ${HOST:-} != Probe-B ]] && [[ ${OWNER:-} != Probe-B ]] \
          && [[ ${REPO:-} != Probe-B ]] \
+         && [[ ${CODEX_BOT:-} != Probe-B ]] && [[ ${COPILOT_BOT:-} != Probe-B ]] \
+         && [[ ${PR_CI_INTERVAL:-} != Probe-B ]] && [[ ${PR_CI_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${PR_CI_GRACE:-} != Probe-B ]] && [[ ${PR_CI_PROBE_TIMEOUT:-} != Probe-B ]] \
+         && [[ ${REVIEW_MERGE_STRICT:-} != Probe-B ]] && [[ ${RB_SUITE_JOBS:-} != Probe-B ]] \
+         && [[ ${REVIEW_ROUND_THRESHOLD:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
