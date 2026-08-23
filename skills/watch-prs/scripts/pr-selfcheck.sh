@@ -633,11 +633,17 @@ done
 #
 # ONLY THE EARLY-EXITING READERS MATTER. `grep -c`, `sed` and `awk` without an
 # `exit` read to end of input, so their pipelines never signal.
-# THE SPELLINGS IT RECOGNISES, AND WHY THEY ARE NOT A LIST OF ONE. The first
-# version matched `printf '%s'` with SINGLE quotes and `grep -q` with the `q`
-# first, and `printf "%s\n" …` or `grep -Fq` walked past it — equivalent code, and
-# the gate reporting clean. The format string may be quoted either way, the flags
-# may be in any order as long as one of them is `q`, and the spacing is free.
+# THE SPELLINGS IT RECOGNISES, AND WHY THEY ARE NOT A LIST OF ONE. Two rounds of
+# review were spent widening this, each finding an equivalent spelling the previous
+# version reported clean: `printf "%s\n" …` with DOUBLE quotes, `grep -Fq` with the
+# `q` second, `builtin printf … | command grep -q` — which twenty-four assertions
+# in `test-pr-selfcheck.sh` used — and `grep -F -q` with the options split.
+#
+# SO IT TAKES THE SHAPE, NOT A LIST: either quoting of the format string, any
+# `command`/`builtin` prefix on either side, any number of separate option words
+# before the one carrying `q`, and free spacing throughout. What it still cannot
+# see is a pipeline assembled at runtime, which is the limit of reading text and is
+# why this is a gate rather than a proof.
 #
 # AND WHAT IS EXEMPT IS MARKED, not guessed. This scans raw text, so a comment, a
 # stub or a heredoc containing the spelling AS DATA cannot be told from code — and
@@ -653,7 +659,7 @@ pipeq=0
 for f in "$SCRIPTS"/test-*.sh; do
     [ -e "$f" ] || continue
     hits=""
-    hits="$(grep -nE "printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\| *grep +-[A-Za-z]*q" "$f")"
+    hits="$(grep -nE "(builtin +)?printf +[\"']%s(\\\\n)?[\"'] +[^|]*\\| *(command +|builtin +)*grep +(-[A-Za-z]+ +)*-[A-Za-z]*q" "$f")"
     grc=$?
     if [ "$grc" -gt 1 ]; then
         note scan_failed "could not scan $(basename "$f") for racy pipelines (grep exited $grc)"

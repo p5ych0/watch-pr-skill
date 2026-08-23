@@ -296,7 +296,9 @@ grep -q 'grep -q y' <<<"$out" \
 # reporting clean.
 for _v in 'printf "%s\n" "$x" BAR grep -q y || true' \
           "printf '%s' \"\$x\" BAR grep -Fq y || true" \
-          "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true"; do
+          "printf  '%s'  \"\$x\"  BAR  grep  -q  y || true" \
+          "builtin printf '%s' \"\$x\" BAR command grep -q y || true" \
+          "printf '%s' \"\$x\" BAR grep -F -q y || true"; do
     { printf '#!/usr/bin/env bash\nset -o pipefail\n'
       printf '%s\n' "${_v/BAR/$_bar}"
     } > "$_rq/skills/watch-prs/scripts/test-racy.sh"
@@ -645,7 +647,7 @@ R6="$(mkroot "$OK_SKILL")"
 addscript "$R6" pr-thing.sh 'exit 0'
 addtest "$R6" test-pr-thing.sh
 out="$(cd "$GLOBDIR" && run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a glob-shaped inherited name is cleared, not expanded" \
     || die "a glob-shaped name blocked a valid run (rc=$rc out='$out')"
 # …AND WITH `set` NEUTRALISED, which is the interaction the separate cases miss.
@@ -654,7 +656,7 @@ out="$(cd "$GLOBDIR" && run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT"
 out="$(cd "$GLOBDIR" && set() { return 0; }
        export -f set
        run_limited 60 env 'BASH_FUNC_a*b%%=() { :; }' "$SCRIPT" "$R6" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "…even when the guard a lesser fix would have used is itself shadowed" \
     || die "a forged set defeated the glob handling (rc=$rc out='$out')"
 
@@ -684,7 +686,7 @@ addscript "$R7" pr-thing.sh 'exit 0'
 builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
 chmod +x "$R7/skills/watch-prs/scripts/test-pr-thing.sh"
 out="$(. "$FORGE5"; run_limited 60 "$SCRIPT" "$R7" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && command grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "an enumerator that reports nothing cannot hide the functions it lists" \
     || die "a forged compgen changed the verdict (rc=$rc out='$out')"
 
@@ -710,7 +712,7 @@ addscript "$R8" pr-thing.sh 'exit 0'
 builtin printf '#!/usr/bin/env bash\nexit 1\n' > "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
 chmod +x "$R8/skills/watch-prs/scripts/test-pr-thing.sh"
 out="$(. "$FORGE6"; run_limited 60 "$SCRIPT" "$R8" 2>&1)"; rc=$?
-builtin printf '%s' "$out" | command grep -q 'status=clean' \
+command grep -q 'status=clean' <<<"$out" \
     && die "one forged prefix answered for both checks and the suite reported clean: $out" \
     || pass "one forged prefix cannot answer for both halves of the postcondition"
 
@@ -741,7 +743,7 @@ addtest "$R11" test-pr-thing.sh
 # while proving nothing about the hook erasing its own trace.
 out="$(run_limited 60 env -u ENV -u SHELLOPTS -u BASH_XTRACEFD \
         BASH_ENV="$ERASE" "$SCRIPT" "$R11" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a hook that unsets itself does not block a valid run" \
     || die "the re-exec was skipped by a self-erasing hook (rc=$rc out='$out')"
 
@@ -762,7 +764,7 @@ R10="$(mkroot "$OK_SKILL")"
 addscript "$R10" pr-thing.sh 'exit 0'
 addtest "$R10" test-pr-thing.sh
 out="$(run_limited 60 env BASH_ENV="$ROFN" "$SCRIPT" "$R10" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a readonly function from a startup hook does not block a valid run" \
     || die "a harmless readonly function was treated as a forgery (rc=$rc out='$out')"
 # …AND WITH THE GUARD'S OWN TEST SHADOWED IN THE SAME HOOK. The hook runs before
@@ -776,7 +778,7 @@ ROFN2="$TMP/rofn2.sh"
   builtin printf '[() { return 1; }\n'
 } > "$ROFN2"
 out="$(run_limited 60 env BASH_ENV="$ROFN2" "$SCRIPT" "$R10" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "…even when the same hook shadows the test the guard is written with" \
     || die "a shadowed [ skipped the re-exec (rc=$rc out='$out')"
 
@@ -792,7 +794,7 @@ R9="$(mkroot "$OK_SKILL")"
 addscript "$R9" pr-thing.sh 'exit 0'
 addtest "$R9" test-pr-thing.sh
 out="$(run_limited 60 env BASH_ENV="$ROENV" "$SCRIPT" "$R9" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a readonly startup hook cannot talk over the record channel" \
     || die "a readonly BASH_ENV reached the records (rc=$rc out='$out')"
 
@@ -812,14 +814,14 @@ XT="$(mkroot "$OK_SKILL")"
 addscript "$XT" pr-thing.sh 'exit 0'
 addtest "$XT" test-pr-thing.sh
 out="$(run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "inherited tracing does not reach the record channel" \
     || die "xtrace from the caller broke the run (rc=$rc out='$out')"
 # …AND THE GUARD DOES NOT LOOP. `SHELLOPTS` is set in every bash whether it was
 # inherited or not, so a re-exec conditioned on it never terminates. The condition
 # is `$-`, which carries `x` only when tracing is really on. A watchdog is not the
 # assertion here — reaching a verdict at all is.
-builtin printf '%s' "$out" | command grep -q 'PR_SELFCHECK' \
+command grep -q 'PR_SELFCHECK' <<<"$out" \
     && pass "…and the guard that strips it terminates" \
     || die "the re-exec did not reach a verdict: $out"
 # …AND WITH `exec` SWALLOWED, so the re-exec cannot strip anything. `SHELLOPTS` is
@@ -831,7 +833,7 @@ builtin printf '%s' "$out" | command grep -q 'PR_SELFCHECK' \
 # valid checkout refused, and the fix is one line rather than an assertion about
 # bash versions.
 out="$(. "$NOEXEC2"; run_limited 60 env SHELLOPTS=xtrace BASH_XTRACEFD=1 "$SCRIPT" "$XT" 2>/dev/null)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "…and tracing is stripped even when the re-exec is swallowed" \
     || die "a swallowed re-exec left tracing on the record channel (rc=$rc out='$out')"
 
@@ -850,7 +852,7 @@ R4="$(mkroot "$OK_SKILL")"
 addscript "$R4" pr-thing.sh 'exit 0'
 addtest "$R4" test-pr-thing.sh
 out="$(run_limited 60 env BASH_ENV="$BENV" "$SCRIPT" "$R4" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a BASH_ENV that prints does not corrupt the record stream" \
     || die "startup output reached the records (rc=$rc out='$out')"
 
@@ -921,7 +923,7 @@ out="$(bash() { if [ "${1#*/test-}" != "$1" ]; then return 0; fi; command bash "
 out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; else builtin printf "$@"; fi; }
        export -f printf
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && command grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "…and an exported printf cannot rewrite a failing record" \
     || die "a forged record format was accepted (rc=$rc out='$out')"
 
@@ -940,7 +942,7 @@ out="$(printf() { if [ "$1" = "F %s\n" ]; then builtin printf "P %s\n" "$2"; els
 out="$(builtin() { if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3"; else command builtin "$@"; fi; }
        export -f builtin
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && command grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "an exported builtin cannot forge the record it is meant to protect" \
     || die "a shadowed builtin forged a pass (rc=$rc out='$out')"
 #
@@ -952,7 +954,7 @@ out="$(builtin() { if [ "${2-}" = 'F %s\n' ]; then command printf 'P %s\n' "$3";
 out="$(command() { if [ "$1" = sort ]; then cat >/dev/null; builtin printf 'P 1\n'; else builtin command "$@"; fi; }
        export -f command
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && command grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "…and neither can an exported command" \
     || die "a shadowed command forged a pass (rc=$rc out='$out')"
 
@@ -982,10 +984,10 @@ out="$(unset() { return 0; }
        }
        export -f unset builtin
        run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+{ [ "$rc" -eq 2 ] && command grep -q 'inherited_function' <<<"$out"; } \
     && pass "an unset that clears nothing is refused, not worked around" \
     || die "a no-op unset left the forgers installed (rc=$rc out='$out')"
-builtin printf '%s' "$out" | command grep -q 'status=clean' \
+command grep -q 'status=clean' <<<"$out" \
     && die "…and it reported clean anyway: $out" \
     || pass "…and nothing was reported clean"
 
@@ -1010,7 +1012,7 @@ read() {
 export -f read
 FORGESH
 out="$(. "$FORGE"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && builtin printf '%s' "$out" | command grep -q 'test-pr-thing.sh fails'; } \
+{ [ "$rc" -eq 1 ] && command grep -q 'test-pr-thing.sh fails' <<<"$out"; } \
     && pass "an exported read cannot fabricate the record stream" \
     || die "a forged read was accepted (rc=$rc out='$out')"
 
@@ -1036,10 +1038,10 @@ FORGESH
 # required the absence of `status=clean` therefore passed either way, which is the
 # same wrong-reason pass this file has already shipped once and had to correct.
 out="$(. "$FORGE2"; run_limited 60 "$SCRIPT" "$R" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+{ [ "$rc" -eq 2 ] && command grep -q 'inherited_function' <<<"$out"; } \
     && pass "a shadowed [ cannot make the postcondition answer for itself" \
     || die "the postcondition was answered by the thing it checks for (rc=$rc out='$out')"
-builtin printf '%s' "$out" | command grep -q 'status=clean' \
+command grep -q 'status=clean' <<<"$out" \
     && die "…and the suite was reported clean: $out" \
     || pass "…and nothing was reported clean"
 
@@ -1064,7 +1066,7 @@ function -v { :; }
 export -f -- -v
 ODDSH
 out="$(. "$ODDFN"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && builtin printf '%s' "$out" | command grep -q 'the whole suite passes'; } \
+{ [ "$rc" -eq 0 ] && command grep -q 'the whole suite passes' <<<"$out"; } \
     && pass "a benign function named like an option is cleared, not a refusal" \
     || die "an option-shaped function name blocked a valid run (rc=$rc out='$out')"
 
@@ -1084,10 +1086,10 @@ builtin() {
 export -f unset builtin
 FORGESH
 out="$(. "$FORGE3"; run_limited 60 "$SCRIPT" "$R2" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'inherited_function'; } \
+{ [ "$rc" -eq 2 ] && command grep -q 'inherited_function' <<<"$out"; } \
     && pass "a swallowed builtin exit still stops the run" \
     || die "the refusal was swallowed (rc=$rc out='$out')"
-builtin printf '%s' "$out" | command grep -q 'status=clean' \
+command grep -q 'status=clean' <<<"$out" \
     && die "…and it went on to report clean: $out" \
     || pass "…and did not go on to a verdict"
 
@@ -1124,7 +1126,7 @@ FORGESH
 # tests themselves rather than the extraction this case is about.
 BARE="$(mkroot "$OK_SKILL")"
 out="$(. "$FORGE4"; run_limited 60 env PATH="$STRICT:$PATH" "$SCRIPT" "$BARE" 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && builtin printf '%s' "$out" | command grep -q 'step=assigned'; } \
+{ [ "$rc" -eq 2 ] && command grep -q 'step=assigned' <<<"$out"; } \
     && pass "an exported set does not leave pipefail off for the run" \
     || die "a failing middle stage was hidden (rc=$rc out='$out')"
 

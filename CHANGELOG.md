@@ -18,8 +18,10 @@
   pre-push gate reports the shape rather than letting it back in — and the suite
   it gates stops failing for reasons that are not there.
 
-  The check recognises either quoting of the format string and any flag order, so
-  `printf "%s\n" …` and `grep -Fq` do not walk past it. A line that carries the
+  The check takes the SHAPE rather than a list of spellings — either quoting of the
+  format string, any `command`/`builtin` prefix on either side, any option order
+  including split options, free spacing — because two review rounds each found an
+  equivalent spelling the previous version reported clean. A line that carries the
   spelling as DATA — a comment, a stub, a heredoc — says so with
   `racy-pipeline-ok`; nothing else is exempt. And a fixture the scan cannot READ is
   a finding of its own rather than a clean result, because `grep` exits 1 for "no
