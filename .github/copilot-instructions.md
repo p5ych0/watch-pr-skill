@@ -312,18 +312,20 @@ leaves that stub, calling it fails, and the first load IS the check. Here there 
 no equivalent — this is the loader itself, and it has nothing to fall back on.
 Decided on #96 and recorded beside the check.
 
-**The test workflow is off, deliberately and temporarily, and that is not a
-finding.** `.github/workflows/tests.yml` runs on `workflow_dispatch` only and
-`macos-shell` carries `if: false`, so a push produces no check and the gates read
-`none` — which `pr-ci-gate.sh` and `pr-merge-gate.sh` both document as "nothing to
-assert". The operator turned it off while the issue backlog is worked through,
-because the suite is the largest fixed cost per round and it had been blocking
-correct changes on portability assertions that were themselves wrong.
+**`macos-shell` is off, deliberately and temporarily, and that is not a
+finding.** The normal job in `.github/workflows/tests.yml` runs on every push to
+`main` and every pull request; `macos-shell` carries `if: false`, so nothing checks
+bash 3.2.57 or a mac-shaped `PATH` — not even a `workflow_dispatch`, since that
+guard is job-level. The operator turned that job off because it went red three
+times on correct changes, each time because a fixture required the ROUTE bash 5
+takes to a defence rather than the defence holding. Where no check exists at all
+— a branch with no run yet — the gates read `none`, which `pr-ci-gate.sh` and `pr-merge-gate.sh` both document
+as "nothing to assert".
 
 **What it costs is real and is not disputed:** while this stands, a green round
-means the reviewers were satisfied, NOT that the suite ran, and a bash 3.2 or
-macOS-userland regression can merge. #93 owns restoring the triggers and the job
-alike, names both in its acceptance criteria, and requires the
+means the suite passed on Ubuntu with bash 5, NOT that it passes on bash 3.2.57 or
+on a mac-shaped `PATH`, and a regression that needs the second machine can merge.
+#93 owns restoring that job, names it in its acceptance criteria, and requires the
 fixtures to be audited against *assert the invariant, not the version's route to
 it* first — re-enabling before that simply reproduces the failures that caused it.
 
@@ -361,11 +363,12 @@ script into a stricter mode.
 
 ## Portability: what CI cannot see, and you can
 
-**NEITHER CI JOB IS RUNNING, so read this section as work that is now yours.**
-The workflow triggers on `workflow_dispatch` only and `macos-shell` carries
-`if: false`; a push produces no check at all. While that stands, post-3.2
-constructs and absent commands reach `main` unless a reader catches them, so check
-for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
+**THE SECOND CI JOB IS NOT RUNNING, so read this section as work that is now
+yours.** The normal job runs on every push to `main` and every pull request, but
+`macos-shell`
+carries `if: false`; nothing checks bash 3.2.57 or a mac-shaped `PATH`. While that
+stands, post-3.2 constructs and absent commands reach `main` unless a reader
+catches them, so check for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
 `declare -A`, `mapfile`/`readarray`, `&>>`, negative array indices, and any
 command name assembled at runtime. The paragraph below says why it is off and what
 it costs.

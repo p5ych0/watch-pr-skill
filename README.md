@@ -221,15 +221,20 @@ the suite never takes; a GNU-only *flag* on a command that exists everywhere
 (`sed -i`, `readlink -f`, `grep -P`); and `\s` in a `grep` pattern, where BSD
 `grep` does not fail but matches a literal `s`. Those are review's job.
 
-**None of it is running at the moment.** `.github/workflows/tests.yml` is on
-`workflow_dispatch` only and `macos-shell` carries `if: false`, so a push produces
-no check at all and a dispatch runs the normal job alone. The suite is still the
-mandatory pre-push gate — `pr-selfcheck.sh` is unchanged, and it is what a
-contributor actually runs — but the second machine is not checking anyone's work
-while this stands, so a bash 3.2 or macOS-userland regression can merge. It was
-turned off because the per-round cost had grown past what the backlog could carry,
-and because several of the portability assertions doing the blocking were
-themselves wrong. #93 owns turning the triggers and the job back on — both are named in its
+**Half of it is running.** `.github/workflows/tests.yml` runs the normal job on
+every push to `main` and on every pull request; `macos-shell` carries `if: false`
+and does not run — a `workflow_dispatch` does not reach it either, that guard
+being job-level. So a green check means the suite passed on Ubuntu with bash 5,
+and says nothing about bash 3.2.57 or a mac-shaped `PATH`. A regression that needs
+the second machine to see it can still merge, and a push to a branch with no pull
+request open produces no check at all. The suite is also still the mandatory pre-push gate; `pr-selfcheck.sh` is
+unchanged, and it is what a contributor actually runs.
+
+Both were off. The normal job came back once its cost came down — the slowest
+fixture went 174s to 10s — on its record: it has never gone red on a correct
+change. `macos-shell` is the opposite case: it went red three times on correct
+changes, each time because a fixture required the ROUTE bash 5 takes to a defence
+rather than the defence holding. #93 owns turning that job back on — it is named in its
 acceptance criteria — after those fixtures are audited.
 
 ## Install
