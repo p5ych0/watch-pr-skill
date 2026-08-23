@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.58] — 2026-08-23
+
+- **The pre-push gate now refuses a fixture that pipes a value into `grep -q`.**
+  That shape is RACY under `set -o pipefail`, which every fixture sets: `grep -q`
+  exits the moment it matches, `printf` takes `SIGPIPE` and dies with 141, and
+  `pipefail` makes that the pipeline's status — so a line that IS present reads as
+  missing, at whatever rate the scheduler decides. Measured at roughly one run in
+  three on one file.
+
+  It is worse than an intermittent failure. Where the status feeds an `|| x=""`
+  capture, a good extraction silently becomes an empty one and every assertion
+  built on it passes against nothing.
+
+  Nothing a user installs changes behaviour: the 498 converted sites are all in
+  `test-*.sh`. What ships is `pr-selfcheck.sh`'s new check, so a contributor's
+  pre-push gate reports the shape rather than letting it back in — and the suite
+  it gates stops failing for reasons that are not there.
+
+---
+
 ## [2.0.57] — 2026-08-22
 
 - **The origin transport was thirty-five lines of driver-shell defence for one
