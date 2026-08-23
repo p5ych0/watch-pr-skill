@@ -22,8 +22,11 @@
 - **A refusal after the directory existed left it behind.** The helper's contract
   is now a directory it creates, so every refusal past that point — an unreadable
   origin, an empty one, a newline in it, a failed write — has something to clean
-  up. The cleanup is one `EXIT` trap that runs once, on every path out — a
-  refusal, a signal, or the end of the script — armed BEFORE the reservation is
+  up. The cleanup is one body with three ways in, each running it at most once: an
+  ordinary refusal and any other abnormal end go through an `EXIT` trap, a SIGNAL
+  goes directly from its own handler and then re-raises, and a SUCCESSFUL run does
+  not go at all — it resets `EXIT` and leaves the directory for the caller, which
+  is the point of the call. The trap is armed BEFORE the reservation is
   attempted, since `mkdir` is an external command and a signal while it ran left
   the shell dead and the child creating the directory. Two recorded facts and an
   ownership test are what make arming first safe: `RB_OWNED` after a successful

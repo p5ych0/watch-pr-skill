@@ -79,15 +79,25 @@
 #          the directory back before stopping. Nothing is left at the argument and
 #          there is nothing for the caller to collect.
 #
-#          THE CLEANUP IS ONE `EXIT` TRAP AND IT HAS TWO SHAPES, chosen by
-#          `RB_PHASE` — by whether a leaf can exist yet. BEFORE either write, which
-#          is the two ancestry walks and the unresolvable-path refusal, it is
-#          `rmdir` ALONE: there is no leaf to remove, and removing one by NAME
-#          would resolve a path the walk has just decided not to trust, which is a
-#          symlink an attacker can substitute while it runs. AFTER the writes it
-#          removes the leaf and then the directory. The refusals themselves clean
-#          up nothing — they say why and stop — so the removal happens exactly
-#          once, whichever way the run ends.
+#          THE CLEANUP HAS ONE BODY AND THREE WAYS IN, and they are not the same
+#          thing. An ordinary refusal and any other abnormal end reach it through
+#          the `EXIT` trap. A SIGNAL reaches it directly from its own handler,
+#          which then re-raises — going through `EXIT` there would mean handling
+#          the signal by RETURNING, which is what made the helper resume the work
+#          it was killed during. And a SUCCESSFUL run reaches it not at all: it
+#          resets `EXIT` and leaves the directory for the caller, which is the
+#          point of the call. "The EXIT trap cleans up on every path" invites both
+#          halves of the mistake — removing the direct signal cleanup, and cleaning
+#          up a successful result.
+#
+#          THE BODY HAS TWO SHAPES, chosen by `RB_PHASE` — by whether a leaf can
+#          exist yet. BEFORE either write, which is the two ancestry walks and the
+#          unresolvable-path refusal, it is `rmdir` ALONE: there is no leaf to
+#          remove, and removing one by NAME would resolve a path the walk has just
+#          decided not to trust, which is a symlink an attacker can substitute
+#          while it runs. AFTER the writes it removes the leaf and then the
+#          directory. The refusals themselves clean up nothing — they say why and
+#          stop — so the removal happens at most once, whichever way the run ends.
 #
 #      THE ANCESTRY IS ON THE SECOND LIST, and it moved there with the `mkdir`.
 #      The walks used to run first, so an unsafe component was refused before

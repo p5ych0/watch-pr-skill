@@ -605,6 +605,12 @@ if [[ -z $RB_REMOTE ]]; then
     # operator is told which name is unusable. Reverting the containment restores
     # exactly that regression, which is why `test-pr-skill-contract.sh` asserts the
     # excerpt reaches the selection.
+    # AND `RB_SCRIPTS` WITH IT, which is where every helper is found. An alias onto
+    # it passed both probes, the assignments replaced the plugin directory with a
+    # transport path, and the very next line invoked `"$RB_SCRIPTS"/pr-origin.sh`
+    # from a directory that does not contain it — a setup that aborts and leaves the
+    # long-lived name corrupted for whatever the operator does next.
+    #
     # AND `REPO_DIR` WITH THEM, which is neither a candidate nor a transport name
     # but is in scope and is what the MERGE stage runs `cd` into. An alias onto it
     # passed both probes — neither read it — and the assignments then replaced the
@@ -623,10 +629,11 @@ if [[ -z $RB_REMOTE ]]; then
     # only against the names its own stage introduces cannot see that.
     if ( RB_TMPPARENT=Probe-A; [[ $RB_TMPPARENT = Probe-A ]] \
          && [[ ${RB_REMOTE:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR=Probe-B; [[ $RB_ORIGIN_DIR = Probe-B ]] \
          && [[ ${RB_REMOTE:-} != Probe-B ]] && [[ ${RB_TMPPARENT:-} != Probe-B ]] \
-         && [[ ${REPO_DIR:-} != Probe-B ]] \
+         && [[ ${REPO_DIR:-} != Probe-B ]] && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -891,10 +898,12 @@ if [[ -z $RB_REMOTE ]]; then
     if ( RB_PIN_DIR=Probe-A; [[ $RB_PIN_DIR = Probe-A ]] \
          && [[ ${RB_PIN_SEEN:-} != Probe-A ]] && [[ ${RB_REMOTE:-} != Probe-A ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-A ]] && [[ ${REPO_DIR:-} != Probe-A ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-A ]] \
          && [[ ${HOME:-} != Probe-A ]] && [[ ${TMPDIR:-} != Probe-A ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN=Probe-B; [[ $RB_PIN_SEEN = Probe-B ]] \
          && [[ ${RB_PIN_DIR:-} != Probe-B ]] && [[ ${RB_REMOTE:-} != Probe-B ]] \
          && [[ ${RB_TMPPARENT:-} != Probe-B ]] && [[ ${REPO_DIR:-} != Probe-B ]] \
+         && [[ ${RB_SCRIPTS:-} != Probe-B ]] \
          && [[ ${HOME:-} != Probe-B ]] && [[ ${TMPDIR:-} != Probe-B ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.

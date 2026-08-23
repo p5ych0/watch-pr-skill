@@ -1213,6 +1213,24 @@ _res_gap="$(awk -v a="$_res_tl" -v b="$_res_mk" 'NR>a && NR<b' "$SCRIPT" \
 [ -z "$_res_gap" ] \
     && pass "…with nothing running between the arming and the reservation" \
     || die "statements run between the arming and the reservation: '$_res_gap'"
+# …AND THE PHASE FLIPS AFTER THE WALKS AND BEFORE ANY WRITE. `RB_PHASE` is what
+# decides whether the cleanup removes a leaf, and the leaf is removed BY NAME — so
+# moving `RB_PHASE=post` above either ancestry walk would let a signal during an
+# UNTRUSTED walk resolve `$OUT` through a path an attacker can have replaced. The
+# interruption cases cannot see that: they stage neither a replacement nor a victim
+# leaf, so they stay green.
+#
+# THESE ASSERTIONS WENT MISSING when this block was rewritten, and their absence is
+# why the paragraph that claimed structural cover was false for two rounds. All
+# three line numbers must be positive before they are ordered — a pattern that
+# stops matching leaves zero, and zero precedes everything.
+_res_ph=0; _res_ph="$(grep -n '^RB_PHASE=post$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_ph=0
+_res_w2=0; _res_w2="$(grep -n '_rb_walk "\$_rb_real" || rb_refuse$' "$SCRIPT" | tail -1 | cut -d: -f1)" || _res_w2=0
+_res_wr=0; _res_wr="$(grep -n '> "\$OUT" *\\$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_wr=0
+{ [ "$_res_ph" -gt 0 ] && [ "$_res_w2" -gt 0 ] && [ "$_res_wr" -gt 0 ] \
+  && [ "$_res_w2" -lt "$_res_ph" ] && [ "$_res_ph" -lt "$_res_wr" ]; } \
+    && pass "…and the phase flips after the walks and before any write" \
+    || die "RB_PHASE=post is misplaced (walk=$_res_w2 phase=$_res_ph write=$_res_wr)"
 # …AND THE CLEANUP REFUSES A DIRECTORY THIS ACCOUNT DOES NOT OWN. Arming first
 # means the cleanup can run at a moment when the `mkdir` had already failed because
 # the name was taken, and a directory there that belongs to somebody else is
@@ -1489,7 +1507,7 @@ rm -rf "$_sig_bin"; rm -f "$_sig_mark"
 
 # WHAT IS NOT STAGED, AND WHY. A signal landing after a write has SUCCEEDED and
 # before the disarm is the phase where the handler must remove the leaf as well.
-# It is asserted structurally above and not run, because the interval cannot be
+# It is asserted structurally by the `RB_PHASE` ordering cases above and not run, because the interval cannot be
 # reached: bash defers a signal until the foreign command it is waiting on
 # returns, so a TERM sent during `git` is handled BEFORE the write, and the only
 # thing between the write and the disarm is a builtin. Racing a builtin is not a
