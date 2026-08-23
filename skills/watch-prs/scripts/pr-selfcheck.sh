@@ -705,7 +705,12 @@ for f in "$SCRIPTS"/test-*.sh; do
           #
           # A QUOTED WORD IS ONE WORD, so `grep -e '"'"'foo bar'"'"' -q` is still a match.
           #
-          t = line; gsub(/\|\|/, "@@", t)
+          # REPLACED WITH A CHARACTER THE WORD CLASS EXCLUDES, so it forms a
+          # BOUNDARY. Written as `@@` it did not: the word class accepted it, the
+          # match crossed into what followed, and
+          # `printf … | grep -c . || test 1 -eq 2` was reported because `-eq` looked
+          # like a quiet option. `)` is already excluded, so the match stops there.
+          t = line; gsub(/\|\|/, ")", t)
           if (t ~ /(command[[:space:]]+|builtin[[:space:]]+)*printf[[:space:]]+["'"'"']%s(\\n)?["'"'"'][[:space:]]+[^|]*\|([^|]*\|)*[[:space:]]*(command[[:space:]]+|builtin[[:space:]]+)*grep([[:space:]]+('"'"'[^'"'"']*'"'"'|\"[^\"]*\"|[^[:space:])\"'"'"'|]+))*[[:space:]]+-[A-Za-z]*q[A-Za-z]*([[:space:]]|$)/)
               printf "%d:%s\n", n, line
         }' "$f")"

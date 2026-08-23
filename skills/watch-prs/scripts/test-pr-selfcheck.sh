@@ -351,6 +351,17 @@ out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
 { [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
     && pass "…nor a grep -c whose line later contains -eq" \
     || die "a grep -c was reported as a racy pipeline (rc=$rc out=$out)"
+# …NOR A `grep -c` FOLLOWED BY AN OR AND AN ARITHMETIC TEST, which is the same
+# false positive one operator along: replacing `||` with a placeholder the word
+# class ACCEPTS let the match cross into `test 1 -eq 2` and read `-eq` as a quiet
+# option. The replacement has to be a character the class excludes.
+{ printf '#!/usr/bin/env bash\nset -o pipefail\n'
+  printf '%s\n' "printf '%s' \"\$x\" $_bar grep -c . || test 1 -eq 2 || true"
+} > "$_rq/skills/watch-prs/scripts/test-racy.sh"
+out="$("$SCRIPT" "$_rq" 2>&1)"; rc=$?
+{ [ "$rc" -eq 0 ] && grep -q 'status=clean' <<<"$out"; } \
+    && pass "…nor a grep -c whose line continues into an arithmetic test" \
+    || die "a grep -c before an OR was reported as racy (rc=$rc out=$out)"
 # …AND A LINE MARKED AS DATA IS NOT A FINDING. The scan reads raw text, so a
 # comment, a stub or a heredoc carrying the spelling cannot be told from code —
 # and the fixture proving this gate works has to carry it. `racy-pipeline-ok`
