@@ -219,6 +219,7 @@ extra="$(bash -c '
     rb_identity >/dev/null 2>&1
     compgen -v | grep -E "^[A-Z][A-Z0-9_]*$" | sort \
         | comm -13 <(printf "%s\n" "$before") -' 2>&1 \
+    `# racy-pipeline-ok: that printf feeds comm, and the pipe below is the bash -c's` \
     | grep -vxF -f <(printf '%s\n' "$declared") || true)"
 [ -z "$extra" ] \
     && pass "…and a call sets no global the declaration does not name" \

@@ -42,7 +42,7 @@ BASE="$(git -C "$REPO" rev-parse HEAD)"
 
 # ── Identical heads: nothing intervened ────────────────────────────────────
 run "$BASE" "$BASE"
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'commits=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'commits=0' <<<"$out"; } \
     && pass "identical reviewed/head => 0" || die "identical heads: rc=$rc out=$out"
 
 # ── Every intervening commit properly tagged ───────────────────────────────
@@ -63,7 +63,7 @@ run "$BASE" "$TAGGED_HEAD"
 commit "fix(review): looks like a Copilot fix but carries no trailer"
 SUBJ_HEAD="$(git -C "$REPO" rev-parse HEAD)"
 run "$BASE" "$SUBJ_HEAD"
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'untagged_commit'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'untagged_commit' <<<"$out"; } \
     && pass "fix(review): subject without the trailer => 1 (blocked)" \
     || die "a bare fix(review): subject passed the gate: rc=$rc out=$out"
 
@@ -88,7 +88,7 @@ commit "fix(review): on a divergent branch
 Review-Phase: copilot"
 SIDE="$(git -C "$REPO" rev-parse HEAD)"
 run "$TAGGED_HEAD" "$SIDE"
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'not_an_ancestor'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'not_an_ancestor' <<<"$out"; } \
     && pass "divergent history => 1, even fully tagged" \
     || die "divergent range was not blocked: rc=$rc out=$out"
 
@@ -155,7 +155,7 @@ out="$(PATH="$COUNT_BIN:$PATH" FAULT_COUNT=1 FAULT_COUNT_VALUE=1 "$SCRIPT" "$BAS
 [ "$rc" -eq 2 ] \
     && pass "counter that prints then fails => 2 (inspection failed)" \
     || die "stdout-plus-failure count accepted: rc=$rc out=$out"
-printf '%s' "$out" | grep -q 'status=ok' \
+grep -q 'status=ok' <<<"$out" \
     && die "a failed count still reported status=ok: $out" \
     || pass "no status=ok from a failed count"
 
@@ -172,7 +172,7 @@ git -C "$REPO" checkout -q -B zerocase "$BASE"
 commit "chore: no trailer here"
 ZERO_HEAD="$(git -C "$REPO" rev-parse HEAD)"
 run "$BASE" "$ZERO_HEAD"
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'tagged=0'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'tagged=0' <<<"$out"; } \
     && pass "no matches is a real zero (blocked, not error)" \
     || die "zero-match count did not block cleanly: rc=$rc out=$out"
 
@@ -202,7 +202,7 @@ out="$(cd "$MRTMP" && run_limited 20 env PATH="$MRTMP/bin:$PATH" "$SCRIPT" \
         1111111111111111111111111111111111111111 2222222222222222222222222222222222222222 2>&1)"
 rc=$?
 set -e
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'repo_root_lookup_failed'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'repo_root_lookup_failed' <<<"$out"; } \
     && pass "a repo-root probe that prints then fails => 2, on its own reason" \
     || die "failed root probe gave rc=$rc out='$out'"
 rm -rf "$MRTMP"
@@ -227,13 +227,13 @@ git -C "$REPO" add -A
 git -C "$REPO" commit -q -F "$TMP/msg.txt"
 MISPLACED="$(git -C "$REPO" rev-parse HEAD)"
 run "$BASE2" "$MISPLACED"
-{ [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'reason=trailer_not_in_trailer_block'; } \
+{ [ "$rc" -eq 1 ] && grep -q 'reason=trailer_not_in_trailer_block' <<<"$out"; } \
     && pass "a trailer outside the trailer block is named as such, not as missing" \
     || die "misplaced trailer gave rc=$rc out='$out'"
-printf '%s' "$out" | grep -q 'LAST paragraph' \
+grep -q 'LAST paragraph' <<<"$out" \
     && pass "…and the diagnostic says where it has to go" \
     || die "the diagnostic does not explain the fix: $out"
-printf '%s' "$out" | grep -q 'reason=untagged_commit' \
+grep -q 'reason=untagged_commit' <<<"$out" \
     && die "…but it was still reported as merely untagged: $out" \
     || pass "…and is not reported as merely untagged"
 
@@ -249,7 +249,7 @@ echo "$RANDOM$RANDOM" > "$REPO/f.txt"
 git -C "$REPO" add -A
 git -C "$REPO" commit -q -F "$TMP/msg.txt"
 run "$BASE3" "$(git -C "$REPO" rev-parse HEAD)"
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'tagged=1'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'tagged=1' <<<"$out"; } \
     && pass "…while the same trailer inside the final block is accepted" \
     || die "a correctly-placed trailer was rejected (rc=$rc out='$out')"
 

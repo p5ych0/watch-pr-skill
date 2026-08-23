@@ -130,7 +130,7 @@ case_is() {   # case_is <want rc> <needle> <label>
     # empty argument into `no`, and the case that matters is the empty one.
     local auto="${6:-no}"; [ "$auto" = EMPTY ] && auto=""
     got="$(run_gate "${4:-7}" "${5:-$HEAD40}" "$auto")"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = "$1" ] && printf '%s' "$body" | grep -qF "$2"; } \
+    { [ "$rc" = "$1" ] && grep -qF "$2" <<<"$body"; } \
         && pass "$3" \
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
@@ -142,7 +142,7 @@ case_line() {   # case_line <want rc> <the WHOLE diagnostic line> <label>
     # what makes a false remainder visible.
     local got rc body
     got="$(run_gate "${4:-7}" "${5:-$HEAD40}" "${6:-no}")"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = "$1" ] && printf '%s\n' "$body" | grep -qxF "$2"; } \
+    { [ "$rc" = "$1" ] && grep -qxF "$2" <<<"$body"; } \
         && pass "$3" \
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
@@ -230,19 +230,19 @@ GATE_OWNER='ac me' run_gate >/dev/null
 
 codex_only_world
 got="$(run_gate 7 "$HEAD40" no)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF 'copilot=2'; } \
+{ [ "$rc" = 1 ] && grep -qF 'copilot=2' <<<"$body"; } \
     && pass "the default gate still requires Copilot, so codex-only is a real choice" \
     || die "the default gate merged without a Copilot verdict (rc=$rc '$body')"
 codex_only_world
 got="$(run_gate 7 "$HEAD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 0 ] && printf '%s' "$body" | grep -qF "merged $HEAD40"; } \
+{ [ "$rc" = 0 ] && grep -qF "merged $HEAD40" <<<"$body"; } \
     && pass "…and codex-only merges on the Codex signoff alone" \
     || die "codex-only could not merge (rc=$rc '$body')"
 # THE HEAD MUST BE THE COMMIT CODEX SIGNED. This is the check that replaces
 # Copilot's: without it, codex-only would merge a head nobody reviewed.
 codex_none_world
 got="$(run_gate 7 "$OLD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF 'pinned to the reviewed commit'; } \
+{ [ "$rc" = 1 ] && grep -qF 'pinned to the reviewed commit' <<<"$body"; } \
     && pass "…and refuses when the head has moved past the signoff" \
     || die "codex-only merged a head Codex never saw (rc=$rc '$body')"
 codex_only_world; printf '1' > "$STUB_DIR/pr-review-state.$CODEXBOT.rc"
@@ -253,7 +253,7 @@ got="$(run_gate 7 "$HEAD40" no codex-only)"; rc="${got%%|*}"; body="${got#*|}"
 # AN UNRECOGNISED MODE IS REFUSED, not read as the permissive one.
 world
 got="$(run_gate 7 "$HEAD40" no everyone)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qF "reviewers must be"; } \
+{ [ "$rc" = 1 ] && grep -qF "reviewers must be" <<<"$body"; } \
     && pass "…and an unrecognised reviewers mode is refused" \
     || die "an unknown reviewers mode was accepted (rc=$rc '$body')"
 
@@ -411,10 +411,29 @@ for _bad in 'verdict=findings findings= source=replies-only' \
         > "$STUB_DIR/pr-review-state.$COPILOTBOT.out"
     printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
     got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = 1 ] && printf '%s' "$body" | grep -qv 'merging on the signoff'; } \
+    { [ "$rc" = 1 ] && { [ -n "$body" ] && grep -qv 'merging on the signoff' <<<"$body"; }; } \
         && pass "a near-miss replies-only record is not authorised: ${_bad#verdict=findings }" \
         || die "a loose record was authorised: '$_bad' rc=$rc out='$body'"
 done
+
+# …AND AN EMPTY BODY IS NOT A PASS, which is what the non-emptiness test above is
+# for. A herestring supplies one newline even for an empty value, so a bare
+# `grep -qv PATTERN <<<"$body"` MATCHES that blank line and succeeds — where the
+# pipe it replaced fed zero bytes and returned 1. Without the guard, a `run_gate`
+# that regressed to status 1 with no diagnostic at all would satisfy every
+# not-authorised assertion above against nothing.
+#
+# ASSERTED ON THE EXPRESSION, not through the gate. Staging a gate that produces an
+# empty body means breaking the gate; what has to hold is that the guarded form
+# refuses an empty value, and that the bare form would have accepted it — both of
+# which are properties of the expression and are shown here directly.
+_eb=""
+{ [ -n "$_eb" ] && grep -qv 'merging on the signoff' <<<"$_eb"; } \
+    && die "the guarded form accepted an empty body" \
+    || pass "an empty body does not satisfy the not-authorised assertion"
+grep -qv 'merging on the signoff' <<<"$_eb" \
+    && pass "…and the unguarded herestring would have, which is why the guard is there" \
+    || die "the empty-body case proves nothing: an unguarded herestring refused it too"
 
 # A HEAD IS NOT A MOMENT. A signoff recorded for an EARLIER clean review on the
 # same head must not vouch for a LATER replies-only review that nobody read —
@@ -579,7 +598,7 @@ printf '1' > "$STUB_DIR/pr-review-state.$COPILOTBOT.rc"
 # earlier and equally final — so what this asserts is the OUTCOME and the absence
 # of the note, not which line said no.
 got="$(run_gate)"; rc="${got%%|*}"; body="${got#*|}"
-{ [ "$rc" = 1 ] && printf '%s' "$body" | grep -qv 'merging on the signoff'; } \
+{ [ "$rc" = 1 ] && { [ -n "$body" ] && grep -qv 'merging on the signoff' <<<"$body"; }; } \
     && pass "…while a signoff does not carry a review that has findings" \
     || die "a signoff carried a review with findings — rc=$rc out='$body'"
 
@@ -621,10 +640,10 @@ grep -qxF "pr-ci-gate.sh 7 $HEAD40" "$TMP/calls" \
 world
 GATE_REMOTE='git@github.example.com:acme/widget.git' run_gate >/dev/null
 gql="$(grep -F 'api --hostname' "$TMP/calls" | head -1)"
-{ printf '%s' "$gql" | grep -qF -- '--hostname github.example.com' \
-    && printf '%s' "$gql" | grep -qF -- 'number=7' \
-    && printf '%s' "$gql" | grep -qF -- 'owner=acme' \
-    && printf '%s' "$gql" | grep -qF -- 'repo=widget'; } \
+{ grep -qF -- '--hostname github.example.com' <<<"$gql" \
+    && grep -qF -- 'number=7' <<<"$gql" \
+    && grep -qF -- 'owner=acme' <<<"$gql" \
+    && grep -qF -- 'repo=widget' <<<"$gql"; } \
     && pass "the thread query names the derived host, owner, repo and PR" \
     || die "the thread query is not bound to the derived identity ('$gql')"
 

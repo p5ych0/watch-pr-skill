@@ -142,8 +142,8 @@ run() {   # run [args…] ; prints "<rc>|<output>"
 
 # ── THE TWO ANSWERS THAT ARE PERMISSION TO CONTINUE ────────────────────────
 world; got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" \
-    | grep -qF "PR_PHASE pr=7 state=before-copilot codex-sha=$HEAD40 head=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] \
+  && grep -qF "PR_PHASE pr=7 state=before-copilot codex-sha=$HEAD40 head=$HEAD40" <<<"${got#*|}"; } \
     && pass "a Codex signoff on the current head reads as the phase before Copilot" \
     || die "the before-Copilot state gave '${got}'"
 
@@ -153,8 +153,8 @@ world; got="$(run 7)"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" \
-    | grep -qF "PR_PHASE pr=7 state=after-copilot codex-sha=$OTHER40 copilot-sha=$HEAD40 head=$HEAD40"; } \
+{ [ "${got%%|*}" = 0 ] \
+  && grep -qF "PR_PHASE pr=7 state=after-copilot codex-sha=$OTHER40 copilot-sha=$HEAD40 head=$HEAD40" <<<"${got#*|}"; } \
     && pass "…and a Copilot signoff on the head reads as the phase after it, with an older Codex sha" \
     || die "the after-Copilot state gave '${got}'"
 
@@ -165,17 +165,17 @@ got="$(run 7)"
 # record exists reported that neither phase was closed.
 world; printf '%s\n' "$OTHER40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=before-copilot' <<<"${got#*|}"; } \
     && pass "…while a historical Copilot signoff naming an older commit does not select that arm" \
     || die "a stale Copilot signoff selected the post-Copilot arm: '${got}'"
 
 # ── NO SIGNOFF IS NOT A PHASE ──────────────────────────────────────────────
 world; printf '1\n' > "$W/codex.rc"; : > "$W/codex.sha"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'status=stopped reason=codex_phase_open'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=stopped reason=codex_phase_open' <<<"${got#*|}"; } \
     && pass "no recorded Codex signoff stops rather than inventing one" \
     || die "an unrecorded phase gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'state=' \
+grep -qF 'state=' <<<"${got#*|}" \
     && die "…but it also reported a state" \
     || pass "…and reports no state to act on"
 
@@ -184,15 +184,15 @@ printf '%s' "${got#*|}" | grep -qF 'state=' \
 # Both are wrong, so it fails closed with its own status.
 world; printf '2\n' > "$W/codex.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'status=error reason=signoff_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'status=error reason=signoff_unreadable' <<<"${got#*|}"; } \
     && pass "an unreadable Codex signoff fails closed with its own status" \
     || die "an unreadable signoff gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'state=' \
+grep -qF 'state=' <<<"${got#*|}" \
     && die "…but it also reported a state" \
     || pass "…and reports no state"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '2\n' > "$W/copilot.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_signoff_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_signoff_unreadable' <<<"${got#*|}"; } \
     && pass "…and so does an unreadable Copilot signoff, which selects the arm" \
     || die "an unreadable Copilot signoff gave '${got}'"
 
@@ -201,7 +201,7 @@ got="$(run 7)"
 # the point. What this prints is what the merge gate is pinned to.
 world; printf 'not-a-sha\n' > "$W/codex.sha"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=bad_codex_sha'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_codex_sha' <<<"${got#*|}"; } \
     && pass "a Codex sha of another shape refuses rather than being pinned to" \
     || die "a malformed Codex sha gave '${got}'"
 # THE MALFORMED COPILOT SHA IS THE FIRST ARM OF THE BRANCH, not a guard before it.
@@ -210,13 +210,14 @@ got="$(run 7)"
 # arm on two values that match only because both are wrong.
 world; printf 'not-a-sha\n' > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=bad_copilot_sha'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_copilot_sha' <<<"${got#*|}"; } \
     && pass "…and so does a Copilot sha of another shape" \
     || die "a malformed Copilot sha gave '${got}'"
 world; printf 'not-a-sha\n' > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf 'not-a-sha\n' > "$W/head.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qvF 'state=after-copilot'; } \
+{ [ "${got%%|*}" = 2 ] && [ -n "${got#*|}" ] \
+  && grep -qvF 'state=after-copilot' <<<"${got#*|}"; } \
     && pass "…and a head malformed the same way does not select the post-Copilot arm" \
     || die "two matching malformed values selected an arm: '${got}'"
 
@@ -226,12 +227,12 @@ got="$(run 7)"
 # the status is checked AND the shape validated.
 world; printf '1\n' > "$W/head.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=head_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=head_unreadable' <<<"${got#*|}"; } \
     && pass "a failed head read fails closed" \
     || die "a failed head read gave '${got}'"
 world; printf 'error: something\n' > "$W/head.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=bad_head'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_head' <<<"${got#*|}"; } \
     && pass "…and so does a head of another shape that arrived with status 0" \
     || die "a malformed head gave '${got}'"
 
@@ -239,10 +240,10 @@ got="$(run 7)"
 # A push while the stop was parked leaves the marker exactly as it was.
 world; printf '%s\n' "$OTHER40" > "$W/head.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'status=stopped reason=head_moved'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'status=stopped reason=head_moved' <<<"${got#*|}"; } \
     && pass "a head that moved past the Codex signoff stops before the Copilot phase" \
     || die "a moved head gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'state=' \
+grep -qF 'state=' <<<"${got#*|}" \
     && die "…but it also reported a state" \
     || pass "…and reports no state"
 
@@ -251,14 +252,14 @@ printf '%s' "${got#*|}" | grep -qF 'state=' \
 world; printf '1\n' > "$W/codex.verdict.rc"
 printf 'PR_REVIEW_STATE verdict=findings\n' > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_withdrawn'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_verdict_withdrawn' <<<"${got#*|}"; } \
     && pass "a Codex verdict that no longer stands stops, though the marker is unchanged" \
     || die "a withdrawn Codex verdict gave '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf '1\n' > "$W/copilot.verdict.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_withdrawn'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=copilot_verdict_withdrawn' <<<"${got#*|}"; } \
     && pass "…and so does a Copilot verdict, on the arm where that is the one that must hold" \
     || die "a withdrawn Copilot verdict gave '${got}'"
 
@@ -270,20 +271,20 @@ got="$(run 7)"
 world; printf '2\n' > "$W/codex.verdict.rc"
 printf 'PR_REVIEW_STATE verdict=error reason=unreadable\n' > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_unreadable' <<<"${got#*|}"; } \
     && pass "an unreadable Codex verdict fails closed rather than reading as a dismissal" \
     || die "an unreadable Codex verdict gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+grep -qF 'withdrawn' <<<"${got#*|}" \
     && die "…but it reported the phase as reopened as well" \
     || pass "…and does not tell the operator to re-request a review"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf '2\n' > "$W/copilot.verdict.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_verdict_unreadable' <<<"${got#*|}"; } \
     && pass "…and so does an unreadable Copilot verdict, on the other arm" \
     || die "an unreadable Copilot verdict gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+grep -qF 'withdrawn' <<<"${got#*|}" \
     && die "…but it reported that phase as reopened as well" \
     || pass "…without telling the operator to re-request that one either"
 
@@ -296,7 +297,7 @@ printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$HEAD40" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=before-copilot' <<<"${got#*|}"; } \
     && pass "a verdict carrying the full forty-hex head is accepted before the Copilot phase" \
     || die "a full-width verdict was refused: '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
@@ -304,7 +305,7 @@ printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$HEAD40" "$COPILOTBOT" > "$W/copilot.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=after-copilot' <<<"${got#*|}"; } \
     && pass "…and after it, on the arm where the Copilot signoff is the one that must hold" \
     || die "a full-width verdict was refused on the post-Copilot arm: '${got}'"
 
@@ -315,25 +316,25 @@ got="$(run 7)"
 # this helper validate; this one did not. #126.
 world; : > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_unparseable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_unparseable' <<<"${got#*|}"; } \
     && pass "an rc-0 verdict with no record refuses rather than reading as clean" \
     || die "an empty rc-0 verdict gave '${got}'"
 world; printf 'PR_REVIEW_STATE pr=8 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_misaddressed' <<<"${got#*|}"; } \
     && pass "…and one about another PR refuses" \
     || die "a record for another PR was accepted: '${got}'"
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$COPILOTBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_misaddressed' <<<"${got#*|}"; } \
     && pass "…and one about another reviewer refuses" \
     || die "a record for another reviewer was accepted: '${got}'"
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$(printf '%s' "$OTHER40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_misaddressed'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_misaddressed' <<<"${got#*|}"; } \
     && pass "…and one about another head refuses" \
     || die "a record for another head was accepted: '${got}'"
 # THE VALUE TOO, since rc 0 and `verdict=findings` disagree and only the record
@@ -341,7 +342,7 @@ got="$(run 7)"
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings=3\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_not_clean'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_not_clean' <<<"${got#*|}"; } \
     && pass "…and an rc-0 record that is not clean refuses" \
     || die "a non-clean rc-0 record was accepted: '${got}'"
 # THE TAIL AS WELL AS THE VALUE. `verdict=clean` with the `findings=0` truncated
@@ -351,13 +352,13 @@ got="$(run 7)"
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_truncated' <<<"${got#*|}"; } \
     && pass "…and a clean record with its findings count truncated away refuses" \
     || die "a truncated clean record was accepted: '${got}'"
 world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0 extra=1\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$CODEXBOT" > "$W/codex.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_truncated'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_verdict_truncated' <<<"${got#*|}"; } \
     && pass "…and one carrying a field nobody defined refuses too" \
     || die "an extended clean record was accepted: '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
@@ -365,7 +366,7 @@ printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean\n' \
     "$(printf '%s' "$HEAD40" | cut -c1-7)" "$COPILOTBOT" > "$W/copilot.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_truncated'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_verdict_truncated' <<<"${got#*|}"; } \
     && pass "…and the post-Copilot arm refuses a truncated clean record as well" \
     || die "the post-Copilot arm accepted a truncated clean record: '${got}'"
 
@@ -375,7 +376,7 @@ world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 : > "$W/copilot.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_unparseable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_verdict_unparseable' <<<"${got#*|}"; } \
     && pass "…and the post-Copilot arm refuses an rc-0 verdict with no record" \
     || die "the post-Copilot arm accepted an empty rc-0 verdict: '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
@@ -383,7 +384,7 @@ printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=clean findings=0\n' \
     "$(printf '%s' "$OTHER40" | cut -c1-7)" "$COPILOTBOT" > "$W/copilot.verdict.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_verdict_misaddressed'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_verdict_misaddressed' <<<"${got#*|}"; } \
     && pass "…and one about another head there too" \
     || die "the post-Copilot arm accepted a record for another head: '${got}'"
 
@@ -396,29 +397,29 @@ got="$(run 7)"
 # exists to end. The merge gate had it; this helper did not. #125.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=before-copilot' <<<"${got#*|}"; } \
     && pass "a replies-only review the operator signed off still reads as a closed phase" \
     || die "a vouched replies-only review was read as a dismissal: '${got}'"
 # WITHOUT THAT RECORD IT REFUSES, and says which of the two it was. Absence is not
 # a disagreement, but here the signoff is the AUTHORITY rather than a cross-check.
 world; replies_only codex "$CODEXBOT" "$HEAD40"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "…and one nobody signed off refuses, naming what it was" \
     || die "an unvouched replies-only review gave '${got}'"
 # THE RENDERED MESSAGE, not only the reason field. The commonest unvouched case —
 # nothing recorded at all — returned without setting a reason, so the prose the
 # operator reads named an empty pair of brackets.
-printf '%s' "${got#*|}" | grep -qF '(no_signoff)' \
+grep -qF '(no_signoff)' <<<"${got#*|}" \
     && pass "…and the prose says why rather than leaving empty brackets" \
     || die "the unvouched stop rendered without a reason: '${got#*|}'"
 # AND NOTHING MORE THAN THAT. With no signoff recorded, neither timestamp has been
 # read — so a deadline line there says `newer than ? … (none) … (none)`, which is
 # noise beside a message that already named the case.
-printf '%s' "${got#*|}" | grep -qF 'It has to be newer than' \
+grep -qF 'It has to be newer than' <<<"${got#*|}" \
     && die "…but it printed a deadline it never computed: '${got#*|}'" \
     || pass "…and prints no deadline where none was computed"
-printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
+grep -qF 'withdrawn' <<<"${got#*|}" \
     && die "…but it called it a dismissal as well" \
     || pass "…rather than reporting it as a dismissal"
 # A HEAD IS NOT A MOMENT. A signoff recorded for an earlier CLEAN review on an
@@ -427,7 +428,7 @@ printf '%s' "${got#*|}" | grep -qF 'withdrawn' \
 world; replies_only codex "$CODEXBOT" "$HEAD40"
 vouched codex "$CODEXBOT" "$HEAD40" 2025-12-31T00:00:00Z
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "…and one recorded before the review does not answer it" \
     || die "a stale signoff vouched for a later review: '${got}'"
 # EQUAL IS NOT NEWER: second-resolution timestamps cannot order a tie, and this is
@@ -451,14 +452,14 @@ world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 replies_only copilot "$COPILOTBOT" "$HEAD40"; vouched copilot "$COPILOTBOT" "$HEAD40"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=after-copilot' <<<"${got#*|}"; } \
     && pass "…and the post-Copilot arm honours it too" \
     || die "the post-Copilot arm read a vouched replies-only review as a dismissal: '${got}'"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 replies_only copilot "$COPILOTBOT" "$HEAD40"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=copilot_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "…and refuses an unvouched one there as well" \
     || die "the post-Copilot arm accepted an unvouched replies-only review: '${got}'"
 # ── WHAT THIS HELPER NO LONGER DOES FOR ITSELF ─────────────────────────────
@@ -478,13 +479,13 @@ got="$(run 7)"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 printf '1\n' > "$W/codex.snap.rc"; : > "$W/codex.snap.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "a review the snapshot does not recognise as the escape's shape cannot vouch" \
     || die "a non-escape snapshot gave '${got}'"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 printf '2\n' > "$W/codex.snap.rc"; : > "$W/codex.snap.out"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…and a snapshot that could not be read is not an absence" \
     || die "an unreadable snapshot gave '${got}'"
 # AND A SNAPSHOT THAT IS NOT ONE. Peeled rather than parsed, a line with two
@@ -495,14 +496,14 @@ world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEA
 printf '2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$W/codex.snap.out"
 printf '0\n' > "$W/codex.snap.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…and a snapshot missing its review id is refused" \
     || die "a two-field snapshot was acted on: '${got}'"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 printf 'warning\t2026-01-01T00:00:00Z\t2026-01-05T00:00:00Z\n' > "$W/codex.snap.out"
 printf '0\n' > "$W/codex.snap.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…and so is one whose id is not an id" \
     || die "a snapshot with a non-numeric id was acted on: '${got}'"
 # AN EMPTY REPLY TIME IS THE DANGEROUS ONE: it is the one shape `rb_answer_at`
@@ -512,7 +513,7 @@ world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEA
 printf '77\t2026-01-01T00:00:00Z\t\n' > "$W/codex.snap.out"
 printf '0\n' > "$W/codex.snap.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…and so is one with no reply time at all" \
     || die "a snapshot with an empty reply time was acted on: '${got}'"
 
@@ -521,8 +522,8 @@ got="$(run 7)"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 replied_at codex 2026-01-03T00:00:00Z
 got="$(run 7)"
-{ printf '%s' "${got#*|}" | grep -qF 'that review (2026-01-01T00:00:00Z)' \
-    && printf '%s' "${got#*|}" | grep -qF 'newest reply (2026-01-03T00:00:00Z)'; } \
+{ grep -qF 'that review (2026-01-01T00:00:00Z)' <<<"${got#*|}" \
+    && grep -qF 'newest reply (2026-01-03T00:00:00Z)' <<<"${got#*|}"; } \
     && pass "…and the stop names the review and the reply, so which one moved is visible" \
     || die "the stop did not name both times: '${got#*|}'"
 
@@ -533,16 +534,16 @@ got="$(run 7)"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 snapshot codex 77 whenever 2026-01-01T00:00:00Z
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "a review time of another shape fails closed rather than reading as unvouched" \
     || die "a malformed review time gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+grep -qF 'unvouched' <<<"${got#*|}" \
     && die "…but it also told the operator to record a signoff" \
     || pass "…and does not send the operator to record one"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 snapshot codex 77 2026-01-01T00:00:00Z whenever
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…and so does a reply time of another shape" \
     || die "a malformed reply time gave '${got}'"
 
@@ -553,14 +554,14 @@ got="$(run 7)"
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 replied_at codex 2026-01-03T00:00:00Z
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "a reply landing after the signoff is not answered by it" \
     || die "a later reply was vouched over: '${got}'"
 # AND ONE BEFORE IT STILL CLOSES THE PHASE, or the rule would only ever refuse.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; vouched codex "$CODEXBOT" "$HEAD40"
 replied_at codex 2026-01-01T12:00:00Z
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=before-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=before-copilot' <<<"${got#*|}"; } \
     && pass "…while one that landed before it still does" \
     || die "an earlier reply blocked the phase: '${got}'"
 # EQUAL IS NOT NEWER HERE EITHER.
@@ -578,7 +579,7 @@ printf '%s\n' "$OTHER40" > "$W/codex.sha"
 replies_only copilot "$COPILOTBOT" "$HEAD40"; vouched copilot "$COPILOTBOT" "$HEAD40"
 replied_at copilot 2026-01-03T00:00:00Z
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=copilot_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "…and the post-Copilot arm orders against the reply too" \
     || die "the post-Copilot arm vouched over a later reply: '${got}'"
 
@@ -588,17 +589,17 @@ got="$(run 7)"
 # probes, on both arms.
 world; replies_only codex "$CODEXBOT" "$HEAD40"; printf '2\n' > "$W/codex.record.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=codex_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "an unreadable signoff probe fails closed rather than reading as unvouched" \
     || die "an unreadable signoff probe gave '${got}'"
-printf '%s' "${got#*|}" | grep -qF 'unvouched' \
+grep -qF 'unvouched' <<<"${got#*|}" \
     && die "…but it also told the operator to record a signoff" \
     || pass "…and does not send the operator to record one"
 world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc"
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 replies_only copilot "$COPILOTBOT" "$HEAD40"; printf '2\n' > "$W/copilot.record.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=copilot_vouch_unreadable'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=copilot_vouch_unreadable' <<<"${got#*|}"; } \
     && pass "…on the post-Copilot arm too" \
     || die "the post-Copilot arm folded an unreadable probe into unvouched: '${got}'"
 # A SIGNOFF FOR ANOTHER REVIEWER DOES NOT VOUCH, even with the same head: the
@@ -608,7 +609,7 @@ printf 'PR_SIGNOFF pr=7 reviewer=%s verdict-at=none at=2026-01-02T00:00:00Z id=9
     "$COPILOTBOT" "$HEAD40" > "$W/codex.record"
 printf '0\n' > "$W/codex.record.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_replies_only_unvouched'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_replies_only_unvouched' <<<"${got#*|}"; } \
     && pass "…and a signoff naming another reviewer does not vouch" \
     || die "another reviewer's signoff vouched: '${got}'"
 
@@ -620,7 +621,7 @@ world; printf 'PR_REVIEW_STATE pr=7 sha=%s reviewer=%s verdict=findings findings
 printf '1\n' > "$W/codex.verdict.rc"
 vouched codex "$CODEXBOT" "$HEAD40"
 got="$(run 7)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reason=codex_verdict_withdrawn'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reason=codex_verdict_withdrawn' <<<"${got#*|}"; } \
     && pass "…while a review with findings is a dismissal, signoff or no signoff" \
     || die "the escape widened past replies-only: '${got}'"
 
@@ -633,7 +634,7 @@ world; printf '%s\n' "$HEAD40" > "$W/copilot.sha"; printf '0\n' > "$W/copilot.rc
 printf '%s\n' "$OTHER40" > "$W/codex.sha"
 printf '1\n' > "$W/codex.verdict.rc"
 got="$(run 7)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'state=after-copilot'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'state=after-copilot' <<<"${got#*|}"; } \
     && pass "the post-Copilot arm does not re-validate the Codex verdict" \
     || die "the post-Copilot arm asked about Codex: '${got}'"
 grep -q -- 'pr-review-state.sh verdict 7 chatgpt-codex-connector' "$TMP/calls" \
@@ -642,11 +643,11 @@ grep -q -- 'pr-review-state.sh verdict 7 chatgpt-codex-connector' "$TMP/calls" \
 
 # ── THE ARGUMENT IS REQUIRED AND CHECKED ───────────────────────────────────
 world; got="$(run)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=bad_pr'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_pr' <<<"${got#*|}"; } \
     && pass "a missing PR number refuses" \
     || die "a missing PR gave '${got}'"
 world; got="$(run notanumber)"
-{ [ "${got%%|*}" = 2 ] && printf '%s' "${got#*|}" | grep -qF 'reason=bad_pr'; } \
+{ [ "${got%%|*}" = 2 ] && grep -qF 'reason=bad_pr' <<<"${got#*|}"; } \
     && pass "…and so does one that is not a number" \
     || die "a non-numeric PR gave '${got}'"
 
@@ -657,7 +658,7 @@ world
 out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     bash "$DIR/pr-phase-state.sh" 7 2>&1)"; rc=$?
-{ [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF 'reason=not_privileged'; } \
+{ [ "$rc" = 2 ] && grep -qF 'reason=not_privileged' <<<"$out"; } \
     && pass "an unprivileged interpreter is refused" \
     || die "an unprivileged run gave rc=$rc '$out'"
 

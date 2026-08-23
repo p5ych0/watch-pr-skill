@@ -613,6 +613,140 @@ for f in "$SCRIPTS"/pr-*.sh "$SCRIPTS"/*lib.sh; do
 done
 [ "$untested" -eq 0 ] && ok "every helper and shared library has a matching test"
 
+# ── 4b. no fixture pipes a value into an early-exiting reader ──────────────
+#
+# `printf … | grep -q PATTERN` is RACY under `set -o pipefail`, which every fixture
+# sets. `grep -q` exits the moment it matches; `printf` is still writing, takes
+# `SIGPIPE`, and dies with 141 — and `pipefail` makes that the PIPELINE's status.
+# So a line that IS present reads as missing, at whatever rate the scheduler
+# decides. Measured at roughly one run in three on one file.
+#
+# THAT IS WHY IT IS A GATE AND NOT A CONVENTION. The failure is intermittent, so a
+# green run proves nothing about the next one, and every occurrence is a case that
+# can report a defect that is not there — or, on an `|| x=""` capture, silently
+# read as "nothing found". `test-pr-skill-contract.sh` spent three review rounds
+# chasing one before the cause was found.
+#
+# A HERESTRING IS THE FIX: `grep -q PATTERN <<<"$value"` is a redirection, not a
+# pipeline, so there is no second process to kill. `case … in` works too where the
+# pattern is a glob.
+#
+# ONLY THE EARLY-EXITING READERS MATTER. `grep -c`, `sed` and `awk` without an
+# `exit` read to end of input, so their pipelines never signal.
+# THE SPELLINGS IT RECOGNISES, AND WHY THEY ARE NOT A LIST OF ONE. Two rounds of
+# review were spent widening this, each finding an equivalent spelling the previous
+# version reported clean: `printf "%s\n" …` with DOUBLE quotes, `grep -Fq` with the
+# `q` second, `builtin printf … | command grep -q` — which twenty-four assertions
+# in `test-pr-selfcheck.sh` used — and `grep -F -q` with the options split.
+#
+# WHAT IT DOES NOT DETECT IS THE PRODUCER BEING ANYTHING ELSE, and that is a
+# stated limit rather than an oversight. `bodies | grep -qF …` races identically —
+# any producer does — and generalising the pattern to "a pipeline whose last stage
+# is `grep -q`" was tried and reverted in one round: `|` is not only a pipe. It
+# appears in `||`, in `${got%%|*}`, inside quoted `awk` programs and inside `case`
+# patterns, and telling those apart needs a shell PARSER. This repository has paid
+# for one of those already — 2,200 lines and fifty-two review rounds — and the
+# generalised version reported 140 false positives on a tree with no defect in it,
+# which is a gate that cannot be pushed past rather than one that catches anything.
+#
+# SO THE GATE IS ANCHORED ON `printf`, which is the shape every occurrence in this
+# suite actually had, and the OTHER producers are review's job — the reviewer files
+# carry the rule. The sites Codex found by hand are converted; what is not
+# guaranteed is that a new one is caught automatically.
+#
+# SO IT TAKES THE SHAPE, NOT A LIST: either quoting of the format string, any
+# `command`/`builtin` prefix on EITHER side — the producer takes them too, which
+# `command printf … | grep -q` walked past — any number of separate option words
+# before the one carrying `q`, any number of INTERMEDIATE filters between the
+# producer and the reader — `printf … | cut … | grep -qF` raced exactly the same
+# way, with `cut` taking the signal instead of `printf` — and free spacing
+# throughout. What it still cannot
+# see is a pipeline assembled at runtime, which is the limit of reading text and is
+# why this is a gate rather than a proof.
+#
+# AND WHAT IS EXEMPT IS MARKED, not guessed. This scans raw text, so a comment, a
+# stub or a heredoc containing the spelling AS DATA cannot be told from code — and
+# the fixture proving this gate works has to contain it. A line carrying
+# `racy-pipeline-ok` is data by declaration; nothing else is exempt, and the marker
+# is deliberately ugly so it is not reached for casually.
+#
+# THE SCAN'S OWN FAILURE IS NOT A CLEAN RESULT. A blanket `|| true` turned an
+# unreadable fixture into an empty hit stream and a green gate. `awk` reports 0
+# whether or not it matched anything, and non-zero only when it could not read the
+# file or could not run — so any non-zero is a finding of its own.
+pipeq=0
+for f in "$SCRIPTS"/test-*.sh; do
+    [ -e "$f" ] || continue
+    hits="$(awk '
+        { line = $0; n = FNR
+          # A CONTINUED LINE AND A LINE ENDING IN A PIPE ARE BOTH ONE COMMAND.
+          # `\` at the end is the obvious one; a trailing `|` continues just as
+          # legally and needs no backslash, and the two halves scanned separately
+          # were reported clean.
+          while ((sub(/\\$/, "", line) || line ~ /\|[ \t]*$/) && (getline nxt) > 0)
+              line = line " " nxt
+          # WHITESPACE CLASSES, NOT LITERAL SPACES. `printf\t'"'"'%s'"'"'\t"$x"\t|\tgrep\t-q y` is
+          # a legal fixture line and walked past a pattern written with ` +`.
+          #
+          # `||` IS NOT A PIPE, and it consumed the mandatory bar: `printf … || grep
+          # -q y` has no pipeline and no risk, and was reported. Replacing it before
+          # the test is safe HERE, where the match is anchored on `printf`, in a way
+          # it was not for the generalised version.
+          #
+          # AND ANY WORD MAY SIT BETWEEN `grep` AND THE OPTION CARRYING `q`, rather
+          # than a modelled option-and-argument grammar. Four rounds were spent
+          # widening that grammar one legal spelling at a time — an option with an
+          # argument, an argument with a hyphen in it, a quoted argument, a
+          # THE SCAN ASKS THREE SUBSTRING QUESTIONS AND PARSES NOTHING. Does the
+          # logical line name `printf`, does it carry a pipe, does it name `grep`.
+          #
+          # EVERYTHING ELSE WAS TRIED FIRST, and this is what it cost. Six review
+          # rounds went into modelling grep'"'"'s options — an option with an argument,
+          # a hyphenated argument, a quoted argument, a dash-leading operand, `-e`
+          # attached to its pattern, `--`, `-qm1`, `--quiet` — each round widening a
+          # grammar by one legal spelling and producing the next. Dropping the
+          # options bought one round: the next found `%b`, an unquoted `$fmt`, a
+          # quoted assignment value, `2>&1` before the pipe, `/usr/bin/grep`, and
+          # `myprintf` matching on its suffix. Every one of those was a fact about
+          # SHELL SYNTAX, and reading shell syntax out of text needs a shell.
+          #
+          # So the rule stops trying. There is no spelling of `printf`, of a pipe or
+          # of `grep` that walks past a substring test, which is the whole class of
+          # finding that took those seven rounds. `CLAUDE.md` records the same
+          # treadmill costing 2,200 lines and fifty-two rounds once already.
+          #
+          # THE PRICE IS OVER-REPORTING, and it is paid in a form that is visible.
+          # A line naming all three where the pipe is not the printf'"'"'s — a `printf`
+          # inside a process substitution beside an unrelated pipeline, say — says
+          # `racy-pipeline-ok`, which is the escape this check already had. There
+          # are two in the tree. A false negative would be invisible and this is
+          # not, which is why the price is paid in this direction.
+          #
+          # `||` IS NOT A PIPE, and that is the one thing still worth spelling: it
+          # is replaced with a character that cannot be one, so
+          # `printf '"'"'%s'"'"' "$x" || grep -q y` has no pipeline and no race.
+          t = line; gsub(/\|\|/, ")", t)
+          if (t ~ /printf/ && t ~ /\|/ && t ~ /grep/)
+              printf "%d:%s\n", n, line
+        }' "$f")"
+    grc=$?
+    if [ "$grc" -ne 0 ]; then
+        echo "PR_SELFCHECK status=error reason=racy_scan_failed file=$(basename "$f") rc=$grc" >&2
+        exit 2
+    fi
+    [ -n "$hits" ] || continue
+    while IFS= read -r hit; do
+        [ -n "$hit" ] || continue
+        case "$hit" in *racy-pipeline-ok*) continue ;; esac
+        note racy_pipeline "$(basename "$f"): $(printf '%s' "$hit" | cut -c1-120)"
+        pipeq=1
+    done <<EOF
+$hits
+EOF
+done
+
+[ "$pipeq" -eq 0 ] && ok "no fixture pipes a printf into grep, which pipefail can turn into a false failure"
+
 # ── 5. the suite passes ────────────────────────────────────────────────────
 #
 # RUN CONCURRENTLY, because the files are independent and this is the gate a

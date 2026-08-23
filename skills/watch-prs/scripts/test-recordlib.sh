@@ -464,7 +464,7 @@ fi
 DRIFT="$TMP/drift"; mkdir -p "$DRIFT"
 printf '#!/usr/bin/env bash\njq %s.state | IN("PENDING","APPROVED","X")%s\n' "'" "'" > "$DRIFT/pr-drifted.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc=$?
-{ [ "$drc" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-drifted.sh'; } \
+{ [ "$drc" -eq 0 ] && grep -q 'pr-drifted.sh' <<<"$seen"; } \
     && pass "…and the scan catches a helper that re-implements one" \
     || die "the drift guard did not catch a planted inline rule (rc=$drc out='$seen')"
 # THE MARKER RULE IS PROVED THE SAME WAY. The planted copy uses the same `case`
@@ -476,7 +476,7 @@ seen="$(scan_inline_rules "$DRIFT")"; drc=$?
   printf 'esac\n'
 } > "$DRIFT/pr-marker-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc4=$?
-{ [ "$drc4" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-marker-copy.sh'; } \
+{ [ "$drc4" -eq 0 ] && grep -q 'pr-marker-copy.sh' <<<"$seen"; } \
     && pass "…and catches a helper that re-implements the reserved-marker set" \
     || die "the drift guard did not catch a planted marker copy (rc=$drc4 out='$seen')"
 rm -f "$DRIFT/pr-marker-copy.sh"
@@ -486,7 +486,7 @@ rm -f "$DRIFT/pr-marker-copy.sh"
   printf 'esac\n'
 } > "$DRIFT/pr-trigger-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc5=$?
-{ [ "$drc5" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-trigger-copy.sh'; } \
+{ [ "$drc5" -eq 0 ] && grep -q 'pr-trigger-copy.sh' <<<"$seen"; } \
     && pass "…and catches a helper that re-implements the review trigger" \
     || die "the drift guard did not catch a planted trigger copy (rc=$drc5 out='$seen')"
 rm -f "$DRIFT/pr-trigger-copy.sh"
@@ -494,7 +494,7 @@ rm -f "$DRIFT/pr-trigger-copy.sh"
   printf "rx='^PR_REVIEW_STATE pr=([0-9]+) sha=([0-9a-f]{7,40}) reviewer=([^[:space:]]+) state=([a-z]+)\$'\n"
 } > "$DRIFT/pr-record-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
-{ [ "$drc6" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-record-copy.sh'; } \
+{ [ "$drc6" -eq 0 ] && grep -q 'pr-record-copy.sh' <<<"$seen"; } \
     && pass "…and catches a helper that re-implements the review-record shape" \
     || die "the drift guard did not catch a planted record copy (rc=$drc6 out='$seen')"
 rm -f "$DRIFT/pr-record-copy.sh"
@@ -502,7 +502,7 @@ rm -f "$DRIFT/pr-record-copy.sh"
   printf 'want="PR_REVIEW_STATE pr=$PR sha=${2:0:7} reviewer=$1 verdict=clean findings=0"\n'
 } > "$DRIFT/pr-rebuild-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc7=$?
-{ [ "$drc7" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-rebuild-copy.sh'; } \
+{ [ "$drc7" -eq 0 ] && grep -q 'pr-rebuild-copy.sh' <<<"$seen"; } \
     && pass "…and one that rebuilds the record as a string rather than a regex" \
     || die "the drift guard did not catch a planted rebuild (rc=$drc7 out='$seen')"
 rm -f "$DRIFT/pr-rebuild-copy.sh"
@@ -513,7 +513,7 @@ rm -f "$DRIFT/pr-rebuild-copy.sh"
   printf 'echo "PR_REVIEW_STATE pr=$pr sha=$short reviewer=$who verdict=clean findings=0"\n'
 } > "$DRIFT/pr-producer.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc8=$?
-{ [ "$drc8" -eq 0 ] && ! printf '%s' "$seen" | grep -q 'pr-producer.sh'; } \
+{ [ "$drc8" -eq 0 ] && ! grep -q 'pr-producer.sh' <<<"$seen"; } \
     && pass "…while a helper that PRINTS a record is left alone" \
     || die "the drift guard flagged the producer (rc=$drc8 out='$seen')"
 rm -f "$DRIFT/pr-producer.sh"
@@ -523,7 +523,7 @@ rm -f "$DRIFT/pr-producer.sh"
   printf 'esac\n'
 } > "$DRIFT/pr-replies-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc9=$?
-{ [ "$drc9" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-replies-copy.sh'; } \
+{ [ "$drc9" -eq 0 ] && grep -q 'pr-replies-copy.sh' <<<"$seen"; } \
     && pass "…and a helper that re-implements the replies-only shape" \
     || die "the drift guard did not catch a planted replies-only copy (rc=$drc9 out='$seen')"
 rm -f "$DRIFT/pr-replies-copy.sh"
@@ -535,7 +535,7 @@ rm -f "$DRIFT/pr-replies-copy.sh"
   printf 'case "$h" in *[!0-9a-f]*|"") return 1 ;; esac\n'
 } > "$DRIFT/pr-recordlib.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc3=$?
-{ [ "$drc3" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-recordlib.sh'; } \
+{ [ "$drc3" -eq 0 ] && grep -q 'pr-recordlib.sh' <<<"$seen"; } \
     && pass "a helper merely named like the library is still scanned" \
     || die "pr-recordlib.sh was exempted by a suffix match (rc=$drc3 out='$seen')"
 rm -f "$DRIFT/pr-recordlib.sh"
@@ -548,7 +548,7 @@ rm -f "$DRIFT/pr-recordlib.sh"
   printf '[ "${#h}" -eq 40 ] || return 1\n'
 } > "$DRIFT/pr-shelldrift.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc2=$?
-{ [ "$drc2" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-shelldrift.sh.*shell'; } \
+{ [ "$drc2" -eq 0 ] && grep -q 'pr-shelldrift.sh.*shell' <<<"$seen"; } \
     && pass "…including the shell spelling of the SHA rule" \
     || die "the drift guard missed a shell-spelled SHA check (rc=$drc2 out='$seen')"
 rm -f "$DRIFT/pr-shelldrift.sh"
@@ -557,7 +557,7 @@ rm -f "$DRIFT/pr-shelldrift.sh"
   printf 'jq %s[.[] | select(has("in_reply_to_id") | not)] | length%s\n' "'" "'"
 } > "$DRIFT/pr-reply-copy.sh"
 seen="$(scan_inline_rules "$DRIFT")"; drc6=$?
-{ [ "$drc6" -eq 0 ] && printf '%s' "$seen" | grep -q 'pr-reply-copy.sh'; } \
+{ [ "$drc6" -eq 0 ] && grep -q 'pr-reply-copy.sh' <<<"$seen"; } \
     && pass "…and catches a helper that asks the reply question inline" \
     || die "the drift guard did not catch a planted reply-shape copy (rc=$drc6 out='$seen')"
 rm -f "$DRIFT/pr-reply-copy.sh"
@@ -608,7 +608,7 @@ if [ -n "$trunc" ]; then
         . "$1/loadlib.sh"
         rb_load "$1" recordlib RB_COPILOT_BOT "PR_X status=error" var || exit 2
         printf "%s" "$RB_COPILOT_BOT"' _ "$trunc" 2>&1)"; tr_rc=$?
-    { [ "$tr_rc" -ne 0 ] && ! printf '%s' "$tr_out" | grep -q 'attacker'; } \
+    { [ "$tr_rc" -ne 0 ] && ! grep -q 'attacker' <<<"$tr_out"; } \
         && pass "a library truncated before the second constant is refused, not inherited" \
         || die "an inherited RB_COPILOT_BOT survived a truncated library (rc=$tr_rc '$tr_out')"
     rm -rf "$trunc"

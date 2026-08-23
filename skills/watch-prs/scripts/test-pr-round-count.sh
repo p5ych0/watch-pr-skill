@@ -102,33 +102,33 @@ mk() {
 # ── a round is a distinct reviewed HEAD ────────────────────────────────────
 mk "$CODEX|aaa|\"t1\"" "$COPILOT|aaa|\"t1\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=1' <<<"$out"; } \
     && pass "two reviewers on one head is ONE round" \
     || die "same-head reviews counted twice (rc=$rc out='$out')"
 
 mk "$CODEX|aaa|\"t1\"" "$CODEX|aaa|\"t2\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'rounds=1' \
+grep -q 'rounds=1' <<<"$out" \
     && pass "a re-review of an unchanged head does not inflate the count" \
     || die "re-review inflated the count: $out"
 
 mk "$CODEX|aaa|\"t1\"" "$CODEX|bbb|\"t2\"" "$CODEX|ccc|\"t3\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=3'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=3' <<<"$out"; } \
     && pass "three distinct heads is three rounds" \
     || die "distinct-head count wrong (rc=$rc out='$out')"
 
 # An UNSUBMITTED draft is not a round: the pass has not happened yet.
 mk "$CODEX|aaa|\"t1\"" "$CODEX|bbb|null"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"
-printf '%s' "$out" | grep -q 'rounds=1' \
+grep -q 'rounds=1' <<<"$out" \
     && pass "a draft review is not a round" \
     || die "a draft counted as a round: $out"
 
 # Reviews by anyone else are not rounds.
 mk "$CODEX|aaa|\"t1\"" "somebody|bbb|\"t2\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"
-printf '%s' "$out" | grep -q 'rounds=1' \
+grep -q 'rounds=1' <<<"$out" \
     && pass "a human review is not a round" \
     || die "a non-reviewer counted: $out"
 
@@ -140,7 +140,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 
 specs+=("$CODEX|c10|\"t10\""); mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'PR_ROUND_PAUSE'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'PR_ROUND_PAUSE' <<<"$out"; } \
     && pass "10 rounds: pause (exit 3)" \
     || die "no pause at the boundary (rc=$rc out='$out')"
 
@@ -168,7 +168,7 @@ mkack() { # <count> [association] [reviewer]
 }
 mkack 11
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=11'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=11' <<<"$out"; } \
     && pass "an acknowledgement at 11 clears the pause" \
     || die "the acknowledgement did not clear the pause (rc=$rc out='$out')"
 
@@ -189,7 +189,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)";
 # multiple is a test a large enough step walks straight past.
 mkreviews 41
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=41'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'rounds=41' <<<"$out"; } \
     && pass "a count that stepped over the boundary (41) still pauses" \
     || die "41 rounds sailed past the check-in (rc=$rc out='$out')"
 
@@ -204,7 +204,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 mkreviews 41
 mkack 41 OWNER "$CODEX"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=41'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=41' <<<"$out"; } \
     && pass "a Codex acknowledgement clears the Codex pause" \
     || die "the scoped acknowledgement did not apply to its own reviewer (rc=$rc out='$out')"
 # The other phase has its own, smaller count. The Codex acknowledgement must be
@@ -213,14 +213,14 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX
 # number, and it fails the whole phase.
 mk "$COPILOT|k1|\"t1\"" "$COPILOT|k2|\"t2\"" "$COPILOT|k3|\"t3\""
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=0' <<<"$out"; } \
     && pass "…and is invisible to the Copilot count, which has its own" \
     || die "a Codex acknowledgement leaked into the Copilot phase (rc=$rc out='$out')"
 # The converse, so the rule is not satisfied by a parser that drops every
 # acknowledgement whose reviewer is not the first in the list.
 mkack 3 OWNER "$COPILOT"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=3'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=3' <<<"$out"; } \
     && pass "a Copilot acknowledgement applies to the Copilot count" \
     || die "the Copilot acknowledgement was not read (rc=$rc out='$out')"
 # An unscoped footer is not an acknowledgement at all. There is no legacy form:
@@ -228,7 +228,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPIL
 jq -n '[{user:{login:"operator"},author_association:"OWNER",id:902,created_at:"2026-01-01T00:00:00Z",
          body:"Continuing.\n\n**Review-Pause-Acknowledged:** `3`\n"}]' > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=0' <<<"$out"; } \
     && pass "a footer naming no reviewer is not an acknowledgement" \
     || die "an unscoped footer was accepted (rc=$rc out='$out')"
 # The login is COMPARED, not interpolated into a pattern: `[bot]` is a character
@@ -254,16 +254,16 @@ mk "${specs[@]}"
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 3 ] && pass "the default invocation pauses on the combined count" \
     || die "no pause on 46 combined heads (rc=$rc out='$out')"
-printf '%s' "$out" | grep -qF "**Review-Pause-Acknowledged:** \`$CODEX\` \`41\`" \
+grep -qF "**Review-Pause-Acknowledged:** \`$CODEX\` \`41\`" <<<"$out" \
     && pass "…and instructs the Codex acknowledgement with Codex's own 41" \
     || die "the Codex instruction did not carry 41: '$out'"
-printf '%s' "$out" | grep -qF "**Review-Pause-Acknowledged:** \`$COPILOT\` \`5\`" \
+grep -qF "**Review-Pause-Acknowledged:** \`$COPILOT\` \`5\`" <<<"$out" \
     && pass "…and the Copilot acknowledgement with Copilot's own 5" \
     || die "the Copilot instruction did not carry 5: '$out'"
 # The consequence, asserted rather than inferred: following the emitted
 # instruction must leave BOTH phases working. An instruction that wedges the
 # phase it names is worse than none, because it looks like the documented path.
-printf '%s' "$out" | grep -qF "\`$COPILOT\` \`46\`" \
+grep -qF "\`$COPILOT\` \`46\`" <<<"$out" \
     && die "the Copilot instruction carried the combined count, which wedges that phase" \
     || pass "…so following the instruction cannot wedge either phase"
 
@@ -280,7 +280,7 @@ done
 # shape, reachable by a typo as easily as by an attacker.
 mkack 999999999
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'ack_ahead_of_count'; } \
+{ [ "$rc" -eq 2 ] && grep -q 'ack_ahead_of_count' <<<"$out"; } \
     && pass "an acknowledgement ahead of the count is refused, not obeyed" \
     || die "a future acknowledgement disabled the pause (rc=$rc out='$out')"
 # ── ONE COMMENT, A LINE PER REVIEWER, WHICH IS WHAT THE PAUSE ASKS FOR ─────
@@ -297,12 +297,12 @@ jq -n --arg c "$CODEX" --arg p "$COPILOT" \
       body:("Continuing.\n\n**Review-Pause-Acknowledged:** `" + $c + "` `11`\n**Review-Pause-Acknowledged:** `" + $p + "` `0`\n")}]' \
    > "$TMP/ack.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$CODEX" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=11'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=11' <<<"$out"; } \
     && pass "one comment acknowledges the reviewer named FIRST in it" \
     || die "the first login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
 # …and the one named last, which is what used to work by accident.
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/ack.json" run 7 "$COPILOT" 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'acknowledged=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'acknowledged=0' <<<"$out"; } \
     && pass "…and the one named last, from the same comment" \
     || die "the last login in a multi-reviewer acknowledgement was dropped (rc=$rc out='$out')"
 
@@ -350,9 +350,9 @@ for ((i=1; i<=15; i++)); do specs+=("$COPILOT|z$i|\"u$i\""); done
 mk "${specs[@]}"
 paused="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 3 ] || die "expected a pause to harvest the instruction from (rc=$rc)"
-emitted="$(printf '%s\n' "$paused" | grep -F '**Review-Pause-Acknowledged:**')" \
+emitted="$(grep -F '**Review-Pause-Acknowledged:**' <<<"$paused")" \
     || die "the pause printed no acknowledgement lines to copy"
-[ "$(printf '%s\n' "$emitted" | grep -c .)" -eq 2 ] \
+[ "$(grep -c . <<<"$emitted")" -eq 2 ] \
     && pass "the pause prints one acknowledgement line per reviewer" \
     || die "expected two emitted lines, got: '$emitted'"
 jq -n --arg b "$(printf 'Continuing.\n\n%s\n' "$emitted")" \
@@ -385,13 +385,13 @@ mk "$CODEX|aaa|\"t1\"" "$CODEX|bbb|\"t2\""
 out="$(REVIEW_ROUND_THRESHOLD=2 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 [ "$rc" -eq 3 ] && pass "an explicit threshold is honoured" || die "threshold=2 did not pause (rc=$rc)"
 out="$(REVIEW_ROUND_THRESHOLD=0 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'threshold=0' <<<"$out"; } \
     && pass "threshold=0 disables the check-in" || die "threshold=0 still paused (rc=$rc)"
 # A typo must not silently disable a safety pause.
 specs2=(); for ((i=1; i<=10; i++)); do specs2+=("$CODEX|d$i|\"t$i\""); done
 mk "${specs2[@]}"
 out="$(REVIEW_ROUND_THRESHOLD=abc GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'threshold=10' <<<"$out"; } \
     && pass "a malformed threshold falls back to 10, never to disabled" \
     || die "a typo disabled the check-in (rc=$rc out='$out')"
 
@@ -406,13 +406,13 @@ specs_lz=(); for ((i=1; i<=10; i++)); do specs_lz+=("$CODEX|lz$i|\"t$i\""); done
 mk "${specs_lz[@]}"
 for bad in 00 08 09 012; do
     out="$(REVIEW_ROUND_THRESHOLD="$bad" GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-    { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
+    { [ "$rc" -eq 3 ] && grep -q 'threshold=10' <<<"$out"; } \
         && pass "threshold '$bad' falls back to 10, not to disabled or an error" \
         || die "threshold '$bad' gave rc=$rc out='$out'"
 done
 # Exactly `0` still disables the check-in.
 out="$(REVIEW_ROUND_THRESHOLD=0 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'threshold=0' <<<"$out"; } \
     && pass "a bare 0 still disables the check-in" || die "0 no longer disables (rc=$rc)"
 
 # ── a CLEAN pass is a round, and leaves no review ─────────────────────────
@@ -438,7 +438,7 @@ specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 mk_clean_icomment "$(sha k10 | cut -c1-10)"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'rounds=10' <<<"$out"; } \
     && pass "nine reviewed heads plus a clean tenth is ten rounds, and pauses" \
     || die "clean-comment head not counted (rc=$rc out='$out')"
 
@@ -447,7 +447,7 @@ specs=(); for ((i=1; i<=9; i++)); do specs+=("$CODEX|k$i|t"); done
 mk "${specs[@]}"
 mk_clean_icomment "$(sha k9 | cut -c1-10)"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=9'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=9' <<<"$out"; } \
     && pass "a clean comment on an already-counted head is not a new round" \
     || die "double-counted a head (rc=$rc out='$out')"
 
@@ -458,7 +458,7 @@ jq -n -c --arg sha "$(sha k10 | cut -c1-10)" \
     '[{id: 701, created_at: "2026-01-01T00:00:00Z", user: {login: "somebody"}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=9'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=9' <<<"$out"; } \
     && pass "a clean comment from another account is not a round" \
     || die "another account added a round (rc=$rc out='$out')"
 
@@ -477,7 +477,7 @@ jq -n -c --arg login "$CODEX" --arg sha "$(sha m10 | cut -c1-8)" \
     '[{id: 702, created_at: "2026-01-01T00:00:00Z", user: {login: $login}, body: ("Codex Review: Didn'"'"'t find any major issues.\n\n**Reviewed commit:** `" + $sha + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'rounds=10' <<<"$out"; } \
     && pass "a short-hash footer adds no phantom round; the boundary still pauses" \
     || die "short hash changed the count (rc=$rc out='$out')"
 
@@ -497,7 +497,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2
 [ "$rc" -eq 2 ] \
     && pass "a clean-pass comment with no created_at fails closed, rather than counting" \
     || die "a comment without created_at was counted (rc=$rc out='$out')"
-printf '%s' "$out" | grep -q 'rounds=10' \
+grep -q 'rounds=10' <<<"$out" \
     && die "…and it inflated the count to 10, which is what skips the check-in: $out" \
     || pass "…so it cannot inflate the count past the operator check-in"
 
@@ -512,7 +512,7 @@ jq -n -c --arg login "$CODEX" --arg decoy "$(sha n99 | cut -c1-10)" --arg real "
        body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'rounds=10'; } \
+{ [ "$rc" -eq 3 ] && grep -q 'rounds=10' <<<"$out"; } \
     && pass "a decoy footer adds no round; the genuine last footer is the one counted" \
     || die "decoy footer changed the count (rc=$rc out='$out')"
 
@@ -522,7 +522,7 @@ jq -n -c --arg login "$CODEX" --arg decoy "$(sha n1 | cut -c1-10)" --arg real "$
        body: ("Codex Review: Didn'"'"'t find any major issues.\n\nEarlier:\n**Reviewed commit:** `" + $decoy + "`\n\n**Reviewed commit:** `" + $real + "`\n")}]' \
     > "$TMP/icomments.json"
 out="$(GH_REVIEWS="$TMP/reviews.json" GH_ICOMMENTS="$TMP/icomments.json" run 7 2>&1)"; rc=$?
-printf '%s' "$out" | grep -q 'rounds=11' \
+grep -q 'rounds=11' <<<"$out" \
     && pass "…and a genuine last footer on a new head does add one" \
     || die "the real footer was not counted (rc=$rc out='$out')"
 
@@ -532,13 +532,13 @@ specs=(); for ((i=1; i<=10; i++)); do specs+=("$CODEX|w$i|t"); done
 mk "${specs[@]}"
 for huge in 99999999999999999999 18446744073709551616 100000000000000000000000; do
     out="$(REVIEW_ROUND_THRESHOLD="$huge" GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-    { [ "$rc" -eq 3 ] && printf '%s' "$out" | grep -q 'threshold=10'; } \
+    { [ "$rc" -eq 3 ] && grep -q 'threshold=10' <<<"$out"; } \
         && pass "an out-of-range threshold ($huge) falls back to 10, not to disabled" \
         || die "threshold $huge gave rc=$rc out='$out'"
 done
 # A large-but-sane cadence is still honoured.
 out="$(REVIEW_ROUND_THRESHOLD=999 GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'threshold=999'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'threshold=999' <<<"$out"; } \
     && pass "a large but representable threshold is honoured" \
     || die "threshold 999 gave rc=$rc out='$out'"
 
@@ -586,7 +586,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 # cannot disagree about what a timestamp is. GitHub returns `Z` here.
 mk "$CODEX|aaa|RAW:\"2026-01-02T03:04:05Z\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=1' <<<"$out"; } \
     && pass "a canonical UTC submitted_at is a real round" \
     || die "canonical UTC timestamp was rejected (rc=$rc out='$out')"
 for nonc in '"2026-01-02T03:04:05.123Z"' '"2026-01-02T03:04:05+01:00"' \
@@ -614,7 +614,7 @@ done
 for goodstate in '"APPROVED"' '"CHANGES_REQUESTED"' '"COMMENTED"' '"DISMISSED"'; do
     mk "$CODEX|aaa|t|$goodstate"
     out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-    { [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=1'; } \
+    { [ "$rc" -eq 0 ] && grep -q 'rounds=1' <<<"$out"; } \
         && pass "state $goodstate is a round" \
         || die "valid state $goodstate was rejected (rc=$rc out='$out')"
 done
@@ -624,7 +624,7 @@ done
 # it is a zero rather than an error.
 mk "$CODEX|aaa|t|\"PENDING\""
 out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=0' <<<"$out"; } \
     && pass "a PENDING draft is not a round" \
     || die "PENDING counted as a round (rc=$rc out='$out')"
 
@@ -641,7 +641,7 @@ out="$(GH_REVIEWS="$TMP/reviews.json" run 7 2>&1)"; rc=$?
 # A genuinely empty list is a readable zero, not an error.
 printf '[]' > "$TMP/none.json"
 out="$(GH_REVIEWS="$TMP/none.json" run 7 2>&1)"; rc=$?
-{ [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'rounds=0'; } \
+{ [ "$rc" -eq 0 ] && grep -q 'rounds=0' <<<"$out"; } \
     && pass "no reviews yet is a readable zero" || die "empty list gave rc=$rc out='$out'"
 
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi

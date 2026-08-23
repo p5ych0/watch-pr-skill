@@ -202,7 +202,7 @@ run() {   # run [reviewer] [auto] ; prints "<rc>|<output>" for the whole round
 case_is() {   # case_is <want rc> <needle> <label> [reviewer] [auto]
     local got rc body
     got="$(run "${4-$CODEXBOT}" "${5-no}")"; rc="${got%%|*}"; body="${got#*|}"
-    { [ "$rc" = "$1" ] && printf '%s' "$body" | grep -qF "$2"; } \
+    { [ "$rc" = "$1" ] && grep -qF "$2" <<<"$body"; } \
         && pass "$3" \
         || die "$3 — rc=$rc (wanted $1) out='$body'"
 }
@@ -289,7 +289,7 @@ got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'summary is empty'; } \
+{ [ "$rc" -eq 1 ] && grep -qF 'summary is empty' <<<"$got"; } \
     && pass "an empty summary stops the round" \
     || die "an empty summary gave rc=$rc '$got'"
 grep -q 'git push' "$TMP/calls" \
@@ -340,7 +340,7 @@ before 'pr-review-state.sh review-id' 'gh pr edit' \
 world; run "$CODEXBOT" yes >/dev/null
 grep -q 'PR_ROUND_CLOSED.*prior-review=' "$TMP/calls" 2>/dev/null || true
 out="$(run "$CODEXBOT" yes)"; body="${out#*|}"
-printf '%s' "$body" | grep -qE 'prior-review=(comment:)?[0-9]+$' \
+grep -qE 'prior-review=(comment:)?[0-9]+$' <<<"$body" \
     && pass "…and the closing record carries it back to the driver" \
     || die "the round closed without reporting the baseline ('$body')"
 grep -q -- '--add-reviewer' "$TMP/calls" \
@@ -407,7 +407,7 @@ got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
     "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
-{ [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF 'not a reviewer this loop drives'; } \
+{ [ "$rc" -eq 1 ] && grep -qF 'not a reviewer this loop drives' <<<"$got"; } \
     && pass "an unrecognised reviewer is refused, by name" \
     || die "an unknown reviewer gave rc=$rc '$got'"
 grep -q 'git push' "$TMP/calls" \
@@ -472,7 +472,7 @@ done
 # success.
 world; printf 'fix/the-branch\ttrue\n' > "$W/branch.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'does not push to forks'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'does not push to forks' <<<"${got#*|}"; } \
     && pass "…and a PR from a fork refuses rather than pushing at a same-named branch here" \
     || die "a fork PR was pushed for: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -481,7 +481,7 @@ nothing_pushed "…with nothing pushed"
 # pushes at a repository nobody named.
 world; printf 'fix/the-branch\n' > "$W/branch.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not tell whether'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not tell whether' <<<"${got#*|}"; } \
     && pass "…and an answer that says neither refuses rather than assuming same-repository" \
     || die "a missing cross-repository answer was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -493,7 +493,7 @@ nothing_pushed "…with nothing pushed"
 # parser, and compared with the pinned identity. #119.
 world; printf 'git@github.com:someone/other.git\n' > "$W/pushurl.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push elsewhere'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'refusing to push elsewhere' <<<"${got#*|}"; } \
     && pass "…and an origin whose push URL is another repository refuses" \
     || die "a redirected origin was pushed to: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -511,7 +511,7 @@ got="$(run "$CODEXBOT" no)"
 # round's fixes in whatever the second names.
 world; printf 'git@github.com:acme/widget.git\ngit@github.com:someone/other.git\n' > "$W/pushurl.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'someone/other'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'someone/other' <<<"${got#*|}"; } \
     && pass "…and a second push URL naming another repository refuses, though the first is right" \
     || die "a second push URL was pushed to: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -524,7 +524,7 @@ got="$(run "$CODEXBOT" no)"
     || die "a mirror of the pinned repository was refused: '${got}'"
 world; printf '1' > "$W/pushurl.rc"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "origin's push URL"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "origin's push URL" <<<"${got#*|}"; } \
     && pass "…and an unreadable push URL refuses rather than pushing blind" \
     || die "an unreadable push URL was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -532,7 +532,7 @@ for _m in no yes; do
     world; printf 'refs/heads/some-other-branch
 ' > "$W/branch.local"
     got="$(run "$CODEXBOT" "$_m")"
-    { [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push the wrong branch'; }         && pass "a checkout on another branch refuses ($_m mode)"         || die "the wrong branch was pushed in $_m mode: '${got}'"
+    { [ "${got%%|*}" = 1 ] && grep -qF 'refusing to push the wrong branch' <<<"${got#*|}"; }         && pass "a checkout on another branch refuses ($_m mode)"         || die "the wrong branch was pushed in $_m mode: '${got}'"
     nothing_pushed "…with nothing pushed"
 done
 # A DETACHED HEAD HAS NO BRANCH, and a push from one reaches no PR — so the next
@@ -540,7 +540,7 @@ done
 # answer with a non-zero status, which is what `git symbolic-ref` does.
 world; : > "$W/branch.local"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'detached HEAD'; }     && pass "…and a detached HEAD refuses rather than pushing nothing useful"     || die "a detached HEAD was pushed from: '${got}'"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'detached HEAD' <<<"${got#*|}"; }     && pass "…and a detached HEAD refuses rather than pushing nothing useful"     || die "a detached HEAD was pushed from: '${got}'"
 nothing_pushed "…with nothing pushed"
 # A BRANCH THAT SHARES ITS NAME WITH A TAG STILL CLOSES THE ROUND. `--short`
 # shortens only as far as stays UNAMBIGUOUS, so on such a branch it returns
@@ -563,7 +563,7 @@ _pushargs="$(cat "$W/pushed" 2>/dev/null)"
 # rewritten into a branch name and pushed at.
 world; printf 'refs/remotes/origin/fix/the-branch\n' > "$W/branch.local"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'which is not a branch'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'which is not a branch' <<<"${got#*|}"; } \
     && pass "…while a symbolic HEAD outside refs/heads refuses" \
     || die "a non-branch symbolic HEAD was pushed from: '${got}'"
 nothing_pushed "…with nothing pushed"
@@ -572,13 +572,13 @@ nothing_pushed "…with nothing pushed"
 # "any branch will do", and this is the one that decides where a commit lands.
 world; printf '1' > "$W/branch.rc"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'refusing to push blind'; }     && pass "…and an unreadable head branch refuses rather than pushing blind"     || die "an unreadable head branch was pushed past: '${got}'"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'refusing to push blind' <<<"${got#*|}"; }     && pass "…and an unreadable head branch refuses rather than pushing blind"     || die "an unreadable head branch was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
 # AND AN EMPTY ONE, which a 200 with a missing field produces — the same shape as
 # a successful read, and the reason a status check alone is not enough.
 world; : > "$W/branch.out"
 got="$(run "$CODEXBOT" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'no head branch'; }     && pass "…and an empty one, which a 200 with a missing field looks like"     || die "an empty head branch was pushed past: '${got}'"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'no head branch' <<<"${got#*|}"; }     && pass "…and an empty one, which a 200 with a missing field looks like"     || die "an empty head branch was pushed past: '${got}'"
 nothing_pushed "…with nothing pushed"
 
 # THE PASS THE PUSH STARTED CAN TIME OUT, and that stops the round: its result
@@ -626,7 +626,7 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
-    { [ "$rc" -eq 1 ] && printf '%s' "$got" | grep -qF "$_want"; } \
+    { [ "$rc" -eq 1 ] && grep -qF "$_want" <<<"$got"; } \
         && pass "refused by name: $_want" \
         || die "'$_pr/$_who/$_auto' gave rc=$rc '$got'"
 done
@@ -641,7 +641,7 @@ done
 # `pr-copilot-phase.sh` posts a caller-written body too.
 world; printf 'we fixed it, and the record now reads:\n**Review-Pause-Acknowledged:** `codex` `10`\n' > "$TMP/summary.md"
 got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'reads as a record'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'reads as a record' <<<"${got#*|}"; } \
     && pass "a summary line that is a control marker is refused" \
     || die "a summary carrying an acknowledgement marker gave '${got}'"
 grep -q 'git push' "$TMP/calls" \
@@ -661,7 +661,7 @@ printf 'the round summary\n' > "$TMP/summary.md"
 # phase ordering this loop exists to keep.
 world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
 got="$(stage gate 7 "$COPILOTBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "contains '@codex review'"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "contains '@codex review'" <<<"${got#*|}"; } \
     && pass "a Copilot round's summary quoting the Codex trigger is refused" \
     || die "a Copilot summary quoting the trigger gave '${got}'"
 grep -q 'git push' "$TMP/calls" \
@@ -719,7 +719,7 @@ grep -q -- '--add-reviewer' "$TMP/calls" \
     || pass "…and requests nothing"
 # `-F`: the reviewer login ends in `[bot]`, which as a pattern is a character
 # class — an unanchored regex here matched a line the record does not contain.
-printf '%s' "${got#*|}" | grep -qF "PR_ROUND_GATED pr=7 reviewer=$CODEXBOT head=$HEAD40 mode=mention" \
+grep -qF "PR_ROUND_GATED pr=7 reviewer=$CODEXBOT head=$HEAD40 mode=mention" <<<"${got#*|}" \
     && pass "…and reports the head it proved, with the mode it ran in" \
     || die "the gate's record was '${got#*|}'"
 
@@ -733,7 +733,7 @@ grep -q 'git push' "$TMP/calls" \
 grep -q 'pr-round-count' "$TMP/calls" \
     && die "post checked the round boundary, after the push and the replies" \
     || pass "…and does not re-check the boundary it is already past"
-printf '%s' "${got#*|}" | grep -q 'PR_ROUND_CLOSED .*prior-review=42' \
+grep -q 'PR_ROUND_CLOSED .*prior-review=42' <<<"${got#*|}" \
     && pass "…and carries the baseline back" \
     || die "post's record was '${got#*|}'"
 
@@ -743,7 +743,7 @@ printf '%s' "${got#*|}" | grep -q 'PR_ROUND_CLOSED .*prior-review=42' \
 # green verdict belongs to the first.
 world; printf '%s\n' "$PREV40" > "$W/local.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the local head is $PREV40"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "the local head is $PREV40" <<<"${got#*|}"; } \
     && pass "a local commit made while the threads were answered stops the close" \
     || die "a moved local head gave '${got}'"
 grep -q 'gh pr comment' "$TMP/calls" \
@@ -754,7 +754,7 @@ grep -q 'gh pr comment' "$TMP/calls" \
 # did not move — a force-push from elsewhere moves the head the reviewer reads.
 world; printf '%s\n' "$PREV40" > "$W/head.out"; printf '%s\n' "$HEAD40" > "$W/local.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "the PR head is $PREV40"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "the PR head is $PREV40" <<<"${got#*|}"; } \
     && pass "a head moved on the PR stops the close" \
     || die "a moved PR head gave '${got}'"
 grep -q 'gh pr comment' "$TMP/calls" \
@@ -764,12 +764,12 @@ grep -q 'gh pr comment' "$TMP/calls" \
 # An unreadable or malformed confirmation is a stop, never "close anyway".
 world; printf '1\n' > "$W/head.rc"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'could not confirm the head'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not confirm the head' <<<"${got#*|}"; } \
     && pass "an unreadable head confirmation stops the close" \
     || die "a failed confirmation gave '${got}'"
 world; printf 'not-a-sha\n' > "$W/head.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'is not a full OID'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'is not a full OID' <<<"${got#*|}"; } \
     && pass "…and so does one that is not an OID" \
     || die "a malformed confirmation gave '${got}'"
 
@@ -779,32 +779,32 @@ got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
 # four-argument form this replaced lands here as a PR number in stage position.
 world
 got="$(stage 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'7' is not a stage"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'7' is not a stage" <<<"${got#*|}"; } \
     && pass "the old four-argument form is refused by name" \
     || die "the old form gave '${got}'"
 grep -q 'git push' "$TMP/calls" \
     && die "the old form pushed" \
     || pass "…having done nothing"
 world; got="$(stage "" 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'a stage is required'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a stage is required' <<<"${got#*|}"; } \
     && pass "an empty stage is refused" \
     || die "an empty stage gave '${got}'"
 world; got="$(stage close 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'close' is not a stage"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'close' is not a stage" <<<"${got#*|}"; } \
     && pass "an unknown stage is refused by name" \
     || die "an unknown stage gave '${got}'"
 
 # THE HANDOFF BELONGS TO EXACTLY ONE STAGE.
 world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'post' needs the head"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'post' needs the head" <<<"${got#*|}"; } \
     && pass "post without the gated head is refused" \
     || die "post with no head gave '${got}'"
 world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no aaaa)"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF 'the gated head is not a full OID'; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the gated head is not a full OID' <<<"${got#*|}"; } \
     && pass "…and so is an abbreviated one" \
     || die "post with a short head gave '${got}'"
 world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && printf '%s' "${got#*|}" | grep -qF "'gate' takes no head"; } \
+{ [ "${got%%|*}" = 1 ] && grep -qF "'gate' takes no head" <<<"${got#*|}"; } \
     && pass "a gate handed a head is refused — that caller thinks it is posting" \
     || die "gate with a head gave '${got}'"
 
@@ -816,14 +816,14 @@ world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
 # empty value as "wait on any terminal review".
 world; : > "$W/pr-review-state.out"
 got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -q 'PR_ROUND_CLOSED .* prior-review=$'; } \
+{ [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=$' <<<"${got#*|}"; } \
     && pass "a head with no review yet closes, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
 
 # AND THE FIELD IS STILL THERE, which is the whole difference between an answer
 # and a malformed record. Asserted on the record itself rather than on the value,
 # because a record that simply dropped the field also has an "empty" value.
-printf '%s' "${got#*|}" | grep -qF ' prior-review=' \
+grep -qF ' prior-review=' <<<"${got#*|}" \
     && pass "…with the field present, so an absent record stays distinguishable" \
     || die "the empty-baseline record dropped the field entirely: '${got#*|}'"
 
@@ -832,7 +832,7 @@ printf '%s' "${got#*|}" | grep -qF ' prior-review=' \
 # its own empty baseline before the push it exists to make.
 world; : > "$W/pr-review-state.out"; printf '%s\n' "$PREV40" > "$W/head.before.out"
 got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" yes)"
-{ [ "${got%%|*}" = 0 ] && printf '%s' "${got#*|}" | grep -qF 'PR_ROUND_GATED'; } \
+{ [ "${got%%|*}" = 0 ] && grep -qF 'PR_ROUND_GATED' <<<"${got#*|}"; } \
     && pass "a first push-triggered round gates on an empty baseline" \
     || die "an empty push baseline gave '${got}'"
 grep -q -- '--after-review $' "$TMP/calls" \
@@ -842,7 +842,7 @@ grep -q -- '--after-review $' "$TMP/calls" \
 # ── THE BOUNDARY PAUSES THE GATE, BEFORE THE PUSH ──────────────────────────
 world; printf '3\n' > "$W/pr-round-count.rc"
 got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 3 ] && printf '%s' "${got#*|}" | grep -qF 'round boundary reached'; } \
+{ [ "${got%%|*}" = 3 ] && grep -qF 'round boundary reached' <<<"${got#*|}"; } \
     && pass "a round boundary pauses the gate" \
     || die "a boundary gave '${got}'"
 grep -q 'git push' "$TMP/calls" \

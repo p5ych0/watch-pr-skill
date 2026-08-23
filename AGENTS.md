@@ -264,6 +264,31 @@ this — a structural scanner was built and removed after six versions were each
 defeated by legal Bash — so read every `return` in the diff and confirm it states
 a value. See `CLAUDE.md § Bash conventions`.
 
+**Piping a value into `grep -q` is a defect in a fixture.** Every `test-*.sh` sets
+`pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` and dies
+with 141, and that becomes the pipeline's status — so an assertion whose line IS
+present reads as missing, intermittently, and an `|| x=""` capture silently becomes
+empty. Use `grep -q PATTERN <<<"$value"`. **Where the value comes from a COMMAND,
+capture it and its status first** — `v="$(producer)" || die`, emptying the value on
+failure. The pipeline reported a failing producer through `pipefail`; a herestring
+has nothing to report one from, so `grep -q X <<<"$(producer)"` passes on a partial
+read when the producer emits the marker and then fails. `pr-selfcheck.sh` gates the `printf`-produced
+form, and `racy-pipeline-ok` marks a line that carries the spelling as data rather
+than as code. **The gate asks three substring questions of a folded line and
+parses nothing**: does it name `printf`, does it carry a pipe that is not `||`,
+does it name `grep`. Seven review rounds were spent on rules that asked more — the
+grep options first, then `%b`, an unquoted `$fmt`, a quoted assignment value,
+`2>&1`, `/usr/bin/grep`, `myprintf` — each answering one legal spelling and
+producing the next, which is the scanner treadmill `CLAUDE.md` records paying for.
+**So a spelling that walks past the substring tests, or one they over-report, is
+not a finding against this gate**: the herestring is the fix for `grep -c` and
+`grep -v` too and is never worse, and a line whose pipe is not the `printf`'s says
+`racy-pipeline-ok`. Do not propose narrowing it to remove a marker. **Any other producer is review's job** — `bodies | grep -qF …` races
+identically, and the gate cannot see it: telling a pipe from `||`, from
+`${x%%|*}` and from a `|` inside a quoted `awk` program needs a shell parser, and
+the generalised version reported 140 false positives on a clean tree. Only early-exiting readers matter: `grep -c`, `sed` and `awk` without an
+`exit` read to end of input.
+
 **Behaviour changes need tests.** A change to script behaviour with no matching
 `skills/watch-prs/scripts/test-*.sh` coverage is a finding. Tests must stay
 self-contained — throwaway git repos, stubbed `gh`, no network — because CI runs

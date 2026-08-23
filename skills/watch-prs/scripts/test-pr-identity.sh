@@ -176,12 +176,12 @@ for sc in $ID_CALLERS; do
     # the wrong repository — so an rc-only assertion passes on the unguarded code
     # and proves nothing. `no_origin` is reachable only when the lookup's status
     # was actually taken.
-    if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q 'reason=no_origin'; then
+    if [ "$rc" -eq "$(id_rc "$sc")" ] && grep -q 'reason=no_origin' <<<"$out"; then
         echo "ok   - $sc rejects an origin lookup that printed before failing"
     else
         echo "FAIL - $sc accepted a failed origin lookup (rc=$rc out='$out')"; idfail=1
     fi
-    if printf '%s' "$out" | grep -q 'someone-else'; then
+    if grep -q 'someone-else' <<<"$out"; then
         echo "FAIL - $sc used the untrusted remote it was given"; idfail=1
     else
         echo "ok   - $sc did not derive an identity from it"
@@ -221,7 +221,7 @@ for sc in $ID_CALLERS; do
              bash -c 'rb_identity() { HOST=github.com; OWNER=someone-else; REPO=other-repo; }
                       export -f rb_identity
                       exec "$1" "${@:2}"' _ "$STALETMP/run/$sc" "$@" 2>&1)"; rc=$?
-    if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q 'reason=identitylib_empty'; then
+    if [ "$rc" -eq "$(id_rc "$sc")" ] && grep -q 'reason=identitylib_empty' <<<"$out"; then
         echo "ok   - $sc refuses an empty library even with a parser already defined"
     else
         echo "FAIL - $sc accepted an inherited parser (rc=$rc out='$out')"; idfail=1
@@ -446,7 +446,7 @@ for sc in $ID_CALLERS pr-watch.sh; do
         bash -c 'rb_load() { return 0; }
                  export -f rb_load
                  exec "$1" "${@:2}"' _ "$BSTMP/run/$sc" "$@" 2>&1)"; bs_rc=$?
-    if [ "$bs_rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$bs_out" | grep -q 'reason=loadlib_empty'; then
+    if [ "$bs_rc" -eq "$(id_rc "$sc")" ] && grep -q 'reason=loadlib_empty' <<<"$bs_out"; then
         echo "ok   - $sc refuses an empty loader even with rb_load already defined"
     else
         echo "FAIL - $sc accepted an inherited loader (rc=$bs_rc out='$bs_out')"; idfail=1
@@ -469,7 +469,7 @@ for sc in $ID_CALLERS pr-watch.sh; do
         pr-phase-state.sh) bs_want='PR_PHASE status=error' ;;
         *) bs_want='PR_CI_STATE status=error' ;;
     esac
-    if printf '%s' "$bs_out" | grep -qF "$bs_want"; then
+    if grep -qF "$bs_want" <<<"$bs_out"; then
         echo "ok   - …addressed in its own words"
     else
         echo "FAIL - $sc did not report as '$bs_want' (out='$bs_out')"; idfail=1
@@ -482,7 +482,7 @@ for sc in $ID_CALLERS pr-watch.sh; do
     else
         echo "ok   - …and addressed no request"
     fi
-    if printf '%s' "$bs_out" | grep -q 'PR_REVIEW_READY'; then
+    if grep -q 'PR_REVIEW_READY' <<<"$bs_out"; then
         echo "FAIL - $sc reported a verdict ready after a failed load"; idfail=1
     else
         echo "ok   - …and reported nothing ready"
@@ -537,14 +537,14 @@ GITSH
             # The negative control. A real GitHub remote must NOT be caught by
             # either rule — otherwise a matrix of rejections could be satisfied
             # by a parser that rejects everything, which is not the invariant.
-            if printf '%s' "$out" | grep -qE 'reason=origin_(has_no_host|transport_unsupported)'; then
+            if grep -qE 'reason=origin_(has_no_host|transport_unsupported)' <<<"$out"; then
                 echo "FAIL - $sc rejected a valid remote as $label (out='$out')"; idfail=1
             else
                 echo "ok   - $sc accepts $label"
             fi
             continue
         fi
-        if [ "$rc" -eq "$(id_rc "$sc")" ] && printf '%s' "$out" | grep -q "reason=$want"; then
+        if [ "$rc" -eq "$(id_rc "$sc")" ] && grep -q "reason=$want" <<<"$out"; then
             echo "ok   - $sc refuses $label"
         else
             echo "FAIL - $sc accepted $label (want reason=$want, rc=$rc out='$out')"; idfail=1
@@ -693,7 +693,7 @@ SPY
         else
             echo "FAIL - $_n never asked rb_load for clocklib (spy: $(tr '\n' ' ' < "$CLKTMP/spy"))"; idfail=1
         fi
-        if [ "$rc" = "$_want" ] && printf '%s' "$out" | grep -q 'clocklib_empty'; then
+        if [ "$rc" = "$_want" ] && grep -q 'clocklib_empty' <<<"$out"; then
             echo "ok   - …and refuses an empty clocklib with rc=$_want, even with rb_elapsed defined"
         else
             echo "FAIL - $_n gave rc=$rc for an empty clocklib (wanted $_want) out='$out'"; idfail=1
@@ -775,8 +775,8 @@ SPY
             # line, or one still polling when time ran out, satisfies an absence
             # check and nothing else.
             if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 125 ] \
-                && ! printf '%s' "$out" | grep -q "$_say" \
-                && printf '%s' "$out" | grep -q 'status=error\|state=error'; then
+                && ! grep -q "$_say" <<<"$out" \
+                && grep -q 'status=error\|state=error' <<<"$out"; then
                 echo "ok   - $_n runs past the $_hook file, which its shell never sources"
             else
                 echo "FAIL - $_n was reached by $_hook (rc=$rc) out='$out'"; idfail=1
@@ -811,7 +811,11 @@ for f in "$ROOT"/pr-*.sh; do
     # the file does not rely on and cannot enforce. Both halves are asserted
     # below, so the exemption cannot quietly become a hole.
     [ "$_b" = pr-origin.sh ] && continue
-    head -n 1 "$f" | grep -qxF '#!/usr/bin/env -S bash -p' \
+    # THE READ'S STATUS IS TAKEN, not only its output. A `head` that emits the
+    # line and then fails would otherwise leave the match standing on a partial
+    # read; an unreadable file is recorded as missing rather than as satisfied.
+    _sb=""; _sb="$(head -n 1 "$f")" || _sb=""
+    grep -qxF '#!/usr/bin/env -S bash -p' <<<"$_sb" \
         || priv_missing="$priv_missing $_b"
 done
 if [ -f "$ROOT/pr-origin.sh" ]; then
@@ -820,7 +824,7 @@ if [ -f "$ROOT/pr-origin.sh" ]; then
         || { echo "FAIL - pr-origin.sh is executable; its shebang would become the entry point"; idfail=1; }
     _po_out="$(run_limited 20 env REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
         bash "$ROOT/pr-origin.sh" read /dev/null 2>&1)"; _po_rc=$?
-    { [ "$_po_rc" -ne 0 ] && printf '%s' "$_po_out" | grep -q 'not privileged'; } \
+    { [ "$_po_rc" -ne 0 ] && grep -q 'not privileged' <<<"$_po_out"; } \
         && echo "ok   - …and it refuses an unprivileged interpreter by name" \
         || { echo "FAIL - pr-origin.sh ran unprivileged (rc=$_po_rc out='$_po_out')"; idfail=1; }
 fi
@@ -853,7 +857,8 @@ done
 [ -z "$nested_bare" ] \
     && echo "ok   - …and no helper calls another by pathname alone" \
     || { echo "FAIL - nested call(s) not started privileged:$nested_bare"; idfail=1; }
-head -n 1 "$ROOT/pr-selfcheck.sh" | grep -qxF '#!/usr/bin/env bash' \
+_sb=""; _sb="$(head -n 1 "$ROOT/pr-selfcheck.sh")" || _sb=""
+grep -qxF '#!/usr/bin/env bash' <<<"$_sb" \
     && echo "ok   - …and pr-selfcheck.sh is the stated exception, which re-execs its own way" \
     || { echo "FAIL - pr-selfcheck.sh's shebang changed; its exemption is no longer what it says"; idfail=1; }
 # AND IT IS TRUE AT RUNTIME, not only in the text. A shebang that a platform's
@@ -891,7 +896,7 @@ for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh pr-merge-range.sh; do
         bash "$ROOT/$sc" "$@" 2>&1)"; up_rc=$?
     # THE DOCUMENTED STATUS AS WELL AS THE REASON: a helper refusing with somebody
     # else's exit code is a caller branching on the wrong thing.
-    if [ "$up_rc" = "$(id_rc "$sc")" ] && printf '%s' "$up_out" | grep -q 'reason=not_privileged'; then
+    if [ "$up_rc" = "$(id_rc "$sc")" ] && grep -q 'reason=not_privileged' <<<"$up_out"; then
         echo "ok   - $sc refuses an unprivileged interpreter by name and status"
     else
         echo "FAIL - $sc ran unprivileged or refused wrongly (rc=$up_rc want=$(id_rc "$sc") out='$up_out')"; idfail=1
@@ -915,7 +920,7 @@ class_out="$(run_limited 20 env \
     'BASH_FUNC_type%%=() { return 1; }' \
     'BASH_FUNC_return%%=() { :; }' \
     "$ROOT/pr-review-state.sh" 2>&1)"; class_rc=$?
-{ [ "$class_rc" -ne 0 ] && printf '%s' "$class_out" | grep -q 'usage:'; } \
+{ [ "$class_rc" -ne 0 ] && grep -q 'usage:' <<<"$class_out"; } \
     && pass_priv=1 || pass_priv=0
 [ "$pass_priv" = 1 ] \
     && echo "ok   - five forged builtins at once do not reach a helper" \
@@ -953,7 +958,7 @@ for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
     # matched — and the consumer reading the documented stream would have got
     # nothing at all.
     if [ "$(id_stream "$sc")" = out ]; then ld_said="$ld_out"; else ld_said="$ld_err"; fi
-    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_said" | grep -q 'reason=loadlib_empty'; then
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && grep -q 'reason=loadlib_empty' <<<"$ld_said"; then
         echo "ok   - $sc names an empty loader on its documented stream, with no preflight"
     else
         echo "FAIL - $sc did not name an empty loader on $(id_stream "$sc") (rc=$ld_rc want=$(id_rc "$sc") out='$ld_out' err='$ld_err')"; idfail=1
@@ -981,7 +986,7 @@ for sc in $ID_CALLERS pr-watch.sh pr-ci-gate.sh; do
         "$LDTMP/run/$sc" "$@" 2>"$LDTMP/err")"; ld_rc=$?
     ld_err="$(cat "$LDTMP/err")"
     if [ "$(id_stream "$sc")" = out ]; then ld_said="$ld_out"; else ld_said="$ld_err"; fi
-    if [ "$ld_rc" = "$(id_rc "$sc")" ] && printf '%s' "$ld_said" | grep -q 'reason=loadlib_empty'; then
+    if [ "$ld_rc" = "$(id_rc "$sc")" ] && grep -q 'reason=loadlib_empty' <<<"$ld_said"; then
         echo "ok   - $sc refuses an empty loader with an rb_load on PATH"
     else
         echo "FAIL - $sc took its loader from PATH (rc=$ld_rc out='$ld_out' err='$ld_err')"; idfail=1
@@ -1142,8 +1147,8 @@ printf '#!/usr/bin/env bash\nREPO_SLUG="acme/widget"\n' > "$UNREAD/pr-offender.s
 # discard it.
 printf '#!/usr/bin/env bash\nREPO_SLUG="acme/widget"; echo "$OWNER/$REPO"\n' > "$UNREAD/pr-mixed.sh"
 found="$(scan_hardcoded_identity "$UNREAD"/pr-*.sh)"; frc=$?
-if [ "$frc" -eq 0 ] && printf '%s' "$found" | grep -q 'pr-offender.sh' \
-   && printf '%s' "$found" | grep -q 'pr-mixed.sh'; then
+if [ "$frc" -eq 0 ] && grep -q 'pr-offender.sh' <<<"$found" \
+   && grep -q 'pr-mixed.sh' <<<"$found"; then
     echo "ok   - …and a script that does hard-code one is caught, even beside \$OWNER/\$REPO"
 else
     echo "FAIL - a hard-coded REPO_SLUG was not caught (rc=$frc out='$found')"

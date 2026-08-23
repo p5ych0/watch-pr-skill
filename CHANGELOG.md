@@ -1,5 +1,73 @@
 # Changelog
 
+## [2.0.58] — 2026-08-23
+
+- **The pre-push gate now refuses a fixture that pipes a `printf` into `grep`.**
+  That shape is RACY under `set -o pipefail`, which every fixture sets: `grep -q`
+  exits the moment it matches, `printf` takes `SIGPIPE` and dies with 141, and
+  `pipefail` makes that the pipeline's status — so a line that IS present reads as
+  missing, at whatever rate the scheduler decides. Measured at roughly one run in
+  three on one file.
+
+  It is worse than an intermittent failure. Where the status feeds an `|| x=""`
+  capture, a good extraction silently becomes an empty one and every assertion
+  built on it passes against nothing.
+
+  None of the 511 converted assertions changes runtime behaviour — they are all in
+  `test-*.sh`. What ships is `pr-selfcheck.sh`'s new check, and a contributor DOES
+  see it: the pre-push gate has a new refusal, which is what this version names. It
+  reports the shape rather than letting it back in, and the suite it gates stops
+  failing for reasons that are not there.
+
+  The check asks three substring questions of a folded LOGICAL line and parses
+  nothing: does it name `printf`, does it carry a pipe that is not `||`, does it
+  name `grep`. Folding matters — a pipeline continues across a `\` and across a
+  bare trailing `|`, and both halves scanned separately read clean — and reporting
+  the first physical line number keeps the finding useful. An input it cannot read
+  exits 2, the could-not-run status, rather than reporting an actionable finding
+  nobody looked for.
+
+  **Everything narrower was tried first, and this is what it cost.** Six review
+  rounds went into modelling grep's options — an option with an argument, a
+  hyphenated argument, a quoted one, a dash-leading operand, `-e` attached to its
+  pattern, `--`, `-qm1`, `--quiet`. Dropping the options bought one round: the next
+  found `%b`, an unquoted `$fmt`, a quoted assignment value, `2>&1` before the
+  pipe, `/usr/bin/grep`, and `myprintf` matching on its suffix. Every one of those
+  was a fact about SHELL SYNTAX, and reading shell syntax out of text needs a
+  shell. There is no spelling of `printf`, of a pipe or of `grep` that walks past a
+  substring test.
+
+  Nothing is lost by asking less: the herestring is the fix for `grep -c` and
+  `grep -v` as much as for `grep -q`, and it is never worse. The thirteen lines in
+  the tree that read to EOF were converted rather than exempted.
+
+  The price is over-reporting, and it is paid where it can be seen. A line naming
+  all three where the pipe is not the `printf`'s says `racy-pipeline-ok`; there are
+  two in the tree. A false negative would be invisible, and this is not.
+
+  **A producer's status travels with the conversion.** A pipeline reported a failing
+  producer through `pipefail`; a herestring has no pipeline to report one from, so
+  `grep -q X <<<"$(producer)"` discards it — and a producer that emits the expected
+  marker and THEN fails leaves the reader matching and the assertion passing on an
+  incomplete read. Every converted site whose producer is a command now captures the
+  value and its status together and empties the value on failure, so a partial read
+  cannot match. One of them failed OPEN before this: an unreadable `SKILL.md` yielded
+  no lines, the search for `sort -V` found none, and the portability assertion
+  reported clean on a file it never read.
+
+  It is anchored on `printf`, and any other producer is review's job. Generalising
+  to "a pipeline whose last stage is `grep -q`" was tried and reverted: `|` also
+  appears in `||`, in `${x%%|*}` and inside quoted `awk` programs, and telling
+  those apart needs a shell parser — the generalised version reported 140 false
+  positives on a clean tree. A line that carries the
+  spelling as DATA — a comment, a stub, a heredoc — says so with
+  `racy-pipeline-ok`; nothing else is exempt. And a fixture the scan cannot READ is
+  a finding of its own rather than a clean result, because `grep` exits 1 for "no
+  match" and 2 or more for an error, and a blanket `|| true` made those the same
+  answer.
+
+---
+
 ## [2.0.57] — 2026-08-22
 
 - **The origin transport was thirty-five lines of driver-shell defence for one

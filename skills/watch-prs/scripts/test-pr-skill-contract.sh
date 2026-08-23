@@ -580,10 +580,10 @@ LOCAL
             '"$_read_block"'
             printf "EXPORTED=[%s]\n" "${REVIEW_BUS_REMOTE:-unset}"
         ' 2>&1)" || true
-    printf '%s' "$_rx_out" | grep -q '^ABORT: RB_REMOTE is readonly in this shell' \
+    grep -q '^ABORT: RB_REMOTE is readonly in this shell' <<<"$_rx_out" \
         && pass "…and a neutralised exit does not change which refusal is printed" \
         || die "the neutralised-exit case did not refuse: '$_rx_out'"
-    printf '%s' "$_rx_out" | grep -qF 'EXPORTED=[unset]' \
+    grep -qF 'EXPORTED=[unset]' <<<"$_rx_out" \
         && pass "…and nothing is pinned from the stale value, whatever exit was replaced with" \
         || die "a stale RB_REMOTE was pinned past a neutralised exit: '$_rx_out'"
     # …AND INTERACTIVELY, WHICH IS WHERE THE WALK ACTUALLY HAPPENS. Readonly
@@ -596,10 +596,10 @@ LOCAL
             "$_read_block" > "$_forge_dir/stalepin.sh"
         _rxi_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV FORGE_RC=0 \
             TMPDIR="$_forge_dir" bash --noprofile --norc -i < "$_forge_dir/stalepin.sh" 2>&1 || true)"
-        printf '%s' "$_rxi_out" | grep -q '^ABORT: RB_REMOTE is readonly in this shell' \
+        grep -q '^ABORT: RB_REMOTE is readonly in this shell' <<<"$_rxi_out" \
             && pass "…and interactively, where the shell survives the failed clear, the refusal still fires" \
             || die "the interactive stale-pin case did not refuse: '$_rxi_out'"
-        printf '%s' "$_rxi_out" | grep -qF 'EXPORTED=[unset]' \
+        grep -qF 'EXPORTED=[unset]' <<<"$_rxi_out" \
             && pass "…and nothing is pinned there either" \
             || die "a stale RB_REMOTE was pinned in an interactive shell: '$_rxi_out'"
     fi
@@ -619,7 +619,7 @@ LOCAL
             '"$_read_block"'
             printf "PINNED=%s\n" "$RB_REMOTE"
         ' 2>&1)" || _rel_rc=$?
-    printf '%s' "$_rel_out" | grep -q '^PINNED=git@github.com:acme/widget.git' \
+    grep -q '^PINNED=git@github.com:acme/widget.git' <<<"$_rel_out" \
         && pass "a relative TMPDIR falls through to HOME rather than ending the session" \
         || die "a relative TMPDIR was selected or refused (rc=$_rel_rc out='$_rel_out')"
     # …AND A RELATIVE `HOME` IS NOT SILENTLY ACCEPTED EITHER. With neither
@@ -633,7 +633,7 @@ LOCAL
             printf "PINNED=%s\n" "$RB_REMOTE"
         ' 2>&1)" || _relh_rc=$?
     { [ "$_relh_rc" -ne 0 ] \
-      && printf '%s' "$_relh_out" | grep -q 'neither TMPDIR nor HOME is an absolute directory'; } \
+      && grep -q 'neither TMPDIR nor HOME is an absolute directory' <<<"$_relh_out"; } \
         && pass "…and with neither absolute, setup says so rather than building a path" \
         || die "a relative HOME was accepted (rc=$_relh_rc out='$_relh_out')"
     # …AND AN ABSOLUTE BUT UNWRITABLE `TMPDIR` FALLS THROUGH TOO. `-d` says the
@@ -660,7 +660,7 @@ LOCAL
                 '"$_read_block"'
                 printf "PINNED=%s\n" "$RB_REMOTE"
             ' 2>&1)" || _unw_rc=$?
-        printf '%s' "$_unw_out" | grep -q '^PINNED=git@github.com:acme/widget.git' \
+        grep -q '^PINNED=git@github.com:acme/widget.git' <<<"$_unw_out" \
             && pass "an absolute but unwritable TMPDIR falls through to HOME rather than ending the session" \
             || die "an unwritable TMPDIR was committed to (rc=$_unw_rc out='$_unw_out')"
         # AND THE FALLBACK IS WHERE IT WENT, not merely that it survived. A block
@@ -695,7 +695,7 @@ LOCAL
     # AND IT SAYS WHY. The expansion's own message names the variable and carries
     # the sentence the guard used to print, so an operator sees a cause rather than
     # a bare non-zero status.
-    printf '%s' "$_ep_out" | grep -qF 'neither TMPDIR nor HOME is an absolute directory' \
+    grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_ep_out" \
         && pass "…and names the cause, which the expansion carries" \
         || die "the empty-parent refusal is silent: '$_ep_out'"
     # …AND THE HELPER WAS NEVER INVOKED, which is the concrete damage — for a root
@@ -725,7 +725,7 @@ LOCAL
     _dj="$(awk '/^ *if \{ \[\[ -O \/dev\/fd\/9 \]\]/,/^ *fi$/' "$SKILL")" || _dj=""
     _dj_then=""; _dj_then="$(printf '%s\n' "$_dj" | sed -n '1,/^ *else$/p')" || _dj_then=""
     _dj_else=""; _dj_else="$(printf '%s\n' "$_dj" | sed -n '/^ *else$/,$p')" || _dj_else=""
-    _dj_n=0; _dj_n="$(printf '%s\n' "$_dj" | grep -c 'rm -f "$RB_ORIGIN_DIR/origin"')" || _dj_n=0
+    _dj_n=0; _dj_n="$(grep -c 'rm -f "$RB_ORIGIN_DIR/origin"' <<<"$_dj")" || _dj_n=0
     { [ -n "$_dj_then" ] && [ -n "$_dj_else" ] && [ "$_dj_n" = 2 ] \
       && case "$_dj_then" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
       && case "$_dj_else" in *'rmdir "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
@@ -851,7 +851,7 @@ LOCAL
         # ITS REACH: the shell must really have run the block, or the absence above
         # is what a shell that failed to start leaves. The refusal is bash's own
         # and carries the sentence the expansion holds.
-        printf '%s' "$_sv_out" | grep -q 'RB_TMPPARENT: neither TMPDIR nor HOME is an absolute directory' \
+        grep -q 'RB_TMPPARENT: neither TMPDIR nor HOME is an absolute directory' <<<"$_sv_out" \
             && pass "…where that shell did reach the refusal and print it" \
             || die "the interactive stale-value case did not reach the refusal: '$_sv_out'"
     fi
@@ -1121,7 +1121,7 @@ if [ -n "$_forge_dir" ]; then
         *'PINNED=[git@'*) die "a pre-seeded probe slot let setup pin the session: '$_ps_out'" ;;
         *) pass "a pre-seeded probe slot fails closed — setup refuses and pins nothing" ;;
     esac
-    printf '%s' "$_ps_out" | grep -q 'readonly, value-transforming, or aimed at another' \
+    grep -q 'readonly, value-transforming, or aimed at another' <<<"$_ps_out" \
         && pass "…refusing by the probe's own message, so an operator is told which names it is about" \
         || die "the pre-seeded case refused for some other reason: '$_ps_out'"
 fi
@@ -2130,7 +2130,7 @@ if [ -f "$ROOT/README.md" ]; then
     # this release removes.
     readme_now="$(grep -v '^[[:space:]]*>' "$ROOT/README.md")"
     for gone in 'file-based bus' 'systemd --user' 'response monitor'; do
-        printf '%s' "$readme_now" | grep -qi -- "$gone" \
+        grep -qi -- "$gone" <<<"$readme_now" \
             && die "README still presents removed v1 machinery as current: $gone" \
             || pass "README does not present removed machinery as current ($gone)"
     done
@@ -2372,7 +2372,7 @@ while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' \
+    grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
 done
@@ -2388,14 +2388,14 @@ done
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
 declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-printf '%s' "$_rb_out" | grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' \
+grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
-printf '%s' "$_rb_out" | grep -qF 'neither TMPDIR nor HOME is an absolute directory' \
+grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_out" \
     && die "…but the selection ran anyway and added its own misdirected abort: '$_rb_out'" \
     || pass "…and no second, misdirected abort follows it (an absence check; see above for what it cannot see)"
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'RB_TMPPARENT=' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-printf '%s' "$_rb_out" | grep -qF 'SURVIVED' \
+grep -qF 'SURVIVED' <<<"$_rb_out" \
     && pass "…and an ordinary shell passes it, so the two above are not refusing everything" \
     || die "the RB_TMPPARENT probe refused an ordinary shell: '$_rb_out'"
 # `declare -u` IS ON THIS LIST TOO, and it is the attribute an ALL-CAPS sentinel
@@ -2409,15 +2409,15 @@ while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
-    printf '%s' "$_rb_out" | grep -q "^ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" \
+    grep -q "^ABORT: RB_WORK_DIR is readonly or value-transforming in this shell" <<<"$_rb_out" \
         && pass "…the working-directory probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_WORK_DIR probe gave '$_rb_out' ($_rb_attr)"
-    printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
+    grep -qF 'OWNER=acme' <<<"$_rb_out" \
         && die "…but setup still reported completion ($_rb_attr): '$_rb_out'" \
         || pass "…and setup's completion line is not reached ($_rb_attr)"
 done
 _rb_out="$(rb_probe_case "$_rb_pb/alloc.sh" 'RB_WORK_DIR=' TMPDIR="$_rb_pb/parent" RB_TMPPARENT="$_rb_pb/parent")"
-printf '%s' "$_rb_out" | grep -qF 'OWNER=acme' \
+grep -qF 'OWNER=acme' <<<"$_rb_out" \
     && pass "…and an ordinary shell reaches the completion line, so the two above are not refusing everything" \
     || die "the RB_WORK_DIR allocation refused an ordinary shell: '$_rb_out'"
 rm -rf "$_rb_pb" 2>/dev/null || true
@@ -2746,7 +2746,7 @@ unquoted_slug="$(grep -c -- '--repo \$HOST/\$OWNER/\$REPO' "$SKILL")" || unquote
 # rather than on the loop's shape, so a reformat does not silently empty this.
 _mk_set="$(grep -o "'\*\*[A-Za-z:-]*\*\*'" "$SCRIPT_DIR/recordlib.sh" \
     | sed "s/^'\*\*//; s/\*\*'$//" | sort -u)" || true
-_mk_n="$(printf '%s\n' "$_mk_set" | grep -c . )" || _mk_n=0
+_mk_n="$(grep -c . <<<"$_mk_set")" || _mk_n=0
 [ "$_mk_n" -eq 3 ] \
     && pass "the reserved-marker set is the size SKILL.md and README.md describe" \
     || die "the reserved-marker set changed ($_mk_n markers, expected 3: $(printf '%s' "$_mk_set" | tr '\n' ' ')) — update SKILL.md and README.md, then this count"
@@ -2762,8 +2762,8 @@ _readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/READ
     && pass "…and both layers still carry the passage that tells an author about them" \
     || die "the refusal passage is gone from SKILL.md or README.md (skill=${#_skill_pass} readme=${#_readme_pass})"
 for _m in $_mk_set; do
-    { printf '%s' "$_skill_pass" | grep -qF "**$_m**" \
-        && printf '%s' "$_readme_pass" | grep -qF "**$_m**"; } \
+    { grep -qF "**$_m**" <<<"$_skill_pass" \
+        && grep -qF "**$_m**" <<<"$_readme_pass"; } \
         && pass "…and $_m is named in both layers an author reads" \
         || die "$_m is refused by the rule but missing from the refusal passage in SKILL.md or README.md"
 done
@@ -2783,7 +2783,7 @@ if [ -f "$CLAUDEMD" ]; then
     for h in "$SCRIPT_DIR"/pr-*.sh; do
         [ -e "$h" ] || continue
         b="$(basename "$h")"
-        printf '%s' "$manifest" | grep -q "$b" || manifest_missing="$manifest_missing $b"
+        grep -q "$b" <<<"$manifest" || manifest_missing="$manifest_missing $b"
     done
     [ -z "$manifest_missing" ] \
         && pass "CLAUDE.md's What-ships table lists every runtime helper" \
@@ -2808,7 +2808,7 @@ if [ -f "$CLAUDEMD" ]; then
     for h in "$SCRIPT_DIR"/pr-*.sh; do
         [ -e "$h" ] || continue
         b="$(basename "$h")"
-        printf '%s' "$strict_row" | grep -q "$b" || strict_missing="$strict_missing $b"
+        grep -q "$b" <<<"$strict_row" || strict_missing="$strict_missing $b"
     done
     [ -z "$strict_missing" ] \
         && pass "…and its strict-mode table says which mode each of them is in" \
@@ -2965,10 +2965,10 @@ printf "SURVIVED\n"' _ "$_rb_bt/parent.sh" 2>&1 || true)"; _rb_bt_rc=$?
     # assignment ends the shell at the line that builds the path, and bash's own
     # message names no cause the operator can act on. What must come out is the
     # refusal that names the two variables.
-    printf '%s' "$_rb_bt_out" | grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' \
+    grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
         && pass "…an unusable RB_ORIGIN_DIR is refused by name ($_rb_bt_attr)" \
         || die "the RB_ORIGIN_DIR case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
-    printf '%s' "$_rb_bt_out" | grep -qF 'neither TMPDIR nor HOME is an absolute directory' \
+    grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_bt_out" \
         && die "…but the selection ran and blamed TMPDIR and HOME instead ($_rb_bt_attr): '$_rb_bt_out'" \
         || pass "…and the selection's message about TMPDIR and HOME does not follow it ($_rb_bt_attr)"
     _rb_bt_left="$(ls -A "$_rb_bt/parent/attacker" 2>/dev/null)" || _rb_bt_left='THE_SCAN_FAILED'
@@ -3461,7 +3461,13 @@ fi
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.
-if grep -vE '^[[:space:]]*#' "$SKILL" | grep -q 'sort -V'; then
+# THE READ'S STATUS IS TAKEN, and this one failed OPEN without it: an unreadable
+# `$SKILL` yields no lines, the search finds no `sort -V`, and the assertion reports
+# the skill portable on a file it never read.
+_nocomment=""
+_nocomment="$(grep -vE '^[[:space:]]*#' "$SKILL")" \
+    || die "could not read the skill to check it for GNU-only tools"
+if grep -q 'sort -V' <<<"$_nocomment"; then
     die "skill uses GNU-only 'sort -V' while README advertises portability"
 else
     pass "no GNU-only sort in the script-resolution fallback"
@@ -3486,7 +3492,7 @@ resume_blk="$(awk '/^### Resuming after a stop$/ {sec=1}
                    inb && /^```$/ {exit}
                    inb' "$SKILL")"
 [ -n "$resume_blk" ] || die "the resume recipe could not be extracted"
-printf '%s' "$resume_blk" | grep -qF 'pr-phase-state.sh N' \
+grep -qF 'pr-phase-state.sh N' <<<"$resume_blk" \
     && pass "the resume recipe reads the phase off the PR through pr-phase-state.sh" \
     || die "the resume recipe does not call pr-phase-state.sh"
 # NO STATUS VARIABLE HOLDS THE ANSWER, and that is not a style point. Written as
@@ -3504,9 +3510,9 @@ esac
 # reads the condition's `$?` into a `case` that tells 1 from anything else. A
 # `case` with only the first arm would fall through to the continue.
 _ph_else="$(printf '%s' "$resume_blk" | awk '/^else$/{f=1; next} /^fi$/{if(f)exit} f')"
-{ printf '%s' "$_ph_else" | grep -qF 'case $? in' \
-    && printf '%s' "$_ph_else" | grep -qE '^ *1\)' \
-    && printf '%s' "$_ph_else" | grep -qE '^ *\*\)'; } \
+{ grep -qF 'case $? in' <<<"$_ph_else" \
+    && grep -qE '^ *1\)' <<<"$_ph_else" \
+    && grep -qE '^ *\*\)' <<<"$_ph_else"; } \
     && pass "…and tells stopped from unreadable where the status is produced" \
     || die "the resume recipe does not distinguish the phase helper's refusals: '$_ph_else'"
 
@@ -3686,7 +3692,7 @@ if [ -n "$merge_blk" ]; then
         || die "the merge-gate block does not parse ($blk_err)"
 fi
 # …AND IT USES THE SHA THE SESSION ALREADY HAS, rather than asking for one again.
-printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' \
+grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW"' <<<"$merge_blk" \
     && pass "…passing the sha captured when the Codex phase closed" \
     || die "the merge gate is not given the validated Codex sha"
 # …AND WHICH REVIEWERS THIS MERGE RESTS ON. The stop above offers merging on the
@@ -3696,7 +3702,7 @@ printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REV
 # ASSERTED WHERE `merge_blk` EXISTS. Written higher up the file it ran against an
 # unset variable — `-u` was not in force for it, so it silently compared nothing
 # and reported the gate untold.
-printf '%s' "$merge_blk" | grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW" "\$REVIEWERS"' \
+grep -q 'pr-merge-gate.sh N "\$CODEX_SHA" "\$AUTO_REVIEW" "\$REVIEWERS"' <<<"$merge_blk" \
     && pass "…which the gate is actually told" \
     || die "the merge gate is never told which reviewers this merge rests on"
 # …AND THE GATE'S STATUS LEAVES THE BLOCK. Every arm of the dispatch ends in an
@@ -3728,13 +3734,13 @@ done
 # collapsed an operator decision into its generic refusal branch while the suite
 # stayed green.
 merge_case="$(awk '/^case "\$MERGE_RC" in/ {c=1} c {print} c && /^esac/ {exit}' "$SKILL")"
-{ [ -n "$merge_case" ] && printf '%s' "$merge_case" | grep -qE '^[[:space:]]*3\)'; } \
+{ [ -n "$merge_case" ] && grep -qE '^[[:space:]]*3\)' <<<"$merge_case"; } \
     && pass "…and the round-boundary pause is distinguished from a refusal" \
     || die "the driver does not tell a merge-gate pause from a block"
 # …AND A QUEUED MERGE FROM A COMPLETED ONE. `gh pr merge` reports success for
 # ADDING a PR to a merge queue, and the PR can leave that queue without landing.
 # Treating rc 4 as success ends the session with the head not on the base branch.
-{ [ -n "$merge_case" ] && printf '%s' "$merge_case" | grep -qE '^[[:space:]]*4\)'; } \
+{ [ -n "$merge_case" ] && grep -qE '^[[:space:]]*4\)' <<<"$merge_case"; } \
     && pass "…and a queued merge is not read as a completed one" \
     || die "the driver treats a queued merge as merged"
 # THE GATE RUNS IN THE REPOSITORY THIS SESSION STARTED IN. It derives identity and
@@ -3833,7 +3839,7 @@ hd="$(grep -n 'cat >>\{0,1\} "\$SUMMARY_FILE" <<' "$SKILL" || true)"
 if [ -z "$hd" ]; then
     die "no summary heredoc found in SKILL.md — has the recipe moved?"
 else
-    bad="$(printf '%s\n' "$hd" | grep -v "<<'EOF'" || true)"
+    bad="$(grep -v "<<'EOF'" <<<"$hd" || true)"
     [ -z "$bad" ] \
         && pass "every summary heredoc is quoted, so prose is written, not executed" \
         || die "an unquoted summary heredoc executes the prose it writes: $bad"
@@ -3965,7 +3971,7 @@ grep -q 'proposal rather than an instruction' "$SKILL" \
 # routinely span continuation lines: a line-based match saw only one token of a
 # split invocation and reported clean. Third time line-wrapping has defeated a
 # check in this PR, which is why the flattened copy is taken once and reused.
-# The scans below use herestrings rather than `printf | grep`: under `pipefail`,
+# The scans below use herestrings rather than a piped `printf`: under `pipefail`,
 # `grep -q` exiting at the first match SIGPIPEs the producer and the pipeline
 # reports the match as ABSENT — the fail-open direction. The fixture demonstrating
 # that hazard, and the counting machinery for CHANGELOG consistency, are held back
@@ -4223,7 +4229,7 @@ grep -qE 'A \*different\* pre-existing defect found while fixing this one is not
     && pass "…and that defect is stated to be OUT of scope" \
     || die "the contract does not state the out-of-scope outcome"
 # ── the SIGPIPE hazard these scans avoid, demonstrated ────────────────────
-# Every scan in this file uses a herestring rather than `printf | grep`. This is
+# Every scan in this file uses a herestring rather than a piped `printf`. This is
 # the fixture that shows why, and it was held back from the documentation PR
 # because it tests THIS FILE's idiom rather than anything the contract says.
 #
@@ -4258,7 +4264,7 @@ $body"'
 #   0 no race · 9 unbuildable · 20 producer lost, consumer matched · 21 consumer failed
 sigpipe_rc=0
 bash -c "$sigpipe_probe"'
-    printf "%s" "$multi" | grep -q EARLYMATCH
+    printf "%s" "$multi" | grep -q EARLYMATCH   # racy-pipeline-ok: this IS the race
     rcs=("${PIPESTATUS[@]}")
     prod=${rcs[0]}; cons=${rcs[1]}
     [ "$cons" -eq 0 ] || exit 21
@@ -4851,7 +4857,7 @@ _first_exec="$(awk '/^## Derive identity$/{s=1} s&&/^```bash$/{f=1;next} f&&/^``
 # THE CODE, NOT THE COMMENTS. The block explains at length why `set +x` was not
 # used, so a scan over the raw text finds that spelling in the prose arguing
 # against it and reports the defect the prose exists to prevent.
-_setup_code="$(printf '%s\n' "$_setup_block" | grep -v '^[[:space:]]*#')"
+_setup_code="$(grep -v '^[[:space:]]*#' <<<"$_setup_block")"
 # ANY `set +…`, NOT ONE SPELLING. `set +x` and `set +o xtrace` do the same thing,
 # and a check for the first stays green for the second — while every behavioural
 # case here lifts the guard alone and would miss a disabling line placed after it.
@@ -4862,7 +4868,7 @@ tr_no_set_minus() {   # tr_no_set_minus <code> ; 0 if no `set +…` appears
     # `grep -E`, NOT `\b`. Word boundaries are a GNU extension: BSD `grep` can
     # match `\b` literally, so the pattern would find nothing and the check would
     # pass everything — fail-open, on the platform the suite exists to cover.
-    _n="$(printf '%s\n' "$1" | grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' || true)"
+    _n="$(grep -cE '(^|[^[:alnum:]_])set[[:space:]]*\+' <<<"$1" || true)"
     [ "$_n" -eq 0 ]
 }
 tr_no_set_minus "$_setup_code" \
@@ -5097,7 +5103,7 @@ else
     # wrong the first time a new one is written: `RB_TRACE_SAVED` would pass a
     # scan for `RB_XTRACE_SAVED` while reintroducing exactly what it forbids. The
     # guard is three lines; requiring it to BE those three lines admits no fourth.
-    _tr_shape="$(printf '%s\n' "$_tr_guard" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$')"
+    _tr_shape="$(grep -v '^[[:space:]]*#' <<<"$_tr_guard" | grep -v '^[[:space:]]*$')"
     [ "$_tr_shape" = 'if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi' ] \
@@ -5113,10 +5119,10 @@ fi' ] \
     # names `BASH_XTRACEFD` twice, in its writability probe and in the move it
     # gates. What must hold is that NOTHING ELSE in the block names it — a restore
     # has to write it again, wherever it puts the value it remembers.
-    _tr_guard_names="$(printf '%s\n' "$_tr_guard" | grep -c 'BASH_XTRACEFD' || true)"
+    _tr_guard_names="$(grep -c 'BASH_XTRACEFD' <<<"$_tr_guard" || true)"
     tr_writes_once() {   # tr_writes_once <block-code> ; 0 if only the guard names it
         local _n
-        _n="$(printf '%s\n' "$1" | grep -c 'BASH_XTRACEFD' || true)"
+        _n="$(grep -c 'BASH_XTRACEFD' <<<"$1" || true)"
         [ "$_n" -eq "$_tr_guard_names" ]
     }
     tr_writes_once "$_setup_code" \

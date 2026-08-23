@@ -436,6 +436,60 @@ rediscovering them.
   it is not derived from the core count, because the `macos-shell` job asserts
   `nproc` is unreachable. See issue #52.
 
+- **Never pipe a value into a reader that exits early.** `printf … | grep -q` is
+  RACY under `set -o pipefail`, which every fixture sets: `grep -q` exits the
+  moment it matches, `printf` takes `SIGPIPE` and dies with 141, and `pipefail`
+  makes that the pipeline's status — so a line that IS present reads as missing, at
+  whatever rate the scheduler decides. Measured at roughly one run in three on one
+  file, and it cost three review rounds on `test-pr-skill-contract.sh` before the
+  cause was found rather than the symptom.
+
+  Use a herestring: `grep -q PATTERN <<<"$value"` is a redirection, not a pipeline,
+  so there is no second process to kill. **Where the value comes from a COMMAND,
+  capture it and its status first** — `v="$(producer)" || die` — because the
+  pipeline reported a failing producer through `pipefail` and a herestring has
+  nothing to report one from: `grep -q X <<<"$(producer)"` discards the status, and
+  a producer that emits the marker and then fails leaves the assertion passing on a
+  partial read. Empty the value on failure, or the partial read still matches. `case … in` works too where the pattern is
+  a glob. Only the EARLY-EXITING readers matter — `grep -c`, `sed` and `awk`
+  without an `exit` read to end of input, so their pipelines never signal.
+
+  `pr-selfcheck.sh` gates the `printf`-produced form, because the failure is
+  intermittent and a green run proves nothing about the next one. A line carrying
+  the spelling as DATA says so with `racy-pipeline-ok`.
+
+  **The gate asks three substring questions of a folded line and parses nothing:**
+  does it name `printf`, does it carry a pipe that is not `||`, does it name
+  `grep`. It does not ask which options make `grep` quiet, which spelling of
+  `printf` this is, or whose pipe it is.
+
+  Everything narrower was tried first. Six rounds went into modelling grep's
+  options — an option with an argument, a hyphenated argument, a quoted one, a
+  dash-leading operand, `-e` attached to its pattern, `--`, `-qm1`, `--quiet`.
+  Dropping the options bought one round: the next found `%b`, an unquoted `$fmt`,
+  a quoted assignment value, `2>&1` before the pipe, `/usr/bin/grep`, and
+  `myprintf` matching on its suffix. Every one was a fact about SHELL SYNTAX, and
+  reading shell syntax out of text needs a shell — which is this file's own
+  scanner warning, arrived at a second time.
+
+  The herestring is the fix for `grep -c` and `grep -v` as much as for `grep -q`
+  and is never worse, so there is nothing the narrower rule bought. The thirteen
+  lines in the tree that read to EOF were converted rather than exempted.
+
+  **The price is over-reporting, and it is paid where it can be seen.** A line
+  naming all three where the pipe is not the `printf`'s says `racy-pipeline-ok`;
+  there are two in the tree. A false negative would be invisible, and this is not.
+  Do not narrow this rule to remove a marker.
+
+  **Any other producer is review's job, and that boundary is deliberate.** `bodies
+  | grep -qF …` races identically — every producer does — and generalising the scan
+  to "a pipeline whose last stage is `grep -q`" was tried and reverted in one
+  round: `|` is not only a pipe. It appears in `||`, in `${x%%|*}`, inside quoted
+  `awk` programs and inside `case` patterns, and telling those apart needs a shell
+  PARSER. This file already records paying for one of those, and the generalised
+  version reported 140 false positives on a tree with no defect in it — a gate
+  nobody can push past rather than one that catches anything. #152.
+
 - **A shadowed `type` inside `rb_load` is accepted, not fixed.** The loader
   verifies the symbol it just loaded with `type -t`, and a `type() { return 1; }`
   in the operator's shell turns a good library into `reason=<lib>_empty`. #88
