@@ -27,6 +27,13 @@ fail=0
 pass() { printf 'ok   - %s\n' "$1"; }
 die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 
+
+if [ ! -f "$SKILL" ]; then
+    echo "ok   - skill not present in this checkout; contract checks skipped"
+    echo "RESULT: PASS"
+    exit 0
+fi
+
 # THE COUNTER FIXTURE'S SCRATCH DIRECTORY IS TAKEN HERE, at the top, and it is the
 # FIRST `mktemp_d` in this file. Its guard is what the scratch probe far below
 # re-runs this file to observe, and where the acquisition sat beside its fixtures
@@ -34,6 +41,12 @@ die()  { printf 'FAIL - %s\n' "$1"; fail=1; }
 # eighty-eight seconds of the file's runtime spent arriving at a guard that fires
 # in a tenth of one. Nothing between here and there uses `$TMP_CL`, and the words
 # the probe greps for are the same words.
+#
+# AFTER THE MISSING-SKILL SKIP, THOUGH. A checkout without `../SKILL.md` reports a
+# skipped PASS and exits, and nothing on that path needs a scratch directory — put
+# ahead of it, a `$TMPDIR` that cannot hold one turned that skip into a FAIL. The
+# skip does not allocate, so this is still the first `mktemp_d` the scratch probe
+# sees wherever the skill exists, which is every checkout the probe runs in.
 # The scratch directory for the fixtures below — through the VALIDATED helper,
 # and stopping rather than recording.
 #
@@ -57,12 +70,6 @@ TMP_CL="$(mktemp_d)" || {
 # left a scratch tree behind. Safe as an unquoted-free `rm -rf` only because
 # `mktemp_d` has already established the path is non-empty, absolute and not `/`.
 trap 'rm -rf "$TMP_CL"' EXIT
-
-if [ ! -f "$SKILL" ]; then
-    echo "ok   - skill not present in this checkout; contract checks skipped"
-    echo "RESULT: PASS"
-    exit 0
-fi
 
 # ── EVERY HELPER THE DRIVER RUNS IS STARTED PRIVILEGED ─────────────────────
 #
