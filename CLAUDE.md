@@ -445,7 +445,12 @@ rediscovering them.
   cause was found rather than the symptom.
 
   Use a herestring: `grep -q PATTERN <<<"$value"` is a redirection, not a pipeline,
-  so there is no second process to kill. `case … in` works too where the pattern is
+  so there is no second process to kill. **Where the value comes from a COMMAND,
+  capture it and its status first** — `v="$(producer)" || die` — because the
+  pipeline reported a failing producer through `pipefail` and a herestring has
+  nothing to report one from: `grep -q X <<<"$(producer)"` discards the status, and
+  a producer that emits the marker and then fails leaves the assertion passing on a
+  partial read. Empty the value on failure, or the partial read still matches. `case … in` works too where the pattern is
   a glob. Only the EARLY-EXITING readers matter — `grep -c`, `sed` and `awk`
   without an `exit` read to end of input, so their pipelines never signal.
 

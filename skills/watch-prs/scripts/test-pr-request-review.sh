@@ -80,16 +80,39 @@ stderr()  { cat "$ERR"; }
 posted()  { grep -q '^gh ' "$TMP/calls"; }
 nothing_posted() { ! grep -q '^gh ' "$TMP/calls"; }
 bodies()  { cat "$TMP/bodies"; }
+# A PRODUCER'S STATUS IS NOT THE READER'S. `grep -q X <<<"$(producer)"` discards the
+# substitution's status, so a producer that emits the expected marker and THEN fails
+# — a truncated write, a missing file read halfway — leaves the reader matching and
+# the assertion passing on an incomplete read. The pipeline this replaced took that
+# status through `pipefail`; a herestring has no pipeline to take it from, so the
+# capture has to. `_cap` takes it, reports it, and EMPTIES the value, because a
+# partial read that still matches is the failure being guarded against.
+_cap() { _CAP="$("$@")" || { die "producer failed: $*"; _CAP=; }; return 0; }
+# …AND THE CAPTURE IS PROVEN TO REJECT AN EMIT-THEN-FAIL PRODUCER, which is the
+# whole point of taking the status: the marker IS emitted, so the reader alone
+# cannot tell the truncated read from the complete one.
+_emit_then_fail() { printf '%s\n' 'THE-MARKER'; return 1; }
+( die() { exit 7; }
+  _cap _emit_then_fail
+  grep -qF 'THE-MARKER' <<<"$_CAP" && exit 8
+  exit 0 )
+_ef=$?
+[ "$_ef" -eq 7 ] \
+    && pass "a producer that emits the marker and then fails is rejected" \
+    || die "an emit-then-fail producer was not rejected (rc=$_ef)"
+
 
 # ── THE ORDINARY MANUAL PATH ───────────────────────────────────────────────
 world; rc="$(run 7 no)"
 { [ "$rc" = 0 ] && [ "$(stdout)" = 4242 ]; } \
     && pass "the manual path posts and returns the baseline on stdout, alone" \
     || die "the manual path gave rc=$rc stdout='$(stdout)' stderr='$(stderr)'"
-grep -qF '@codex review' <<<"$(bodies)" \
+_cap bodies
+grep -qF '@codex review' <<<"$_CAP" \
     && pass "…in one comment carrying the mention that IS the request" \
     || die "the manual path posted no mention: $(bodies)"
-grep -qF 'A one-paragraph account' <<<"$(bodies)" \
+_cap bodies
+grep -qF 'A one-paragraph account' <<<"$_CAP" \
     && pass "…and the account travels with it, rather than in a second comment" \
     || die "the account was not posted with the mention: $(bodies)"
 [ "$(grep -c '^gh ' "$TMP/calls")" = 1 ] \
@@ -141,7 +164,8 @@ world; rc="$(run 7 yes)"
 grep -q '^review-state ' "$TMP/calls" \
     && die "…but it looked the baseline up anyway: $(cat "$TMP/calls")" \
     || pass "…and never looks one up"
-grep -qF '@codex review' <<<"$(bodies)" \
+_cap bodies
+grep -qF '@codex review' <<<"$_CAP" \
     && die "…but it posted a mention, queuing a second pass: $(bodies)" \
     || pass "…and posts the account WITHOUT a mention, so no second pass is queued"
 
@@ -153,7 +177,8 @@ for _mode in no yes; do
     world
     printf '**Review-Signoff:** `%s` `%s`\n' "$CODEXBOT" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$TMP/body.md"
     rc="$(run 7 "$_mode")"
-    { [ "$rc" = 1 ] && grep -qF 'marker the loop reads as a record' <<<"$(stderr)"; } \
+    _cap stderr
+    { [ "$rc" = 1 ] && grep -qF 'marker the loop reads as a record' <<<"$_CAP"; } \
         && pass "a body reproducing a signoff marker is refused ($_mode)" \
         || die "a marker body on the $_mode path gave rc=$rc '$(stderr)'"
     nothing_posted \
@@ -180,7 +205,8 @@ rc="$(run 7 no)"
 # head, which is the duplicate the branch exists to prevent.
 world; printf 'Superseding the earlier @codex review request described in #12.\n' > "$TMP/body.md"
 rc="$(run 7 yes)"
-{ [ "$rc" = 1 ] && grep -qF 'queues a second one' <<<"$(stderr)"; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'queues a second one' <<<"$_CAP"; } \
     && pass "an automatic-path body containing the mention is refused" \
     || die "a quoted mention on the automatic path gave rc=$rc '$(stderr)'"
 nothing_posted \
@@ -210,7 +236,8 @@ rc="$(run 7 yes)"
 # the watch then accepts the PREVIOUS review as this round's.
 world; printf '2\n' > "$W/prior.rc"
 rc="$(run 7 no)"
-{ [ "$rc" = 1 ] && grep -qF 'do not request a review blind' <<<"$(stderr)"; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'do not request a review blind' <<<"$_CAP"; } \
     && pass "an unreadable baseline stops the request" \
     || die "an unreadable baseline gave rc=$rc '$(stderr)'"
 nothing_posted \
@@ -227,7 +254,8 @@ nothing_posted \
 for _mode in no yes; do
     world; printf '1\n' > "$W/gh.rc"
     rc="$(run 7 "$_mode")"
-    { [ "$rc" = 1 ] && grep -qF 'do not enter the wait step' <<<"$(stderr)"; } \
+    _cap stderr
+    { [ "$rc" = 1 ] && grep -qF 'do not enter the wait step' <<<"$_CAP"; } \
         && pass "a failed post stops rather than reporting a request ($_mode)" \
         || die "a failed post on the $_mode path gave rc=$rc '$(stderr)'"
 done
@@ -256,17 +284,20 @@ world; BODY_IN="$TMP"; rc="$(run 7 no)"
     && pass "a body that cannot be read stops before posting" \
     || die "an unreadable body gave rc=$rc, posted=$(cat "$TMP/calls")"
 world; : > "$TMP/body.md"; rc="$(run 7 no)"
-{ [ "$rc" = 1 ] && grep -qF 'empty' <<<"$(stderr)" && nothing_posted; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'empty' <<<"$_CAP" && nothing_posted; } \
     && pass "…and an empty one is refused rather than posted as an account" \
     || die "an empty body gave rc=$rc '$(stderr)'"
 
 # ── THE ARGUMENTS ARE REQUIRED AND CHECKED ─────────────────────────────────
 world; rc="$(run)"
-{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$(stderr)"; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$_CAP"; } \
     && pass "a missing PR number refuses" \
     || die "a missing PR gave rc=$rc '$(stderr)'"
 world; rc="$(run notanumber no)"
-{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$(stderr)"; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'a PR number is required' <<<"$_CAP"; } \
     && pass "…and so does one that is not a number" \
     || die "a non-numeric PR gave rc=$rc '$(stderr)'"
 
@@ -274,12 +305,14 @@ world; rc="$(run notanumber no)"
 # a duplicate pass and a review nobody asked for, so an unrecognised value cannot
 # fall into either branch — which is what `[ "$X" = yes ]` on its own does.
 world; rc="$(run 7 '')"
-{ [ "$rc" = 1 ] && grep -qF 'auto-review mode is required' <<<"$(stderr)" && nothing_posted; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'auto-review mode is required' <<<"$_CAP" && nothing_posted; } \
     && pass "a missing auto-review mode refuses rather than defaulting" \
     || die "a missing mode gave rc=$rc '$(stderr)'"
 for _bad in YES true on 1 y; do
     world; rc="$(run 7 "$_bad")"
-    { [ "$rc" = 1 ] && grep -qF "'$_bad' is not an auto-review mode" <<<"$(stderr)" && nothing_posted; } \
+    _cap stderr
+    { [ "$rc" = 1 ] && grep -qF "'$_bad' is not an auto-review mode" <<<"$_CAP" && nothing_posted; } \
         && pass "…and '$_bad' is refused by name" \
         || die "the mode '$_bad' gave rc=$rc '$(stderr)', posted=$(cat "$TMP/calls")"
 done
@@ -287,7 +320,8 @@ done
 # reading whatever stdin happened to be — a terminal, or the previous command's
 # output, posted as this PR's account.
 world; rc="$(run 7 no "$TMP/body.md")"
-{ [ "$rc" = 1 ] && grep -qF 'the body is no longer a file' <<<"$(stderr)" && nothing_posted; } \
+_cap stderr
+{ [ "$rc" = 1 ] && grep -qF 'the body is no longer a file' <<<"$_CAP" && nothing_posted; } \
     && pass "a caller still passing a body file is refused, not silently ignored" \
     || die "the old three-argument form gave rc=$rc '$(stderr)'"
 

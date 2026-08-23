@@ -811,7 +811,11 @@ for f in "$ROOT"/pr-*.sh; do
     # the file does not rely on and cannot enforce. Both halves are asserted
     # below, so the exemption cannot quietly become a hole.
     [ "$_b" = pr-origin.sh ] && continue
-    grep -qxF '#!/usr/bin/env -S bash -p' <<<"$(head -n 1 "$f")" \
+    # THE READ'S STATUS IS TAKEN, not only its output. A `head` that emits the
+    # line and then fails would otherwise leave the match standing on a partial
+    # read; an unreadable file is recorded as missing rather than as satisfied.
+    _sb=""; _sb="$(head -n 1 "$f")" || _sb=""
+    grep -qxF '#!/usr/bin/env -S bash -p' <<<"$_sb" \
         || priv_missing="$priv_missing $_b"
 done
 if [ -f "$ROOT/pr-origin.sh" ]; then
@@ -853,7 +857,8 @@ done
 [ -z "$nested_bare" ] \
     && echo "ok   - …and no helper calls another by pathname alone" \
     || { echo "FAIL - nested call(s) not started privileged:$nested_bare"; idfail=1; }
-grep -qxF '#!/usr/bin/env bash' <<<"$(head -n 1 "$ROOT/pr-selfcheck.sh")" \
+_sb=""; _sb="$(head -n 1 "$ROOT/pr-selfcheck.sh")" || _sb=""
+grep -qxF '#!/usr/bin/env bash' <<<"$_sb" \
     && echo "ok   - …and pr-selfcheck.sh is the stated exception, which re-execs its own way" \
     || { echo "FAIL - pr-selfcheck.sh's shebang changed; its exemption is no longer what it says"; idfail=1; }
 # AND IT IS TRUE AT RUNTIME, not only in the text. A shebang that a platform's

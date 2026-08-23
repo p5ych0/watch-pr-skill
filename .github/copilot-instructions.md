@@ -201,7 +201,11 @@ every `return` in the diff and confirm it states a value.
 sets `pipefail`; `grep -q` exits on its first match, `printf` takes `SIGPIPE` and
 dies with 141, and that becomes the pipeline's status — so an assertion whose line
 IS present reads as missing, intermittently, and an `|| x=""` capture silently
-becomes empty. Use a herestring: `grep -q PATTERN <<<"$value"`. `pr-selfcheck.sh`
+becomes empty. Use a herestring: `grep -q PATTERN <<<"$value"`. **Where the value comes from a
+COMMAND, capture it and its status first** — `v="$(producer)" || die`, emptying the
+value on failure. The pipeline reported a failing producer through `pipefail`; a
+herestring has nothing to report one from, so `grep -q X <<<"$(producer)"` passes on
+a partial read when the producer emits the marker and then fails. `pr-selfcheck.sh`
 gates the `printf`-produced form; a line carrying the spelling as DATA says so
 with `racy-pipeline-ok`. **The gate asks three substring questions of a folded
 line and parses nothing**: does it name `printf`, does it carry a pipe that is not

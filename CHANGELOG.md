@@ -44,6 +44,16 @@
   all three where the pipe is not the `printf`'s says `racy-pipeline-ok`; there are
   two in the tree. A false negative would be invisible, and this is not.
 
+  **A producer's status travels with the conversion.** A pipeline reported a failing
+  producer through `pipefail`; a herestring has no pipeline to report one from, so
+  `grep -q X <<<"$(producer)"` discards it — and a producer that emits the expected
+  marker and THEN fails leaves the reader matching and the assertion passing on an
+  incomplete read. Every converted site whose producer is a command now captures the
+  value and its status together and empties the value on failure, so a partial read
+  cannot match. One of them failed OPEN before this: an unreadable `SKILL.md` yielded
+  no lines, the search for `sort -V` found none, and the portability assertion
+  reported clean on a file it never read.
+
   It is anchored on `printf`, and any other producer is review's job. Generalising
   to "a pipeline whose last stage is `grep -q`" was tried and reverted: `|` also
   appears in `||`, in `${x%%|*}` and inside quoted `awk` programs, and telling

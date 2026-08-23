@@ -3461,7 +3461,13 @@ fi
 # ── portability: no GNU-only tools on the path that must work on macOS ─────
 # Comment lines are excluded on purpose: the skill EXPLAINS why `sort -V` is not
 # used, and matching that explanation would make the assertion unfalsifiable.
-if grep -q 'sort -V' <<<"$(grep -vE '^[[:space:]]*#' "$SKILL")"; then
+# THE READ'S STATUS IS TAKEN, and this one failed OPEN without it: an unreadable
+# `$SKILL` yields no lines, the search finds no `sort -V`, and the assertion reports
+# the skill portable on a file it never read.
+_nocomment=""
+_nocomment="$(grep -vE '^[[:space:]]*#' "$SKILL")" \
+    || die "could not read the skill to check it for GNU-only tools"
+if grep -q 'sort -V' <<<"$_nocomment"; then
     die "skill uses GNU-only 'sort -V' while README advertises portability"
 else
     pass "no GNU-only sort in the script-resolution fallback"

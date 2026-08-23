@@ -571,6 +571,10 @@ out="$(run_limited 60 env PATH="$REVSTUB:$PATH" RB_REV_COUNT=2 "$SCRIPT" "$R" 2>
     && grep -q 'test-pr-omega.sh' <<<"$out"; } \
     && pass "a runner reporting backwards still names both files" \
     || die "the reversed runner lost a failure (rc=$rc out='$out')"
+# THE NESTED READS MAY FAIL, and that is their ordinary answer: `grep -n` exits 1
+# when it matches nothing. It fails CLOSED here — no match means an empty value,
+# which the outer reader cannot match, so the assertion reports the failure rather
+# than passing on a partial read.
 { grep -q 'alpha' \
     <<<"$(sed -n '1p' <<<"$(grep -n 'test-pr-alpha.sh\|test-pr-omega.sh' <<<"$out" | head -2)")"; } \
     && pass "…in the glob's order rather than the order they were reported in" \
