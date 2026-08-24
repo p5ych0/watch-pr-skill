@@ -77,16 +77,16 @@
 #      operator owns, so no ownership test can tell it from a fresh one, and only
 #      refusing the name catches it.
 #
-#      AND THE CALLER AUTHENTICATES WHAT IT OPENS, which is the ANOTHER-ACCOUNT
-#      half. The probe above is a check-then-use: on a shared parent an account
-#      watching argv can create the third argument AFTER it, with a readable leaf
-#      inside, while this run is succeeding on the second. Nothing here can close
-#      that — the name is public from `exec`, and reserving both would refuse the
-#      session the fallback exists to save. What closes it is the caller's own
-#      `[[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]]` on the DESCRIPTOR it opens: a
-#      plant by another account is not `-O`, so the session refuses rather than
-#      pinning to it. A caller that skips those tests has no defence and this
-#      script cannot give it one.
+#      AND ITS IMMEDIATE PARENT MUST BE THIS ACCOUNT'S ALONE, which is the
+#      ANOTHER-ACCOUNT half. The existence probe is a check-then-use: where others
+#      can create there, the leaf can appear AFTER it — the name is public from
+#      `exec` — and ownership does not save the caller, because a SYMLINK to
+#      another operator-owned transport passes `-O` and `-f` by following it to a
+#      file the operator really does own. So the ambiguity is removed rather than
+#      guarded: the strict walk refuses such a parent, and where nobody else can
+#      create the directory, nothing can be planted inside one that exists mode
+#      700. The FIRST argument may still be shared — that is the point of having a
+#      fallback at all.
 #
 #      WHAT REMAINS is a SAME-ACCOUNT process racing that window, whose plant is
 #      `-O` because it is the operator's. That is #162's boundary and not a new
@@ -398,8 +398,25 @@ set -C
     || { echo "ABORT: the fallback directory '$RB_DIR2' already exists; it must be a name this run can create, or the caller cannot tell which candidate holds the value" >&2; exit 1; }
 # THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
 # WRITTEN and as it RESOLVES, and neither covers the other.
-_rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
-    local p="$1" bad frc next
+# A SECOND MODE, FOR THE FALLBACK CANDIDATE ONLY, which refuses a shared parent
+# outright — sticky or not.
+#
+# THE ORDINARY MODE ALLOWS A STICKY WORLD-WRITABLE ANCESTOR, and must: that is
+# `/tmp`, root owns it, and `1777` lets anyone create entries while letting nobody
+# rename another account's. Creating an entry is all an attacker needs HERE,
+# though, because the caller cannot be told which candidate holds the value and
+# decides by testing for the leaf under the second. On a shared parent an account
+# watching argv can create that leaf after any check this script makes — and
+# making it a SYMLINK to another operator-owned transport defeats the caller's
+# `-O`/`-f` too, since those follow it to a file the operator really does own.
+#
+# SO THE AMBIGUITY IS REMOVED RATHER THAN GUARDED. Where nobody else can create
+# anything under the fallback's ancestry, a leaf under it can only be one this run
+# wrote, and no check-then-use window exists to race. The first candidate may still
+# be shared — that is `TMPDIR`, and a squat there costs a fallback rather than a
+# session, which is the whole point.
+_rb_walk() {   # _rb_walk <dir> [strict] ; 0 safe, 1 refused (reason on stderr)
+    local p="$1" strict="${2-}" first=yes bad frc next
     while : ; do
         # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather
         # than tidiness. If a component is renamed while its turn is being
@@ -412,7 +429,22 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
         # temporary directory. What a link's mode means is nothing; what its
         # OWNER means is everything, because that account can repoint it, so the
         # ownership clause applies to links exactly as it does to directories.
-        bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
+        # THE STICKY EXEMPTION IS DROPPED FOR THE IMMEDIATE PARENT ONLY, and
+        # only in strict mode. Sticky stops another account RENAMING an entry it
+        # does not own; it does not stop them CREATING a new name, which is all
+        # the fallback attack needs. So the directory the candidate is created in
+        # must be nobody else's to write — while the components above it are the
+        # ordinary question, "can anyone rename what is on the way", which sticky
+        # genuinely answers and `/tmp` genuinely satisfies.
+        #
+        # THE EXPRESSION IS WRITTEN OUT TWICE rather than patched together from a
+        # variable: a `find` operator assembled at runtime is invisible to every
+        # reader and to the `macos-shell` job alike.
+        if [[ $strict = strict ]] && [[ $first = yes ]]; then
+            bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) \) \) -print 2>/dev/null)"
+        else
+            bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
+        fi
         frc=$?
         if [[ $frc -ne 0 ]]; then
             echo "ABORT: could not examine '$p' on the way to the transport; refusing rather than assuming it is safe" >&2
@@ -455,6 +487,7 @@ _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
         next="${p%/*}"
         [[ -n $next ]] || next=/
         [[ $next = "$p" ]] && break
+        first=no
         p="$next"
     done
     return 0
@@ -562,6 +595,39 @@ _rb_aim() {   # _rb_aim <dir> ; point every derived name at that candidate
     [[ -e $RB_DIR ]] || RB_PREEXISTED=no
     return 0
 }
+# AND ITS ANCESTRY MUST BE THIS ACCOUNT'S ALONE, checked before either candidate is
+# attempted. The caller decides which candidate holds the value by testing for the
+# leaf under the second, and on a parent other accounts can write that decision is
+# a check-then-use nothing here can close: the name is public from `exec`, so a
+# leaf can be created after any probe — and made a SYMLINK to another
+# operator-owned transport it defeats the caller's `-O` and `-f` as well, since
+# those follow it to a file the operator really does own.
+#
+# THE STRICT WALK REMOVES THE AMBIGUITY INSTEAD OF GUARDING IT. Where nobody else
+# can create the fallback DIRECTORY, a leaf under it can only be one this run
+# wrote — the directory itself is created mode 700, so nothing can be planted
+# inside one that exists. The first candidate may still be shared: that is
+# `TMPDIR`, and a squat there costs a fallback rather than a session.
+#
+# THE IMMEDIATE PARENT IS WHAT HAS TO BE PRIVATE, not the whole ancestry. Sticky
+# stops another account renaming an entry it does not own and does not stop them
+# creating a NEW name, which is all this attack needs — so `/tmp` is fine above the
+# parent and not fine as the parent.
+#
+# THE WALK RUNS ON THE PATH AS WRITTEN AND AS IT RESOLVES, for the reason it does
+# everywhere else: a symlinked ancestor whose own owner is fine can point into a
+# tree whose owner is not.
+if [[ -n $RB_DIR2 ]]; then
+    _rb_d2="${RB_DIR2%/*}"
+    [[ -n $_rb_d2 ]] || _rb_d2=/
+    _rb_walk "$_rb_d2" strict \
+        || { echo "ABORT: the fallback directory's ancestry is not this account's alone; the caller could not tell its leaf from one another account planted" >&2; exit 1; }
+    _rb_d2_real="$(cd -P "$_rb_d2" 2>/dev/null && pwd -P)"
+    [[ -n $_rb_d2_real ]] \
+        || { echo "ABORT: could not resolve '$_rb_d2' to a physical path; refusing rather than checking a name that may not be where it points" >&2; exit 1; }
+    [[ $_rb_d2_real = "$_rb_d2" ]] || _rb_walk "$_rb_d2_real" strict \
+        || { echo "ABORT: the fallback directory's ancestry is not this account's alone; the caller could not tell its leaf from one another account planted" >&2; exit 1; }
+fi
 _rb_aim "$RB_DIR1"
 # WHY A RESERVATION FAILED, ANSWERED BY THE TWO WALKS. It is a function because
 # both attempts ask it, and it is DEFINED HERE — above the traps — because

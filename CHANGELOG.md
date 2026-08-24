@@ -25,14 +25,15 @@
   would put a status branch back on the driver's side.
 
   That rule is sound in two halves. A second candidate that ALREADY EXISTS is
-  refused before either is attempted — that is the our-own half, because a leaked
-  leaf from an earlier session is a file the operator owns and no ownership test
-  can tell it from a fresh one. And the caller authenticates what it opens with
-  `[[ -O ]]` and `[[ -f ]]` on the DESCRIPTOR — that is the another-account half,
-  because the probe is a check-then-use and a plant made after it, by an account
-  watching a shared parent, is refused for not being ours rather than pinned to.
-  What remains is a same-account process racing that window, which is #162's
-  boundary: an account that can create files there can also edit the script.
+  refused before either is attempted — the our-own half, because a leaked leaf
+  from an earlier session is a file the operator owns and no ownership test can
+  tell it from a fresh one. And the fallback's IMMEDIATE PARENT must be this
+  account's alone — the another-account half, because the existence probe is a
+  check-then-use and ownership does not save a caller there: a symlink to another
+  operator-owned transport passes `-O` and `-f` by following it to a file the
+  operator really does own. The immediate parent only: sticky stops another
+  account renaming an entry it does not own and not creating a new name, which is
+  all that attack needs, so `/tmp` is fine ABOVE the parent and not fine AS it.
 
 ## [2.0.61] — 2026-08-24
 
