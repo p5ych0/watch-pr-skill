@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.62] — 2026-08-24
+
+- **`pr-origin.sh` takes a second transport directory and falls back to it.** The
+  parent of the first is chosen on mode bits — `-d`, `-w`, `-x` — and those
+  describe neither a filesystem that is full, over quota or read-only nor a name
+  another account got to first. Any of those refused the session with a perfectly
+  usable second parent beside it untried.
+
+  The retry is here rather than in the driver because only this process runs both
+  the `mkdir` and the ancestry walk, and the two failures must be told apart: a
+  sound ancestry that could not be reserved falls through to the second candidate,
+  while an ancestry the walk refuses — an account owning a component, a
+  world-writable non-sticky one, an ACL — is reported and stops. Stepping past
+  that is what the driver's old candidate loop did wrong.
+
+  Nothing changes for a caller that passes one directory. The driver still does;
+  wiring it up is the next change.
+
 ## [2.0.61] — 2026-08-24
 
 - **Two installed scripts said the bash 3.2 CI job was switched off.** It is on
