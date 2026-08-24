@@ -17,9 +17,20 @@
   block exists to remove.
 
   Which candidate holds the value is not announced: the driver tests for the leaf
-  under the second and reads the first where that is absent. The helper is what
-  makes that sound — it refuses a second candidate that already exists, and one
-  whose immediate parent other accounts can write.
+  under the second and reads the first where that is absent. It authenticates that
+  directory first — `[[ ! -L ]] && [[ -d ]] && [[ -O ]]` — because the candidate
+  names are argv, which `ps` shows at exec, so on a parent other accounts can write
+  one of them can create the second candidate while this run succeeds on the first.
+  It has to be the DIRECTORY: a plant whose leaf is a symlink to another
+  operator-owned transport passes `-O` and `-f` on the descriptor by following it.
+  The helper covers the other half by refusing a second candidate that already
+  exists, which is a leaked leaf of our own that ownership cannot distinguish.
+
+  A stricter ancestry rule in the helper was tried for two rounds and removed. It
+  refused a fallback whose immediate parent other accounts can write, checked
+  before the first candidate was attempted — and a `HOME` that walk refuses, such
+  as a GitHub runner's, whose `/home` carries an ACL, then ended a session whose
+  first candidate was perfectly fine.
 
   **The pin probe falls back the same way**, because half a fallback is none: the
   origin read falling through to `HOME` while that probe still refused on `TMPDIR`
@@ -65,13 +76,11 @@
   That rule is sound in two halves. A second candidate that ALREADY EXISTS is
   refused before either is attempted — the our-own half, because a leaked leaf
   from an earlier session is a file the operator owns and no ownership test can
-  tell it from a fresh one. And the fallback's IMMEDIATE PARENT must be this
-  account's alone — the another-account half, because the existence probe is a
-  check-then-use and ownership does not save a caller there: a symlink to another
-  operator-owned transport passes `-O` and `-f` by following it to a file the
-  operator really does own. The immediate parent only: sticky stops another account from RENAMING or deleting an entry it does not own, and does not stop them CREATING a new name — and
-  creating is all that attack needs. So `/tmp` is fine ABOVE the parent and not
-  fine AS it.
+  tell it from a fresh one. The another-account half is the CALLER's: since 2.0.63
+  it authenticates the second candidate DIRECTORY — `[[ ! -L ]] && [[ -d ]] &&
+  [[ -O ]]` — before believing its leaf. It has to be the directory, because a
+  plant whose leaf is a symlink to another operator-owned transport passes `-O`
+  and `-f` on the descriptor by following it.
 
 ## [2.0.61] — 2026-08-24
 

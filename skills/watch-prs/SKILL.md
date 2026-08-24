@@ -771,11 +771,34 @@ if [[ -z $RB_REMOTE ]]; then
             # which covers a plant that a symlink would otherwise walk past `-O`
             # and `-f`. #174.
             #
-            # AN EXPANSION AND A TEST, NO COMMAND, because this is the shell the
-            # whole block is written for. `RB_ORIGIN_USED` is probed above with the
-            # rest.
+            # AND THE DIRECTORY IS AUTHENTICATED BEFORE ITS LEAF IS BELIEVED, which
+            # is what makes the leaf safe to read at all. The candidate names are
+            # PUBLIC — they are argv, which `ps` shows at exec — so on a parent
+            # other accounts can write, one of them can create the second candidate
+            # while this run is succeeding on the first, and the leaf test alone
+            # would follow it.
+            #
+            # `-O` ON THE DIRECTORY IS THE ANSWER, and it has to be the directory
+            # rather than the leaf: a plant whose leaf is a SYMLINK to another
+            # operator-owned transport passes `-O` and `-f` on the descriptor by
+            # following it to a file the operator really does own. The directory
+            # cannot be faked that way — the helper created ours exclusively, and
+            # another account's is theirs. `! -L` goes with it because `-d` and
+            # `-O` both follow a symlink, so a link to a directory we own would
+            # otherwise pass both.
+            #
+            # WHAT IT DOES NOT COVER is a SAME-ACCOUNT process, whose plant is ours
+            # by every test there is. That is #162's boundary rather than a new
+            # one: an account that can create files under these parents can also
+            # edit this document.
+            #
+            # EXPANSIONS AND RESERVED WORDS, NO COMMAND, because this is the shell
+            # the whole block is written for. `RB_ORIGIN_USED` is probed above with
+            # the rest.
             RB_ORIGIN_USED="$RB_ORIGIN_DIR"
-            [[ -n $RB_ORIGIN_DIR2 ]] && [[ -e $RB_ORIGIN_DIR2/origin ]] \
+            [[ -n $RB_ORIGIN_DIR2 ]] && [[ ! -L $RB_ORIGIN_DIR2 ]] \
+                && [[ -d $RB_ORIGIN_DIR2 ]] && [[ -O $RB_ORIGIN_DIR2 ]] \
+                && [[ -e $RB_ORIGIN_DIR2/origin ]] \
                 && RB_ORIGIN_USED="$RB_ORIGIN_DIR2"
             # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
             # of the OPEN DESCRIPTOR, so they describe the object this shell is
@@ -1064,11 +1087,13 @@ if [[ -z $RB_REMOTE ]]; then
         # Written after the call they ran on every path, including that one.
         if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR" "$RB_PIN_DIR2"; then
             # THE LEAF DECIDES WHICH CANDIDATE WAS USED, exactly as it does for the
-            # origin read above, and it is sound for the same two reasons the
-            # helper makes it so: it refuses a second candidate that already
-            # exists, and one whose immediate parent other accounts can write.
+            # origin read above — and the directory is authenticated first, for the
+            # reason given there: the candidate names are public, so ownership of
+            # the DIRECTORY is what tells this run's from another account's.
             RB_PIN_USED="$RB_PIN_DIR"
-            [[ -n $RB_PIN_DIR2 ]] && [[ -e $RB_PIN_DIR2/pin ]] \
+            [[ -n $RB_PIN_DIR2 ]] && [[ ! -L $RB_PIN_DIR2 ]] \
+                && [[ -d $RB_PIN_DIR2 ]] && [[ -O $RB_PIN_DIR2 ]] \
+                && [[ -e $RB_PIN_DIR2/pin ]] \
                 && RB_PIN_USED="$RB_PIN_DIR2"
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_USED/pin"

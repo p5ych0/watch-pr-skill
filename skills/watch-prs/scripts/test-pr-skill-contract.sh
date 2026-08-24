@@ -1927,9 +1927,22 @@ grep -qF 'rm -f "$RB_ORIGIN_USED/origin"' <<<"$skill_flat" \
 grep -qF 'RB_ORIGIN_USED="$RB_ORIGIN_DIR"' <<<"$skill_flat" \
     && pass "…and the used candidate defaults to the first" \
     || die "the used candidate does not default to the first"
-grep -qF '[[ -n $RB_ORIGIN_DIR2 ]] && [[ -e $RB_ORIGIN_DIR2/origin ]]' <<<"$skill_flat" \
+grep -qF '[[ -e $RB_ORIGIN_DIR2/origin ]]' <<<"$skill_flat" \
     && pass "…and moves to the second only where its leaf is there" \
     || die "the used candidate is not selected by the second's leaf"
+# …AND THE DIRECTORY IS AUTHENTICATED BEFORE ITS LEAF IS BELIEVED. The candidate
+# names are argv, which `ps` shows at exec, so on a parent other accounts can write
+# one of them can create the second candidate while this run succeeds on the first.
+# `-O` on the DIRECTORY is what refuses that, and it has to be the directory: a
+# plant whose leaf is a symlink to another operator-owned transport passes `-O` and
+# `-f` on the descriptor by following it. `! -L` goes with it because `-d` and `-O`
+# both follow a link.
+for _sel in '[[ ! -L $RB_ORIGIN_DIR2 ]]' '[[ -d $RB_ORIGIN_DIR2 ]]' '[[ -O $RB_ORIGIN_DIR2 ]]' \
+            '[[ ! -L $RB_PIN_DIR2 ]]' '[[ -d $RB_PIN_DIR2 ]]' '[[ -O $RB_PIN_DIR2 ]]'; do
+    grep -qF "$_sel" <<<"$skill_flat" \
+        && pass "…and the second candidate is authenticated: $_sel" \
+        || die "the second candidate is believed without $_sel"
+done
 grep -qF 'CLOSE_RC=$?' <<<"$skill_flat" \
     && pass "…and its status is taken" \
     || die "SKILL.md runs the close stage without reading its status"

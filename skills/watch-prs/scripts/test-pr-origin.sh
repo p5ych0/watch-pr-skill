@@ -289,45 +289,30 @@ chmod 700 "$_fb_p2"
     || die "the both-failed refusal named the wrong candidate: '${_fb_got#*|}'"
 fi
 
-# A FALLBACK WHOSE IMMEDIATE PARENT OTHERS CAN WRITE IS REFUSED, and that refusal
-# is what makes the caller's rule sound rather than merely documented.
+# A SHARED FALLBACK PARENT IS ACCEPTED HERE, and that is deliberate — it was
+# refused for two rounds and the refusal was wrong.
 #
-# The caller cannot be told which candidate holds the value, so it tests for the
-# leaf under the second. On a parent other accounts can write, that is a
-# check-then-use nothing in the helper can close: the name is public from `exec`,
-# so the leaf can be created after any probe — and as a SYMLINK to another
-# operator-owned transport it defeats the caller's `-O` and `-f` as well, since
-# those follow it to a file the operator really does own. Where nobody else can
-# create the directory, none of that is reachable.
+# The caller decides which candidate holds the value by testing for the leaf under
+# the second, and the candidate names are public from `exec`, so a fallback parent
+# other accounts can write looked like something this script had to refuse. It was
+# checked BEFORE the first candidate was attempted, which is what made it wrong: a
+# `HOME` the walk refuses — a GitHub runner's `/home` carries an ACL — then ended a
+# session whose FIRST candidate was perfectly fine, and the `test` job said so.
 #
-# THE IMMEDIATE PARENT, NOT THE WHOLE ANCESTRY. Sticky stops another account
-# from RENAMING or deleting an entry it does not own, and does not stop them
-# CREATING a new name — and creating is all this attack needs. So a sticky
-# world-writable component ABOVE the parent is still fine, and this case proves
-# both halves.
+# THE CALLER AUTHENTICATES THE DIRECTORY INSTEAD, with `[[ ! -L ]] && [[ -d ]] &&
+# [[ -O ]]` before it believes the leaf, which `test-pr-skill-contract.sh` holds.
+# Another account's plant is theirs by every one of those; ours is ours because
+# this script created it exclusively.
 _fb_shared="$TMP/fbshared"; mkdir -p "$_fb_shared"; chmod 1777 "$_fb_shared"
 _fb_d1="$(_fb_new)"
 [ -n "$_fb_d1" ] || die "no scratch for the shared-fallback case"
+mkdir "$_fb_d1"
 _fb_got="$(_fb_call read "$_fb_d1" "$_fb_shared/dir")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"not this account's alone"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "a fallback whose parent other accounts can write is refused" \
-    || die "a shared fallback parent was accepted (got='$_fb_got')"
-# …AND A SYMLINKED PARENT IS FOLLOWED, which is the half a lexical check cannot
-# see: the link is ours and mode 0777 on a symlink means nothing, while what it
-# POINTS AT is a parent other accounts can write. Without the resolved-path pass
-# this refusal is skipped and the plant is available again.
-_fb_shared2="$TMP/fbshared2"; mkdir -p "$_fb_shared2"; chmod 1777 "$_fb_shared2"
-_fb_link="$TMP/fblink"; rm -f "$_fb_link"; ln -s "$_fb_shared2" "$_fb_link"
-_fb_d1="$(_fb_new)"
-[ -n "$_fb_d1" ] || die "no scratch for the symlinked-fallback case"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_link/dir")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"must be this account's alone"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "…and a fallback parent that RESOLVES to a shared one is refused too" \
-    || die "a symlinked shared fallback parent was accepted (got='$_fb_got')"
+_fb_val=""; [ -f "$_fb_shared/dir/origin" ] && _fb_val="$(<"$_fb_shared/dir/origin")"
+{ [ "${_fb_got%%|*}" = 0 ] && [ "$_fb_val" = "$REAL" ]; } \
+    && pass "a fallback under a shared parent is used, not refused before the first is tried" \
+    || die "a shared fallback parent was refused (got='$_fb_got' value='$_fb_val')"
+rm -rf "$_fb_shared/dir"
 
 # …AND A DANGLING SYMLINK AT THE FALLBACK NAME IS AN EXISTING ENTRY, which `-e`
 # reports as absent because it follows the link. The refusal was skipped, the first
@@ -343,18 +328,6 @@ _fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
   && [ ! -e "$_fb_d1" ]; } \
     && pass "…and a DANGLING symlink at the fallback name is an existing entry" \
     || die "a dangling symlink was read as an absent fallback (got='$_fb_got')"
-
-# …AND A SHARED COMPONENT ABOVE IT IS NOT REFUSED, which is the half that keeps
-# every scratch tree under `/tmp` usable: `$TMP` itself is mode 700 and this
-# account's, and `/tmp` above it is exactly the sticky world-writable case the
-# ordinary walk exists to allow.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the shared-ancestor case"
-mkdir "$_fb_d1"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" = 0 ] && [ -f "$_fb_d2/origin" ]; } \
-    && pass "…while a sticky world-writable component ABOVE that parent is not" \
-    || die "a sticky ancestor was refused as a shared parent (got='$_fb_got')"
 
 # A THIRD ARGUMENT THAT IS NOT A CANDIDATE IS REFUSED UP FRONT, and up front is
 # the point: a relative fallback only looked at when the first one fails is a
