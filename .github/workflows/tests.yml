@@ -4,41 +4,39 @@ name: tests
 # push to a PR branch — the whole workflow twice, for the same commit, telling us
 # the same thing. Pushes to the default branch are covered directly; everything
 # else is covered as a pull request.
-# ── WHAT RUNS AUTOMATICALLY, AND WHAT DOES NOT ─────────────────────────────
+# ── WHAT RUNS AUTOMATICALLY ────────────────────────────────────────────────
 #
-# The `test` job below runs on every push to `main` and on every pull request.
-# `macos-shell` does NOT: it carries `if: false`, and that is the one thing still
-# switched off here.
+# BOTH JOBS run on every push to `main` and on every pull request. Nothing is
+# switched off here any more.
 #
-# BOTH WERE OFF, and they came back separately because their blockers are
+# BOTH WERE OFF, and they came back separately because their blockers were
 # different. They were turned off together while the backlog was worked through —
 # the suite was the largest fixed cost in each review round, paid locally and then
-# again here. That cost is down: `test-pr-skill-contract.sh` went 174s to 10s in
-# #165, and the contributor gate with it. The `test` job has never gone red on a
-# correct change — it runs the same fixtures the contributor's own gate runs, on
-# an Ubuntu runner with bash 5, which is a shell those fixtures are written and
-# reviewed against every round. That is not a claim that the contributor's shell
-# IS bash 5: a macOS contributor's `pr-selfcheck.sh` resolves whatever `bash` is on
-# their `PATH`, which may be 3.2.57. It is a claim about this job's record, which
-# is why nothing had to be audited before restoring it. `macos-shell` is the
-# opposite case: it went red three times on correct changes, each time because a
-# fixture required the ROUTE bash 5 takes to a
-# defence rather than the defence holding. #93's first acceptance criterion is
-# auditing every fixture against that, and its `if:` stays until then.
+# again here. The `test` job came back in #167 once that cost came down; it had
+# never gone red on a correct change.
+#
+# `macos-shell` took longer because it HAD. It went red three times on changes
+# that were correct, each time because a fixture required the ROUTE bash 5 takes
+# to a defence rather than the defence holding, and #93's first acceptance
+# criterion was auditing every fixture against that. The audit was done by RUNNING
+# the job rather than by reading twenty-two files: nineteen passed, and the three
+# that did not were real defects rather than version-route artefacts — the
+# portable watchdog gave its bounded command no stdin, a global substitution over
+# 330 KB does not finish on 3.2.57, and two cases that forbid writing to regular
+# files cannot be captured through the watchdog's own regular files. #171 fixed
+# those three, and the job is green.
+#
+# WHAT IT COSTS is about twenty-five minutes a run, against the `test` job's
+# three. That is paid on every pull request, and it is the reason to keep the
+# per-file bound below rather than to run this less often: a regression only this
+# shell can see is exactly what those three defects were.
 #
 # `workflow_dispatch` is kept so a branch can be checked without opening a pull
-# request — `gh workflow run tests.yml --ref <branch>`. It does NOT reach
-# `macos-shell`: that `if: false` is job-level and unconditional, so a dispatch
-# runs the `test` job alone. Nothing exercises bash 3.2.57 while it stands, by any
-# route, and an event-conditional guard is #93's to decide rather than a comment's
-# to imply.
+# request — `gh workflow run tests.yml --ref <branch>` — which is how the audit
+# above was run.
 #
-# WHAT IT MEANS FOR THE LOOP that the second job is off: `pr-ci-state.sh` reports
-# on the checks that EXIST, so a green round now means the suite ran on Ubuntu —
-# it does not mean it ran on bash 3.2.57 or on a mac-shaped PATH. A post-3.2
-# construct can still merge. And a push to a branch with no pull request open
-# still produces no check at all: `push` is `main` only, so that state has not
-# gone away, it has narrowed. #93 carries the rest.
+# WHAT IS STILL NOT COVERED: a push to a branch with no pull request open produces
+# no check at all, because `push` is `main` only.
 on:
   push:
     branches: [main]
@@ -149,6 +147,13 @@ jobs:
   # test and its error are in the log either way.
   macos-shell:
     runs-on: ubuntu-latest
+    # A CEILING, BECAUSE A HANG HERE COSTS SIX HOURS. The default job timeout is
+    # 360 minutes, and the first run after this job was switched back on spent two
+    # of them inside one fixture before it was cancelled by hand — a global
+    # substitution over 330 KB that is free on bash 5 and does not finish on
+    # 3.2.57. The per-file bound below is what NAMES the file; this is what stops
+    # the bill.
+    timeout-minutes: 60
     # ── TEMPORARILY DISABLED, DELIBERATELY, AND WITH AN OWNER ──────────────
     #
     # Turned off by the operator while the open issue backlog is worked through:
@@ -165,7 +170,6 @@ jobs:
     # and it is still right.
     #
     # RE-ENABLE BY DELETING THIS `if:`. See the tracking issue.
-    if: false
     # ONE DEFINITION OF THE DIGEST, used by the verification AND by the cache key.
     # It has to key the cache: the first version of this pin left the key at
     # `bash-3.2-<os>`, which an earlier UNVERIFIED build had already populated, so
@@ -418,15 +422,28 @@ jobs:
         working-directory: skills/watch-prs/scripts
         run: |
           set -uo pipefail
+          # RESOLVED BEFORE THE PATH IS REPLACED. `timeout` is GNU-only and the
+          # replacement below removes it on purpose — that absence is half of what
+          # this job tests. The BOUND still has to exist, so the runner's own
+          # `timeout` is captured here by absolute path and used from outside the
+          # mac-shaped world, which is exactly what the fixtures may not do.
+          RB_TIMEOUT="$(command -v timeout)"
           export PATH="$HOME/bash32/shim:$HOME/macos-path"
           fail=0 total=0
           for t in test-*.sh; do
             total=$((total + 1))
             echo "::group::$t"
-            if bash "$t"; then
-              echo "PASS $t"
+            _t0=$SECONDS
+            # TEN MINUTES PER FILE, AND THE TIME IS REPORTED EITHER WAY. The
+            # slowest file here takes 149s, so ten minutes is not a threshold any
+            # correct file approaches — and 124 says "it hung" rather than leaving
+            # a reader to infer it from a job that ran to the ceiling. A hang is
+            # what this shell produced the first time the job ran again.
+            if "$RB_TIMEOUT" -k 30 600 bash "$t"; then
+              echo "PASS $t in $((SECONDS - _t0))s"
             else
-              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH"
+              _rc=$?
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH (rc=$_rc after $((SECONDS - _t0))s; 124 = it hung)"
               fail=1
             fi
             echo "::endgroup::"

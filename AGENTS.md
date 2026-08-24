@@ -13,19 +13,17 @@ there is one place to change it.
 
 ## Portability: what CI cannot see, and you can
 
-**THE SECOND CI JOB IS NOT RUNNING, so read this section as work that is now
-yours.** The normal job runs on every push to `main` and every pull request, but
-`macos-shell`
-carries `if: false`; nothing checks bash 3.2.57 or a mac-shaped `PATH`. While that
-stands, post-3.2 constructs and absent commands reach `main` unless a reader
-catches them, so check for them: a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
+**BOTH CI JOBS RUN, and this section is still worth reading.** `macos-shell`
+covers bash 3.2.57 and a mac-shaped `PATH` on every push to `main` and every pull
+request — but only for the lines the suite EXECUTES. A construct on a branch the
+suite never takes reaches `main` unless a reader catches it, so check for them:
+a `[[ … =~ … ]]` pattern containing a parenthesis, `${var^^}`,
 `declare -A`, `mapfile`/`readarray`, `&>>`, negative array indices, and any
-command name assembled at runtime. The paragraph below says why it is off and what
-it costs.
+command name assembled at runtime.
 
-When it is on again — #93 — CI runs the whole suite twice, once normally and once
-in a `macos-shell` job on a **bash 3.2.57 built from source and first on `PATH`**
-with the GNU-only tools removed, and those two classes fail there on their own.
+CI runs the whole suite twice: once normally, and once in a `macos-shell` job on
+a **bash 3.2.57 built from source and first on `PATH`** with the GNU-only tools
+removed, where those two classes fail on their own.
 
 **Three classes stay invisible to that job, and they are yours.** The runner is
 Ubuntu with GNU userland, so in each case CI goes green and a macOS contributor
@@ -380,23 +378,25 @@ leaves that stub, calling it fails, and the first load IS the check. Here there 
 no equivalent — this is the loader itself, and it has nothing to fall back on.
 Decided on #96 and recorded beside the check.
 
-**`macos-shell` is off, deliberately and temporarily, and that is not a
-finding.** The normal job in `.github/workflows/tests.yml` runs on every push to
-`main` and every pull request; `macos-shell` carries `if: false`, and a
-`workflow_dispatch` does not reach it either — that guard is job-level. The
-operator turned that one off
-because it went red three times on correct changes, each time because a fixture
-required the ROUTE bash 5 takes to a defence rather than the defence holding.
+**Both CI jobs run**, on every push to `main` and on every pull request:
+`test` on Ubuntu with bash 5, and `macos-shell` on a bash 3.2.57 built from source
+with the GNU-only tools removed from `PATH`. A green round therefore means the
+suite passed on both. What is still not covered is a push to a branch with no pull
+request open, which produces no check at all — `push` is `main` only — and where
+no check exists the gates read `none`, which `pr-ci-gate.sh` and `pr-merge-gate.sh`
+both document as "nothing to assert".
 
-**What it costs is real and is not disputed:** while this stands, a green round
-means the suite passed on Ubuntu with bash 5, NOT that it passes on bash 3.2.57 or
-on a mac-shaped `PATH`, and a regression that needs the second machine can merge.
-#93 owns restoring that job, names it in its acceptance criteria, and requires the
-fixtures to be audited against *assert the invariant, not the version's route to
-it* first — re-enabling before that simply reproduces the failures that caused it.
+`macos-shell` was off for a long time because it went red three times on changes
+that were correct, each because a fixture required the ROUTE bash 5 takes to a
+defence rather than the defence holding. Auditing for that was done by running the
+job: nineteen of twenty-two files passed, and the three that did not were real
+defects — a watchdog that gave its bounded command no stdin, an expansion that does
+not finish on 3.2.57, and two cases whose output the watchdog could not carry. It
+takes about twenty-five minutes, so it bounds each file at ten and the job at
+sixty.
 
-Do not raise the disabled workflow as a finding while this paragraph stands. Do
-raise anything that would be caught only by it, on its own merits.
+Both jobs being on is the current state; a finding that assumes either is disabled
+is out of date rather than correct.
 
 Three limits are worth knowing, and all three have produced real defects.
 
