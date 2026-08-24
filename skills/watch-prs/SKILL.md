@@ -734,6 +734,78 @@ if [[ -z $RB_REMOTE ]]; then
                 [[ -n "" ]]
             fi
         else
+            # THE RECOVERY IS NAMED, because the operator has one and nothing on
+            # screen said so. The parent is chosen by mode bits — `-d`, `-w`, `-x`
+            # — and a `TMPDIR` that passes all three can still fail to hold a
+            # directory: a quota reached on that filesystem, a full one, or a
+            # read-only mount none of those bits describe. The helper then refuses,
+            # and a perfectly usable `HOME` sits next to it untried, because the
+            # fallthrough happens on the mode bits and not on the failure. #161
+            # carries the automatic retry and why it is not here; this is the step
+            # the operator can take without one.
+            #
+            # THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
+            # the whole of what the change does: an `echo` that returns without
+            # printing leaves the arm silent, and the operator back where they
+            # started. `${VAR:?…}` is the shell refusing to expand — no command runs,
+            # so there is nothing to shadow — and it is the same form the parent
+            # selection above already uses. `RB_REMOTE` is the name because it is
+            # the one this arm is reached with UNSET: the read-back never assigned
+            # it. No new name is introduced, so nothing new has to be probed.
+            #
+            # AND THE EXPANSION ALWAYS FIRES HERE, which is worth stating because
+            # the obvious reason to keep the `echo` behind it is wrong: a startup
+            # file that pre-set `RB_REMOTE` never reaches this arm at all. The clear
+            # far above is a CONDITION with this whole block as its arm, so a value
+            # that survives it takes the readonly refusal instead, and one that does
+            # not leaves `RB_REMOTE` empty — which is what `:?` fires on. The `echo`
+            # and the `exit` stay as the shape every other arm in this block has,
+            # and would carry the refusal if a later change ever left a value here;
+            # they are not a second channel for a state that exists today.
+            #
+            # QUALIFIED, BECAUSE THIS ARM IS EVERY REFUSAL. The helper refuses for an
+            # unreadable `origin`, an ancestry another account owns and an
+            # unresolvable path as well as for storage it could not use, and the
+            # storage one is the only one this line is about. So it names the REPORT
+            # it applies to and leaves the rest to the helper's own line above.
+            #
+            # ON WHAT THE REPORT NAMES, NOT ON `TMPDIR` BEING SET. Selection can
+            # REJECT a set `TMPDIR` — a relative one, or one the mode bits refuse —
+            # and choose `HOME`; the failure is then under `HOME`, and "if TMPDIR is
+            # set" sends the operator to unset something already ignored.
+            #
+            # CREATE OR WRITE, because the helper refuses on both and the storage
+            # failure is the same one: a filesystem that accepts the directory can
+            # fill, hit quota or go read-only while the leaf is written. Enumerating
+            # the two diagnostics was the alternative and it is the shape this
+            # repository has paid for twice — the advice keys on what the report
+            # NAMES rather than on which of the helper's sentences produced it.
+            #
+            # AND EXHAUSTION IS NOT INFERRED FROM THEM. Both of those refusals also
+            # cover a name another account got to first, where the filesystem has
+            # room and re-running is the whole fix. So the cheap answer comes first
+            # and storage is what to look at when re-running keeps failing —
+            # asserting a full filesystem from a diagnostic that does not say so
+            # sends the operator to change storage for a race.
+            #
+            # A NEW SESSION, NOT `unset TMPDIR` IN THIS ONE. `unset` is a name, the
+            # variable may be readonly, and on bash 4.3+ a `declare -n TMPDIR=HOME`
+            # makes `unset TMPDIR` destroy `HOME` in the operator's long-lived shell
+            # — after which the re-run aborts one step earlier than before. Starting
+            # a session without the override needs none of that to be true.
+            #
+            # AND `HOME` IS NOT AUTOMATICALLY AN ESCAPE. `/tmp` and a home directory
+            # share the root filesystem on many machines, so a full one or a
+            # filesystem-wide quota is not something falling through to `HOME`
+            # escapes. The line says so rather than promising a recovery that
+            # re-runs into the same storage.
+            # AND NO APOSTROPHE IN IT. Inside `${…}` bash treats a single quote as
+            # a QUOTE even within double quotes, so one apostrophe in this message
+            # leaves the brace expansion unterminated and the whole block fails to
+            # parse — five hundred lines below, where nothing points back here.
+            # `test-pr-skill-contract.sh` parses the lifted block, which is what
+            # caught it; the phrasing avoids the character rather than escaping it.
+            : "${RB_REMOTE:?could not read the origin for this session. The line above says which refusal this was. If it names a path setup could not create or write, re-run: the name may simply have been taken. If that keeps failing, the filesystem may be full, over quota or read-only — re-run in a session whose TMPDIR points at storage with room, or with no TMPDIR at all so setup uses HOME, which helps only where HOME is not on the same filesystem.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]

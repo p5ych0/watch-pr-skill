@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.0.59] — 2026-08-24
+
+- **The origin-read abort now tells you how to recover.** That abort is reached
+  whenever `pr-origin.sh` refuses — an ancestor it will not trust, a path it
+  cannot resolve, an `origin` the checkout does not have, or a transport directory
+  it could not create or write — and the helper's own line above says which.
+  Several of them you can repair; the storage one is the one the abort itself can
+  tell you how to get past, and nothing said so.
+
+  Setup picks the transport parent on mode bits — `-d`, `-w`, `-x` — and prefers
+  `TMPDIR`. A `TMPDIR` that passes all three can still fail to hold a directory, or
+  to take the file written into it: a quota reached on that filesystem, a full one,
+  or a read-only mount none of those bits describe. The helper refused, setup
+  printed a bare `could not read this session's origin`, and stopped — with a
+  perfectly usable `HOME` beside it untried, because the fallthrough happens on the
+  mode bits and not on the failure.
+
+  The abort now names the step: **if the line above names a path setup could not
+  create or write**, re-run — the same diagnostic covers a name another account got
+  to first, where the filesystem has room. If that keeps failing, the filesystem
+  may be full, over quota or read-only: re-run in a session whose `TMPDIR` points
+  at storage with room, or with no `TMPDIR` at all so setup uses `HOME` — **which
+  helps only where `HOME` is not on the same filesystem**. It keys on what the report names rather
+  than on `TMPDIR` being set, because selection can reject a set `TMPDIR` and be
+  using `HOME` already; it says a new session rather than `unset TMPDIR`, because
+  that variable may be readonly and, if it is a nameref, `unset` destroys what it
+  points at.
+
+  It is emitted as a `${VAR:?…}` expansion rather than through `echo`, so the line
+  you see now begins with your shell's name and `RB_REMOTE:`; the troubleshooting
+  entry in `README.md` is keyed to that text. The driver
+  runs in your own shell, where `echo` may be a function that returns without
+  printing — and this line is the whole of what the change does, so an `echo` was
+  the one shape that could silently undo it. The shell refusing to expand a
+  parameter runs no command and has nothing to shadow.
+
+  Nothing else changes — the automatic retry is #161, and it is not here because
+  the driver would need three more assignable names in a shell where a startup
+  file can make any of them readonly, and neither a function nor a status branch
+  is available to it.
+
 ## [2.0.58] — 2026-08-23
 
 - **The pre-push gate now refuses a fixture that pipes a `printf` into `grep`.**
