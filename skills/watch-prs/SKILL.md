@@ -644,8 +644,14 @@ if [[ -z $RB_REMOTE ]]; then
     # the alias.
     if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
+       && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
+         && [[ -z ${!RB_TMPPARENT2:-} ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
-         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null; then
+         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
+         && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_USED="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_USED = RbProbe* ]] \
+         && [[ -z ${!RB_ORIGIN_USED:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -668,12 +674,35 @@ if [[ -z $RB_REMOTE ]]; then
         # which is the removal this whole change is; and a `TMPDIR` whose ancestry
         # is unsafe is a state an operator has to SEE named, not one to step past
         # into `HOME`. The helper says which component and why.
+        # BOTH PARENTS ARE KEPT NOW, not just the first usable one. The mode bits
+        # `-d`, `-w` and `-x` describe neither a filesystem that is full, over
+        # quota or read-only nor a name another account got to first, and any of
+        # those refused the session with `HOME` sitting beside it untried, because
+        # the fallthrough happens on the BITS and not on the failure. #161.
+        #
+        # THE HELPER DECIDES WHETHER TO USE THE SECOND, and it is the only thing
+        # that can: it runs both the `mkdir` and the ancestry walk, so it can tell
+        # a reservation failure — retry — from an ancestry refusal, which an
+        # operator has to see named. Deciding here would need a second copy of the
+        # read-back arm or a status branch outside it, and both are the
+        # walked-past-guard shape this block exists to remove. #174.
         RB_TMPPARENT=
         [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
             && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
+        RB_TMPPARENT2=
+        [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
+            && [[ -x ${HOME:-} ]] && RB_TMPPARENT2="$HOME"
+        # AND `HOME` MOVES UP WHERE `TMPDIR` IS UNUSABLE, so the first candidate is
+        # always the one that exists. The helper refuses an EMPTY first argument by
+        # name, and an empty THIRD one means "no fallback" — so the two have to be
+        # in that order, and a session with one usable parent passes one candidate
+        # exactly as it did before.
         [[ -n $RB_TMPPARENT ]] \
-            || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
-                 && [[ -x ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
+            || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
+        # AND THE SAME PARENT IS NOT TWO CANDIDATES. `TMPDIR=$HOME` is an ordinary
+        # setting, and the helper refuses two candidates under it as the same
+        # storage twice — correctly, but as a refusal where there is nothing wrong.
+        [[ $RB_TMPPARENT2 = "$RB_TMPPARENT" ]] && RB_TMPPARENT2=
         # AND AN EMPTY PARENT CANNOT PRODUCE A PATH AT ALL. Written as
         # `[[ -n $RB_TMPPARENT ]] || { echo …; exit 1; }` this was a GUARD, and
         # `exit` is a name a startup file can replace with one that RETURNS: the
@@ -696,6 +725,13 @@ if [[ -z $RB_REMOTE ]]; then
         # value left to walk past it WITH.
         RB_ORIGIN_DIR=
         RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+        # AND THE SECOND, WHICH IS EMPTY WHERE THERE IS NO SECOND PARENT. Cleared
+        # first for the reason the first one is: an abandoned assignment leaves the
+        # OLD value, and a stale path from an earlier run in the same long-lived
+        # shell would be handed to the helper as this session's fallback.
+        RB_ORIGIN_DIR2=
+        [[ -n $RB_TMPPARENT2 ]] \
+            && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
         # after a guard. `mkdir` is what proves this shell's helper created that
         # directory, and it is the helper that runs it — so a REFUSED call means
@@ -705,7 +741,23 @@ if [[ -z $RB_REMOTE ]]; then
         # `-O` and `-f`, and pinned the session from it — and removed the
         # operator's file and directory on the way out. Containment is what a
         # neutralised `exit` cannot step over.
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
+        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR" "$RB_ORIGIN_DIR2"; then
+            # WHICH CANDIDATE HOLDS THE VALUE IS NOT ANNOUNCED, and must not be: a
+            # second success status would put a status branch outside this arm, and
+            # a line on a stream would put the value's own channel into a capture.
+            # So the leaf decides — and the helper is what makes that sound. It
+            # refuses a second candidate that already exists, which covers a leaked
+            # leaf of OUR OWN that no ownership test could tell from a fresh one,
+            # and it refuses one whose immediate parent other accounts can write,
+            # which covers a plant that a symlink would otherwise walk past `-O`
+            # and `-f`. #174.
+            #
+            # AN EXPANSION AND A TEST, NO COMMAND, because this is the shell the
+            # whole block is written for. `RB_ORIGIN_USED` is probed above with the
+            # rest.
+            RB_ORIGIN_USED="$RB_ORIGIN_DIR"
+            [[ -n $RB_ORIGIN_DIR2 ]] && [[ -e $RB_ORIGIN_DIR2/origin ]] \
+                && RB_ORIGIN_USED="$RB_ORIGIN_DIR2"
             # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
             # of the OPEN DESCRIPTOR, so they describe the object this shell is
             # about to read rather than a name it could be talked into looking up
@@ -723,12 +775,12 @@ if [[ -z $RB_REMOTE ]]; then
             # into a file this run never created. Same defect the helper's own
             # cleanup had, on this side of the call.
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin"; then
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_USED/origin"; then
+                /usr/bin/env rm -f "$RB_ORIGIN_USED/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_USED"
             else
-                /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
-                /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+                /usr/bin/env rm -f "$RB_ORIGIN_USED/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_USED"
                 echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
                 exit 1
                 [[ -n "" ]]
@@ -811,7 +863,7 @@ if [[ -z $RB_REMOTE ]]; then
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
+        echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_ORIGIN_USED is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
         [[ -n "" ]]
     fi
@@ -963,6 +1015,10 @@ if [[ -z $RB_REMOTE ]]; then
     # the alias.
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
+       && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
+         && [[ -z ${!RB_PIN_DIR2:-} ]] ) 2>/dev/null \
+       && ( RB_PIN_USED="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_USED = RbProbe* ]] \
+         && [[ -z ${!RB_PIN_USED:-} ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
@@ -973,6 +1029,13 @@ if [[ -z $RB_REMOTE ]]; then
         # handed.
         RB_PIN_DIR=
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
+        # AND THE SAME SECOND CANDIDATE, for the same reason and because half a
+        # fallback is none: the origin read falling through to `HOME` while this
+        # probe still refuses on `TMPDIR` ends the session one step later, on the
+        # pin instead of on the origin. #161.
+        RB_PIN_DIR2=
+        [[ -n $RB_TMPPARENT2 ]] \
+            && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
         # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
         # above states: a refused call means the `mkdir` inside the helper found
@@ -980,11 +1043,18 @@ if [[ -z $RB_REMOTE ]]; then
         # OPERATOR'S — and `rm -f` deletes that file while `rmdir` deletes the
         # directory whenever it is empty, which an operator's directory often is.
         # Written after the call they ran on every path, including that one.
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
+        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR" "$RB_PIN_DIR2"; then
+            # THE LEAF DECIDES WHICH CANDIDATE WAS USED, exactly as it does for the
+            # origin read above, and it is sound for the same two reasons the
+            # helper makes it so: it refuses a second candidate that already
+            # exists, and one whose immediate parent other accounts can write.
+            RB_PIN_USED="$RB_PIN_DIR"
+            [[ -n $RB_PIN_DIR2 ]] && [[ -e $RB_PIN_DIR2/pin ]] \
+                && RB_PIN_USED="$RB_PIN_DIR2"
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
-                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
-            /usr/bin/env rm -f "$RB_PIN_DIR/pin"
-            /usr/bin/env rmdir "$RB_PIN_DIR"
+                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_USED/pin"
+            /usr/bin/env rm -f "$RB_PIN_USED/pin"
+            /usr/bin/env rmdir "$RB_PIN_USED"
         fi
         # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
         # rounds of review walked up to it and it is cheaper to state than to
@@ -1165,7 +1235,7 @@ if [[ -z $RB_REMOTE ]]; then
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
+        echo "ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_USED and RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
         exit 1
         [[ -n "" ]]
     fi

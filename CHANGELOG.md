@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.63] — 2026-08-24
+
+- **A `TMPDIR` that cannot hold a directory no longer ends the session.** Setup
+  picks the transport parent on mode bits — `-d`, `-w`, `-x` — and prefers
+  `TMPDIR`. Those describe neither a filesystem that is full, over quota or
+  read-only nor a name another account got to first, and the fallthrough to `HOME`
+  happened on the BITS rather than on the failure: any of them refused the session
+  with a perfectly usable `HOME` sitting beside it untried.
+
+  Both parents are passed now, and `pr-origin.sh` decides. It is the only thing
+  that can: it runs both the `mkdir` and the ancestry walk, so it tells a
+  reservation failure — retry — from an ancestry refusal, which an operator has to
+  see named. Deciding in the driver would need a second copy of the read-back arm
+  or a status branch outside it, and both are the walked-past-guard shape that
+  block exists to remove.
+
+  Which candidate holds the value is not announced: the driver tests for the leaf
+  under the second and reads the first where that is absent. The helper is what
+  makes that sound — it refuses a second candidate that already exists, and one
+  whose immediate parent other accounts can write.
+
+  **The pin probe falls back the same way**, because half a fallback is none: the
+  origin read falling through to `HOME` while that probe still refused on `TMPDIR`
+  would end the session one step later.
+
+  A session with one usable parent passes one candidate and behaves exactly as
+  before. Closes #161, and #160 with it — a squatter who pre-creates the
+  argv-published first name now costs a fallback rather than a refused session, and
+  the fallback's parent is one no other account can create in.
+
 ## [2.0.62] — 2026-08-24
 
 - **`pr-origin.sh` takes a second transport directory and falls back to it.** The

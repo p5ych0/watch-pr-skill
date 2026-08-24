@@ -821,6 +821,12 @@ plugin docs and open an issue.
   as a parameter expansion the shell refuses rather than through `echo`, which in
   your own shell may be a function that prints nothing.
 
+  Setup passes TWO candidate directories — one under `TMPDIR`, one under `HOME` —
+  and the helper falls through to the second where the first could not be reserved,
+  so a full or read-only `TMPDIR` no longer ends the session by itself. What is
+  left to you is the case where both fail, or where the refusal is not about
+  storage at all.
+
   So **if the line above names a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic
   covers a name another account got to first, where the filesystem has room and
