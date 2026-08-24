@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.60] — 2026-08-24
+
+- **The portable watchdog gave the bounded command no standard input.** Where GNU
+  `timeout` is missing — stock macOS, and the bash 3.2 CI job by construction —
+  `run_limited` runs its subject in the background, and a background job whose
+  redirections do not mention stdin gets `/dev/null` from the shell. It was
+  redirected there explicitly, so a bounded command that READS stdin received
+  nothing.
+
+  Nothing in the driver feeds a bounded command on stdin today, so no session
+  behaviour changes. What it cost was the suite: every case in
+  `test-pr-request-review.sh` feeds the request body that way, and all of them
+  measured the empty-body refusal instead — invisible wherever `timeout` exists,
+  which is why it survived until the bash 3.2 job was run again. `testlib.sh`
+  ships inside `pr-ci-state.sh`, so this is an installed file and a release.
+
 ## [2.0.59] — 2026-08-24
 
 - **The origin-read abort now tells you how to recover.** That abort is reached

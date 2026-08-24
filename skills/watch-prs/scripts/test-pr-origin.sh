@@ -1147,7 +1147,21 @@ for _wf_mode in read pin; do
     _wf_dir="$TMP/wf.$_wf_mode.$$"
     rm -rf "$_wf_dir"
     _wf_rc=0
-    _wf_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    # NO WATCHDOG ON THIS ONE, and the reason is the case itself. `run_limited`
+    # captures the bounded command's output into REGULAR FILES and prints them
+    # afterwards — that is what stops a child holding the caller's substitution
+    # pipe open. This case sets `ulimit -f 0`, which forbids writing to a regular
+    # file: the helper's refusal goes into the watchdog's capture file, the write
+    # is refused, and the case sees rc=1 with EMPTY output and cannot tell the
+    # refusal it wants from any other. Under GNU `timeout` the output stays on the
+    # substitution pipe, which the limit does not touch — so this failed only on
+    # the mac-shaped bash 3.2 job, where `timeout` is absent by construction.
+    #
+    # WHAT IS GIVEN UP is the time bound, and it is bounded another way: the
+    # subject is `pr-origin.sh` with a zero file-size limit, which cannot write
+    # and therefore cannot loop on writing, and its `git` reads run against an
+    # empty `HOME` with `GIT_CONFIG_NOSYSTEM`.
+    _wf_out="$(cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
         bash -c 'ulimit -f 0 2>/dev/null || exit 97
                  trap "" XFSZ

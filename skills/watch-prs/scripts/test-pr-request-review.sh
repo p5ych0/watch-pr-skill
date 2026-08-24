@@ -145,8 +145,18 @@ world; printf 'comment:998877\n' > "$W/prior.out"; rc="$(run 7 no)"
 # value as the baseline and the watch accepts the PREVIOUS review as the answer
 # to a request just posted. Taking the status only works while there is something
 # left to refuse with, which is why the write goes first.
+#
+# NO WATCHDOG ON THIS ONE, because the watchdog is what the case is trying to
+# break. `run_limited` redirects its subject's stdout into a capture file — that
+# is how it stops a child holding the caller's substitution pipe open — so the
+# closed descriptor never reaches the helper and its write succeeds, the request
+# is posted, and the case fails on the mac-shaped bash 3.2 job where the fallback
+# is the only arm. Under GNU `timeout` the descriptor passes straight through.
+#
+# WHAT IS GIVEN UP is the time bound, and the subject cannot spend it: it is one
+# `printf` and one stubbed `gh` call, with no loop between them.
 world; rc=0
-(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+(cd "$TMP" && env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     BODIES="$TMP/bodies" REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     /usr/bin/env bash -p "$DIR/pr-request-review.sh" 7 no <"$BODY_IN" >&- 2>"$ERR") || rc=$?
 { [ "$rc" != 0 ] && nothing_posted; } \
