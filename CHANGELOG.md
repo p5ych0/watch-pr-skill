@@ -16,7 +16,12 @@
   that is what the driver's old candidate loop did wrong.
 
   Nothing changes for a caller that passes one directory. The driver still does;
-  wiring it up is the next change.
+  wiring it up is the next change — and when it does, the status-0 contract is
+  that ONE of the candidates is the directory that was created, the second unless
+  a third was passed and the first could not be reserved. The caller tests for the
+  leaf under the second candidate and reads the first where that is absent; which
+  one it was is not announced, because putting the value's own channel into a
+  caller's capture is what the file transport exists to avoid.
 
 ## [2.0.61] — 2026-08-24
 

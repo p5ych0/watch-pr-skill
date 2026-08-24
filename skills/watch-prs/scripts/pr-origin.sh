@@ -5,6 +5,15 @@
 #   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
 #     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" || abort
 #
+#   /usr/bin/env bash -p pr-origin.sh read "$RB_DIR1" "$RB_DIR2" || abort
+#
+# A SECOND CANDIDATE IS OPTIONAL, and where one is passed the caller does NOT know
+# which of the two holds the answer: this script tries the first and falls through
+# to the second only where the first one's RESERVATION failed. Both are directories
+# it creates, so the one that exists afterwards is the one it used — and on the
+# fallback path the first is a name somebody else holds, which is why the `mkdir`
+# refused and why nothing here touches it.
+#
 # THE DIRECTORY IS THIS SCRIPT'S TO CREATE, and the file inside it is this
 # script's to name. The caller passes a path that must NOT exist; `mkdir` here is
 # what makes it this run's. It used to pass a file inside a directory it had built
@@ -48,10 +57,17 @@
 # captured now: the usage above is the whole invocation, and a maintainer reading
 # the old paragraph would have reintroduced the failure it described.
 #
-#   0  the second argument is a DIRECTORY this script created, and the value is in
-#      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
-#      itself is the directory, never the file — a caller that opens it directly
-#      opens a directory.
+#   0  ONE OF THE CANDIDATE ARGUMENTS is a DIRECTORY this script created, and the
+#      value is in its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The
+#      argument itself is the directory, never the file — a caller that opens it
+#      directly opens a directory.
+#
+#      WHICH ONE is the second argument unless a third was passed AND the first
+#      could not be reserved, in which case it is the third. The caller is not told
+#      which in words: it tests for the leaf under the second candidate, and reads
+#      the first where that is absent. Announcing it on a stream would put the
+#      value's own channel back into a caller's capture, which is what the file
+#      transport exists to avoid.
 #   1  refused — the reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
 #      nothing here ever leaves a half-written or empty one.
