@@ -221,21 +221,25 @@ the suite never takes; a GNU-only *flag* on a command that exists everywhere
 (`sed -i`, `readlink -f`, `grep -P`); and `\s` in a `grep` pattern, where BSD
 `grep` does not fail but matches a literal `s`. Those are review's job.
 
-**Half of it is running.** `.github/workflows/tests.yml` runs the normal job on
-every push to `main` and on every pull request; `macos-shell` carries `if: false`
-and does not run — a `workflow_dispatch` does not reach it either, that guard
-being job-level. So a green check means the suite passed on Ubuntu with bash 5,
-and says nothing about bash 3.2.57 or a mac-shaped `PATH`. A regression that needs
-the second machine to see it can still merge, and a push to a branch with no pull
-request open produces no check at all. The suite is also still the mandatory pre-push gate; `pr-selfcheck.sh` is
-unchanged, and it is what a contributor actually runs.
+**All of it is running.** `.github/workflows/tests.yml` runs both jobs on every
+push to `main` and on every pull request, so a green check means the suite passed
+on Ubuntu with bash 5 **and** on bash 3.2.57 with a mac-shaped `PATH`. A push to a
+branch with no pull request open still produces no check at all. The suite is also
+still the mandatory pre-push gate; `pr-selfcheck.sh` is unchanged, and it is what
+a contributor actually runs.
 
-Both were off. The normal job came back once its cost came down — the slowest
-fixture went 174s to 10s — on its record: it has never gone red on a correct
-change. `macos-shell` is the opposite case: it went red three times on correct
-changes, each time because a fixture required the ROUTE bash 5 takes to a defence
-rather than the defence holding. #93 owns turning that job back on — it is named in its
-acceptance criteria — after those fixtures are audited.
+Both were off, and came back separately. The normal job returned once its cost
+came down — the slowest fixture went 174s to 10s — on its record: it had never
+gone red on a correct change. `macos-shell` had, three times, each because a
+fixture required the ROUTE bash 5 takes to a defence rather than the defence
+holding. Auditing for that was done by running the job rather than by reading
+twenty-two files: nineteen passed, and the three that did not were real defects —
+a watchdog that gave its bounded command no stdin, an expansion that does not
+finish on 3.2.57, and two cases whose output the watchdog could not carry.
+
+`macos-shell` takes about twenty-five minutes against the normal job's three, and
+a hang there used to run to the six-hour default, so it bounds each file at ten
+minutes and the job at sixty.
 
 ## Install
 

@@ -18,8 +18,8 @@
 #
 # It was 291 lines of shell inside a fenced block in `SKILL.md`, pasted into the
 # driving session's own shell. Nothing checked it — the suite, `pr-selfcheck.sh`
-# and the `macos-shell` CI job all cover `scripts/`, the last of them only while it
-# is enabled (#93), and none of them can see shell inside a Markdown file. That is not theoretical here: this block could not
+# and the `macos-shell` CI job all cover `scripts/`, and none of them can see
+# shell inside a Markdown file. That is not theoretical here: this block could not
 # be PARSED by the bash macOS ships, for fifty review rounds, because an inline
 # `[[ … =~ … ]]` pattern containing a parenthesis is a syntax error there. It was
 # found by running the suite under bash 3.2, not by reading the document. Issue

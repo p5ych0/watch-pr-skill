@@ -35,10 +35,12 @@ PATH="$NOTO" command -v timeout >/dev/null 2>&1 \
 # and every case in `test-pr-request-review.sh`, which feeds the request body that
 # way, measured the empty-body refusal instead of its subject.
 #
-# THIS CASE IS WHY IT CANNOT COME BACK. The Ubuntu job takes the GNU `timeout`
-# arm, which passes stdin through, and `macos-shell` is disabled — so removing
-# `<&0` again would leave every automatic check green. Here the fallback is the
-# only arm, by the reduced PATH above.
+# THIS CASE IS WHY IT CANNOT COME BACK, and it is not redundant with the
+# `macos-shell` job. That job would catch it too — it is where the defect was
+# found — but only through the fixtures that happen to feed stdin, and only at
+# twenty-five minutes a run. Here the fallback is the ONLY arm, by the reduced
+# PATH above, so the guarantee is asserted directly and on every shell the suite
+# runs on rather than inferred from a downstream failure.
 out="$(printf 'THE-STDIN-VALUE\n' | PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 5 cat' 2>&1)"
 case "$out" in
     *THE-STDIN-VALUE*) pass "the fallback gives the bounded command the caller's stdin" ;;

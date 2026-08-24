@@ -351,22 +351,30 @@ rediscovering them.
   one from the day it was written. Absence covers the other half: a command name
   assembled at runtime is invisible to text and dies at once here.
 
-  **That job is switched off; the workflow around it is not.**
-  `.github/workflows/tests.yml` runs the normal job on every push to `main` and
-  every pull request, and `macos-shell` carries `if: false` — which a
-  `workflow_dispatch` does not lift, that guard being job-level. A push to a branch
-  with no pull request open therefore still produces no check at all. So the paragraph above
-  describes what the SECOND job is for, not what it is doing — while this stands,
-  bash 3.2.57 and a mac-shaped `PATH` are proven by nothing, and a regression that
-  needs them to be seen can merge. Both were off; the normal one came back in #167
-  once its cost came down, on its record: it has never gone red on a correct
-  change, running the same fixtures the contributor's gate runs on a bash the
-  fixtures are reviewed against every round. That is not a claim that the
-  contributor's shell IS bash 5 — a macOS `pr-selfcheck.sh` resolves whatever
-  `bash` is on that `PATH`, which may be 3.2.57. `macos-shell` is the opposite case — it went red three times on correct
-  changes, each time on a fixture requiring the ROUTE bash 5 takes to a defence —
-  and #93 owns restoring it, after the fixtures are audited against *assert the
-  invariant, not the version's route to it*.
+  **Both jobs run again**, on every push to `main` and every pull request. A push
+  to a branch with no pull request open still produces no check at all, because
+  `push` is `main` only.
+
+  They were off together and came back separately. The normal one returned in #167
+  once its cost came down; it had never gone red on a correct change. `macos-shell`
+  had, three times, each on a fixture requiring the ROUTE bash 5 takes to a
+  defence — so #93's first criterion was auditing every fixture against *assert the
+  invariant, not the version's route to it*. **That audit was done by running the
+  job rather than by reading twenty-two files**: nineteen passed, and the three
+  that did not were real defects rather than route artefacts — the portable
+  watchdog gave its bounded command no stdin, a global substitution over 330 KB
+  does not finish on 3.2.57, and two cases that forbid writing to regular files
+  cannot be captured through the watchdog's own regular files. #171 fixed them and
+  the job is green.
+
+  It costs about twenty-five minutes a run against the normal job's three, and a
+  hang there used to cost six: the job carries `timeout-minutes: 60` and bounds
+  each file at ten minutes with the runner's own `timeout`, captured by absolute
+  path before the mac-shaped `PATH` removes it. The failure message reports the
+  status, the elapsed time and the bound, and classifies none of them: `-k 30`
+  makes a file that ignores `TERM` report 137 rather than 124, a fixture may exit
+  124 for reasons of its own, and a branch deciding between them in a YAML file is
+  logic no fixture can reach.
 
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
   than an oversight: ~950 lines of executable shell live in a Markdown file, and
