@@ -52,7 +52,20 @@
 #      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
 #      itself is the directory, never the file — a caller that opens it directly
 #      opens a directory.
-#   1  refused — the reason is on STDERR, and this script does NOT create a value
+#   2  refused, and RETRYING UNDER ANOTHER PARENT IS SENSIBLE: both ancestry walks
+#      passed and the name still could not be taken exclusively — a full
+#      filesystem, a quota, a read-only mount, or a name another account got to
+#      first. Nothing about the PATH is implicated.
+#
+#      THIS IS THE ONLY PLACE THAT CAN SAY IT, because it is the only one that runs
+#      both the `mkdir` and the walk. A caller that ignores it is no worse off than
+#      before: 2 is non-zero, so `if helper …; then` treats it as a refusal.
+#   1  refused, TERMINALLY — an ancestry another account can interfere with, a path
+#      that will not resolve, an unreadable `origin`, a write that opened and then
+#      failed. A caller must not route around these into another parent: what is
+#      wrong is not the storage, and an operator has to see it named.
+#
+#      The reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
 #      nothing here ever leaves a half-written or empty one.
 #
@@ -617,8 +630,22 @@ trap 'rb_on_signal TERM' TERM
              || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
          [[ $_rb_fail_real != "$_rb_dir" ]] \
              && { _rb_walk "$_rb_fail_real" || exit 1; }
+         # STATUS 2 SAYS "THE ANCESTRY IS SOUND AND THE NAME COULD NOT BE TAKEN",
+         # which is the one failure a caller can do something about: a full
+         # filesystem, a quota, a read-only mount, or a name another account got
+         # to first. Both walks above have passed by the time this line is
+         # reached, so nothing about the PATH is implicated — only the storage or
+         # the moment.
+         #
+         # EVERY OTHER REFUSAL IS 1, and the difference is what lets a caller
+         # retry under another parent without stepping past an ancestry this
+         # process refused. That distinction cannot be made anywhere else: this is
+         # the only place that runs both the `mkdir` and the walk.
+         #
+         # A CALLER THAT IGNORES IT IS NO WORSE OFF than before — 2 is non-zero,
+         # so every existing `if helper …; then` treats it as the refusal it is.
          echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
-         exit 1; }
+         exit 2; }
 # AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal from here on
 # happens AFTER the directory exists — the two ancestry walks, the git read, an
 # empty origin, a newline in it, a write that opens and then fails — and each used

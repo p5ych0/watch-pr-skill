@@ -54,14 +54,17 @@
   caller can act on is worse than one that does not offer it. The helper takes one
   directory, as it did before 2.0.62.
 
-  **What the retry does not do** is distinguish a reservation failure from an
-  ancestry refusal. The helper tells them apart internally, and a two-call driver
-  discards that: an unsafe `TMPDIR` ancestry is reported and the session then
-  continues under `HOME`. Using the distinction needs it to cross back into the
-  driving shell, and both routes are worse — a status the driver can only read with
-  a branch outside the arm holding the read-back, or one call taking both
-  candidates, which leaves the driver guessing which holds the value. The unsafe
-  ancestry is reported and is not used; `CLAUDE.md` records the trade. Closes #161, and #160 with it — a squatter who pre-creates the
+  **Only a reservation failure is retried.** `pr-origin.sh` reports **2** where both
+  ancestry walks passed and the name still could not be taken — a full filesystem, a
+  quota, a read-only mount, a name another account got to first — and **1** where
+  the refusal was about the path or the checkout. A 1 is terminal: another parent
+  fixes none of those, and stepping past one is what the driver's old candidate loop
+  did wrong.
+
+  The driver reads that status in the retry's own condition —
+  `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so the read-back stays
+  contained in the arm that names its directory rather than becoming a statement
+  after a guard. Closes #161, and #160 with it — a squatter who pre-creates the
   argv-published first name costs a retry rather than a refused session.
 
 ## [2.0.62] — 2026-08-24

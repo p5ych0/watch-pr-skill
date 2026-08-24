@@ -446,10 +446,16 @@ cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
 # AND A COUNTER, so a case can make the FIRST call fail and the second succeed —
 # which is the retry, and the only way to reach the second arm of the read block.
+#
+# THE STATUS IS THE CASE'S TO CHOOSE, because the driver retries only on 2: the
+# helper reports 2 where both ancestry walks passed and the name still could not be
+# taken, and 1 where the refusal was about the path or the checkout. A case that
+# wants the retry sends 2; one that wants to prove a terminal refusal is NOT
+# retried sends 1.
 if [ -n "${FORGE_FAIL_FIRST:-}" ]; then
     _n=0; [ -f "$FORGE_FAIL_FIRST" ] && _n="$(cat "$FORGE_FAIL_FIRST")"
     _n=$((_n + 1)); printf '%s\n' "$_n" > "$FORGE_FAIL_FIRST"
-    [ "$_n" = 1 ] && exit 1
+    [ "$_n" = 1 ] && exit "${FORGE_FIRST_RC:-2}"
 fi
 mkdir -m 700 "$2" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
@@ -584,6 +590,18 @@ rm -rf "$_fe_dir"
     grep -qF 'watch-pr-pin-2.$$.' <<<"$skill_flat" \
         && pass "…and so does the second pin candidate" \
         || die "the two pin candidates differ only by RANDOM"
+    # AND THE STATUS IS READ INSIDE THE `if`, which is what makes the distinction
+    # usable at all. `elif [[ $? -eq 2 ]] && helper …; then` is a condition of the
+    # same `if`, so the read-back stays contained in the arm that names its
+    # directory — it is not a branch after a guard, which is the shape #155 and #158
+    # removed. `$?` is taken FIRST, before the emptiness test, because a command
+    # between the two would replace it.
+    grep -qF 'elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]]' <<<"$skill_flat" \
+        && pass "…and the retry is gated on the helper's reservation status, first in the condition" \
+        || die "the transport retry does not gate on the reservation status"
+    grep -qF 'elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]]' <<<"$skill_flat" \
+        && pass "…and so is the pin retry" \
+        || die "the pin retry does not gate on the reservation status"
     # THE RETRY IS NOT ANNOUNCED, and this asserts that rather than lamenting it.
     # A note is an `echo`, `echo` is a name, and there is no position for it: in the
     # condition a function by that name runs before `$RB_SCRIPTS` and
@@ -596,6 +614,29 @@ rm -rf "$_fe_dir"
         *'this session is using '*) die "the retry announces itself through a shadowable echo: '$_rs_out'" ;;
         *) pass "…and the retry adds no shadowable announcement of its own" ;;
     esac
+    # …AND A TERMINAL REFUSAL IS NOT RETRIED, which is the half the status exists
+    # for. Status 1 means the refusal was about the PATH or the checkout — an
+    # ancestry another account can interfere with, a path that will not resolve, an
+    # `origin` the checkout does not have — and another parent fixes none of those.
+    # Retrying past it would step around a state the operator has to see named,
+    # which is what the driver's old candidate loop did wrong.
+    _rs_t1="$_forge_dir/term.n"; rm -f "$_rs_t1"
+    _rs_tb="$_forge_dir/thome"; rm -rf "$_rs_tb"; mkdir -p "$_rs_tb"
+    _rs_tr=0
+    _rs_to="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_FAIL_FIRST="$_rs_t1" FORGE_FIRST_RC=1 TMPDIR="$_forge_dir" HOME="$_rs_tb" bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rs_tr=$?
+    _rs_tn=0; [ -f "$_rs_t1" ] && _rs_tn="$(<"$_rs_t1")"
+    { [ "$_rs_tr" -ne 0 ] && [ "$_rs_tn" = 1 ] \
+      && case "$_rs_to" in *PINNED=git@*) false ;; *) true ;; esac; } \
+        && pass "…and a TERMINAL refusal is not retried under the other parent" \
+        || die "a terminal refusal was retried (rc=$_rs_tr calls=$_rs_tn out='$_rs_to')"
+    [ -z "$(ls -A "$_rs_tb" 2>/dev/null)" ] \
+        && pass "…and nothing is created under the parent it did not try" \
+        || die "the terminal refusal touched the second parent"
+
     # AND THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes the
     # retry a fix rather than half of one: `RB_TMPPARENT` is what the pin probe and
     # the session's working directory are built from further down, so leaving it on

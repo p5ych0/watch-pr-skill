@@ -810,7 +810,22 @@ if [[ -z $RB_REMOTE ]]; then
         # reason before this arm was reached. What the operator does not get is a
         # line saying which parent the session ended up on. The abort further down
         # covers the case where both failed.
-        elif [[ -n $RB_ORIGIN_DIR2 ]] \
+        # `$?` IS THE FIRST CALL'S STATUS, AND IT IS READ INSIDE THE `if`. That is
+        # what makes the distinction usable: 2 means both ancestry walks passed and
+        # the name still could not be taken — a full filesystem, a quota, a
+        # read-only mount, a name another account got to first — and 1 means the
+        # refusal was about the PATH or the checkout, which another parent does not
+        # fix and an operator has to see named.
+        #
+        # NOT A BRANCH OUTSIDE THE ARM. `elif [[ $? -eq 2 ]] && helper …; then` is a
+        # condition of this same `if`, so the read-back below stays contained in the
+        # arm that names its directory — nothing here is a statement after a guard,
+        # which is the shape #155 and #158 removed. `[[` is a reserved word and `$?`
+        # is a shell parameter, so neither is a name anything can take.
+        #
+        # AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness
+        # test comes second: a command between the two would replace it.
+        elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
             # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
             # this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
@@ -1117,7 +1132,7 @@ if [[ -z $RB_REMOTE ]]; then
         # THE SAME SECOND CALL AS THE ORIGIN READ, and for the same reasons: an
         # `elif` needs no status, and each arm names the directory the helper just
         # created rather than guessing between two.
-        elif [[ -n $RB_PIN_DIR2 ]] \
+        elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
             # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
             # filesystem can fill between the origin read and this probe, and

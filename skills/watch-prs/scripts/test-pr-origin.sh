@@ -151,6 +151,48 @@ _ex_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="
     && pass "a second directory argument is refused by name, not silently ignored" \
     || die "the removed fallback argument was ignored (rc=$_ex_rc out='$_ex_out')"
 
+# ── A RESERVATION FAILURE IS STATUS 2, AND EVERY OTHER REFUSAL IS 1 ───────
+# This is the only place that runs both the `mkdir` and the ancestry walk, so it is
+# the only one that can tell a caller which failure it had. A caller retrying under
+# another parent must not step past an ancestry this process refused — what is
+# wrong there is not the storage — and 2 is what says the storage or the moment was
+# the whole of it.
+_st_new() {   # _st_new ; prints a fresh <parent>/dir path, empty on failure
+    local _p
+    _p="$(mktemp -d "$TMP/st.XXXXXX")" || _p=""
+    [ -n "$_p" ] && [ -d "$_p" ] && printf '%s/dir' "$_p"
+}
+_st_dir="$(_st_new)"
+[ -n "$_st_dir" ] || die "no scratch for the status cases"
+mkdir "$_st_dir"
+_st_rc=0
+(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 2 ] \
+    && pass "a name that could not be taken on a sound ancestry reports 2" \
+    || die "a reservation failure reported $_st_rc, not 2"
+# …AND AN ANCESTRY REFUSAL IS 1, which is what the caller must not retry past.
+_st_open="$TMP/stopen"; mkdir -p "$_st_open"; mkdir -p "$_st_open/dir"; chmod 777 "$_st_open"
+_st_rc=0
+(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_open/dir" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 1 ] \
+    && pass "…while an ancestry the walk refuses reports 1" \
+    || die "an ancestry refusal reported $_st_rc, not 1"
+# …AND SO IS AN UNREADABLE ORIGIN, which is the other class a retry cannot help:
+# the directory was created and the failure is about the checkout, not the storage.
+_st_dir2="$(_st_new)"
+[ -n "$_st_dir2" ] || die "no scratch for the origin-status case"
+_st_rc=0
+(cd "$TMP" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE= \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir2" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 1 ] \
+    && pass "…and so does a checkout with no usable origin" \
+    || die "an unreadable origin reported $_st_rc, not 1"
+
 # ── it reads what origin says ──────────────────────────────────────────────
 got="$(run read)"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
