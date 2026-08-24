@@ -31,9 +31,9 @@
   account's alone — the another-account half, because the existence probe is a
   check-then-use and ownership does not save a caller there: a symlink to another
   operator-owned transport passes `-O` and `-f` by following it to a file the
-  operator really does own. The immediate parent only: sticky stops another
-  account renaming an entry it does not own and not creating a new name, which is
-  all that attack needs, so `/tmp` is fine ABOVE the parent and not fine AS it.
+  operator really does own. The immediate parent only: sticky stops another account from RENAMING or deleting an entry it does not own, and does not stop them CREATING a new name — and
+  creating is all that attack needs. So `/tmp` is fine ABOVE the parent and not
+  fine AS it.
 
 ## [2.0.61] — 2026-08-24
 

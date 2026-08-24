@@ -282,9 +282,10 @@ fi
 # create the directory, none of that is reachable.
 #
 # THE IMMEDIATE PARENT, NOT THE WHOLE ANCESTRY. Sticky stops another account
-# renaming an entry it does not own and does not stop them creating a NEW name,
-# which is all this attack needs — so a sticky world-writable component ABOVE the
-# parent is still fine, and this case proves both halves.
+# from RENAMING or deleting an entry it does not own, and does not stop them
+# CREATING a new name — and creating is all this attack needs. So a sticky
+# world-writable component ABOVE the parent is still fine, and this case proves
+# both halves.
 _fb_shared="$TMP/fbshared"; mkdir -p "$_fb_shared"; chmod 1777 "$_fb_shared"
 _fb_d1="$(_fb_new)"
 [ -n "$_fb_d1" ] || die "no scratch for the shared-fallback case"
@@ -294,6 +295,36 @@ _fb_got="$(_fb_call read "$_fb_d1" "$_fb_shared/dir")"
   && [ ! -e "$_fb_d1" ]; } \
     && pass "a fallback whose parent other accounts can write is refused" \
     || die "a shared fallback parent was accepted (got='$_fb_got')"
+# …AND A SYMLINKED PARENT IS FOLLOWED, which is the half a lexical check cannot
+# see: the link is ours and mode 0777 on a symlink means nothing, while what it
+# POINTS AT is a parent other accounts can write. Without the resolved-path pass
+# this refusal is skipped and the plant is available again.
+_fb_shared2="$TMP/fbshared2"; mkdir -p "$_fb_shared2"; chmod 1777 "$_fb_shared2"
+_fb_link="$TMP/fblink"; rm -f "$_fb_link"; ln -s "$_fb_shared2" "$_fb_link"
+_fb_d1="$(_fb_new)"
+[ -n "$_fb_d1" ] || die "no scratch for the symlinked-fallback case"
+_fb_got="$(_fb_call read "$_fb_d1" "$_fb_link/dir")"
+{ [ "${_fb_got%%|*}" -ne 0 ] \
+  && case "${_fb_got#*|}" in *"must be this account's alone"*) true ;; *) false ;; esac \
+  && [ ! -e "$_fb_d1" ]; } \
+    && pass "…and a fallback parent that RESOLVES to a shared one is refused too" \
+    || die "a symlinked shared fallback parent was accepted (got='$_fb_got')"
+
+# …AND A DANGLING SYMLINK AT THE FALLBACK NAME IS AN EXISTING ENTRY, which `-e`
+# reports as absent because it follows the link. The refusal was skipped, the first
+# candidate succeeded, and a target that resolves LATER — the account that planted
+# it creating what it points at — makes the caller's leaf probe select data this run
+# never wrote.
+_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
+{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the dangling-symlink case"
+ln -s "$_fb_d2.target-that-does-not-exist" "$_fb_d2"
+_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
+{ [ "${_fb_got%%|*}" -ne 0 ] \
+  && case "${_fb_got#*|}" in *"already exists"*) true ;; *) false ;; esac \
+  && [ ! -e "$_fb_d1" ]; } \
+    && pass "…and a DANGLING symlink at the fallback name is an existing entry" \
+    || die "a dangling symlink was read as an absent fallback (got='$_fb_got')"
+
 # …AND A SHARED COMPONENT ABOVE IT IS NOT REFUSED, which is the half that keeps
 # every scratch tree under `/tmp` usable: `$TMP` itself is mode 700 and this
 # account's, and `/tmp` above it is exactly the sticky world-writable case the

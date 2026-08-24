@@ -394,7 +394,13 @@ set -C
 # costs a session whose first candidate would have worked, and the names carry a
 # pid and three `$RANDOM` draws, so existing means a leak or an account that
 # guessed — neither of which is a state to write a session on top of.
-[[ -z $RB_DIR2 ]] || [[ ! -e $RB_DIR2 ]] \
+# `-e` OR `-L`, BECAUSE `-e` FOLLOWS THE LINK. A DANGLING symlink at the fallback
+# name is an existing entry that `-e` reports as absent, so the refusal was skipped,
+# the first candidate succeeded, and a target that resolves LATER — the account that
+# planted it creating what it points at — makes the caller's leaf probe select data
+# this run never wrote. `mkdir` would refuse that name too, but only on the fallback
+# PATH, which a successful first candidate never reaches.
+[[ -z $RB_DIR2 ]] || { [[ ! -e $RB_DIR2 ]] && [[ ! -L $RB_DIR2 ]]; } \
     || { echo "ABORT: the fallback directory '$RB_DIR2' already exists; it must be a name this run can create, or the caller cannot tell which candidate holds the value" >&2; exit 1; }
 # THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
 # WRITTEN and as it RESOLVES, and neither covers the other.
@@ -451,7 +457,17 @@ _rb_walk() {   # _rb_walk <dir> [strict] ; 0 safe, 1 refused (reason on stderr)
             return 1
         fi
         if [[ -n $bad ]]; then
-            echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
+            # THE REASON IS THE MODE'S, so it has to differ with the mode. Strict
+            # refuses a STICKY world-writable parent too, and the ordinary message
+            # — "writable by one and not sticky" — is simply false about that path:
+            # a reader checking `/tmp` against it finds the sticky bit set and
+            # concludes the tool is wrong rather than that the policy is stricter
+            # here.
+            if [[ $strict = strict ]] && [[ $first = yes ]]; then
+                echo "ABORT: '$p' is owned by another account, or writable by one; a fallback directory's immediate parent must be this account's alone, or its leaf cannot be told from one another account planted" >&2
+            else
+                echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
+            fi
             return 1
         fi
         # AND AN ACL IS A PERMISSION THE MODE BITS DO NOT SHOW. On macOS a
@@ -610,9 +626,9 @@ _rb_aim() {   # _rb_aim <dir> ; point every derived name at that candidate
 # `TMPDIR`, and a squat there costs a fallback rather than a session.
 #
 # THE IMMEDIATE PARENT IS WHAT HAS TO BE PRIVATE, not the whole ancestry. Sticky
-# stops another account renaming an entry it does not own and does not stop them
-# creating a NEW name, which is all this attack needs — so `/tmp` is fine above the
-# parent and not fine as the parent.
+# stops another account from RENAMING or deleting an entry it does not own, and
+# does not stop them CREATING a new name — and creating is all this attack needs.
+# So `/tmp` is fine above the parent and not fine as the parent.
 #
 # THE WALK RUNS ON THE PATH AS WRITTEN AND AS IT RESOLVES, for the reason it does
 # everywhere else: a symlinked ancestor whose own owner is fine can point into a
