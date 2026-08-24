@@ -155,6 +155,25 @@ _fb_call() {   # _fb_call <mode> <args…> ; prints "<rc>|<stderr>"
     printf '%s|%s' "$rc" "$err"
 }
 
+# THE FIRST CANDIDATE WINS WHERE IT CAN BE RESERVED, which every other case here
+# takes for granted by making the first name exist before the call. Without this
+# one, an unconditional switch to the second candidate passes all of them — and the
+# caller reads whichever leaf exists, so it would follow the helper into the wrong
+# directory without noticing.
+_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
+{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the first-wins case"
+_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
+_fb_val=""; [ -f "$_fb_d1/origin" ] && _fb_val="$(<"$_fb_d1/origin")"
+{ [ "${_fb_got%%|*}" = 0 ] && [ "$_fb_val" = "$REAL" ] && [ ! -e "$_fb_d2" ]; } \
+    && pass "a first candidate that can be reserved wins, and the second is never created" \
+    || die "the first candidate did not win (got='$_fb_got' value='$_fb_val')"
+# …AND SAYS NOTHING, because a note on every ordinary session is a note nobody
+# reads on the one where it matters.
+case "${_fb_got#*|}" in
+    '') pass "…and the ordinary path is silent" ;;
+    *)  die "the ordinary two-candidate path printed: '${_fb_got#*|}'" ;;
+esac
+
 # A NAME ANOTHER ACCOUNT GOT TO FIRST is the reservation failure this can be built
 # from without a full filesystem: the directory is created EXCLUSIVELY, so an
 # existing name refuses exactly as a quota does.
