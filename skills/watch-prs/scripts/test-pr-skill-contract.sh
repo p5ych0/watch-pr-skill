@@ -441,7 +441,16 @@ unset FORGE_LOG FORGE_RC FORGE_VALUE
 # the case against a block that created nothing.
 cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
+# ALL THE ARGUMENTS, because a case whose subject is WHICH directory an
+# invocation was given can only see it here.
 [ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
+# AND A COUNTER, so a case can make the FIRST call fail and the second succeed —
+# which is the retry, and the only way to reach the second arm of the read block.
+if [ -n "${FORGE_FAIL_FIRST:-}" ]; then
+    _n=0; [ -f "$FORGE_FAIL_FIRST" ] && _n="$(cat "$FORGE_FAIL_FIRST")"
+    _n=$((_n + 1)); printf '%s\n' "$_n" > "$FORGE_FAIL_FIRST"
+    [ "$_n" = 1 ] && exit 1
+fi
 mkdir -m 700 "$2" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
@@ -462,68 +471,46 @@ _fe_val=""; _fe_val="$(cat "$_fe_dir/origin" 2>/dev/null)" || _fe_val=""
     || die "the forge saw an inherited value (rc=$_fe_rc value='$_fe_val' log-exists=$([ -e "$_fe_log" ] && echo yes || echo no))"
 rm -rf "$_fe_dir"
     _rs_rc=0
-    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _rs_rc=$?
-    # …AND THE ABORT NAMES THE RECOVERY. The parent is chosen on mode bits, so a
-    # `TMPDIR` that passes `-d`, `-w` and `-x` and still cannot hold a directory —
-    # a quota, a full filesystem, a read-only mount — refuses here with a usable
-    # `HOME` untried beside it. #161 carries the automatic retry; this is the step
-    # the operator can take without one, and asserting it here is what stops the
-    # text and the behaviour drifting apart.
+    # …AND IT DESCRIBES TWO ATTEMPTS, because by the time it is reached there have
+    # been two: a directory under `TMPDIR` and then one under `HOME`. The advice
+    # that used to live here — unset `TMPDIR` and re-run — is what the retry now
+    # DOES, so repeating it would send the operator to do again what already
+    # happened.
+    { case "$_rs_out" in *'tried a directory under TMPDIR and then one under HOME'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'the lines above say why each was refused'*) true ;; *) false ;; esac; } \
+        && pass "…and the abort describes both attempts, pointing at the helper's own reasons" \
+        || die "the origin abort does not describe two attempts: '$_rs_out'"
+    # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING. That was the manual
+    # form of exactly this retry; leaving it in would ask for a step already taken,
+    # and `unset` is a name besides — on bash 4.3+ a `declare -n TMPDIR=HOME` makes
+    # `unset TMPDIR` destroy `HOME` in the operator's long-lived shell.
     case "$_rs_out" in
-        *'re-run in a session'*) pass "…and the abort names the recovery" ;;
-        *) die "the origin abort no longer names a recovery: '$_rs_out'" ;;
+        *'unset TMPDIR'*) die "the abort still asks the operator to unset TMPDIR: '$_rs_out'" ;;
+        *) pass "…and does not ask for the step the retry already took" ;;
     esac
-    # …AND IT IS QUALIFIED, because this arm is reached for EVERY refusal — an
-    # unreadable origin, an ancestry another account owns, a path that will not
-    # resolve — and unsetting `TMPDIR` fixes none of those, nor helps where `HOME`
-    # is unset, relative or unwritable. An unconditional recommendation here would
-    # send an operator round a loop that cannot end.
-    { case "$_rs_out" in *'names a path setup could not create or write'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'may simply have been taken'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'not on the same filesystem'*) true ;; *) false ;; esac; } \
-        && pass "…and names the report it applies to, the cheap answer and what it does not escape" \
-        || die "the recovery is stated unconditionally: '$_rs_out'"
-    # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING IN THIS SHELL. `unset`
-    # is a name; `TMPDIR` may be readonly; and on bash 4.3+ a `declare -n
-    # TMPDIR=HOME` makes `unset TMPDIR` destroy `HOME` in the operator's long-lived
-    # shell, after which the re-run aborts one step EARLIER than it did. A new
-    # session needs none of that to be true.
+    # …AND THE RETRY ANNOUNCES ITSELF, which is what makes it honest rather than a
+    # silent route around a refusal the operator ought to see. The helper's own
+    # line says WHAT is being retried past; this says that a retry happened.
     case "$_rs_out" in
-        *'unset TMPDIR'*) die "the recovery still asks the operator to unset TMPDIR in this shell: '$_rs_out'" ;;
-        *) pass "…and asks for a new session rather than an unset in this one" ;;
+        *'trying '*) pass "…and the retry says so, rather than routing around the first refusal in silence" ;;
+        *) die "the retry was silent: '$_rs_out'" ;;
     esac
-    # …AND THE CONDITION IS THE PATH, NOT `TMPDIR` BEING SET. Selection rejects a
-    # RELATIVE `TMPDIR` and chooses `HOME`, so a creation failure is then under
-    # `HOME` — and advice reading "if TMPDIR is set" sends the operator to unset
-    # something already ignored and re-run into the same parent. This is the run
-    # where that happens: `TMPDIR` is set and refused, the helper fails anyway, and
-    # the abort must still state a condition the operator can evaluate against the
-    # path the helper named.
-    _rs_r=0
-    _rs_ro="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
-        TMPDIR=.tmp HOME="$_forge_dir" bash -c '
-            '"$_read_block"'
-        ' 2>&1)" || _rs_r=$?
-    { [ "$_rs_r" -ne 0 ] \
-      && case "$_rs_ro" in *'names a path setup could not create or write'*) true ;; *) false ;; esac; } \
-        && pass "…and keys on the report even where TMPDIR was refused" \
-        || die "a refused TMPDIR got advice keyed to TMPDIR being set (rc=$_rs_r out='$_rs_ro')"
-    # …AND IT SURVIVES A SHADOWED `echo`, which is the whole of what this change
-    # does: an `echo` that returns without printing leaves the operator where they
-    # started. The message is a `${VAR:?…}` expansion — the shell refusing, with no
-    # command to shadow — so this stages the function the previous shape lost to.
+    # …AND IT SURVIVES A SHADOWED `echo`. The note above is an `echo` and can be
+    # silenced; the ABORT is a `${VAR:?…}` expansion — the shell refusing, with no
+    # command to shadow — and it is the one an operator cannot be left without.
     _rs_e=0
-    _rs_eo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" bash -c '
+    _rs_eo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             echo() { :; }
             '"$_read_block"'
         ' 2>&1)" || _rs_e=$?
     { [ "$_rs_e" -ne 0 ] \
-      && case "$_rs_eo" in *'re-run in a session'*) true ;; *) false ;; esac; } \
-        && pass "…and reaches the operator with echo shadowed" \
-        || die "a shadowed echo silenced the recovery (rc=$_rs_e out='$_rs_eo')"
+      && case "$_rs_eo" in *'tried a directory under TMPDIR and then one under HOME'*) true ;; *) false ;; esac; } \
+        && pass "…and the abort reaches the operator with echo shadowed" \
+        || die "a shadowed echo silenced the abort (rc=$_rs_e out='$_rs_eo')"
     { [ "$_rs_rc" -ne 0 ] \
       && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…so a helper that writes a URL and then fails does not pin the session" \
@@ -531,7 +518,7 @@ rm -rf "$_fe_dir"
     # THE ORDINARY CASE STILL PASSES THROUGH, or a block that aborted on every
     # read would satisfy the case above while starting no session at all.
     _rs_rc=0
-    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" bash -c '
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _rs_rc=$?
@@ -539,6 +526,38 @@ rm -rf "$_fe_dir"
       && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
         && pass "…while a helper that succeeds pins the value it wrote" \
         || die "the read block refused a good read (rc=$_rs_rc out='$_rs_out')"
+    # …AND A REFUSED FIRST ATTEMPT IS RETRIED UNDER THE OTHER PARENT, which is the
+    # arm nothing else here reaches. The transport parent is chosen on MODE BITS,
+    # and `-d`, `-w` and `-x` describe neither a filesystem that is full, over
+    # quota or read-only nor a name another account got to first — so any of those
+    # refused the session with a usable `HOME` beside it untried. #161.
+    #
+    # A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE. The helper cannot tell
+    # this shell which of two it used without a status branch outside this arm or a
+    # line on the value's own channel, so a single call would leave the driver
+    # GUESSING from a name that is public in argv — a check-then-use that #176
+    # built three defences for and had all three refuted. An `elif` needs no status
+    # at all: each arm names the directory the helper just created.
+    _rs_ct="$_forge_dir/retry.n"; rm -f "$_rs_ct"
+    _rs_hb="$_forge_dir/rhome"; rm -rf "$_rs_hb"; mkdir -p "$_rs_hb"
+    _rs_rc=0
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_FAIL_FIRST="$_rs_ct" TMPDIR="$_forge_dir" HOME="$_rs_hb" bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rs_rc=$?
+    { [ "$_rs_rc" -eq 0 ] \
+      && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
+        && pass "…and a refused first attempt is retried under the other parent" \
+        || die "the read block did not retry (rc=$_rs_rc out='$_rs_out')"
+    # AND THE SECOND DIRECTORY IS REMOVED, wherever it was. The cleanup lives in
+    # the arm that named it, so an arm that reads and does not remove is a leak the
+    # suite would not otherwise see. This parent is the case's own, so anything
+    # under it is this run's.
+    _rs_left=""; _rs_left="$(ls -A "$_rs_hb" 2>/dev/null)" || _rs_left="THE_SCAN_FAILED"
+    [ -z "$_rs_left" ] \
+        && pass "…and removes the directory that second attempt created" \
+        || die "the retry left its transport behind: '$_rs_left'"
     # …AND A SHADOWED `rm` CANNOT REWRITE THE VALUE BETWEEN THE READ AND THE
     # CHECK. `rm` is a name, and setup ran one immediately after the protected
     # read and before `$RB_REMOTE` was validated or exported — so a function by
@@ -547,7 +566,7 @@ rm -rf "$_fe_dir"
     # repository. The helper cannot see this: it did its job.
     _rm_rc=0
     _rm_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-        TMPDIR="$_forge_dir" \
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" \
         'BASH_FUNC_rm%%=() { RB_REMOTE="git@github.com:WRONG/other.git"; return 0; }' bash -c '
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
@@ -586,7 +605,7 @@ SWAP
     if [ -e /etc/hostname ] && [ ! -O /etc/hostname ]; then
         _sw_rc=0
         _sw_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/swap" \
-            TMPDIR="$_forge_dir" bash -c '
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
                 '"$_read_block"'
                 echo "PINNED=$RB_REMOTE"
             ' 2>&1)" || _sw_rc=$?
@@ -629,7 +648,7 @@ LOCAL
         # end of setup, so it exits non-zero whenever anything in it refuses — which
         # is the point of this case. What is asserted is the DIRECTORY, below.
         env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir/local" \
-            TMPDIR="$_lk_dir" bash -c '
+            TMPDIR="$_lk_dir" HOME="$_lk_dir" bash -c '
                 '"$_read_block"'
                 echo "PINNED=$RB_REMOTE"
             ' >/dev/null 2>&1 || true
@@ -654,7 +673,7 @@ LOCAL
     printf '%s\n' "git@github.com:WRONG/other.git" > "$_forge_dir/elsewhere"
     _ro_out=""
     _ro_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-        TMPDIR="$_forge_dir" bash -c '
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             readonly RB_ORIGIN_OUT="'"$_forge_dir"'/elsewhere"
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
@@ -677,7 +696,7 @@ LOCAL
     # value came from, so it cannot be satisfied by a second look at the path.
     _rr_out=""
     _rr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-        TMPDIR="$_forge_dir" bash -c '
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             readonly RB_REMOTE="git@github.com:WRONG/other.git"
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
@@ -698,7 +717,7 @@ LOCAL
     # asserting on it would be asserting that bash works.
     _rx_out=""
     _rx_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
-        TMPDIR="$_forge_dir" bash -c '
+        TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             exit() { return 0; }
             readonly RB_REMOTE="git@github.com:WRONG/other.git"
             '"$_read_block"'
@@ -719,7 +738,7 @@ LOCAL
         printf 'exit() { return 0; }\nreadonly RB_REMOTE="git@github.com:WRONG/other.git"\nRB_SCRIPTS="$TMPDIR"\n%s\nprintf "EXPORTED=[%%s]\\n" "${REVIEW_BUS_REMOTE:-unset}"\nexit\n' \
             "$_read_block" > "$_forge_dir/stalepin.sh"
         _rxi_out="$(run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV FORGE_RC=0 \
-            TMPDIR="$_forge_dir" bash --noprofile --norc -i < "$_forge_dir/stalepin.sh" 2>&1 || true)"
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" bash --noprofile --norc -i < "$_forge_dir/stalepin.sh" 2>&1 || true)"
         grep -q '^ABORT: RB_REMOTE is readonly in this shell' <<<"$_rxi_out" \
             && pass "…and interactively, where the shell survives the failed clear, the refusal still fires" \
             || die "the interactive stale-pin case did not refuse: '$_rxi_out'"
@@ -1009,7 +1028,7 @@ LOCAL
     # different repository, so a pin from it is visible rather than
     # indistinguishable from the correct answer.
     _pex_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
-        FORGE_VALUE='git@github.com:attacker/other.git' TMPDIR="$_forge_dir" \
+        FORGE_VALUE='git@github.com:attacker/other.git' TMPDIR="$_forge_dir" HOME="$_forge_dir" \
         'BASH_FUNC_exit%%=() { return 0; }' bash -c '
             '"$_read_block"'
             printf "PINNED=[%s]\n" "${RB_REMOTE:-}"
@@ -1292,7 +1311,7 @@ esac
 # through to the probe, where a pre-seeded readonly `RB_PIN_SEEN` certifies a pin
 # no child ever saw.
 case "$_arm_refuse" in
-    *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*) pass "…and the refusal is an arm that says so before it stops" ;;
+    *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) pass "…and the refusal is an arm that says so before it stops" ;;
     *) die "the pin refusal is not an arm with an abort: '$_arm_refuse'" ;;
 esac
 
@@ -1446,7 +1465,7 @@ _sent_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 # survival checks stay green while setup runs the helper against the operator's
 # directory and then removes it.
 { [ "$_sent_rc" -ne 0 ] \
-  && case "$_sent_out" in *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+  && case "$_sent_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
     && pass "…where a readonly RB_PIN_DIR takes the probe's refusal, non-zero and saying so" \
     || die "a readonly RB_PIN_DIR did not take the probe's refusal (rc=$_sent_rc out='$_sent_out')"
 case "$_sent_out" in
@@ -1485,7 +1504,7 @@ _ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c
 # which the next case asserts.
 { [ "$_ero_rc" -ne 0 ] \
   && case "$_ero_out" in
-        *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
+        *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
         *) false ;;
      esac; } \
     && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
@@ -1636,8 +1655,13 @@ fi
 # skip announces itself: a case that quietly does not run is the coverage this file
 # exists to stop claiming.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+    # EVERY NAME THAT PROBE GUARDS, in every attribute it takes, for the reason
+    # the transport table gives one screen up. #161.
     for _nr in 'declare -n RB_PIN_SEEN=RB_TMPPARENT' \
-               'declare -n RB_PIN_DIR=RB_TMPPARENT'; do
+               'declare -n RB_PIN_DIR=RB_TMPPARENT' \
+               'declare -n RB_PIN_DIR2=RB_TMPPARENT' \
+               'readonly RB_PIN_DIR2=/tmp' \
+               'declare -i RB_PIN_DIR2=0'; do
         _nr_rc=0
         _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
                 RB_REMOTE="git@github.com:acme/widget.git"
@@ -1648,7 +1672,7 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
             ' 2>&1)" || _nr_rc=$?
         { [ "$_nr_rc" -ne 0 ] \
           && case "$_nr_out" in *OWNER=*) false ;; *) true ;; esac \
-          && case "$_nr_out" in *'ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
             && pass "…and a nameref onto the transport parent is refused by name ($_nr)" \
             || die "a nameref onto RB_TMPPARENT was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
         # AND THE PARENT IS UNCHANGED — OBSERVED, NOT INFERRED FROM AN ABSENCE.
@@ -2489,14 +2513,23 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # where the attribute it tests does not exist. The skip is announced rather than
 # silent: a case that quietly does not run is the coverage this file exists to
 # stop claiming.
-_rb_attrs="readonly RB_TMPPARENT=/tmp|declare -i RB_TMPPARENT=0"
-if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x|declare -u RB_TMPPARENT=x"; fi
+# EVERY NAME THE PROBE GUARDS IS IN THIS TABLE, and in every attribute it takes,
+# not just the first name and the first attribute. The probe is one condition over
+# four variables, and a table naming two of them stays green while either of the
+# others stops refusing — after which setup can build or read a transport path the
+# operator's shell chose. #161.
+_rb_attrs=""
+for _rb_nm in RB_TMPPARENT RB_TMPPARENT2 RB_ORIGIN_DIR RB_ORIGIN_DIR2; do
+    _rb_attrs="$_rb_attrs|readonly $_rb_nm=/tmp|declare -i $_rb_nm=0"
+    if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l $_rb_nm=x|declare -u $_rb_nm=x"; fi
+done
+_rb_attrs="${_rb_attrs#|}"
 _rb_rest="$_rb_attrs"
 while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
     _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
 done
@@ -2512,7 +2545,7 @@ done
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
 declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
 grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_out" \
@@ -3132,7 +3165,7 @@ printf "SURVIVED\n"' _ "$_rb_bt/parent.sh" 2>&1 || true)"; _rb_bt_rc=$?
     # assignment ends the shell at the line that builds the path, and bash's own
     # message names no cause the operator can act on. What must come out is the
     # refusal that names the two variables.
-    grep -q '^ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
+    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
         && pass "…an unusable RB_ORIGIN_DIR is refused by name ($_rb_bt_attr)" \
         || die "the RB_ORIGIN_DIR case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
     grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_bt_out" \

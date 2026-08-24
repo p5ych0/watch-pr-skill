@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.63] — 2026-08-24
+
+- **A `TMPDIR` that cannot hold a directory no longer ends the session.** Setup
+  picks the transport parent on mode bits — `-d`, `-w`, `-x` — and prefers
+  `TMPDIR`. Those describe neither a filesystem that is full, over quota or
+  read-only nor a name another account got to first, and the fallthrough to `HOME`
+  happened on the BITS rather than on the failure: any of them refused the session
+  with a perfectly usable `HOME` sitting beside it untried.
+
+  Setup now tries a directory under `TMPDIR` and, where that is refused, one under
+  `HOME`. The retry announces itself, and the helper's own line above it says what
+  is being retried past — a refusal routed around in silence is what the old
+  candidate loop got wrong.
+
+  **It is a second CALL, not a second candidate passed to one.** The helper cannot
+  tell the driver which of two candidates it used: a second success status would
+  put a status branch outside the arm holding the read-back, and a line on a stream
+  would put the value's own channel into a capture. A single call would therefore
+  leave the driver guessing from a name that is public in argv, and every test of
+  such a name is a check-then-use — three defences were built for it and all three
+  refuted. An `elif` needs no status at all, and each arm names the directory the
+  helper just created, so there is nothing to guess and nothing to race.
+
+  The read-back is written twice, which is the price. A function would hold it once
+  and cannot be used here: `return` is a name a startup file can replace, and
+  `readonly -f` makes the document's own definition fail so an inherited one runs.
+
+  The pin probe retries the same way, because half a retry is none: the origin read
+  succeeding under `HOME` while that probe still refused on `TMPDIR` would end the
+  session one step later.
+
+  The abort now describes two attempts rather than recommending the one the retry
+  already made. Closes #161, and #160 with it — a squatter who pre-creates the
+  argv-published first name costs a retry rather than a refused session.
+
 ## [2.0.62] — 2026-08-24
 
 - **`pr-origin.sh` takes a second transport directory and falls back to it.** The
