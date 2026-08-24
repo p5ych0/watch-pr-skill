@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.0.61] — 2026-08-24
+
+- **Two installed scripts said the bash 3.2 CI job was switched off.** It is on
+  again, so `pr-ci-gate.sh` and `pr-merge-gate.sh` no longer qualify "the
+  `macos-shell` CI job covers `scripts/`" with "only while it is enabled". Nothing
+  a user runs changes; what changes is which coverage the comments claim, and both
+  of them are arguments for why the code moved out of `SKILL.md` in the first
+  place — a reader who believes the weaker claim has a weaker reason.
+
 ## [2.0.60] — 2026-08-24
 
 - **The portable watchdog gave the bounded command no standard input.** Where GNU
