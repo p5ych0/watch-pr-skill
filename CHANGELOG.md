@@ -31,8 +31,15 @@
   succeeding under `HOME` while that probe still refused on `TMPDIR` would end the
   session one step later.
 
-  The abort now describes two attempts rather than recommending the one the retry
-  already made. Closes #161, and #160 with it — a squatter who pre-creates the
+  **The parent that worked becomes the primary one**, which is what makes this a
+  fix rather than half of one: `RB_TMPPARENT` is what the pin probe and the
+  session's working directory are built from, so leaving it on the parent that just
+  refused read the origin from `HOME` and then died allocating the working
+  directory under the same full `TMPDIR`.
+
+  The abort describes what actually happened — two attempts, or one where `TMPDIR`
+  was unset, relative or refused by its mode bits and `HOME` was promoted to the
+  first — rather than recommending the step the retry already took. Closes #161, and #160 with it — a squatter who pre-creates the
   argv-published first name costs a retry rather than a refused session.
 
 ## [2.0.62] — 2026-08-24

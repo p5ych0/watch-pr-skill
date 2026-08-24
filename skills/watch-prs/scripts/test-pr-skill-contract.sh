@@ -480,7 +480,7 @@ rm -rf "$_fe_dir"
     # that used to live here — unset `TMPDIR` and re-run — is what the retry now
     # DOES, so repeating it would send the operator to do again what already
     # happened.
-    { case "$_rs_out" in *'tried a directory under TMPDIR and then one under HOME'*) true ;; *) false ;; esac \
+    { case "$_rs_out" in *'under one parent and then under the other'*) true ;; *) false ;; esac \
       && case "$_rs_out" in *'the lines above say why each was refused'*) true ;; *) false ;; esac; } \
         && pass "…and the abort describes both attempts, pointing at the helper's own reasons" \
         || die "the origin abort does not describe two attempts: '$_rs_out'"
@@ -492,13 +492,6 @@ rm -rf "$_fe_dir"
         *'unset TMPDIR'*) die "the abort still asks the operator to unset TMPDIR: '$_rs_out'" ;;
         *) pass "…and does not ask for the step the retry already took" ;;
     esac
-    # …AND THE RETRY ANNOUNCES ITSELF, which is what makes it honest rather than a
-    # silent route around a refusal the operator ought to see. The helper's own
-    # line says WHAT is being retried past; this says that a retry happened.
-    case "$_rs_out" in
-        *'trying '*) pass "…and the retry says so, rather than routing around the first refusal in silence" ;;
-        *) die "the retry was silent: '$_rs_out'" ;;
-    esac
     # …AND IT SURVIVES A SHADOWED `echo`. The note above is an `echo` and can be
     # silenced; the ABORT is a `${VAR:?…}` expansion — the shell refusing, with no
     # command to shadow — and it is the one an operator cannot be left without.
@@ -508,9 +501,26 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
         ' 2>&1)" || _rs_e=$?
     { [ "$_rs_e" -ne 0 ] \
-      && case "$_rs_eo" in *'tried a directory under TMPDIR and then one under HOME'*) true ;; *) false ;; esac; } \
+      && case "$_rs_eo" in *'under one parent and then under the other'*) true ;; *) false ;; esac; } \
         && pass "…and the abort reaches the operator with echo shadowed" \
         || die "a shadowed echo silenced the abort (rc=$_rs_e out='$_rs_eo')"
+    # …AND WHERE THERE WAS ONLY ONE ATTEMPT IT SAYS SO. `TMPDIR` unset, relative or
+    # refused by the mode bits promotes `HOME` to the FIRST candidate and leaves no
+    # second, so an abort claiming two were tried sends the operator looking for a
+    # first failure that never happened.
+    _rs_o1=0
+    _rs_oo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
+        TMPDIR=.tmp HOME="$_forge_dir" bash -c '
+            '"$_read_block"'
+        ' 2>&1)" || _rs_o1=$?
+    { [ "$_rs_o1" -ne 0 ] \
+      && case "$_rs_oo" in *'had ONE usable parent'*) true ;; *) false ;; esac; } \
+        && pass "…and an abort after ONE attempt says one, not two" \
+        || die "a single-attempt abort claimed two (rc=$_rs_o1 out='$_rs_oo')"
+    case "$_rs_oo" in
+        *'under one parent and then under the other'*) die "the single-attempt abort also claimed two: '$_rs_oo'" ;;
+        *) pass "…and does not also carry the two-attempt wording" ;;
+    esac
     { [ "$_rs_rc" -ne 0 ] \
       && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…so a helper that writes a URL and then fails does not pin the session" \
@@ -545,6 +555,7 @@ rm -rf "$_fe_dir"
         FORGE_FAIL_FIRST="$_rs_ct" TMPDIR="$_forge_dir" HOME="$_rs_hb" bash -c '
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
+            echo "PARENT=$RB_TMPPARENT"
         ' 2>&1)" || _rs_rc=$?
     { [ "$_rs_rc" -eq 0 ] \
       && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
@@ -554,10 +565,33 @@ rm -rf "$_fe_dir"
     # the arm that named it, so an arm that reads and does not remove is a leak the
     # suite would not otherwise see. This parent is the case's own, so anything
     # under it is this run's.
-    _rs_left=""; _rs_left="$(ls -A "$_rs_hb" 2>/dev/null)" || _rs_left="THE_SCAN_FAILED"
+    # THE TRANSPORT DIRECTORY SPECIFICALLY, not "this parent is empty". Since the
+    # working parent becomes the primary one, the session's own working directory
+    # is created under here too and is removed later by a part of setup this lift
+    # does not reach — asserting emptiness would fail on the fix working.
+    _rs_left=""; _rs_left="$(ls -A "$_rs_hb" 2>/dev/null | grep '^watch-pr\.')" || _rs_left=""
     [ -z "$_rs_left" ] \
-        && pass "…and removes the directory that second attempt created" \
+        && pass "…and removes the transport directory that second attempt created" \
         || die "the retry left its transport behind: '$_rs_left'"
+    # …AND THE RETRY ANNOUNCES ITSELF, on the run where it succeeded. It is an
+    # `echo` and can be silenced by one in the operator's shell — which is exactly
+    # why it is not in the CONDITION, where a function by that name would run
+    # immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded for the
+    # helper call. The abort is the `${VAR:?…}` expansion and is the one an operator
+    # cannot be left without.
+    case "$_rs_out" in
+        *'this session is using '*) pass "…and says which parent the session ended up on" ;;
+        *) die "the retry did not say which parent it used: '$_rs_out'" ;;
+    esac
+    # AND THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes the
+    # retry a fix rather than half of one: `RB_TMPPARENT` is what the pin probe and
+    # the session's working directory are built from further down, so leaving it on
+    # the parent that just refused reads the origin from `HOME` and then dies
+    # allocating the working directory under the same full `TMPDIR`.
+    case "$_rs_out" in
+        *"PARENT=$_rs_hb"*) pass "…and the parent that worked becomes the one everything after it uses" ;;
+        *) die "the retry left RB_TMPPARENT on the parent that refused: '$_rs_out'" ;;
+    esac
     # …AND A SHADOWED `rm` CANNOT REWRITE THE VALUE BETWEEN THE READ AND THE
     # CHECK. `rm` is a name, and setup ran one immediately after the protected
     # read and before `$RB_REMOTE` was validated or exported — so a function by
@@ -918,6 +952,10 @@ LOCAL
                    "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -u RB_TMPPARENT=x|RB_TMPPARENT|X" \
                    "declare -u RB_ORIGIN_DIR=x|RB_ORIGIN_DIR|X" \
+                   "declare -n RB_TMPPARENT2=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR2=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_TMPPARENT2=TMPDIR|TMPDIR|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR2=TMPDIR|TMPDIR|$_forge_dir" \
                    "declare -n RB_ORIGIN_DIR=GIT_DIR|GIT_DIR|/somewhere/.git" \
                    "declare -n RB_TMPPARENT=CDPATH|CDPATH|/projects" \
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
@@ -1380,6 +1418,38 @@ env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 [ "$_noexp_rc" -ne 0 ] \
     && pass "…and an export that assigns without exporting is caught by asking a child" \
     || die "the pin passed while no child could see it; every stage would route by the current directory"
+# …AND A REFUSED FIRST PIN PROBE IS RETRIED UNDER THE OTHER PARENT, which is the
+# arm nothing else reaches. Half a retry is none: the origin read succeeding under
+# `HOME` while this probe still refused on `TMPDIR` ends the session one step
+# later, on the pin instead of on the origin. #161.
+#
+# THE FORGE FAILS ONLY ITS FIRST CALL, which is what makes the second arm the one
+# that answers. Deleting that arm, reading from the first directory in it, or
+# leaving its directory behind all pass without this.
+if [ -n "$_forge_dir" ]; then
+    _pf_ct="$_forge_dir/pinretry.n"; rm -f "$_pf_ct"
+    _pf_hb="$_forge_dir/pinhome"; rm -rf "$_pf_hb"; mkdir -p "$_pf_hb"
+    _pf_out=""
+    _pf_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_FAIL_FIRST="$_pf_ct" bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+            RB_TMPPARENT2="'"$_pf_hb"'"
+            '"$_pin_block"'
+            printf "PINOK=[%s]\n" "${RB_PIN_SEEN:-}"
+        ' 2>&1)" || true
+    case "$_pf_out" in
+        *'PINOK=[git@github.com:acme/widget.git]'*) pass "a refused first pin probe is retried under the other parent" ;;
+        *) die "the pin probe did not retry: '$_pf_out'" ;;
+    esac
+    _pf_left=""; _pf_left="$(ls -A "$_pf_hb" 2>/dev/null)" || _pf_left="THE_SCAN_FAILED"
+    [ -z "$_pf_left" ] \
+        && pass "…and removes the directory that second probe created" \
+        || die "the pin retry left its transport behind: '$_pf_left'"
+else
+    echo "ok   - (no forge; the pin retry case did not run)"
+fi
+
 # …AND A PRE-SEEDED READONLY `RB_PIN_SEEN` CANNOT CERTIFY A PIN NO CHILD SAW.
 # This is the combined state, and it is the one the non-emptiness test cannot
 # reach: `export` assigns without exporting, `exit` is neutered so the reset's
@@ -1655,8 +1725,9 @@ fi
 # skip announces itself: a case that quietly does not run is the coverage this file
 # exists to stop claiming.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
-    # EVERY NAME THAT PROBE GUARDS, in every attribute it takes, for the reason
-    # the transport table gives one screen up. #161.
+    # EVERY NAME THAT PROBE GUARDS, in every attribute it takes — INCLUDING the
+    # nameref, which is the state the `${!name}` half of the probe exists for and
+    # which a readonly or an integer attribute does not reach. #161.
     for _nr in 'declare -n RB_PIN_SEEN=RB_TMPPARENT' \
                'declare -n RB_PIN_DIR=RB_TMPPARENT' \
                'declare -n RB_PIN_DIR2=RB_TMPPARENT' \

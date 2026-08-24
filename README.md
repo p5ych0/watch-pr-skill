@@ -831,20 +831,13 @@ plugin docs and open an issue.
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage. Setup picks the transport
-  directory's parent on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is
-  writable and executable can still fail to hold a directory or to take the file
-  written into it — a quota reached on that filesystem, a full one, or a read-only
-  mount. Re-run in a session whose `TMPDIR` points at storage with room, or with no
-  `TMPDIR` at all so setup uses `HOME`.
-
-  Three things about that, all of which the abort itself also says. It keys on what
-  the report **names** rather than on `TMPDIR` being set, because selection can
-  reject a set `TMPDIR` — a relative one, or one the mode bits refuse — and be
-  using `HOME` already. It says a new session rather than `unset TMPDIR` here,
-  because that variable may be readonly and, if it is a nameref, `unset` destroys
-  what it points at. And falling through to `HOME` escapes nothing where `HOME` is
-  on the same filesystem, which on many machines it is. An ancestry another account owns, or an `origin`
+  If re-running keeps failing, look at storage — and note that setup has already
+  tried **both** parents, so `unset TMPDIR` is not the answer: that selects one
+  setup used and refused. Point `TMPDIR` at storage with room instead, on a
+  filesystem `HOME` is not on. The abort itself says which of the two cases you are
+  in: two attempts were made, or only one because `TMPDIR` was unset, relative or
+  refused by its mode bits — in which case setting it gives the retry something to
+  try. An ancestry another account owns, or an `origin`
   the checkout does not have, is a different failure and unsetting `TMPDIR` will
   not fix it.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh

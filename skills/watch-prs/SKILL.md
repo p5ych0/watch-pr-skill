@@ -789,9 +789,27 @@ if [[ -z $RB_REMOTE ]]; then
         # the other parent honest rather than a silent route around it — which is
         # the defect the old candidate loop had. The note below says a retry
         # happened; the helper's line above says what it is retrying past.
+        # NOTHING RUNS BEFORE THE HELPER IN THIS CONDITION, and the note that used
+        # to is why it is stated. `{ echo …; helper …; }` executes `echo` — a NAME —
+        # immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded for the
+        # call, so a function by that name can point both at a script and a directory
+        # of its own choosing; if that script returns success this arm reads and
+        # removes an `origin` the real helper never wrote. The condition is the
+        # helper and the emptiness test, and nothing else.
         elif [[ -n $RB_ORIGIN_DIR2 ]] \
-            && { echo "note: the first transport directory could not be created; trying '$RB_ORIGIN_DIR2'"
-                 /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; }; then
+            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
+            # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
+            # this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
+            # probe and the working directory are built from further down, so
+            # leaving it on the parent that just refused meant the origin was read
+            # from `HOME` and the session then died allocating its working directory
+            # under the same full `TMPDIR` — the exact state this retry exists for.
+            # The refused one stays as the second candidate: retrying there later is
+            # pointless where the filesystem is full and correct where the first
+            # name was simply taken.
+            RB_TMPPARENT2="$RB_TMPPARENT"
+            RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
+            echo "note: the first transport directory could not be created; this session is using '$RB_TMPPARENT'"
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR2/origin"; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
@@ -872,7 +890,16 @@ if [[ -z $RB_REMOTE ]]; then
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            : "${RB_REMOTE:?could not read the origin for this session. Setup tried a directory under TMPDIR and then one under HOME, and the lines above say why each was refused. Where they name a path it could not create or write, both filesystems are full, over quota or read-only; where they name a component of the path, that ancestry is one another account can interfere with and the fix is a TMPDIR and a HOME that are yours alone.}"
+            # AND IT SAYS HOW MANY ATTEMPTS THERE WERE, because there is not always a second:
+            # where `TMPDIR` is unset, relative or refused by the mode bits, `HOME`
+            # is promoted to the first candidate and no second exists. Saying two
+            # were tried there sends the operator looking for a first failure that
+            # never happened.
+            if [[ -n $RB_ORIGIN_DIR2 ]]; then
+                : "${RB_REMOTE:?could not read the origin for this session. Setup tried a directory under one parent and then under the other, and the lines above say why each was refused. Where they name a path it could not create or write, both filesystems are full, over quota or read-only; where they name a component of the path, that ancestry is one another account can interfere with and the fix is a TMPDIR and a HOME that are yours alone.}"
+            else
+                : "${RB_REMOTE:?could not read the origin for this session. Setup had ONE usable parent — TMPDIR was unset, relative or refused by its mode bits — and the line above says why that one was refused. Set TMPDIR to an absolute directory you can write to, on storage with room, and there will be a second to try.}"
+            fi
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]
