@@ -49,12 +49,17 @@ Every `pr-*.sh` except `pr-selfcheck.sh` and `pr-origin.sh` begins
 `#!/usr/bin/env -S bash -p`, and every one of them refuses if `$-` does not
 contain `p`.
 
-**The transport retry cannot distinguish an ancestry refusal from a reservation
-failure, and that is an accepted limit rather than an oversight.** `SKILL.md`
-retries the transport under the other parent with a SECOND CALL — `if helper
-"$RB_ORIGIN_DIR"; then … elif helper "$RB_ORIGIN_DIR2"; then …` — so an unsafe
-`TMPDIR` ancestry is reported by the helper and the session then continues under
-`HOME`.
+**A TRANSPORT RETRY MAY NOT BE ABLE TO DISTINGUISH AN ANCESTRY REFUSAL FROM A
+RESERVATION FAILURE, and where it cannot, that is an accepted trade rather than a
+defect.** This is a decision recorded ahead of the change that needs it (#161),
+not a description of what `SKILL.md` does today — today it makes one call and
+stops.
+
+The decision: where the driver retries the transport under the other parent, it
+does so with a SECOND CALL — `if helper "$RB_ORIGIN_DIR"; then … elif helper
+"$RB_ORIGIN_DIR2"; then …` — and therefore cannot ask which failure the first one
+was. An unsafe `TMPDIR` ancestry is reported by the helper and the session then
+continues under `HOME`.
 
 `pr-origin.sh` knows which failure it is: it runs both the `mkdir` and the
 ancestry walk. Carrying that back into the driving shell needs one of two things,
@@ -63,24 +68,28 @@ and both are worse:
 - **a distinct exit status**, which the driver can only read with a branch OUTSIDE
   the arm holding its read-back. That is the walked-past-guard shape #155 and #158
   removed, where a neutralised `exit` steps into the success path;
-- **one call taking both candidates**, after which the driver must GUESS which of
-  the two holds the value — the names are argv, public at `exec`, so every test of
-  one is a check-then-use. #176 built three authentications of that guess and had
-  all three refuted: the leaf existing (a leaked leaf of our own), `-O` on the leaf
-  descriptor (a symlink to another operator-owned transport passes it), and
-  `[[ ! -L ]] && [[ -d ]] && [[ -O ]]` on the directory (alternate the entry
-  between the two and the sequential probes disagree). The driving shell has no
-  `openat` to anchor a pathname identity across two tests.
+- **one call taking both candidates** — the interface `pr-origin.sh` grew in
+  #174 — after which the driver must GUESS which of the two holds the value. The
+  names are argv, public at `exec`, so every test of one is a check-then-use. #176
+  built three authentications of that guess and had all three refuted: the leaf
+  existing (a leaked leaf of our own), `-O` on the leaf descriptor (a symlink to
+  another operator-owned transport passes it), and `[[ ! -L ]] && [[ -d ]] &&
+  [[ -O ]]` on the directory (alternate the entry between the two and the
+  sequential probes disagree). The driving shell has no `openat` to anchor a
+  pathname identity across two tests.
 
-**What the loss is:** the unsafe ancestry is REPORTED, naming the component and
+**What the trade is:** the unsafe ancestry is REPORTED, naming the component and
 the reason, and it is not USED — the session runs under the other parent. What it
 costs is an operator who does not read that line keeping a compromised `TMPDIR`.
 What the alternative costs is a session pinned to a repository an attacker chose.
 
-**Do not raise it as a defect while this paragraph stands.** It was raised four
+**So do not raise the missing distinction against a two-call retry.** Everything
+else about such a retry is fair game — that it reads or removes something the
+helper did not create, that it fires where the first attempt succeeded, that the
+parent it lands on is not the one the rest of the session uses. It was raised four
 times on one pull request, each answer on a thread the next round could not see,
-because the reviewer files are read from the BASE ref — which is what this
-paragraph is for. #179.
+because the reviewer files are read from the BASE ref. That is what this paragraph
+is for. #179.
 
 `pr-origin.sh` is the narrower of the two exceptions: it is **not executable**,
 so a shebang is inert — nothing can start it but a caller naming an interpreter,

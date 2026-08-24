@@ -288,23 +288,25 @@ identically, and the gate cannot see it: telling a pipe from `||`, from
 the generalised version reported 140 false positives on a clean tree. Only early-exiting readers matter: `grep -c`, `sed` and `awk` without an
 `exit` read to end of input.
 
-**The transport retry does not distinguish an ancestry refusal from a reservation
-failure, and that is not a finding.** `SKILL.md` retries the transport directory
-under the other parent with a SECOND helper call — `if helper "$RB_ORIGIN_DIR";
-then … elif helper "$RB_ORIGIN_DIR2"; then …` — so an unsafe `TMPDIR` ancestry is
-reported by the helper and the session then continues under `HOME`.
+**A TRANSPORT RETRY MAY NOT BE ABLE TO DISTINGUISH AN ANCESTRY REFUSAL FROM A
+RESERVATION FAILURE, and that is not a finding.** Recorded ahead of the change that
+needs it (#161); today `SKILL.md` makes one call and stops.
 
-`pr-origin.sh` knows which failure it is; carrying that back into the driving shell
-needs either a distinct exit status the driver can only read with a branch OUTSIDE
-the arm holding its read-back — the walked-past-guard shape #155 and #158 removed —
-or one call taking both candidates, after which the driver must GUESS which holds
-the value. The candidate names are argv, public at `exec`, so every test of one is
-a check-then-use; three were built and all three refuted, the last by alternating
-an entry between a directory and a symlink across two sequential probes.
+Where the driver retries the transport under the other parent it does so with a
+SECOND CALL, and cannot ask which failure the first one was. `pr-origin.sh` knows —
+it runs both the `mkdir` and the walk — and carrying that back needs either a
+distinct exit status the driver can only read with a branch OUTSIDE the arm holding
+its read-back, which is the walked-past-guard shape #155 and #158 removed, or one
+call taking both candidates, after which the driver must GUESS which holds the
+value. The names are argv, public at `exec`, so every test of one is a
+check-then-use; three were built and all three refuted, the last by alternating an
+entry between a directory and a symlink across two sequential probes.
 
 The unsafe ancestry is REPORTED and is not USED. The alternative is a session
-pinned to a repository an attacker chose. Raised four times on one pull request
-before it was recorded here; do not raise it again while this paragraph stands.
+pinned to a repository an attacker chose. Everything else about such a retry is
+fair game — what it reads, what it removes, whether it fires where the first
+attempt succeeded, and whether the parent it lands on is the one the rest of the
+session uses. Raised four times on one pull request before it was recorded here.
 #179.
 
 **Behaviour changes need tests.** A change to script behaviour with no matching
