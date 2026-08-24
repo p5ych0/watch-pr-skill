@@ -223,6 +223,25 @@ shell parser.
 Only early-exiting readers matter — `grep -c`, `sed` and `awk` without an `exit`
 read to end of input.
 
+**The transport retry does not distinguish an ancestry refusal from a reservation
+failure, and that is not a finding.** `SKILL.md` retries the transport directory
+under the other parent with a SECOND helper call — `if helper "$RB_ORIGIN_DIR";
+then … elif helper "$RB_ORIGIN_DIR2"; then …` — so an unsafe `TMPDIR` ancestry is
+reported by the helper and the session then continues under `HOME`.
+
+`pr-origin.sh` knows which failure it is; carrying that back into the driving shell
+needs either a distinct exit status the driver can only read with a branch OUTSIDE
+the arm holding its read-back — the walked-past-guard shape #155 and #158 removed —
+or one call taking both candidates, after which the driver must GUESS which holds
+the value. The candidate names are argv, public at `exec`, so every test of one is
+a check-then-use; three were built and all three refuted, the last by alternating
+an entry between a directory and a symlink across two sequential probes.
+
+The unsafe ancestry is REPORTED and is not USED. The alternative is a session
+pinned to a repository an attacker chose. Raised four times on one pull request
+before it was recorded here; do not raise it again while this paragraph stands.
+#179.
+
 **Behaviour changes need tests** — a matching
 `skills/watch-prs/scripts/test-*.sh` case, self-contained, with `gh` stubbed and
 no network.
