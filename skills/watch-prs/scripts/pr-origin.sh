@@ -5,15 +5,6 @@
 #   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
 #     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" || abort
 #
-#   /usr/bin/env bash -p pr-origin.sh read "$RB_DIR1" "$RB_DIR2" || abort
-#
-# A SECOND CANDIDATE IS OPTIONAL, and where one is passed the caller does NOT know
-# which of the two holds the answer: this script tries the first and falls through
-# to the second only where the first one's RESERVATION failed. Both are directories
-# it creates, so the one that exists afterwards is the one it used — and on the
-# fallback path the first is a name somebody else holds, which is why the `mkdir`
-# refused and why nothing here touches it.
-#
 # THE DIRECTORY IS THIS SCRIPT'S TO CREATE, and the file inside it is this
 # script's to name. The caller passes a path that must NOT exist; `mkdir` here is
 # what makes it this run's. It used to pass a file inside a directory it had built
@@ -57,41 +48,10 @@
 # captured now: the usage above is the whole invocation, and a maintainer reading
 # the old paragraph would have reintroduced the failure it described.
 #
-#   0  ONE OF THE CANDIDATE ARGUMENTS is a DIRECTORY this script created, and the
-#      value is in its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The
-#      argument itself is the directory, never the file — a caller that opens it
-#      directly opens a directory.
-#
-#      WHICH ONE is the second argument unless a third was passed AND the first
-#      could not be reserved, in which case it is the third. The caller is not told
-#      which in words: it tests for the leaf under the THIRD argument, and reads
-#      the second where that is absent. Announcing it on a stream would put the
-#      value's own channel back into a caller's capture, which is what the file
-#      transport exists to avoid, and a second SUCCESS status would put a status
-#      branch back on the driver's side.
-#
-#      THAT RULE IS SOUND IN TWO HALVES, and neither covers the other.
-#
-#      A THIRD ARGUMENT THAT ALREADY EXISTS IS REFUSED up front, which is the OUR-
-#      OWN half: a leaked leaf from an earlier session of this loop is a file the
-#      operator owns, so no ownership test can tell it from a fresh one, and only
-#      refusing the name catches it.
-#
-#      AND ITS IMMEDIATE PARENT MUST BE THIS ACCOUNT'S ALONE, which is the
-#      ANOTHER-ACCOUNT half. The existence probe is a check-then-use: where others
-#      can create there, the leaf can appear AFTER it — the name is public from
-#      `exec` — and ownership does not save the caller, because a SYMLINK to
-#      another operator-owned transport passes `-O` and `-f` by following it to a
-#      file the operator really does own. So the ambiguity is removed rather than
-#      guarded: the strict walk refuses such a parent, and where nobody else can
-#      create the directory, nothing can be planted inside one that exists mode
-#      700. The FIRST argument may still be shared — that is the point of having a
-#      fallback at all.
-#
-#      WHAT REMAINS is a SAME-ACCOUNT process racing that window, whose plant is
-#      `-O` because it is the operator's. That is #162's boundary and not a new
-#      one: an account that can create files under these parents can also edit this
-#      script, the `git` it runs and the shell interpreting it.
+#   0  the second argument is a DIRECTORY this script created, and the value is in
+#      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
+#      itself is the directory, never the file — a caller that opens it directly
+#      opens a directory.
 #   1  refused — the reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
 #      nothing here ever leaves a half-written or empty one.
@@ -259,36 +219,16 @@ esac
 # sources no `BASH_ENV`, and `RB_DIR` below is its own. Creating the directory
 # where the exclusion can actually be relied on deletes the thing those guards
 # were guarding rather than adding another. #157.
-RB_DIR1="${2-}"
-[[ -n $RB_DIR1 ]] \
-    || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir> [<fallback-dir>]" >&2; exit 1; }
-# A SECOND CANDIDATE IS OPTIONAL, AND IT IS THE CALLER'S ONLY WAY TO GET A RETRY.
-# The parent of the first is chosen on MODE BITS — `-d`, `-w`, `-x` — and those do
-# not describe a filesystem that is full, over quota or read-only, nor a name
-# another account got to first. Any of those refuses here with a perfectly usable
-# second parent beside it untried, because the caller cannot tell a RESERVATION
-# failure from an ancestry refusal and must not route around the second.
-#
-# THIS PROCESS CAN TELL THEM APART, which is why the retry belongs here: it runs
-# the `mkdir` and it runs the walk. An ancestry the walk refuses is REPORTED and
-# stops — an operator has to see that named, and stepping past it into another
-# parent is what the caller's old candidate loop did wrong. A reservation failure
-# on a sound ancestry is the only thing that reaches the second candidate.
-RB_DIR2="${3-}"
-[[ $# -le 3 ]] \
-    || { echo "ABORT: pr-origin.sh takes a mode, a directory and at most one fallback directory; got $# arguments" >&2; exit 1; }
-# AN EMPTY THIRD ARGUMENT IS "NO FALLBACK", not a candidate. The caller builds it
-# by expansion from a parent it may not have, so empty is the ordinary way to say
-# there is one usable parent — while a THIRD argument that is present and empty
-# would otherwise reach the `mkdir` as `/` with the leaf appended.
-RB_DIR="$RB_DIR1"
+RB_DIR="${2-}"
+[[ -n $RB_DIR ]] \
+    || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
 # THE FILE IS THIS SCRIPT'S TO NAME. The caller reads `<dir>/origin` or
 # `<dir>/pin`, and naming it here rather than taking it means there is no path
 # the caller can be talked into passing.
-#
-# AND IT IS DERIVED PER CANDIDATE, by `_rb_aim` below, because the fallback moves
-# the directory and every name derived from it has to move with it. Setting it
-# once here left `OUT` pointing into the candidate that could not be created.
+case "$MODE" in
+    read) OUT="$RB_DIR/origin" ;;
+    pin)  OUT="$RB_DIR/pin" ;;
+esac
 # CREATED, NOT TRUNCATED, AND THE DIFFERENCE IS THE WHOLE POINT. `: > "$OUT"`
 # opens with O_TRUNC and FOLLOWS SYMLINKS: an account that can replace the
 # directory this path names can put a symlink there pointing at any file the
@@ -363,66 +303,17 @@ set -C
 #
 # `$EUID` IS AN EXPANSION, so the identity this compares against costs no command;
 # `-uid` is understood by both GNU and BSD `find`, like the rest of this test.
-# BOTH CANDIDATES ARE CHECKED HERE, before either is aimed at. A relative
-# fallback that is only looked at when the first one fails is a refusal the
-# operator meets on their worst day rather than on an ordinary one.
-[[ $RB_DIR1 = /* ]] \
-    || { echo "ABORT: the output directory must be absolute; '$RB_DIR1' cannot be checked to the root" >&2; exit 1; }
-[[ -z $RB_DIR2 ]] || [[ $RB_DIR2 = /* ]] \
-    || { echo "ABORT: the fallback directory must be absolute; '$RB_DIR2' cannot be checked to the root" >&2; exit 1; }
-# AND THEY MUST NOT BE THE SAME PATH, because a fallback onto the name that just
-# refused is a second attempt at the identical failure reported as a retry.
-[[ -z $RB_DIR2 ]] || [[ $RB_DIR2 != "$RB_DIR1" ]] \
-    || { echo "ABORT: the fallback directory is the same path as the first; there is nothing to fall back to" >&2; exit 1; }
-# AND IT MUST NOT EXIST YET, which is what makes the caller's rule sound.
-#
-# The caller cannot be TOLD which candidate was used — a second success status
-# would put a status branch back on the driver's side, which is the walked-past-
-# guard shape `SKILL.md` removed — so it tests for the leaf under the second and
-# reads the first where that is absent. That rule is only sound while a leaf under
-# the second candidate can only be one this run wrote.
-#
-# THE FALLBACK PATH ALREADY GUARANTEES IT: the second candidate is created by the
-# same exclusive `mkdir`, so a directory that was already there refuses rather than
-# being written into. What it did NOT cover is the run that SUCCEEDS on the first
-# candidate while a stale second one sits beside it — from a leaked earlier
-# transport, or a name collision — where the helper never touches the second and
-# the caller reads a value from a previous session. For `read` that pins the
-# session to another repository and retargets every later post.
-#
-# So an existing second candidate is refused here, before either is attempted. It
-# costs a session whose first candidate would have worked, and the names carry a
-# pid and three `$RANDOM` draws, so existing means a leak or an account that
-# guessed — neither of which is a state to write a session on top of.
-# `-e` OR `-L`, BECAUSE `-e` FOLLOWS THE LINK. A DANGLING symlink at the fallback
-# name is an existing entry that `-e` reports as absent, so the refusal was skipped,
-# the first candidate succeeded, and a target that resolves LATER — the account that
-# planted it creating what it points at — makes the caller's leaf probe select data
-# this run never wrote. `mkdir` would refuse that name too, but only on the fallback
-# PATH, which a successful first candidate never reaches.
-[[ -z $RB_DIR2 ]] || { [[ ! -e $RB_DIR2 ]] && [[ ! -L $RB_DIR2 ]]; } \
-    || { echo "ABORT: the fallback directory '$RB_DIR2' already exists; it must be a name this run can create, or the caller cannot tell which candidate holds the value" >&2; exit 1; }
+[[ $RB_DIR = /* ]] \
+    || { echo "ABORT: the output directory must be absolute; '$RB_DIR' cannot be checked to the root" >&2; exit 1; }
+# THE ANCESTORS ARE WHAT THE WALK IS ABOUT, and the directory itself does not
+# exist yet — it is created below, exclusively, which is what makes IT safe. So
+# the walk starts one level up.
+_rb_dir="${RB_DIR%/*}"
+[[ -n $_rb_dir ]] || _rb_dir=/
 # THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
 # WRITTEN and as it RESOLVES, and neither covers the other.
-# A SECOND MODE, FOR THE FALLBACK CANDIDATE ONLY, which refuses a shared parent
-# outright — sticky or not.
-#
-# THE ORDINARY MODE ALLOWS A STICKY WORLD-WRITABLE ANCESTOR, and must: that is
-# `/tmp`, root owns it, and `1777` lets anyone create entries while letting nobody
-# rename another account's. Creating an entry is all an attacker needs HERE,
-# though, because the caller cannot be told which candidate holds the value and
-# decides by testing for the leaf under the second. On a shared parent an account
-# watching argv can create that leaf after any check this script makes — and
-# making it a SYMLINK to another operator-owned transport defeats the caller's
-# `-O`/`-f` too, since those follow it to a file the operator really does own.
-#
-# SO THE AMBIGUITY IS REMOVED RATHER THAN GUARDED. Where nobody else can create
-# anything under the fallback's ancestry, a leaf under it can only be one this run
-# wrote, and no check-then-use window exists to race. The first candidate may still
-# be shared — that is `TMPDIR`, and a squat there costs a fallback rather than a
-# session, which is the whole point.
-_rb_walk() {   # _rb_walk <dir> [strict] ; 0 safe, 1 refused (reason on stderr)
-    local p="$1" strict="${2-}" first=yes bad frc next
+_rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)
+    local p="$1" bad frc next
     while : ; do
         # THE PROBE'S STATUS IS TAKEN, and that is the fail-closed rule rather
         # than tidiness. If a component is renamed while its turn is being
@@ -435,39 +326,14 @@ _rb_walk() {   # _rb_walk <dir> [strict] ; 0 safe, 1 refused (reason on stderr)
         # temporary directory. What a link's mode means is nothing; what its
         # OWNER means is everything, because that account can repoint it, so the
         # ownership clause applies to links exactly as it does to directories.
-        # THE STICKY EXEMPTION IS DROPPED FOR THE IMMEDIATE PARENT ONLY, and
-        # only in strict mode. Sticky stops another account RENAMING an entry it
-        # does not own; it does not stop them CREATING a new name, which is all
-        # the fallback attack needs. So the directory the candidate is created in
-        # must be nobody else's to write — while the components above it are the
-        # ordinary question, "can anyone rename what is on the way", which sticky
-        # genuinely answers and `/tmp` genuinely satisfies.
-        #
-        # THE EXPRESSION IS WRITTEN OUT TWICE rather than patched together from a
-        # variable: a `find` operator assembled at runtime is invisible to every
-        # reader and to the `macos-shell` job alike.
-        if [[ $strict = strict ]] && [[ $first = yes ]]; then
-            bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) \) \) -print 2>/dev/null)"
-        else
-            bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
-        fi
+        bad="$(find "$p" -prune \( \( ! -uid "$EUID" -a ! -uid 0 \) -o \( ! -type l -a \( -perm -g+w -o -perm -o+w \) -a ! -perm -1000 \) \) -print 2>/dev/null)"
         frc=$?
         if [[ $frc -ne 0 ]]; then
             echo "ABORT: could not examine '$p' on the way to the transport; refusing rather than assuming it is safe" >&2
             return 1
         fi
         if [[ -n $bad ]]; then
-            # THE REASON IS THE MODE'S, so it has to differ with the mode. Strict
-            # refuses a STICKY world-writable parent too, and the ordinary message
-            # — "writable by one and not sticky" — is simply false about that path:
-            # a reader checking `/tmp` against it finds the sticky bit set and
-            # concludes the tool is wrong rather than that the policy is stricter
-            # here.
-            if [[ $strict = strict ]] && [[ $first = yes ]]; then
-                echo "ABORT: '$p' is owned by another account, or writable by one; a fallback directory's immediate parent must be this account's alone, or its leaf cannot be told from one another account planted" >&2
-            else
-                echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
-            fi
+            echo "ABORT: '$p' is owned by another account, or writable by one and not sticky; the transport could be replaced between this write and the caller's read" >&2
             return 1
         fi
         # AND AN ACL IS A PERMISSION THE MODE BITS DO NOT SHOW. On macOS a
@@ -503,7 +369,6 @@ _rb_walk() {   # _rb_walk <dir> [strict] ; 0 safe, 1 refused (reason on stderr)
         next="${p%/*}"
         [[ -n $next ]] || next=/
         [[ $next = "$p" ]] && break
-        first=no
         p="$next"
     done
     return 0
@@ -582,94 +447,8 @@ RB_PHASE=pre
 # file in the exclusion fixtures hid it, because `rmdir` refuses a non-empty
 # directory and the removal failed for the wrong reason.
 RB_OWNED=no
-RB_PREEXISTED=yes
-# EVERY NAME DERIVED FROM THE DIRECTORY MOVES WITH IT, which is what makes a
-# second candidate possible at all: `OUT`, the parent the walks start from, and
-# both facts the cleanup reads are set here and nowhere else.
-#
-# THE ORDER IS THE SIGNAL-SAFE ONE, and it is why `RB_PREEXISTED` starts at `yes`
-# above. This runs with the traps already armed on the fallback path, so a signal
-# can arrive in the middle of it — and every intermediate state it can be caught
-# in reads as "not this run's", which makes the cleanup decline. A leak is the
-# failure this direction produces; removing something this run did not create is
-# the one it cannot.
-_rb_aim() {   # _rb_aim <dir> ; point every derived name at that candidate
-    RB_PREEXISTED=yes
-    RB_OWNED=no
-    RB_DIR="$1"
-    case "$MODE" in
-        read) OUT="$RB_DIR/origin" ;;
-        pin)  OUT="$RB_DIR/pin" ;;
-    esac
-    # THE ANCESTORS ARE WHAT THE WALK IS ABOUT, and the directory itself does not
-    # exist yet — it is created below, exclusively, which is what makes IT safe.
-    # So the walk starts one level up.
-    _rb_dir="${RB_DIR%/*}"
-    [[ -n $_rb_dir ]] || _rb_dir=/
-    # LAST, because until this line every field above may still describe the
-    # PREVIOUS candidate, and `yes` is the answer that removes nothing.
-    [[ -e $RB_DIR ]] || RB_PREEXISTED=no
-    return 0
-}
-# AND ITS ANCESTRY MUST BE THIS ACCOUNT'S ALONE, checked before either candidate is
-# attempted. The caller decides which candidate holds the value by testing for the
-# leaf under the second, and on a parent other accounts can write that decision is
-# a check-then-use nothing here can close: the name is public from `exec`, so a
-# leaf can be created after any probe — and made a SYMLINK to another
-# operator-owned transport it defeats the caller's `-O` and `-f` as well, since
-# those follow it to a file the operator really does own.
-#
-# THE STRICT WALK REMOVES THE AMBIGUITY INSTEAD OF GUARDING IT. Where nobody else
-# can create the fallback DIRECTORY, a leaf under it can only be one this run
-# wrote — the directory itself is created mode 700, so nothing can be planted
-# inside one that exists. The first candidate may still be shared: that is
-# `TMPDIR`, and a squat there costs a fallback rather than a session.
-#
-# THE IMMEDIATE PARENT IS WHAT HAS TO BE PRIVATE, not the whole ancestry. Sticky
-# stops another account from RENAMING or deleting an entry it does not own, and
-# does not stop them CREATING a new name — and creating is all this attack needs.
-# So `/tmp` is fine above the parent and not fine as the parent.
-#
-# THE WALK RUNS ON THE PATH AS WRITTEN AND AS IT RESOLVES, for the reason it does
-# everywhere else: a symlinked ancestor whose own owner is fine can point into a
-# tree whose owner is not.
-if [[ -n $RB_DIR2 ]]; then
-    _rb_d2="${RB_DIR2%/*}"
-    [[ -n $_rb_d2 ]] || _rb_d2=/
-    _rb_walk "$_rb_d2" strict \
-        || { echo "ABORT: the fallback directory's ancestry is not this account's alone; the caller could not tell its leaf from one another account planted" >&2; exit 1; }
-    _rb_d2_real="$(cd -P "$_rb_d2" 2>/dev/null && pwd -P)"
-    [[ -n $_rb_d2_real ]] \
-        || { echo "ABORT: could not resolve '$_rb_d2' to a physical path; refusing rather than checking a name that may not be where it points" >&2; exit 1; }
-    [[ $_rb_d2_real = "$_rb_d2" ]] || _rb_walk "$_rb_d2_real" strict \
-        || { echo "ABORT: the fallback directory's ancestry is not this account's alone; the caller could not tell its leaf from one another account planted" >&2; exit 1; }
-fi
-_rb_aim "$RB_DIR1"
-# WHY A RESERVATION FAILED, ANSWERED BY THE TWO WALKS. It is a function because
-# both attempts ask it, and it is DEFINED HERE — above the traps — because
-# nothing may run between arming them and the `mkdir`, which is the invariant
-# `test-pr-origin.sh` holds. A definition is a statement like any other.
-#
-# 0 MEANS THE ANCESTRY IS SOUND, so the failure was the reservation itself and a
-# second candidate is worth trying. 1 means refused, and the walk that refused has
-# already named the component and the reason on stderr.
-_rb_classify() {   # 0 the ancestry is sound, 1 it is refused or unreadable
-    _rb_walk "$_rb_dir" || return 1
-    # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the case
-    # the lexical walk cannot answer: the link's own owner is fine and what it
-    # points at is not, so `mkdir` fails and only this pass can say why. Both walks
-    # run here for the same reason they both run below.
-    _rb_fail_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
-    # A PATH THAT WILL NOT RESOLVE IS ITS OWN REFUSAL, and it is the answer for a
-    # link into a tree this account cannot enter: the lexical walk sees only the
-    # link, which we own, and `cd -P` is what fails. Reporting the generic message
-    # there would hide the one fact the operator needs.
-    [[ -n $_rb_fail_real ]] \
-        || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it points" >&2; return 1; }
-    [[ $_rb_fail_real != "$_rb_dir" ]] \
-        && { _rb_walk "$_rb_fail_real" || return 1; }
-    return 0
-}
+RB_PREEXISTED=no
+[[ -e $RB_DIR ]] && RB_PREEXISTED=yes
 rb_cleanup() {   # give back what this run created, for the phase it is in
     # THIS RUN'S, OR IT IS NOT OURS TO REMOVE. The traps are armed before the
     # `mkdir`, so this can run at a moment when the `mkdir` had already failed
@@ -817,25 +596,22 @@ trap 'rb_on_signal INT' INT
 trap 'rb_on_signal TERM' TERM
 
 /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
-    || { # WHY IT FAILED IS THE QUESTION, AND ONLY THIS PROCESS CAN ANSWER IT.
-         # `_rb_classify` returns 0 where the ancestry is SOUND — so the failure
-         # was the reservation itself: a full filesystem, a quota, a read-only
-         # mount, or a name another account got to first — and 1 where it is
-         # refused, having already said which component and why.
-         _rb_classify || exit 1
-         # NO SECOND CANDIDATE IS THE OLD BEHAVIOUR, unchanged.
-         [[ -n $RB_DIR2 ]] \
-             || { echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
-                  exit 1; }
-         # AND THE RETRY IS ANNOUNCED, because a session that silently used a
-         # different parent is one whose operator cannot tell a working `TMPDIR`
-         # from a failing one until it matters somewhere else.
-         echo "note: could not create '$RB_DIR' exclusively; trying '$RB_DIR2'" >&2
-         _rb_aim "$RB_DIR2"
-         /usr/bin/env mkdir -m 700 "$RB_DIR" 2>/dev/null && RB_OWNED=yes \
-             || { _rb_classify || exit 1
-                  echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
-                  exit 1; }; }
+    || { _rb_walk "$_rb_dir" || exit 1
+         # AND THE RESOLVED PATH TOO, because a symlinked ancestor is exactly the
+         # case the lexical walk cannot answer: the link's own owner is fine and
+         # what it points at is not, so `mkdir` fails and only this pass can say
+         # why. Both walks run here for the same reason they both run below.
+         _rb_fail_real="$(cd -P "$_rb_dir" 2>/dev/null && pwd -P)"
+         # A PATH THAT WILL NOT RESOLVE IS ITS OWN REFUSAL, and it is the answer for
+         # a link into a tree this account cannot enter: the lexical walk sees only
+         # the link, which we own, and `cd -P` is what fails. Reporting the generic
+         # message there would hide the one fact the operator needs.
+         [[ -n $_rb_fail_real ]] \
+             || { echo "ABORT: could not resolve '$_rb_dir' to a physical path; refusing rather than checking a name that may not be where it leads" >&2; exit 1; }
+         [[ $_rb_fail_real != "$_rb_dir" ]] \
+             && { _rb_walk "$_rb_fail_real" || exit 1; }
+         echo "ABORT: could not create '$RB_DIR' exclusively; it already exists, or its parent refuses" >&2
+         exit 1; }
 # AND WHAT THIS SCRIPT CREATES, THIS SCRIPT REMOVES. Every refusal from here on
 # happens AFTER the directory exists — the two ancestry walks, the git read, an
 # empty origin, a newline in it, a write that opens and then fails — and each used

@@ -43,6 +43,12 @@
   exclusively, so two names simply being taken produces the same pair of refusals
   as two full filesystems, and the helper's own lines are what tell them apart.
 
+  **`pr-origin.sh`'s optional second-candidate argument, added in 2.0.62, is
+  removed again.** It was built for the single-call design this replaces, and
+  nothing consumes it: an installed helper whose contract promises a distinction no
+  caller can act on is worse than one that does not offer it. The helper takes one
+  directory, as it did before 2.0.62.
+
   **What the retry does not do** is distinguish a reservation failure from an
   ancestry refusal. The helper tells them apart internally, and a two-call driver
   discards that: an unsafe `TMPDIR` ancestry is reported and the session then

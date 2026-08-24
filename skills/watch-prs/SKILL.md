@@ -794,13 +794,22 @@ if [[ -z $RB_REMOTE ]]; then
         # the other parent honest rather than a silent route around it — which is
         # the defect the old candidate loop had. The note below says a retry
         # happened; the helper's line above says what it is retrying past.
-        # NOTHING RUNS BEFORE THE HELPER IN THIS CONDITION, and the note that used
-        # to is why it is stated. `{ echo …; helper …; }` executes `echo` — a NAME —
-        # immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded for the
-        # call, so a function by that name can point both at a script and a directory
-        # of its own choosing; if that script returns success this arm reads and
-        # removes an `origin` the real helper never wrote. The condition is the
-        # helper and the emptiness test, and nothing else.
+        # NOTHING RUNS IN THIS ARM THAT IS NOT A REDIRECTION OR AN EXPANSION, and
+        # the announcement that used to is why it is stated. A note here is an
+        # `echo`, and `echo` is a NAME. In the CONDITION, a function by that name
+        # runs immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded
+        # for the call and can point both at a script and a directory of its own.
+        # Moved after the read it is no better: it then runs before the non-empty,
+        # single-line, identity and export checks, and a function that assigns
+        # `RB_REMOTE` replaces the value that was just authenticated. There is no
+        # third position — every one of them is before something that trusts a
+        # variable — and no command-free way to print, since `${VAR:?…}` terminates.
+        #
+        # SO THE RETRY IS NOT ANNOUNCED, and what makes that acceptable is that the
+        # REFUSAL is: the helper's own `ABORT:` line named the directory and the
+        # reason before this arm was reached. What the operator does not get is a
+        # line saying which parent the session ended up on. The abort further down
+        # covers the case where both failed.
         elif [[ -n $RB_ORIGIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
             # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
@@ -818,14 +827,6 @@ if [[ -z $RB_REMOTE ]]; then
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR2/origin"; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
-                # AND THE NOTE COMES LAST, after the value has been read and the
-                # directory removed. `echo` is a NAME: wherever it sits between the
-                # helper returning and `$RB_ORIGIN_DIR2` being expanded for the
-                # descriptor, a function by that name can repoint the variable at a
-                # directory of its own holding a forged `origin` — which the `-O`
-                # and `-f` tests then accept, because it belongs to the operator.
-                # Nothing here depends on that variable any more.
-                echo "note: the first transport directory could not be created; this session is using '$RB_TMPPARENT'"
             else
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
@@ -834,12 +835,14 @@ if [[ -z $RB_REMOTE ]]; then
                 [[ -n "" ]]
             fi
         else
-            # BOTH PARENTS HAVE BEEN TRIED BY THE TIME THIS ARM IS REACHED, so
-            # what it describes is two refusals rather than one, and the helper has
-            # named each on stderr. The advice that used to live here — unset
-            # `TMPDIR` and re-run — is what the retry now does automatically, so
-            # repeating it would send the operator to do again what already
-            # happened. #161.
+            # HOW MANY PARENTS WERE TRIED DEPENDS ON HOW MANY THERE WERE, which is
+            # why there are two messages below rather than one. Where both `TMPDIR`
+            # and `HOME` were absolute directories this session can write to, two
+            # attempts have been made and the helper has named each on stderr; where
+            # only one of them was, there is one. The advice that used to live here
+            # — unset `TMPDIR` and re-run — is what the retry now does where there
+            # IS a second parent, so repeating it would send the operator to do
+            # again what already happened. #161.
             #
             # THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
             # the whole of what the change does: an `echo` that returns without

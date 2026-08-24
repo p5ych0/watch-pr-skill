@@ -584,15 +584,17 @@ rm -rf "$_fe_dir"
     grep -qF 'watch-pr-pin-2.$$.' <<<"$skill_flat" \
         && pass "…and so does the second pin candidate" \
         || die "the two pin candidates differ only by RANDOM"
-    # …AND THE RETRY ANNOUNCES ITSELF, on the run where it succeeded. It is an
-    # `echo` and can be silenced by one in the operator's shell — which is exactly
-    # why it is not in the CONDITION, where a function by that name would run
-    # immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded for the
-    # helper call. The abort is the `${VAR:?…}` expansion and is the one an operator
-    # cannot be left without.
+    # THE RETRY IS NOT ANNOUNCED, and this asserts that rather than lamenting it.
+    # A note is an `echo`, `echo` is a name, and there is no position for it: in the
+    # condition a function by that name runs before `$RB_SCRIPTS` and
+    # `$RB_ORIGIN_DIR2` are expanded for the call; after the read it runs before the
+    # non-empty, single-line, identity and export checks, where one that assigns
+    # `RB_REMOTE` replaces the value just authenticated. The REFUSAL is announced —
+    # by the helper, naming the directory and the reason — which is what makes the
+    # retry honest rather than silent.
     case "$_rs_out" in
-        *'this session is using '*) pass "…and says which parent the session ended up on" ;;
-        *) die "the retry did not say which parent it used: '$_rs_out'" ;;
+        *'this session is using '*) die "the retry announces itself through a shadowable echo: '$_rs_out'" ;;
+        *) pass "…and the retry adds no shadowable announcement of its own" ;;
     esac
     # AND THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes the
     # retry a fix rather than half of one: `RB_TMPPARENT` is what the pin probe and
