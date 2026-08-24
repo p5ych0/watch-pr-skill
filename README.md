@@ -817,12 +817,17 @@ plugin docs and open an issue.
   as a parameter expansion the shell refuses rather than through `echo`, which in
   your own shell may be a function that prints nothing.
 
-  Setup picks the transport directory's parent on mode bits and prefers `TMPDIR`,
-  and a `TMPDIR` that is writable and executable can still fail to hold a directory
-  or to take the file written into it — a quota reached on that filesystem, a full
-  one, or a read-only mount. So **if the line above names a path setup could not
-  create or write**, re-run in a session whose `TMPDIR` points at storage with
-  room, or with no `TMPDIR` at all so setup uses `HOME`.
+  So **if the line above names a path setup could not create or write**, re-run
+  first: the helper creates that directory exclusively, and the same diagnostic
+  covers a name another account got to first, where the filesystem has room and
+  re-running is the whole fix.
+
+  If re-running keeps failing, look at storage. Setup picks the transport
+  directory's parent on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is
+  writable and executable can still fail to hold a directory or to take the file
+  written into it — a quota reached on that filesystem, a full one, or a read-only
+  mount. Re-run in a session whose `TMPDIR` points at storage with room, or with no
+  `TMPDIR` at all so setup uses `HOME`.
 
   Three things about that, all of which the abort itself also says. It keys on what
   the report **names** rather than on `TMPDIR` being set, because selection can

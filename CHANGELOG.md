@@ -18,9 +18,11 @@
   mode bits and not on the failure.
 
   The abort now names the step: **if the line above names a path setup could not
-  create or write**, re-run in a session whose `TMPDIR` points at storage with
-  room, or with no `TMPDIR` at all so setup uses `HOME` — **which helps only where
-  `HOME` is not on the same filesystem**. It keys on what the report names rather
+  create or write**, re-run — the same diagnostic covers a name another account got
+  to first, where the filesystem has room. If that keeps failing, the filesystem
+  may be full, over quota or read-only: re-run in a session whose `TMPDIR` points
+  at storage with room, or with no `TMPDIR` at all so setup uses `HOME` — **which
+  helps only where `HOME` is not on the same filesystem**. It keys on what the report names rather
   than on `TMPDIR` being set, because selection can reject a set `TMPDIR` and be
   using `HOME` already; it says a new session rather than `unset TMPDIR`, because
   that variable may be readonly and, if it is a nameref, `unset` destroys what it

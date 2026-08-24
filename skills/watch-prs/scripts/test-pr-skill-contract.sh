@@ -482,8 +482,9 @@ rm -rf "$_fe_dir"
     # is unset, relative or unwritable. An unconditional recommendation here would
     # send an operator round a loop that cannot end.
     { case "$_rs_out" in *'names a path setup could not create or write'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'may simply have been taken'*) true ;; *) false ;; esac \
       && case "$_rs_out" in *'not on the same filesystem'*) true ;; *) false ;; esac; } \
-        && pass "…and names the report it applies to and what it does not escape" \
+        && pass "…and names the report it applies to, the cheap answer and what it does not escape" \
         || die "the recovery is stated unconditionally: '$_rs_out'"
     # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING IN THIS SHELL. `unset`
     # is a name; `TMPDIR` may be readonly; and on bash 4.3+ a `declare -n

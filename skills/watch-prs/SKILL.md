@@ -781,6 +781,13 @@ if [[ -z $RB_REMOTE ]]; then
             # repository has paid for twice — the advice keys on what the report
             # NAMES rather than on which of the helper's sentences produced it.
             #
+            # AND EXHAUSTION IS NOT INFERRED FROM THEM. Both of those refusals also
+            # cover a name another account got to first, where the filesystem has
+            # room and re-running is the whole fix. So the cheap answer comes first
+            # and storage is what to look at when re-running keeps failing —
+            # asserting a full filesystem from a diagnostic that does not say so
+            # sends the operator to change storage for a race.
+            #
             # A NEW SESSION, NOT `unset TMPDIR` IN THIS ONE. `unset` is a name, the
             # variable may be readonly, and on bash 4.3+ a `declare -n TMPDIR=HOME`
             # makes `unset TMPDIR` destroy `HOME` in the operator's long-lived shell
@@ -798,7 +805,7 @@ if [[ -z $RB_REMOTE ]]; then
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            : "${RB_REMOTE:?could not read the origin for this session. The line above says which refusal this was. If it names a path setup could not create or write, that filesystem is full, over quota or read-only: re-run in a session whose TMPDIR points at storage with room, or with no TMPDIR at all so setup uses HOME — which helps only where HOME is not on the same filesystem.}"
+            : "${RB_REMOTE:?could not read the origin for this session. The line above says which refusal this was. If it names a path setup could not create or write, re-run: the name may simply have been taken. If that keeps failing, the filesystem may be full, over quota or read-only — re-run in a session whose TMPDIR points at storage with room, or with no TMPDIR at all so setup uses HOME, which helps only where HOME is not on the same filesystem.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]
