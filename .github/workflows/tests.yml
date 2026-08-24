@@ -437,25 +437,24 @@ jobs:
             total=$((total + 1))
             echo "::group::$t"
             _t0=$SECONDS
-            # TEN MINUTES PER FILE, AND THE ELAPSED TIME IS WHAT NAMES A HANG.
-            # The slowest file here takes 149s, so ten minutes is not a threshold
-            # any correct file approaches. The STATUS does not name it: with
-            # `-k 30` a file that ignores TERM is killed and reports 137 — which
-            # is exactly what the hang that prompted this bound reported — and a
-            # fixture may exit 124 for reasons of its own. So the duration
-            # decides, and the status is printed beside it rather than read as a
-            # verdict.
+            # TEN MINUTES PER FILE. The slowest file here takes 149s, so that is
+            # not a threshold any correct file approaches.
+            #
+            # THE MESSAGE REPORTS AND DOES NOT CLASSIFY. It said "124 = it hung",
+            # which is wrong twice: `-k 30` escalates to KILL, so a file that
+            # ignores TERM reports 137 — exactly what the hang that prompted this
+            # bound reported — and a fixture may exit 124 for reasons of its own.
+            # Deciding between them from the elapsed time was the next version and
+            # it is a CLASSIFIER: a branch in a YAML file that no fixture can
+            # reach, which is the untestable-logic-in-a-document shape this
+            # repository has paid for. So both facts are printed, with the bound
+            # beside them, and the reader draws the conclusion no branch here is
+            # qualified to draw.
             if "$RB_TIMEOUT" -k 30 600 bash "$t"; then
               echo "PASS $t in $((SECONDS - _t0))s"
             else
               _rc=$?
-              _el=$((SECONDS - _t0))
-              if [ "$_el" -ge 600 ]; then
-                _why="it hung: the ten-minute bound fired (rc=$_rc)"
-              else
-                _why="rc=$_rc after ${_el}s"
-              fi
-              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH — $_why"
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH (rc=$_rc after $((SECONDS - _t0))s; the per-file bound is 600s)"
               fail=1
             fi
             echo "::endgroup::"
