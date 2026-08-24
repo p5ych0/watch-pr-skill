@@ -812,10 +812,7 @@ plugin docs and open an issue.
 
   The line begins with your shell's name and `RB_REMOTE:` because setup emits it
   as a parameter expansion the shell refuses rather than through `echo`, which in
-  your own shell may be a function that prints nothing. Where a startup file has
-  pre-set `RB_REMOTE`, the expansion does not fire and you see
-  `ABORT: could not read this session's origin` instead — the same failure, said
-  the other way.
+  your own shell may be a function that prints nothing.
 
   That one is the directory. Setup picks the parent on mode bits and prefers
   `TMPDIR`, and a `TMPDIR` that is writable and executable can still fail to hold

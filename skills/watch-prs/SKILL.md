@@ -753,10 +753,15 @@ if [[ -z $RB_REMOTE ]]; then
             # the one this arm is reached with UNSET: the read-back never assigned
             # it. No new name is introduced, so nothing new has to be probed.
             #
-            # THE `echo` STAYS BEHIND IT for the one case the expansion cannot
-            # cover: a startup file that pre-set `RB_REMOTE` leaves `:?` silent, and
-            # this arm must still say something. Where both are defeated the driver
-            # is in the state #102 describes and no line written here changes it.
+            # AND THE EXPANSION ALWAYS FIRES HERE, which is worth stating because
+            # the obvious reason to keep the `echo` behind it is wrong: a startup
+            # file that pre-set `RB_REMOTE` never reaches this arm at all. The clear
+            # far above is a CONDITION with this whole block as its arm, so a value
+            # that survives it takes the readonly refusal instead, and one that does
+            # not leaves `RB_REMOTE` empty — which is what `:?` fires on. The `echo`
+            # and the `exit` stay as the shape every other arm in this block has,
+            # and would carry the refusal if a later change ever left a value here;
+            # they are not a second channel for a state that exists today.
             #
             # QUALIFIED, BECAUSE THIS ARM IS EVERY REFUSAL. The helper refuses for an
             # unreadable `origin`, an ancestry another account owns and an
