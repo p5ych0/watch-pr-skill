@@ -75,14 +75,18 @@ run_limited() {
     # which already use 125 for exactly this reason.
     local tmp
     tmp="$(mktemp 2>/dev/null)" || return 125
-    # `exec` the redirections FIRST, inside the subshell, and detach stdin too.
-    # Redirecting the job itself still left a window between fork and redirect in
-    # which the child held the substitution pipe, and anything it spawned kept
-    # that descriptor — so `sh -c 'sleep 30 &'` returned instantly from here while
-    # the CALLER's capture blocked for the full thirty seconds. Nothing inherits
-    # the pipe now, so the capture closes when this shell is done with it.
-    # Output goes to a temp file, never to the caller's capture pipe, and the
-    # command is killed at the limit.
+    # THE OUTPUT DESCRIPTORS ARE THE SUBJECT HERE, and only those. Redirecting the
+    # job itself still left a window between fork and redirect in which the child
+    # held the substitution pipe, and anything it spawned kept that descriptor —
+    # so `sh -c 'sleep 30 &'` returned instantly from here while the CALLER's
+    # capture blocked for the full thirty seconds. Output goes to a temp file,
+    # never to the caller's capture pipe, so nothing inherits it and the capture
+    # closes when this shell is done with it; the command is killed at the limit.
+    #
+    # STDIN IS NOT PART OF THAT, and this paragraph used to say it was. The
+    # capture pipe is stdout; detaching stdin bought nothing and cost every
+    # bounded command that reads it — see the redirection below and the case in
+    # `test-testlib.sh` that holds it.
     #
     # WHAT THIS DOES NOT SOLVE, stated rather than papered over: a command that
     # backgrounds a child and then EXITS — `sh -c 'sleep 30 &'` — leaves an
