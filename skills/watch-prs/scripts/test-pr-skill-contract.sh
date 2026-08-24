@@ -585,12 +585,30 @@ rm -rf "$_fe_dir"
     # thereafter — so with `TMPDIR` and `HOME` naming one directory both candidates
     # reduce to the same `watch-pr.$$.` path, and a retry after a taken name
     # submits the name that was taken.
-    grep -qF 'watch-pr-2.$$.' <<<"$skill_flat" \
-        && pass "…and the second transport candidate carries a literal discriminator" \
-        || die "the two transport candidates differ only by RANDOM"
-    grep -qF 'watch-pr-pin-2.$$.' <<<"$skill_flat" \
-        && pass "…and so does the second pin candidate" \
-        || die "the two pin candidates differ only by RANDOM"
+    # ASSERTED BY RUNNING IT, not by finding the string. A discriminator that
+    # survives only in a comment or an unused assignment satisfies a source scan
+    # while the two candidates still collide — and the state it matters in is
+    # exactly the one where `$RANDOM` supplies nothing: `unset RANDOM` removes its
+    # special behaviour, so with `TMPDIR` and `HOME` naming one directory both
+    # leaves reduce to `watch-pr.$$.` and the retry submits the name that was taken.
+    #
+    # THE FORGE'S LOG IS WHAT SEES IT: two calls, two lines, and the two directories
+    # it was handed have to differ.
+    _rd_ct="$_forge_dir/rand.n"; rm -f "$_rd_ct"
+    _rd_lg="$_forge_dir/rand.log"; rm -f "$_rd_lg"
+    _rd_hb="$_forge_dir/randhome"; rm -rf "$_rd_hb"; mkdir -p "$_rd_hb"
+    env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_FAIL_FIRST="$_rd_ct" FORGE_LOG="$_rd_lg" \
+        TMPDIR="$_rd_hb" HOME="$_rd_hb" bash -c '
+            unset RANDOM
+            '"$_read_block"'
+        ' >/dev/null 2>&1 || true
+    _rd_a=""; _rd_b=""
+    _rd_a="$(sed -n '1p' "$_rd_lg" 2>/dev/null)" || _rd_a=""
+    _rd_b="$(sed -n '2p' "$_rd_lg" 2>/dev/null)" || _rd_b=""
+    { [ -n "$_rd_a" ] && [ -n "$_rd_b" ] && [ "$_rd_a" != "$_rd_b" ]; } \
+        && pass "…and the two candidates differ with RANDOM unset and one parent" \
+        || die "the two candidates collided without RANDOM (first='$_rd_a' second='$_rd_b')"
     # AND THE STATUS IS READ INSIDE THE `if`, which is what makes the distinction
     # usable at all. `elif [[ $? -eq 2 ]] && helper …; then` is a condition of the
     # same `if`, so the read-back stays contained in the arm that names its
@@ -1823,10 +1841,6 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # written out — this file already asks the shell whether it has them.
     _pin_nrs="declare -n RB_PIN_SEEN=RB_TMPPARENT|declare -n RB_PIN_DIR=RB_TMPPARENT"
     _pin_nrs="$_pin_nrs|declare -n RB_PIN_DIR2=RB_TMPPARENT"
-    if [ "$_rb_has_l" = yes ]; then
-        _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR2=x|declare -u RB_PIN_DIR2=x"
-        _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR=x|declare -u RB_PIN_DIR=x"
-    fi
     _pin_rest="$_pin_nrs"
     while [ -n "$_pin_rest" ]; do
         _nr="${_pin_rest%%|*}"
@@ -1878,9 +1892,19 @@ fi
 # nameref-only branch above meant bash 3.2 — which is the shell the `macos-shell`
 # job builds — exercised neither for `RB_PIN_DIR2`, the one name this change adds.
 if [ -n "$_forge_dir" ]; then
-    for _nr in 'readonly RB_PIN_DIR2=/tmp' \
-               'declare -i RB_PIN_DIR2=0' \
-               'readonly RB_PIN_DIR=/tmp'; do
+    # AND THE VALUE-TRANSFORMING ONES ARE bash 4.0, NOT 4.3. Holding them with the
+    # namerefs meant 4.0 through 4.2 — where `declare -l` exists and `declare -n`
+    # does not — skipped them too. Each attribute is gated on the shell having THAT
+    # attribute, which is the only thing that governs whether its case can run.
+    _pp_list='readonly RB_PIN_DIR2=/tmp|declare -i RB_PIN_DIR2=0|readonly RB_PIN_DIR=/tmp'
+    if [ "$_rb_has_l" = yes ]; then
+        _pp_list="$_pp_list|declare -l RB_PIN_DIR2=x|declare -u RB_PIN_DIR2=x"
+        _pp_list="$_pp_list|declare -l RB_PIN_DIR=x|declare -u RB_PIN_DIR=x"
+    fi
+    _pp_rest="$_pp_list"
+    while [ -n "$_pp_rest" ]; do
+        _nr="${_pp_rest%%|*}"
+        case "$_pp_rest" in *'|'*) _pp_rest="${_pp_rest#*|}" ;; *) _pp_rest="" ;; esac
         _nr_rc=0
         _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
                 RB_REMOTE="git@github.com:acme/widget.git"

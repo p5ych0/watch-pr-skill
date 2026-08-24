@@ -44,9 +44,12 @@
   refused read the origin from `HOME` and then died allocating the working
   directory under the same full `TMPDIR`.
 
-  The abort describes what actually happened — two attempts, or one because only
-  one of `TMPDIR` and `HOME` was usable — rather than recommending the step the
-  retry already took, and it does not DIAGNOSE: the directory is created
+  The abort counts nothing and recommends nothing: each `ABORT:` line above it is
+  one attempt and its reason, and there may be one or two, since the retry runs only
+  where the first refusal was about storage. It cannot know which — the three ways
+  to reach it differ and telling them apart there needs the first call's status in a
+  variable, for a claim the operator can read off those lines. It does not DIAGNOSE
+  either: the directory is created
   exclusively, so two names simply being taken produces the same pair of refusals
   as two full filesystems, and the helper's own lines are what tell them apart.
 

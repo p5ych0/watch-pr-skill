@@ -823,22 +823,24 @@ plugin docs and open an issue.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
-  **How many attempts the abort is reporting depends on how many parents were
-  usable**, and the abort says which: two where both `TMPDIR` and `HOME` were
-  absolute directories it could write to, one where only one of them was. The
-  helper's lines above name each refusal.
+  **The abort counts nothing**, deliberately: each `ABORT:` line above it is one
+  attempt and its reason. There may be one or two, because the retry runs only
+  where the first refusal was about storage — a name it could not take on a sound
+  ancestry — and not where it was about the path or the checkout, which another
+  parent does not fix.
 
   So **if they name a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage. Where the abort reports **two**
-  attempts, setup has already used both parents, so `unset TMPDIR` is not the
-  answer — that selects one it just tried. Point `TMPDIR` at storage with room
-  instead, on a filesystem `HOME` is not on. Where it reports **one**, only one of
-  the two was an absolute directory setup could write to; making the other one
-  usable gives the retry somewhere to go. An ancestry another account owns, or an `origin`
+  If re-running keeps failing, look at storage — and count the `ABORT:` lines.
+  **Two** means setup has already used both parents, so `unset TMPDIR` is not the
+  answer: that selects one it just tried. Point `TMPDIR` at storage with room
+  instead, on a filesystem `HOME` is not on. **One** means either that only one of
+  the two was an absolute directory setup could write to, in which case making the
+  other usable gives the retry somewhere to go, or that the refusal was not about
+  storage at all — which the line itself says. An ancestry another account owns, or an `origin`
   the checkout does not have, is a different failure and unsetting `TMPDIR` will
   not fix it.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh

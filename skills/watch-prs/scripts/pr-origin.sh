@@ -77,8 +77,11 @@
 #      where the EXIT cleanup, in its post-write phase, removes the leaf and the
 #      directory together.
 #
-#      WHAT IS AT THE ARGUMENT ON STATUS 1 DEPENDS ON WHICH SIDE OF THE `mkdir`
-#      the refusal happened, and the two are opposite:
+#      WHAT IS AT THE ARGUMENT ON A NON-ZERO STATUS DEPENDS ON WHICH SIDE OF THE
+#      `mkdir` the refusal happened, and the two are opposite. That is a different
+#      question from WHICH status: a name already taken on a sound ancestry is a 2
+#      and is on the before side; an unsafe ancestor is a 1 and is on the after
+#      side; a bad mode or a relative path is a 1 on the before side.
 #
 #        - BEFORE it — a bad mode, a relative path, or the `mkdir` itself failing
 #          because the name is ALREADY TAKEN — nothing here created anything, so
