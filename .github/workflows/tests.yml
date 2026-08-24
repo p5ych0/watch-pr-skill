@@ -154,22 +154,25 @@ jobs:
     # 3.2.57. The per-file bound below is what NAMES the file; this is what stops
     # the bill.
     timeout-minutes: 60
-    # ── TEMPORARILY DISABLED, DELIBERATELY, AND WITH AN OWNER ──────────────
+    # ── IT WAS DISABLED, AND WHAT IT COST TO TURN BACK ON ──────────────────
     #
-    # Turned off by the operator while the open issue backlog is worked through:
-    # it is the slowest job in the loop and it had gone red three times in one
-    # pull request for the same reason — a fixture asserting bash 5's ROUTE to an
-    # outcome rather than the outcome, where bash 3.2.57 reaches it differently.
-    # Each of those was a correct change stopped by a portability check that was
-    # itself wrong.
+    # It had gone red three times in one pull request for the same reason: a
+    # fixture asserting bash 5's ROUTE to an outcome rather than the outcome,
+    # where 3.2.57 reaches it differently. Each of those was a correct change
+    # stopped by a portability check that was itself wrong, and #93's first
+    # acceptance criterion was auditing every fixture against that.
     #
-    # WHAT IS LOST WHILE IT IS OFF, stated so nobody mistakes green for covered:
-    # nothing verifies the suite on bash 3.2.57 or on a mac-shaped PATH. A
-    # post-3.2 construct, or a command stock macOS lacks, now merges silently.
-    # `CLAUDE.md` § Portability calls this job the only thing that catches those,
-    # and it is still right.
+    # THAT AUDIT WAS DONE BY RUNNING THIS JOB, not by reading twenty-two files.
+    # Nineteen passed. The three that did not were real defects rather than route
+    # artefacts — the portable watchdog gave its bounded command no stdin, a
+    # global substitution over 330 KB does not finish on 3.2.57, and two cases
+    # that forbid writing to regular files cannot be captured through the
+    # watchdog's own regular files. #171 fixed them.
     #
-    # RE-ENABLE BY DELETING THIS `if:`. See the tracking issue.
+    # WHAT IS STILL NOT COVERED, stated so nobody mistakes green for covered: a
+    # line the suite never executes. This job runs the fixtures; it does not read
+    # them. `CLAUDE.md` § Portability carries the classes that stay a reader's
+    # job.
     # ONE DEFINITION OF THE DIGEST, used by the verification AND by the cache key.
     # It has to key the cache: the first version of this pin left the key at
     # `bash-3.2-<os>`, which an earlier UNVERIFIED build had already populated, so
