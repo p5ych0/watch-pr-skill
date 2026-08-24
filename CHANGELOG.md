@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.0.62] — 2026-08-24
+
+- **`pr-origin.sh` takes a second transport directory and falls back to it.** The
+  parent of the first is chosen on mode bits — `-d`, `-w`, `-x` — and those
+  describe neither a filesystem that is full, over quota or read-only nor a name
+  another account got to first. Any of those refused the session with a perfectly
+  usable second parent beside it untried.
+
+  The retry is here rather than in the driver because only this process runs both
+  the `mkdir` and the ancestry walk, and the two failures must be told apart: a
+  sound ancestry that could not be reserved falls through to the second candidate,
+  while an ancestry the walk refuses — an account owning a component, a
+  world-writable non-sticky one, an ACL — is reported and stops. Stepping past
+  that is what the driver's old candidate loop did wrong.
+
+  Nothing changes for a caller that passes one directory. The driver still does;
+  wiring it up is the next change — and when it does, the status-0 contract is
+  that ONE of the candidates is the directory that was created, the second unless
+  a third was passed and the first could not be reserved. The caller tests for the
+  leaf under the second candidate and reads the first where that is absent. Which
+  one it was is not announced: putting the value's own channel into a caller's
+  capture is what the file transport exists to avoid, and a second SUCCESS status
+  would put a status branch back on the driver's side.
+
+  That rule is sound in two halves. A second candidate that ALREADY EXISTS is
+  refused before either is attempted — the our-own half, because a leaked leaf
+  from an earlier session is a file the operator owns and no ownership test can
+  tell it from a fresh one. And the fallback's IMMEDIATE PARENT must be this
+  account's alone — the another-account half, because the existence probe is a
+  check-then-use and ownership does not save a caller there: a symlink to another
+  operator-owned transport passes `-O` and `-f` by following it to a file the
+  operator really does own. The immediate parent only: sticky stops another account from RENAMING or deleting an entry it does not own, and does not stop them CREATING a new name — and
+  creating is all that attack needs. So `/tmp` is fine ABOVE the parent and not
+  fine AS it.
+
 ## [2.0.61] — 2026-08-24
 
 - **Two installed scripts said the bash 3.2 CI job was switched off.** It is on
