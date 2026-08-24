@@ -70,10 +70,28 @@
 #      transport exists to avoid, and a second SUCCESS status would put a status
 #      branch back on the driver's side.
 #
-#      THAT RULE IS SOUND BECAUSE A THIRD ARGUMENT THAT ALREADY EXISTS IS REFUSED
-#      up front: a leaf under it can therefore only be one this run wrote. Without
-#      that, a run succeeding on the second argument with a stale third beside it
-#      would hand the caller a previous session's value.
+#      THAT RULE IS SOUND IN TWO HALVES, and neither covers the other.
+#
+#      A THIRD ARGUMENT THAT ALREADY EXISTS IS REFUSED up front, which is the OUR-
+#      OWN half: a leaked leaf from an earlier session of this loop is a file the
+#      operator owns, so no ownership test can tell it from a fresh one, and only
+#      refusing the name catches it.
+#
+#      AND THE CALLER AUTHENTICATES WHAT IT OPENS, which is the ANOTHER-ACCOUNT
+#      half. The probe above is a check-then-use: on a shared parent an account
+#      watching argv can create the third argument AFTER it, with a readable leaf
+#      inside, while this run is succeeding on the second. Nothing here can close
+#      that — the name is public from `exec`, and reserving both would refuse the
+#      session the fallback exists to save. What closes it is the caller's own
+#      `[[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]]` on the DESCRIPTOR it opens: a
+#      plant by another account is not `-O`, so the session refuses rather than
+#      pinning to it. A caller that skips those tests has no defence and this
+#      script cannot give it one.
+#
+#      WHAT REMAINS is a SAME-ACCOUNT process racing that window, whose plant is
+#      `-O` because it is the operator's. That is #162's boundary and not a new
+#      one: an account that can create files under these parents can also edit this
+#      script, the `git` it runs and the shell interpreting it.
 #   1  refused — the reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
 #      nothing here ever leaves a half-written or empty one.

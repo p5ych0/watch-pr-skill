@@ -24,11 +24,15 @@
   capture is what the file transport exists to avoid, and a second SUCCESS status
   would put a status branch back on the driver's side.
 
-  That rule is sound because a second candidate that ALREADY EXISTS is refused
-  before either is attempted. Without it, a run succeeding on the first candidate
-  with a stale second one beside it — a leaked earlier transport, a name collision
-  — would hand the caller a previous session's value, and for `read` that pins the
-  session to another repository and retargets every later post.
+  That rule is sound in two halves. A second candidate that ALREADY EXISTS is
+  refused before either is attempted — that is the our-own half, because a leaked
+  leaf from an earlier session is a file the operator owns and no ownership test
+  can tell it from a fresh one. And the caller authenticates what it opens with
+  `[[ -O ]]` and `[[ -f ]]` on the DESCRIPTOR — that is the another-account half,
+  because the probe is a check-then-use and a plant made after it, by an account
+  watching a shared parent, is refused for not being ours rather than pinned to.
+  What remains is a same-account process racing that window, which is #162's
+  boundary: an account that can create files there can also edit the script.
 
 ## [2.0.61] — 2026-08-24
 
