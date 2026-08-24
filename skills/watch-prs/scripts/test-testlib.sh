@@ -28,6 +28,23 @@ PATH="$NOTO" command -v timeout >/dev/null 2>&1 \
     && die "the reduced PATH still has timeout; the fallback is not being tested" \
     || pass "the reduced PATH has no timeout, so the fallback branch runs"
 
+# ── the bounded command keeps the caller's standard input ─────────────────
+# The fallback runs its subject as a BACKGROUND JOB, and a background job whose
+# redirections do not mention stdin gets `/dev/null` from the shell. It was
+# redirected there explicitly, so a bounded command that READS stdin got nothing —
+# and every case in `test-pr-request-review.sh`, which feeds the request body that
+# way, measured the empty-body refusal instead of its subject.
+#
+# THIS CASE IS WHY IT CANNOT COME BACK. The Ubuntu job takes the GNU `timeout`
+# arm, which passes stdin through, and `macos-shell` is disabled — so removing
+# `<&0` again would leave every automatic check green. Here the fallback is the
+# only arm, by the reduced PATH above.
+out="$(printf 'THE-STDIN-VALUE\n' | PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; run_limited 5 cat' 2>&1)"
+case "$out" in
+    *THE-STDIN-VALUE*) pass "the fallback gives the bounded command the caller's stdin" ;;
+    *) die "the bounded command did not receive stdin: '$out'" ;;
+esac
+
 # ── the limit is enforced, and reported the way GNU timeout reports it ─────
 out="$(PATH="$NOTO" bash -c '. "'"$SELF_DIR"'/testlib.sh"; start=$(date +%s); run_limited 2 sleep 30; rc=$?; echo "rc=$rc elapsed=$(( $(date +%s) - start ))"')"
 case "$out" in
