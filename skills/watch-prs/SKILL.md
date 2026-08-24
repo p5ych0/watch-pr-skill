@@ -699,9 +699,28 @@ if [[ -z $RB_REMOTE ]]; then
         # exactly as it did before.
         [[ -n $RB_TMPPARENT ]] \
             || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
-        # AND THE SAME PARENT IS NOT TWO CANDIDATES. `TMPDIR=$HOME` is an ordinary
-        # setting, and the helper refuses two candidates under it as the same
-        # storage twice — correctly, but as a refusal where there is nothing wrong.
+        # AND THE SAME PARENT IS NOT TWO CANDIDATES, which matters because the
+        # helper holds the FALLBACK to a stricter rule: its immediate parent must
+        # be one no other account can write, sticky or not. `/tmp` passes as a
+        # first candidate and is refused as a fallback — so `TMPDIR=/tmp` with a
+        # `HOME` of `/tmp` would abort a session whose first candidate was fine.
+        #
+        # TRAILING SLASHES ARE STRIPPED BEFORE THE COMPARISON, because `/tmp/` and
+        # `/tmp` are the same directory and a string test says otherwise. The loop
+        # is reserved words and expansions — no command answers for a path here.
+        #
+        # WHAT IT DOES NOT COVER, stated rather than implied: `/tmp/.`, `//tmp`, a
+        # symlinked spelling, or two different paths on one filesystem. Deciding
+        # those needs `cd -P` or `realpath`, and both are NAMES in this shell —
+        # which is the whole reason the transport moved into a privileged helper.
+        # Where the two spellings still differ and the fallback's parent is one
+        # others can write, the helper refuses and names it.
+        while [[ $RB_TMPPARENT = */ ]] && [[ $RB_TMPPARENT != / ]]; do
+            RB_TMPPARENT="${RB_TMPPARENT%/}"
+        done
+        while [[ $RB_TMPPARENT2 = */ ]] && [[ $RB_TMPPARENT2 != / ]]; do
+            RB_TMPPARENT2="${RB_TMPPARENT2%/}"
+        done
         [[ $RB_TMPPARENT2 = "$RB_TMPPARENT" ]] && RB_TMPPARENT2=
         # AND AN EMPTY PARENT CANNOT PRODUCE A PATH AT ALL. Written as
         # `[[ -n $RB_TMPPARENT ]] || { echo …; exit 1; }` this was a GUARD, and

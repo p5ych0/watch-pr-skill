@@ -441,7 +441,9 @@ unset FORGE_LOG FORGE_RC FORGE_VALUE
 # the case against a block that created nothing.
 cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
-[ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
+# ALL THREE ARGUMENTS, because the third is the fallback candidate and a case
+# whose subject is whether one was passed at all can only see it here.
+[ -n "${FORGE_LOG:-}" ] && printf '%s %s %s\n' "$1" "$2" "${3:-}" >> "$FORGE_LOG"
 # THE REAL HELPER FALLS BACK TO THE THIRD ARGUMENT where the second one's
 # reservation failed, and the driver has to read from whichever was used. This is
 # how a case asks for that: the forge writes into the third instead, which is
@@ -570,6 +572,38 @@ rm -rf "$_fe_dir"
     [ -z "$_rs_left" ] \
         && pass "…and removes it, rather than only the candidate it did not use" \
         || die "the fallback candidate was left behind: '$_rs_left'"
+    # …AND TWO SPELLINGS OF ONE PARENT ARE ONE CANDIDATE. The fallback is held to a
+    # stricter rule than the first — its immediate parent must be one no other
+    # account can write, sticky or not — so `TMPDIR=/x/` beside `HOME=/x` would
+    # hand the helper a fallback under a parent it may refuse, ending a session
+    # whose first candidate was fine. The trailing slash is stripped before the two
+    # are compared.
+    #
+    # OBSERVED THROUGH THE FORGE'S LOG, which records the arguments each invocation
+    # received: what has to be true is that the third argument is EMPTY, and the
+    # forge is what can say so.
+    _rs_hb2="$_forge_dir/eqhome"; rm -rf "$_rs_hb2"; mkdir -p "$_rs_hb2"
+    _rs_lg="$_forge_dir/eq.log"; rm -f "$_rs_lg"
+    _rs_rc=0
+    _rs_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_LOG="$_rs_lg" TMPDIR="$_rs_hb2/" HOME="$_rs_hb2" bash -c '
+            '"$_read_block"'
+            echo "PINNED=$RB_REMOTE"
+        ' 2>&1)" || _rs_rc=$?
+    _rs_args=""; [ -f "$_rs_lg" ] && _rs_args="$(<"$_rs_lg")"
+    { [ "$_rs_rc" -eq 0 ] \
+      && case "$_rs_out" in *'PINNED=git@github.com:acme/widget.git'*) true ;; *) false ;; esac; } \
+        && pass "…and TMPDIR spelled with a trailing slash beside the same HOME still pins" \
+        || die "two spellings of one parent broke the session (rc=$_rs_rc out='$_rs_out')"
+    # MATCHED ON THE LEAF RATHER THAN ON THE PARENT, because the two spellings of
+    # the parent are exactly what differs: `…/eqhome//watch-pr.` does not contain
+    # `…/eqhome/watch-pr.`, so a pattern built from the parent found one of the two
+    # and reported the line clean. Every candidate carries `watch-pr.`, so two of
+    # those on one line is two candidates however each parent was spelled.
+    case "$_rs_args" in
+        *watch-pr.*watch-pr.*) die "the same parent was passed as two candidates: '$_rs_args'" ;;
+        *) pass "…and passes one candidate, not the same parent twice" ;;
+    esac
     # …AND A SHADOWED `rm` CANNOT REWRITE THE VALUE BETWEEN THE READ AND THE
     # CHECK. `rm` is a name, and setup ran one immediately after the protected
     # read and before `$RB_REMOTE` was validated or exported — so a function by
@@ -930,6 +964,13 @@ LOCAL
                    "declare -n RB_TMPPARENT=RB_SCRIPTS|RB_SCRIPTS|$_forge_dir" \
                    "declare -u RB_TMPPARENT=x|RB_TMPPARENT|X" \
                    "declare -u RB_ORIGIN_DIR=x|RB_ORIGIN_DIR|X" \
+                   "declare -n RB_TMPPARENT2=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_DIR2=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_USED=HOME|HOME|$_forge_dir" \
+                   "declare -n RB_ORIGIN_USED=TMPDIR|TMPDIR|$_forge_dir" \
+                   "declare -u RB_TMPPARENT2=x|RB_TMPPARENT2|X" \
+                   "declare -u RB_ORIGIN_DIR2=x|RB_ORIGIN_DIR2|X" \
+                   "declare -u RB_ORIGIN_USED=x|RB_ORIGIN_USED|X" \
                    "declare -n RB_ORIGIN_DIR=GIT_DIR|GIT_DIR|/somewhere/.git" \
                    "declare -n RB_TMPPARENT=CDPATH|CDPATH|/projects" \
                    "declare -n RB_ORIGIN_DIR=PATH|PATH|$PATH" \
@@ -1667,8 +1708,13 @@ fi
 # skip announces itself: a case that quietly does not run is the coverage this file
 # exists to stop claiming.
 if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
+    # EVERY NAME THAT PROBE GUARDS, for the reason the transport table gives: the
+    # pin probe is one condition over four variables now, and a table naming two of
+    # them stays green while either of the others stops refusing. #161.
     for _nr in 'declare -n RB_PIN_SEEN=RB_TMPPARENT' \
-               'declare -n RB_PIN_DIR=RB_TMPPARENT'; do
+               'declare -n RB_PIN_DIR=RB_TMPPARENT' \
+               'declare -n RB_PIN_DIR2=RB_TMPPARENT' \
+               'declare -n RB_PIN_USED=RB_TMPPARENT'; do
         _nr_rc=0
         _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
                 RB_REMOTE="git@github.com:acme/widget.git"
@@ -2532,8 +2578,18 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # where the attribute it tests does not exist. The skip is announced rather than
 # silent: a case that quietly does not run is the coverage this file exists to
 # stop claiming.
+# EVERY NAME THE PROBE GUARDS IS IN THIS TABLE, not just the first two. The probe
+# is one condition over five variables, and a table naming two of them stays green
+# while any of the other three stops refusing — after which setup can select, read
+# or remove a transport path the operator's shell chose. #161.
 _rb_attrs="readonly RB_TMPPARENT=/tmp|declare -i RB_TMPPARENT=0"
-if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x|declare -u RB_TMPPARENT=x"; fi
+_rb_attrs="$_rb_attrs|readonly RB_TMPPARENT2=/tmp|declare -i RB_TMPPARENT2=0"
+_rb_attrs="$_rb_attrs|readonly RB_ORIGIN_DIR2=/tmp|declare -i RB_ORIGIN_DIR2=0"
+_rb_attrs="$_rb_attrs|readonly RB_ORIGIN_USED=/tmp|declare -i RB_ORIGIN_USED=0"
+if [ "$_rb_has_l" = yes ]; then
+    _rb_attrs="$_rb_attrs|declare -l RB_TMPPARENT=x|declare -u RB_TMPPARENT=x"
+    _rb_attrs="$_rb_attrs|declare -u RB_TMPPARENT2=x|declare -u RB_ORIGIN_DIR2=x|declare -u RB_ORIGIN_USED=x"
+fi
 _rb_rest="$_rb_attrs"
 while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"

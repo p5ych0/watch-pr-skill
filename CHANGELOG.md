@@ -25,6 +25,14 @@
   origin read falling through to `HOME` while that probe still refused on `TMPDIR`
   would end the session one step later.
 
+  Two spellings of one parent are one candidate: trailing slashes are stripped
+  before the two are compared, because the fallback is held to a stricter rule than
+  the first — its immediate parent must be one no other account can write, sticky
+  or not — so `TMPDIR=/x/` beside `HOME=/x` would otherwise end a session whose
+  first candidate was fine. `/tmp/.`, `//tmp` and symlinked spellings are not
+  covered: deciding those needs `cd -P` or `realpath`, both of them NAMES in the
+  driving shell, which is why the transport moved into a privileged helper at all.
+
   A session with one usable parent passes one candidate and behaves exactly as
   before. Closes #161, and #160 with it — a squatter who pre-creates the
   argv-published first name now costs a fallback rather than a refused session, and
