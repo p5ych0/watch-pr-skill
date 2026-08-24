@@ -151,8 +151,8 @@ jobs:
     # 360 minutes, and the first run after this job was switched back on spent two
     # of them inside one fixture before it was cancelled by hand — a global
     # substitution over 330 KB that is free on bash 5 and does not finish on
-    # 3.2.57. The per-file bound below is what NAMES the file; this is what stops
-    # the bill.
+    # 3.2.57. The per-file bound below is what NAMES the file and reports how long
+    # it took; this is what stops the bill.
     timeout-minutes: 60
     # ── IT WAS DISABLED, AND WHAT IT COST TO TURN BACK ON ──────────────────
     #
@@ -437,16 +437,25 @@ jobs:
             total=$((total + 1))
             echo "::group::$t"
             _t0=$SECONDS
-            # TEN MINUTES PER FILE, AND THE TIME IS REPORTED EITHER WAY. The
-            # slowest file here takes 149s, so ten minutes is not a threshold any
-            # correct file approaches — and 124 says "it hung" rather than leaving
-            # a reader to infer it from a job that ran to the ceiling. A hang is
-            # what this shell produced the first time the job ran again.
+            # TEN MINUTES PER FILE, AND THE ELAPSED TIME IS WHAT NAMES A HANG.
+            # The slowest file here takes 149s, so ten minutes is not a threshold
+            # any correct file approaches. The STATUS does not name it: with
+            # `-k 30` a file that ignores TERM is killed and reports 137 — which
+            # is exactly what the hang that prompted this bound reported — and a
+            # fixture may exit 124 for reasons of its own. So the duration
+            # decides, and the status is printed beside it rather than read as a
+            # verdict.
             if "$RB_TIMEOUT" -k 30 600 bash "$t"; then
               echo "PASS $t in $((SECONDS - _t0))s"
             else
               _rc=$?
-              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH (rc=$_rc after $((SECONDS - _t0))s; 124 = it hung)"
+              _el=$((SECONDS - _t0))
+              if [ "$_el" -ge 600 ]; then
+                _why="it hung: the ten-minute bound fired (rc=$_rc)"
+              else
+                _why="rc=$_rc after ${_el}s"
+              fi
+              echo "::error file=skills/watch-prs/scripts/$t::$t failed on bash 3.2.57 with a mac-shaped PATH — $_why"
               fail=1
             fi
             echo "::endgroup::"

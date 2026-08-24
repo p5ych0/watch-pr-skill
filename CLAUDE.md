@@ -370,7 +370,9 @@ rediscovering them.
   It costs about twenty-five minutes a run against the normal job's three, and a
   hang there used to cost six: the job carries `timeout-minutes: 60` and bounds
   each file at ten minutes with the runner's own `timeout`, captured by absolute
-  path before the mac-shaped `PATH` removes it.
+  path before the mac-shaped `PATH` removes it. What names a hang is the ELAPSED
+  TIME rather than the status — `-k 30` makes a file that ignores `TERM` report
+  137, and a fixture may exit 124 for reasons of its own.
 
   **`SKILL.md`'s bash is not covered by any of it**, and that is issue #26 rather
   than an oversight: ~950 lines of executable shell live in a Markdown file, and
