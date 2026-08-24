@@ -135,6 +135,22 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 
+# ── THE REMOVED FALLBACK ARGUMENT IS REFUSED, NOT IGNORED ─────────────────
+# 2.0.62 took an optional second candidate here and 2.0.63 removed it, because the
+# driver could not use the distinction it existed for. A caller written against
+# that form is out there, and reading `$2` while dropping `$3` hands it an ordinary
+# refusal on the first name while the fallback it believes it supplied is silently
+# ignored — which is the worst of the three possible behaviours.
+_ex_rc=0
+_ex_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$TMP/exarg.a" "$TMP/exarg.b" 2>&1)" || _ex_rc=$?
+{ [ "$_ex_rc" -ne 0 ] \
+  && case "$_ex_out" in *"takes a mode and ONE directory"*) true ;; *) false ;; esac \
+  && [ ! -e "$TMP/exarg.a" ] && [ ! -e "$TMP/exarg.b" ]; } \
+    && pass "a second directory argument is refused by name, not silently ignored" \
+    || die "the removed fallback argument was ignored (rc=$_ex_rc out='$_ex_out')"
+
 # ── it reads what origin says ──────────────────────────────────────────────
 got="$(run read)"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \

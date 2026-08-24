@@ -10,9 +10,14 @@
   with a perfectly usable `HOME` sitting beside it untried.
 
   Setup now tries a directory under `TMPDIR` and, where that is refused, one under
-  `HOME`. The retry announces itself, and the helper's own line above it says what
-  is being retried past — a refusal routed around in silence is what the old
-  candidate loop got wrong.
+  `HOME`. **The refusal is announced; the retry is not.** The helper's own `ABORT:`
+  line names the directory and the reason, so nothing is routed around in silence —
+  which is what the old candidate loop got wrong — but there is no note saying which
+  parent the session ended up on. A note would be an `echo`, `echo` is a name in the
+  driving shell, and every position for it is before something that trusts a
+  variable: in the call's condition it precedes `$RB_SCRIPTS` being expanded, and
+  after the read it precedes the identity checks, where a function that assigns
+  `RB_REMOTE` replaces the value just authenticated.
 
   **It is a second CALL, not a second candidate passed to one.** The helper cannot
   tell the driver which of two candidates it used: a second success status would

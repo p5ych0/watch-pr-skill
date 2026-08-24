@@ -222,6 +222,13 @@ esac
 RB_DIR="${2-}"
 [[ -n $RB_DIR ]] \
     || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
+# AND NOTHING AFTER IT. 2.0.62 took an optional SECOND candidate here and 2.0.63
+# removed it, because the driver could not use the distinction it existed for — so
+# a caller written against that form is out there, and reading `$2` while dropping
+# `$3` gives it an ordinary refusal on the first name while the fallback it thinks
+# it supplied is silently ignored. A refusal by name says which interface this is.
+[[ $# -le 2 ]] \
+    || { echo "ABORT: pr-origin.sh takes a mode and ONE directory; the optional fallback directory of 2.0.62 was removed in 2.0.63, and the caller retries with a second call instead" >&2; exit 1; }
 # THE FILE IS THIS SCRIPT'S TO NAME. The caller reads `<dir>/origin` or
 # `<dir>/pin`, and naming it here rather than taking it means there is no path
 # the caller can be talked into passing.

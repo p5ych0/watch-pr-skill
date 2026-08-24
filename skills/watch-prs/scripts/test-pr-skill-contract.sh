@@ -1753,11 +1753,21 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # EVERY NAME THAT PROBE GUARDS, in every attribute it takes — INCLUDING the
     # nameref, which is the state the `${!name}` half of the probe exists for and
     # which a readonly or an integer attribute does not reach. #161.
-    for _nr in 'declare -n RB_PIN_SEEN=RB_TMPPARENT' \
-               'declare -n RB_PIN_DIR=RB_TMPPARENT' \
-               'declare -n RB_PIN_DIR2=RB_TMPPARENT' \
-               'readonly RB_PIN_DIR2=/tmp' \
-               'declare -i RB_PIN_DIR2=0'; do
+    # THE VALUE-TRANSFORMING ATTRIBUTES TOO, which the nameref, readonly and
+    # integer states do not reach: `declare -l` and `declare -u` let the assignment
+    # SUCCEED and change the value, so the mixed-case prefix the probe tests for is
+    # what catches them. They are bash 4.0+, so the list is built rather than
+    # written out — this file already asks the shell whether it has them.
+    _pin_nrs="declare -n RB_PIN_SEEN=RB_TMPPARENT|declare -n RB_PIN_DIR=RB_TMPPARENT"
+    _pin_nrs="$_pin_nrs|declare -n RB_PIN_DIR2=RB_TMPPARENT|readonly RB_PIN_DIR2=/tmp|declare -i RB_PIN_DIR2=0"
+    if [ "$_rb_has_l" = yes ]; then
+        _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR2=x|declare -u RB_PIN_DIR2=x"
+        _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR=x|declare -u RB_PIN_DIR=x"
+    fi
+    _pin_rest="$_pin_nrs"
+    while [ -n "$_pin_rest" ]; do
+        _nr="${_pin_rest%%|*}"
+        case "$_pin_rest" in *'|'*) _pin_rest="${_pin_rest#*|}" ;; *) _pin_rest="" ;; esac
         _nr_rc=0
         _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
                 RB_REMOTE="git@github.com:acme/widget.git"
