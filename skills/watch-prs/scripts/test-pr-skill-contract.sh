@@ -481,15 +481,21 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
             echo "PINNED=$RB_REMOTE"
         ' 2>&1)" || _rs_rc=$?
-    # …AND IT DESCRIBES TWO ATTEMPTS, because by the time it is reached there have
-    # been two: a directory under `TMPDIR` and then one under `HOME`. The advice
-    # that used to live here — unset `TMPDIR` and re-run — is what the retry now
-    # DOES, so repeating it would send the operator to do again what already
-    # happened.
-    { case "$_rs_out" in *'under one parent and then under the other'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'the two lines above say why each was refused'*) true ;; *) false ;; esac; } \
-        && pass "…and the abort describes both attempts, pointing at the helper's own reasons" \
-        || die "the origin abort does not describe two attempts: '$_rs_out'"
+    # …AND IT DOES NOT COUNT THE ATTEMPTS. Reaching that arm means the first call
+    # failed and the second either was not made or failed too, and the three reasons
+    # it was not made differ — no second candidate, a TERMINAL first refusal the
+    # status gate skipped, or a second refusal. The previous shape chose between two
+    # messages on whether a second candidate existed, and was wrong for the middle
+    # one: a terminal first refusal said two attempts were made.
+    { case "$_rs_out" in *'each ABORT line above is one attempt and its reason'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'not the same failure as a filesystem with no room'*) true ;; *) false ;; esac; } \
+        && pass "…and the abort points at the helper's lines rather than counting attempts" \
+        || die "the origin abort does not point at the helper's lines: '$_rs_out'"
+    case "$_rs_out" in
+        *'tried a directory under'*|*'had ONE candidate'*|*'under one parent and then under the other'*)
+            die "the abort still claims a number of attempts: '$_rs_out'" ;;
+        *) pass "…and claims no number it cannot know" ;;
+    esac
     # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING. That was the manual
     # form of exactly this retry; leaving it in would ask for a step already taken,
     # and `unset` is a name besides — on bash 4.3+ a `declare -n TMPDIR=HOME` makes
@@ -498,35 +504,30 @@ rm -rf "$_fe_dir"
         *'unset TMPDIR'*) die "the abort still asks the operator to unset TMPDIR: '$_rs_out'" ;;
         *) pass "…and does not ask for the step the retry already took" ;;
     esac
-    # …AND IT SURVIVES A SHADOWED `echo`. The note above is an `echo` and can be
-    # silenced; the ABORT is a `${VAR:?…}` expansion — the shell refusing, with no
-    # command to shadow — and it is the one an operator cannot be left without.
+    # …AND IT SURVIVES A SHADOWED `echo`. The abort is a `${VAR:?…}` expansion — the
+    # shell refusing, with no command to shadow — and it is the one an operator
+    # cannot be left without.
     _rs_e=0
     _rs_eo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 TMPDIR="$_forge_dir" HOME="$_forge_dir" bash -c '
             echo() { :; }
             '"$_read_block"'
         ' 2>&1)" || _rs_e=$?
     { [ "$_rs_e" -ne 0 ] \
-      && case "$_rs_eo" in *'under one parent and then under the other'*) true ;; *) false ;; esac; } \
+      && case "$_rs_eo" in *'each ABORT line above is one attempt and its reason'*) true ;; *) false ;; esac; } \
         && pass "…and the abort reaches the operator with echo shadowed" \
         || die "a shadowed echo silenced the abort (rc=$_rs_e out='$_rs_eo')"
-    # …AND WHERE THERE WAS ONLY ONE ATTEMPT IT SAYS SO. `TMPDIR` unset, relative or
+    # …AND THE SAME WHERE THERE WAS ONLY ONE CANDIDATE. `TMPDIR` unset, relative or
     # refused by the mode bits promotes `HOME` to the FIRST candidate and leaves no
-    # second, so an abort claiming two were tried sends the operator looking for a
-    # first failure that never happened.
+    # second — and the message is the same one, because it counts nothing.
     _rs_o1=0
     _rs_oo="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=1 \
         TMPDIR=.tmp HOME="$_forge_dir" bash -c '
             '"$_read_block"'
         ' 2>&1)" || _rs_o1=$?
     { [ "$_rs_o1" -ne 0 ] \
-      && case "$_rs_oo" in *'had ONE candidate'*) true ;; *) false ;; esac; } \
-        && pass "…and an abort after ONE attempt says one, not two" \
-        || die "a single-attempt abort claimed two (rc=$_rs_o1 out='$_rs_oo')"
-    case "$_rs_oo" in
-        *'under one parent and then under the other'*) die "the single-attempt abort also claimed two: '$_rs_oo'" ;;
-        *) pass "…and does not also carry the two-attempt wording" ;;
-    esac
+      && case "$_rs_oo" in *'each ABORT line above is one attempt and its reason'*) true ;; *) false ;; esac; } \
+        && pass "…and says the same where only one candidate existed" \
+        || die "the single-candidate abort said something else (rc=$_rs_o1 out='$_rs_oo')"
     { [ "$_rs_rc" -ne 0 ] \
       && case "$_rs_out" in *PINNED=*) false ;; *) true ;; esac; } \
         && pass "…so a helper that writes a URL and then fails does not pin the session" \
@@ -548,12 +549,12 @@ rm -rf "$_fe_dir"
     # quota or read-only nor a name another account got to first — so any of those
     # refused the session with a usable `HOME` beside it untried. #161.
     #
-    # A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE. The helper cannot tell
-    # this shell which of two it used without a status branch outside this arm or a
-    # line on the value's own channel, so a single call would leave the driver
-    # GUESSING from a name that is public in argv — a check-then-use that #176
-    # built three defences for and had all three refuted. An `elif` needs no status
-    # at all: each arm names the directory the helper just created.
+    # A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE. A single call would
+    # leave the driver GUESSING which of the two holds the value, from a name that
+    # is public in argv — a check-then-use that #176 built three defences for and
+    # had all three refuted. Each arm of an `elif` names the directory the helper
+    # just created, and the first call's status is read in the second's own
+    # condition, which is inside the same `if`.
     _rs_ct="$_forge_dir/retry.n"; rm -f "$_rs_ct"
     _rs_hb="$_forge_dir/rhome"; rm -rf "$_rs_hb"; mkdir -p "$_rs_hb"
     _rs_rc=0
@@ -1501,6 +1502,27 @@ if [ -n "$_forge_dir" ]; then
     # parent that worked becomes the primary one, so the session's own working
     # directory is created under here too.
     _pf_left=""; _pf_left="$(ls -A "$_pf_hb" 2>/dev/null | grep '^watch-pr-pin')" || _pf_left=""
+    # …AND A TERMINAL FIRST PIN REFUSAL IS NOT RETRIED, which the source-text
+    # assertion above cannot show: changing the pin path to retry a terminal status
+    # keeps that spelling and stays green. Status 1 means the refusal was about the
+    # path or the checkout, and another parent fixes neither.
+    _pt_ct="$_forge_dir/pinterm.n"; rm -f "$_pt_ct"
+    _pt_hb="$_forge_dir/pintermhome"; rm -rf "$_pt_hb"; mkdir -p "$_pt_hb"
+    _pt_out=""
+    _pt_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+        FORGE_FAIL_FIRST="$_pt_ct" FORGE_FIRST_RC=1 bash -c '
+            RB_REMOTE="git@github.com:acme/widget.git"
+            RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+            RB_TMPPARENT2="'"$_pt_hb"'"
+            '"$_pin_block"'
+            printf "PINOK=[%s]\n" "${RB_PIN_SEEN:-}"
+        ' 2>&1)" || true
+    _pt_n=0; [ -f "$_pt_ct" ] && _pt_n="$(<"$_pt_ct")"
+    { [ "$_pt_n" = 1 ] \
+      && case "$_pt_out" in *'PINOK=[git@'*) false ;; *) true ;; esac \
+      && [ -z "$(ls -A "$_pt_hb" 2>/dev/null)" ]; } \
+        && pass "…and a TERMINAL first pin refusal is not retried under the other parent" \
+        || die "a terminal pin refusal was retried (calls=$_pt_n out='$_pt_out')"
     [ -z "$_pf_left" ] \
         && pass "…and removes the directory that second probe created" \
         || die "the pin retry left its transport behind: '$_pf_left'"
@@ -1800,7 +1822,7 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # what catches them. They are bash 4.0+, so the list is built rather than
     # written out — this file already asks the shell whether it has them.
     _pin_nrs="declare -n RB_PIN_SEEN=RB_TMPPARENT|declare -n RB_PIN_DIR=RB_TMPPARENT"
-    _pin_nrs="$_pin_nrs|declare -n RB_PIN_DIR2=RB_TMPPARENT|readonly RB_PIN_DIR2=/tmp|declare -i RB_PIN_DIR2=0"
+    _pin_nrs="$_pin_nrs|declare -n RB_PIN_DIR2=RB_TMPPARENT"
     if [ "$_rb_has_l" = yes ]; then
         _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR2=x|declare -u RB_PIN_DIR2=x"
         _pin_nrs="$_pin_nrs|declare -l RB_PIN_DIR=x|declare -u RB_PIN_DIR=x"
@@ -1850,6 +1872,29 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     done
 else
     echo "ok   - (declare -n is unavailable on this bash, or no scratch tree; the pin nameref cases did not run)"
+fi
+# …AND THE ATTRIBUTES THAT NEED NO NAMEREF RUN WHATEVER THIS SHELL IS. `readonly`
+# and `declare -i` are not bash 4.3 features, and holding them inside the
+# nameref-only branch above meant bash 3.2 — which is the shell the `macos-shell`
+# job builds — exercised neither for `RB_PIN_DIR2`, the one name this change adds.
+if [ -n "$_forge_dir" ]; then
+    for _nr in 'readonly RB_PIN_DIR2=/tmp' \
+               'declare -i RB_PIN_DIR2=0' \
+               'readonly RB_PIN_DIR=/tmp'; do
+        _nr_rc=0
+        _nr_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$_forge_dir" FORGE_RC=0 bash -c '
+                RB_REMOTE="git@github.com:acme/widget.git"
+                RB_TMPPARENT="${RB_TMPBASE:?the pin cases need the fixture scratch tree}"
+                '"$_nr"'
+                '"$_pin_block"'
+            ' 2>&1)" || _nr_rc=$?
+        { [ "$_nr_rc" -ne 0 ] \
+          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+            && pass "…and the pin probe refuses it on any bash ($_nr)" \
+            || die "a portable attribute was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
+    done
+else
+    echo "ok   - (no forge; the portable pin-attribute cases did not run)"
 fi
 # …AND THE PIN STAGE'S ALIASES ARE RUN, not only matched. The probe is generic —
 # `${!name}` — so there are no per-name comparisons left to match; what the source

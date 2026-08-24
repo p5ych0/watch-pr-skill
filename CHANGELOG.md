@@ -25,7 +25,9 @@
   would put the value's own channel into a capture. A single call would therefore
   leave the driver guessing from a name that is public in argv, and every test of
   such a name is a check-then-use — three defences were built for it and all three
-  refuted. An `elif` needs no status at all, and each arm names the directory the
+  refuted. An `elif` reads the first call's status IN ITS OWN CONDITION —
+  `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so nothing becomes a
+  statement after a guard, and each arm names the directory the
   helper just created, so there is nothing to guess and nothing to race.
 
   The read-back is written twice, which is the price. A function would hold it once

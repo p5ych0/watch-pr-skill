@@ -779,9 +779,12 @@ if [[ -z $RB_REMOTE ]]; then
         # between the two and the sequential probes disagree). There is no `openat`
         # here to anchor the identity. #161, #176.
         #
-        # AN `elif` NEEDS NO STATUS AT ALL. Each arm knows exactly which directory
-        # the helper just created, because it named it — there is nothing to guess
-        # and therefore nothing to race.
+        # AN `elif` READS THE STATUS WITHOUT LEAVING THE `if`. `$?` after a failed
+        # condition is that command's, `[[` is a reserved word, and the read-back
+        # stays contained in the arm below — so the distinction is usable without
+        # anything becoming a statement after a guard. And each arm knows exactly
+        # which directory the helper just created, because it named it: there is
+        # nothing to guess and therefore nothing to race.
         #
         # THE READ-BACK IS WRITTEN TWICE, and that is the price. A function would
         # hold it once and cannot be used: `return` is a name a startup file can
@@ -920,27 +923,20 @@ if [[ -z $RB_REMOTE ]]; then
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            # AND IT SAYS HOW MANY ATTEMPTS THERE WERE, because there is not always a second:
-            # where `TMPDIR` is unset, relative or refused by the mode bits, `HOME`
-            # is promoted to the first candidate and no second exists. Saying two
-            # were tried there sends the operator looking for a first failure that
-            # never happened.
-            # AND IT DOES NOT DIAGNOSE. Two refusals are not two full filesystems:
-            # the directory is created EXCLUSIVELY, so both names simply being taken
-            # produces exactly the same pair of refusals on a filesystem with room.
-            # The helper says which each was, and this says how many there were and
-            # where to look.
+            # AND IT DOES NOT COUNT THE ATTEMPTS, because it cannot. Reaching this
+            # arm means the first call failed and the second either was not made or
+            # failed too — and the three reasons it was not made are different: there
+            # was no second candidate, or the first refusal was TERMINAL and the
+            # status gate skipped it, or it ran and refused as well. Telling them
+            # apart here needs the first call's status carried in a variable, which
+            # is another name for a startup file to make readonly, for a claim the
+            # operator can read off the lines above anyway.
             #
-            # NOR DOES IT NAME WHICH PARENT WAS MISSING. One candidate means the
-            # OTHER parent could not supply a second — and that is `TMPDIR` unset,
-            # relative or refused, or `HOME` in exactly the same states. Naming one
-            # of them sends half the operators who reach it to fix the one that was
-            # already fine.
-            if [[ -n $RB_ORIGIN_DIR2 ]]; then
-                : "${RB_REMOTE:?could not read the origin for this session. Setup tried a directory under one parent and then under the other, and the two lines above say why each was refused. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with.}"
-            else
-                : "${RB_REMOTE:?could not read the origin for this session. Setup had ONE candidate, because only one of TMPDIR and HOME was an absolute directory it could write to, and the line above says why that one was refused. Making the other one usable gives the retry somewhere to go.}"
-            fi
+            # TWO MESSAGES CHOSEN ON `RB_ORIGIN_DIR2` WAS THE PREVIOUS SHAPE, and it
+            # was wrong for exactly the middle case: a terminal first refusal with a
+            # second candidate present said two attempts were made when the gate had
+            # correctly skipped the second.
+            : "${RB_REMOTE:?could not read the origin for this session. Setup could not get a transport directory it could use, and each ABORT line above is one attempt and its reason. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with or a checkout with no usable origin.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]
@@ -1130,8 +1126,9 @@ if [[ -z $RB_REMOTE ]]; then
             /usr/bin/env rm -f "$RB_PIN_DIR/pin"
             /usr/bin/env rmdir "$RB_PIN_DIR"
         # THE SAME SECOND CALL AS THE ORIGIN READ, and for the same reasons: an
-        # `elif` needs no status, and each arm names the directory the helper just
-        # created rather than guessing between two.
+        # `elif` reads the first call's status in its own condition, which is inside
+        # the same `if`, and each arm names the directory the helper just created
+        # rather than guessing between two.
         elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
             # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
