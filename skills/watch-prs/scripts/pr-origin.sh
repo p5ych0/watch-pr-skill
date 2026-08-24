@@ -64,10 +64,16 @@
 #
 #      WHICH ONE is the second argument unless a third was passed AND the first
 #      could not be reserved, in which case it is the third. The caller is not told
-#      which in words: it tests for the leaf under the second candidate, and reads
-#      the first where that is absent. Announcing it on a stream would put the
+#      which in words: it tests for the leaf under the THIRD argument, and reads
+#      the second where that is absent. Announcing it on a stream would put the
 #      value's own channel back into a caller's capture, which is what the file
-#      transport exists to avoid.
+#      transport exists to avoid, and a second SUCCESS status would put a status
+#      branch back on the driver's side.
+#
+#      THAT RULE IS SOUND BECAUSE A THIRD ARGUMENT THAT ALREADY EXISTS IS REFUSED
+#      up front: a leaf under it can therefore only be one this run wrote. Without
+#      that, a run succeeding on the second argument with a stale third beside it
+#      would hand the caller a previous session's value.
 #   1  refused — the reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
 #      nothing here ever leaves a half-written or empty one.
@@ -350,6 +356,28 @@ set -C
 # refused is a second attempt at the identical failure reported as a retry.
 [[ -z $RB_DIR2 ]] || [[ $RB_DIR2 != "$RB_DIR1" ]] \
     || { echo "ABORT: the fallback directory is the same path as the first; there is nothing to fall back to" >&2; exit 1; }
+# AND IT MUST NOT EXIST YET, which is what makes the caller's rule sound.
+#
+# The caller cannot be TOLD which candidate was used — a second success status
+# would put a status branch back on the driver's side, which is the walked-past-
+# guard shape `SKILL.md` removed — so it tests for the leaf under the second and
+# reads the first where that is absent. That rule is only sound while a leaf under
+# the second candidate can only be one this run wrote.
+#
+# THE FALLBACK PATH ALREADY GUARANTEES IT: the second candidate is created by the
+# same exclusive `mkdir`, so a directory that was already there refuses rather than
+# being written into. What it did NOT cover is the run that SUCCEEDS on the first
+# candidate while a stale second one sits beside it — from a leaked earlier
+# transport, or a name collision — where the helper never touches the second and
+# the caller reads a value from a previous session. For `read` that pins the
+# session to another repository and retargets every later post.
+#
+# So an existing second candidate is refused here, before either is attempted. It
+# costs a session whose first candidate would have worked, and the names carry a
+# pid and three `$RANDOM` draws, so existing means a leak or an account that
+# guessed — neither of which is a state to write a session on top of.
+[[ -z $RB_DIR2 ]] || [[ ! -e $RB_DIR2 ]] \
+    || { echo "ABORT: the fallback directory '$RB_DIR2' already exists; it must be a name this run can create, or the caller cannot tell which candidate holds the value" >&2; exit 1; }
 # THE WALK IS A FUNCTION BECAUSE IT RUNS TWICE. A path is checked as it is
 # WRITTEN and as it RESOLVES, and neither covers the other.
 _rb_walk() {   # _rb_walk <dir> ; 0 safe, 1 refused (reason on stderr)

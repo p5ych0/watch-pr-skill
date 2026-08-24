@@ -19,9 +19,16 @@
   wiring it up is the next change — and when it does, the status-0 contract is
   that ONE of the candidates is the directory that was created, the second unless
   a third was passed and the first could not be reserved. The caller tests for the
-  leaf under the second candidate and reads the first where that is absent; which
-  one it was is not announced, because putting the value's own channel into a
-  caller's capture is what the file transport exists to avoid.
+  leaf under the second candidate and reads the first where that is absent. Which
+  one it was is not announced: putting the value's own channel into a caller's
+  capture is what the file transport exists to avoid, and a second SUCCESS status
+  would put a status branch back on the driver's side.
+
+  That rule is sound because a second candidate that ALREADY EXISTS is refused
+  before either is attempted. Without it, a run succeeding on the first candidate
+  with a stale second one beside it — a leaked earlier transport, a name collision
+  — would hand the caller a previous session's value, and for `read` that pins the
+  session to another repository and retargets every later post.
 
 ## [2.0.61] — 2026-08-24
 

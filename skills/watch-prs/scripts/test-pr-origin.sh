@@ -221,14 +221,42 @@ case "${_fb_got#*|}" in
     *) pass "…and does not announce one" ;;
 esac
 
-# BOTH FAILING IS A REFUSAL NAMING THE LAST ONE TRIED, so the operator is told
-# where it ended up rather than where it started.
+# A SECOND CANDIDATE THAT ALREADY EXISTS IS REFUSED BEFORE EITHER IS ATTEMPTED,
+# and that refusal is what makes the caller's rule sound. The caller cannot be told
+# which candidate was used — a second success status would put a status branch back
+# on the driver's side — so it tests for the leaf under the second and reads the
+# first where that is absent. A run that SUCCEEDS on the first candidate with a
+# stale second one beside it, from a leak or a name collision, would hand the
+# caller a previous session's value; for `read` that pins the session to another
+# repository and retargets every later post.
 _fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the both-fail case"
-mkdir "$_fb_d1"; mkdir "$_fb_d2"
+{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the stale-fallback case"
+mkdir "$_fb_d2"; printf 'git@github.com:other/repo.git\n' > "$_fb_d2/origin"
 _fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
 { [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"could not create '$_fb_d2' exclusively"*) true ;; *) false ;; esac; } \
+  && case "${_fb_got#*|}" in *"already exists"*) true ;; *) false ;; esac \
+  && [ ! -e "$_fb_d1" ]; } \
+    && pass "a second candidate that already exists is refused, not stepped past" \
+    || die "a stale second candidate was accepted (got='$_fb_got')"
+# AND THE STALE VALUE IS STILL THERE, untouched: this helper removes only what it
+# created, and it created neither.
+[ "$(<"$_fb_d2/origin")" = 'git@github.com:other/repo.git' ] \
+    && pass "…and the refusal leaves what was already there alone" \
+    || die "the refusal disturbed a directory it did not create"
+
+# BOTH FAILING IS A REFUSAL NAMING THE LAST ONE TRIED, so the operator is told
+# where it ended up rather than where it started. The second candidate cannot
+# pre-exist — the case above refuses that — so "both failing" means the first was
+# taken and the second could not be created for a reason of its own, which an
+# unwritable parent produces.
+_fb_d1="$(_fb_new)"
+_fb_p2="$(mktemp -d "$TMP/fbro.XXXXXX")" || _fb_p2=""
+{ [ -n "$_fb_d1" ] && [ -n "$_fb_p2" ]; } || die "no scratch for the both-fail case"
+mkdir "$_fb_d1"; chmod 500 "$_fb_p2"
+_fb_got="$(_fb_call read "$_fb_d1" "$_fb_p2/dir")"
+chmod 700 "$_fb_p2"
+{ [ "${_fb_got%%|*}" -ne 0 ] \
+  && case "${_fb_got#*|}" in *"could not create '$_fb_p2/dir' exclusively"*) true ;; *) false ;; esac; } \
     && pass "…and both failing refuses, naming the candidate it ended on" \
     || die "the both-failed refusal named the wrong candidate: '${_fb_got#*|}'"
 
