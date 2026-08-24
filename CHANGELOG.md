@@ -5,24 +5,26 @@
 - **The origin-read abort now tells you how to recover.** That abort is reached
   whenever `pr-origin.sh` refuses — an ancestor it will not trust, a path it
   cannot resolve, an `origin` the checkout does not have, or a transport directory
-  it could not create — and the helper's own line above says which. One of those
-  has a recovery you can perform, and nothing said so.
+  it could not create or write — and the helper's own line above says which.
+  Several of them you can repair; the storage one is the one the abort itself can
+  tell you how to get past, and nothing said so.
 
-  It is the directory. Setup picks its parent on mode bits — `-d`, `-w`, `-x` —
-  and prefers `TMPDIR`. A `TMPDIR` that passes all three can still fail to hold a
-  directory: a quota reached on that filesystem, a full one, or a read-only mount
-  none of those bits describe. The helper refused, setup printed a bare
-  `could not read this session's origin`, and stopped — with a perfectly usable
-  `HOME` beside it untried, because the fallthrough happens on the mode bits and
-  not on the failure.
+  Setup picks the transport parent on mode bits — `-d`, `-w`, `-x` — and prefers
+  `TMPDIR`. A `TMPDIR` that passes all three can still fail to hold a directory, or
+  to take the file written into it: a quota reached on that filesystem, a full one,
+  or a read-only mount none of those bits describe. The helper refused, setup
+  printed a bare `could not read this session's origin`, and stopped — with a
+  perfectly usable `HOME` beside it untried, because the fallthrough happens on the
+  mode bits and not on the failure.
 
-  The abort now names the step, and names what it applies to: **if the helper's
-  line above says the transport directory could not be created and the path it
-  names is inside `TMPDIR`**, unset `TMPDIR` and re-run — setup then uses `HOME`,
-  **provided `HOME` is an absolute directory you can write to**. Every condition is
-  in the text because that arm is reached for every refusal the helper makes: some
-  are failures unsetting `TMPDIR` cannot fix, and selection can reject a set
-  `TMPDIR` and be using `HOME` already, where unsetting it changes nothing.
+  The abort now names the step: **if the line above names a path setup could not
+  create or write**, re-run in a session whose `TMPDIR` points at storage with
+  room, or with no `TMPDIR` at all so setup uses `HOME` — **which helps only where
+  `HOME` is not on the same filesystem**. It keys on what the report names rather
+  than on `TMPDIR` being set, because selection can reject a set `TMPDIR` and be
+  using `HOME` already; it says a new session rather than `unset TMPDIR`, because
+  that variable may be readonly and, if it is a nameref, `unset` destroys what it
+  points at.
 
   It is emitted as a `${VAR:?…}` expansion rather than through `echo`, so the line
   you see now begins with your shell's name and `RB_REMOTE:`; the troubleshooting

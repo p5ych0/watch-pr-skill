@@ -765,27 +765,40 @@ if [[ -z $RB_REMOTE ]]; then
             #
             # QUALIFIED, BECAUSE THIS ARM IS EVERY REFUSAL. The helper refuses for an
             # unreadable `origin`, an ancestry another account owns and an
-            # unresolvable path as well as for a directory it could not create, and
-            # unsetting `TMPDIR` fixes none of those — nor does it help when `HOME`
-            # is unset, relative or unwritable, where the re-run aborts one step
-            # earlier. So the advice names the report it applies to and the
-            # condition it needs, and the helper's own line above is what says which
-            # failure this was.
+            # unresolvable path as well as for storage it could not use, and the
+            # storage one is the only one this line is about. So it names the REPORT
+            # it applies to and leaves the rest to the helper's own line above.
             #
-            # ON THE PATH, NOT ON `TMPDIR` BEING SET. Selection can REJECT a set
-            # `TMPDIR` — a relative one, or one the mode bits refuse — and choose
-            # `HOME`; a creation failure is then under `HOME`, and "if TMPDIR is set"
-            # sends the operator to unset something already ignored and re-run into
-            # the same parent. The helper names the directory it could not create,
-            # so the condition the operator can actually evaluate is whether THAT
-            # path is inside `TMPDIR`.
+            # ON WHAT THE REPORT NAMES, NOT ON `TMPDIR` BEING SET. Selection can
+            # REJECT a set `TMPDIR` — a relative one, or one the mode bits refuse —
+            # and choose `HOME`; the failure is then under `HOME`, and "if TMPDIR is
+            # set" sends the operator to unset something already ignored.
+            #
+            # CREATE OR WRITE, because the helper refuses on both and the storage
+            # failure is the same one: a filesystem that accepts the directory can
+            # fill, hit quota or go read-only while the leaf is written. Enumerating
+            # the two diagnostics was the alternative and it is the shape this
+            # repository has paid for twice — the advice keys on what the report
+            # NAMES rather than on which of the helper's sentences produced it.
+            #
+            # A NEW SESSION, NOT `unset TMPDIR` IN THIS ONE. `unset` is a name, the
+            # variable may be readonly, and on bash 4.3+ a `declare -n TMPDIR=HOME`
+            # makes `unset TMPDIR` destroy `HOME` in the operator's long-lived shell
+            # — after which the re-run aborts one step earlier than before. Starting
+            # a session without the override needs none of that to be true.
+            #
+            # AND `HOME` IS NOT AUTOMATICALLY AN ESCAPE. `/tmp` and a home directory
+            # share the root filesystem on many machines, so a full one or a
+            # filesystem-wide quota is not something falling through to `HOME`
+            # escapes. The line says so rather than promising a recovery that
+            # re-runs into the same storage.
             # AND NO APOSTROPHE IN IT. Inside `${…}` bash treats a single quote as
             # a QUOTE even within double quotes, so one apostrophe in this message
             # leaves the brace expansion unterminated and the whole block fails to
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            : "${RB_REMOTE:?could not read the origin for this session. If the line above says the transport directory could not be created, and the path it names is inside TMPDIR, that filesystem may be full, over quota or read-only: unset TMPDIR and re-run, and setup then uses HOME — provided HOME is an absolute directory you can write to.}"
+            : "${RB_REMOTE:?could not read the origin for this session. The line above says which refusal this was. If it names a path setup could not create or write, that filesystem is full, over quota or read-only: re-run in a session whose TMPDIR points at storage with room, or with no TMPDIR at all so setup uses HOME — which helps only where HOME is not on the same filesystem.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]

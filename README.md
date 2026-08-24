@@ -807,23 +807,30 @@ plugin docs and open an issue.
   refused, for any of the reasons it refuses for — it could not create the private directory
   the value travels in, it would not trust an ancestor of that directory, it could
   not resolve the path, or it could not read a usable `origin` from the checkout.
-  **The helper's own line above says which**, and it is the one to read first:
-  only one of those has a recovery you can perform from here.
+  **The helper's own line above says which**, and it is the one to read first.
+  Several of them are things you can repair — a checkout with no `origin` gets a
+  remote added, an ancestor another account owns gets a different parent — and the
+  one documented here is the storage case, because that is the one the abort itself
+  can tell you how to get past.
 
   The line begins with your shell's name and `RB_REMOTE:` because setup emits it
   as a parameter expansion the shell refuses rather than through `echo`, which in
   your own shell may be a function that prints nothing.
 
-  That one is the directory. Setup picks the parent on mode bits and prefers
-  `TMPDIR`, and a `TMPDIR` that is writable and executable can still fail to hold
-  a directory — a quota reached on that filesystem, a full one, or a read-only
-  mount. So **if the line above says the transport directory could not be created
-  and the path it names is inside your `TMPDIR`**, unset `TMPDIR` and re-run: setup
-  then uses `HOME`, provided `HOME` is an absolute directory you can write to. The
-  condition is the path rather than `TMPDIR` merely being set, because selection
-  can reject a set `TMPDIR` — a relative one, or one the mode bits refuse — and
-  choose `HOME` already; unsetting it then changes nothing and the re-run fails
-  identically. The abort itself carries the same conditions. An ancestry another account owns, or an `origin`
+  Setup picks the transport directory's parent on mode bits and prefers `TMPDIR`,
+  and a `TMPDIR` that is writable and executable can still fail to hold a directory
+  or to take the file written into it — a quota reached on that filesystem, a full
+  one, or a read-only mount. So **if the line above names a path setup could not
+  create or write**, re-run in a session whose `TMPDIR` points at storage with
+  room, or with no `TMPDIR` at all so setup uses `HOME`.
+
+  Three things about that, all of which the abort itself also says. It keys on what
+  the report **names** rather than on `TMPDIR` being set, because selection can
+  reject a set `TMPDIR` — a relative one, or one the mode bits refuse — and be
+  using `HOME` already. It says a new session rather than `unset TMPDIR` here,
+  because that variable may be readonly and, if it is a nameref, `unset` destroys
+  what it points at. And falling through to `HOME` escapes nothing where `HOME` is
+  on the same filesystem, which on many machines it is. An ancestry another account owns, or an `origin`
   the checkout does not have, is a different failure and unsetting `TMPDIR` will
   not fix it.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh

@@ -473,19 +473,27 @@ rm -rf "$_fe_dir"
     # the operator can take without one, and asserting it here is what stops the
     # text and the behaviour drifting apart.
     case "$_rs_out" in
-        *'unset TMPDIR'*) pass "…and the abort names the one-step recovery" ;;
-        *) die "the origin abort no longer tells the operator to unset TMPDIR: '$_rs_out'" ;;
+        *'re-run in a session'*) pass "…and the abort names the recovery" ;;
+        *) die "the origin abort no longer names a recovery: '$_rs_out'" ;;
     esac
     # …AND IT IS QUALIFIED, because this arm is reached for EVERY refusal — an
     # unreadable origin, an ancestry another account owns, a path that will not
     # resolve — and unsetting `TMPDIR` fixes none of those, nor helps where `HOME`
     # is unset, relative or unwritable. An unconditional recommendation here would
     # send an operator round a loop that cannot end.
-    { case "$_rs_out" in *'the transport directory could not be created'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'the path it names is inside TMPDIR'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'provided HOME is an absolute directory'*) true ;; *) false ;; esac; } \
-        && pass "…and names the report it applies to and the conditions it needs" \
+    { case "$_rs_out" in *'names a path setup could not create or write'*) true ;; *) false ;; esac \
+      && case "$_rs_out" in *'not on the same filesystem'*) true ;; *) false ;; esac; } \
+        && pass "…and names the report it applies to and what it does not escape" \
         || die "the recovery is stated unconditionally: '$_rs_out'"
+    # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING IN THIS SHELL. `unset`
+    # is a name; `TMPDIR` may be readonly; and on bash 4.3+ a `declare -n
+    # TMPDIR=HOME` makes `unset TMPDIR` destroy `HOME` in the operator's long-lived
+    # shell, after which the re-run aborts one step EARLIER than it did. A new
+    # session needs none of that to be true.
+    case "$_rs_out" in
+        *'unset TMPDIR'*) die "the recovery still asks the operator to unset TMPDIR in this shell: '$_rs_out'" ;;
+        *) pass "…and asks for a new session rather than an unset in this one" ;;
+    esac
     # …AND THE CONDITION IS THE PATH, NOT `TMPDIR` BEING SET. Selection rejects a
     # RELATIVE `TMPDIR` and chooses `HOME`, so a creation failure is then under
     # `HOME` — and advice reading "if TMPDIR is set" sends the operator to unset
@@ -499,9 +507,9 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
         ' 2>&1)" || _rs_r=$?
     { [ "$_rs_r" -ne 0 ] \
-      && case "$_rs_ro" in *'the path it names is inside TMPDIR'*) true ;; *) false ;; esac; } \
-        && pass "…and states it against the path even where TMPDIR was refused" \
-        || die "a refused TMPDIR still got 'unset TMPDIR' unconditionally (rc=$_rs_r out='$_rs_ro')"
+      && case "$_rs_ro" in *'names a path setup could not create or write'*) true ;; *) false ;; esac; } \
+        && pass "…and keys on the report even where TMPDIR was refused" \
+        || die "a refused TMPDIR got advice keyed to TMPDIR being set (rc=$_rs_r out='$_rs_ro')"
     # …AND IT SURVIVES A SHADOWED `echo`, which is the whole of what this change
     # does: an `echo` that returns without printing leaves the operator where they
     # started. The message is a `${VAR:?…}` expansion — the shell refusing, with no
@@ -512,7 +520,7 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
         ' 2>&1)" || _rs_e=$?
     { [ "$_rs_e" -ne 0 ] \
-      && case "$_rs_eo" in *'unset TMPDIR'*) true ;; *) false ;; esac; } \
+      && case "$_rs_eo" in *'re-run in a session'*) true ;; *) false ;; esac; } \
         && pass "…and reaches the operator with echo shadowed" \
         || die "a shadowed echo silenced the recovery (rc=$_rs_e out='$_rs_eo')"
     { [ "$_rs_rc" -ne 0 ] \
