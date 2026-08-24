@@ -112,7 +112,18 @@ run_limited() {
     local tmperr
     tmperr="$(mktemp 2>/dev/null)" || { rm -f "$tmp" 2>/dev/null; return 125; }
     set -m
-    ( "$@" ) >"$tmp" 2>"$tmperr" </dev/null &
+    # STDIN IS THE CALLER'S, EXPLICITLY. It was `</dev/null`, which is what bash
+    # gives a background job anyway when nothing redirects it — so a bounded
+    # command that READS stdin got nothing, and every case that feeds one a body
+    # measured the empty case instead. It is invisible wherever GNU `timeout`
+    # exists, because that arm never reaches here: `test-pr-request-review.sh`
+    # feeds the request body on stdin and failed every case on the mac-shaped
+    # bash 3.2 job, where `timeout` is absent by construction.
+    #
+    # `<&0` IS WHAT KEEPS IT. A background job whose redirection list does not
+    # mention stdin gets `/dev/null` from the shell; naming fd 0 explicitly is
+    # what stops that, and it is a duplication rather than a command.
+    ( "$@" ) >"$tmp" 2>"$tmperr" <&0 &
     local pid=$!
     set +m
     local waited=0

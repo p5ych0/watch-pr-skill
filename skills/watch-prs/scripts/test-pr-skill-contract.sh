@@ -2698,23 +2698,28 @@ grep -q 'SELF_RC' "$SKILL" \
 # assignment is one of the two things `CLAUDE.md` says cannot be taken over.
 RB_SKILL_BODY="$(<"$SKILL")"
 RB_LINE=""
-# CUT ONCE, THEN COUNT NEWLINES. This walked the document one line at a time,
-# peeling the front off a 140 KB string on every iteration — quadratic, and nine
-# seconds of this file's runtime for two lookups. Cutting at the needle and
-# measuring how many newlines the prefix lost is two expansions and no loop, and
-# it is still command-free, which is the property the case below asserts.
+# ONE CUT, AND THE ANSWER IS THE OFFSET. This walked the document a line at a
+# time, peeling the front off a 140 KB string on every iteration — quadratic, and
+# nine seconds for two lookups. Cutting at the needle is one expansion.
+#
+# AN OFFSET RATHER THAN A LINE NUMBER, because the caller compares two of them
+# and nothing else. Turning the prefix into a line count needs
+# `${_pre//$'\n'/}`, and a global substitution over a 140 KB string is fast on
+# bash 5 and pathological on the 3.2.57 the `macos-shell` job builds — the same
+# expansion in `rb_occurrences` below ran for ten minutes there and was killed.
+# Byte offsets order the two needles exactly as line numbers do, so the count was
+# not buying anything.
 #
 # ABSENCE IS A LENGTH, not a second search. `%%` returns the string UNCHANGED
 # when the needle is not in it, so the prefix being the whole body is what
 # "absent" means — asking `[[ $body == *"$1"* ]]` first is a second full match
 # over the same string for an answer the cut already gave.
-rb_line_of() {   # rb_line_of <needle> ; sets RB_LINE, empty when absent
-    local _pre _nl
+rb_line_of() {   # rb_line_of <needle> ; sets RB_LINE to its offset, empty when absent
+    local _pre
     RB_LINE=""
     _pre="${RB_SKILL_BODY%%"$1"*}"
     [ "${#_pre}" -eq "${#RB_SKILL_BODY}" ] && return 0
-    _nl="${_pre//$'\n'/}"
-    RB_LINE=$(( ${#_pre} - ${#_nl} + 1 ))
+    RB_LINE=$(( ${#_pre} + 1 ))
     return 0
 }
 rb_line_of 'AUTO_REVIEW=no';                    sel="$RB_LINE"
@@ -2732,38 +2737,47 @@ rb_line_of 'Request the review — Codex first';  req="$RB_LINE"
 # source and passing. Each needle must appear TWICE: once here and once as the
 # lookup, so losing the lookup drops the count.
 _rb_self="$(<"$0")"
-# COUNTED BY WHAT THE STRIP REMOVED, for the same reason. Each iteration of the
-# loop this replaced ran a `*needle*` match over 330 KB, and two counts cost
-# twenty-nine seconds. Removing every occurrence and dividing the lost length by
-# the needle's is one expansion, and it counts the same non-overlapping
-# occurrences the loop did.
-rb_occurrences() {   # sets RB_N to how many times $1 appears in this file
-    local _stripped
-    RB_N=0
+# TWO CUTS, AND WHETHER THEY LAND IN THE SAME PLACE. What the assertion below
+# needs is "at least twice", not a count — and asking for a count is what made
+# this expensive three times running. The loop it started as ran a `*needle*`
+# match over 330 KB per occurrence, twenty-nine seconds. The global substitution
+# that replaced it cost nothing on bash 5 and was killed after ten minutes on the
+# bash 3.2.57 the `macos-shell` job builds. A prefix-strip loop is quadratic on
+# BOTH — fifteen seconds per `#*needle` here.
+#
+# `%%` cuts at the FIRST occurrence and `%` at the LAST. If those two prefixes
+# are different lengths there is more than one occurrence; if the needle is
+# absent both are the whole string. Two suffix operations, no loop, and a second
+# each on the shell this file has to be fast on.
+#
+# AN EMPTY NEEDLE STILL NEEDS ITS GUARD, and for a different reason than before:
+# `*` matches empty, so `%` removes nothing while `%%` removes everything, and
+# the two lengths differ — which would report "twice" for a needle that is not
+# there at all.
+rb_appears_twice() {   # sets RB_TWICE=yes when $1 occurs at least twice in this file
+    local _first _last
+    RB_TWICE=no
     [ -n "$1" ] || return 0
-    _stripped="${_rb_self//"$1"/}"
-    RB_N=$(( (${#_rb_self} - ${#_stripped}) / ${#1} ))
+    _first="${_rb_self%%"$1"*}"
+    _last="${_rb_self%"$1"*}"
+    [ "${#_first}" -ne "${#_last}" ] && RB_TWICE=yes
     return 0
 }
-# BOTH ABSENCE ARMS ARE EXERCISED, because neither is reachable from the lookups
-# above: every needle they use is present, so removing either arm left the file
-# green while an absent needle produced the document's line count and a needle of
-# no length divided by zero. An arm no case can reach is worse than no arm.
 rb_line_of 'a needle this document does not contain anywhere at all'
 [ -z "$RB_LINE" ] \
     && pass "a needle the document does not carry reports no line rather than its last" \
     || die "an absent needle reported line '$RB_LINE'"
-# THE STDERR IS PART OF IT. Without the guard the count divides by a needle of
-# length zero, and bash reports that on stderr and returns non-zero — which under
-# `set -e` ends this file before any assertion prints, so `RB_N` alone cannot tell
-# the arm from its absence.
-rb_occurrences "" 2>"$TMP_CL/occ.err"
-{ [ "$RB_N" -eq 0 ] && [ ! -s "$TMP_CL/occ.err" ]; } \
-    && pass "…and a needle of no length counts zero rather than dividing by it" \
-    || die "an empty needle counted $RB_N ($(tr '\n' ';' <"$TMP_CL/occ.err"))"
-rb_occurrences "rb_line_of 'AUTO_REVIEW=no'";                   _rb_sel_n="$RB_N"
-rb_occurrences "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB_N"
-{ [ "$_rb_sel_n" -ge 2 ] && [ "$_rb_req_n" -ge 2 ]; } \
+# …AND A NEEDLE OF NO LENGTH IS NOT "TWICE". `*` matches empty, so without the
+# guard `%` removes nothing while `%%` removes everything and the two lengths
+# differ — reporting a needle that is not there at all as present twice, which is
+# the fail-open direction for the assertion below.
+rb_appears_twice ""
+[ "$RB_TWICE" = no ] \
+    && pass "…and a needle of no length is not found twice" \
+    || die "an empty needle was reported as appearing twice"
+rb_appears_twice "rb_line_of 'AUTO_REVIEW=no'";                   _rb_sel_n="$RB_TWICE"
+rb_appears_twice "rb_line_of 'Request the review — Codex first'"; _rb_req_n="$RB_TWICE"
+{ [ "$_rb_sel_n" = yes ] && [ "$_rb_req_n" = yes ]; } \
     && pass "the contract lookups read the file through the command-free helper" \
     || die "a contract lookup went back to a command a function can shadow ($_rb_sel_n/$_rb_req_n)"
 # In its own shell, with the function spliced in and `SHELLOPTS` cleared — an
