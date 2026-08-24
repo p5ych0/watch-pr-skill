@@ -718,9 +718,14 @@ if [[ -z $RB_REMOTE ]]; then
         # the reason the first one is: an abandoned assignment leaves the OLD
         # value, and a stale path from an earlier run in the same long-lived shell
         # would become this session's retry.
+        # A LITERAL DISCRIMINATOR IN THE LEAF, so the two names differ without
+        # `$RANDOM`. `unset RANDOM` removes its special behaviour — it expands to
+        # nothing thereafter — and with `TMPDIR` and `HOME` naming one directory
+        # both candidates then reduce to the same `watch-pr.$$.` path, so a retry
+        # after a taken name submits the name that was taken.
         RB_ORIGIN_DIR2=
         [[ -n $RB_TMPPARENT2 ]] \
-            && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+            && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr-2.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
         # after a guard. `mkdir` is what proves this shell's helper created that
         # directory, and it is the helper that runs it — so a REFUSED call means
@@ -809,11 +814,18 @@ if [[ -z $RB_REMOTE ]]; then
             # name was simply taken.
             RB_TMPPARENT2="$RB_TMPPARENT"
             RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
-            echo "note: the first transport directory could not be created; this session is using '$RB_TMPPARENT'"
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR2/origin"; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
+                # AND THE NOTE COMES LAST, after the value has been read and the
+                # directory removed. `echo` is a NAME: wherever it sits between the
+                # helper returning and `$RB_ORIGIN_DIR2` being expanded for the
+                # descriptor, a function by that name can repoint the variable at a
+                # directory of its own holding a forged `origin` — which the `-O`
+                # and `-f` tests then accept, because it belongs to the operator.
+                # Nothing here depends on that variable any more.
+                echo "note: the first transport directory could not be created; this session is using '$RB_TMPPARENT'"
             else
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
@@ -895,10 +907,21 @@ if [[ -z $RB_REMOTE ]]; then
             # is promoted to the first candidate and no second exists. Saying two
             # were tried there sends the operator looking for a first failure that
             # never happened.
+            # AND IT DOES NOT DIAGNOSE. Two refusals are not two full filesystems:
+            # the directory is created EXCLUSIVELY, so both names simply being taken
+            # produces exactly the same pair of refusals on a filesystem with room.
+            # The helper says which each was, and this says how many there were and
+            # where to look.
+            #
+            # NOR DOES IT NAME WHICH PARENT WAS MISSING. One candidate means the
+            # OTHER parent could not supply a second — and that is `TMPDIR` unset,
+            # relative or refused, or `HOME` in exactly the same states. Naming one
+            # of them sends half the operators who reach it to fix the one that was
+            # already fine.
             if [[ -n $RB_ORIGIN_DIR2 ]]; then
-                : "${RB_REMOTE:?could not read the origin for this session. Setup tried a directory under one parent and then under the other, and the lines above say why each was refused. Where they name a path it could not create or write, both filesystems are full, over quota or read-only; where they name a component of the path, that ancestry is one another account can interfere with and the fix is a TMPDIR and a HOME that are yours alone.}"
+                : "${RB_REMOTE:?could not read the origin for this session. Setup tried a directory under one parent and then under the other, and the two lines above say why each was refused. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with.}"
             else
-                : "${RB_REMOTE:?could not read the origin for this session. Setup had ONE usable parent — TMPDIR was unset, relative or refused by its mode bits — and the line above says why that one was refused. Set TMPDIR to an absolute directory you can write to, on storage with room, and there will be a second to try.}"
+                : "${RB_REMOTE:?could not read the origin for this session. Setup had ONE candidate, because only one of TMPDIR and HOME was an absolute directory it could write to, and the line above says why that one was refused. Making the other one usable gives the retry somewhere to go.}"
             fi
             echo "ABORT: could not read this session's origin"
             exit 1
@@ -1075,7 +1098,7 @@ if [[ -z $RB_REMOTE ]]; then
         # the origin. #161.
         RB_PIN_DIR2=
         [[ -n $RB_TMPPARENT2 ]] \
-            && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
+            && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin-2.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
         # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
         # above states: a refused call means the `mkdir` inside the helper found
@@ -1093,6 +1116,13 @@ if [[ -z $RB_REMOTE ]]; then
         # created rather than guessing between two.
         elif [[ -n $RB_PIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
+            # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
+            # filesystem can fill between the origin read and this probe, and
+            # without the swap the working directory is still allocated from the
+            # one that just refused — so a pin that recovered would be followed by
+            # a session that could not start.
+            RB_TMPPARENT2="$RB_TMPPARENT"
+            RB_TMPPARENT="${RB_PIN_DIR2%/*}"
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR2/pin"
             /usr/bin/env rm -f "$RB_PIN_DIR2/pin"

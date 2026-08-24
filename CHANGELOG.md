@@ -37,9 +37,20 @@
   refused read the origin from `HOME` and then died allocating the working
   directory under the same full `TMPDIR`.
 
-  The abort describes what actually happened — two attempts, or one where `TMPDIR`
-  was unset, relative or refused by its mode bits and `HOME` was promoted to the
-  first — rather than recommending the step the retry already took. Closes #161, and #160 with it — a squatter who pre-creates the
+  The abort describes what actually happened — two attempts, or one because only
+  one of `TMPDIR` and `HOME` was usable — rather than recommending the step the
+  retry already took, and it does not DIAGNOSE: the directory is created
+  exclusively, so two names simply being taken produces the same pair of refusals
+  as two full filesystems, and the helper's own lines are what tell them apart.
+
+  **What the retry does not do** is distinguish a reservation failure from an
+  ancestry refusal. The helper tells them apart internally, and a two-call driver
+  discards that: an unsafe `TMPDIR` ancestry is reported and the session then
+  continues under `HOME`. Using the distinction needs it to cross back into the
+  driving shell, and both routes are worse — a status the driver can only read with
+  a branch outside the arm holding the read-back, or one call taking both
+  candidates, which leaves the driver guessing which holds the value. The unsafe
+  ancestry is reported and is not used; `CLAUDE.md` records the trade. Closes #161, and #160 with it — a squatter who pre-creates the
   argv-published first name costs a retry rather than a refused session.
 
 ## [2.0.62] — 2026-08-24

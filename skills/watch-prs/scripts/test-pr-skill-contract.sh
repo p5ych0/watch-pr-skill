@@ -481,7 +481,7 @@ rm -rf "$_fe_dir"
     # DOES, so repeating it would send the operator to do again what already
     # happened.
     { case "$_rs_out" in *'under one parent and then under the other'*) true ;; *) false ;; esac \
-      && case "$_rs_out" in *'the lines above say why each was refused'*) true ;; *) false ;; esac; } \
+      && case "$_rs_out" in *'the two lines above say why each was refused'*) true ;; *) false ;; esac; } \
         && pass "…and the abort describes both attempts, pointing at the helper's own reasons" \
         || die "the origin abort does not describe two attempts: '$_rs_out'"
     # …AND IT DOES NOT TELL THE OPERATOR TO `unset` ANYTHING. That was the manual
@@ -514,7 +514,7 @@ rm -rf "$_fe_dir"
             '"$_read_block"'
         ' 2>&1)" || _rs_o1=$?
     { [ "$_rs_o1" -ne 0 ] \
-      && case "$_rs_oo" in *'had ONE usable parent'*) true ;; *) false ;; esac; } \
+      && case "$_rs_oo" in *'had ONE candidate'*) true ;; *) false ;; esac; } \
         && pass "…and an abort after ONE attempt says one, not two" \
         || die "a single-attempt abort claimed two (rc=$_rs_o1 out='$_rs_oo')"
     case "$_rs_oo" in
@@ -573,6 +573,17 @@ rm -rf "$_fe_dir"
     [ -z "$_rs_left" ] \
         && pass "…and removes the transport directory that second attempt created" \
         || die "the retry left its transport behind: '$_rs_left'"
+    # …AND THE TWO CANDIDATE LEAVES DIFFER BY A LITERAL, not only by `$RANDOM`.
+    # `unset RANDOM` removes its special behaviour — it expands to nothing
+    # thereafter — so with `TMPDIR` and `HOME` naming one directory both candidates
+    # reduce to the same `watch-pr.$$.` path, and a retry after a taken name
+    # submits the name that was taken.
+    grep -qF 'watch-pr-2.$$.' <<<"$skill_flat" \
+        && pass "…and the second transport candidate carries a literal discriminator" \
+        || die "the two transport candidates differ only by RANDOM"
+    grep -qF 'watch-pr-pin-2.$$.' <<<"$skill_flat" \
+        && pass "…and so does the second pin candidate" \
+        || die "the two pin candidates differ only by RANDOM"
     # …AND THE RETRY ANNOUNCES ITSELF, on the run where it succeeded. It is an
     # `echo` and can be silenced by one in the operator's shell — which is exactly
     # why it is not in the CONDITION, where a function by that name would run
@@ -1437,15 +1448,27 @@ if [ -n "$_forge_dir" ]; then
             RB_TMPPARENT2="'"$_pf_hb"'"
             '"$_pin_block"'
             printf "PINOK=[%s]\n" "${RB_PIN_SEEN:-}"
+            printf "PARENT=[%s]\n" "${RB_TMPPARENT:-}"
         ' 2>&1)" || true
     case "$_pf_out" in
         *'PINOK=[git@github.com:acme/widget.git]'*) pass "a refused first pin probe is retried under the other parent" ;;
         *) die "the pin probe did not retry: '$_pf_out'" ;;
     esac
-    _pf_left=""; _pf_left="$(ls -A "$_pf_hb" 2>/dev/null)" || _pf_left="THE_SCAN_FAILED"
+    # THE PIN DIRECTORY SPECIFICALLY, for the reason the origin retry gives: the
+    # parent that worked becomes the primary one, so the session's own working
+    # directory is created under here too.
+    _pf_left=""; _pf_left="$(ls -A "$_pf_hb" 2>/dev/null | grep '^watch-pr-pin')" || _pf_left=""
     [ -z "$_pf_left" ] \
         && pass "…and removes the directory that second probe created" \
         || die "the pin retry left its transport behind: '$_pf_left'"
+    # …AND THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary filesystem
+    # can fill between the origin read and this probe, and without the swap the
+    # working directory is still allocated from the one that just refused — a pin
+    # that recovered, followed by a session that cannot start.
+    case "$_pf_out" in
+        *"PARENT=[$_pf_hb]"*) pass "…and the pin retry's parent becomes the one everything after it uses" ;;
+        *) die "the pin retry left RB_TMPPARENT on the parent that refused: '$_pf_out'" ;;
+    esac
 else
     echo "ok   - (no forge; the pin retry case did not run)"
 fi
