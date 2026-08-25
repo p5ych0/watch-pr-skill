@@ -3944,6 +3944,193 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
             && pass "…reporting a failure rather than an abort message alone" \
             || die "the setup block refused $stale_fn but exited 0 (out='$setup_out')"
     done
+    # ── WHAT A SQUATTER ON THE PUBLISHED CANDIDATE ACTUALLY COSTS ─────────
+    #
+    # #160: the transport candidate is an argv entry, published at `exec` — mode
+    # 444 in `/proc/<pid>/cmdline` — so another account on a shared parent can read
+    # it before the `mkdir` reserves it and create the name first. What that BUYS
+    # them is the question this region answers, and it is answered by running the
+    # whole setup block against the real helper rather than by argument.
+    #
+    # THE ANSWER IS A REFUSAL, NEVER A FORGED ORIGIN. The helper reserves with
+    # `mkdir -m 700`, which is an exclusion: a name somebody else holds is refused
+    # and never written through, so a squatter cannot put a value where setup will
+    # read it. `test-pr-origin.sh` proves that half on the helper. What is left is
+    # what the DRIVER does with it, and these two cases are that.
+    #
+    # WHAT IS MODELLED IS THE `mkdir` FAILING, and nothing else. Staging a real
+    # squat means pre-creating a name built from `$$` and three `$RANDOM` draws
+    # inside a shell this fixture has not started yet — unknowable in advance,
+    # which is precisely why a squatter has to READ it. A `mkdir` on `PATH` that
+    # refuses one parent and otherwise execs the real one reproduces the same
+    # `EEXIST` deterministically; everything downstream — the status, the retry,
+    # the parent swap, the pin — is the real code.
+    # AN UNAVAILABLE FIXTURE IS A FAILURE, NOT A SKIP. Written
+    # `_sq_root="$(mktemp_d)" || _sq_root=""` with an `if` around it, a `TMPDIR`
+    # that is full or read-only turned every case below into silence and the file
+    # still reported PASS — a green tick over evidence nobody collected, which is
+    # the shape this repository keeps deleting.
+    # AND `die` DOES NOT TERMINATE — it prints and sets `fail=1`. So `|| die` here
+    # left `_sq_root` EMPTY and carried on into `mkdir -p "$_sq_root/a"`, which is
+    # `/a`, `/b` and `/bin` — and then wrote `/bin/mkdir`, which in a root CI
+    # container overwrites the system one. The allocation terminates, as `TMP_CL`
+    # above does, and the postcondition is checked rather than the status alone.
+    _sq_root=""
+    _sq_root="$(mktemp_d)" || {
+        die "no scratch tree for the squat cases"
+        echo "RESULT: FAIL"
+        exit 1
+    }
+    { [ -n "$_sq_root" ] && [ -d "$_sq_root" ]; } || {
+        die "the squat scratch tree was not created ('$_sq_root')"
+        echo "RESULT: FAIL"
+        exit 1
+    }
+    if [ -n "$setup_block" ]; then
+        cat "$SCRIPT_DIR/identitylib.sh" \
+            > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
+        mkdir -p "$_sq_root/a" "$_sq_root/b" "$_sq_root/bin"
+        # THE REAL `mkdir` IS CAPTURED BY PATH, not spelled. `/usr/bin/mkdir` is
+        # not where every platform keeps it, and the mac-shaped job builds its own
+        # PATH out of what stock macOS has.
+        _sq_real=""; _sq_real="$(command -v mkdir)" || _sq_real=""
+        if [ -n "$_sq_real" ]; then
+            # THE REAL `mkdir` TRAVELS IN THE ENVIRONMENT, never interpolated into
+            # this script. Written `exec $_sq_real "$@"` the path is emitted
+            # unquoted, so a `PATH` entry carrying a space or a glob character
+            # splits or expands and the stub cannot delegate — after which both
+            # cases below test a broken fixture rather than setup.
+            cat > "$_sq_root/bin/mkdir" <<'SQUAT'
+#!/bin/sh
+# NARROW, AND OTHERWISE WORKING: only a target under $SQUAT_PARENT is refused,
+# and the diagnostic is the one a taken name produces. Everything else execs the
+# real mkdir, so the rest of setup — the working directory included — is untouched.
+for _a; do :; done
+case "$_a" in
+    "$SQUAT_PARENT"/*)
+        # THE REFUSAL IS LOGGED, so a case can require that the first candidate was
+        # actually ATTEMPTED. Without it, setup regressing to pick HOME directly —
+        # never touching the squatted TMPDIR at all — produces the same remote and
+        # the same working parent, and the recovery assertions pass with the retry
+        # arm never run.
+        [ -n "${SQUAT_LOG:-}" ] && echo "$_a" >> "$SQUAT_LOG"
+        echo "mkdir: cannot create directory '$_a': File exists" >&2; exit 1 ;;
+esac
+[ -n "${SQUAT_REAL_MKDIR:-}" ] || {
+    echo "squat stub: SQUAT_REAL_MKDIR is unset; refusing to guess" >&2
+    exit 127
+}
+exec "$SQUAT_REAL_MKDIR" "$@"
+SQUAT
+            chmod +x "$_sq_root/bin/mkdir"
+            # ONE PARENT SQUATTED: the retry recovers, and the session is pinned to
+            # the REAL origin. This is the #161 retry doing the work #160 costs.
+            _sq_rc=0; _sq_rc2=0
+            _sq_out="$(cd "$SETUPTMP/repo" && run_limited 60 env \
+                CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
+                TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
+                GIT_CONFIG_NOSYSTEM=1 SQUAT_PARENT="$_sq_root/a" \
+                SQUAT_LOG="$_sq_root/refusals" SQUAT_REAL_MKDIR="$_sq_real" \
+                PATH="$_sq_root/bin:$PATH" \
+                bash -c 'eval "$1"
+                         printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
+                || _sq_rc=$?
+            # THE PROBE'S OWN STATUS FIRST. `run_limited`s portable fallback can
+            # report a failure AFTER the markers were emitted, and a case that
+            # reads the output without checking would call that successful
+            # evidence. Requiring ZERO here excludes the watchdog's own 124 and 125
+            # by construction; the both-squatted case below wants a non-zero status
+            # and has to name them.
+            [ "${_sq_rc:-0}" -eq 0 ] \
+                || die "the one-parent squat probe failed (rc=$_sq_rc out='$_sq_out')"
+            # AND THE FIRST CANDIDATE WAS ATTEMPTED. Setup regressing to choose
+            # `HOME` directly gives the same remote and the same working parent
+            # with the retry arm never run, so the recovery claim needs the stub
+            # to have refused something under `a`.
+            # COUNTED AS A LITERAL PREFIX. `grep -c "^$_sq_root/a/"` interpolates
+            # the scratch path into a REGULAR EXPRESSION, so a `TMPDIR` carrying
+            # `[`, `.` or `*` — `/tmp/build[1]` is a real shape — fails to match
+            # the literal path the stub logged, and the case then reports that the
+            # retry never ran. A quoted `case` pattern is literal by construction.
+            _sq_tried=0
+            if [ -f "$_sq_root/refusals" ]; then
+                while IFS= read -r _sq_line; do
+                    case "$_sq_line" in "$_sq_root/a/"*) _sq_tried=$((_sq_tried + 1)) ;; esac
+                done < "$_sq_root/refusals"
+            fi
+            [ "${_sq_tried:-0}" -ge 1 ] \
+                && pass "the squatted parent was attempted before the retry ($_sq_tried refusal(s))" \
+                || die "no candidate under the squatted parent was attempted; the retry claim is unproved"
+            case "$_sq_out" in
+                *'PINNED=[git@github.com:acme/widget.git]'*)
+                    pass "a squatter on the first candidate costs a retry, not the session" ;;
+                *) die "a squat on one parent was not recovered from: '$_sq_out'" ;;
+            esac
+            # AND THE SESSION MOVED TO THE PARENT THAT WORKED, which is the half a
+            # pin check alone cannot see: the working files are built from
+            # `RB_TMPPARENT`, and a retry that read the origin under `HOME` while
+            # leaving that name on the squatted `TMPDIR` dies one step later.
+            case "$_sq_out" in
+                *"SUMMARY_FILE=$_sq_root/b/"*)
+                    pass "…and the parent that worked becomes the one the session uses" ;;
+                *) die "the session kept the squatted parent for its working files: '$_sq_out'" ;;
+            esac
+            # BOTH PARENTS SQUATTED: setup REFUSES. Nothing is pinned and nothing
+            # is forged — which is the whole severity claim for #160, and the
+            # reason it is a denial of service rather than a compromise.
+            _sq_out2="$(cd "$SETUPTMP/repo" && run_limited 60 env \
+                CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
+                TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
+                GIT_CONFIG_NOSYSTEM=1 SQUAT_PARENT="$_sq_root" \
+                SQUAT_REAL_MKDIR="$_sq_real" \
+                PATH="$_sq_root/bin:$PATH" \
+                bash -c 'eval "$1"
+                         printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
+                || _sq_rc2=$?
+            # ANY `PINNED=[` IS A CONTINUATION, not just one carrying an SSH
+            # remote. The line after the block runs only if setup did NOT stop, so
+            # its presence is the failure whatever it carries — an empty value, or
+            # an HTTPS remote, which `rb_identity` accepts exactly as readily.
+            case "$_sq_out2" in
+                *'PINNED=['*) die "setup continued past the refusal with both parents squatted: '$_sq_out2'" ;;
+                *) pass "…and a squatter on both parents stops the session rather than steering it" ;;
+            esac
+            # AND IT STOPPED NON-ZERO. A refusal that exits 0 is the state
+            # `CLAUDE.md` records shipping twice: the caller cannot tell it from a
+            # setup that finished.
+            # NON-ZERO IS NOT ENOUGH: the watchdog reports 124 when it kills a
+            # bounded command and 125 when its own setup or read fails, and either
+            # satisfies a bare `-ne 0` while the markers above were replayed from a
+            # capture. A broken probe would then read as evidence that setup
+            # refused. Both are rejected by name, as the bounded probe further down
+            # this file already does.
+            { [ "${_sq_rc2:-0}" -ne 0 ] && [ "${_sq_rc2:-0}" -ne 124 ] \
+              && [ "${_sq_rc2:-0}" -ne 125 ]; } \
+                && pass "…reporting a failure rather than a diagnostic alone" \
+                || die "the both-squatted run gave rc=$_sq_rc2, which is not a refusal (out='$_sq_out2')"
+            case "$_sq_out2" in
+                *'RB_REMOTE: could not read the origin for this session'*)
+                    pass "…refusing by name, from the shell rather than from an echo" ;;
+                *) die "the both-squatted case did not reach the transport refusal: '$_sq_out2'" ;;
+            esac
+            # AND NO VALUE WAS WRITTEN ANYWHERE UNDER EITHER PARENT, which is the
+            # exclusion holding on this side of the call: a squatted name is
+            # refused, so there is nothing for a later read to pick up.
+            # THE SCAN'S STATUS IS TAKEN. `|| _sq_left=""` overwrote a failed
+            # traversal with the answer the case wants, so a `find` that could not
+            # read either tree reported that nothing survived.
+            _sq_left=""; _sq_find_rc=0
+            _sq_left="$(find "$_sq_root/a" "$_sq_root/b" \( -name origin -o -name pin \) 2>&1)" || _sq_find_rc=$?
+            [ "$_sq_find_rc" -eq 0 ] \
+                || die "the survivor scan failed (rc=$_sq_find_rc out='$_sq_left'); it proves nothing"
+            [ -z "$_sq_left" ] \
+                && pass "…and nothing was written through a name it did not take" \
+                || die "a transport value survives a squatted run: '$_sq_left'"
+        else
+            echo "ok   - (mkdir is not on PATH; the squat cases did not run)"
+        fi
+        rm -rf "$_sq_root"
+    fi
     rm -rf "$SETUPTMP"
 fi
 
