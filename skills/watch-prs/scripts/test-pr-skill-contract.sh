@@ -3970,10 +3970,22 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # that is full or read-only turned every case below into silence and the file
     # still reported PASS — a green tick over evidence nobody collected, which is
     # the shape this repository keeps deleting.
+    # AND `die` DOES NOT TERMINATE — it prints and sets `fail=1`. So `|| die` here
+    # left `_sq_root` EMPTY and carried on into `mkdir -p "$_sq_root/a"`, which is
+    # `/a`, `/b` and `/bin` — and then wrote `/bin/mkdir`, which in a root CI
+    # container overwrites the system one. The allocation terminates, as `TMP_CL`
+    # above does, and the postcondition is checked rather than the status alone.
     _sq_root=""
-    _sq_root="$(mktemp_d)" || die "no scratch tree for the squat cases"
-    { [ -n "$_sq_root" ] && [ -d "$_sq_root" ]; } \
-        || die "the squat scratch tree was not created ('$_sq_root')"
+    _sq_root="$(mktemp_d)" || {
+        die "no scratch tree for the squat cases"
+        echo "RESULT: FAIL"
+        exit 1
+    }
+    { [ -n "$_sq_root" ] && [ -d "$_sq_root" ]; } || {
+        die "the squat scratch tree was not created ('$_sq_root')"
+        echo "RESULT: FAIL"
+        exit 1
+    }
     if [ -n "$setup_block" ]; then
         cat "$SCRIPT_DIR/identitylib.sh" \
             > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
@@ -3990,7 +4002,14 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
 # real mkdir, so the rest of setup — the working directory included — is untouched.
 for _a; do :; done
 case "\$_a" in
-    "\$SQUAT_PARENT"/*) echo "mkdir: cannot create directory '\$_a': File exists" >&2; exit 1 ;;
+    "\$SQUAT_PARENT"/*)
+        # THE REFUSAL IS LOGGED, so a case can require that the first candidate was
+        # actually ATTEMPTED. Without it, setup regressing to pick HOME directly —
+        # never touching the squatted TMPDIR at all — produces the same remote and
+        # the same working parent, and the recovery assertions pass with the retry
+        # arm never run.
+        [ -n "\${SQUAT_LOG:-}" ] && echo "\$_a" >> "\$SQUAT_LOG"
+        echo "mkdir: cannot create directory '\$_a': File exists" >&2; exit 1 ;;
 esac
 exec $_sq_real "\$@"
 SQUAT
@@ -4002,10 +4021,26 @@ SQUAT
                 CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
                 TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
                 GIT_CONFIG_NOSYSTEM=1 SQUAT_PARENT="$_sq_root/a" \
+                SQUAT_LOG="$_sq_root/refusals" \
                 PATH="$_sq_root/bin:$PATH" \
                 bash -c 'eval "$1"
                          printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
                 || _sq_rc=$?
+            # THE PROBE'S OWN STATUS FIRST. `run_limited`s portable fallback can
+            # report a failure AFTER the markers were emitted, and a case that
+            # reads the output without checking would call that successful
+            # evidence.
+            [ "${_sq_rc:-0}" -eq 0 ] \
+                || die "the one-parent squat probe failed (rc=$_sq_rc out='$_sq_out')"
+            # AND THE FIRST CANDIDATE WAS ATTEMPTED. Setup regressing to choose
+            # `HOME` directly gives the same remote and the same working parent
+            # with the retry arm never run, so the recovery claim needs the stub
+            # to have refused something under `a`.
+            _sq_tried=0
+            [ -f "$_sq_root/refusals" ] && _sq_tried="$(grep -c "^$_sq_root/a/" "$_sq_root/refusals")" || _sq_tried=0
+            [ "${_sq_tried:-0}" -ge 1 ] \
+                && pass "the squatted parent was attempted before the retry ($_sq_tried refusal(s))" \
+                || die "no candidate under the squatted parent was attempted; the retry claim is unproved"
             case "$_sq_out" in
                 *'PINNED=[git@github.com:acme/widget.git]'*)
                     pass "a squatter on the first candidate costs a retry, not the session" ;;
