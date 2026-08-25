@@ -826,8 +826,9 @@ plugin docs and open an issue.
   **The abort counts nothing**, deliberately: each `ABORT:` line above it is one
   attempt and its reason. There may be one or two, because the retry runs only
   where the first refusal was about storage — a name it could not take on a sound
-  ancestry — and not where it was about the path or the checkout, which another
-  parent does not fix.
+  ancestry, or a directory it created and then could not write the value into —
+  and not where it was about the path or the checkout, which another parent does
+  not fix.
 
   So **if they name a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic

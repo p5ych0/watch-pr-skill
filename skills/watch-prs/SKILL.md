@@ -658,12 +658,15 @@ if [[ -z $RB_REMOTE ]]; then
         #
         # AND WHAT `-w`/`-x` STILL CANNOT SEE: they are MODE BITS. A `TMPDIR` that
         # passes all three can fail to hold a directory anyway — an exhausted quota,
-        # a full filesystem — and setup then aborts with a usable `HOME` next to it.
-        # Restoring that fallback needs the retry to tell a RESERVATION failure
-        # apart from an ancestry refusal or a bad origin, which means either a
-        # second copy of the read-back or a branch on the helper's status outside
-        # the arm that contains it — and both re-open the walked-past-guard class
-        # this block exists to close. #161 carries it, with the shapes considered.
+        # a full filesystem, a read-only mount, a name another account got to first
+        # — and it can accept the directory and refuse the BYTES written into it,
+        # which is the same failure one step later. THE RETRY BELOW IS WHAT COVERS
+        # BOTH: the helper reports 2 for either, the `elif` reads that status in its
+        # own condition, and the read-back stays inside the arm that names its
+        # directory. A second copy of the read-back is the price, and it is the one
+        # this block can pay — a branch on the status OUTSIDE the arm is the
+        # walked-past-guard class this block exists to close, and there is not one.
+        # #161.
         #
         # WHAT IS NOT RETRIED, AND WHY. A parent whose ANCESTRY the helper refuses —
         # another account owning a component, a world-writable non-sticky one, an

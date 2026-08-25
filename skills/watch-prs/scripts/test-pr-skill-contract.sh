@@ -448,10 +448,11 @@ cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 # which is the retry, and the only way to reach the second arm of the read block.
 #
 # THE STATUS IS THE CASE'S TO CHOOSE, because the driver retries only on 2: the
-# helper reports 2 where both ancestry walks passed and the name still could not be
-# taken, and 1 where the refusal was about the path or the checkout. A case that
-# wants the retry sends 2; one that wants to prove a terminal refusal is NOT
-# retried sends 1.
+# helper reports 2 where both ancestry walks passed and the STORAGE would not take
+# what it asked — the name could not be taken, or the directory was created and the
+# value could not be written into it — and 1 where the refusal was about the path
+# or the checkout. A case that wants the retry sends 2; one that wants to prove a
+# terminal refusal is NOT retried sends 1.
 if [ -n "${FORGE_FAIL_FIRST:-}" ]; then
     _n=0; [ -f "$FORGE_FAIL_FIRST" ] && _n="$(cat "$FORGE_FAIL_FIRST")"
     _n=$((_n + 1)); printf '%s\n' "$_n" > "$FORGE_FAIL_FIRST"
