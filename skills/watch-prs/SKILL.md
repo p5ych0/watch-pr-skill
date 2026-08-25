@@ -853,14 +853,15 @@ if [[ -z $RB_REMOTE ]]; then
                 [[ -n "" ]]
             fi
         else
-            # HOW MANY PARENTS WERE TRIED DEPENDS ON HOW MANY THERE WERE, which is
-            # why there are two messages below rather than one. Where both `TMPDIR`
-            # and `HOME` were absolute directories this session can write to, two
-            # attempts have been made and the helper has named each on stderr; where
-            # only one of them was, there is one. The advice that used to live here
-            # — unset `TMPDIR` and re-run — is what the retry now does where there
-            # IS a second parent, so repeating it would send the operator to do
-            # again what already happened. #161.
+            # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it
+            # cannot tell them apart — the first call refused and the second either
+            # was not made or refused as well. The helper has named each attempt it
+            # made on stderr, so the message points at those lines rather than
+            # counting them; see IT DOES NOT COUNT THE ATTEMPTS below, which is the
+            # whole of why. The advice that used to live here — unset `TMPDIR` and
+            # re-run — is what the retry now does where there IS a second parent and
+            # the first refusal was retryable, so repeating it would send the
+            # operator to do again what already happened. #161.
             #
             # THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
             # the whole of what the change does: an `echo` that returns without
