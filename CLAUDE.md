@@ -188,6 +188,12 @@ rediscovering them.
   or an **assignment**: the parser handles those and no function can take their
   place. A postcondition cannot be written with the thing it checks for, and two
   checks behind one prefix are one check.
+
+  **`:` is one of those names**, which is why `${VAR:?…}` is carried by an
+  assignment and never by `: "${VAR:?…}"`. The refusal path is safe either way —
+  the expansion fires and no command runs — and the SUCCESS path invokes `:` with
+  the value as its argument, on every ordinary run. A function by that name then
+  replaces the value after every check has passed it. Measured; #181.
 - **A list of names is wrong by omission.** Clearing "the names the verdict
   depends on" missed `read` and `[`. Enumerate everything, or change the shape so
   no list is needed.

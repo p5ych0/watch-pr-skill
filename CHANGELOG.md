@@ -22,6 +22,16 @@
   the parser, so nothing can shadow it — and expand it after. No command in any of
   the three, and nothing after them to walk into.
 
+  **Every one of them is carried by an assignment rather than by `: "${…}"`, and
+  that is not a style choice.** `:` is a NAME. Written `: "${RB_REMOTE:?…}"`, the
+  refusal path is safe — the expansion fires and no command runs — and the
+  ORDINARY path invokes a function called `:` with the authenticated value as its
+  argument, on every session where the origin is fine. One that assigns
+  `RB_REMOTE` replaces the value after every check has passed it and before the
+  identity parse, so setup reports success and pins the session to another
+  repository. `RB_REMOTE="${RB_REMOTE:?…}"` has no command in it and introduces no
+  new name.
+
   What you see changes shape again: these announce themselves with your shell's
   name, a line number and `RB_REMOTE:` rather than with `ABORT:`, which is what
   every other refusal from READING the origin already looked like. The pin and the

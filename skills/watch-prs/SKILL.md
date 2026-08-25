@@ -991,9 +991,17 @@ if [[ -z $RB_REMOTE ]]; then
     # simply runs.
     #
     # `${RB_REMOTE:?…}` fires on exactly the state the guard tested — unset or
-    # EMPTY — so the check and the refusal are one thing the shell does, with no
-    # command in it to shadow. #181.
-    : "${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
+    # EMPTY — so the check and the refusal are one thing the shell does. #181.
+    #
+    # AND IT IS AN ASSIGNMENT, NOT `: "${…}"`. `:` IS A NAME — a startup file can
+    # define a function called `:`, and on the ORDINARY path the expansion SUCCEEDS
+    # and that function then runs with the value as its argument, free to replace
+    # `RB_REMOTE` before the identity parse. The refusal path was never the exposed
+    # one; the success path is, and there is one on every session. An assignment is
+    # handled by the parser, so there is no command to invoke, and assigning the
+    # value back to the name it came from introduces nothing new to be readonly or
+    # transforming — `RB_ORIGIN_DIR="${RB_TMPPARENT:?…}/…"` above is the same idiom.
+    RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
     # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
     # public information, so this is tidiness rather than secrecy — but the setup block
     # already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
@@ -1007,8 +1015,9 @@ if [[ -z $RB_REMOTE ]]; then
     # AND THIS ONE CLEARS THE VALUE AND THEN EXPANDS IT, because `${…:?…}` fires on
     # empty and there is no other state it can be given. The `||` takes an
     # ASSIGNMENT rather than a group: an assignment is handled by the parser, so
-    # nothing can shadow it, and the expansion below is then the same shell-level
-    # refusal every other one in this block is. #181.
+    # nothing can shadow it, and the line below is then the same shell-level
+    # refusal every other one in this block is — carried by an assignment too,
+    # because `:` is a name and on the ordinary path that expansion succeeds. #181.
     #
     # THE VALUE IS NO LONGER IN THE MESSAGE, and that is the price. It cannot be:
     # the word is expanded after the clear. Printing a multi-line value into the
@@ -1016,7 +1025,7 @@ if [[ -z $RB_REMOTE ]]; then
     # is which check refused.
     [[ $RB_REMOTE = "${RB_REMOTE%%'
     '*}" ]] || RB_REMOTE=
-    : "${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
+    RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
     # the same value the children will be pinned to, without depending on the export
     # having succeeded — so the two cannot disagree. The export itself is the last
@@ -1027,7 +1036,7 @@ if [[ -z $RB_REMOTE ]]; then
     # refusing. `$RB_IDENTITY_REASON` is expanded into the word, so the parser
     # message still names which rule the origin broke. #181.
     REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
-    : "${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
+    RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
     CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
     # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
     #

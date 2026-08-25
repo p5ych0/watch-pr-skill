@@ -432,8 +432,8 @@ if [ -n "$_forge_dir" ]; then
 # have exported them — a fixture that passes against the unfixed code, which is the
 # vacuous shape `CLAUDE.md` warns about.
 _fe_log="$_forge_dir/forge-log-that-must-not-exist"
-export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' FORGE_LEAF_DIR=1
-unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR
+export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' FORGE_LEAF_DIR=1 FORGE_PIN_ECHO=1
+unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR FORGE_PIN_ECHO
 # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
 # cases assert the helper was never invoked, and the only alternative was scanning
 # a directory for what it would have created — which for the empty-parent case
@@ -471,7 +471,18 @@ else
         # `-`, NOT `:-`, SO A CASE CAN ASK FOR AN EMPTY ORIGIN. That is one of the
     # three states the checks after the read-back refuse, and `:-` made it
     # indistinguishable from not asking at all.
-    printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$2/$_leaf"
+    #
+    # AND `pin` CAN ANSWER WITH WHAT A CHILD ACTUALLY SEES, which is what the real
+    # helper does. Writing `FORGE_VALUE` there instead makes the pin probe compare
+    # the driver's value against a constant, so a case where the DRIVER's value was
+    # replaced sees a mismatch and reports a refused pin — fail-closed, but for the
+    # wrong reason, and it hides the outcome the case is about. With this set the
+    # forgery is carried through exactly as it would be.
+    if [ -n "${FORGE_PIN_ECHO:-}" ] && [ "$1" = pin ]; then
+        printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$2/$_leaf"
+    else
+        printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$2/$_leaf"
+    fi
 fi
 exit "${FORGE_RC:-0}"
 FORGE
@@ -1201,6 +1212,44 @@ LOCAL
                 || die "setup pinned past the $_gd_name origin ($_gd_pin pin calls): '$_gd_out'"
             rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
         done
+        # …AND THE ORDINARY PATH IS WHERE A SHADOWED `:` WOULD HAVE BITTEN.
+        #
+        # Written `: "${RB_REMOTE:?…}"`, those three checks invoke `:` — a NAME, and
+        # one a startup file can define as a function — on every session where the
+        # origin is FINE, with the authenticated value as its argument. The refusal
+        # path was never the exposed one: there the expansion fires and no command
+        # runs. The SUCCESS path is, and there is one every time.
+        #
+        # THE CHECKS ARE ASSIGNMENTS NOW, so the expansion has no command attached
+        # to it at all. This case is the proof, and it is the only one in this file
+        # where the block is expected to run to COMPLETION: a defence that refuses
+        # the honest case would pass every assertion above it.
+        rm -f "$_forge_dir/colon.calls"
+        _cl_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+            RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+            FORGE_LOG="$_forge_dir/colon.calls" \
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+            FORGE_PIN_ECHO=1 \
+            'BASH_FUNC_:%%=() { RB_REMOTE=git@github.com:attacker/other.git; return 0; }' \
+            bash -c "$_read_block"'
+                printf "PINNED=[%s] OWNER=[%s]\n" "${REVIEW_BUS_REMOTE:-}" "${OWNER:-}"' 2>&1)" || true
+        case "$_cl_out" in
+            *'PINNED=[git@github.com:attacker/'*)
+                die "a shadowed : replaced the origin on the ordinary path: '$_cl_out'" ;;
+            *'PINNED=[git@github.com:acme/widget.git] OWNER=[acme]'*)
+                pass "…and a shadowed : cannot replace the origin the checks just passed" ;;
+            *) die "the shadowed-colon case did not run the block to completion: '$_cl_out'" ;;
+        esac
+        # AND THE SESSION REALLY WAS PINNED, which is the half the string above
+        # cannot show: the pin probe is a CHILD, and what it proves is that the
+        # exported value is what a child sees. A case asserting only the parent
+        # variable would pass against a block that never ran the probe at all.
+        _cl_pin=""
+        [ -f "$_forge_dir/colon.calls" ] && _cl_pin="$(grep -c '^pin ' "$_forge_dir/colon.calls")" || _cl_pin=0
+        [ "${_cl_pin:-0}" = 1 ] \
+            && pass "…and the pin probe ran on that value, so the honest path is not merely unrefused" \
+            || die "the shadowed-colon case made $_cl_pin pin calls: '$_cl_out'"
+        rm -rf "$_forge_dir"/watch-pr.* "$_forge_dir"/watch-pr-pin.* 2>/dev/null || true
     fi
     # …AND A NAMEREF ONTO A CANDIDATE — `HOME` OR `TMPDIR` — IS REFUSED, WITH THAT
     # CANDIDATE LEFT AS IT WAS. The probe compared only against the names this stage
