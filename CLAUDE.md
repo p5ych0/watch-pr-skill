@@ -189,11 +189,17 @@ rediscovering them.
   place. A postcondition cannot be written with the thing it checks for, and two
   checks behind one prefix are one check.
 
-  **`:` is one of those names**, which is why `${VAR:?…}` is carried by an
-  assignment and never by `: "${VAR:?…}"`. The refusal path is safe either way —
-  the expansion fires and no command runs — and the SUCCESS path invokes `:` with
-  the value as its argument, on every ordinary run. A function by that name then
-  replaces the value after every check has passed it. Measured; #181.
+  **`:` is one of those names**, so an expansion whose SUCCESS path is reachable
+  is carried by an assignment — `VAR="${VAR:?…}"` — and never by `: "${VAR:?…}"`.
+  Measured: with `:` defined as a function, the ordinary run invokes it with the
+  value as its argument and it replaces that value after every check has passed
+  it. #181.
+
+  **Where the expansion always FIRES, `: "${VAR:?…}"` is correct and is what the
+  tree uses.** `SKILL.md`'s four abort arms are reached only with `RB_REMOTE`
+  empty, so no command is ever run there; the name is in the source and is
+  unreachable. Read the state, not the spelling: what decides it is whether the
+  value can be present when that line runs.
 - **A list of names is wrong by omission.** Clearing "the names the verdict
   depends on" missed `read` and `[`. Enumerate everything, or change the shape so
   no list is needed.
