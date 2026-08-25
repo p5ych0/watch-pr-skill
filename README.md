@@ -821,25 +821,27 @@ plugin docs and open an issue.
   as a parameter expansion the shell refuses rather than through `echo`, which in
   your own shell may be a function that prints nothing.
 
-  So **if the line above names a path setup could not create or write**, re-run
+  Setup tries a directory under `TMPDIR` and, where that is refused, one under
+  `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.
+  **The abort counts nothing**, deliberately: each `ABORT:` line above it is one
+  attempt and its reason. There may be one or two, because the retry runs only
+  where the first refusal was about storage — a name it could not take on a sound
+  ancestry, or a directory it created and then could not write the value into —
+  and not where it was about the path or the checkout, which another parent does
+  not fix.
+
+  So **if they name a path setup could not create or write**, re-run
   first: the helper creates that directory exclusively, and the same diagnostic
   covers a name another account got to first, where the filesystem has room and
   re-running is the whole fix.
 
-  If re-running keeps failing, look at storage. Setup picks the transport
-  directory's parent on mode bits and prefers `TMPDIR`, and a `TMPDIR` that is
-  writable and executable can still fail to hold a directory or to take the file
-  written into it — a quota reached on that filesystem, a full one, or a read-only
-  mount. Re-run in a session whose `TMPDIR` points at storage with room, or with no
-  `TMPDIR` at all so setup uses `HOME`.
-
-  Three things about that, all of which the abort itself also says. It keys on what
-  the report **names** rather than on `TMPDIR` being set, because selection can
-  reject a set `TMPDIR` — a relative one, or one the mode bits refuse — and be
-  using `HOME` already. It says a new session rather than `unset TMPDIR` here,
-  because that variable may be readonly and, if it is a nameref, `unset` destroys
-  what it points at. And falling through to `HOME` escapes nothing where `HOME` is
-  on the same filesystem, which on many machines it is. An ancestry another account owns, or an `origin`
+  If re-running keeps failing, look at storage — and count the `ABORT:` lines.
+  **Two** means setup has already used both parents, so `unset TMPDIR` is not the
+  answer: that selects one it just tried. Point `TMPDIR` at storage with room
+  instead, on a filesystem `HOME` is not on. **One** means either that only one of
+  the two was an absolute directory setup could write to, in which case making the
+  other usable gives the retry somewhere to go, or that the refusal was not about
+  storage at all — which the line itself says. An ancestry another account owns, or an `origin`
   the checkout does not have, is a different failure and unsetting `TMPDIR` will
   not fix it.
 - **Stale review after a push:** the merge gate blocks a moved head. Post a fresh

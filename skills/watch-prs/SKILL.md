@@ -644,8 +644,12 @@ if [[ -z $RB_REMOTE ]]; then
     # the alias.
     if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
+       && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
+         && [[ -z ${!RB_TMPPARENT2:-} ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
-         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null; then
+         && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null \
+       && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
+         && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -654,12 +658,15 @@ if [[ -z $RB_REMOTE ]]; then
         #
         # AND WHAT `-w`/`-x` STILL CANNOT SEE: they are MODE BITS. A `TMPDIR` that
         # passes all three can fail to hold a directory anyway — an exhausted quota,
-        # a full filesystem — and setup then aborts with a usable `HOME` next to it.
-        # Restoring that fallback needs the retry to tell a RESERVATION failure
-        # apart from an ancestry refusal or a bad origin, which means either a
-        # second copy of the read-back or a branch on the helper's status outside
-        # the arm that contains it — and both re-open the walked-past-guard class
-        # this block exists to close. #161 carries it, with the shapes considered.
+        # a full filesystem, a read-only mount, a name another account got to first
+        # — and it can accept the directory and refuse the BYTES written into it,
+        # which is the same failure one step later. THE RETRY BELOW IS WHAT COVERS
+        # BOTH: the helper reports 2 for either, the `elif` reads that status in its
+        # own condition, and the read-back stays inside the arm that names its
+        # directory. A second copy of the read-back is the price, and it is the one
+        # this block can pay — a branch on the status OUTSIDE the arm is the
+        # walked-past-guard class this block exists to close, and there is not one.
+        # #161.
         #
         # WHAT IS NOT RETRIED, AND WHY. A parent whose ANCESTRY the helper refuses —
         # another account owning a component, a world-writable non-sticky one, an
@@ -668,12 +675,26 @@ if [[ -z $RB_REMOTE ]]; then
         # which is the removal this whole change is; and a `TMPDIR` whose ancestry
         # is unsafe is a state an operator has to SEE named, not one to step past
         # into `HOME`. The helper says which component and why.
+        # BOTH PARENTS ARE KEPT, not just the first usable one. The mode bits
+        # `-d`, `-w` and `-x` describe neither a filesystem that is full, over
+        # quota or read-only nor a name another account got to first, and any of
+        # those refused the session with `HOME` sitting beside it untried, because
+        # the fallthrough happened on the BITS and not on the failure. #161.
         RB_TMPPARENT=
         [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
             && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
+        RB_TMPPARENT2=
+        [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
+            && [[ -x ${HOME:-} ]] && RB_TMPPARENT2="$HOME"
+        # AND `HOME` MOVES UP WHERE `TMPDIR` IS UNUSABLE, so the FIRST attempt is
+        # always the one that exists and the second is simply absent.
         [[ -n $RB_TMPPARENT ]] \
-            || { [[ ${HOME:-} = /* ]] && [[ -d ${HOME:-} ]] && [[ -w ${HOME:-} ]] \
-                 && [[ -x ${HOME:-} ]] && RB_TMPPARENT="$HOME"; }
+            || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
+        # THE SAME PARENT TWICE IS NOT DEDUPLICATED, deliberately. The two leaves
+        # carry INDEPENDENT random suffixes, so two candidates under one parent are
+        # two usable names — and a name another account got to first is exactly the
+        # failure the retry recovers from. Clearing the second here would turn that
+        # case back into a refusal.
         # AND AN EMPTY PARENT CANNOT PRODUCE A PATH AT ALL. Written as
         # `[[ -n $RB_TMPPARENT ]] || { echo …; exit 1; }` this was a GUARD, and
         # `exit` is a name a startup file can replace with one that RETURNS: the
@@ -696,6 +717,18 @@ if [[ -z $RB_REMOTE ]]; then
         # value left to walk past it WITH.
         RB_ORIGIN_DIR=
         RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
+        # AND THE SECOND, EMPTY WHERE THERE IS NO SECOND PARENT. Cleared first for
+        # the reason the first one is: an abandoned assignment leaves the OLD
+        # value, and a stale path from an earlier run in the same long-lived shell
+        # would become this session's retry.
+        # A LITERAL DISCRIMINATOR IN THE LEAF, so the two names differ without
+        # `$RANDOM`. `unset RANDOM` removes its special behaviour — it expands to
+        # nothing thereafter — and with `TMPDIR` and `HOME` naming one directory
+        # both candidates then reduce to the same `watch-pr.$$.` path, so a retry
+        # after a taken name submits the name that was taken.
+        RB_ORIGIN_DIR2=
+        [[ -n $RB_TMPPARENT2 ]] \
+            && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr-2.$$.$RANDOM$RANDOM$RANDOM"
         # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
         # after a guard. `mkdir` is what proves this shell's helper created that
         # directory, and it is the helper that runs it — so a REFUSED call means
@@ -733,16 +766,107 @@ if [[ -z $RB_REMOTE ]]; then
                 exit 1
                 [[ -n "" ]]
             fi
+        # A SECOND ATTEMPT UNDER THE OTHER PARENT, AS A SECOND CALL — which is the
+        # whole design and not a detail.
+        #
+        # THE ALTERNATIVE WAS ONE CALL TAKING BOTH CANDIDATES, and it cannot work
+        # from here. The helper cannot TELL this shell which of the two it used: a
+        # second success status would put a status branch outside the arm holding
+        # the read-back, and a line on a stream would put the value's own channel
+        # into a capture. So the driver would have to GUESS — and the candidate
+        # names are argv, published at `exec`, so every test of that name on a
+        # parent another account can write is a check-then-use. Three of them were
+        # built and refuted in that order: the leaf existing, `-O` on the leaf
+        # descriptor (a symlink to another operator-owned transport passes it), and
+        # `[[ ! -L ]] && [[ -d ]] && [[ -O ]]` on the directory (alternate the entry
+        # between the two and the sequential probes disagree). There is no `openat`
+        # here to anchor the identity. #161, #176.
+        #
+        # AN `elif` READS THE STATUS WITHOUT LEAVING THE `if`. `$?` after a failed
+        # condition is that command's, `[[` is a reserved word, and the read-back
+        # stays contained in the arm below — so the distinction is usable without
+        # anything becoming a statement after a guard. And each arm knows exactly
+        # which directory the helper just created, because it named it: there is
+        # nothing to guess and therefore nothing to race.
+        #
+        # THE READ-BACK IS WRITTEN TWICE, and that is the price. A function would
+        # hold it once and cannot be used: `return` is a name a startup file can
+        # replace with one that does not return, and `readonly -f` makes this
+        # document's own definition fail so an inherited one runs. `CLAUDE.md`
+        # records both. Two copies of a correct read-back beat one copy of a guess.
+        #
+        # AND A REFUSED FIRST ATTEMPT HAS ALREADY SAID WHY, on the helper's stderr,
+        # naming the component and the reason. That is what makes retrying under
+        # the other parent honest rather than a silent route around it — which is
+        # the defect the old candidate loop had. The note below says a retry
+        # happened; the helper's line above says what it is retrying past.
+        # NOTHING RUNS IN THIS ARM THAT IS NOT A REDIRECTION OR AN EXPANSION, and
+        # the announcement that used to is why it is stated. A note here is an
+        # `echo`, and `echo` is a NAME. In the CONDITION, a function by that name
+        # runs immediately before `$RB_SCRIPTS` and `$RB_ORIGIN_DIR2` are expanded
+        # for the call and can point both at a script and a directory of its own.
+        # Moved after the read it is no better: it then runs before the non-empty,
+        # single-line, identity and export checks, and a function that assigns
+        # `RB_REMOTE` replaces the value that was just authenticated. There is no
+        # third position — every one of them is before something that trusts a
+        # variable — and no command-free way to print, since `${VAR:?…}` terminates.
+        #
+        # SO THE RETRY IS NOT ANNOUNCED, and what makes that acceptable is that the
+        # REFUSAL is: the helper's own `ABORT:` line named the directory and the
+        # reason before this arm was reached. What the operator does not get is a
+        # line saying which parent the session ended up on. The abort further down
+        # covers the case where both failed.
+        # `$?` IS THE FIRST CALL'S STATUS, AND IT IS READ INSIDE THE `if`. That is
+        # what makes the distinction usable: 2 means both ancestry walks passed and
+        # the STORAGE would not take what the helper asked of it — the directory
+        # could not be created exclusively, or the leaf inside it could not be
+        # written, which is the same failure one step later. A full filesystem, a
+        # quota, a read-only mount, a name another account got to first. And 1
+        # means the refusal was about the PATH or the checkout, which another
+        # parent does not fix and an operator has to see named.
+        #
+        # NOT A BRANCH OUTSIDE THE ARM. `elif [[ $? -eq 2 ]] && helper …; then` is a
+        # condition of this same `if`, so the read-back below stays contained in the
+        # arm that names its directory — nothing here is a statement after a guard,
+        # which is the shape #155 and #158 removed. `[[` is a reserved word and `$?`
+        # is a shell parameter, so neither is a name anything can take.
+        #
+        # AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness
+        # test comes second: a command between the two would replace it.
+        elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
+            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
+            # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
+            # this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
+            # probe and the working directory are built from further down, so
+            # leaving it on the parent that just refused meant the origin was read
+            # from `HOME` and the session then died allocating its working directory
+            # under the same full `TMPDIR` — the exact state this retry exists for.
+            # The refused one stays as the second candidate: retrying there later is
+            # pointless where the filesystem is full and correct where the first
+            # name was simply taken.
+            RB_TMPPARENT2="$RB_TMPPARENT"
+            RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
+            if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR2/origin"; then
+                /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
+            else
+                /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
+                /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
+                echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
+                exit 1
+                [[ -n "" ]]
+            fi
         else
-            # THE RECOVERY IS NAMED, because the operator has one and nothing on
-            # screen said so. The parent is chosen by mode bits — `-d`, `-w`, `-x`
-            # — and a `TMPDIR` that passes all three can still fail to hold a
-            # directory: a quota reached on that filesystem, a full one, or a
-            # read-only mount none of those bits describe. The helper then refuses,
-            # and a perfectly usable `HOME` sits next to it untried, because the
-            # fallthrough happens on the mode bits and not on the failure. #161
-            # carries the automatic retry and why it is not here; this is the step
-            # the operator can take without one.
+            # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it
+            # cannot tell them apart — the first call refused and the second either
+            # was not made or refused as well. The helper has named each attempt it
+            # made on stderr, so the message points at those lines rather than
+            # counting them; see IT DOES NOT COUNT THE ATTEMPTS below, which is the
+            # whole of why. The advice that used to live here — unset `TMPDIR` and
+            # re-run — is what the retry now does where there IS a second parent and
+            # the first refusal was retryable, so repeating it would send the
+            # operator to do again what already happened. #161.
             #
             # THE EXPANSION IS THE MESSAGE, because `echo` is a NAME and this line is
             # the whole of what the change does: an `echo` that returns without
@@ -805,13 +929,26 @@ if [[ -z $RB_REMOTE ]]; then
             # parse — five hundred lines below, where nothing points back here.
             # `test-pr-skill-contract.sh` parses the lifted block, which is what
             # caught it; the phrasing avoids the character rather than escaping it.
-            : "${RB_REMOTE:?could not read the origin for this session. The line above says which refusal this was. If it names a path setup could not create or write, re-run: the name may simply have been taken. If that keeps failing, the filesystem may be full, over quota or read-only — re-run in a session whose TMPDIR points at storage with room, or with no TMPDIR at all so setup uses HOME, which helps only where HOME is not on the same filesystem.}"
+            # AND IT DOES NOT COUNT THE ATTEMPTS, because it cannot. Reaching this
+            # arm means the first call failed and the second either was not made or
+            # failed too — and the three reasons it was not made are different: there
+            # was no second candidate, or the first refusal was TERMINAL and the
+            # status gate skipped it, or it ran and refused as well. Telling them
+            # apart here needs the first call's status carried in a variable, which
+            # is another name for a startup file to make readonly, for a claim the
+            # operator can read off the lines above anyway.
+            #
+            # TWO MESSAGES CHOSEN ON `RB_ORIGIN_DIR2` WAS THE PREVIOUS SHAPE, and it
+            # was wrong for exactly the middle case: a terminal first refusal with a
+            # second candidate present said two attempts were made when the gate had
+            # correctly skipped the second.
+            : "${RB_REMOTE:?could not read the origin for this session. Setup could not get a transport directory it could use, and each ABORT line above is one attempt and its reason. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with or a checkout with no usable origin.}"
             echo "ABORT: could not read this session's origin"
             exit 1
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: RB_TMPPARENT or RB_ORIGIN_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
+        echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
         [[ -n "" ]]
     fi
@@ -963,6 +1100,8 @@ if [[ -z $RB_REMOTE ]]; then
     # the alias.
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
+       && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
+         && [[ -z ${!RB_PIN_DIR2:-} ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
@@ -973,6 +1112,13 @@ if [[ -z $RB_REMOTE ]]; then
         # handed.
         RB_PIN_DIR=
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
+        # AND THE SECOND, for the same reason and because half a retry is none:
+        # the origin read succeeding under `HOME` while this probe still refused on
+        # `TMPDIR` would end the session one step later, on the pin instead of on
+        # the origin. #161.
+        RB_PIN_DIR2=
+        [[ -n $RB_TMPPARENT2 ]] \
+            && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin-2.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
         # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
         # above states: a refused call means the `mkdir` inside the helper found
@@ -985,6 +1131,23 @@ if [[ -z $RB_REMOTE ]]; then
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
             /usr/bin/env rm -f "$RB_PIN_DIR/pin"
             /usr/bin/env rmdir "$RB_PIN_DIR"
+        # THE SAME SECOND CALL AS THE ORIGIN READ, and for the same reasons: an
+        # `elif` reads the first call's status in its own condition, which is inside
+        # the same `if`, and each arm names the directory the helper just created
+        # rather than guessing between two.
+        elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]] \
+            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
+            # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
+            # filesystem can fill between the origin read and this probe, and
+            # without the swap the working directory is still allocated from the
+            # one that just refused — so a pin that recovered would be followed by
+            # a session that could not start.
+            RB_TMPPARENT2="$RB_TMPPARENT"
+            RB_TMPPARENT="${RB_PIN_DIR2%/*}"
+            { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
+                && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR2/pin"
+            /usr/bin/env rm -f "$RB_PIN_DIR2/pin"
+            /usr/bin/env rmdir "$RB_PIN_DIR2"
         fi
         # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
         # rounds of review walked up to it and it is cheaper to state than to
@@ -1165,7 +1328,7 @@ if [[ -z $RB_REMOTE ]]; then
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: RB_PIN_DIR or RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
+        echo "ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
         exit 1
         [[ -n "" ]]
     fi

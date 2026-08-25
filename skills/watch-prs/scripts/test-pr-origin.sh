@@ -135,260 +135,97 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 
-# ── A SECOND CANDIDATE, TRIED ONLY WHERE THE RESERVATION FAILED ───────────
-# The caller picks the transport parent on MODE BITS — `-d`, `-w`, `-x` — and
-# those describe neither a filesystem that is full, over quota or read-only nor a
-# name another account got to first. Every one of those refused here with a
-# perfectly usable second parent beside it untried, because the caller cannot tell
-# a RESERVATION failure from an ancestry refusal and must not route around the
-# second. This process runs both the `mkdir` and the walk, so it can.
-_fb_new() {   # _fb_new ; prints a fresh <parent>/dir path, empty on failure
+# ── THE REMOVED FALLBACK ARGUMENT IS REFUSED, NOT IGNORED ─────────────────
+# 2.0.62 took an optional second candidate here and 2.0.63 removed it, because the
+# driver could not use the distinction it existed for. A caller written against
+# that form is out there, and reading `$2` while dropping `$3` hands it an ordinary
+# refusal on the first name while the fallback it believes it supplied is silently
+# ignored — which is the worst of the three possible behaviours.
+_ex_rc=0
+_ex_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$TMP/exarg.a" "$TMP/exarg.b" 2>&1)" || _ex_rc=$?
+{ [ "$_ex_rc" -ne 0 ] \
+  && case "$_ex_out" in *"takes a mode and ONE directory"*) true ;; *) false ;; esac \
+  && [ ! -e "$TMP/exarg.a" ] && [ ! -e "$TMP/exarg.b" ]; } \
+    && pass "a second directory argument is refused by name, not silently ignored" \
+    || die "the removed fallback argument was ignored (rc=$_ex_rc out='$_ex_out')"
+
+# ── A STORAGE FAILURE IS STATUS 2, AND A PATH OR CHECKOUT REFUSAL IS 1 ────
+# This is the only place that runs both the `mkdir` and the ancestry walk, so it is
+# the only one that can tell a caller which failure it had. A caller retrying under
+# another parent must not step past an ancestry this process refused — what is
+# wrong there is not the storage — and 2 is what says the storage or the moment was
+# the whole of it.
+#
+# TWO MOMENTS PRODUCE A 2, and they are the same question one step apart: the
+# directory could not be created exclusively, or the LEAF inside it could not be
+# written. A filesystem with room for a directory and none for the bytes in it
+# fails at the second, and a caller told that terminally would skip a parent that
+# would have worked. The write cases live further down, beside the cleanup they
+# also prove; the cases here are the reservation half.
+_st_new() {   # _st_new ; prints a fresh <parent>/dir path, empty on failure
     local _p
-    _p="$(mktemp -d "$TMP/fb.XXXXXX")" || _p=""
+    _p="$(mktemp -d "$TMP/st.XXXXXX")" || _p=""
     [ -n "$_p" ] && [ -d "$_p" ] && printf '%s/dir' "$_p"
 }
-_fb_call() {   # _fb_call <mode> <args…> ; prints "<rc>|<stderr>"
-    local rc=0 err mode="$1"; shift
-    err="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+_st_dir="$(_st_new)"
+[ -n "$_st_dir" ] || die "no scratch for the status cases"
+mkdir "$_st_dir"
+_st_rc=0
+(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 2 ] \
+    && pass "a name that could not be taken on a sound ancestry reports 2" \
+    || die "a reservation failure reported $_st_rc, not 2"
+# …AND AN ANCESTRY REFUSAL IS 1, which is what the caller must not retry past.
+_st_open="$TMP/stopen"; mkdir -p "$_st_open"; mkdir -p "$_st_open/dir"; chmod 777 "$_st_open"
+_st_rc=0
+(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_open/dir" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 1 ] \
+    && pass "…while an ancestry the walk refuses reports 1" \
+    || die "an ancestry refusal reported $_st_rc, not 1"
+# …AND SO IS AN UNREADABLE ORIGIN, which is the other class a retry cannot help:
+# the directory was created and the failure is about the checkout, not the storage.
+_st_dir2="$(_st_new)"
+[ -n "$_st_dir2" ] || die "no scratch for the origin-status case"
+_st_rc=0
+(cd "$TMP" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE= \
+    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir2" >/dev/null 2>&1) || _st_rc=$?
+[ "$_st_rc" -eq 1 ] \
+    && pass "…and so does a checkout with no usable origin" \
+    || die "an unreadable origin reported $_st_rc, not 1"
+
+# …AND A WRITE THAT FAILS AFTER THE DIRECTORY EXISTS IS 2 AS WELL, because it is
+# the same storage failure one step later: a filesystem with room for a directory
+# and none for the bytes in it fails there, and a caller told that terminally would
+# skip a second parent that would have worked.
+#
+# `ulimit -f 0` IS HOW THAT STATE IS BUILT, and this case runs the helper WITHOUT
+# the watchdog for the reason the pair below it gives: `run_limited` captures
+# through regular files, which that limit forbids.
+_wr_bin="$TMP/wrbin"; mkdir -p "$_wr_bin"
+for _wr_mode in read pin; do
+    _wr_dir="$(_st_new)"
+    [ -n "$_wr_dir" ] || die "no scratch for the $_wr_mode write-status case"
+    _wr_rc=0
+    (cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-        /usr/bin/env bash -p "$SCRIPT" "$mode" "$@" 2>&1 >/dev/null)" || rc=$?
-    printf '%s|%s' "$rc" "$err"
-}
-
-# THE FIRST CANDIDATE WINS WHERE IT CAN BE RESERVED, which every other case here
-# takes for granted by making the first name exist before the call. Without this
-# one, an unconditional switch to the second candidate passes all of them — and the
-# caller reads whichever leaf exists, so it would follow the helper into the wrong
-# directory without noticing.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the first-wins case"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-_fb_val=""; [ -f "$_fb_d1/origin" ] && _fb_val="$(<"$_fb_d1/origin")"
-{ [ "${_fb_got%%|*}" = 0 ] && [ "$_fb_val" = "$REAL" ] && [ ! -e "$_fb_d2" ]; } \
-    && pass "a first candidate that can be reserved wins, and the second is never created" \
-    || die "the first candidate did not win (got='$_fb_got' value='$_fb_val')"
-# …AND SAYS NOTHING, because a note on every ordinary session is a note nobody
-# reads on the one where it matters.
-case "${_fb_got#*|}" in
-    '') pass "…and the ordinary path is silent" ;;
-    *)  die "the ordinary two-candidate path printed: '${_fb_got#*|}'" ;;
-esac
-
-# A NAME ANOTHER ACCOUNT GOT TO FIRST is the reservation failure this can be built
-# from without a full filesystem: the directory is created EXCLUSIVELY, so an
-# existing name refuses exactly as a quota does.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the fallback cases"
-mkdir "$_fb_d1"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-_fb_val=""; [ -f "$_fb_d2/origin" ] && _fb_val="$(<"$_fb_d2/origin")"
-{ [ "${_fb_got%%|*}" = 0 ] && [ "$_fb_val" = "$REAL" ]; } \
-    && pass "a name that cannot be reserved falls through to the second candidate" \
-    || die "the fallback did not produce a value (got='$_fb_got' value='$_fb_val')"
-case "${_fb_got#*|}" in
-    *"trying '$_fb_d2'"*) pass "…and says so, so a failing TMPDIR is visible before it matters elsewhere" ;;
-    *) die "the fallback was silent: '${_fb_got#*|}'" ;;
-esac
-# AND THE FIRST CANDIDATE IS LEFT ALONE. It belongs to whoever created it, which
-# is the whole reason the `mkdir` refused — removing it on the way past would be
-# this helper deleting a directory it did not make.
-{ [ -d "$_fb_d1" ] && [ -z "$(ls -A "$_fb_d1")" ]; } \
-    && pass "…and leaves the name it could not take untouched" \
-    || die "the fallback disturbed the first candidate"
-
-# …AND `pin` FALLS BACK THE SAME WAY, because the two modes differ only in which
-# leaf they write and a fallback that covered one of them would be a trap.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the pin fallback case"
-mkdir "$_fb_d1"
-_fb_got="$(REVIEW_BUS_REMOTE="$REAL" _fb_call pin "$_fb_d1" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" = 0 ] && [ -f "$_fb_d2/pin" ]; } \
-    && pass "…and pin falls back too, writing its own leaf in the second candidate" \
-    || die "pin did not fall back (got='$_fb_got')"
-
-# AN ANCESTRY REFUSAL DOES NOT FALL THROUGH, and that is the half that makes the
-# retry safe. An account owning a component, a world-writable non-sticky one or an
-# ACL is a state the operator has to SEE named — stepping past it into another
-# parent is what the caller's old candidate loop did wrong, and it is why this
-# decision could not stay on the caller's side.
-_fb_open="$TMP/fbopen"; mkdir -p "$_fb_open"; chmod 777 "$_fb_open"
-_fb_d2="$(_fb_new)"
-[ -n "$_fb_d2" ] || die "no scratch for the ancestry-refusal case"
-_fb_got="$(_fb_call read "$_fb_open/dir" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" -ne 0 ] && [ ! -e "$_fb_d2" ]; } \
-    && pass "an ancestry the walk refuses is reported rather than routed around" \
-    || die "a refused ancestry fell through to the second candidate (got='$_fb_got')"
-case "${_fb_got#*|}" in
-    *"could be replaced between this write"*) pass "…naming the component and the reason, as it did with one candidate" ;;
-    *) die "the ancestry refusal lost its reason: '${_fb_got#*|}'" ;;
-esac
-
-# …AND THAT IS ASSERTED WHERE THE RESERVATION IS WHAT FAILS, which is the arm the
-# case above cannot reach: a world-writable parent is still WRITABLE, so the
-# `mkdir` succeeds there and the refusal comes from the walks that run after it.
-# Taking the name as well makes the `mkdir` fail, and only then does the
-# classification decide whether a second candidate is tried at all.
-_fb_open2="$TMP/fbopen2"; mkdir -p "$_fb_open2"; mkdir -p "$_fb_open2/dir"; chmod 777 "$_fb_open2"
-_fb_d2="$(_fb_new)"
-[ -n "$_fb_d2" ] || die "no scratch for the classified-refusal case"
-_fb_got="$(_fb_call read "$_fb_open2/dir" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" -ne 0 ] && [ ! -e "$_fb_d2" ]; } \
-    && pass "…and a reservation failure on a REFUSED ancestry is not a fallback either" \
-    || die "a refused ancestry was classified as a reservation failure (got='$_fb_got')"
-case "${_fb_got#*|}" in
-    *"trying '$_fb_d2'"*) die "the refused ancestry announced a retry: '${_fb_got#*|}'" ;;
-    *) pass "…and does not announce one" ;;
-esac
-
-# A SECOND CANDIDATE THAT ALREADY EXISTS IS REFUSED BEFORE EITHER IS ATTEMPTED,
-# and that refusal is what makes the caller's rule sound. The caller cannot be told
-# which candidate was used — a second success status would put a status branch back
-# on the driver's side — so it tests for the leaf under the second and reads the
-# first where that is absent. A run that SUCCEEDS on the first candidate with a
-# stale second one beside it, from a leak or a name collision, would hand the
-# caller a previous session's value; for `read` that pins the session to another
-# repository and retargets every later post.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the stale-fallback case"
-mkdir "$_fb_d2"; printf 'git@github.com:other/repo.git\n' > "$_fb_d2/origin"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"already exists"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "a second candidate that already exists is refused, not stepped past" \
-    || die "a stale second candidate was accepted (got='$_fb_got')"
-# AND THE STALE VALUE IS STILL THERE, untouched: this helper removes only what it
-# created, and it created neither.
-[ "$(<"$_fb_d2/origin")" = 'git@github.com:other/repo.git' ] \
-    && pass "…and the refusal leaves what was already there alone" \
-    || die "the refusal disturbed a directory it did not create"
-
-# BOTH FAILING IS A REFUSAL NAMING THE LAST ONE TRIED, so the operator is told
-# where it ended up rather than where it started. The second candidate cannot
-# pre-exist — the case above refuses that — so "both failing" means the first was
-# taken and the second could not be created for a reason of its own, which an
-# unwritable parent produces.
-#
-# AND THAT REASON IS DISCRETIONARY, so root does not meet it: a mode-0500 parent is
-# still writable to uid 0, the helper creates the fallback, and the case would fail
-# on a state it never reached rather than on the one it is about. This file already
-# skips by name where a shell cannot produce the state a case needs; this is the
-# same. Nothing else here depends on being non-root.
-if [ "$(id -u)" = 0 ]; then
-    echo "ok   - (running as root; the both-reservations-fail case needs a parent root cannot write)"
-else
-_fb_d1="$(_fb_new)"
-_fb_p2="$(mktemp -d "$TMP/fbro.XXXXXX")" || _fb_p2=""
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_p2" ]; } || die "no scratch for the both-fail case"
-mkdir "$_fb_d1"; chmod 500 "$_fb_p2"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_p2/dir")"
-chmod 700 "$_fb_p2"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"could not create '$_fb_p2/dir' exclusively"*) true ;; *) false ;; esac; } \
-    && pass "…and both failing refuses, naming the candidate it ended on" \
-    || die "the both-failed refusal named the wrong candidate: '${_fb_got#*|}'"
-fi
-
-# A FALLBACK WHOSE IMMEDIATE PARENT OTHERS CAN WRITE IS REFUSED, and that refusal
-# is what makes the caller's rule sound rather than merely documented.
-#
-# The caller cannot be told which candidate holds the value, so it tests for the
-# leaf under the second. On a parent other accounts can write, that is a
-# check-then-use nothing in the helper can close: the name is public from `exec`,
-# so the leaf can be created after any probe — and as a SYMLINK to another
-# operator-owned transport it defeats the caller's `-O` and `-f` as well, since
-# those follow it to a file the operator really does own. Where nobody else can
-# create the directory, none of that is reachable.
-#
-# THE IMMEDIATE PARENT, NOT THE WHOLE ANCESTRY. Sticky stops another account
-# from RENAMING or deleting an entry it does not own, and does not stop them
-# CREATING a new name — and creating is all this attack needs. So a sticky
-# world-writable component ABOVE the parent is still fine, and this case proves
-# both halves.
-_fb_shared="$TMP/fbshared"; mkdir -p "$_fb_shared"; chmod 1777 "$_fb_shared"
-_fb_d1="$(_fb_new)"
-[ -n "$_fb_d1" ] || die "no scratch for the shared-fallback case"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_shared/dir")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"not this account's alone"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "a fallback whose parent other accounts can write is refused" \
-    || die "a shared fallback parent was accepted (got='$_fb_got')"
-# …AND A SYMLINKED PARENT IS FOLLOWED, which is the half a lexical check cannot
-# see: the link is ours and mode 0777 on a symlink means nothing, while what it
-# POINTS AT is a parent other accounts can write. Without the resolved-path pass
-# this refusal is skipped and the plant is available again.
-_fb_shared2="$TMP/fbshared2"; mkdir -p "$_fb_shared2"; chmod 1777 "$_fb_shared2"
-_fb_link="$TMP/fblink"; rm -f "$_fb_link"; ln -s "$_fb_shared2" "$_fb_link"
-_fb_d1="$(_fb_new)"
-[ -n "$_fb_d1" ] || die "no scratch for the symlinked-fallback case"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_link/dir")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"must be this account's alone"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "…and a fallback parent that RESOLVES to a shared one is refused too" \
-    || die "a symlinked shared fallback parent was accepted (got='$_fb_got')"
-
-# …AND A DANGLING SYMLINK AT THE FALLBACK NAME IS AN EXISTING ENTRY, which `-e`
-# reports as absent because it follows the link. The refusal was skipped, the first
-# candidate succeeded, and a target that resolves LATER — the account that planted
-# it creating what it points at — makes the caller's leaf probe select data this run
-# never wrote.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the dangling-symlink case"
-ln -s "$_fb_d2.target-that-does-not-exist" "$_fb_d2"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"already exists"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "…and a DANGLING symlink at the fallback name is an existing entry" \
-    || die "a dangling symlink was read as an absent fallback (got='$_fb_got')"
-
-# …AND A SHARED COMPONENT ABOVE IT IS NOT REFUSED, which is the half that keeps
-# every scratch tree under `/tmp` usable: `$TMP` itself is mode 700 and this
-# account's, and `/tmp` above it is exactly the sticky world-writable case the
-# ordinary walk exists to allow.
-_fb_d1="$(_fb_new)"; _fb_d2="$(_fb_new)"
-{ [ -n "$_fb_d1" ] && [ -n "$_fb_d2" ]; } || die "no scratch for the shared-ancestor case"
-mkdir "$_fb_d1"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d2")"
-{ [ "${_fb_got%%|*}" = 0 ] && [ -f "$_fb_d2/origin" ]; } \
-    && pass "…while a sticky world-writable component ABOVE that parent is not" \
-    || die "a sticky ancestor was refused as a shared parent (got='$_fb_got')"
-
-# A THIRD ARGUMENT THAT IS NOT A CANDIDATE IS REFUSED UP FRONT, and up front is
-# the point: a relative fallback only looked at when the first one fails is a
-# refusal the operator meets on their worst day rather than on an ordinary one.
-_fb_d1="$(_fb_new)"
-[ -n "$_fb_d1" ] || die "no scratch for the argument cases"
-_fb_got="$(_fb_call read "$_fb_d1" 'relative/dir')"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"fallback directory must be absolute"*) true ;; *) false ;; esac \
-  && [ ! -e "$_fb_d1" ]; } \
-    && pass "a relative fallback is refused before the first candidate is touched" \
-    || die "a relative fallback was accepted (got='$_fb_got')"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d1")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"same path as the first"*) true ;; *) false ;; esac; } \
-    && pass "…and a fallback onto the same path is refused, not attempted twice" \
-    || die "the same path was accepted as a fallback (got='$_fb_got')"
-_fb_got="$(_fb_call read "$_fb_d1" "$_fb_d1.b" "$_fb_d1.c")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"at most one fallback"*) true ;; *) false ;; esac; } \
-    && pass "…and a fourth argument is refused rather than ignored" \
-    || die "a fourth argument was ignored (got='$_fb_got')"
-# AND AN EMPTY THIRD ARGUMENT IS "NO FALLBACK" rather than a candidate. The caller
-# builds it by expansion from a parent it may not have, so empty is the ordinary
-# way to say there is one usable parent — and taken as a candidate it would reach
-# the `mkdir` as `/` with the leaf appended.
-_fb_d1="$(_fb_new)"
-[ -n "$_fb_d1" ] || die "no scratch for the empty-fallback case"
-mkdir "$_fb_d1"
-_fb_got="$(_fb_call read "$_fb_d1" "")"
-{ [ "${_fb_got%%|*}" -ne 0 ] \
-  && case "${_fb_got#*|}" in *"could not create '$_fb_d1' exclusively"*) true ;; *) false ;; esac; } \
-    && pass "an empty third argument means no fallback, and refuses on the first" \
-    || die "an empty fallback was treated as a candidate (got='$_fb_got')"
+        bash -c 'ulimit -f 0 2>/dev/null || exit 97
+                 trap "" XFSZ
+                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wr_mode" "$_wr_dir" >/dev/null 2>&1) || _wr_rc=$?
+    if [ "$_wr_rc" = 97 ]; then
+        echo "ok   - (this shell cannot set a zero file-size limit; the $_wr_mode write-status case did not run)"
+        continue
+    fi
+    [ "$_wr_rc" -eq 2 ] \
+        && pass "…and a write that fails after the directory exists reports 2 ($_wr_mode)" \
+        || die "the $_wr_mode write failure reported $_wr_rc, not 2"
+done
 
 # ── it reads what origin says ──────────────────────────────────────────────
 got="$(run read)"
@@ -1425,9 +1262,18 @@ for _wf_mode in read pin; do
         echo "ok   - (this shell cannot set a zero file-size limit; the $_wf_mode write-failure case did not run)"
         continue
     fi
-    { [ "$_wf_rc" -ne 0 ] \
-      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac; } \
-        && pass "a write that opens and then fails is refused by name ($_wf_mode)" \
+    # THE STATUS IS ASSERTED, NOT MERELY NON-ZERO. 2 is what makes the driver try
+    # its second parent, and this case IS the storage failure that must reach it —
+    # a zero file-size limit is a filesystem refusing the bytes. `-ne 0` passed
+    # against the unfixed code, which exited 1 here and sent the driver home.
+    #
+    # AND THE DIAGNOSTIC NAMES STORAGE, because the operator is told to read each
+    # `ABORT:` line and the message used to give exactly two causes, neither of
+    # them this one — so a full filesystem was reported as a name already taken.
+    { [ "$_wf_rc" = 2 ] \
+      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac \
+      && case "$_wf_out" in *"storage refused the write"*) true ;; *) false ;; esac; } \
+        && pass "a write that opens and then fails reports 2 and names storage ($_wf_mode)" \
         || die "the $_wf_mode write-failure case gave rc=$_wf_rc '$_wf_out'"
     [ ! -e "$_wf_dir" ] \
         && pass "…and the directory it had reserved is given back ($_wf_mode)" \
@@ -1491,9 +1337,17 @@ _res_ref=""
 _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
 { [ -n "$_res_ref" ] \
   && case "$_res_ref" in *'rm -f'*|*rmdir*|*rb_cleanup*) false ;; *) true ;; esac \
-  && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
+  && case "$_res_ref" in *'exit "${2:-1}"'*) true ;; *) false ;; esac; } \
     && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
     || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
+# AND IT STOPS WITH THE STATUS IT WAS GIVEN, defaulting to 1. Most refusals are
+# terminal; 2 says the storage would not take what this script asked of it, and a
+# caller retries that under another parent. A default of 1 is what keeps every
+# existing call site unchanged.
+case "$_res_ref" in
+    *'exit "${2:-1}"'*) pass "…and stops with the status it was given, terminal by default" ;;
+    *) die "rb_refuse does not take a status: '$_res_ref'" ;;
+esac
 _res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXIT$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 _res_tl=0; _res_tl="$(grep -n "^trap 'rb_on_signal TERM' TERM$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tl=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_tl" -gt 0 ] && [ "$_res_tl" -lt "$_res_mk" ]; } \

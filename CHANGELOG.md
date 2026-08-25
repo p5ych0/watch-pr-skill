@@ -1,5 +1,88 @@
 # Changelog
 
+## [2.0.63] — 2026-08-24
+
+- **A `TMPDIR` that cannot hold a directory no longer ends the session.** Setup
+  picks the transport parent on mode bits — `-d`, `-w`, `-x` — and prefers
+  `TMPDIR`. Those describe neither a filesystem that is full, over quota or
+  read-only nor a name another account got to first, and the fallthrough to `HOME`
+  happened on the BITS rather than on the failure: any of them refused the session
+  with a perfectly usable `HOME` sitting beside it untried.
+
+  Setup now tries a directory under `TMPDIR` and, where that is refused, one under
+  `HOME`. **The refusal is announced; the retry is not.** The helper's own `ABORT:`
+  line names the directory and the reason, so nothing is routed around in silence —
+  which is what the old candidate loop got wrong — but there is no note saying which
+  parent the session ended up on. A note would be an `echo`, `echo` is a name in the
+  driving shell, and every position for it is before something that trusts a
+  variable: in the call's condition it precedes `$RB_SCRIPTS` being expanded, and
+  after the read it precedes the identity checks, where a function that assigns
+  `RB_REMOTE` replaces the value just authenticated.
+
+  **It is a second CALL, not a second candidate passed to one.** The helper cannot
+  tell the driver which of two candidates it used: a second success status would
+  put a status branch outside the arm holding the read-back, and a line on a stream
+  would put the value's own channel into a capture. A single call would therefore
+  leave the driver guessing from a name that is public in argv, and every test of
+  such a name is a check-then-use — three defences were built for it and all three
+  refuted. An `elif` reads the first call's status IN ITS OWN CONDITION —
+  `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so nothing becomes a
+  statement after a guard, and each arm names the directory the
+  helper just created, so there is nothing to guess and nothing to race.
+
+  The read-back is written twice, which is the price. A function would hold it once
+  and cannot be used here: `return` is a name a startup file can replace, and
+  `readonly -f` makes the document's own definition fail so an inherited one runs.
+
+  The pin probe retries the same way, because half a retry is none: the origin read
+  succeeding under `HOME` while that probe still refused on `TMPDIR` would end the
+  session one step later.
+
+  **The parent that worked becomes the primary one**, which is what makes this a
+  fix rather than half of one: `RB_TMPPARENT` is what the pin probe and the
+  session's working directory are built from, so leaving it on the parent that just
+  refused read the origin from `HOME` and then died allocating the working
+  directory under the same full `TMPDIR`.
+
+  The abort counts nothing and recommends nothing: each `ABORT:` line above it is
+  one attempt and its reason, and there may be one or two, since the retry runs only
+  where the first refusal was about storage. It cannot know which — the three ways
+  to reach it differ and telling them apart there needs the first call's status in a
+  variable, for a claim the operator can read off those lines. It does not DIAGNOSE
+  either: the directory is created
+  exclusively, so two names simply being taken produces the same pair of refusals
+  as two full filesystems, and the helper's own lines are what tell them apart.
+
+  **`pr-origin.sh`'s optional second-candidate argument, added in 2.0.62, is
+  removed again.** It was built for the single-call design this replaces, and
+  nothing consumes it: an installed helper whose contract promises a distinction no
+  caller can act on is worse than one that does not offer it. The helper takes one
+  directory, as it did before 2.0.62.
+
+  **Only a storage failure is retried.** `pr-origin.sh` reports **2** where both
+  ancestry walks passed and the storage would not take what it asked — the directory
+  could not be created exclusively, or the leaf inside it could not be written: a
+  full filesystem, a quota, a read-only mount, a name another account got to first.
+  It reports **1** where the refusal was about the path or the checkout. A 1 is terminal: another parent
+  fixes none of those, and stepping past one is what the driver's old candidate loop
+  did wrong.
+
+  **The two write refusals name storage too**, because the operator is told to read
+  each `ABORT:` line and they gave exactly two causes — the name being taken, or a
+  symlink — neither of which is a full filesystem. On the first of two attempts that
+  is the wrong reason for the failure the retry then recovers from.
+
+  The driver reads that status in the retry's own condition —
+  `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so the read-back stays
+  contained in the arm that names its directory rather than becoming a statement
+  after a guard. Closes #161.
+
+  It MITIGATES #160 without closing it. A squatter who pre-creates the
+  argv-published first name costs a retry rather than a refused session — but an
+  account watching argv continuously can pre-create the second name as well, and
+  both parents being one shared sticky directory is a configuration the selection
+  allows. The distinct suffixes prevent an accidental collision, not a watcher.
+
 ## [2.0.62] — 2026-08-24
 
 - **`pr-origin.sh` takes a second transport directory and falls back to it.** The
