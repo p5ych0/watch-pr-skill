@@ -710,7 +710,7 @@ if [[ $MODE = pin ]]; then
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
-        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink" 2
+        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; the name is already taken or is a symlink, or the storage refused the write" 2
     # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
     # EXIT handler would remove the leaf this run just wrote, so it has to go. The
     # SIGNAL handlers stay armed through the final command: resetting them too left
@@ -862,7 +862,7 @@ if [[ $_rb_origin != "${_rb_origin%%'
     rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
 fi
 printf '%s\n' "$_rb_origin" > "$OUT" \
-    || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink" 2
+    || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; the name is already taken or is a symlink, or the storage refused the write" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
 # stay armed through the final command.
 trap - EXIT

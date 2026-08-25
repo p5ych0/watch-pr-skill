@@ -67,6 +67,11 @@
   fixes none of those, and stepping past one is what the driver's old candidate loop
   did wrong.
 
+  **The two write refusals name storage too**, because the operator is told to read
+  each `ABORT:` line and they gave exactly two causes — the name being taken, or a
+  symlink — neither of which is a full filesystem. On the first of two attempts that
+  is the wrong reason for the failure the retry then recovers from.
+
   The driver reads that status in the retry's own condition —
   `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so the read-back stays
   contained in the arm that names its directory rather than becoming a statement

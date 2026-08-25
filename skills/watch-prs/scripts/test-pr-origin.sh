@@ -1255,9 +1255,18 @@ for _wf_mode in read pin; do
         echo "ok   - (this shell cannot set a zero file-size limit; the $_wf_mode write-failure case did not run)"
         continue
     fi
-    { [ "$_wf_rc" -ne 0 ] \
-      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac; } \
-        && pass "a write that opens and then fails is refused by name ($_wf_mode)" \
+    # THE STATUS IS ASSERTED, NOT MERELY NON-ZERO. 2 is what makes the driver try
+    # its second parent, and this case IS the storage failure that must reach it —
+    # a zero file-size limit is a filesystem refusing the bytes. `-ne 0` passed
+    # against the unfixed code, which exited 1 here and sent the driver home.
+    #
+    # AND THE DIAGNOSTIC NAMES STORAGE, because the operator is told to read each
+    # `ABORT:` line and the message used to give exactly two causes, neither of
+    # them this one — so a full filesystem was reported as a name already taken.
+    { [ "$_wf_rc" = 2 ] \
+      && case "$_wf_out" in *"could not create"*"exclusively and write"*) true ;; *) false ;; esac \
+      && case "$_wf_out" in *"storage refused the write"*) true ;; *) false ;; esac; } \
+        && pass "a write that opens and then fails reports 2 and names storage ($_wf_mode)" \
         || die "the $_wf_mode write-failure case gave rc=$_wf_rc '$_wf_out'"
     [ ! -e "$_wf_dir" ] \
         && pass "…and the directory it had reserved is given back ($_wf_mode)" \
