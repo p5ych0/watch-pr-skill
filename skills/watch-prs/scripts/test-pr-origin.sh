@@ -123,7 +123,7 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     # themselves.
     diag="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
         GIT_CONFIG_NOSYSTEM=1 \
-        "$@" /usr/bin/env bash -p "$SCRIPT" "$mode" "$vd" 2>&1)" || rc=$?
+        "$@" RB_DIR="$vd" /usr/bin/env bash -p "$SCRIPT" "$mode" 2>&1)" || rc=$?
     # THE VALUE AND THE DIAGNOSTICS ARE SEPARATE STREAMS, which is the point of the
     # file: the caller reads one and never sees the other. They are joined here
     # only so a single assertion can look at both.
@@ -135,21 +135,35 @@ run() {   # run <mode> [env-entries…] ; prints "<rc>|<output>"
     printf '%s|%s' "$rc" "$out"
 }
 
-# ── THE REMOVED FALLBACK ARGUMENT IS REFUSED, NOT IGNORED ─────────────────
-# 2.0.62 took an optional second candidate here and 2.0.63 removed it, because the
-# driver could not use the distinction it existed for. A caller written against
-# that form is out there, and reading `$2` while dropping `$3` hands it an ordinary
-# refusal on the first name while the fallback it believes it supplied is silently
-# ignored — which is the worst of the three possible behaviours.
+# ── A POSITIONAL DIRECTORY IS REFUSED, NOT IGNORED ────────────────────────
+# TWO older interfaces passed one: 2.0.62 an optional SECOND candidate, and every
+# version through 2.0.66 the first one. Callers written against both are out there,
+# and ignoring the argument would leave one of them publishing a name in argv that
+# this script never uses while it creates its directory somewhere else entirely —
+# the worst of the three possible behaviours, and silent.
+#
+# `RB_DIR` IS SET AS WELL, so the case is about the ARGUMENT rather than about a
+# missing environment: with both supplied, an ignoring version would succeed at
+# `$TMP/exarg.a` and this case would pass on it. Neither name may exist afterwards.
 _ex_rc=0
 _ex_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-    /usr/bin/env bash -p "$SCRIPT" read "$TMP/exarg.a" "$TMP/exarg.b" 2>&1)" || _ex_rc=$?
+    RB_DIR="$TMP/exarg.a" /usr/bin/env bash -p "$SCRIPT" read "$TMP/exarg.b" 2>&1)" || _ex_rc=$?
 { [ "$_ex_rc" -ne 0 ] \
-  && case "$_ex_out" in *"takes a mode and ONE directory"*) true ;; *) false ;; esac \
+  && case "$_ex_out" in *"takes a mode and nothing else"*) true ;; *) false ;; esac \
   && [ ! -e "$TMP/exarg.a" ] && [ ! -e "$TMP/exarg.b" ]; } \
-    && pass "a second directory argument is refused by name, not silently ignored" \
-    || die "the removed fallback argument was ignored (rc=$_ex_rc out='$_ex_out')"
+    && pass "a positional directory is refused by name, not silently ignored" \
+    || die "a positional directory was ignored (rc=$_ex_rc out='$_ex_out')"
+# …AND SO IS THE THREE-ARGUMENT FORM, which is the 2.0.62 caller exactly.
+_ex3_rc=0
+_ex3_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+    GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+    /usr/bin/env bash -p "$SCRIPT" read "$TMP/ex3.a" "$TMP/ex3.b" 2>&1)" || _ex3_rc=$?
+{ [ "$_ex3_rc" -ne 0 ] \
+  && case "$_ex3_out" in *"takes a mode and nothing else"*) true ;; *) false ;; esac \
+  && [ ! -e "$TMP/ex3.a" ] && [ ! -e "$TMP/ex3.b" ]; } \
+    && pass "…and so is the two-directory form of 2.0.62" \
+    || die "the 2.0.62 form was not refused by name (rc=$_ex3_rc out='$_ex3_out')"
 
 # ── A STORAGE FAILURE IS STATUS 2, AND A PATH OR CHECKOUT REFUSAL IS 1 ────
 # This is the only place that runs both the `mkdir` and the ancestry walk, so it is
@@ -175,7 +189,7 @@ mkdir "$_st_dir"
 _st_rc=0
 (cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir" >/dev/null 2>&1) || _st_rc=$?
+    RB_DIR="$_st_dir" /usr/bin/env bash -p "$SCRIPT" read >/dev/null 2>&1) || _st_rc=$?
 [ "$_st_rc" -eq 2 ] \
     && pass "a name that could not be taken on a sound ancestry reports 2" \
     || die "a reservation failure reported $_st_rc, not 2"
@@ -184,7 +198,7 @@ _st_open="$TMP/stopen"; mkdir -p "$_st_open"; mkdir -p "$_st_open/dir"; chmod 77
 _st_rc=0
 (cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
-    /usr/bin/env bash -p "$SCRIPT" read "$_st_open/dir" >/dev/null 2>&1) || _st_rc=$?
+    RB_DIR="$_st_open/dir" /usr/bin/env bash -p "$SCRIPT" read >/dev/null 2>&1) || _st_rc=$?
 [ "$_st_rc" -eq 1 ] \
     && pass "…while an ancestry the walk refuses reports 1" \
     || die "an ancestry refusal reported $_st_rc, not 1"
@@ -195,7 +209,7 @@ _st_dir2="$(_st_new)"
 _st_rc=0
 (cd "$TMP" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
     GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE= \
-    /usr/bin/env bash -p "$SCRIPT" read "$_st_dir2" >/dev/null 2>&1) || _st_rc=$?
+    RB_DIR="$_st_dir2" /usr/bin/env bash -p "$SCRIPT" read >/dev/null 2>&1) || _st_rc=$?
 [ "$_st_rc" -eq 1 ] \
     && pass "…and so does a checkout with no usable origin" \
     || die "an unreadable origin reported $_st_rc, not 1"
@@ -217,7 +231,7 @@ for _wr_mode in read pin; do
         GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
         bash -c 'ulimit -f 0 2>/dev/null || exit 97
                  trap "" XFSZ
-                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wr_mode" "$_wr_dir" >/dev/null 2>&1) || _wr_rc=$?
+                 RB_DIR="$3" exec /usr/bin/env bash -p "$1" "$2"' _ "$SCRIPT" "$_wr_mode" "$_wr_dir" >/dev/null 2>&1) || _wr_rc=$?
     if [ "$_wr_rc" = 97 ]; then
         echo "ok   - (this shell cannot set a zero file-size limit; the $_wr_mode write-status case did not run)"
         continue
@@ -311,7 +325,7 @@ got="$(run pin REVIEW_BUS_REMOTE="$REAL")"
 # what the caller needs to distinguish, so it is an empty line and status 0 rather
 # than an abort, which would look like every other failure from that side.
 rm -rf "$TMP/pin.value"
-run_limited 20 env -u REVIEW_BUS_REMOTE HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" pin "$TMP/pin.value" >/dev/null 2>&1; pin_rc=$?
+run_limited 20 env -u REVIEW_BUS_REMOTE HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/pin.value" /usr/bin/env bash -p "$SCRIPT" pin >/dev/null 2>&1; pin_rc=$?
 pin_out="$(<"$TMP/pin.value/pin")"
 { [ "$pin_rc" = 0 ] && [ -z "$pin_out" ]; } \
     && pass "…and an unset pin is an empty answer, not an error" \
@@ -334,7 +348,7 @@ got="$(run sideways)"
 # and used, so the absence is asserted as well as the status.
 BARE="$TMP/bare"; mkdir -p "$BARE"
 ( cd "$BARE" && git init -q . ) >/dev/null 2>&1
-rm -rf "$TMP/v";  out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$BARE" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/v" /usr/bin/env bash -p "$SCRIPT" read 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "a checkout with no origin is refused" \
     || die "a checkout with no origin gave rc=$rc '$out'"
@@ -346,7 +360,7 @@ esac
 # NOT A REPOSITORY AT ALL is the same answer, since `git` fails rather than
 # printing an empty remote.
 NOTREPO="$TMP/notrepo"; mkdir -p "$NOTREPO"
-rm -rf "$TMP/v";  out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$NOTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/v" /usr/bin/env bash -p "$SCRIPT" read 2>&1)"; rc=$?
 { [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "…and so is a directory that is not a checkout" \
     || die "a non-checkout gave rc=$rc '$out'"
@@ -366,7 +380,7 @@ printf '%s\n' "$FORGED"
 exit 1
 GITSH
 chmod +x "$STUB/git"
-rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" RB_DIR="$TMP/v" /usr/bin/env bash -p "$SCRIPT" read 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && grep -qF 'ABORT:' <<<"$out"; } \
     && pass "a remote read that prints and then fails is refused" \
@@ -388,7 +402,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\ngit@github.com:WRONG/other.git\n'
 GITSH
 chmod +x "$STUB/git"
-rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" RB_DIR="$TMP/v" /usr/bin/env bash -p "$SCRIPT" read 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && grep -qF 'newline' <<<"$out"; } \
     && pass "a multi-line remote is refused rather than split" \
@@ -413,7 +427,7 @@ cat > "$STUB/git" <<'GITSH'
 printf 'git@github.com:acme/widget.git\n\n'
 GITSH
 chmod +x "$STUB/git"
-rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$TMP/v" 2>&1)"; rc=$?
+rm -rf "$TMP/v";  out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$STUB:$PATH" RB_DIR="$TMP/v" /usr/bin/env bash -p "$SCRIPT" read 2>&1)"; rc=$?
 out="$( [ -f "$TMP/v/origin" ] && cat "$TMP/v/origin" )$out"
 { [ "$rc" = 1 ] && grep -qF 'newline' <<<"$out"; } \
     && pass "a trailing data newline is refused, not stripped into a valid slug" \
@@ -440,7 +454,7 @@ naive="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$T
 cat > "$TMP/tr.sh" <<TRSH
 cd "$REPO" || exit 1
 rm -rf "$TMP/tr.value"
-/usr/bin/env bash -p "$SCRIPT" read "$TMP/tr.value" || printf 'CALL_FAILED\n' >&2
+RB_DIR="$TMP/tr.value" /usr/bin/env bash -p "$SCRIPT" read || printf 'CALL_FAILED\n' >&2
 printf 'VALUE=%s\n' "\$(<"$TMP/tr.value/origin")" >&2
 TRSH
 for _fd in 1 9; do
@@ -467,7 +481,7 @@ rm -rf "$TMP/fn.value"
 run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
-    /usr/bin/env bash -p "'"$SCRIPT"'" read "'"$TMP/fn.value"'"' >/dev/null 2>&1 || true
+    RB_DIR="'"$TMP/fn.value"'" /usr/bin/env bash -p "'"$SCRIPT"'" read' >/dev/null 2>&1 || true
 [ "$(<"$TMP/fn.value/origin")" = "$REAL" ] \
     && pass "a bash function in the caller does not stand in for the interpreter" \
     || die "a shadowed bash wrote the value: '$(<"$TMP/fn.value")'"
@@ -476,7 +490,7 @@ rm -f "$TMP/fn2.value"
 run_limited 20 bash -c '
     bash() { printf "%s\n" "'"$FORGED"'" > "'"$TMP/fn2.value"'"; return 0; }
     cd "'"$REPO"'" || exit 1
-    bash -p "'"$SCRIPT"'" read "'"$TMP/fn2.value"'"' >/dev/null 2>&1 || true
+    RB_DIR="'"$TMP/fn2.value"'" bash -p "'"$SCRIPT"'" read' >/dev/null 2>&1 || true
 [ "$(<"$TMP/fn2.value")" = "$FORGED" ] \
     && pass "…where the unpathed form calls the function instead" \
     || die "the comparison did not reproduce the shadowed-bash attack: '$(<"$TMP/fn2.value")'"
@@ -521,7 +535,7 @@ got="$(run read BASH_ENV="$TMP/hook-direct.sh")"
 # the comparison to mean anything.
 rm -rf "$TMP/unprot.value"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 BASH_ENV="$TMP/hook-direct.sh" \
-    /usr/bin/env bash "$SCRIPT" read "$TMP/unprot.value" ) >/dev/null 2>&1 || true
+    RB_DIR="$TMP/unprot.value" /usr/bin/env bash "$SCRIPT" read ) >/dev/null 2>&1 || true
 unprot=""
 [ -f "$TMP/unprot.value/origin" ] && unprot="$(<"$TMP/unprot.value/origin")"
 # REPORTED, NOT REQUIRED, because the ROUTE is version-dependent. This hook writes
@@ -555,7 +569,7 @@ mkdir -p "$SYMDIR"
 printf 'PRECIOUS\n' > "$SYMDIR/victim"
 ln -s "$SYMDIR/victim" "$SYMDIR/out"
 sym_rc=0
-sym_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/out" 2>&1 )" || sym_rc=$?
+sym_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$SYMDIR/out" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || sym_rc=$?
 { [ "$sym_rc" -ne 0 ] \
   && case "$sym_diag" in *exclusively*) true ;; *) false ;; esac; } \
     && pass "an output that is a symlink to an owned file is refused" \
@@ -568,7 +582,7 @@ sym_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME
 # caller allocates a fresh directory per run, so nothing legitimate collides here.
 printf 'STALE\n' > "$SYMDIR/plain"
 plain_rc=0
-plain_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SYMDIR/plain" 2>&1 )" || plain_rc=$?
+plain_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$SYMDIR/plain" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || plain_rc=$?
 { [ "$plain_rc" -ne 0 ] && [ "$(cat "$SYMDIR/plain")" = STALE ]; } \
     && pass "…and a path that already exists is refused rather than truncated" \
     || die "an existing output was truncated (rc=$plain_rc)"
@@ -576,7 +590,7 @@ plain_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HO
 # mode says who may write it once it is there.
 rm -f "$TMP/modecheck.marker"
 rm -rf "$TMP/modecheck"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/modecheck" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/modecheck" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 mode="$(ls -l "$TMP/modecheck/origin" 2>/dev/null | cut -c1-10)"
 case "$mode" in
     -rw-------) pass "…and the object it creates is readable only by this user" ;;
@@ -598,7 +612,7 @@ mkdir -p "$IOREPO"
 ( cd "$IOREPO" && git init -q . && git remote add origin 'work:acme/widget.git' ) >/dev/null 2>&1 \
     || die "could not build the insteadOf checkout"
 rm -rf "$TMP/io.value"
-( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/io.value" ) >/dev/null 2>&1
+( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/io.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 io_got="$(cat "$TMP/io.value/origin" 2>/dev/null)"
 [ "$io_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "a global insteadOf rule is expanded, not returned as the alias" \
@@ -617,7 +631,7 @@ mkdir -p "$IOOTHER"
     || die "could not build the second insteadOf checkout"
 rm -rf "$TMP/io2.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$IOHOME" GIT_CONFIG_NOSYSTEM=1 GIT_DIR="$IOOTHER/.git" \
-    /usr/bin/env bash -p "$SCRIPT" read "$TMP/io2.value" ) >/dev/null 2>&1
+    RB_DIR="$TMP/io2.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 io2_got="$(cat "$TMP/io2.value/origin" 2>/dev/null)"
 [ "$io2_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "…while GIT_DIR still cannot redirect the read" \
@@ -636,7 +650,7 @@ OPENDIR="$TMP/open"
 mkdir -p "$OPENDIR"
 chmod 777 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$OPENDIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/dir" ]; } \
@@ -645,7 +659,7 @@ open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOM
 # …AND A GROUP-WRITABLE ONE TOO, which is the shape a shared machine actually has.
 chmod 770 "$OPENDIR"
 open_rc=0
-open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || open_rc=$?
+open_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$OPENDIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || open_rc=$?
 { [ "$open_rc" -ne 0 ] \
   && case "$open_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/dir" ]; } \
@@ -665,7 +679,7 @@ mkdir -p "$ANCESTOR/mid/leaf"
 chmod 777 "$ANCESTOR/mid"
 chmod 700 "$ANCESTOR/mid/leaf"
 anc_rc=0
-anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/dir" 2>&1 )" || anc_rc=$?
+anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$ANCESTOR/mid/leaf/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || anc_rc=$?
 { [ "$anc_rc" -ne 0 ] \
   && case "$anc_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac \
   && [ ! -e "$ANCESTOR/mid/leaf/dir/origin" ]; } \
@@ -676,7 +690,7 @@ anc_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME
 # would refuse the directory it was written for.
 chmod 1777 "$ANCESTOR/mid"
 rm -rf "$ANCESTOR/mid/leaf/dir"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ANCESTOR/mid/leaf/dir" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$ANCESTOR/mid/leaf/dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 [ "$(cat "$ANCESTOR/mid/leaf/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a sticky ancestor is accepted, as /tmp is" \
     || die "a sticky ancestor was refused; this would refuse every ordinary session"
@@ -707,7 +721,7 @@ for _cand in /lost+found /run/user/* /var/lib/* /home/*; do
 done
 if [ -n "$FOREIGN" ]; then
     foreign_rc=0
-    foreign_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$FOREIGN/dir" 2>&1 )" || foreign_rc=$?
+    foreign_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$FOREIGN/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || foreign_rc=$?
     { [ "$foreign_rc" -ne 0 ] \
       && case "$foreign_diag" in *"could be replaced between this write"*) true ;; *) false ;; esac; } \
         && pass "…and a component owned by another account is refused ($FOREIGN)" \
@@ -731,7 +745,7 @@ if [ -n "$FOREIGN" ]; then
     mkdir -p "$LINKDIR"
     ln -sfn "$FOREIGN" "$LINKDIR/t"
     link_rc=0
-    link_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$LINKDIR/t/dir" 2>&1 )" || link_rc=$?
+    link_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$LINKDIR/t/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || link_rc=$?
     { [ "$link_rc" -ne 0 ] \
       && case "$link_diag" in *"could be replaced between this write"*|*"could not examine"*|*"could not resolve"*) true ;; *) false ;; esac; } \
         && pass "…and a symlink into a third account's tree is refused, not walked lexically" \
@@ -746,7 +760,7 @@ mkdir -p "$SAFELINK"
 ln -sfn "$OPENDIR" "$SAFELINK/t"
 chmod 700 "$OPENDIR"
 rm -rf "$OPENDIR/dir"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$SAFELINK/t/dir" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$SAFELINK/t/dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 [ "$(cat "$SAFELINK/t/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a symlink to a directory this user owns is followed as before" \
     || die "a safe symlinked path was refused; macOS reaches its temporary directories this way"
@@ -767,7 +781,7 @@ if command -v setfacl >/dev/null 2>&1; then
     # the first version of this case asserted.
     if setfacl -m u:nobody:r-x "$ACLDIR" >/dev/null 2>&1; then
         acl_rc=0
-        acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$ACLDIR/dir" 2>&1 )" || acl_rc=$?
+        acl_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$ACLDIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || acl_rc=$?
         { [ "$acl_rc" -ne 0 ] \
           && case "$acl_diag" in *"access-control list"*) true ;; *) false ;; esac \
           && [ ! -e "$ACLDIR/dir" ]; } \
@@ -804,7 +818,7 @@ printf '#!/usr/bin/env bash\n[ "$1" = -ld ] && printf "drwx------@ 2 x y 40 Jan 
 chmod +x "$XASTUB/ls"
 xa_rc=0
 xa_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$XASTUB:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$XADIR/dir" 2>&1 )" || xa_rc=$?
+    RB_DIR="$XADIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || xa_rc=$?
 { [ "$xa_rc" -ne 0 ] \
   && case "$xa_diag" in *"access-control list or extended attributes"*) true ;; *) false ;; esac \
   && [ ! -e "$XADIR/dir" ]; } \
@@ -824,7 +838,7 @@ rm -rf "$OPENDIR/dir"
 chmod 700 "$OPENDIR"
 lsf_rc=0
 lsf_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$LSFAIL:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || lsf_rc=$?
+    RB_DIR="$OPENDIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || lsf_rc=$?
 { [ "$lsf_rc" -ne 0 ] \
   && case "$lsf_diag" in *"could not read the permissions"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/dir" ]; } \
@@ -843,7 +857,7 @@ chmod +x "$FINDSTUB/find"
 rm -rf "$OPENDIR/dir"
 probe_rc=0
 probe_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 PATH="$FINDSTUB:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" 2>&1 )" || probe_rc=$?
+    RB_DIR="$OPENDIR/dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || probe_rc=$?
 { [ "$probe_rc" -ne 0 ] \
   && case "$probe_diag" in *"could not examine"*) true ;; *) false ;; esac \
   && [ ! -e "$OPENDIR/dir" ]; } \
@@ -853,7 +867,7 @@ probe_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HO
 # …WHILE A PRIVATE ONE IS THE ORDINARY CASE, or this would refuse every session.
 chmod 700 "$OPENDIR"
 rm -rf "$OPENDIR/dir"
-( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$OPENDIR/dir" ) >/dev/null 2>&1
+( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 RB_DIR="$OPENDIR/dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 [ "$(cat "$OPENDIR/dir/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a private directory is written as before" \
     || die "a private directory was refused"
@@ -870,7 +884,7 @@ rm -rf "$OPENDIR/dir"
     && pass "the helper is not executable, so there is no unprivileged entry point" \
     || die "the helper is executable; ./pr-origin.sh reaches a hook-run shell"
 unpriv_rc=0
-unpriv_out="$( cd "$REPO" && run_limited 20 "$SCRIPT" read "$TMP/unpriv.value" 2>&1 )" || unpriv_rc=$?
+unpriv_out="$( cd "$REPO" && RB_DIR="$TMP/unpriv.value" run_limited 20 "$SCRIPT" read 2>&1 )" || unpriv_rc=$?
 [ "$unpriv_rc" -ne 0 ] \
     && pass "…and executing it directly fails rather than running unprotected" \
     || die "the helper ran when executed directly (out='$unpriv_out')"
@@ -878,7 +892,7 @@ unpriv_out="$( cd "$REPO" && run_limited 20 "$SCRIPT" read "$TMP/unpriv.value" 2
 # than the file mode: `$-` is shell state a hook cannot write.
 rm -f "$TMP/nop.value"
 nop_rc=0
-nop_diag="$( cd "$REPO" && run_limited 20 /usr/bin/env bash "$SCRIPT" read "$TMP/nop.value" 2>&1 )" || nop_rc=$?
+nop_diag="$( cd "$REPO" && RB_DIR="$TMP/nop.value" run_limited 20 /usr/bin/env bash "$SCRIPT" read 2>&1 )" || nop_rc=$?
 { [ "$nop_rc" -ne 0 ] \
   && case "$nop_diag" in *"not privileged"*) true ;; *) false ;; esac \
   && [ ! -s "$TMP/nop.value" ]; } \
@@ -904,7 +918,7 @@ HOSTILE="$TMP/hostile-global"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "origin"]\n\turl = %s\n' "$FORGED" > "$HOSTILE"
 rm -rf "$TMP/hg1.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL="$HOSTILE" /usr/bin/env bash -p "$SCRIPT" read "$TMP/hg1.value" ) >/dev/null 2>&1
+    GIT_CONFIG_GLOBAL="$HOSTILE" RB_DIR="$TMP/hg1.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 hg_got="$(cat "$TMP/hg1.value/origin" 2>/dev/null)"
 hg_git="$(cd "$IOREPO" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$HOSTILE" git remote get-url origin 2>/dev/null)"
 [ -n "$hg_git" ] && [ "$hg_got" = "$hg_git" ] \
@@ -933,7 +947,7 @@ NAMECFG="$TMP/namecollide.gitconfig"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n[remote "work:acme/widget.git"]\n\turl = %s\n' "$FORGED" > "$NAMECFG"
 rm -rf "$TMP/nc.value"
 ( cd "$NAMEREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL="$NAMECFG" /usr/bin/env bash -p "$SCRIPT" read "$TMP/nc.value" ) >/dev/null 2>&1
+    GIT_CONFIG_GLOBAL="$NAMECFG" RB_DIR="$TMP/nc.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 nc_got="$(cat "$TMP/nc.value/origin" 2>/dev/null)"
 nc_git="$(cd "$NAMEREPO" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL="$NAMECFG" git remote get-url origin 2>/dev/null)"
 { [ "$nc_got" = 'git@ghe.example:acme/widget.git' ] && [ "$nc_got" = "$nc_git" ]; } \
@@ -973,7 +987,7 @@ if [ -d "$TMP/wtlinked" ] && [ -n "$(cd "$TMP/wtlinked" && git config --worktree
     wt_git="$(cd "$TMP/wtlinked" && env HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 git remote get-url origin 2>/dev/null)"
     rm -rf "$TMP/wt.value"
     ( cd "$TMP/wtlinked" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-        /usr/bin/env bash -p "$SCRIPT" read "$TMP/wt.value" ) >/dev/null 2>&1
+        RB_DIR="$TMP/wt.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
     wt_got="$(cat "$TMP/wt.value/origin" 2>/dev/null)"
     [ -n "$wt_got" ] && [ "$wt_got" = "$wt_git" ] \
         && pass "inside a linked worktree the helper answers exactly as git remote get-url does" \
@@ -1004,7 +1018,7 @@ rt_case() {   # rt_case <label> <expect-pass-text> [env-entries…]
     local _got _git
     rm -rf "$TMP/rt.value"
     ( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-        GIT_CONFIG_NOSYSTEM=1 "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
+        GIT_CONFIG_NOSYSTEM=1 "$@" RB_DIR="$TMP/rt.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
     _got="$(cat "$TMP/rt.value/origin" 2>/dev/null)"
     _git="$(cd "$RTREPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
         GIT_CONFIG_NOSYSTEM=1 "$@" git remote get-url origin 2>/dev/null)"
@@ -1024,7 +1038,7 @@ rt_case 'parameters' '…and one supplied through GIT_CONFIG_PARAMETERS reaches 
 # checkout that was never aliased.
 rm -rf "$TMP/rt.value"
 ( cd "$RTREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-    GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$TMP/rt.value" ) >/dev/null 2>&1
+    GIT_CONFIG_NOSYSTEM=1 RB_DIR="$TMP/rt.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 [ "$(cat "$TMP/rt.value/origin" 2>/dev/null)" = 'work:acme/widget.git' ] \
     && pass "…while with no rule at all the alias is what comes back" \
     || die "the alias did not survive an unrewritten read; the cases above prove nothing"
@@ -1051,7 +1065,7 @@ chmod +x "$NSSTUB/git"
 ns_env() {   # ns_env [env-entries…] ; prints what the subject's git saw
     rm -rf "$TMP/ns.value"; rm -f "$NSSTUB/git.log"
     ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-        PATH="$NSSTUB:$PATH" "$@" /usr/bin/env bash -p "$SCRIPT" read "$TMP/ns.value" ) >/dev/null 2>&1
+        PATH="$NSSTUB:$PATH" "$@" RB_DIR="$TMP/ns.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
     cat "$NSSTUB/git.log" 2>/dev/null
 }
 # BOTH DIRECTIONS. Unset must arrive unset, or the case passes against a helper
@@ -1112,7 +1126,7 @@ IOGLOBAL="$TMP/insteadof-global"
 printf '[url "git@ghe.example:"]\n\tinsteadOf = work:\n' > "$IOGLOBAL"
 rm -rf "$TMP/iog.value"
 ( cd "$IOREPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL="$IOGLOBAL" /usr/bin/env bash -p "$SCRIPT" read "$TMP/iog.value" ) >/dev/null 2>&1
+    GIT_CONFIG_GLOBAL="$IOGLOBAL" RB_DIR="$TMP/iog.value" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 iog_got="$(cat "$TMP/iog.value/origin" 2>/dev/null)"
 [ "$iog_got" = 'git@ghe.example:acme/widget.git' ] \
     && pass "…and a GIT_CONFIG_GLOBAL the operator chose is honoured, as their own git honours it" \
@@ -1154,7 +1168,7 @@ for _ex_kind in dir emptydir file link; do
     esac
     _ex_rc=0
     _ex_diag="$( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-        GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$_ex_path" 2>&1 )" || _ex_rc=$?
+        GIT_CONFIG_NOSYSTEM=1 RB_DIR="$_ex_path" /usr/bin/env bash -p "$SCRIPT" read 2>&1 )" || _ex_rc=$?
     { [ "$_ex_rc" -ne 0 ] \
       && case "$_ex_diag" in *"could not create"*) true ;; *) false ;; esac; } \
         && pass "read refuses a transport directory that already exists as a $_ex_kind" \
@@ -1192,7 +1206,7 @@ done
 # because every path is refused.
 rm -rf "$_ex_base/fresh"
 ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
-    GIT_CONFIG_NOSYSTEM=1 /usr/bin/env bash -p "$SCRIPT" read "$_ex_base/fresh" ) >/dev/null 2>&1
+    GIT_CONFIG_NOSYSTEM=1 RB_DIR="$_ex_base/fresh" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1
 [ "$(cat "$_ex_base/fresh/origin" 2>/dev/null)" = "$REAL" ] \
     && pass "…while a name nobody has taken is created and written" \
     || die "the ordinary create-and-write case failed"
@@ -1257,7 +1271,7 @@ for _wf_mode in read pin; do
         GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
         bash -c 'ulimit -f 0 2>/dev/null || exit 97
                  trap "" XFSZ
-                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wf_mode" "$_wf_dir" 2>&1)" || _wf_rc=$?
+                 RB_DIR="$3" exec /usr/bin/env bash -p "$1" "$2"' _ "$SCRIPT" "$_wf_mode" "$_wf_dir" 2>&1)" || _wf_rc=$?
     if [ "$_wf_rc" = 97 ]; then
         echo "ok   - (this shell cannot set a zero file-size limit; the $_wf_mode write-failure case did not run)"
         continue
@@ -1459,7 +1473,7 @@ rm -rf "$_int_dir"
 # against a correct handler. `exec` replaces the subshell, so the pid is the one
 # the signal has to reach.
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    PATH="$_int_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_int_dir" ) >/dev/null 2>&1 &
+    PATH="$_int_bin:$PATH" RB_DIR="$_int_dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1 &
 _int_pid=$!
 # WAIT FOR THE RESERVATION, rather than sleeping a guessed interval: the case is
 # about what happens after the directory exists, so it has to exist first.
@@ -1519,7 +1533,7 @@ _pin_dir="$TMP/pint.$$"
 rm -rf "$_pin_dir"
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     REVIEW_BUS_REMOTE="$REAL" PATH="$_pin_bin:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" pin "$_pin_dir" ) >/dev/null 2>&1 &
+    RB_DIR="$_pin_dir" /usr/bin/env bash -p "$SCRIPT" pin ) >/dev/null 2>&1 &
 _pin_pid=$!
 _pin_n=0
 while [ ! -d "$_pin_dir" ] && [ "$_pin_n" -lt 100 ]; do _pin_n=$(( _pin_n + 1 )); sleep 0.1; done
@@ -1566,7 +1580,7 @@ rm -rf "$_mkd_dir"
 if [ -n "$_mkd_real" ] && [ -x "$_mkd_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
     RB_MKD_MARK="$_mkd_mark" PATH="$_mkd_bin:$PATH" \
-    /usr/bin/env bash -p "$SCRIPT" read "$_mkd_dir" ) >/dev/null 2>&1 &
+    RB_DIR="$_mkd_dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1 &
 _mkd_pid=$!
 _mkd_n=0
 while [ ! -e "$_mkd_mark" ] && [ "$_mkd_n" -lt 150 ]; do _mkd_n=$(( _mkd_n + 1 )); sleep 0.1; done
@@ -1635,7 +1649,7 @@ _sig_mark="$TMP/sig.cleanup-started"
 rm -f "$_sig_mark"
 if [ -n "$_sig_real" ] && [ -x "$_sig_real" ]; then
 ( cd "$REPO" && exec env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" /usr/bin/env bash -p "$SCRIPT" read "$_sig_dir" ) >/dev/null 2>&1 &
+    RB_SIG_MARK="$_sig_mark" PATH="$_sig_bin:$PATH" RB_DIR="$_sig_dir" /usr/bin/env bash -p "$SCRIPT" read ) >/dev/null 2>&1 &
 _sig_pid=$!
 _sig_n=0
 while [ ! -d "$_sig_dir" ] && [ "$_sig_n" -lt 100 ]; do _sig_n=$(( _sig_n + 1 )); sleep 0.1; done
@@ -1753,7 +1767,7 @@ mkdir -p "$TMP/notarepo"
 _leak_rc=0
 _leak_out="$(cd "$TMP/notarepo" && run_limited 20 env HOME="$TMP/nohome" \
     XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    /usr/bin/env bash -p "$SCRIPT" read "$_leak_dir" 2>&1)" || _leak_rc=$?
+    RB_DIR="$_leak_dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1)" || _leak_rc=$?
 # THE REFUSAL FIRST, or the absence below means the directory was never made and
 # the case passes against a script that cannot create one at all.
 { [ "$_leak_rc" -ne 0 ] && grep -qF 'could not read origin' <<<"$_leak_out"; } \
@@ -1769,7 +1783,7 @@ _keep_dir="$TMP/keep.$$.$RANDOM$RANDOM"
 _keep_rc=0
 _keep_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" \
     XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
-    /usr/bin/env bash -p "$SCRIPT" read "$_keep_dir" 2>&1)" || _keep_rc=$?
+    RB_DIR="$_keep_dir" /usr/bin/env bash -p "$SCRIPT" read 2>&1)" || _keep_rc=$?
 { [ "$_keep_rc" -eq 0 ] && [ -s "$_keep_dir/origin" ]; } \
     && pass "…while a successful read leaves the directory and its file for the caller" \
     || die "a successful read left nothing to read (rc=$_keep_rc out='$_keep_out')"

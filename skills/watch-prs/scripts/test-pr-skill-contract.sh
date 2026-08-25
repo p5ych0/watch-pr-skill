@@ -297,7 +297,7 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
-grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"' <<<"$skill_flat" \
+grep -qF 'RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
 # …AND THAT IS ASSERTED BY RUNNING IT, because the line above finds the call and
@@ -321,7 +321,7 @@ _read_block="$(awk '/^RB_REMOTE=$/, /^fi$/' "$SKILL")" \
 [ -z "$_read_block" ] || _read_block='. "$RB_SCRIPTS/identitylib.sh"
 '"$_read_block"
 { [ -n "$_read_block" ] \
-  && case "$_read_block" in *'/pr-origin.sh read "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
+  && case "$_read_block" in *'RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read'*) true ;; *) false ;; esac \
   && case "$_read_block" in *'9<"$RB_ORIGIN_DIR/origin"'*) true ;; *) false ;; esac \
   && case "$_read_block" in *'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity'*) true ;; *) false ;; esac; } \
     && pass "…and the read lifts out of SKILL.md with the call and the read-back" \
@@ -443,7 +443,7 @@ cat > "$_forge_dir/pr-origin.sh" <<'FORGE'
 #!/usr/bin/env bash
 # ALL THE ARGUMENTS, because a case whose subject is WHICH directory an
 # invocation was given can only see it here.
-[ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "$2" >> "$FORGE_LOG"
+[ -n "${FORGE_LOG:-}" ] && printf '%s %s\n' "$1" "${RB_DIR-}" >> "$FORGE_LOG"
 # AND A COUNTER, so a case can make the FIRST call fail and the second succeed —
 # which is the retry, and the only way to reach the second arm of the read block.
 #
@@ -458,7 +458,7 @@ if [ -n "${FORGE_FAIL_FIRST:-}" ]; then
     _n=$((_n + 1)); printf '%s\n' "$_n" > "$FORGE_FAIL_FIRST"
     [ "$_n" = 1 ] && exit "${FORGE_FIRST_RC:-2}"
 fi
-mkdir -m 700 "$2" || exit 1
+mkdir -m 700 "${RB_DIR-}" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 # AND THE LEAF CAN BE MADE SOMETHING THE READ-BACK REJECTS, which is the only way
 # to reach the arm that refuses it. A DIRECTORY is what this uses: the caller's
@@ -466,7 +466,7 @@ case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 # false — so the rejection comes from the check the arm exists for rather than
 # from a missing file, which any earlier step would have refused first.
 if [ -n "${FORGE_LEAF_DIR:-}" ]; then
-    mkdir "$2/$_leaf" || exit 1
+    mkdir "$RB_DIR/$_leaf" || exit 1
 else
         # `-`, NOT `:-`, SO A CASE CAN ASK FOR AN EMPTY ORIGIN. That is one of the
     # three states the checks after the read-back refuse, and `:-` made it
@@ -479,9 +479,9 @@ else
     # wrong reason, and it hides the outcome the case is about. With this set the
     # forgery is carried through exactly as it would be.
     if [ -n "${FORGE_PIN_ECHO:-}" ] && [ "$1" = pin ]; then
-        printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$2/$_leaf"
+        printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$RB_DIR/$_leaf"
     else
-        printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$2/$_leaf"
+        printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$RB_DIR/$_leaf"
     fi
 fi
 exit "${FORGE_RC:-0}"
@@ -493,7 +493,7 @@ FORGE
 # value no case expects — which is what makes this a proof rather than a restatement
 # of the `unset` above it.
 _fe_dir="$_forge_dir/envproof"
-_fe_rc=0; bash "$_forge_dir/pr-origin.sh" read "$_fe_dir" || _fe_rc=$?
+_fe_rc=0; RB_DIR="$_fe_dir" bash "$_forge_dir/pr-origin.sh" read || _fe_rc=$?
 _fe_val=""; _fe_val="$(cat "$_fe_dir/origin" 2>/dev/null)" || _fe_val=""
 { [ "$_fe_rc" -eq 0 ] && [ "$_fe_val" = 'git@github.com:acme/widget.git' ] \
   && [ ! -e "$_fe_log" ]; } \
@@ -725,7 +725,7 @@ rm -rf "$_fe_dir"
     # form of the attack a fixture can stage without a second uid.
     cat > "$_forge_dir/pr-origin-swap.sh" <<'SWAP'
 #!/usr/bin/env bash
-mkdir -m 700 "$2" || exit 1
+mkdir -m 700 "${RB_DIR-}" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 ln -s /etc/hostname "$2/$_leaf"
 exit 0
@@ -766,7 +766,7 @@ SWAP
     if [ -n "$_lk_dir" ]; then
         cat > "$_forge_dir/pr-origin-local.sh" <<'LOCAL'
 #!/usr/bin/env bash
-mkdir -m 700 "$2" || exit 1
+mkdir -m 700 "${RB_DIR-}" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 printf '%s
 ' "/home/somebody/a-checkout" > "$2/$_leaf"
@@ -1418,8 +1418,8 @@ second-line|more than one line" \
     { [ "$_tp_all" -ge 3 ] && [ "$_tp_in" = "$_tp_all" ]; } \
         && pass "every requirement of the transport parent is inside the block an interactive abandonment takes" \
         || die "a \${RB_TMPPARENT:?…} sits outside the transport block (in=$_tp_in all=$_tp_all)"
-    { case "$_read_block" in *'pr-origin.sh read "$RB_ORIGIN_DIR"'*) true ;; *) false ;; esac \
-      && case "$_read_block" in *'pr-origin.sh pin "$RB_PIN_DIR"'*) true ;; *) false ;; esac; } \
+    { case "$_read_block" in *'RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read'*) true ;; *) false ;; esac \
+      && case "$_read_block" in *'RB_DIR="$RB_PIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin'*) true ;; *) false ;; esac; } \
         && pass "…and so are both helper invocations" \
         || die "a helper invocation sits outside the block the parent requirement guards"
     # …AND A HELPER THAT REFUSES DOES NOT HAVE ITS TRANSPORT READ OR REMOVED, EVEN
@@ -1499,7 +1499,7 @@ fi
 # captures — and the paragraph is rewritten rather than left, because it described
 # assertions these greps do not make and pointed a maintainer back at the design
 # that produced the failure.
-grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"' <<<"$skill_flat" \
+grep -qF 'RB_DIR="$RB_PIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin' <<<"$skill_flat" \
     && pass "…and the pin is proved by a real child, not by a shell copy" \
     || die "the pin proof does not go through pr-origin.sh"
 # …AND BEFORE THE IDENTITY IS DERIVED FROM IT. Exporting after `rb_identity` would
@@ -1698,7 +1698,7 @@ esac
 # THE PROBE IS IN THERE WITH IT, which is what the arm exists for: a walked-past
 # refusal must not reach the child.
 case "$_arm_work" in
-    *'pr-origin.sh pin "$RB_PIN_DIR"'*) pass "…with the pin probe inside that arm, not before it" ;;
+    *'RB_DIR="$RB_PIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin'*) pass "…with the pin probe inside that arm, not before it" ;;
     *) die "the pin probe runs outside the arm the probe guards: '$_arm_work'" ;;
 esac
 # AND EVERY CLEANUP IS IN THERE TOO. The refusal fires before the helper is ever
@@ -1720,7 +1720,7 @@ esac
 # through to the probe, where a pre-seeded readonly `RB_PIN_SEEN` certifies a pin
 # no child ever saw.
 case "$_arm_refuse" in
-    *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) pass "…and the refusal is an arm that says so before it stops" ;;
+    *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly'*) pass "…and the refusal is an arm that says so before it stops" ;;
     *) die "the pin refusal is not an arm with an abort: '$_arm_refuse'" ;;
 esac
 
@@ -1901,7 +1901,7 @@ esac
 # script before the arm's own abort prints, which is bash's behaviour and not a
 # spelling to assert.
 case "$_seed_out" in
-    *'RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*)
+    *'RB_PIN_SEEN and RB_DIR is readonly'*|*'RB_PIN_SEEN: readonly variable'*)
         pass "…where that shell does refuse on the pre-seeded value" ;;
     *) die "the pre-seeded case did not refuse at all ('$_seed_out')" ;;
 esac
@@ -1939,7 +1939,7 @@ _sent_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" \
 # survival checks stay green while setup runs the helper against the operator's
 # directory and then removes it.
 { [ "$_sent_rc" -ne 0 ] \
-  && case "$_sent_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+  && case "$_sent_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly'*) true ;; *) false ;; esac; } \
     && pass "…where a readonly RB_PIN_DIR takes the probe's refusal, non-zero and saying so" \
     || die "a readonly RB_PIN_DIR did not take the probe's refusal (rc=$_sent_rc out='$_sent_out')"
 case "$_sent_out" in
@@ -1978,7 +1978,7 @@ _ero_out="$(env -u SHELLOPTS -u BASH_ENV -u ENV RB_SCRIPTS="$SCRIPT_DIR" bash -c
 # which the next case asserts.
 { [ "$_ero_rc" -ne 0 ] \
   && case "$_ero_out" in
-        *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
+        *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly'*|*'RB_PIN_SEEN: readonly variable'*) true ;;
         *) false ;;
      esac; } \
     && pass "…and an EMPTY readonly RB_PIN_SEEN is refused, not mistaken for a reset" \
@@ -2153,7 +2153,7 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
             ' 2>&1)" || _nr_rc=$?
         { [ "$_nr_rc" -ne 0 ] \
           && case "$_nr_out" in *OWNER=*) false ;; *) true ;; esac \
-          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly'*) true ;; *) false ;; esac; } \
             && pass "…and a nameref onto the transport parent is refused by name ($_nr)" \
             || die "a nameref onto RB_TMPPARENT was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
         # AND THE PARENT IS UNCHANGED — OBSERVED, NOT INFERRED FROM AN ABSENCE.
@@ -2211,7 +2211,7 @@ if [ -n "$_forge_dir" ]; then
                 '"$_pin_block"'
             ' 2>&1)" || _nr_rc=$?
         { [ "$_nr_rc" -ne 0 ] \
-          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly'*) true ;; *) false ;; esac; } \
+          && case "$_nr_out" in *'ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly'*) true ;; *) false ;; esac; } \
             && pass "…and the pin probe refuses it on any bash ($_nr)" \
             || die "a portable attribute was accepted (rc=$_nr_rc out='$_nr_out') ($_nr)"
     done
@@ -2975,7 +2975,7 @@ mkdir -p "$_rb_pb/parent" "$_rb_pb/bin"
 # the probe's success arm now: without one, an ordinary shell reaches the loop,
 # every candidate is refused by the helper, and the control would agree with the
 # two refusal cases for a reason that has nothing to do with the probe.
-printf '#!/bin/sh\nmkdir -m 700 "$2" || exit 1\nif [ "$1" = pin ]; then _l=pin; else _l=origin; fi\nprintf "git@github.com:acme/widget.git\\n" > "$2/$_l"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
+printf '#!/bin/sh\nmkdir -m 700 "${RB_DIR-}" || exit 1\nif [ "$1" = pin ]; then _l=pin; else _l=origin; fi\nprintf "git@github.com:acme/widget.git\\n" > "${RB_DIR-}/$_l"\nexit 0\n' > "$_rb_pb/bin/pr-origin.sh"
 chmod +x "$_rb_pb/bin/pr-origin.sh"
 # THE ALLOCATION LIFTS WITH ITS OWN INDENT STRIPPED. It sits inside the pin's work
 # arm, which sits inside the arm that contains the pinned value (#155) — eight
@@ -3061,13 +3061,13 @@ while [ -n "$_rb_rest" ]; do
     # interactive shell echoes its input, so the transcript can contain the arm's
     # own text — but that text is `RB_REMOTE:?one of …`, with no space after the
     # colon, and this pattern needs one. No anchor is required to tell them apart.
-    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
     # AND THE `echo` BELOW IT NEVER RAN, which is the order this case exists for.
     # An emitted line starts at column 0; the expansion having fired means nothing
     # after it in that arm executed.
-    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly' <<<"$_rb_out" \
+    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly' <<<"$_rb_out" \
         && die "the arm reached its echo, so the expansion is not first ($_rb_attr): '$_rb_out'" \
         || pass "…and the echo after it never ran, so a shadowed one cannot forge past it ($_rb_attr)"
 done
@@ -3083,7 +3083,7 @@ done
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
 declare -i RB_TMPPARENT=0' RB_PROBE_REMOTE= TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
 grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_out" \
@@ -3703,7 +3703,7 @@ printf "SURVIVED\n"' _ "$_rb_bt/parent.sh" 2>&1 || true)"; _rb_bt_rc=$?
     # assignment ends the shell at the line that builds the path, and bash's own
     # message names no cause the operator can act on. What must come out is the
     # refusal that names the two variables.
-    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
+    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
         && pass "…an unusable RB_ORIGIN_DIR is refused by name ($_rb_bt_attr)" \
         || die "the RB_ORIGIN_DIR case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
     grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_bt_out" \

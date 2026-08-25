@@ -649,7 +649,9 @@ if [[ -z $RB_REMOTE ]]; then
        && ( RB_ORIGIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
-         && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null; then
+         && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null \
+       && ( RB_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_DIR = RbProbe* ]] \
+         && [[ -z ${!RB_DIR:-} ]] ) 2>/dev/null; then
         # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
         # fallback is FOR and `-d` does not answer it. An absolute, existing but
         # unwritable `TMPDIR` — `/usr` is one — passed `-d`, was committed to, and
@@ -738,7 +740,20 @@ if [[ -z $RB_REMOTE ]]; then
         # `-O` and `-f`, and pinned the session from it — and removed the
         # operator's file and directory on the way out. Containment is what a
         # neutralised `exit` cannot step over.
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
+        # THE DIRECTORY TRAVELS IN THE ENVIRONMENT, NOT IN ARGV. An argument is
+        # published at `exec`: `/proc/<pid>/cmdline` is mode 444 and `ps` prints
+        # it, so any account on the machine could read the candidate BEFORE the
+        # helper reserved it and create the name first. `/proc/<pid>/environ` is
+        # mode 400 — measured — so the same account reads it and nobody else does.
+        # The random suffix stops a name being GUESSED and never did anything
+        # about one being READ. #160.
+        #
+        # A COMMAND PREFIX, NOT `export`. The assignment is a parser construct, so
+        # there is no builtin to shadow, and the binding is temporary: this shell
+        # keeps whatever `RB_DIR` it had. The name is in the probe above with the
+        # other four, because a readonly or nameref `RB_DIR` makes the prefix
+        # assignment fail and the helper is then invoked with nothing.
+        if RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; then
             # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
             # of the OPEN DESCRIPTOR, so they describe the object this shell is
             # about to read rather than a name it could be talked into looking up
@@ -855,7 +870,7 @@ if [[ -z $RB_REMOTE ]]; then
         # AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness
         # test comes second: a command between the two would replace it.
         elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
-            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
+            && RB_DIR="$RB_ORIGIN_DIR2" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read; then
             # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
             # this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
             # probe and the working directory are built from further down, so
@@ -978,8 +993,8 @@ if [[ -z $RB_REMOTE ]]; then
         # path, so `RB_REMOTE` is still the value the clear left, and the shell
         # refusing to expand runs before the `echo` a startup file can have
         # replaced with one that forges a URL and neuters `exit`. #178.
-        : "${RB_REMOTE:?one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen}"
-        echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
+        : "${RB_REMOTE:?one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen}"
+        echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR, RB_ORIGIN_DIR2 and RB_DIR is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
         [[ -n "" ]]
     fi
@@ -1181,7 +1196,9 @@ if [[ -z $RB_REMOTE ]]; then
        && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR2:-} ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
-         && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
+         && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null \
+       && ( RB_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_DIR = RbProbe* ]] \
+         && [[ -z ${!RB_DIR:-} ]] ) 2>/dev/null; then
         # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
         # origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
         # CLEARED FIRST, for the reason the origin read gives: interactively the
@@ -1204,7 +1221,7 @@ if [[ -z $RB_REMOTE ]]; then
         # OPERATOR'S — and `rm -f` deletes that file while `rmdir` deletes the
         # directory whenever it is empty, which an operator's directory often is.
         # Written after the call they ran on every path, including that one.
-        if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
+        if RB_DIR="$RB_PIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; then
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
             /usr/bin/env rm -f "$RB_PIN_DIR/pin"
@@ -1214,7 +1231,7 @@ if [[ -z $RB_REMOTE ]]; then
         # the same `if`, and each arm names the directory the helper just created
         # rather than guessing between two.
         elif [[ $? -eq 2 ]] && [[ -n $RB_PIN_DIR2 ]] \
-            && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR2"; then
+            && RB_DIR="$RB_PIN_DIR2" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin; then
             # THE PARENT THAT WORKED BECOMES PRIMARY HERE TOO. The primary
             # filesystem can fill between the origin read and this probe, and
             # without the swap the working directory is still allocated from the
@@ -1406,7 +1423,7 @@ if [[ -z $RB_REMOTE ]]; then
             [[ -n "" ]]
         fi
     else
-        echo "ABORT: one of RB_PIN_DIR, RB_PIN_DIR2 and RB_PIN_SEEN is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
+        echo "ABORT: one of RB_PIN_DIR, RB_PIN_DIR2, RB_PIN_SEEN and RB_DIR is readonly, value-transforming, or aimed at another transport variable; the pin proof cannot be made"
         exit 1
         [[ -n "" ]]
     fi

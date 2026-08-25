@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The session's repository, read where the driving shell's names cannot reach.
 #
-#   /usr/bin/env bash -p pr-origin.sh read "$RB_ORIGIN_DIR" || abort
+#   RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p pr-origin.sh read || abort
 #   { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
 #     && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin" || abort
 #
@@ -36,7 +36,7 @@
 # `bash -p` IS THE CALLER'S PART AND CANNOT BE DELEGATED. Privileged mode is what
 # stops `BASH_ENV` being sourced, so it has to be in force before this file's first
 # line. A hook needs to shadow nothing to use the gap: one that creates the
-# directory it sees as `$2`, writes the value file inside it and exits is a
+# directory it sees in `RB_DIR`, writes the value file inside it and exits is a
 # complete attack, finished before this script's first line.
 # There is no fallback for a caller that forgets — see the block above the guard
 # for why one cannot work — so a missing `-p` is refused, not recovered from.
@@ -203,7 +203,7 @@
 # THERE IS NO HOP, AND THE FILE IS NOT EXECUTABLE. Both were removed together, and
 # for the same reason: neither could work. The hop re-execed into `bash -p` for a
 # caller that had forgotten it — but by then the caller's `BASH_ENV` hook had
-# already run in this process, and a hook that writes a forged value to `$2` and
+# already run in this process, and a hook that writes a forged value into `RB_DIR` and
 # exits has finished the job before any line of this file executes. Advertising a
 # recovery that cannot recover is worse than refusing, because a caller may rely
 # on it. Removing the executable bit removes the invocation that reaches that
@@ -215,7 +215,7 @@
 # shell state a hook cannot write, so an unprivileged shell that reaches here
 # stops, with nothing read and nothing captured.
 if [[ $- != *p* ]]; then
-    echo "ABORT: this shell is not privileged; invoke as /usr/bin/env bash -p pr-origin.sh <mode> <path>" >&2
+    echo "ABORT: this shell is not privileged; invoke as RB_DIR=<dir> /usr/bin/env bash -p pr-origin.sh <mode>" >&2
     exit 1
 fi
 set -uo pipefail
@@ -243,16 +243,34 @@ esac
 # sources no `BASH_ENV`, and `RB_DIR` below is its own. Creating the directory
 # where the exclusion can actually be relied on deletes the thing those guards
 # were guarding rather than adding another. #157.
-RB_DIR="${2-}"
+# THE DIRECTORY COMES IN THE ENVIRONMENT, NOT IN ARGV, and that is the whole of
+# #160. A candidate passed as an argument is published at `exec`: `/proc/<pid>/
+# cmdline` is mode 444 and `ps` prints it, so any account on the machine can read
+# the name BEFORE the `mkdir` below reserves it and create it first — repeatably,
+# for as long as they watch. The random suffix stops a name being GUESSED and does
+# nothing about one being READ.
+#
+# `/proc/<pid>/environ` IS MODE 400. Measured on Linux: the owner reads it and
+# nobody else does, and `ps` shows another account nothing. The value is no more
+# secret than before to a process of the SAME user — which is what #162 is about,
+# and is a different question — but the cross-account publication is closed.
+#
+# THE CALLER PASSES IT AS A COMMAND PREFIX, `RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env
+# …`, which is a parser construct: no `export` builtin to shadow, and the binding
+# is temporary, so the driving shell keeps whatever it had.
+# ARGV CARRIES THE MODE AND NOTHING ELSE, AND THAT IS ASKED FIRST. Two older interfaces passed a
+# directory here — 2.0.62 an optional SECOND candidate, and every version up to
+# 2.0.66 the first one — so callers written against both are out there. Ignoring a
+# positional argument would leave one of them publishing a name in argv that this
+# script never uses, and creating its directory somewhere else entirely. A refusal
+# by name says which interface this is — and it is asked BEFORE `RB_DIR`, because
+# a caller passing directories positionally supplies no `RB_DIR` either, and
+# "RB_DIR is unset" sends them to set it while still passing the arguments.
+[[ $# -le 1 ]] \
+    || { echo "ABORT: pr-origin.sh takes a mode and nothing else; the directory is named by RB_DIR in the environment, and the fallback directory of 2.0.62 was removed in 2.0.63" >&2; exit 1; }
+RB_DIR="${RB_DIR-}"
 [[ -n $RB_DIR ]] \
-    || { echo "ABORT: pr-origin.sh writes its value into a directory it creates; invoke it as /usr/bin/env bash -p pr-origin.sh $MODE <dir>" >&2; exit 1; }
-# AND NOTHING AFTER IT. 2.0.62 took an optional SECOND candidate here and 2.0.63
-# removed it, because the driver could not use the distinction it existed for — so
-# a caller written against that form is out there, and reading `$2` while dropping
-# `$3` gives it an ordinary refusal on the first name while the fallback it thinks
-# it supplied is silently ignored. A refusal by name says which interface this is.
-[[ $# -le 2 ]] \
-    || { echo "ABORT: pr-origin.sh takes a mode and ONE directory; the optional fallback directory of 2.0.62 was removed in 2.0.63, and the caller retries with a second call instead" >&2; exit 1; }
+    || { echo "ABORT: pr-origin.sh writes its value into a directory it creates, named by RB_DIR in the environment; invoke it as RB_DIR=<dir> /usr/bin/env bash -p pr-origin.sh $MODE" >&2; exit 1; }
 # THE FILE IS THIS SCRIPT'S TO NAME. The caller reads `<dir>/origin` or
 # `<dir>/pin`, and naming it here rather than taking it means there is no path
 # the caller can be talked into passing.

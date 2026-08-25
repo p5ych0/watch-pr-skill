@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.67] — 2026-08-25
+
+- **The transport directory's name was published in argv before it was reserved.**
+  `pr-origin.sh` took the candidate as an argument, and an argument is published at
+  `exec`: `/proc/<pid>/cmdline` is mode 444 and `ps` prints it, so any account on
+  the machine could read the name in the window between the `exec` and the `mkdir`
+  that reserves it — and create it first, repeatably, for as long as they watched.
+  The random suffix stops a name being GUESSED and never did anything about one
+  being READ.
+
+  It comes in the environment now, as `RB_DIR`. Measured: `/proc/<pid>/environ` is
+  mode 400, so the owner reads it and nobody else does, and `ps` shows another
+  account nothing. The driver passes it as a COMMAND PREFIX —
+  `RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p … pr-origin.sh read` — which is a
+  parser construct, so there is no `export` builtin to shadow, and the binding is
+  temporary: the driving shell keeps whatever it had. `RB_DIR` joins the four names
+  the transport probe already proves assignable, and the three the pin probe does,
+  because a readonly or nameref one makes the prefix assignment fail.
+
+  **Argv now carries the mode and nothing else, and a positional directory is
+  REFUSED rather than ignored.** Two older interfaces passed one — 2.0.62 an
+  optional second candidate, and every version through 2.0.66 the first — so
+  callers written against both exist. Ignoring the argument would leave one of them
+  publishing a name this script never uses while it created its directory somewhere
+  else entirely. The count is checked BEFORE `RB_DIR`, because such a caller
+  supplies no `RB_DIR` either and "RB_DIR is unset" sends them to set it while
+  still passing the arguments.
+
+  Closes #160. What it does not close is #162: a process of the SAME user still
+  reads that environment, and the reservation is still an inference rather than a
+  handoff.
+
 ## [2.0.66] — 2026-08-25
 
 - **The one-line origin check matched a newline followed by four spaces, not a
