@@ -151,12 +151,19 @@ _ex_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" XDG_CONFIG_HOME="
     && pass "a second directory argument is refused by name, not silently ignored" \
     || die "the removed fallback argument was ignored (rc=$_ex_rc out='$_ex_out')"
 
-# ── A RESERVATION FAILURE IS STATUS 2, AND EVERY OTHER REFUSAL IS 1 ───────
+# ── A STORAGE FAILURE IS STATUS 2, AND A PATH OR CHECKOUT REFUSAL IS 1 ────
 # This is the only place that runs both the `mkdir` and the ancestry walk, so it is
 # the only one that can tell a caller which failure it had. A caller retrying under
 # another parent must not step past an ancestry this process refused — what is
 # wrong there is not the storage — and 2 is what says the storage or the moment was
 # the whole of it.
+#
+# TWO MOMENTS PRODUCE A 2, and they are the same question one step apart: the
+# directory could not be created exclusively, or the LEAF inside it could not be
+# written. A filesystem with room for a directory and none for the bytes in it
+# fails at the second, and a caller told that terminally would skip a parent that
+# would have worked. The write cases live further down, beside the cleanup they
+# also prove; the cases here are the reservation half.
 _st_new() {   # _st_new ; prints a fresh <parent>/dir path, empty on failure
     local _p
     _p="$(mktemp -d "$TMP/st.XXXXXX")" || _p=""

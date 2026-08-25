@@ -815,10 +815,12 @@ if [[ -z $RB_REMOTE ]]; then
         # covers the case where both failed.
         # `$?` IS THE FIRST CALL'S STATUS, AND IT IS READ INSIDE THE `if`. That is
         # what makes the distinction usable: 2 means both ancestry walks passed and
-        # the name still could not be taken — a full filesystem, a quota, a
-        # read-only mount, a name another account got to first — and 1 means the
-        # refusal was about the PATH or the checkout, which another parent does not
-        # fix and an operator has to see named.
+        # the STORAGE would not take what the helper asked of it — the directory
+        # could not be created exclusively, or the leaf inside it could not be
+        # written, which is the same failure one step later. A full filesystem, a
+        # quota, a read-only mount, a name another account got to first. And 1
+        # means the refusal was about the PATH or the checkout, which another
+        # parent does not fix and an operator has to see named.
         #
         # NOT A BRANCH OUTSIDE THE ARM. `elif [[ $? -eq 2 ]] && helper …; then` is a
         # condition of this same `if`, so the read-back below stays contained in the
