@@ -297,6 +297,24 @@ grep -qF 'export REVIEW_BUS_REMOTE="$RB_REMOTE"' <<<"$skill_flat" \
 # cannot be shadowed and steps out of the startup hooks; `test-pr-origin.sh` runs
 # both attacks against it. The status still matters — a read that prints and then
 # fails would otherwise pin the session to whatever it emitted. #84.
+# AND NO INVOCATION CARRIES A DIRECTORY IN ARGV, which is #160 stated directly
+# rather than through the shape of one call. An argument is published at `exec` —
+# `/proc/<pid>/cmdline` is mode 444 — so a candidate passed there is readable by
+# every account on the machine in the window before the `mkdir` reserves it. Every
+# `pr-origin.sh` invocation in the document must end at its MODE.
+#
+# THE FOUR ARE COUNTED AS WELL AS MATCHED. A pattern that only forbids a trailing
+# argument is satisfied by a document with no invocations left in it at all.
+# COMMENTS ARE NOT INVOCATIONS, and this document explains itself at length —
+# `A SECOND pr-origin.sh read was built to…` is prose, not a call, and counting it
+# would fail this on a tree with no defect in it.
+_ap_code=""
+_ap_code="$(grep -v '^[[:space:]]*#' "$SKILL")" || _ap_code=""
+_ap_all=0; _ap_all="$(grep -c 'pr-origin\.sh ' <<<"$_ap_code")" || _ap_all=0
+_ap_bare=0; _ap_bare="$(grep -cE 'pr-origin\.sh (read|pin)(;.*)?$' <<<"$_ap_code")" || _ap_bare=0
+{ [ "$_ap_all" -ge 4 ] && [ "$_ap_bare" = "$_ap_all" ]; } \
+    && pass "no pr-origin.sh invocation publishes a directory in argv ($_ap_bare of $_ap_all end at the mode)" \
+    || die "a pr-origin.sh invocation carries an argument after its mode (bare=$_ap_bare all=$_ap_all)"
 grep -qF 'RB_DIR="$RB_ORIGIN_DIR" /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read' <<<"$skill_flat" \
     && pass "…from a helper reached by path, with its status taken" \
     || die "the pinned remote is not read through pr-origin.sh, or its status is unchecked"
