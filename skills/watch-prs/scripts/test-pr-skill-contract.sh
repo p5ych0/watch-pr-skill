@@ -3965,8 +3965,16 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
     # refuses one parent and otherwise execs the real one reproduces the same
     # `EEXIST` deterministically; everything downstream — the status, the retry,
     # the parent swap, the pin — is the real code.
-    _sq_root=""; _sq_root="$(mktemp_d)" || _sq_root=""
-    if [ -n "$_sq_root" ] && [ -n "$setup_block" ]; then
+    # AN UNAVAILABLE FIXTURE IS A FAILURE, NOT A SKIP. Written
+    # `_sq_root="$(mktemp_d)" || _sq_root=""` with an `if` around it, a `TMPDIR`
+    # that is full or read-only turned every case below into silence and the file
+    # still reported PASS — a green tick over evidence nobody collected, which is
+    # the shape this repository keeps deleting.
+    _sq_root=""
+    _sq_root="$(mktemp_d)" || die "no scratch tree for the squat cases"
+    { [ -n "$_sq_root" ] && [ -d "$_sq_root" ]; } \
+        || die "the squat scratch tree was not created ('$_sq_root')"
+    if [ -n "$setup_block" ]; then
         cat "$SCRIPT_DIR/identitylib.sh" \
             > "$SETUPTMP/plugin/skills/watch-prs/scripts/identitylib.sh"
         mkdir -p "$_sq_root/a" "$_sq_root/b" "$_sq_root/bin"
@@ -3989,6 +3997,7 @@ SQUAT
             chmod +x "$_sq_root/bin/mkdir"
             # ONE PARENT SQUATTED: the retry recovers, and the session is pinned to
             # the REAL origin. This is the #161 retry doing the work #160 costs.
+            _sq_rc=0; _sq_rc2=0
             _sq_out="$(cd "$SETUPTMP/repo" && run_limited 60 env \
                 CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
                 TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
@@ -3996,7 +4005,7 @@ SQUAT
                 PATH="$_sq_root/bin:$PATH" \
                 bash -c 'eval "$1"
                          printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
-                || _sq_out="$_sq_out"
+                || _sq_rc=$?
             case "$_sq_out" in
                 *'PINNED=[git@github.com:acme/widget.git]'*)
                     pass "a squatter on the first candidate costs a retry, not the session" ;;
@@ -4021,11 +4030,21 @@ SQUAT
                 PATH="$_sq_root/bin:$PATH" \
                 bash -c 'eval "$1"
                          printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
-                || _sq_out2="$_sq_out2"
+                || _sq_rc2=$?
+            # ANY `PINNED=[` IS A CONTINUATION, not just one carrying an SSH
+            # remote. The line after the block runs only if setup did NOT stop, so
+            # its presence is the failure whatever it carries — an empty value, or
+            # an HTTPS remote, which `rb_identity` accepts exactly as readily.
             case "$_sq_out2" in
-                *'PINNED=[git@'*) die "setup pinned a session with both parents squatted: '$_sq_out2'" ;;
+                *'PINNED=['*) die "setup continued past the refusal with both parents squatted: '$_sq_out2'" ;;
                 *) pass "…and a squatter on both parents stops the session rather than steering it" ;;
             esac
+            # AND IT STOPPED NON-ZERO. A refusal that exits 0 is the state
+            # `CLAUDE.md` records shipping twice: the caller cannot tell it from a
+            # setup that finished.
+            [ "${_sq_rc2:-0}" -ne 0 ] \
+                && pass "…reporting a failure rather than a diagnostic alone" \
+                || die "the both-squatted run exited 0 (out='$_sq_out2')"
             case "$_sq_out2" in
                 *'RB_REMOTE: could not read the origin for this session'*)
                     pass "…refusing by name, from the shell rather than from an echo" ;;
@@ -4034,8 +4053,13 @@ SQUAT
             # AND NO VALUE WAS WRITTEN ANYWHERE UNDER EITHER PARENT, which is the
             # exclusion holding on this side of the call: a squatted name is
             # refused, so there is nothing for a later read to pick up.
-            _sq_left=""
-            _sq_left="$(find "$_sq_root/a" "$_sq_root/b" -name origin -o -name pin 2>/dev/null)" || _sq_left=""
+            # THE SCAN'S STATUS IS TAKEN. `|| _sq_left=""` overwrote a failed
+            # traversal with the answer the case wants, so a `find` that could not
+            # read either tree reported that nothing survived.
+            _sq_left=""; _sq_find_rc=0
+            _sq_left="$(find "$_sq_root/a" "$_sq_root/b" \( -name origin -o -name pin \) 2>&1)" || _sq_find_rc=$?
+            [ "$_sq_find_rc" -eq 0 ] \
+                || die "the survivor scan failed (rc=$_sq_find_rc out='$_sq_left'); it proves nothing"
             [ -z "$_sq_left" ] \
                 && pass "…and nothing was written through a name it did not take" \
                 || die "a transport value survives a squatted run: '$_sq_left'"
