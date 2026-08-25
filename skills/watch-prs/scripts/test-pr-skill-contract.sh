@@ -4038,7 +4038,9 @@ SQUAT
             # THE PROBE'S OWN STATUS FIRST. `run_limited`s portable fallback can
             # report a failure AFTER the markers were emitted, and a case that
             # reads the output without checking would call that successful
-            # evidence.
+            # evidence. Requiring ZERO here excludes the watchdog's own 124 and 125
+            # by construction; the both-squatted case below wants a non-zero status
+            # and has to name them.
             [ "${_sq_rc:-0}" -eq 0 ] \
                 || die "the one-parent squat probe failed (rc=$_sq_rc out='$_sq_out')"
             # AND THE FIRST CANDIDATE WAS ATTEMPTED. Setup regressing to choose
@@ -4096,9 +4098,16 @@ SQUAT
             # AND IT STOPPED NON-ZERO. A refusal that exits 0 is the state
             # `CLAUDE.md` records shipping twice: the caller cannot tell it from a
             # setup that finished.
-            [ "${_sq_rc2:-0}" -ne 0 ] \
+            # NON-ZERO IS NOT ENOUGH: the watchdog reports 124 when it kills a
+            # bounded command and 125 when its own setup or read fails, and either
+            # satisfies a bare `-ne 0` while the markers above were replayed from a
+            # capture. A broken probe would then read as evidence that setup
+            # refused. Both are rejected by name, as the bounded probe further down
+            # this file already does.
+            { [ "${_sq_rc2:-0}" -ne 0 ] && [ "${_sq_rc2:-0}" -ne 124 ] \
+              && [ "${_sq_rc2:-0}" -ne 125 ]; } \
                 && pass "…reporting a failure rather than a diagnostic alone" \
-                || die "the both-squatted run exited 0 (out='$_sq_out2')"
+                || die "the both-squatted run gave rc=$_sq_rc2, which is not a refusal (out='$_sq_out2')"
             case "$_sq_out2" in
                 *'RB_REMOTE: could not read the origin for this session'*)
                     pass "…refusing by name, from the shell rather than from an echo" ;;
