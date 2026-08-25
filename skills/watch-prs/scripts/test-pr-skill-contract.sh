@@ -3995,23 +3995,32 @@ if [ -n "$SETUPTMP" ] && [ -n "$setup_block" ]; then
         # PATH out of what stock macOS has.
         _sq_real=""; _sq_real="$(command -v mkdir)" || _sq_real=""
         if [ -n "$_sq_real" ]; then
-            cat > "$_sq_root/bin/mkdir" <<SQUAT
+            # THE REAL `mkdir` TRAVELS IN THE ENVIRONMENT, never interpolated into
+            # this script. Written `exec $_sq_real "$@"` the path is emitted
+            # unquoted, so a `PATH` entry carrying a space or a glob character
+            # splits or expands and the stub cannot delegate — after which both
+            # cases below test a broken fixture rather than setup.
+            cat > "$_sq_root/bin/mkdir" <<'SQUAT'
 #!/bin/sh
-# NARROW, AND OTHERWISE WORKING: only a target under \$SQUAT_PARENT is refused,
+# NARROW, AND OTHERWISE WORKING: only a target under $SQUAT_PARENT is refused,
 # and the diagnostic is the one a taken name produces. Everything else execs the
 # real mkdir, so the rest of setup — the working directory included — is untouched.
 for _a; do :; done
-case "\$_a" in
-    "\$SQUAT_PARENT"/*)
+case "$_a" in
+    "$SQUAT_PARENT"/*)
         # THE REFUSAL IS LOGGED, so a case can require that the first candidate was
         # actually ATTEMPTED. Without it, setup regressing to pick HOME directly —
         # never touching the squatted TMPDIR at all — produces the same remote and
         # the same working parent, and the recovery assertions pass with the retry
         # arm never run.
-        [ -n "\${SQUAT_LOG:-}" ] && echo "\$_a" >> "\$SQUAT_LOG"
-        echo "mkdir: cannot create directory '\$_a': File exists" >&2; exit 1 ;;
+        [ -n "${SQUAT_LOG:-}" ] && echo "$_a" >> "$SQUAT_LOG"
+        echo "mkdir: cannot create directory '$_a': File exists" >&2; exit 1 ;;
 esac
-exec $_sq_real "\$@"
+[ -n "${SQUAT_REAL_MKDIR:-}" ] || {
+    echo "squat stub: SQUAT_REAL_MKDIR is unset; refusing to guess" >&2
+    exit 127
+}
+exec "$SQUAT_REAL_MKDIR" "$@"
 SQUAT
             chmod +x "$_sq_root/bin/mkdir"
             # ONE PARENT SQUATTED: the retry recovers, and the session is pinned to
@@ -4021,7 +4030,7 @@ SQUAT
                 CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
                 TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
                 GIT_CONFIG_NOSYSTEM=1 SQUAT_PARENT="$_sq_root/a" \
-                SQUAT_LOG="$_sq_root/refusals" \
+                SQUAT_LOG="$_sq_root/refusals" SQUAT_REAL_MKDIR="$_sq_real" \
                 PATH="$_sq_root/bin:$PATH" \
                 bash -c 'eval "$1"
                          printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
@@ -4036,8 +4045,17 @@ SQUAT
             # `HOME` directly gives the same remote and the same working parent
             # with the retry arm never run, so the recovery claim needs the stub
             # to have refused something under `a`.
+            # COUNTED AS A LITERAL PREFIX. `grep -c "^$_sq_root/a/"` interpolates
+            # the scratch path into a REGULAR EXPRESSION, so a `TMPDIR` carrying
+            # `[`, `.` or `*` — `/tmp/build[1]` is a real shape — fails to match
+            # the literal path the stub logged, and the case then reports that the
+            # retry never ran. A quoted `case` pattern is literal by construction.
             _sq_tried=0
-            [ -f "$_sq_root/refusals" ] && _sq_tried="$(grep -c "^$_sq_root/a/" "$_sq_root/refusals")" || _sq_tried=0
+            if [ -f "$_sq_root/refusals" ]; then
+                while IFS= read -r _sq_line; do
+                    case "$_sq_line" in "$_sq_root/a/"*) _sq_tried=$((_sq_tried + 1)) ;; esac
+                done < "$_sq_root/refusals"
+            fi
             [ "${_sq_tried:-0}" -ge 1 ] \
                 && pass "the squatted parent was attempted before the retry ($_sq_tried refusal(s))" \
                 || die "no candidate under the squatted parent was attempted; the retry claim is unproved"
@@ -4062,6 +4080,7 @@ SQUAT
                 CLAUDE_PLUGIN_ROOT="$SETUPTMP/plugin" \
                 TMPDIR="$_sq_root/a" HOME="$_sq_root/b" XDG_CONFIG_HOME="$_sq_root/b" \
                 GIT_CONFIG_NOSYSTEM=1 SQUAT_PARENT="$_sq_root" \
+                SQUAT_REAL_MKDIR="$_sq_real" \
                 PATH="$_sq_root/bin:$PATH" \
                 bash -c 'eval "$1"
                          printf "PINNED=[%s]\n" "${REVIEW_BUS_REMOTE-}"' _ "$setup_block" 2>&1)" \
