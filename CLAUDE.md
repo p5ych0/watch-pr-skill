@@ -100,8 +100,11 @@ Privileged mode does none of the three things, so there is nothing to shadow.
   because the library half would otherwise run somewhere a hook can reach.
 - **What it does NOT cover**: `SKILL.md`'s own bash, which runs in the operator's
   shell and cannot re-exec itself, so the driver keeps every name it has (#102) —
-  which is why the four abort ARMS of its transport block are a `${RB_REMOTE:?…}`
-  FIRST and an `echo` second. Containment (`exit 1` then `[[ -n "" ]]`) stops an
+  which is why every refusal that comes from READING the origin is a
+  `${RB_REMOTE:?…}` and, in the four abort ARMS, an `echo` second. The pin and the
+  working-file refusals below them keep the plain `echo`, and correctly: their
+  success arms contain everything that follows, so POSITION is their containment
+  and there is nothing after them to walk into. Containment (`exit 1` then `[[ -n "" ]]`) stops an
   arm falling through into the success path; it does not stop an `echo` that
   forges a value and neuters `exit` in the same body, because that one has already
   run. The expansion is the shell refusing to expand, so no command runs and there
@@ -110,12 +113,15 @@ Privileged mode does none of the three things, so there is nothing to shadow.
   whole enclosing compound command, which is the same `if` the clear opens, so
   setup stops either way. #178.
 
-  **It is the four arms, not the block.** The `|| { echo …; exit 1; }` guards after
-  the read-back — the empty origin, the multi-line one, the identity, the pin —
-  are the same class and are NOT fixed: `:?` has nothing to fire on where
-  `RB_REMOTE` is already set, so they need a mechanism this does not supply. #181
-  carries them, and a review finding against one of them is a live finding rather
-  than something #178 closed. And a poisoned `PATH`.
+  **The three checks AFTER the read-back are the same rule reached another way.**
+  They were `|| { echo …; exit 1; }` guards, which have no containment at all — a
+  `||` list is a statement, so a returning `exit` lets the next statement run. The
+  empty check is now `${RB_REMOTE:?…}` outright, since that fires on exactly the
+  state it tested; the multi-line and identity ones CLEAR `RB_REMOTE` with an
+  assignment — the parser handles assignments, so nothing can shadow one — and
+  expand it after. #181. Their conditions are a separate question from their
+  refusals: the multi-line one matches a newline followed by four spaces rather
+  than a newline, which is #183. And a poisoned `PATH`.
 
   **The `PATH` one is settled rather than open.** Privileged startup stops
   `BASH_ENV`, stops imported functions and ignores `SHELLOPTS`. It does not
@@ -182,6 +188,18 @@ rediscovering them.
   or an **assignment**: the parser handles those and no function can take their
   place. A postcondition cannot be written with the thing it checks for, and two
   checks behind one prefix are one check.
+
+  **`:` is one of those names**, so an expansion whose SUCCESS path is reachable
+  is carried by an assignment — `VAR="${VAR:?…}"` — and never by `: "${VAR:?…}"`.
+  Measured: with `:` defined as a function, the ordinary run invokes it with the
+  value as its argument and it replaces that value after every check has passed
+  it. #181.
+
+  **Where the expansion always FIRES, `: "${VAR:?…}"` is correct and is what the
+  tree uses.** `SKILL.md`'s four abort arms are reached only with `RB_REMOTE`
+  empty, so no command is ever run there; the name is in the source and is
+  unreachable. Read the state, not the spelling: what decides it is whether the
+  value can be present when that line runs.
 - **A list of names is wrong by omission.** Clearing "the names the verdict
   depends on" missed `read` and `[`. Enumerate everything, or change the shape so
   no list is needed.

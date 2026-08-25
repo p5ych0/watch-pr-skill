@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.0.65] — 2026-08-25
+
+- **The three checks after setup reads the origin were guards, and a guard has no
+  containment at all.** Each was written
+
+  ```bash
+  <check> || { echo "ABORT: …"; exit 1; }
+  ```
+
+  and a startup file that defines `exit` as a function which RETURNS makes the
+  group print and the next statement simply run. There is nothing to fall out of:
+  a `||` list is a statement, not an arm. So an empty origin, a multi-line one, or
+  one the identity parser rejected went on into the parse, the export and the pin
+  — and with `echo` shadowed as well, the same shape that made 2.0.64 necessary
+  applies here, with the forged value reaching every post of the session.
+
+  Each is a shell-level refusal now. The empty check IS `${RB_REMOTE:?…}`, which
+  fires on exactly the state it tested, so the check and the refusal are one thing
+  the shell does. The other two clear `RB_REMOTE` with an ASSIGNMENT — handled by
+  the parser, so nothing can shadow it — and expand it after. No command in any of
+  the three, and nothing after them to walk into.
+
+  **Every one of them is carried by an assignment rather than by `: "${…}"`, and
+  that is not a style choice.** `:` is a NAME. Written `: "${RB_REMOTE:?…}"`, the
+  refusal path is safe — the expansion fires and no command runs — and the
+  ORDINARY path invokes a function called `:` with the authenticated value as its
+  argument, on every session where the origin is fine. One that assigns
+  `RB_REMOTE` replaces the value after every check has passed it and before the
+  identity parse, so setup reports success and pins the session to another
+  repository. `RB_REMOTE="${RB_REMOTE:?…}"` has no command in it and introduces no
+  new name.
+
+  What you see changes shape again: these announce themselves with your shell's
+  name, a line number and `RB_REMOTE:` rather than with `ABORT:`, which is what
+  every other refusal from READING the origin already looked like. The pin and the
+  working-file refusals below them keep the plain `ABORT:` line, and correctly:
+  their success arms contain everything that follows, so nothing runs after them
+  either way. The multi-line one no
+  longer prints the value — the word is expanded after the clear — and printing a
+  multi-line value into the terminal was never the useful part of it.
+
+  Closes #181. The multi-line check's PATTERN is a separate defect and is #183: it
+  is written across two source lines, so it matches a newline followed by four
+  spaces rather than a newline.
+
 ## [2.0.64] — 2026-08-25
 
 - **Three of setup's refusals could be talked past by a shadowed `echo`.** Each
