@@ -1023,8 +1023,22 @@ if [[ -z $RB_REMOTE ]]; then
     # the word is expanded after the clear. Printing a multi-line value into the
     # terminal was never much of a diagnostic anyway, and what the operator needs
     # is which check refused.
-    [[ $RB_REMOTE = "${RB_REMOTE%%'
-    '*}" ]] || RB_REMOTE=
+    # AND THE PATTERN IS `$'\n'`, ON ONE LINE. It was a quoted string spanning two
+    # source lines, and the second was INDENTED to match this block — so the
+    # pattern was a newline followed by four spaces, and `%%` stripped nothing from
+    # a value whose second line began with anything else. The comparison was then
+    # true and a multi-line origin passed the check that exists to refuse it.
+    # Measured: staging one reached the pin. #183.
+    #
+    # A CONTAINMENT TEST, NOT A STRIP-AND-COMPARE. `[[ $V = *$'\n'* ]]` asks the
+    # question directly, and `[[` is a reserved word with the quoting handled by
+    # the parser — there is no second expansion to get the indentation of wrong.
+    # The old form said the same thing twice and only one of them was right.
+    #
+    # AN INTERIOR NEWLINE IS THE STATE, which is why this reads the value rather
+    # than the file. `$(<…)` strips TRAILING newlines, so a well-formed origin
+    # never carries one and anything left is a second line.
+    [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
     # the same value the children will be pinned to, without depending on the export
