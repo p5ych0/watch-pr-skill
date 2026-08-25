@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.0.66] — 2026-08-25
+
+- **The one-line origin check matched a newline followed by four spaces, not a
+  newline.** The pattern was a quoted string spanning two source lines, and the
+  second was indented to match the block — so `${RB_REMOTE%%'…'*}` stripped at
+  `"\n    "` and stripped nothing from a value whose second line began with
+  anything else. The comparison was then true and a multi-line origin passed the
+  check that exists to refuse it. Measured: staging one reached the pin.
+
+  It is `[[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=` now — a containment test rather
+  than a strip-and-compare, with the quoting handled by the parser and no second
+  expansion to get the indentation of wrong. The old form said the same thing
+  twice and only one of the two was right.
+
+  What this guards is the unknown rather than the case it was added for: the value
+  comes back in a file the helper names, so nothing known writes to the stream any
+  more. That is why it went unnoticed, and it is not a reason to leave a check that
+  does not do what it says. Closes #183.
+
 ## [2.0.65] — 2026-08-25
 
 - **The three checks after setup reads the origin were guards, and a guard has no

@@ -1173,17 +1173,16 @@ LOCAL
         # an `echo` that also forges is what made the same states dangerous rather
         # than merely unstopped.
         #
-        # THE MULTI-LINE VALUE CARRIES THE NEWLINE THE CONDITION ACTUALLY MATCHES,
-        # which is a newline followed by four spaces — the pattern is written
-        # across two source lines and the second is indented, so the quoted string
-        # is "\n    " rather than "\n". That is a defect in the CONDITION and it
-        # is filed, not fixed here: this pull request is about how the refusal
-        # terminates, and a value with a plain second line would be testing the
-        # other half. Staging what the condition does match is what proves the
-        # refusal shape without asserting the condition is right.
+        # THE MULTI-LINE VALUE IS AN ORDINARY SECOND LINE NOW. It used to carry a
+        # newline followed by FOUR SPACES, because that was the only thing the
+        # condition matched: the pattern was a quoted string spanning two indented
+        # source lines, so it was "\n    " and `%%` stripped nothing from anything
+        # else. The check that exists to refuse a multi-line origin passed one.
+        # #183 replaced it with `[[ $RB_REMOTE = *$'"'"'\n'"'"'* ]]`, and this value is
+        # what proves that: against the old pattern it reaches the pin.
         for _gd in "empty|__EMPTY__|origin is empty" \
                    "multiline|git@github.com:acme/widget.git
-    second-line|more than one line" \
+second-line|more than one line" \
                    "identity|not a remote at all|not a usable identity"; do
             _gd_name="${_gd%%|*}"; _gd_rest="${_gd#*|}"
             _gd_val="${_gd_rest%|*}"; _gd_want="${_gd_rest##*|}"
