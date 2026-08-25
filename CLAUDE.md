@@ -99,8 +99,14 @@ Privileged mode does none of the three things, so there is nothing to shadow.
   the *caller's* flags, so an unprivileged shell is refused — which is correct,
   because the library half would otherwise run somewhere a hook can reach.
 - **What it does NOT cover**: `SKILL.md`'s own bash, which runs in the operator's
-  shell and cannot re-exec itself, so the driver keeps every name it has (#102);
-  and a poisoned `PATH`.
+  shell and cannot re-exec itself, so the driver keeps every name it has (#102) —
+  which is why every refusal in its transport block is a `${RB_REMOTE:?…}` FIRST
+  and an `echo` second. Containment (`exit 1` then `[[ -n "" ]]`) stops an arm
+  falling through into the success path; it does not stop an `echo` that forges a
+  value and neuters `exit` in the same body, because that one has already run. The
+  expansion is the shell refusing to expand, so no command runs and there is
+  nothing to shadow — and the ORDER is what makes it work, not the presence of the
+  check. #178. And a poisoned `PATH`.
 
   **The `PATH` one is settled rather than open.** Privileged startup stops
   `BASH_ENV`, stops imported functions and ignores `SHELLOPTS`. It does not

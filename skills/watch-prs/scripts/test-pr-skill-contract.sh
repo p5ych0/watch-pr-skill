@@ -432,8 +432,8 @@ if [ -n "$_forge_dir" ]; then
 # have exported them — a fixture that passes against the unfixed code, which is the
 # vacuous shape `CLAUDE.md` warns about.
 _fe_log="$_forge_dir/forge-log-that-must-not-exist"
-export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git'
-unset FORGE_LOG FORGE_RC FORGE_VALUE
+export FORGE_LOG="$_fe_log" FORGE_RC=1 FORGE_VALUE='git@github.com:squatter/other.git' FORGE_LEAF_DIR=1
+unset FORGE_LOG FORGE_RC FORGE_VALUE FORGE_LEAF_DIR
 # AND IT RECORDS THAT IT RAN, under `$FORGE_LOG` when a case asks for one. Some
 # cases assert the helper was never invoked, and the only alternative was scanning
 # a directory for what it would have created — which for the empty-parent case
@@ -460,7 +460,16 @@ if [ -n "${FORGE_FAIL_FIRST:-}" ]; then
 fi
 mkdir -m 700 "$2" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
-printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
+# AND THE LEAF CAN BE MADE SOMETHING THE READ-BACK REJECTS, which is the only way
+# to reach the arm that refuses it. A DIRECTORY is what this uses: the caller's
+# `9<` opens it, `[[ -O ]]` passes because this run made it, and `[[ -f ]]` is
+# false — so the rejection comes from the check the arm exists for rather than
+# from a missing file, which any earlier step would have refused first.
+if [ -n "${FORGE_LEAF_DIR:-}" ]; then
+    mkdir "$2/$_leaf" || exit 1
+else
+    printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
+fi
 exit "${FORGE_RC:-0}"
 FORGE
 # …AND THE CLEARING IS PROVEN, by asking the forge what its environment says. It
@@ -983,6 +992,61 @@ LOCAL
       && case "$_dj_else" in *'exit 1'*) true ;; *) false ;; esac; } \
         && pass "the read-back is a branch whose arms each clean up exactly once" \
         || die "the transport cleanup can run twice on a rejected read (then=${#_dj_then} else=${#_dj_else} rm=$_dj_n)"
+    # …AND A REJECTED READ CANNOT BE TALKED PAST BY A SHADOWED `echo`. This is the
+    # whole of #178, staged rather than read: the arm used to be
+    #
+    #     echo "ABORT: …"; exit 1; [[ -n "" ]]
+    #
+    # and an `echo` that FORGES a value and neuters `exit` in the same body is past
+    # all three — `echo` runs first, so the assignment has happened; `exit` returns;
+    # and `[[ -n "" ]]` ends the `if` list false, which is containment working
+    # exactly as designed and still leaving the forged URL in hand. The identity
+    # checks below validate FORM, not provenance, so an attacker URL of the right
+    # shape passes them.
+    #
+    # THE FIX IS ORDER, NOT ANOTHER CHECK: `${RB_REMOTE:?…}` is the shell refusing
+    # to expand, it runs before any command in the arm, and a non-interactive shell
+    # ends there. This case is what proves the order, because both spellings print
+    # a refusal and only one of them stops.
+    #
+    # OBSERVED FROM AN `EXIT` TRAP, for the reason the alias cases give: with the
+    # arm refusing there is no reachable line after the block to read a variable
+    # from, and the trap runs however the shell leaves.
+    if [ -n "$_forge_dir" ]; then
+        rm -f "$_forge_dir/walk.out" "$_forge_dir/walkcalls"
+        _wk_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+            RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_LEAF_DIR=1 \
+            FORGE_LOG="$_forge_dir/walkcalls" \
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+            RB_ALIAS_OUT="$_forge_dir/walk.out" \
+            'BASH_FUNC_echo%%=() { RB_REMOTE=git@github.com:attacker/other.git; eval "exit() { return 0; }"; }' \
+            bash -c '
+                trap '"'"'printf "PINNED=[%s]\n" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
+                '"$_read_block"'
+            ' 2>&1)" || true
+        _wk_seen=""
+        [ -f "$_forge_dir/walk.out" ] && _wk_seen="$(<"$_forge_dir/walk.out")"
+        case "$_wk_seen" in
+            *'PINNED=[git@github.com:attacker/'*)
+                die "a shadowed echo forged the origin past the rejected read: '$_wk_seen' out='$_wk_out'" ;;
+            *'PINNED=[]'*)
+                pass "…and a shadowed echo that forges a value cannot walk past the rejection" ;;
+            *) die "the shadowed-echo case left no observation at all: seen='$_wk_seen' out='$_wk_out'" ;;
+        esac
+        # AND IT STOPS THERE, not merely with the value unset. The pin probe is the
+        # next thing setup does, so an invocation of the helper in `pin` mode is
+        # what a continuation looks like — and the forge records every call it
+        # gets, so the question is answered by what this run did.
+        _wk_pin=""
+        [ -f "$_forge_dir/walkcalls" ] && _wk_pin="$(grep -c '^pin ' "$_forge_dir/walkcalls")" || _wk_pin=0
+        [ "${_wk_pin:-0}" = 0 ] \
+            && pass "…and setup stops at the refusal rather than going on to pin" \
+            || die "setup continued to the pin after a rejected read ($_wk_pin pin calls)"
+        # THE REJECTED LEAF IS THIS CASE'S TO REMOVE. The arm cleans up with
+        # `rm -f` and `rmdir`, and neither can take a directory holding an entry —
+        # which is correct for the transport and leaves this staged one behind.
+        rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
+    fi
     # …AND A NAMEREF ONTO A CANDIDATE — `HOME` OR `TMPDIR` — IS REFUSED, WITH THAT
     # CANDIDATE LEFT AS IT WAS. The probe compared only against the names this stage
     # introduces, so `declare -n RB_ORIGIN_DIR=HOME` passed it: neither subshell read
@@ -2715,7 +2779,14 @@ rb_probe_case() {   # rb_probe_case <script> <attribute-line> <extra-env…>
 set -e
 '"$_attr"'
 OWNER=acme; REPO=widget; RB_SCRIPTS="${RB_PROBE_SCRIPTS:-/nonexistent-rb-scripts}"
-RB_PIN_SEEN=same; RB_REMOTE=same
+# THE CALLER CHOOSES `RB_REMOTE`, because the two lifts reach their arms in
+# opposite states. The pin allocation runs AFTER the origin has been read, so
+# `same` is what makes its comparison meaningful; the transport-parent probe runs
+# BEFORE, where the clear has left it empty — and its refusal is now
+# `${RB_REMOTE:?…}`, which fires on empty and does not on `same`. A scaffold that
+# states the wrong one turns the case into a test of the `echo` below the
+# expansion, which is the shape #178 removed.
+RB_PIN_SEEN=same; RB_REMOTE="${RB_PROBE_REMOTE-same}"
 . "$1"
 printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 }
@@ -2745,10 +2816,27 @@ _rb_rest="$_rb_attrs"
 while [ -n "$_rb_rest" ]; do
     _rb_attr="${_rb_rest%%|*}"
     case "$_rb_rest" in *'|'*) _rb_rest="${_rb_rest#*|}" ;; *) _rb_rest="" ;; esac
-    _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
-    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+    _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" "$_rb_attr" RB_PROBE_REMOTE= TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent")"
+    # THE REFUSAL IS THE SHELL REFUSING TO EXPAND, NOT AN `echo`, so the line
+    # carries `RB_REMOTE: ` and the shell's own name and line number. Matching that
+    # rather than an anchored `ABORT:` is what #178 changed: the arm's first
+    # statement is `${RB_REMOTE:?…}`, which ends the shell before any command in it
+    # runs, and an assertion demanding the echoed line would demand the shape the
+    # forged-`echo` attack walks through.
+    #
+    # AND `RB_REMOTE: ` DISCRIMINATES AGAINST AN ECHOED SOURCE LINE by itself. An
+    # interactive shell echoes its input, so the transcript can contain the arm's
+    # own text — but that text is `RB_REMOTE:?one of …`, with no space after the
+    # colon, and this pattern needs one. No anchor is required to tell them apart.
+    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
         && pass "…the transport-parent probe reaches its named refusal under errexit ($_rb_attr)" \
         || die "the RB_TMPPARENT probe gave '$_rb_out' ($_rb_attr)"
+    # AND THE `echo` BELOW IT NEVER RAN, which is the order this case exists for.
+    # An emitted line starts at column 0; the expansion having fired means nothing
+    # after it in that arm executed.
+    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly' <<<"$_rb_out" \
+        && die "the arm reached its echo, so the expansion is not first ($_rb_attr): '$_rb_out'" \
+        || pass "…and the echo after it never ran, so a shadowed one cannot forge past it ($_rb_attr)"
 done
 # AND A SHADOWED `exit` CHANGES NOTHING ABOUT WHICH REFUSAL IS PRINTED. The
 # selection being the probe's success arm is asserted STRUCTURALLY above, and that
@@ -2761,8 +2849,8 @@ done
 # what can be: the refusal that IS printed is the probe's own, naming the
 # variable, whatever was done to `exit`.
 _rb_out="$(rb_probe_case "$_rb_pb/parent.sh" 'exit() { return 0; }
-declare -i RB_TMPPARENT=0' TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
-grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
+declare -i RB_TMPPARENT=0' RB_PROBE_REMOTE= TMPDIR="$_rb_pb/parent" HOME="$_rb_pb/parent" RB_PROBE_SCRIPTS="$_rb_pb/bin")"
+grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_out" \
     && pass "…and a shadowed exit does not change which refusal is printed" \
     || die "the shadowed-exit case gave '$_rb_out'"
 grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_out" \
@@ -3382,7 +3470,7 @@ printf "SURVIVED\n"' _ "$_rb_bt/parent.sh" 2>&1 || true)"; _rb_bt_rc=$?
     # assignment ends the shell at the line that builds the path, and bash's own
     # message names no cause the operator can act on. What must come out is the
     # refusal that names the two variables.
-    grep -q '^ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
+    grep -q 'RB_REMOTE: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable' <<<"$_rb_bt_out" \
         && pass "…an unusable RB_ORIGIN_DIR is refused by name ($_rb_bt_attr)" \
         || die "the RB_ORIGIN_DIR case gave rc=$_rb_bt_rc '$_rb_bt_out' ($_rb_bt_attr)"
     grep -qF 'neither TMPDIR nor HOME is an absolute directory' <<<"$_rb_bt_out" \
