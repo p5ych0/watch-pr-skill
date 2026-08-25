@@ -983,8 +983,17 @@ if [[ -z $RB_REMOTE ]]; then
         exit 1
         [[ -n "" ]]
     fi
-    [[ -n $RB_REMOTE ]] \
-        || { echo "ABORT: origin is empty; there is no repository to pin this session to"; exit 1; }
+    # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE. This was
+    # `[[ -n $RB_REMOTE ]] || { echo …; exit 1; }`, and a startup file that defines
+    # `exit` as a function which RETURNS makes that group print and carry on — with
+    # an empty origin, into the identity parse, the export and the pin. There is no
+    # containment on a `||` group: it is a statement, and the statement after it
+    # simply runs.
+    #
+    # `${RB_REMOTE:?…}` fires on exactly the state the guard tested — unset or
+    # EMPTY — so the check and the refusal are one thing the shell does, with no
+    # command in it to shadow. #181.
+    : "${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
     # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
     # public information, so this is tidiness rather than secrecy — but the setup block
     # already allocates one temporary and `test-pr-skill-contract.sh` counts what a run
@@ -995,15 +1004,30 @@ if [[ -z $RB_REMOTE ]]; then
     # session is addressed by. Nothing known still writes to this stream — that is
     # what the invocation form buys — so this now guards the unknown rather than the
     # tracing case it was added for.
+    # AND THIS ONE CLEARS THE VALUE AND THEN EXPANDS IT, because `${…:?…}` fires on
+    # empty and there is no other state it can be given. The `||` takes an
+    # ASSIGNMENT rather than a group: an assignment is handled by the parser, so
+    # nothing can shadow it, and the expansion below is then the same shell-level
+    # refusal every other one in this block is. #181.
+    #
+    # THE VALUE IS NO LONGER IN THE MESSAGE, and that is the price. It cannot be:
+    # the word is expanded after the clear. Printing a multi-line value into the
+    # terminal was never much of a diagnostic anyway, and what the operator needs
+    # is which check refused.
     [[ $RB_REMOTE = "${RB_REMOTE%%'
-    '*}" ]] \
-        || { echo "ABORT: the origin read returned more than one line; something is writing to its stdout ('$RB_REMOTE')"; exit 1; }
+    '*}" ]] || RB_REMOTE=
+    : "${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
     # the same value the children will be pinned to, without depending on the export
     # having succeeded — so the two cannot disagree. The export itself is the last
     # thing this block does; see the end of it for why.
-    REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \
-        || { echo "ABORT: origin is not a usable identity ($RB_IDENTITY_REASON)"; exit 1; }
+    #
+    # AND ITS REFUSAL IS THE SAME SHAPE AS THE TWO ABOVE: the failure clears
+    # `RB_REMOTE` with an assignment, and the expansion below is the shell
+    # refusing. `$RB_IDENTITY_REASON` is expanded into the word, so the parser
+    # message still names which rule the origin broke. #181.
+    REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
+    : "${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
     CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
     # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
     #

@@ -468,7 +468,10 @@ case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
 if [ -n "${FORGE_LEAF_DIR:-}" ]; then
     mkdir "$2/$_leaf" || exit 1
 else
-    printf '%s\n' "${FORGE_VALUE:-git@github.com:acme/widget.git}" > "$2/$_leaf"
+        # `-`, NOT `:-`, SO A CASE CAN ASK FOR AN EMPTY ORIGIN. That is one of the
+    # three states the checks after the read-back refuse, and `:-` made it
+    # indistinguishable from not asking at all.
+    printf '%s\n' "${FORGE_VALUE-git@github.com:acme/widget.git}" > "$2/$_leaf"
 fi
 exit "${FORGE_RC:-0}"
 FORGE
@@ -1141,6 +1144,63 @@ LOCAL
         # `rm -f` and `rmdir`, and neither can take a directory holding an entry —
         # which is correct for the transport and leaves this staged one behind.
         rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
+        # ── AND THE THREE CHECKS AFTER THE READ-BACK REFUSE THE SAME WAY ──────
+        #
+        # These were `|| { echo "ABORT: …"; exit 1; }` GUARDS, which is weaker than
+        # the arms above ever were: a `||` group has no containment at all, so a
+        # startup file defining `exit` as a function that RETURNS makes the group
+        # print and the NEXT STATEMENT run — with an empty origin, a multi-line one
+        # or one the parser rejected, straight into the identity parse, the export
+        # and the pin. #181.
+        #
+        # EACH IS A SHELL-LEVEL REFUSAL NOW. The empty case IS `${…:?…}`; the other
+        # two clear `RB_REMOTE` with an ASSIGNMENT — which the parser handles, so
+        # nothing can shadow it — and expand it after.
+        #
+        # `exit` AND `echo` ARE BOTH SHADOWED HERE, because either alone proves
+        # less than it looks: a returning `exit` is what walks past the guard, and
+        # an `echo` that also forges is what made the same states dangerous rather
+        # than merely unstopped.
+        #
+        # THE MULTI-LINE VALUE CARRIES THE NEWLINE THE CONDITION ACTUALLY MATCHES,
+        # which is a newline followed by four spaces — the pattern is written
+        # across two source lines and the second is indented, so the quoted string
+        # is "\n    " rather than "\n". That is a defect in the CONDITION and it
+        # is filed, not fixed here: this pull request is about how the refusal
+        # terminates, and a value with a plain second line would be testing the
+        # other half. Staging what the condition does match is what proves the
+        # refusal shape without asserting the condition is right.
+        for _gd in "empty|__EMPTY__|origin is empty" \
+                   "multiline|git@github.com:acme/widget.git
+    second-line|more than one line" \
+                   "identity|not a remote at all|not a usable identity"; do
+            _gd_name="${_gd%%|*}"; _gd_rest="${_gd#*|}"
+            _gd_val="${_gd_rest%|*}"; _gd_want="${_gd_rest##*|}"
+            [ "$_gd_val" = __EMPTY__ ] && _gd_val=""
+            rm -f "$_forge_dir/gd.calls"
+            _gd_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+                RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_VALUE="$_gd_val" \
+                FORGE_LOG="$_forge_dir/gd.calls" \
+                TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+                'BASH_FUNC_exit%%=() { return 0; }' \
+                'BASH_FUNC_echo%%=() { RB_REMOTE=git@github.com:attacker/other.git; return 0; }' \
+                bash -c "$_read_block" 2>&1)" || true
+            # THE REFUSAL IS NAMED, so a case cannot pass on a run that stopped for
+            # some other reason — the transport failing, the lift not parsing.
+            case "$_gd_out" in
+                *"RB_REMOTE: "*"$_gd_want"*)
+                    pass "…and the $_gd_name origin is refused by the shell, not by an echo" ;;
+                *) die "the $_gd_name case did not reach its named refusal: '$_gd_out'" ;;
+            esac
+            # AND SETUP STOPS THERE. The pin is the next thing that calls the
+            # helper, so a `pin` invocation is what a continuation looks like.
+            _gd_pin=""
+            [ -f "$_forge_dir/gd.calls" ] && _gd_pin="$(grep -c '^pin ' "$_forge_dir/gd.calls")" || _gd_pin=0
+            [ "${_gd_pin:-0}" = 0 ] \
+                && pass "…and setup does not go on to pin from it ($_gd_name)" \
+                || die "setup pinned past the $_gd_name origin ($_gd_pin pin calls): '$_gd_out'"
+            rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
+        done
     fi
     # …AND A NAMEREF ONTO A CANDIDATE — `HOME` OR `TMPDIR` — IS REFUSED, WITH THAT
     # CANDIDATE LEFT AS IT WAS. The probe compared only against the names this stage
@@ -1374,7 +1434,7 @@ grep -qF '/usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"' <<<
 # the pin — two identities agreeing whenever this defect is absent and disagreeing
 # exactly when it is not — and taking it from the export would make it depend on
 # the export having succeeded, which is the failure the guard exists for.
-grep -qF 'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \' <<<"$skill_flat" \
+grep -qF 'REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=' <<<"$skill_flat" \
     && pass "…and the driver derives its own identity from that same pinned value" \
     || die "rb_identity does not take the pinned remote; the driver and its children can disagree"
 # …AND THE PIN IS THE LAST THING SETUP DOES. Either hostile state alone is caught:
@@ -3615,7 +3675,7 @@ fi
 # out there; the parser is `identitylib.sh` now, and a text check left pointing at
 # SKILL.md would have gone on passing against a driver that derived nothing at
 # all. So: the driver must DELEGATE, and the parser must derive.
-grep -q '^[[:space:]]*REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity \\$' "$SKILL" \
+grep -q '^[[:space:]]*REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=$' "$SKILL" \
     && pass "the driver derives its identity through the shared parser" \
     || die "SKILL.md does not call rb_identity; the identity comes from somewhere else"
 grep -q 'HOST=' "$SCRIPT_DIR/identitylib.sh" \
