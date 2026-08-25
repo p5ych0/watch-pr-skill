@@ -745,7 +745,10 @@ rm -rf "$_fe_dir"
 #!/usr/bin/env bash
 mkdir -m 700 "${RB_DIR-}" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
-ln -s /etc/hostname "$2/$_leaf"
+# THE WRITE IS TAKEN, not merely attempted. A leaf this stub failed to create
+# leaves the caller refusing a MISSING file, which satisfies the same assertion
+# and never exercises the substituted-symlink check it is here to stage.
+ln -s /etc/hostname "$RB_DIR/$_leaf" || exit 1
 exit 0
 SWAP
     mkdir -p "$_forge_dir/swap"
@@ -786,8 +789,10 @@ SWAP
 #!/usr/bin/env bash
 mkdir -m 700 "${RB_DIR-}" || exit 1
 case "$1" in pin) _leaf=pin ;; *) _leaf=origin ;; esac
+# THE WRITE IS TAKEN HERE TOO: with the leaf absent the caller refuses for a
+# reason that has nothing to do with the local path this stub exists to supply.
 printf '%s
-' "/home/somebody/a-checkout" > "$2/$_leaf"
+' "/home/somebody/a-checkout" > "$RB_DIR/$_leaf" || exit 1
 exit 0
 LOCAL
         mkdir -p "$_forge_dir/local"
@@ -1074,6 +1079,42 @@ LOCAL
         [ "${_wk_pin:-0}" = 0 ] \
             && pass "…and setup stops at the refusal rather than going on to pin" \
             || die "setup continued to the pin after a rejected read ($_wk_pin pin calls)"
+        # ── AN UNUSABLE `RB_DIR` STOPS SETUP BEFORE THE HELPER IS INVOKED ────
+        #
+        # The directory travels as a command-prefix assignment, so `RB_DIR` is a
+        # name the operator can hold. The probe above lists it with the other four,
+        # and what that BUYS has to be asserted rather than assumed: without it the
+        # states below still fail closed, because the prefix assignment fails or
+        # resolves elsewhere and the helper refuses. Removing the probe clause and
+        # asserting only the refusal left the case green.
+        #
+        # SO THE ASSERTION IS THAT THE HELPER NEVER RAN. With a NAMEREF the prefix
+        # assignment succeeds — it sets the TARGET — so `RB_DIR` reaches the child
+        # unset, the helper is invoked, refuses, and the child has somebody elses
+        # variable overwritten in its environment on the way. The probe is what
+        # stops the invocation happening at all.
+        if [ "$_rb_has_n" = yes ]; then
+            rm -f "$_forge_dir/rbdir.calls"
+            _rd2_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+                RB_SCRIPTS="$_forge_dir" FORGE_RC=0 \
+                FORGE_LOG="$_forge_dir/rbdir.calls" \
+                TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+                bash -c '
+                    declare -n RB_DIR=HOME
+                    '"$_read_block"'
+                ' 2>&1)" || true
+            [ ! -e "$_forge_dir/rbdir.calls" ] \
+                && pass "…and a nameref RB_DIR stops setup before the helper is invoked" \
+                || die "a nameref RB_DIR reached the helper: '$(cat "$_forge_dir/rbdir.calls" 2>/dev/null)' out='$_rd2_out'"
+            case "$_rd2_out" in
+                *'and RB_DIR is readonly, value-transforming, or aimed at another'*)
+                    pass "…and the refusal names it with the other four" ;;
+                *) die "a nameref RB_DIR did not take the probe refusal: '$_rd2_out'" ;;
+            esac
+            rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
+        else
+            echo "ok   - (declare -n is unavailable on this bash; the RB_DIR probe case did not run)"
+        fi
         # …AND ON THE RETRY ARM, WHICH IS A SECOND COPY OF THE READ-BACK AND
         # THEREFORE A SECOND COPY OF THE DEFECT. The case above reaches the FIRST
         # arm only, because its forged helper succeeds on the first call — so
@@ -2157,6 +2198,9 @@ if [ -n "$_forge_dir" ] && [ "$_rb_has_n" = yes ]; then
     # written out — this file already asks the shell whether it has them.
     _pin_nrs="declare -n RB_PIN_SEEN=RB_TMPPARENT|declare -n RB_PIN_DIR=RB_TMPPARENT"
     _pin_nrs="$_pin_nrs|declare -n RB_PIN_DIR2=RB_TMPPARENT"
+    # AND `RB_DIR`, THE NAME THE HELPER IS INVOKED THROUGH. The pin probe guards it
+    # for the same reason the transport one does. #160.
+    _pin_nrs="$_pin_nrs|declare -n RB_DIR=RB_TMPPARENT"
     _pin_rest="$_pin_nrs"
     while [ -n "$_pin_rest" ]; do
         _nr="${_pin_rest%%|*}"
@@ -2213,9 +2257,11 @@ if [ -n "$_forge_dir" ]; then
     # does not — skipped them too. Each attribute is gated on the shell having THAT
     # attribute, which is the only thing that governs whether its case can run.
     _pp_list='readonly RB_PIN_DIR2=/tmp|declare -i RB_PIN_DIR2=0|readonly RB_PIN_DIR=/tmp'
+    _pp_list="$_pp_list|readonly RB_DIR=/tmp|declare -i RB_DIR=0"
     if [ "$_rb_has_l" = yes ]; then
         _pp_list="$_pp_list|declare -l RB_PIN_DIR2=x|declare -u RB_PIN_DIR2=x"
         _pp_list="$_pp_list|declare -l RB_PIN_DIR=x|declare -u RB_PIN_DIR=x"
+        _pp_list="$_pp_list|declare -l RB_DIR=x|declare -u RB_DIR=x"
     fi
     _pp_rest="$_pp_list"
     while [ -n "$_pp_rest" ]; do
@@ -3054,11 +3100,16 @@ printf "SURVIVED\n"' _ "$_s" 2>&1 || true
 # stop claiming.
 # EVERY NAME THE PROBE GUARDS IS IN THIS TABLE, and in every attribute it takes,
 # not just the first name and the first attribute. The probe is one condition over
-# four variables, and a table naming two of them stays green while either of the
+# FIVE variables, and a table naming two of them stays green while any of the
 # others stops refusing — after which setup can build or read a transport path the
 # operator's shell chose. #161.
+#
+# `RB_DIR` IS THE FIFTH, and it is the one the helper is invoked THROUGH: the
+# directory travels as a command-prefix assignment, so a readonly or nameref
+# `RB_DIR` makes that assignment fail and the helper runs with nothing — or, for a
+# nameref, sets somebody else's variable in the child instead. #160.
 _rb_attrs=""
-for _rb_nm in RB_TMPPARENT RB_TMPPARENT2 RB_ORIGIN_DIR RB_ORIGIN_DIR2; do
+for _rb_nm in RB_TMPPARENT RB_TMPPARENT2 RB_ORIGIN_DIR RB_ORIGIN_DIR2 RB_DIR; do
     _rb_attrs="$_rb_attrs|readonly $_rb_nm=/tmp|declare -i $_rb_nm=0"
     if [ "$_rb_has_l" = yes ]; then _rb_attrs="$_rb_attrs|declare -l $_rb_nm=x|declare -u $_rb_nm=x"; fi
 done

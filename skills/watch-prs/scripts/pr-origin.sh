@@ -48,10 +48,11 @@
 # captured now: the usage above is the whole invocation, and a maintainer reading
 # the old paragraph would have reintroduced the failure it described.
 #
-#   0  the second argument is a DIRECTORY this script created, and the value is in
-#      its leaf: `<dir>/origin` for `read`, `<dir>/pin` for `pin`. The argument
-#      itself is the directory, never the file — a caller that opens it directly
-#      opens a directory.
+#   0  `$RB_DIR` is a DIRECTORY this script created, and the value is in its leaf:
+#      `<dir>/origin` for `read`, `<dir>/pin` for `pin`. `RB_DIR` itself names the
+#      directory, never the file — a caller that opens it directly opens a
+#      directory. It comes in the ENVIRONMENT and argv carries the mode alone;
+#      see the block above the read for why. #160.
 #   2  refused, and RETRYING UNDER ANOTHER PARENT IS SENSIBLE: both ancestry walks
 #      passed and the storage would not take what this script asked of it. Two
 #      moments produce it and they are the same question one step apart — the
@@ -220,7 +221,7 @@ if [[ $- != *p* ]]; then
 fi
 set -uo pipefail
 
-# ── THE OUTPUT PATH IS REQUIRED, AND IS THE SECOND ARGUMENT ────────────────
+# ── THE OUTPUT PATH IS REQUIRED, AND IS `RB_DIR` IN THE ENVIRONMENT ────────
 #
 # Diagnostics go to stderr; the VALUE goes only to this file. Keeping them on
 # different streams is what lets the caller read the value with `$(<…)` and never
@@ -231,7 +232,7 @@ case "$MODE" in
     "") echo "ABORT: a mode is required: 'read' (origin's URL) or 'pin' (REVIEW_BUS_REMOTE as a child sees it)" >&2; exit 1 ;;
     *)  echo "ABORT: '$MODE' is not a mode; expected 'read' or 'pin'" >&2; exit 1 ;;
 esac
-# THE ARGUMENT IS A DIRECTORY THIS SCRIPT CREATES, not a file the caller made a
+# `RB_DIR` IS A DIRECTORY THIS SCRIPT CREATES, not a file the caller made a
 # place for. It was a file path, and the caller had to build a private directory
 # around it first — a two-candidate loop, three names of its own, three
 # assignability probes with cross-variable alias checks, an exclusive `mkdir`, and
