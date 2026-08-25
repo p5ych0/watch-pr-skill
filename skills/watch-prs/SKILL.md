@@ -762,6 +762,27 @@ if [[ -z $RB_REMOTE ]]; then
             else
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
+                # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
+                # is a NAME, and one that both forges a value and neuters `exit`
+                # walks straight past everything below it:
+                #
+                #   echo() { RB_REMOTE=git@github.com:attacker/other.git
+                #            exit() { return 0; }; }
+                #
+                # `echo` runs, the assignment has happened, `exit` returns, and
+                # `[[ -n "" ]]` ends this `if` list false — which is containment
+                # doing exactly its job and still leaving the forged URL in hand
+                # for the identity parser, which validates FORM and not origin.
+                # Reached before any of that, `${RB_REMOTE:?…}` is the shell
+                # refusing to expand: no command runs, so there is nothing to
+                # shadow, and a non-interactive shell ends there. #178.
+                #
+                # AND IT ALWAYS FIRES HERE, which is what makes the order enough.
+                # This arm is the read-backs failure, and the read-back is the
+                # only thing that assigns `RB_REMOTE` — the clear far above is a
+                # CONDITION with this whole block as its arm, so a value a startup
+                # file pre-set never reaches here at all.
+                : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
                 echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
                 exit 1
                 [[ -n "" ]]
@@ -853,6 +874,11 @@ if [[ -z $RB_REMOTE ]]; then
             else
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR2/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR2"
+                # THE EXPANSION IS FIRST HERE TOO, for the reason spelled out on
+                # the arm above: a shadowed `echo` that forges a value and neuters
+                # `exit` is past every statement that follows it, and the shell
+                # refusing to expand is reached before any command runs. #178.
+                : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
                 echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
                 exit 1
                 [[ -n "" ]]
@@ -948,6 +974,11 @@ if [[ -z $RB_REMOTE ]]; then
             [[ -n "" ]]
         fi
     else
+        # THE EXPANSION IS FIRST HERE TOO. Nothing has read the origin on this
+        # path, so `RB_REMOTE` is still the value the clear left, and the shell
+        # refusing to expand runs before the `echo` a startup file can have
+        # replaced with one that forges a URL and neuters `exit`. #178.
+        : "${RB_REMOTE:?one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen}"
         echo "ABORT: one of RB_TMPPARENT, RB_TMPPARENT2, RB_ORIGIN_DIR and RB_ORIGIN_DIR2 is readonly, value-transforming, or aimed at another transport variable; the transport directory cannot be chosen"
         exit 1
         [[ -n "" ]]

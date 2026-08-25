@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.0.64] — 2026-08-25
+
+- **Three of setup's refusals could be talked past by a shadowed `echo`.** Each
+  was written
+
+  ```bash
+  echo "ABORT: …"
+  exit 1
+  [[ -n "" ]]
+  ```
+
+  and the `[[ -n "" ]]` is containment: where `exit` has been replaced by a
+  function that RETURNS, it ends the enclosing `if` list false so the arm cannot
+  fall through into the success path. It does not contain an `echo` that forges a
+  value and neuters `exit` in the same body — `echo` runs FIRST, so the assignment
+  has already happened; `exit` returns; the containment does exactly its job; and
+  execution continues past the whole block with an attacker URL in `RB_REMOTE`.
+  The identity checks that follow validate the URL's FORM, not where it came from,
+  so a well-formed one passes them and every request, signoff, revocation and merge
+  for that session is addressed at the attacker's repository.
+
+  Each arm now begins with `${RB_REMOTE:?…}` — the shell refusing to expand, which
+  runs no command, so there is nothing to shadow, and a non-interactive shell ends
+  there. The `echo` and the `exit` stay behind it as the shape every arm in the
+  block has. The fix is ORDER rather than another check, and it works because
+  `RB_REMOTE` is provably empty on all three paths: the read-back is the only thing
+  that assigns it, and the clear far above is a CONDITION with the whole block as
+  its arm, so a value a startup file pre-set never reaches them.
+
+  What you see when one fires changes shape: the line now begins with your shell's
+  name and `RB_REMOTE:` rather than with `ABORT:`, which is what the origin-read
+  abort has looked like since 2.0.59 and what `README.md` describes.
+
+  It is the four ARMS, not the whole block. The `|| { echo …; exit 1; }` guards
+  after the read-back — the empty origin, the multi-line one, the identity, the
+  pin — are the same class and are not fixed here: `${RB_REMOTE:?…}` has nothing to
+  fire on where `RB_REMOTE` is already set, so they need a mechanism this change
+  does not supply. #181 carries them.
+
+  Closes #178.
+
 ## [2.0.63] — 2026-08-24
 
 - **A `TMPDIR` that cannot hold a directory no longer ends the session.** Setup
