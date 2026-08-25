@@ -53,9 +53,16 @@
 #      itself is the directory, never the file — a caller that opens it directly
 #      opens a directory.
 #   2  refused, and RETRYING UNDER ANOTHER PARENT IS SENSIBLE: both ancestry walks
-#      passed and the name still could not be taken exclusively — a full
+#      passed and the storage would not take what this script asked of it. Two
+#      moments produce it and they are the same question one step apart — the
+#      DIRECTORY could not be created exclusively, or the LEAF could not. A full
 #      filesystem, a quota, a read-only mount, or a name another account got to
 #      first. Nothing about the PATH is implicated.
+#
+#      THE LEAF IS INCLUDED BECAUSE THE FAILURE IS THE SAME ONE ONE STEP LATER: a
+#      filesystem with room for a directory and none for the bytes in it fails
+#      there, and a caller told that terminally would skip a second parent that
+#      would have worked.
 #
 #      THIS IS THE ONLY PLACE THAT CAN SAY IT, because it is the only one that runs
 #      both the `mkdir` and the walk. A caller that ignores it is no worse off than
@@ -485,9 +492,13 @@ rb_cleanup() {   # give back what this run created, for the phase it is in
     /usr/bin/env rmdir "$RB_DIR" 2>/dev/null
     return 0
 }
-rb_refuse() {   # rb_refuse [message] ; say why and stop; the EXIT trap cleans up
+# THE STATUS IS AN ARGUMENT, defaulting to 1. Most refusals are terminal — the
+# ancestry, the checkout, an argument — and 2 says the storage would not take what
+# this script asked of it, which is the one a caller can retry under another
+# parent. See the status contract at the top.
+rb_refuse() {   # rb_refuse [message] [status] ; say why and stop; the EXIT trap cleans up
     [[ -n ${1-} ]] && echo "$1" >&2
-    exit 1
+    exit "${2:-1}"
 }
 # AND A SIGNAL BETWEEN THE RESERVATION AND EITHER END LEAVES NOTHING BEHIND. The
 # caller performs no cleanup after a non-zero status, deliberately — it cannot know
@@ -698,7 +709,7 @@ if [[ $MODE = pin ]]; then
     # a failed write leaves exactly what a legitimately unset pin leaves: an empty
     # file and success. The caller could not tell them apart, so this one says.
     printf '%s\n' "${REVIEW_BUS_REMOTE-}" > "$OUT" \
-        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink"
+        || rb_refuse "ABORT: could not create '$OUT' exclusively and write the pin; it already exists, or is a symlink" 2
     # ONLY `EXIT` IS RESET, AND THAT IS THE WHOLE POINT OF RESETTING IT HERE. The
     # EXIT handler would remove the leaf this run just wrote, so it has to go. The
     # SIGNAL handlers stay armed through the final command: resetting them too left
@@ -850,7 +861,7 @@ if [[ $_rb_origin != "${_rb_origin%%'
     rb_refuse "ABORT: origin contains a newline; it cannot be a single value"
 fi
 printf '%s\n' "$_rb_origin" > "$OUT" \
-    || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink"
+    || rb_refuse "ABORT: could not create '$OUT' exclusively and write the origin; it already exists, or is a symlink" 2
 # ONLY `EXIT`, for the reason the pin path above gives: the signal handlers have to
 # stay armed through the final command.
 trap - EXIT

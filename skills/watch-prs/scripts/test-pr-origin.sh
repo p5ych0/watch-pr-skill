@@ -193,6 +193,33 @@ _st_rc=0
     && pass "…and so does a checkout with no usable origin" \
     || die "an unreadable origin reported $_st_rc, not 1"
 
+# …AND A WRITE THAT FAILS AFTER THE DIRECTORY EXISTS IS 2 AS WELL, because it is
+# the same storage failure one step later: a filesystem with room for a directory
+# and none for the bytes in it fails there, and a caller told that terminally would
+# skip a second parent that would have worked.
+#
+# `ulimit -f 0` IS HOW THAT STATE IS BUILT, and this case runs the helper WITHOUT
+# the watchdog for the reason the pair below it gives: `run_limited` captures
+# through regular files, which that limit forbids.
+_wr_bin="$TMP/wrbin"; mkdir -p "$_wr_bin"
+for _wr_mode in read pin; do
+    _wr_dir="$(_st_new)"
+    [ -n "$_wr_dir" ] || die "no scratch for the $_wr_mode write-status case"
+    _wr_rc=0
+    (cd "$REPO" && env HOME="$TMP/nohome" XDG_CONFIG_HOME="$TMP/nohome" \
+        GIT_CONFIG_NOSYSTEM=1 REVIEW_BUS_REMOTE="$REAL" \
+        bash -c 'ulimit -f 0 2>/dev/null || exit 97
+                 trap "" XFSZ
+                 exec /usr/bin/env bash -p "$1" "$2" "$3"' _ "$SCRIPT" "$_wr_mode" "$_wr_dir" >/dev/null 2>&1) || _wr_rc=$?
+    if [ "$_wr_rc" = 97 ]; then
+        echo "ok   - (this shell cannot set a zero file-size limit; the $_wr_mode write-status case did not run)"
+        continue
+    fi
+    [ "$_wr_rc" -eq 2 ] \
+        && pass "…and a write that fails after the directory exists reports 2 ($_wr_mode)" \
+        || die "the $_wr_mode write failure reported $_wr_rc, not 2"
+done
+
 # ── it reads what origin says ──────────────────────────────────────────────
 got="$(run read)"
 { [ "${got%%|*}" = 0 ] && [ "${got#*|}" = "$REAL" ]; } \
@@ -1294,9 +1321,17 @@ _res_ref=""
 _res_ref="$(awk '/^rb_refuse\(\) \{/,/^\}/' "$SCRIPT")" || _res_ref=""
 { [ -n "$_res_ref" ] \
   && case "$_res_ref" in *'rm -f'*|*rmdir*|*rb_cleanup*) false ;; *) true ;; esac \
-  && case "$_res_ref" in *'exit 1'*) true ;; *) false ;; esac; } \
+  && case "$_res_ref" in *'exit "${2:-1}"'*) true ;; *) false ;; esac; } \
     && pass "…and a refusal only says why and stops, so the cleanup happens exactly once" \
     || die "rb_refuse cleans up as well as the EXIT trap: '$_res_ref'"
+# AND IT STOPS WITH THE STATUS IT WAS GIVEN, defaulting to 1. Most refusals are
+# terminal; 2 says the storage would not take what this script asked of it, and a
+# caller retries that under another parent. A default of 1 is what keeps every
+# existing call site unchanged.
+case "$_res_ref" in
+    *'exit "${2:-1}"'*) pass "…and stops with the status it was given, terminal by default" ;;
+    *) die "rb_refuse does not take a status: '$_res_ref'" ;;
+esac
 _res_tr=0; _res_tr="$(grep -n '^trap .trap "" EXIT HUP INT TERM; rb_cleanup. EXIT$' "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tr=0
 _res_tl=0; _res_tl="$(grep -n "^trap 'rb_on_signal TERM' TERM$" "$SCRIPT" | head -1 | cut -d: -f1)" || _res_tl=0
 { [ "$_res_tr" -gt 0 ] && [ "$_res_tl" -gt 0 ] && [ "$_res_tl" -lt "$_res_mk" ]; } \
