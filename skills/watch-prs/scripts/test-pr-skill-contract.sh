@@ -1042,6 +1042,55 @@ LOCAL
         [ "${_wk_pin:-0}" = 0 ] \
             && pass "…and setup stops at the refusal rather than going on to pin" \
             || die "setup continued to the pin after a rejected read ($_wk_pin pin calls)"
+        # …AND ON THE RETRY ARM, WHICH IS A SECOND COPY OF THE READ-BACK AND
+        # THEREFORE A SECOND COPY OF THE DEFECT. The case above reaches the FIRST
+        # arm only, because its forged helper succeeds on the first call — so
+        # removing the expansion from the retry arm alone left the suite green and
+        # the same forged-origin attack live on the second-parent path.
+        #
+        # THE FIRST CALL REFUSES WITH 2, which is the status the driver retries on,
+        # and the second creates the leaf the read-back rejects. That is the only
+        # route into that arm.
+        rm -f "$_forge_dir/walk2.out" "$_forge_dir/walk2calls" "$_forge_dir/walk2n"
+        _wk2_out="$(cd "$_forge_dir" && env -u SHELLOPTS -u BASH_ENV -u ENV \
+            RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_LEAF_DIR=1 \
+            FORGE_FAIL_FIRST="$_forge_dir/walk2n" FORGE_FIRST_RC=2 \
+            FORGE_LOG="$_forge_dir/walk2calls" \
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+            RB_ALIAS_OUT="$_forge_dir/walk2.out" \
+            'BASH_FUNC_echo%%=() { RB_REMOTE=git@github.com:attacker/other.git; eval "exit() { return 0; }"; }' \
+            bash -c '
+                trap '"'"'printf "PINNED=[%s]\n" "${RB_REMOTE:-}" > "$RB_ALIAS_OUT"'"'"' EXIT
+                '"$_read_block"'
+            ' 2>&1)" || true
+        # THE ROUTE IS ASSERTED, NOT ASSUMED. Two READ calls is what proves the
+        # retry arm ran at all; with one, this case would be the first arm again
+        # under a different name and would pass with the retry unprotected.
+        #
+        # `read` CALLS, NOT EVERY CALL. A run that walks past the refusal goes on
+        # to the pin, and counting the whole log there reports three — which fails
+        # this assertion with a message about not reaching the arm, when what
+        # happened is the opposite. The two below are the ones that should carry
+        # that failure.
+        _wk2_n=0
+        [ -f "$_forge_dir/walk2calls" ] && _wk2_n="$(grep -c '^read ' "$_forge_dir/walk2calls")" || _wk2_n=0
+        [ "${_wk2_n:-0}" = 2 ] \
+            && pass "…and the retry arm is actually reached (two helper calls)" \
+            || die "the retry-arm case made $_wk2_n helper calls, so it did not reach that arm: '$_wk2_out'"
+        _wk2_seen=""
+        [ -f "$_forge_dir/walk2.out" ] && _wk2_seen="$(<"$_forge_dir/walk2.out")"
+        case "$_wk2_seen" in
+            *'PINNED=[git@github.com:attacker/'*)
+                die "a shadowed echo forged the origin past the retry arm: '$_wk2_seen' out='$_wk2_out'" ;;
+            *'PINNED=[]'*)
+                pass "…and the retry arm refuses the same way the first one does" ;;
+            *) die "the retry-arm shadowed-echo case left no observation: seen='$_wk2_seen' out='$_wk2_out'" ;;
+        esac
+        _wk2_pin=""
+        [ -f "$_forge_dir/walk2calls" ] && _wk2_pin="$(grep -c '^pin ' "$_forge_dir/walk2calls")" || _wk2_pin=0
+        [ "${_wk2_pin:-0}" = 0 ] \
+            && pass "…and setup stops there too rather than going on to pin" \
+            || die "setup continued to the pin after a rejected retry read ($_wk2_pin pin calls)"
         # …AND INTERACTIVELY TOO, WHICH IS THE MODE THE EXPANSION DOES NOT EXIT.
         # `${VAR:?…}` ends a NON-interactive shell where it stands. Interactively
         # the shell survives, and the question is what it survives INTO — a review
