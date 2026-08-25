@@ -1211,6 +1211,36 @@ LOCAL
                 && pass "…and setup does not go on to pin from it ($_gd_name)" \
                 || die "setup pinned past the $_gd_name origin ($_gd_pin pin calls): '$_gd_out'"
             rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
+            # …AND THE SAME STATE IN AN INTERACTIVE SHELL, which is the mode the
+            # driver actually runs in and the one `${VAR:?…}` does not exit. What
+            # it does there is abandon the whole enclosing compound command — the
+            # `if [[ -z $RB_REMOTE ]]` these checks live in — so the pin and the
+            # working files go with them. Asserted the same two ways, because a
+            # mode that is not run is a mode that is not covered.
+            rm -f "$_forge_dir/gdi.calls"
+            { printf '%s\n' "$_read_block"
+            } > "$_forge_dir/gdi.in"
+            _gdi_out="$(cd "$_forge_dir" && run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
+                RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_VALUE="$_gd_val" \
+                FORGE_LOG="$_forge_dir/gdi.calls" \
+                TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+                'BASH_FUNC_exit%%=() { return 0; }' \
+                'BASH_FUNC_echo%%=() { RB_REMOTE=git@github.com:attacker/other.git; return 0; }' \
+                bash --noprofile --norc -i < "$_forge_dir/gdi.in" 2>&1 || true)"
+            # THE SPACE AFTER THE COLON IS THE DISCRIMINATOR, as it is for the
+            # transport arms above: an interactive shell echoes its input, and the
+            # source line reads `RB_REMOTE:?…` with none.
+            case "$_gdi_out" in
+                *"RB_REMOTE: "*"$_gd_want"*)
+                    pass "…and interactively the $_gd_name origin reaches the same refusal" ;;
+                *) die "the interactive $_gd_name case did not reach its refusal: '$_gdi_out'" ;;
+            esac
+            _gdi_pin=""
+            [ -f "$_forge_dir/gdi.calls" ] && _gdi_pin="$(grep -c '^pin ' "$_forge_dir/gdi.calls")" || _gdi_pin=0
+            [ "${_gdi_pin:-0}" = 0 ] \
+                && pass "…and the abandonment takes the pin with it ($_gd_name)" \
+                || die "an interactive session pinned past the $_gd_name origin ($_gdi_pin pin calls): '$_gdi_out'"
+            rm -rf "$_forge_dir"/watch-pr.* 2>/dev/null || true
         done
         # …AND THE ORDINARY PATH IS WHERE A SHADOWED `:` WOULD HAVE BITTEN.
         #
