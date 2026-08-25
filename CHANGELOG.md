@@ -24,7 +24,10 @@
 
   What you see changes shape again: these announce themselves with your shell's
   name, a line number and `RB_REMOTE:` rather than with `ABORT:`, which is what
-  every other refusal in that block already looked like. The multi-line one no
+  every other refusal from READING the origin already looked like. The pin and the
+  working-file refusals below them keep the plain `ABORT:` line, and correctly:
+  their success arms contain everything that follows, so nothing runs after them
+  either way. The multi-line one no
   longer prints the value — the word is expanded after the clear — and printing a
   multi-line value into the terminal was never the useful part of it.
 
