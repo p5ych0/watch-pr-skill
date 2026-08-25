@@ -820,9 +820,11 @@ plugin docs and open an issue.
   The line begins with your shell's name and `RB_REMOTE:` because setup emits it
   as a parameter expansion the shell refuses rather than through `echo`, which in
   your own shell may be a function that prints nothing — or one that forges a
-  value and then stops `exit` from working. Every refusal in that block is written
-  this way now, so the shape is the same whichever one you see: your shell's name,
-  a line number, `RB_REMOTE:`, and the reason.
+  value and then stops `exit` from working. The refusals that come from the
+  transport read itself all look like that now: your shell's name, a line number,
+  `RB_REMOTE:`, and the reason. The checks AFTER the value has been read — an
+  empty origin, a multi-line one, an unusable identity — still announce themselves
+  with a plain `ABORT:` line.
 
   Setup tries a directory under `TMPDIR` and, where that is refused, one under
   `HOME` — so a full or read-only `TMPDIR` no longer ends the session by itself.

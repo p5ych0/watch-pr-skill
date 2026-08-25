@@ -1042,6 +1042,52 @@ LOCAL
         [ "${_wk_pin:-0}" = 0 ] \
             && pass "…and setup stops at the refusal rather than going on to pin" \
             || die "setup continued to the pin after a rejected read ($_wk_pin pin calls)"
+        # …AND INTERACTIVELY TOO, WHICH IS THE MODE THE EXPANSION DOES NOT EXIT.
+        # `${VAR:?…}` ends a NON-interactive shell where it stands. Interactively
+        # the shell survives, and the question is what it survives INTO — a review
+        # round on #178 read that as "execution reaches the `echo` below it", which
+        # would make the fix cover only `bash -c`.
+        #
+        # MEASURED, AND IT IS THE WHOLE ENCLOSING COMPOUND COMMAND THAT GOES, not
+        # the one command the expansion sits in:
+        #
+        #     P=; if true; then if true; then : "${P:?x}"; echo INNER; fi
+        #                       echo OUTER; fi; echo AFTER
+        #
+        # prints the diagnostic and `AFTER` — never `INNER`, never `OUTER`. Setup is
+        # one `if [[ -z $RB_REMOTE ]]` from the clear to the end, so abandoning it
+        # takes the arm, the pin and the working files together.
+        #
+        # RUN RATHER THAN ARGUED, because that is a fact about a shell mode and the
+        # non-interactive case above cannot see it. No trap here: interactively
+        # there IS a reachable line after the block, which is what makes the
+        # observation direct.
+        rm -f "$_forge_dir/walkicalls"
+        { printf '%s\n' 'echo() { RB_REMOTE=git@github.com:attacker/other.git; exit() { return 0; }; }'
+          printf '%s\n' "$_read_block"
+          printf '%s\n' 'printf "PINNED=[%s]\n" "${RB_REMOTE:-}"'
+        } > "$_forge_dir/walki.in"
+        _wki_out="$(cd "$_forge_dir" && run_limited 25 env -u SHELLOPTS -u BASH_ENV -u ENV \
+            RB_SCRIPTS="$_forge_dir" FORGE_RC=0 FORGE_LEAF_DIR=1 \
+            FORGE_LOG="$_forge_dir/walkicalls" \
+            TMPDIR="$_forge_dir" HOME="$_forge_dir" REPO_DIR="$_forge_dir" \
+            bash --noprofile --norc -i < "$_forge_dir/walki.in" 2>&1 || true)"
+        # ANCHORED, BECAUSE AN INTERACTIVE SHELL ECHOES ITS INPUT. The transcript
+        # carries the source line that PRINTS this, and that line reads
+        # `PINNED=[%s]` — a format, not a value. Matching the emitted forms alone
+        # keeps the two apart.
+        case "$_wki_out" in
+            *'PINNED=[git@github.com:attacker/'*)
+                die "interactively, a shadowed echo forged the origin past the rejected read: '$_wki_out'" ;;
+            *'PINNED=[]'*)
+                pass "…and interactively the whole block is abandoned, so the echo is not reached either" ;;
+            *) die "the interactive shadowed-echo case left no observation: '$_wki_out'" ;;
+        esac
+        _wki_pin=""
+        [ -f "$_forge_dir/walkicalls" ] && _wki_pin="$(grep -c '^pin ' "$_forge_dir/walkicalls")" || _wki_pin=0
+        [ "${_wki_pin:-0}" = 0 ] \
+            && pass "…and no pin was attempted in that shell either" \
+            || die "an interactive session continued to the pin after a rejected read ($_wki_pin pin calls)"
         # THE REJECTED LEAF IS THIS CASE'S TO REMOVE. The arm cleans up with
         # `rm -f` and `rmdir`, and neither can take a directory holding an entry —
         # which is correct for the transport and leaves this staged one behind.

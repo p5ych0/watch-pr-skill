@@ -33,6 +33,12 @@
   name and `RB_REMOTE:` rather than with `ABORT:`, which is what the origin-read
   abort has looked like since 2.0.59 and what `README.md` describes.
 
+  It is the four ARMS, not the whole block. The `|| { echo …; exit 1; }` guards
+  after the read-back — the empty origin, the multi-line one, the identity, the
+  pin — are the same class and are not fixed here: `${RB_REMOTE:?…}` has nothing to
+  fire on where `RB_REMOTE` is already set, so they need a mechanism this change
+  does not supply. #181 carries them.
+
   Closes #178.
 
 ## [2.0.63] — 2026-08-24
