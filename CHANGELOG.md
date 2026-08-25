@@ -70,11 +70,13 @@
   The driver reads that status in the retry's own condition —
   `elif [[ $? -eq 2 ]] && …` — which is inside the same `if`, so the read-back stays
   contained in the arm that names its directory rather than becoming a statement
-  after a guard. Closes #161, and #160 with it — a squatter who pre-creates the
-  argv-published first name costs a retry rather than a refused session — which
-  MITIGATES #160 rather than closing it: an account watching argv continuously can
-  pre-create the second name as well, and both parents being one shared sticky
-  directory is a configuration the selection allows.
+  after a guard. Closes #161.
+
+  It MITIGATES #160 without closing it. A squatter who pre-creates the
+  argv-published first name costs a retry rather than a refused session — but an
+  account watching argv continuously can pre-create the second name as well, and
+  both parents being one shared sticky directory is a configuration the selection
+  allows. The distinct suffixes prevent an accidental collision, not a watcher.
 
 ## [2.0.62] — 2026-08-24
 

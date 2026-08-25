@@ -68,9 +68,10 @@
 #      both the `mkdir` and the walk. A caller that ignores it is no worse off than
 #      before: 2 is non-zero, so `if helper …; then` treats it as a refusal.
 #   1  refused, TERMINALLY — an ancestry another account can interfere with, a path
-#      that will not resolve, an unreadable `origin`, a write that opened and then
-#      failed. A caller must not route around these into another parent: what is
-#      wrong is not the storage, and an operator has to see it named.
+#      that will not resolve, an unreadable `origin`, a caller that asked for
+#      something this script does not do. A caller must not route around these into
+#      another parent: what is wrong is not the storage, and an operator has to see
+#      it named.
 #
 #      The reason is on STDERR, and this script does NOT create a value
 #      file. The leaf is written by the single redirection that creates it, so
