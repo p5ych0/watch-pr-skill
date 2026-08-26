@@ -515,6 +515,22 @@ unchanged, which is how that one attribute got through. `RbProbe*` matches
 neither transformation, so the same two lines catch every attribute as well as
 the alias.
 
+## THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
+
+The argument is the one above, not a second copy of it: the pin probe guards
+`RB_PIN_DIR`, `RB_PIN_DIR2`, `RB_PIN_SEEN` and `RB_DIR` exactly as the transport
+probe guards its four, and for the same reason — a list of names is wrong by
+omission, and `${!name}` answers generically what an enumeration cannot.
+
+It has its own claim because it is its own SITE. Sharing one claim between two
+places in the block meant a claim could be deleted from one of them and added
+anywhere else, and every count still balanced; with one claim per site the
+mapping to this document is one-to-one, and a claim that moves or goes is a
+number that no longer matches.
+
+See the transport probe's section above for what the test does and what it still
+cannot stop.
+
 ## `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
 
 `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the

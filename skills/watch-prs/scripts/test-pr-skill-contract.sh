@@ -5071,19 +5071,17 @@ if [ -f "$_wy_doc" ]; then
         && pass "…and nothing still names its old path under docs/" \
         || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
 
-    # AND BOTH PROBE SITES KEEP A POINTER. The transport probe and the pin probe
-    # make the SAME claim — they are one argument — so the section they share stays
-    # claimed if either pointer is deleted, and the counts fall together. The count
-    # is therefore stated: 29 claims over 28 arguments, the one duplicate being
-    # that pair. A pointer deleted, or a new claim added without an argument, moves
-    # this number and has to be looked at rather than passing quietly.
+    # AND THE TWO TOTALS MATCH. With one claim per argument the mapping is a
+    # bijection, so a pointer dropped or a section deleted moves one number and not
+    # the other — no fixed count to go stale, and nothing that has to know how many
+    # there ought to be.
     _wy_heads_n=0; _wy_hn_rc=0
     _wy_heads_n="$(grep -c '^## ' "$_wy_doc")" || _wy_hn_rc=$?
     [ "$_wy_hn_rc" -le 1 ] \
         || die "the rationale could not be counted (rc=$_wy_hn_rc)"
-    { [ "$_wy_all" -eq 29 ] && [ "$_wy_heads_n" -eq 28 ]; } \
-        && pass "…and the block carries 29 claims over 28 arguments, the probes sharing one" \
-        || die "the block has $_wy_all claims over $_wy_heads_n arguments, not 29 over 28; a pointer was added or dropped"
+    [ "$_wy_all" -eq "$_wy_heads_n" ] \
+        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
+        || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
 
     # 2. THE CLAIMS, taken from the setup fence alone and paired with the pointer
     #    beneath them. The status is taken: fed straight into a comparison, a
@@ -5112,20 +5110,43 @@ if [ -f "$_wy_doc" ]; then
         *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
     esac
 
-    # AND THE ONE DUPLICATED CLAIM IS THE PROBE PAIR, at exactly two sites. The
-    # counts alone do not say WHICH claim is doubled: deleting the pin probe's
-    # pointer and adding a valid pair for some other already-argued heading keeps
-    # 29 over 28 and passes both membership loops, while the pin probe loses its
-    # local rationale. So the duplicate is named.
-    _wy_gen='ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.'
-    _wy_cdupe=""; _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cdupe="THE_SCAN_FAILED"
-    [ "$_wy_cdupe" = "$_wy_gen" ] \
-        && pass "…and the only claim made twice is the one the two probes share" \
-        || die "the duplicated claims are '$_wy_cdupe', not the probe pair; a site lost its own rationale"
-    _wy_gen_n=0; _wy_gen_n="$(grep -cxF "$_wy_gen" <<<"$_wy_claims")" || _wy_gen_n=0
-    [ "$_wy_gen_n" -eq 2 ] \
-        && pass "…claimed at both probe sites, not one" \
-        || die "the shared probe claim appears $_wy_gen_n times, not twice"
+    # THE MAPPING IS ONE TO ONE, which is what makes counting sufficient. Two sites
+    # once shared a claim — the transport probe and the pin probe make the same
+    # argument — and while they did, the counts could not say WHICH claim was
+    # doubled: deleting one site's pointer and adding the pair anywhere else kept
+    # the totals and passed both membership loops, with that site silently
+    # unannotated. Each site has its own claim now, and the second section says it
+    # is the same argument rather than repeating it — so no claim is duplicated, no
+    # heading is, and a relocation is a number that stops matching.
+    _wy_cdupe=""; _wy_cd_rc=0
+    _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cd_rc=$?
+    { [ "$_wy_cd_rc" -eq 0 ] && [ -z "$_wy_cdupe" ]; } \
+        && pass "…and no claim is made at two sites, so the mapping is one to one" \
+        || die "a claim is made at two sites (rc=$_wy_cd_rc): '\''$_wy_cdupe'\''; a relocation between them would be invisible"
+
+    # AND EVERY PAIR ANNOTATES CODE. A claim and its pointer must be followed by a
+    # line that is neither comment nor blank, so the pair sits ON something rather
+    # than floating in a comment block.
+    #
+    # WHAT THIS DOES NOT CATCH, stated rather than left to be discovered: a pair
+    # moved from one code line to another INSIDE the fence. Every count, both
+    # membership loops and this adjacency all still hold, because the pair is
+    # intact and still annotates code — it is simply annotating the wrong code.
+    # Catching that means the fixture knowing which line each claim belongs to,
+    # which couples the contract to the block's shape: any legitimate edit to the
+    # setup then fails it for a reason that has nothing to do with the rationale.
+    # A relocated claim is visible in the diff as code losing its annotation; a
+    # contract that breaks on every refactor is not.
+    _wy_float=0
+    _wy_float="$(awk '/^## Derive identity$/{sec=1}
+       sec && /^```bash$/ && !seen {f=1; seen=1; next}
+       f && /^```$/{f=0; sec=0; next}
+       f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
+           prev=$0 }
+       END{print n+0}' "$SKILL")" || _wy_float=99
+    [ "$_wy_float" -eq 0 ] \
+        && pass "…and every claim and pointer sits on a line of code" \
+        || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
 
     # 3. FORWARD: every claim is a heading, verbatim. `grep -xF` — a claim is
     #    literal text and must match the WHOLE heading, or a claim that is a prefix
@@ -5161,9 +5182,11 @@ EOWY
     # keeps the counts, the forward lookup and the reverse membership intact, and
     # the `# WHY:` then leads a model to an empty section — which is the separation
     # failing completely while the contract reports clean.
+    # STRUCTURE IS NOT CONTENT: `NF` counted a bare fence as body, so a section
+    # stripped to an empty code block kept every count while arguing nothing.
     _wy_empty=""; _wy_empty="$(awk '
         /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
-        h != "" && NF { body=1 }
+        h != "" && NF && $0 !~ /^[[:space:]]*```[a-z]*[[:space:]]*$/ { body=1 }
         END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
     [ -z "$_wy_empty" ] \
         && pass "…and every section argues something under its heading" \

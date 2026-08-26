@@ -304,7 +304,7 @@ if [[ -z $RB_REMOTE ]]; then
     # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     export REVIEW_BUS_REMOTE="$RB_REMOTE" \
         || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-    # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+    # THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
     # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
