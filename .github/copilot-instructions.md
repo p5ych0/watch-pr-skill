@@ -450,10 +450,26 @@ finding: each record accepts one named race and nothing else.
 
 **The `--admin` merge mode is accepted too**, in
 `docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
-`gh pr merge --admin` by default, which bypasses branch protection, and the
-record sets out the bounds that make it acceptable and the `REVIEW_MERGE_STRICT`
-opt-out that drops it. Read that record before raising the bypass; a bound it
-claims having gone missing is a finding, and so is a new way past the gate.
+`gh pr merge --admin` by default, which bypasses branch protection.
+
+**Its bounds are listed here rather than left in that record, because you cannot
+follow the pointer.** The bypass is accepted only while ALL of these hold, so a
+change that removes any one of them is a finding even though the bypass itself is
+waived:
+
+- the head is re-read and compared immediately before merging;
+- that comparison uses the **full 40-hex SHA**, never a 7-character prefix — a
+  commit sharing seven hex characters is constructible, and that is not a race
+  with a window but a match at any time;
+- the comparison is **atomic with the merge**, through `--match-head-commit`, so
+  a push cannot land between the check and the merge call;
+- a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
+  `CHANGES_REQUESTED`;
+- **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
+  process — it is exported, not merely assigned.
+
+A new way past the gate is a finding too. What is waived is the default `--admin`
+itself, on those bounds, and nothing else.
 
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use

@@ -4173,6 +4173,17 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # ACCEPTED ONES ONLY. A record whose status is superseded or rejected is
     # history rather than authority, and requiring a reviewer file to name it
     # would be requiring the opposite of what it says.
+    # …AND THE `--admin` BOUNDS ARE SPELLED OUT FOR COPILOT, not deferred to the
+    # record. Naming the file is enough for Codex, which reads the repository;
+    # Copilot is configured from its own instructions and follows no pointers, so
+    # a waiver that says "read that record" leaves it unable to notice that a
+    # bound the waiver DEPENDS ON has been removed — and it would sign off a
+    # newly unsafe `--admin` path. The bypass is waived; its bounds are not.
+    for _bd in '40-hex' 'match-head-commit' 'REVIEW_MERGE_STRICT' 'review-state probe'; do
+        grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
+            && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
+            || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
+    done
     # …AND A PROBE THAT ERRORS IS NOT AN INACTIVE RECORD. `grep -q … || continue`
     # treats rc 2 — unreadable, vanished between the `-f` and the read — exactly
     # like rc 1, "this record is not accepted", so an accepted waiver nobody can
