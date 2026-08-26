@@ -4997,9 +4997,10 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY `# WHY:` POINTER RESOLVES, AND EVERY SECTION IS POINTED AT ───────
 #
-# The setup block's argument lives in `docs/skill-setup-rationale.md` — 29
+# The setup block's argument lives in `docs/skill-setup-rationale.md` — 28
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
-# reader needs the COMMANDS. What stayed beside the code is the CLAIM: one line,
+# reader needs the COMMANDS. The ids run S01–S29 with S22 absent: it opened with
+# the same claim as S07 and both probes cite S07 now, so the gap is deliberate. What stayed beside the code is the CLAIM: one line,
 # then a `# WHY:` naming the section that proves it.
 #
 # THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
@@ -5014,11 +5015,24 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # nothing reading the skill would ever reach it.
 _wy_doc="$ROOT/docs/skill-setup-rationale.md"
 if [ -f "$_wy_doc" ]; then
-    _wy_ptr=""; _wy_ptr="$(grep -o '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*' "$SKILL" \
+    # THE POINTER ENDS AT THE ID. Unanchored, `…#S01x` yields `S01` — every
+    # section, anchor and claim check then passes while the literal fragment in the
+    # file names nothing. The pointer is the whole rest of the line, so end-of-line
+    # is the boundary, and both extractors use it.
+    _wy_ptr=""; _wy_ptr="$(grep -o '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*$' "$SKILL" \
         | sed 's/.*#//' | sort -u)" || _wy_ptr=""
     [ -n "$_wy_ptr" ] \
         && pass "the setup block points at its rationale" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
+    # …AND EVERY POINTER LINE IS WELL FORMED. With the extractors anchored, a
+    # mistyped `…#S01x` simply stops being extracted — invisible rather than
+    # wrong, which is the same silence one level along. Count the pointer lines
+    # and require the anchored extractor to have seen all of them.
+    _wy_all=0; _wy_all="$(grep -c '# WHY: docs/skill-setup-rationale' "$SKILL")" || _wy_all=0
+    _wy_ok=0;  _wy_ok="$(grep -c '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*$' "$SKILL")" || _wy_ok=0
+    [ "$_wy_all" -eq "$_wy_ok" ] \
+        && pass "…and every pointer line ends at its section id" \
+        || die "$((_wy_all - _wy_ok)) # WHY: lines are malformed and would be skipped rather than checked"
     _wy_sec=""; _wy_sec="$(grep -o '^## S[0-9][0-9]* ' "$_wy_doc" | sed 's/^## //; s/ $//' | sort -u)" || _wy_sec=""
     for _wy in $_wy_ptr; do
         grep -q "^## $_wy — " "$_wy_doc" \
@@ -5072,7 +5086,7 @@ if [ -f "$_wy_doc" ]; then
     # times, `_wy_bad` stays 0, and a failed parse reports as a clean contract.
     _wy_map=""; _wy_map_rc=0
     _wy_map="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
-       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+/)) {
+       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+$/)) {
                id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
                c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
                print id "|" c }

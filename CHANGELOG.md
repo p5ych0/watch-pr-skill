@@ -9,7 +9,7 @@
 
   That commentary is the argument for why setup has the shape it has — each
   paragraph a defect that was shipped, found and paid for. It now lives in
-  `docs/skill-setup-rationale.md`, twenty-nine sections, reached from the block by
+  `docs/skill-setup-rationale.md`, twenty-eight sections, reached from the block by
   a `# WHY:` line. **The claim stays beside the code**: every section opens with
   the same sentence that remains in the block, so the argument reads whole from
   either end and a reader still meets the point at the line it protects.

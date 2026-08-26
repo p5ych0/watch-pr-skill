@@ -25,9 +25,11 @@ THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
 sends xtrace to file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture,
 so the trace of `cmd` is assigned to `X` along with its output. Measured:
 
-  SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
-  [++ printf hello
-  hello]
+```bash
+SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+[++ printf hello
+hello]
+```
 
 Every substitution in this block is affected — the repository root, the plugin
 discovery, the `mktemp`, the `type -t` probe — so it is one property of the
@@ -638,8 +640,10 @@ THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
 is a NAME, and one that both forges a value and neuters `exit`
 walks straight past everything below it:
 
-  echo() { RB_REMOTE=git@github.com:attacker/other.git
-           exit() { return 0; }; }
+```bash
+echo() { RB_REMOTE=git@github.com:attacker/other.git
+         exit() { return 0; }; }
+```
 
 `echo` runs, the assignment has happened, `exit` returns, and
 `[[ -n "" ]]` ends this `if` list false — which is containment
