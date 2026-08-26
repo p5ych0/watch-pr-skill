@@ -468,8 +468,15 @@ waived:
 - **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
   process — it is exported, not merely assigned.
 
+**And the waiver does not cover a base branch that requires a merge queue.**
+There is no merge-queue probe anywhere in this plugin, and `gh pr merge --admin`
+bypasses a required queue outright rather than racing it — so the exposure is a
+skipped queue rather than a seconds-wide window, and `REVIEW_MERGE_STRICT=1` is
+the only supported setting for such a repository. A change that would merge with
+`--admin` there is a finding, not a waived bypass.
+
 A new way past the gate is a finding too. What is waived is the default `--admin`
-itself, on those bounds, and nothing else.
+itself, on those bounds and outside that configuration, and nothing else.
 
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use

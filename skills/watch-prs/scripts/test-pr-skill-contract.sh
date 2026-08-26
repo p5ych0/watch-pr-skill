@@ -4199,7 +4199,9 @@ if [ -d "$ROOT/docs/decisions" ]; then
                'dismissed review' \
                'body-only' \
                'REVIEW_MERGE_STRICT=1' \
-               'exported, not merely assigned'; do
+               'exported, not merely assigned' \
+               'requires a merge queue' \
+               'no merge-queue probe'; do
         grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
             && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
             || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
@@ -4217,11 +4219,24 @@ if [ -d "$ROOT/docs/decisions" ]; then
     }
     for _dr in "$ROOT"/docs/decisions/*.md; do
         [ -f "$_dr" ] || continue
-        _dr_rc=0; _dr_status_of "$_dr" || _dr_rc=$?
-        case "$_dr_rc" in
-            0) ;;
-            1) continue ;;
-            *) die "the status of $(basename "$_dr") could not be read (rc=$_dr_rc); an accepted waiver may be going unchecked"
+        # THE STATUS IS PARSED, NOT INFERRED FROM A MISS. `grep -q accepted` failing
+        # means only that the accepted pattern was absent — a status deleted,
+        # misspelled or reformatted looks exactly like `superseded`, so a live
+        # waiver would be classified inactive and go unchecked. Read the line,
+        # accept the values this repository uses, and refuse anything else.
+        _dr_rc=0; _dr_line=""
+        _dr_line="$(grep -i '^\*\*Status:\*\*' "$_dr" 2>/dev/null)" || _dr_rc=$?
+        [ "$_dr_rc" -le 1 ] \
+            || die "the status line of $(basename "$_dr") could not be read (rc=$_dr_rc); an accepted waiver may be going unchecked"
+        # THE FIRST WORD AFTER THE LABEL, lowercased by `tr` rather than by a
+        # `declare -l` this shell may not have — the mac-shaped job runs bash 3.2.
+        _dr_st="${_dr_line#*\*\*Status:\*\* }"
+        _dr_st="${_dr_st%% *}"
+        _dr_st="$(printf '%s' "$_dr_st" | tr '[:upper:]' '[:lower:]')"
+        case "$_dr_st" in
+            accepted) ;;
+            superseded|rejected|withdrawn) continue ;;
+            *) die "$(basename "$_dr") has no usable Status (saw '$_dr_st'); a live waiver would be skipped as inactive"
                continue ;;
         esac
         _drn="$(basename "$_dr" .md)"
@@ -4250,6 +4265,24 @@ if [ -d "$ROOT/docs/decisions" ]; then
     fi
     chmod 644 "$_dr_un" 2>/dev/null || true
     rm -f "$_dr_un"
+    # …AND A MALFORMED STATUS IS REFUSED RATHER THAN SKIPPED. This is the shape
+    # the loop is asserted on: the classification must come from a status it
+    # RECOGNISES, so a record whose status was deleted or misspelled cannot pass
+    # for `superseded` and take a live waiver out of the check with it.
+    for _dr_bad in '' '**Status:** acccepted' '**Status:** pending'; do
+        _dr_mal="$TMP_CL/malformed-record.md"
+        printf '# Decision: a probe\n\n%s\n' "$_dr_bad" > "$_dr_mal"
+        _dr_line=""; _dr_rc=0
+        _dr_line="$(grep -i '^\*\*Status:\*\*' "$_dr_mal" 2>/dev/null)" || _dr_rc=$?
+        _dr_st="${_dr_line#*\*\*Status:\*\* }"; _dr_st="${_dr_st%% *}"
+        _dr_st="$(printf '%s' "$_dr_st" | tr '[:upper:]' '[:lower:]')"
+        case "$_dr_st" in
+            accepted|superseded|rejected|withdrawn)
+                die "a malformed status ('$_dr_bad') was classified as '$_dr_st'" ;;
+            *) pass "…and a record whose status is '${_dr_bad:-absent}' is refused, not skipped" ;;
+        esac
+        rm -f "$_dr_mal"
+    done
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
