@@ -5035,19 +5035,42 @@ if [ -f "$_wy_doc" ]; then
             && pass "…and $_wy is pointed at from the block" \
             || die "$_wy is a section nothing points at; its code is gone or its pointer rotted"
     done
-    # AND EVERY CLAIM KEEPS ITS POINTER ADJACENT. A `# WHY:` that drifted away from
-    # the line it explains is a pointer nobody meets at the moment they need it, so
-    # each one must sit directly under a comment line — never under code, and never
-    # opening a run.
+    # AND EVERY POINTER NAMES THE ARGUMENT FOR THE CLAIM ABOVE IT. Adjacency alone
+    # is not enough: with only "the previous line is a comment", SWAPPING two valid
+    # pointers keeps every check green — both sections exist, both anchors exist,
+    # both sit under a comment — while each claim now cites the argument for a
+    # different one. That is the central safeguard failing silently, so the check
+    # compares the claim to the section it points at.
+    #
+    # THE COMPARISON IS EXACT, AND CHEAP, because each section OPENS with the claim
+    # line verbatim. That is not a coincidence to rely on quietly: the document is
+    # built that way so the argument reads whole from either end, and this case is
+    # what keeps it true.
     _wy_bad=0
-    _wy_bad="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
-                    f { if ($0 ~ /# WHY: docs\/skill-setup-rationale/) {
-                            if (prev !~ /^[[:space:]]*#/) b++ }
-                        prev=$0 }
-                    END{print b+0}' "$SKILL")" || _wy_bad=99
+    while IFS='|' read -r _wy_id _wy_claim; do
+        [ -n "$_wy_id" ] || continue
+        _wy_first=""
+        _wy_first="$(awk -v id="$_wy_id" '
+            $0 ~ "^## " id " — " {f=1; next}
+            f && /^## S[0-9]/ {exit}
+            f && NF {print; exit}' "$_wy_doc")" || _wy_first=""
+        if [ "$_wy_claim" = "$_wy_first" ]; then
+            pass "…and $_wy_id is the argument for the claim above it"
+        else
+            die "$_wy_id is cited by a claim it does not open with: block '$_wy_claim' vs section '$_wy_first'"
+            _wy_bad=$((_wy_bad + 1))
+        fi
+    done <<EOWY
+$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
+       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+/)) {
+               id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
+               c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
+               print id "|" c }
+           prev=$0 }' "$SKILL")
+EOWY
     [ "$_wy_bad" -eq 0 ] \
-        && pass "…and every pointer sits directly under the claim it belongs to" \
-        || die "$_wy_bad # WHY: pointers do not follow a claim line"
+        && pass "…so no pointer cites the argument for a different claim" \
+        || die "$_wy_bad pointers cite the wrong section"
 else
     die "docs/skill-setup-rationale.md is missing; the setup block's argument has nowhere to live"
 fi
