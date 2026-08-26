@@ -4211,32 +4211,38 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # like rc 1, "this record is not accepted", so an accepted waiver nobody can
     # read is silently skipped and the contract reports success without checking
     # it. Only the ordinary no-match status continues; anything else fails.
-    _dr_status_of() {   # _dr_status_of <file> ; 0 accepted, 1 not, 2 unreadable
-        # STDERR IS DISCARDED, THE STATUS IS NOT. The caller branches on the
-        # status and names the file itself, so grep's own complaint would only
-        # land in the middle of the suite's output.
-        grep -qi '^\*\*Status:\*\* accepted' "$1" 2>/dev/null
+    # ONE DECISION TABLE, USED BY THE SCAN AND BY THE CASES THAT PROVE IT. The
+    # malformed-status cases used to re-implement the parse and the `case` arms,
+    # so a regression in the real scanner left them green while a live waiver
+    # dropped out of both reviewer-file checks — a copy of a rule proving the copy.
+    #
+    # STDERR IS DISCARDED, THE STATUS IS NOT: the caller names the file itself, so
+    # grep's own complaint would only land in the middle of the suite's output.
+    _dr_action() {   # _dr_action <file> ; prints require | skip | refuse
+        local _l _rc=0 _st
+        _l="$(grep -i '^\*\*Status:\*\*' "$1" 2>/dev/null)" || _rc=$?
+        # rc 1 is "no such line", which is a malformed record; anything above it
+        # is a read error, and both are refusals rather than silent skips.
+        [ "$_rc" -le 1 ] || { printf refuse; return 0; }
+        _st="${_l#*\*\*Status:\*\* }"
+        _st="${_st%% *}"
+        # LOWERCASED WITH `tr`, not `declare -l`: the mac-shaped job runs bash 3.2.
+        _st="$(printf '%s' "$_st" | tr '[:upper:]' '[:lower:]')"
+        case "$_st" in
+            accepted)                     printf require ;;
+            superseded|rejected|withdrawn) printf skip ;;
+            *)                            printf refuse ;;
+        esac
+        return 0
     }
     for _dr in "$ROOT"/docs/decisions/*.md; do
         [ -f "$_dr" ] || continue
-        # THE STATUS IS PARSED, NOT INFERRED FROM A MISS. `grep -q accepted` failing
-        # means only that the accepted pattern was absent — a status deleted,
-        # misspelled or reformatted looks exactly like `superseded`, so a live
-        # waiver would be classified inactive and go unchecked. Read the line,
-        # accept the values this repository uses, and refuse anything else.
-        _dr_rc=0; _dr_line=""
-        _dr_line="$(grep -i '^\*\*Status:\*\*' "$_dr" 2>/dev/null)" || _dr_rc=$?
-        [ "$_dr_rc" -le 1 ] \
-            || die "the status line of $(basename "$_dr") could not be read (rc=$_dr_rc); an accepted waiver may be going unchecked"
-        # THE FIRST WORD AFTER THE LABEL, lowercased by `tr` rather than by a
-        # `declare -l` this shell may not have — the mac-shaped job runs bash 3.2.
-        _dr_st="${_dr_line#*\*\*Status:\*\* }"
-        _dr_st="${_dr_st%% *}"
-        _dr_st="$(printf '%s' "$_dr_st" | tr '[:upper:]' '[:lower:]')"
-        case "$_dr_st" in
-            accepted) ;;
-            superseded|rejected|withdrawn) continue ;;
-            *) die "$(basename "$_dr") has no usable Status (saw '$_dr_st'); a live waiver would be skipped as inactive"
+        # THE SCAN ASKS THE TABLE. Nothing is parsed here, so the cases below
+        # that prove the classification are proving THIS behaviour.
+        case "$(_dr_action "$_dr")" in
+            require) ;;
+            skip)    continue ;;
+            *) die "$(basename "$_dr") has no usable Status; a live waiver would be skipped as inactive"
                continue ;;
         esac
         _drn="$(basename "$_dr" .md)"
@@ -4252,37 +4258,42 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # SKIPPED BY NAME WHERE THE PROBE CAN READ IT ANYWAY: a run as root, or a
     # filesystem ignoring the mode, makes the unreadable file readable and the
     # case would assert nothing.
+    # …AND THE TABLE IS EXERCISED, through the same function the scan calls.
+    #
+    # AN UNREADABLE RECORD IS A REFUSAL, not "not accepted". Skipped by name where
+    # the probe can read it anyway — a root run, or a filesystem ignoring the
+    # mode, would leave the case asserting nothing.
     _dr_un="$TMP_CL/unreadable-record.md"
     printf '# Decision: a probe\n\n**Status:** accepted\n' > "$_dr_un" 2>/dev/null
     chmod 000 "$_dr_un" 2>/dev/null || true
     if [ -f "$_dr_un" ] && ! grep -qi 'Status' "$_dr_un" 2>/dev/null; then
-        _dr_rc=0; _dr_status_of "$_dr_un" || _dr_rc=$?
-        { [ "$_dr_rc" -ne 0 ] && [ "$_dr_rc" -ne 1 ]; } \
-            && pass "…and an unreadable record reports an error rather than 'not accepted'" \
-            || die "an unreadable record gave rc=$_dr_rc, which the loop would treat as inactive"
+        [ "$(_dr_action "$_dr_un")" = refuse ] \
+            && pass "…and an unreadable record is refused rather than treated as inactive" \
+            || die "an unreadable record classified as '$(_dr_action "$_dr_un")'"
     else
         echo "ok   - (this run can read a mode-000 file; the unreadable-record case did not run)"
     fi
     chmod 644 "$_dr_un" 2>/dev/null || true
     rm -f "$_dr_un"
-    # …AND A MALFORMED STATUS IS REFUSED RATHER THAN SKIPPED. This is the shape
-    # the loop is asserted on: the classification must come from a status it
-    # RECOGNISES, so a record whose status was deleted or misspelled cannot pass
-    # for `superseded` and take a live waiver out of the check with it.
-    for _dr_bad in '' '**Status:** acccepted' '**Status:** pending'; do
-        _dr_mal="$TMP_CL/malformed-record.md"
+    # AND A MALFORMED STATUS IS REFUSED RATHER THAN SKIPPED, which is the shape
+    # that matters: a status deleted, misspelled or reformatted must not pass for
+    # `superseded` and take a live waiver out of the check with it.
+    _dr_mal="$TMP_CL/malformed-record.md"
+    for _dr_bad in '' '**Status:** acccepted' '**Status:** pending' '**Status:**'; do
         printf '# Decision: a probe\n\n%s\n' "$_dr_bad" > "$_dr_mal"
-        _dr_line=""; _dr_rc=0
-        _dr_line="$(grep -i '^\*\*Status:\*\*' "$_dr_mal" 2>/dev/null)" || _dr_rc=$?
-        _dr_st="${_dr_line#*\*\*Status:\*\* }"; _dr_st="${_dr_st%% *}"
-        _dr_st="$(printf '%s' "$_dr_st" | tr '[:upper:]' '[:lower:]')"
-        case "$_dr_st" in
-            accepted|superseded|rejected|withdrawn)
-                die "a malformed status ('$_dr_bad') was classified as '$_dr_st'" ;;
-            *) pass "…and a record whose status is '${_dr_bad:-absent}' is refused, not skipped" ;;
-        esac
-        rm -f "$_dr_mal"
+        [ "$(_dr_action "$_dr_mal")" = refuse ] \
+            && pass "…and a record whose status is '${_dr_bad:-absent}' is refused, not skipped" \
+            || die "the status '${_dr_bad:-absent}' classified as '$(_dr_action "$_dr_mal")'"
     done
+    # …AND THE THREE LIVE VALUES CLASSIFY THE WAY THE SCAN NEEDS, so the refusals
+    # above are not passing because the table refuses everything.
+    for _dr_ok in 'accepted:require' 'Accepted:require' 'superseded:skip' 'rejected:skip'; do
+        printf '# Decision: a probe\n\n**Status:** %s\n' "${_dr_ok%%:*}" > "$_dr_mal"
+        [ "$(_dr_action "$_dr_mal")" = "${_dr_ok##*:}" ] \
+            && pass "…and '${_dr_ok%%:*}' classifies as ${_dr_ok##*:}" \
+            || die "'${_dr_ok%%:*}' classified as '$(_dr_action "$_dr_mal")', not ${_dr_ok##*:}"
+    done
+    rm -f "$_dr_mal"
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
