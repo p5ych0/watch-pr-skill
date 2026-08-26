@@ -5095,7 +5095,13 @@ if [ -f "$_wy_doc" ]; then
                     run = 0
                     while (substr(rest, run + 1, 1) == ch) run++
                     if (run >= 3) {
-                        if (!fence) { fence = 1; fch = ch; frun = run; next }
+                        info = substr(rest, run + 1)
+                        # A BACKTICK OPENER MAY NOT CARRY A BACKTICK IN ITS INFO
+                        # STRING — CommonMark forbids it, so ```` lang`opt`` is not
+                        # a fence at all. Opening on it hid every real heading
+                        # after it and rejected the edit as a count mismatch.
+                        if (!fence && !(ch == "`" && index(info, "`"))) {
+                            fence = 1; fch = ch; frun = run; next }
                         else if (ch == fch && run >= frun \
                                  && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
                     }
@@ -5221,7 +5227,13 @@ EOWY
                     run = 0
                     while (substr(rest, run + 1, 1) == ch) run++
                     if (run >= 3) {
-                        if (!fence) { fence = 1; fch = ch; frun = run; next }
+                        info = substr(rest, run + 1)
+                        # A BACKTICK OPENER MAY NOT CARRY A BACKTICK IN ITS INFO
+                        # STRING — CommonMark forbids it, so ```` lang`opt`` is not
+                        # a fence at all. Opening on it hid every real heading
+                        # after it and rejected the edit as a count mismatch.
+                        if (!fence && !(ch == "`" && index(info, "`"))) {
+                            fence = 1; fch = ch; frun = run; next }
                         else if (ch == fch && run >= frun \
                                  && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
                     }
