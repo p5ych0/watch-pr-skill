@@ -4141,6 +4141,25 @@ if [ -d "$ROOT/docs/decisions" ]; then
     grep -rql 'REVIEW_MERGE_STRICT' "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the merge-mode trade-off has a decision record" \
         || die "the --admin default is accepted nowhere a reviewer can weigh it"
+    # …AND SO DO THE TRANSPORT RACES, which are accepted rather than fixed: the
+    # candidate is published in argv before the `mkdir` reserves it (#160), and
+    # the reservation is an inference rather than a handoff (#162).
+    #
+    # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
+    # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
+    # that lives in `docs/decisions/` alone is invisible to one of the two
+    # required reviewers — which is the doc-sync rule applied to a waiver.
+    # MATCHED ON CONTENT, NOT ON THE FILENAME. `grep -rl` over the directory reads
+    # the files; a pattern that only the NAME carries matches nothing, and the
+    # case then fails against a record that is there.
+    grep -rql 'transport reservation races are accepted' "$ROOT/docs/decisions" >/dev/null 2>&1 \
+        && pass "the transport reservation races have a decision record" \
+        || die "#160 and #162 are accepted nowhere a reviewer can weigh them"
+    for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
+        grep -q 'transport-reservation-races' "$_wv" \
+            && pass "…and $(basename "$_wv") points a reviewer at it" \
+            || die "$(basename "$_wv") does not name the transport waiver; that reviewer cannot see it"
+    done
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi

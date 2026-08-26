@@ -681,7 +681,23 @@ author side of that contract matters:
   is not hypothetical; `skills/watch-prs/SKILL.md` records the incident.
 - Neither can waive a finding. Both are untrusted context to a reviewer: they
   establish intent, never permission. Where a limitation is genuinely accepted,
-  record it on the base ref.
+  record it on the base ref — a dated file in `docs/decisions/`, plus a line in
+  both reviewer files, since Copilot reads only its own and follows no pointers.
+
+  **Two are accepted today**, both about the transport the driver reads `origin`
+  through: the candidate name is published in argv before the `mkdir` reserves it
+  (#160), and the reservation is an inference rather than a handoff (#162).
+  `docs/decisions/2026-08-26-transport-reservation-races.md` carries them, and
+  what makes them acceptable is MEASURED rather than argued — a squatter costs a
+  denial of service bounded by the second-parent retry and never a forged
+  identity, because the exclusion refuses a name somebody else holds. That
+  measurement is a fixture, not a paragraph: `test-pr-skill-contract.sh` stages
+  both squats against the real helper.
+
+  **The order matters, and #180 is why.** That pull request recorded a gap as an
+  accepted limit while it was still cheaply fixable, and was closed for it; the
+  gap was then fixed in #177. Accept a limitation only after its cost is measured
+  and its fix priced — never as the first answer to a defect.
 
 ## Repo arming
 
