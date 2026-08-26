@@ -5021,11 +5021,21 @@ if [ -f "$_wy_doc" ]; then
     #    silently — and every one of them well formed, inside the setup fence, and
     #    paired with a claim. One equality closes a filename typo, a stray
     #    character, a pointer moved to another fence, and a pointer under code.
-    _wy_all=0; _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all=0
+    # A COUNT OF ZERO AND A FAILED READ ARE DIFFERENT ANSWERS. `grep -c` reports 1
+    # when it matched nothing and 2 when it could not read at all, and `|| VAR=0`
+    # turns both into "none" — so a transiently unreadable `SKILL.md` reports no
+    # relative pointers, which is exactly what the check wants to see.
+    _wy_all=0; _wy_all_rc=0
+    _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
+    [ "$_wy_all_rc" -le 1 ] \
+        || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
         && pass "the setup block points at its rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
-    _wy_rel=0; _wy_rel="$(grep -c '# WHY: docs/' "$SKILL")" || _wy_rel=0
+    _wy_rel=0; _wy_rel_rc=0
+    _wy_rel="$(grep -c '# WHY: docs/' "$SKILL")" || _wy_rel_rc=$?
+    [ "$_wy_rel_rc" -le 1 ] \
+        || die "SKILL.md could not be scanned for relative pointers (rc=$_wy_rel_rc); one could be there"
     [ "$_wy_rel" -eq 0 ] \
         && pass "…and none is relative to the driver's working directory" \
         || die "$_wy_rel pointers name a bare docs/ path; from another project that is that project's file"
@@ -5043,7 +5053,10 @@ if [ -f "$_wy_doc" ]; then
     # is therefore stated: 29 claims over 28 arguments, the one duplicate being
     # that pair. A pointer deleted, or a new claim added without an argument, moves
     # this number and has to be looked at rather than passing quietly.
-    _wy_heads_n=0; _wy_heads_n="$(grep -c '^## ' "$_wy_doc")" || _wy_heads_n=0
+    _wy_heads_n=0; _wy_hn_rc=0
+    _wy_heads_n="$(grep -c '^## ' "$_wy_doc")" || _wy_hn_rc=$?
+    [ "$_wy_hn_rc" -le 1 ] \
+        || die "the rationale could not be counted (rc=$_wy_hn_rc)"
     { [ "$_wy_all" -eq 29 ] && [ "$_wy_heads_n" -eq 28 ]; } \
         && pass "…and the block carries 29 claims over 28 arguments, the probes sharing one" \
         || die "the block has $_wy_all claims over $_wy_heads_n arguments, not 29 over 28; a pointer was added or dropped"
@@ -5065,9 +5078,15 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_n" -eq "$_wy_all" ] \
         && pass "…and all $_wy_all sit under a claim, in the setup block, in the documented form" \
         || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside the setup block, or not under a claim"
-    grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" \
-        && die "a # WHY: pointer follows code rather than the claim it belongs to" \
-        || pass "…each directly under the claim it belongs to"
+    # AND THE SENTINEL PROBE TELLS A MISS FROM A FAILURE for the same reason: with
+    # `&& die || pass`, a `grep` that could not read routes straight to the pass.
+    _wy_sent_rc=0
+    grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" || _wy_sent_rc=$?
+    case "$_wy_sent_rc" in
+        0) die "a # WHY: pointer follows code rather than the claim it belongs to" ;;
+        1) pass "…each directly under the claim it belongs to" ;;
+        *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
+    esac
 
     # 3. FORWARD: every claim is a heading, verbatim. `grep -xF` — a claim is
     #    literal text and must match the WHOLE heading, or a claim that is a prefix

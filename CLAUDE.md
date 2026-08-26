@@ -565,9 +565,18 @@ from anything installed here. Entries explain the failure that was fixed and how
 manifested, not just what changed.
 
 **A release accompanies a change to what is installed** — the scripts, `SKILL.md`,
-or the manifests. A change confined to `skills/watch-prs/scripts/test-*.sh`, to
-authoring documentation, or to the reviewer instruction files produces no
-release, and must not bump the version.
+`docs/skill-setup-rationale.md`, or the manifests. A change confined to
+`skills/watch-prs/scripts/test-*.sh`, to authoring documentation, or to the
+reviewer instruction files produces no release, and must not bump the version.
+
+**The rationale is on the RELEASE side, and it is the one document that is.** It
+is not authoring documentation: the installed `SKILL.md` points at it by path, so
+it is reached through the plugin root at runtime and is part of the driver
+contract. Every claim beside the setup code is an assertion whose argument lives
+only there — correct one of those arguments without a release and a user keeps the
+stale one behind a claim that now says something else. The marketplace installs
+from `./`, so the file ships; what makes it a release is that a reader FOLLOWS it,
+which nothing does for `AGENTS.md`. #192.
 
 The reviewer files are on the no-release side despite being contract rather than
 prose: `AGENTS.md` and `.github/copilot-instructions.md` are read by Codex and
