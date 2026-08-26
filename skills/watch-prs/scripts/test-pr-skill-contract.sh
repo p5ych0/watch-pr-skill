@@ -4141,32 +4141,6 @@ if [ -d "$ROOT/docs/decisions" ]; then
     grep -rql 'REVIEW_MERGE_STRICT' "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the merge-mode trade-off has a decision record" \
         || die "the --admin default is accepted nowhere a reviewer can weigh it"
-    # …AND SO DOES #160, the transport candidate being published in argv before
-    # the `mkdir` reserves it, which is accepted rather than fixed.
-    #
-    # #162 HAS ITS OWN RECORD, checked the same way. They are separate races and
-    # separate acceptances, so one case per record — a single case naming both
-    # would go green with only one of them written.
-    #
-    # AND THE TWO RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one was written
-    # while #162 was still unaccepted and said so; left that way, a reviewer
-    # following it reaches the opposite verdict from one following the #162
-    # record, and both are base-ref authorities. The argv record has to name the
-    # later one.
-    grep -q 'reservation-inference' \
-        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
-        && pass "the argv record points at the later reservation decision" \
-        || die "the two decision records disagree about whether #162 is accepted"
-    #
-    # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
-    # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
-    # that lives in `docs/decisions/` alone is invisible to one of the two
-    # required reviewers — the doc-sync rule applied to a waiver. This asserts it
-    # of THIS record; the older `--admin` waiver predates the practice and is #189.
-    #
-    # MATCHED ON CONTENT, NOT ON THE FILENAME. `grep -rl` over the directory reads
-    # the files; a pattern that only the NAME carries matches nothing, and the
-    # case then fails against a record that is there.
     grep -rql 'transport candidate being published in argv is an accepted limit' \
         "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the argv-publication limit has a decision record" \
@@ -4175,13 +4149,208 @@ if [ -d "$ROOT/docs/decisions" ]; then
         "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the reservation inference has a decision record" \
         || die "#162 is accepted nowhere a reviewer can weigh it"
-    for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
-        for _rec in transport-candidate-in-argv reservation-inference; do
-            grep -q "$_rec" "$_wv" \
-                && pass "…and $(basename "$_wv") points a reviewer at $_rec" \
-                || die "$(basename "$_wv") does not name $_rec; that reviewer cannot see it"
+    # AND THE TWO TRANSPORT RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one
+    # was written while #162 was still unaccepted and said so; left that way, a
+    # reviewer following it reaches the opposite verdict from one following the
+    # #162 record, and both are base-ref authorities.
+    grep -q 'reservation-inference' \
+        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
+        && pass "the argv record points at the later reservation decision" \
+        || die "the two decision records disagree about whether #162 is accepted"
+    # ── EVERY ACCEPTED RECORD IS NAMED IN BOTH REVIEWER FILES ─────────────
+    #
+    # Codex reads the repository and can follow a pointer; Copilot reads only
+    # `.github/copilot-instructions.md` and follows none, which is why that file
+    # restates the policy inline. So an acceptance living in `docs/decisions/`
+    # alone is invisible to one of the two required reviewers, and it can re-raise
+    # what the operator already accepted. That is the doc-sync rule applied to a
+    # waiver.
+    #
+    # DERIVED FROM THE DIRECTORY, NOT LISTED. A list of two went stale the moment
+    # a third record was written — which is how the 2026-08-06 `--admin` waiver
+    # sat unreferenced in both files for twenty days. #189.
+    #
+    # ACCEPTED ONES ONLY. A record whose status is superseded or rejected is
+    # history rather than authority, and requiring a reviewer file to name it
+    # would be requiring the opposite of what it says.
+    # …AND THE `--admin` BOUNDS ARE SPELLED OUT FOR COPILOT, not deferred to the
+    # record. Naming the file is enough for Codex, which reads the repository;
+    # Copilot is configured from its own instructions and follows no pointers, so
+    # a waiver that says "read that record" leaves it unable to notice that a
+    # bound the waiver DEPENDS ON has been removed — and it would sign off a
+    # newly unsafe `--admin` path. The bypass is waived; its bounds are not.
+    # EVERY CONCRETE CONDITION, NOT FOUR BROAD LABELS. A loop over `40-hex`,
+    # `match-head-commit`, `REVIEW_MERGE_STRICT` and `review-state probe` stayed
+    # green while an edit removed the head re-read entirely, or reduced the
+    # review-state probe to a phrase with no states in it, or dropped that strict
+    # mode must be `=1` and EXPORTED — each of which leaves Copilot not knowing a
+    # bound the waiver depends on, which is the regression this exists to stop.
+    #
+    # SEMANTIC TOKENS, NOT STYLISTIC ONES: each names a condition rather than a
+    # turn of phrase, so rewording the prose around them does not fail the case
+    # while removing the condition does.
+    for _bd in 're-read and compared immediately before merging' \
+               'full 40-hex SHA' \
+               '7-character prefix' \
+               'atomic with the merge' \
+               'match-head-commit' \
+               'review-state probe' \
+               'blocked' \
+               'dismissed review' \
+               'body-only' \
+               'REVIEW_MERGE_STRICT=1' \
+               'exported, not merely assigned' \
+               'requires a merge queue' \
+               'no merge-queue probe'; do
+        grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
+            && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
+            || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
+    done
+    # …AND A PROBE THAT ERRORS IS NOT AN INACTIVE RECORD. `grep -q … || continue`
+    # treats rc 2 — unreadable, vanished between the `-f` and the read — exactly
+    # like rc 1, "this record is not accepted", so an accepted waiver nobody can
+    # read is silently skipped and the contract reports success without checking
+    # it. Only the ordinary no-match status continues; anything else fails.
+    # ONE DECISION TABLE, USED BY THE SCAN AND BY THE CASES THAT PROVE IT. The
+    # malformed-status cases used to re-implement the parse and the `case` arms,
+    # so a regression in the real scanner left them green while a live waiver
+    # dropped out of both reviewer-file checks — a copy of a rule proving the copy.
+    #
+    # STDERR IS DISCARDED, THE STATUS IS NOT: the caller names the file itself, so
+    # grep's own complaint would only land in the middle of the suite's output.
+    # THE NAME IS MATCHED LITERALLY, AND WHOLE. Two defects, one function.
+    #
+    # A derived basename is a BASIC REGULAR EXPRESSION to `grep`, so a record
+    # legitimately named `2026-09-01-bash-3.2` is satisfied by the text
+    # `bash-3x2`; `-F` is that half.
+    #
+    # And `-F` is a SUBSTRING search, which the path alone does not bound. With
+    # `2026-09-01-bash-3.2` accepted, `docs/decisions/2026-09-01-bash-3.2.md` is
+    # contained by `2026-09-01-bash-3.2-portability.md`, by
+    # `old-docs/decisions/2026-09-01-bash-3.2.md`, and by that same path with a
+    # `.bak` after it — none of which names the accepted record.
+    #
+    # SO THE MATCH CARRIES THE DELIMITERS THE PROSE USES. Both reviewer files
+    # write these as inline code, and a backtick on each side is a real boundary:
+    # nothing can precede the opening one inside a longer path, and nothing can
+    # follow the closing one inside a longer filename. Matching the delimiter the
+    # document actually uses is what ends this class, rather than a third guess at
+    # where a path stops.
+    _dr_named_in() {   # _dr_named_in <reviewer-file> <record-basename>
+        grep -qF "\`docs/decisions/$2.md\`" "$1"
+    }
+    _dr_action() {   # _dr_action <file> ; prints require | skip | refuse
+        local _l _rc=0 _st
+        _l="$(grep -i '^\*\*Status:\*\*' "$1" 2>/dev/null)" || _rc=$?
+        # rc 1 is "no such line", which is a malformed record; anything above it
+        # is a read error, and both are refusals rather than silent skips.
+        [ "$_rc" -le 1 ] || { printf refuse; return 0; }
+        _st="${_l#*\*\*Status:\*\* }"
+        _st="${_st%% *}"
+        # LOWERCASED WITH `tr`, not `declare -l`: the mac-shaped job runs bash 3.2.
+        #
+        # THREE VALUES, AND THIS REPOSITORY USES ALL THREE. A fourth was carried
+        # here uncovered, which is a table arm no case could have caught
+        # regressing — anything not on this list is REFUSED, so a record reaching
+        # for a new word fails loudly and somebody decides what it means.
+        _st="$(printf '%s' "$_st" | tr '[:upper:]' '[:lower:]')"
+        case "$_st" in
+            accepted)             printf require ;;
+            superseded|rejected)  printf skip ;;
+            *)                    printf refuse ;;
+        esac
+        return 0
+    }
+    for _dr in "$ROOT"/docs/decisions/*.md; do
+        [ -f "$_dr" ] || continue
+        # THE SCAN ASKS THE TABLE. Nothing is parsed here, so the cases below
+        # that prove the classification are proving THIS behaviour.
+        case "$(_dr_action "$_dr")" in
+            require) ;;
+            skip)    continue ;;
+            *) die "$(basename "$_dr") has no usable Status; a live waiver would be skipped as inactive"
+               continue ;;
+        esac
+        _drn="$(basename "$_dr" .md)"
+        for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
+            _dr_named_in "$_wv" "$_drn" \
+                && pass "$(basename "$_wv") names the $_drn waiver" \
+                || die "$(basename "$_wv") does not name $_drn; that reviewer can re-raise an accepted limit"
         done
     done
+    # …AND THAT DISTINCTION IS RUN, not merely written. A record whose status
+    # cannot be read must fail the fixture rather than be skipped as inactive.
+    #
+    # SKIPPED BY NAME WHERE THE PROBE CAN READ IT ANYWAY: a run as root, or a
+    # filesystem ignoring the mode, makes the unreadable file readable and the
+    # case would assert nothing.
+    # …AND THE TABLE IS EXERCISED, through the same function the scan calls.
+    #
+    # AN UNREADABLE RECORD IS A REFUSAL, not "not accepted". Skipped by name where
+    # the probe can read it anyway — a root run, or a filesystem ignoring the
+    # mode, would leave the case asserting nothing.
+    _dr_un="$TMP_CL/unreadable-record.md"
+    printf '# Decision: a probe\n\n**Status:** accepted\n' > "$_dr_un" 2>/dev/null
+    chmod 000 "$_dr_un" 2>/dev/null || true
+    if [ -f "$_dr_un" ] && ! grep -qi 'Status' "$_dr_un" 2>/dev/null; then
+        [ "$(_dr_action "$_dr_un")" = refuse ] \
+            && pass "…and an unreadable record is refused rather than treated as inactive" \
+            || die "an unreadable record classified as '$(_dr_action "$_dr_un")'"
+    else
+        echo "ok   - (this run can read a mode-000 file; the unreadable-record case did not run)"
+    fi
+    chmod 644 "$_dr_un" 2>/dev/null || true
+    rm -f "$_dr_un"
+    # AND A MALFORMED STATUS IS REFUSED RATHER THAN SKIPPED, which is the shape
+    # that matters: a status deleted, misspelled or reformatted must not pass for
+    # `superseded` and take a live waiver out of the check with it.
+    _dr_mal="$TMP_CL/malformed-record.md"
+    for _dr_bad in '' '**Status:** acccepted' '**Status:** pending' '**Status:**'; do
+        printf '# Decision: a probe\n\n%s\n' "$_dr_bad" > "$_dr_mal"
+        [ "$(_dr_action "$_dr_mal")" = refuse ] \
+            && pass "…and a record whose status is '${_dr_bad:-absent}' is refused, not skipped" \
+            || die "the status '${_dr_bad:-absent}' classified as '$(_dr_action "$_dr_mal")'"
+    done
+    # …AND THE THREE LIVE VALUES CLASSIFY THE WAY THE SCAN NEEDS, so the refusals
+    # above are not passing because the table refuses everything.
+    for _dr_ok in 'accepted:require' 'Accepted:require' 'superseded:skip' 'rejected:skip' 'withdrawn:refuse'; do
+        printf '# Decision: a probe\n\n**Status:** %s\n' "${_dr_ok%%:*}" > "$_dr_mal"
+        [ "$(_dr_action "$_dr_mal")" = "${_dr_ok##*:}" ] \
+            && pass "…and '${_dr_ok%%:*}' classifies as ${_dr_ok##*:}" \
+            || die "'${_dr_ok%%:*}' classified as '$(_dr_action "$_dr_mal")', not ${_dr_ok##*:}"
+    done
+    rm -f "$_dr_mal"
+    # …AND THE NAMING CHECK IS LITERAL, exercised through the same function the
+    # scan calls. A metacharacter in a record's basename is legitimate — a bash
+    # version in it is the obvious case — and as a regular expression it matches
+    # text that does not name the record at all.
+    _dr_nm="$TMP_CL/reviewer-probe.md"
+    printf 'this file mentions `docs/decisions/2026-09-01-bash-3x2.md` and nothing else\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && die "the naming check matched '2026-09-01-bash-3.2' against 'bash-3x2'; it is a regular expression" \
+        || pass "…and a record name carrying a metacharacter is matched literally"
+    # …AND A LONGER NAME DOES NOT ANSWER FOR A SHORTER ONE. `-F` is still a
+    # SUBSTRING search, so without the `.md` the accepted `…-bash-3.2` record
+    # reports as named by a file that mentions only `…-bash-3.2-portability`.
+    printf 'this file names `docs/decisions/2026-09-01-bash-3.2-portability.md` only\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && die "a longer record name satisfied the check for a shorter one; the match is a substring" \
+        || pass "…and a longer record name does not answer for a shorter one"
+    # …AND NEITHER SIDE OF THE PATH IS OPEN. Without the delimiters the prose
+    # uses, a mention of a DIFFERENT directory or of a backup of the file contains
+    # the searched string and answers for the record.
+    for _dr_near in 'old-docs/decisions/2026-09-01-bash-3.2.md' \
+                    'docs/decisions/2026-09-01-bash-3.2.md.bak'; do
+        printf 'this file mentions `%s` and nothing else\n' "$_dr_near" > "$_dr_nm"
+        _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+            && die "'$_dr_near' answered for the accepted record; the path is unbounded" \
+            || pass "…and '$_dr_near' does not answer for it"
+    done
+    printf 'this file names `docs/decisions/2026-09-01-bash-3.2.md` properly\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && pass "…while the record it does name is still found" \
+        || die "the naming check missed a record the file names"
+    rm -f "$_dr_nm"
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi

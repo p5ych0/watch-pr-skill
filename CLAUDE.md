@@ -695,9 +695,15 @@ author side of that contract matters:
   rest on: **if a bound changes they fail**, which is what stops an accepted limit
   drifting into an unexamined one.
 
-  Both records carry a line in BOTH reviewer files, because Copilot reads only its
-  own and follows no pointers — that is these records' own shape rather than a
-  rule imposed on the older `--admin` waiver, which predates it and is #189.
+  **Every accepted record carries a line in BOTH reviewer files**, because Codex
+  reads the repository and can follow a pointer while Copilot reads only its own
+  file and follows none — so an acceptance living in `docs/decisions/` alone is
+  invisible to one of the two required reviewers, which can then re-raise what the
+  operator already accepted. `test-pr-skill-contract.sh` derives that check FROM
+  THE DIRECTORY rather than from a list: a list of two went stale the moment a
+  third record was written, which is how the 2026-08-06 `--admin` waiver sat
+  unreferenced in both files for twenty days (#189). Records whose status is
+  superseded or rejected are skipped — they are history, not authority.
 
   **The order matters, and #180 is why.** That pull request recorded a gap as an
   accepted limit while it was still cheaply fixable, and was closed for it; the

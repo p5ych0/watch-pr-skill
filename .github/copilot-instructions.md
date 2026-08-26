@@ -448,6 +448,36 @@ reservation races cost one empty directory — lost or left behind — because
 underweighted as a non-blocking note. A NEW defect in that area is still a
 finding: each record accepts one named race and nothing else.
 
+**The `--admin` merge mode is accepted too**, in
+`docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
+`gh pr merge --admin` by default, which bypasses branch protection.
+
+**Its bounds are listed here rather than left in that record, because you cannot
+follow the pointer.** The bypass is accepted only while ALL of these hold, so a
+change that removes any one of them is a finding even though the bypass itself is
+waived:
+
+- the head is re-read and compared immediately before merging;
+- that comparison uses the **full 40-hex SHA**, never a 7-character prefix — a
+  commit sharing seven hex characters is constructible, and that is not a race
+  with a window but a match at any time;
+- the comparison is **atomic with the merge**, through `--match-head-commit`, so
+  a push cannot land between the check and the merge call;
+- a **review-state probe** refuses `blocked`, a dismissed review, and a body-only
+  `CHANGES_REQUESTED`;
+- **`REVIEW_MERGE_STRICT=1`** drops `--admin` entirely, and reaches the gate's
+  process — it is exported, not merely assigned.
+
+**And the waiver does not cover a base branch that requires a merge queue.**
+There is no merge-queue probe anywhere in this plugin, and `gh pr merge --admin`
+bypasses a required queue outright rather than racing it — so the exposure is a
+skipped queue rather than a seconds-wide window, and `REVIEW_MERGE_STRICT=1` is
+the only supported setting for such a repository. A change that would merge with
+`--admin` there is a finding, not a waived bypass.
+
+A new way past the gate is a finding too. What is waived is the default `--admin`
+itself, on those bounds and outside that configuration, and nothing else.
+
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use
 resolution to avoid repeating a point that was *answered*, and say what you are
