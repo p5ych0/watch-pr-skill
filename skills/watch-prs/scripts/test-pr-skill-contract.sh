@@ -4997,7 +4997,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 28
+# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 29
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
@@ -5186,11 +5186,12 @@ EOWY
     # STRUCTURE IS NOT CONTENT: `NF` counted a bare fence as body, so a section
     # stripped to an empty code block kept every count while arguing nothing — and
     # a subheading is structure by the same argument, so `### Evidence` alone is
-    # not a section that argues anything either.
+    # not a section that argues anything either — nor a bare `###`, which is an
+    # empty ATX heading: end of line terminates the hash run just as a space does.
     _wy_empty=""; _wy_empty="$(awk '
         /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
         h != "" && NF && $0 !~ /^[[:space:]]*```[a-z]*[[:space:]]*$/ \
-             && $0 !~ /^[[:space:]]*#+[[:space:]]/ { body=1 }
+             && $0 !~ /^[[:space:]]*#+([[:space:]]|$)/ { body=1 }
         END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
     [ -z "$_wy_empty" ] \
         && pass "…and every section argues something under its heading" \
