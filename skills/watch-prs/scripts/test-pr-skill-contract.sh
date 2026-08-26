@@ -4148,6 +4148,16 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # separate acceptances, so one case per record — a single case naming both
     # would go green with only one of them written.
     #
+    # AND THE TWO RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one was written
+    # while #162 was still unaccepted and said so; left that way, a reviewer
+    # following it reaches the opposite verdict from one following the #162
+    # record, and both are base-ref authorities. The argv record has to name the
+    # later one.
+    grep -q 'reservation-inference' \
+        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
+        && pass "the argv record points at the later reservation decision" \
+        || die "the two decision records disagree about whether #162 is accepted"
+    #
     # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
     # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
     # that lives in `docs/decisions/` alone is invisible to one of the two

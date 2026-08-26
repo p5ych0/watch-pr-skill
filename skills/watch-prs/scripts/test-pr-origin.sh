@@ -1815,8 +1815,14 @@ case "$_a" in
                 # succeeds — and the signal is delivered while this child still
                 # runs, which the helper handles once `mkdir` RETURNS and before
                 # the `&&` that would have set `RB_OWNED`.
+                #
+                # IT RECORDS THAT IT RAN, OUTSIDE the candidate. Without that, an
+                # arm that never fired leaves the pre-created directory sitting
+                # there after an ordinary refusal, and the leak assertion below
+                # reports exactly what it wants to see.
                 rmdir "$_a" 2>/dev/null
                 "$RACE_REAL" -m 700 "$_a" || exit 1
+                [ -n "${RACE_RAN:-}" ] && echo frees > "$RACE_RAN"
                 kill -s TERM "$PPID" 2>/dev/null
                 exit 0 ;;
         esac ;;
@@ -1829,6 +1835,7 @@ RACER
             XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
             RACE_PARENT="$_rz/parent" RACE_REAL="$_rz_real" \
             RACE_MODE="${RACE_MODE:-}" RACE_MARK="${RACE_MARK:-}" \
+            RACE_RAN="${RACE_RAN:-}" \
             PATH="$_rz/bin:$PATH" \
             /usr/bin/env bash -p "$SCRIPT" read "$1" ) >/dev/null 2>&1
     }
@@ -1855,7 +1862,19 @@ RACER
     # holds NO VALUE: a leak of an empty mode-700 directory is tidiness, a leak of
     # one carrying an origin would be something else.
     rm -rf "$_rz/parent/freed"; mkdir "$_rz/parent/freed"
-    RACE_MODE=frees RACE_MARK="" _rz_run "$_rz/parent/freed"
+    rm -f "$_rz/ran"
+    _rz_rc=0
+    RACE_MODE=frees RACE_MARK="" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/freed" || _rz_rc=$?
+    # THE RACER RAN, AND THE RUN WAS INTERRUPTED. Neither is visible in the
+    # directory afterwards: an arm that never fired leaves the pre-created
+    # directory exactly where the leak assertion wants it, and the case would
+    # report the interleaving from a run that never staged it.
+    [ -s "$_rz/ran" ] \
+        && pass "…with the freeing racer proved to have run" \
+        || die "the frees arm never fired; the leak below would be the pre-created directory"
+    { [ "$_rz_rc" -ne 0 ] && [ "$_rz_rc" -ne 124 ] && [ "$_rz_rc" -ne 125 ]; } \
+        && pass "…and the signal ended the helper rather than it finishing (rc=$_rz_rc)" \
+        || die "the interrupted run gave rc=$_rz_rc, which is not a signal death"
     if [ -d "$_rz/parent/freed" ]; then
         _rz_left=""; _rz_left="$(ls -A "$_rz/parent/freed" 2>&1)" || _rz_left="THE_SCAN_FAILED"
         [ -z "$_rz_left" ] \
