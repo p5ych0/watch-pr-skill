@@ -5077,14 +5077,37 @@ if [ -f "$_wy_doc" ]; then
     # there ought to be.
     _wy_heads_n=0; _wy_hn_rc=0
     _wy_heads_n="$(awk '
-        # CommonMark fenced code: ``` or ~~~, up to three leading spaces. Getting
-        # this wrong fails CLOSED — an unrecognised fence makes a fenced `## foo`
-        # count as a section, and the totals then reject a legitimate edit loudly
-        # rather than accepting a broken one quietly.
-        /^ {0,3}(```|~~~)/ { fence = !fence; next }
+        # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
+        # is three or more backticks or tildes with up to three leading spaces; it
+        # closes only on the SAME character, a run at least as long, and nothing
+        # else on the line. Toggling on any fence-looking line got this wrong two
+        # ways — a ``` line inside a ~~~ example closed it, and a shorter run
+        # inside a longer fence closed it — and both reject a legitimate edit.
+        # The rule is finite, so it is written out once rather than approximated
+        # again.
+        {
+            line = $0
+            indent = match(line, /[^ ]/) - 1
+            if (indent <= 3) {
+                rest = substr(line, indent + 1)
+                ch = substr(rest, 1, 1)
+                if (ch == "`" || ch == "~") {
+                    run = 0
+                    while (substr(rest, run + 1, 1) == ch) run++
+                    if (run >= 3) {
+                        if (!fence) { fence = 1; fch = ch; frun = run; next }
+                        else if (ch == fch && run >= frun \
+                                 && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
+                    }
+                }
+            }
+        }
         !fence && /^## / { n++ }
         END { print n+0 }' "$_wy_doc")" || _wy_hn_rc=$?
-    [ "$_wy_hn_rc" -le 1 ] \
+    # EXACTLY ZERO. The `-le 1` tolerance is `grep`'s contract, where 1 means "no
+    # match"; `awk` has no such thing, so an extractor that printed the expected
+    # count and then failed would keep the value and let the equality pass.
+    [ "$_wy_hn_rc" -eq 0 ] \
         || die "the rationale could not be counted (rc=$_wy_hn_rc)"
     [ "$_wy_all" -eq "$_wy_heads_n" ] \
         && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
@@ -5180,7 +5203,31 @@ EOWY
     #    resolve to either, and the second is unreachable.
     _wy_heads=""; _wy_hrc=0
     _wy_heads="$(awk '
-        /^ {0,3}(```|~~~)/ { fence = !fence; next }
+        # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
+        # is three or more backticks or tildes with up to three leading spaces; it
+        # closes only on the SAME character, a run at least as long, and nothing
+        # else on the line. Toggling on any fence-looking line got this wrong two
+        # ways — a ``` line inside a ~~~ example closed it, and a shorter run
+        # inside a longer fence closed it — and both reject a legitimate edit.
+        # The rule is finite, so it is written out once rather than approximated
+        # again.
+        {
+            line = $0
+            indent = match(line, /[^ ]/) - 1
+            if (indent <= 3) {
+                rest = substr(line, indent + 1)
+                ch = substr(rest, 1, 1)
+                if (ch == "`" || ch == "~") {
+                    run = 0
+                    while (substr(rest, run + 1, 1) == ch) run++
+                    if (run >= 3) {
+                        if (!fence) { fence = 1; fch = ch; frun = run; next }
+                        else if (ch == fch && run >= frun \
+                                 && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
+                    }
+                }
+            }
+        }
         !fence && /^## / { sub(/^## /, ""); print }' "$_wy_doc")" || _wy_hrc=$?
     [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ] \
         || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
