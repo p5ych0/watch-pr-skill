@@ -5075,20 +5075,22 @@ if [ -f "$_wy_doc" ]; then
     # bijection, so a pointer dropped or a section deleted moves one number and not
     # the other — no fixed count to go stale, and nothing that has to know how many
     # there ought to be.
-    _wy_heads_n=0; _wy_hn_rc=0
-    _wy_heads_n="$(awk '
+    # THE HEADING SCANNER IS ONE FUNCTION, so the case below exercises what the two
+    # scans actually run rather than a copy of it — the lesson three earlier rounds
+    # of this region were spent on.
+    _wy_headings_of() {   # _wy_headings_of <file> ; prints each ## heading, fences honoured
+        awk '
         # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
-        # is three or more backticks or tildes with up to three leading spaces; it
-        # closes only on the SAME character, a run at least as long, and nothing
-        # else on the line. Toggling on any fence-looking line got this wrong two
-        # ways — a ``` line inside a ~~~ example closed it, and a shorter run
-        # inside a longer fence closed it — and both reject a legitimate edit.
-        # The rule is finite, so it is written out once rather than approximated
-        # again.
+        # is three or more backticks or tildes with up to three leading spaces; a
+        # backtick opener may not carry a backtick in its info string; and it
+        # closes only on the SAME character, a run at least as long, with nothing
+        # else on the line. Approximating it rejected legitimate documentation
+        # three rounds running, each time by hiding real headings, so the rule is
+        # written out once from the definition.
         {
             line = $0
             indent = match(line, /[^ ]/) - 1
-            if (indent <= 3) {
+            if (indent >= 0 && indent <= 3) {
                 rest = substr(line, indent + 1)
                 ch = substr(rest, 1, 1)
                 if (ch == "`" || ch == "~") {
@@ -5096,20 +5098,20 @@ if [ -f "$_wy_doc" ]; then
                     while (substr(rest, run + 1, 1) == ch) run++
                     if (run >= 3) {
                         info = substr(rest, run + 1)
-                        # A BACKTICK OPENER MAY NOT CARRY A BACKTICK IN ITS INFO
-                        # STRING — CommonMark forbids it, so ```` lang`opt`` is not
-                        # a fence at all. Opening on it hid every real heading
-                        # after it and rejected the edit as a count mismatch.
                         if (!fence && !(ch == "`" && index(info, "`"))) {
-                            fence = 1; fch = ch; frun = run; next }
-                        else if (ch == fch && run >= frun \
-                                 && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
+                            fence = 1; fch = ch; frun = run; next
+                        } else if (fence && ch == fch && run >= frun \
+                                   && info ~ /^[[:space:]]*$/) {
+                            fence = 0; next
+                        }
                     }
                 }
             }
         }
-        !fence && /^## / { n++ }
-        END { print n+0 }' "$_wy_doc")" || _wy_hn_rc=$?
+        !fence && /^## / { sub(/^## /, ""); print }' "$1"
+    }
+    _wy_heads_n=0; _wy_hn_rc=0
+    _wy_heads_n="$(_wy_headings_of "$_wy_doc" | grep -c .)" || _wy_hn_rc=$?
     # EXACTLY ZERO. The `-le 1` tolerance is `grep`'s contract, where 1 means "no
     # match"; `awk` has no such thing, so an extractor that printed the expected
     # count and then failed would keep the value and let the equality pass.
@@ -5145,6 +5147,36 @@ if [ -f "$_wy_doc" ]; then
         1) pass "…each directly under the claim it belongs to" ;;
         *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
     esac
+
+    # …AND THE SCANNER IS EXERCISED, over forms this document does not contain.
+    #
+    # Every fence rule here was added because approximating it REJECTED a
+    # legitimate documentation edit — a `## example` inside a transcript read as a
+    # section. Nothing in the rationale carries those forms, so without a staged
+    # document the guards could all be removed and the suite would stay green:
+    # each one is a case this file has to bring its own input for.
+    _wy_fx="$TMP_CL/fence-forms.md"
+    {
+        printf '## REAL HEADING ONE.\n\nprose\n\n'
+        printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
+        printf '````\n```\n## decoy behind a shorter run\n````\n\n'
+        printf '   ~~~\n## decoy inside an indented fence\n   ~~~\n\n'
+        printf '```\n``` not a closer\n## decoy after a closer carrying text\n```\n\n'
+        printf '```` lang`option``\n## VISIBLE, because that opener is invalid.\n\n'
+        # FOUR SPACES IS AN INDENTED CODE BLOCK, NOT A FENCE, so what follows is
+        # still a heading — the bound on the indent is what says so.
+        printf '    ```\n## VISIBLE, because a four-space fence is not one.\n\n'
+        printf '## REAL HEADING TWO.\n\nprose\n'
+    } > "$_wy_fx"
+    _wy_fx_out=""; _wy_fx_out="$(_wy_headings_of "$_wy_fx")" || _wy_fx_out="THE_SCAN_FAILED"
+    _wy_fx_want='REAL HEADING ONE.
+VISIBLE, because that opener is invalid.
+VISIBLE, because a four-space fence is not one.
+REAL HEADING TWO.'
+    [ "$_wy_fx_out" = "$_wy_fx_want" ] \
+        && pass "…and the heading scanner honours every fence form, and no other" \
+        || die "the fence scanner disagrees; got '$_wy_fx_out'"
+    rm -f "$_wy_fx"
 
     # THE MAPPING IS ONE TO ONE, which is what makes counting sufficient. Two sites
     # once shared a claim — the transport probe and the pin probe make the same
@@ -5208,39 +5240,7 @@ EOWY
     #    and duplicate headings are refused: two identical ones would let a claim
     #    resolve to either, and the second is unreachable.
     _wy_heads=""; _wy_hrc=0
-    _wy_heads="$(awk '
-        # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
-        # is three or more backticks or tildes with up to three leading spaces; it
-        # closes only on the SAME character, a run at least as long, and nothing
-        # else on the line. Toggling on any fence-looking line got this wrong two
-        # ways — a ``` line inside a ~~~ example closed it, and a shorter run
-        # inside a longer fence closed it — and both reject a legitimate edit.
-        # The rule is finite, so it is written out once rather than approximated
-        # again.
-        {
-            line = $0
-            indent = match(line, /[^ ]/) - 1
-            if (indent <= 3) {
-                rest = substr(line, indent + 1)
-                ch = substr(rest, 1, 1)
-                if (ch == "`" || ch == "~") {
-                    run = 0
-                    while (substr(rest, run + 1, 1) == ch) run++
-                    if (run >= 3) {
-                        info = substr(rest, run + 1)
-                        # A BACKTICK OPENER MAY NOT CARRY A BACKTICK IN ITS INFO
-                        # STRING — CommonMark forbids it, so ```` lang`opt`` is not
-                        # a fence at all. Opening on it hid every real heading
-                        # after it and rejected the edit as a count mismatch.
-                        if (!fence && !(ch == "`" && index(info, "`"))) {
-                            fence = 1; fch = ch; frun = run; next }
-                        else if (ch == fch && run >= frun \
-                                 && substr(rest, run + 1) ~ /^[[:space:]]*$/) { fence = 0; next }
-                    }
-                }
-            }
-        }
-        !fence && /^## / { sub(/^## /, ""); print }' "$_wy_doc")" || _wy_hrc=$?
+    _wy_heads="$(_wy_headings_of "$_wy_doc")" || _wy_hrc=$?
     [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ] \
         || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
     _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
