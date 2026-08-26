@@ -11,10 +11,15 @@ again, and it exists because `AGENTS.md` makes a dated decision record the only
 thing that can accept a limitation — a comment in a diff cannot.
 
 **It accepts #160 and nothing else.** #162 — the reservation being an inference
-rather than a handoff — is a different race with a different trigger, and it is
-NOT accepted here: its interleavings have not been measured, and this record's own
-standard is that a limitation is accepted only after its cost is measured. It
-stays open.
+rather than a handoff — is a different race with a different trigger, and it was
+not accepted here: when this record was written its interleavings had not been
+measured, and this record's own standard is that a limitation is accepted only
+after its cost is measured.
+
+**#162 was measured afterwards and is now accepted in its own record**,
+`2026-08-26-reservation-inference.md`. Read that one for its terms; this record
+says nothing about it beyond the ordering, and a reviewer following this sentence
+should not conclude that #162 is open.
 
 ## What is accepted
 
@@ -92,4 +97,5 @@ Any of these raises the price and makes the rework proportionate again:
 
 Until then: raising #160 against a pull request is answered by this record.
 Raising a *new* defect in the same area is not — this accepts one named race and
-nothing else, #162 included.
+nothing else. #162 is answered by `2026-08-26-reservation-inference.md`, on its
+own measurement and its own terms.

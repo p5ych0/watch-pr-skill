@@ -4144,9 +4144,19 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # …AND SO DOES #160, the transport candidate being published in argv before
     # the `mkdir` reserves it, which is accepted rather than fixed.
     #
-    # #162 IS NOT IN THIS CHECK, deliberately: it is a different race, its
-    # interleavings are unmeasured, and it is not accepted. A case naming both
-    # would go green the moment somebody wrote a record for it, measured or not.
+    # #162 HAS ITS OWN RECORD, checked the same way. They are separate races and
+    # separate acceptances, so one case per record — a single case naming both
+    # would go green with only one of them written.
+    #
+    # AND THE TWO RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one was written
+    # while #162 was still unaccepted and said so; left that way, a reviewer
+    # following it reaches the opposite verdict from one following the #162
+    # record, and both are base-ref authorities. The argv record has to name the
+    # later one.
+    grep -q 'reservation-inference' \
+        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
+        && pass "the argv record points at the later reservation decision" \
+        || die "the two decision records disagree about whether #162 is accepted"
     #
     # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
     # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
@@ -4161,10 +4171,16 @@ if [ -d "$ROOT/docs/decisions" ]; then
         "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the argv-publication limit has a decision record" \
         || die "#160 is accepted nowhere a reviewer can weigh it"
+    grep -rql 'the reservation being an inference is an accepted limit' \
+        "$ROOT/docs/decisions" >/dev/null 2>&1 \
+        && pass "the reservation inference has a decision record" \
+        || die "#162 is accepted nowhere a reviewer can weigh it"
     for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
-        grep -q 'transport-candidate-in-argv' "$_wv" \
-            && pass "…and $(basename "$_wv") points a reviewer at it" \
-            || die "$(basename "$_wv") does not name the transport waiver; that reviewer cannot see it"
+        for _rec in transport-candidate-in-argv reservation-inference; do
+            grep -q "$_rec" "$_wv" \
+                && pass "…and $(basename "$_wv") points a reviewer at $_rec" \
+                || die "$(basename "$_wv") does not name $_rec; that reviewer cannot see it"
+        done
     done
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"

@@ -1775,5 +1775,145 @@ _keep_out="$(cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" \
     || die "a successful read left nothing to read (rc=$_keep_rc out='$_keep_out')"
 rm -rf "$_keep_dir" "$TMP/notarepo"
 
+# ── THE BOUNDS ON THE RESERVATION INFERENCE, MEASURED ──────────────────────
+#
+# #162: whether a directory found after a signal is one this run created is
+# decided from two recorded facts — `RB_OWNED`, set after a successful `mkdir`,
+# and `RB_PREEXISTED`, a `[[ -e ]]` taken before the traps are armed. Two
+# same-UID interleavings defeat them, and this region measures what each one
+# actually costs. `docs/decisions/` accepts the race on these numbers, so these
+# cases are what that acceptance rests on: if any of them changes, the record is
+# wrong and has to be revisited.
+#
+# STAGED THROUGH `mkdir` ON `PATH`, because the windows are inside this helper and
+# a real racer would have to win them. The stub IS the racer: it acts at exactly
+# the moment the interleaving describes and then reports what the real `mkdir`
+# would have reported. Everything else — the traps, the flags, the cleanup — is
+# the real code.
+_rz="$TMP/race"; mkdir -p "$_rz/bin" "$_rz/parent"
+_rz_real=""; _rz_real="$(command -v mkdir)" || _rz_real=""
+if [ -n "$_rz_real" ]; then
+    # THE REAL `mkdir` TRAVELS IN THE ENVIRONMENT rather than being written into
+    # this script, so a `PATH` entry carrying a space or a glob character cannot
+    # break the stub`s delegation.
+    cat > "$_rz/bin/mkdir" <<'RACER'
+#!/bin/sh
+for _a; do :; done
+case "$_a" in
+    "$RACE_PARENT"/*)
+        case "${RACE_MODE:-}" in
+            takes)
+                # The racer creates the name in the window between the helper`s
+                # `[[ -e ]]` and this `mkdir`, so ours fails the way a taken name
+                # makes it fail.
+                #
+                # THE MARKER IS WRITTEN AFTER THE CREATE SUCCEEDS, and outside the
+                # candidate. A delegated `mkdir` that failed would leave the name
+                # absent, which is exactly what the deletion assertion looks for —
+                # so the case would report a directory lost that never existed.
+                "$RACE_REAL" -m 700 "$_a" || exit 1
+                [ -n "${RACE_RAN:-}" ] && echo takes > "$RACE_RAN"
+                [ -n "${RACE_MARK:-}" ] && : > "$_a/$RACE_MARK"
+                echo "mkdir: cannot create directory '$_a': File exists" >&2
+                exit 1 ;;
+            frees)
+                # The racer removes the entry the helper observed, so ours
+                # succeeds — and the signal is delivered while this child still
+                # runs, which the helper handles once `mkdir` RETURNS and before
+                # the `&&` that would have set `RB_OWNED`.
+                #
+                # IT RECORDS THAT IT RAN, OUTSIDE the candidate. Without that, an
+                # arm that never fired leaves the pre-created directory sitting
+                # there after an ordinary refusal, and the leak assertion below
+                # reports exactly what it wants to see.
+                rmdir "$_a" 2>/dev/null
+                "$RACE_REAL" -m 700 "$_a" || exit 1
+                [ -n "${RACE_RAN:-}" ] && echo frees > "$RACE_RAN"
+                kill -s TERM "$PPID" 2>/dev/null
+                exit 0 ;;
+        esac ;;
+esac
+exec "$RACE_REAL" "$@"
+RACER
+    chmod +x "$_rz/bin/mkdir"
+    _rz_run() {   # _rz_run <candidate> ; runs the helper with the racer on PATH
+        ( cd "$REPO" && run_limited 20 env HOME="$TMP/nohome" \
+            XDG_CONFIG_HOME="$TMP/nohome" GIT_CONFIG_NOSYSTEM=1 \
+            RACE_PARENT="$_rz/parent" RACE_REAL="$_rz_real" \
+            RACE_MODE="${RACE_MODE:-}" RACE_MARK="${RACE_MARK:-}" \
+            RACE_RAN="${RACE_RAN:-}" \
+            PATH="$_rz/bin:$PATH" \
+            /usr/bin/env bash -p "$SCRIPT" read "$1" ) >/dev/null 2>&1
+    }
+    # A RACER`S EMPTY DIRECTORY IS REMOVED, and that is the defect. `RB_PREEXISTED`
+    # is `no` because nothing was there when this run looked, `-O` passes because
+    # the racer is the same account, and the cleanup therefore treats it as ours.
+    # THE RACER CREATED SOMETHING, AND THE HELPER REFUSED THE WAY A TAKEN NAME
+    # MAKES IT REFUSE. Neither is visible in the absence the assertion reads: a
+    # delegated `mkdir` that failed leaves the name absent too, and the case would
+    # then report a directory lost that was never there.
+    rm -rf "$_rz/parent/taken"; rm -f "$_rz/ran"; _rz_rc=0
+    RACE_MODE=takes RACE_MARK="" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/taken" || _rz_rc=$?
+    [ -s "$_rz/ran" ] \
+        && pass "the taking racer created its directory before this run's mkdir" \
+        || die "the takes arm never created anything; the deletion below would be an absence, not a loss"
+    [ "$_rz_rc" -eq 2 ] \
+        && pass "…and the helper refused it as a name it could not take" \
+        || die "the taken-name run gave rc=$_rz_rc, not the storage refusal this stages"
+    [ ! -d "$_rz/parent/taken" ] \
+        && pass "a racer's EMPTY directory is removed by this run's cleanup (#162)" \
+        || die "the measured bound changed: the racer's empty directory survived, and the decision record says it does not"
+    # …AND ONE WITH ANYTHING IN IT SURVIVES, which is the bound that makes the
+    # race acceptable: `rmdir` refuses a non-empty directory, so no data a racer
+    # had put there can be destroyed. Only an empty reservation is ever lost.
+    rm -rf "$_rz/parent/held"; rm -f "$_rz/ran"; _rz_rc=0
+    RACE_MODE=takes RACE_MARK="racer-data" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/held" || _rz_rc=$?
+    { [ -s "$_rz/ran" ] && [ "$_rz_rc" -eq 2 ]; } \
+        && pass "…with that racer proved to have run and been refused too (rc=$_rz_rc)" \
+        || die "the held-directory case did not stage its racer (ran=$( [ -s "$_rz/ran" ] && echo yes || echo no) rc=$_rz_rc)"
+    { [ -d "$_rz/parent/held" ] && [ -e "$_rz/parent/held/racer-data" ]; } \
+        && pass "…while one holding anything survives, because rmdir refuses it" \
+        || die "a racer's directory and its contents were destroyed; the decision record's bound is wrong"
+    # THE OTHER INTERLEAVING LEAKS, AND WHAT IT LEAKS IS EMPTY. The entry this run
+    # observed is removed before its `mkdir` succeeds, so `RB_PREEXISTED` is `yes`
+    # and `RB_OWNED` is not yet set when the signal is handled — the cleanup
+    # declines and the directory stays. The assertion that matters is that it
+    # holds NO VALUE: a leak of an empty mode-700 directory is tidiness, a leak of
+    # one carrying an origin would be something else.
+    rm -rf "$_rz/parent/freed"; mkdir "$_rz/parent/freed"
+    rm -f "$_rz/ran"
+    _rz_rc=0
+    RACE_MODE=frees RACE_MARK="" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/freed" || _rz_rc=$?
+    # THE RACER RAN, AND THE RUN WAS INTERRUPTED. Neither is visible in the
+    # directory afterwards: an arm that never fired leaves the pre-created
+    # directory exactly where the leak assertion wants it, and the case would
+    # report the interleaving from a run that never staged it.
+    [ -s "$_rz/ran" ] \
+        && pass "…with the freeing racer proved to have run" \
+        || die "the frees arm never fired; the leak below would be the pre-created directory"
+    # 143 EXACTLY — 128 + SIGTERM — NOT MERELY NON-ZERO. A handler regressing to
+    # `exit 1` or `exit 2` instead of re-raising leaves the marker written and the
+    # candidate in place, and a check that only excluded 0, 124 and 125 would call
+    # that ordinary exit a signal death. The helper re-raises after cleaning up,
+    # so the shell reports the signal; that is the invariant, and 128+15 is how
+    # both bash 3.2 and bash 5 spell it.
+    [ "$_rz_rc" -eq 143 ] \
+        && pass "…and the run died of the signal rather than exiting (rc=143)" \
+        || die "the interrupted run gave rc=$_rz_rc, not the 143 a re-raised TERM produces"
+    if [ -d "$_rz/parent/freed" ]; then
+        _rz_left=""; _rz_left="$(ls -A "$_rz/parent/freed" 2>&1)" || _rz_left="THE_SCAN_FAILED"
+        [ -z "$_rz_left" ] \
+            && pass "…and the leak the other interleaving leaves behind is an empty directory" \
+            || die "the leaked directory is not empty ('$_rz_left'); the decision record's bound is wrong"
+    else
+        # NOT A FAILURE: the leak is what the record accepts, and closing it is an
+        # improvement. It still has to be SEEN, because the record cites it.
+        pass "…and the other interleaving no longer leaks at all; docs/decisions/ overstates the cost"
+    fi
+else
+    echo "ok   - (mkdir is not on PATH; the reservation-race bounds were not measured)"
+fi
+rm -rf "$_rz"
+
 if [ "$fail" -ne 0 ]; then echo "RESULT: FAIL"; exit 1; fi
 echo "RESULT: PASS"

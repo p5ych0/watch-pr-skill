@@ -683,23 +683,28 @@ author side of that contract matters:
   establish intent, never permission. Where a limitation is genuinely accepted,
   record it on the base ref as a dated file in `docs/decisions/`.
 
-  **#160 is accepted there**: the transport candidate name is published in argv
-  before the `mkdir` reserves it. What makes it acceptable is MEASURED rather than
-  argued — a squatter costs a denial of service bounded by the second-parent retry
-  and never a forged identity, because the exclusion refuses a name somebody else
-  holds. That measurement is a fixture, not a paragraph:
-  `test-pr-skill-contract.sh` stages both squats against the real helper.
-  `docs/decisions/2026-08-26-transport-candidate-in-argv.md` also carries a line
-  in BOTH reviewer files, because Copilot reads only its own and follows no
-  pointers — that is this record's own shape rather than a rule imposed on the
-  older `--admin` waiver, which predates it and is #189.
+  **Two are accepted there, one record each.** #160: the transport candidate name
+  is published in argv before the `mkdir` reserves it. #162: the reservation is an
+  inference — `RB_OWNED` and `RB_PREEXISTED` — rather than a handoff. What makes
+  each acceptable is MEASURED rather than argued, and the measurement is a
+  FIXTURE rather than a paragraph. A squatter costs a denial of service bounded by
+  the second-parent retry and never a forged identity, which
+  `test-pr-skill-contract.sh` stages against the real helper; the reservation
+  races cost one empty directory, lost or left behind, which `test-pr-origin.sh`
+  stages with `mkdir` on `PATH` as the racer. Those cases are what the records
+  rest on: **if a bound changes they fail**, which is what stops an accepted limit
+  drifting into an unexamined one.
+
+  Both records carry a line in BOTH reviewer files, because Copilot reads only its
+  own and follows no pointers — that is these records' own shape rather than a
+  rule imposed on the older `--admin` waiver, which predates it and is #189.
 
   **The order matters, and #180 is why.** That pull request recorded a gap as an
   accepted limit while it was still cheaply fixable, and was closed for it; the
   gap was then fixed in #177. Accept a limitation only after its cost is measured
-  and its fix priced — never as the first answer to a defect. #162 is the live
-  example: it was proposed for acceptance alongside #160 and refused, because its
-  interleavings have not been measured.
+  and its fix priced — never as the first answer to a defect. #162 is the worked
+  example: it was proposed for acceptance alongside #160, refused because its
+  interleavings were unmeasured, and accepted in its own change once they were.
 
 ## Repo arming
 
