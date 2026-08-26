@@ -5076,7 +5076,7 @@ if [ -f "$_wy_doc" ]; then
     # the other — no fixed count to go stale, and nothing that has to know how many
     # there ought to be.
     _wy_heads_n=0; _wy_hn_rc=0
-    _wy_heads_n="$(grep -c '^## ' "$_wy_doc")" || _wy_hn_rc=$?
+    _wy_heads_n="$(awk '/^```/{f=!f; next} !f && /^## /{n++} END{print n+0}' "$_wy_doc")" || _wy_hn_rc=$?
     [ "$_wy_hn_rc" -le 1 ] \
         || die "the rationale could not be counted (rc=$_wy_hn_rc)"
     [ "$_wy_all" -eq "$_wy_heads_n" ] \
@@ -5172,7 +5172,7 @@ EOWY
     #    and duplicate headings are refused: two identical ones would let a claim
     #    resolve to either, and the second is unreachable.
     _wy_heads=""; _wy_hrc=0
-    _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
+    _wy_heads="$(awk '/^```/{f=!f; next} !f && /^## /{sub(/^## /, ""); print}' "$_wy_doc")" || _wy_hrc=$?
     [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ] \
         || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
     _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
@@ -5183,15 +5183,28 @@ EOWY
     # keeps the counts, the forward lookup and the reverse membership intact, and
     # the `# WHY:` then leads a model to an empty section — which is the separation
     # failing completely while the contract reports clean.
-    # STRUCTURE IS NOT CONTENT: `NF` counted a bare fence as body, so a section
-    # stripped to an empty code block kept every count while arguing nothing — and
-    # a subheading is structure by the same argument, so `### Evidence` alone is
-    # not a section that argues anything either — nor a bare `###`, which is an
-    # empty ATX heading: end of line terminates the hash run just as a space does.
+    # A SECTION MUST CARRY A LINE OF PROSE, and that is measured by LENGTH rather
+    # than by recognising Markdown.
+    #
+    # Enumerating structure did not converge. `NF` counted a bare fence; excluding
+    # fences left `### Evidence`; excluding headings-with-a-space left a bare
+    # `###`; and after that come HTML comments, setext underlines, list bullets,
+    # and whatever the next form is. Each round removed one spelling and revealed
+    # the next — this repository has a name for that shape, and a 2,200-line
+    # scanner it deleted for being it.
+    #
+    # PROSE IS LONG AND SCAFFOLDING IS SHORT. This document wraps at about eighty
+    # columns, so a real argument always carries a line well over forty; every
+    # structural form is far under it, whatever its syntax. One threshold, no
+    # grammar, and nothing left for the next form to slip through.
+    #
+    # OUTSIDE FENCES, because a transcript line can be long without arguing
+    # anything — and because a fenced `## example` must not read as a heading
+    # either, which is what the two scans above now also honour.
     _wy_empty=""; _wy_empty="$(awk '
-        /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
-        h != "" && NF && $0 !~ /^[[:space:]]*```[a-z]*[[:space:]]*$/ \
-             && $0 !~ /^[[:space:]]*#+([[:space:]]|$)/ { body=1 }
+        /^```/ { fence = !fence; next }
+        !fence && /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
+        !fence && h != "" && length($0) >= 40 { body=1 }
         END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
     [ -z "$_wy_empty" ] \
         && pass "…and every section argues something under its heading" \

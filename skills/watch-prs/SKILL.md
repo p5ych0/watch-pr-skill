@@ -231,6 +231,8 @@ if [[ -z $RB_REMOTE ]]; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
             else
+                # THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
+                # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
                 # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
@@ -285,8 +287,6 @@ if [[ -z $RB_REMOTE ]]; then
     # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
     # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
-    # THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
-    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
