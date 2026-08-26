@@ -4997,7 +4997,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 29
+# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 30
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
