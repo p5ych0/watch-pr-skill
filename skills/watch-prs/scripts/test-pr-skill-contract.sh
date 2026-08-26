@@ -5000,8 +5000,10 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # The setup block's argument lives in `docs/skill-setup-rationale.md` — 28
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. The ids run S01–S29 with S22 absent: it opened with
-# the same claim as S07 and both probes cite S07 now, so the gap is deliberate. What stayed beside the code is the CLAIM: one line,
-# then a `# WHY:` naming the section that proves it.
+# the same claim as S07 and both probes cite S07 now, so the gap is deliberate.
+#
+# What stayed beside the code is the CLAIM: one line, then a `# WHY:` naming the
+# section that proves it.
 #
 # THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
 # that a comment arguing against the code beside it is an instruction and will be
@@ -5009,40 +5011,84 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # that rots leaves a claim with nothing behind it, and the next session deletes the
 # shape for looking gratuitous.
 #
-# BOTH DIRECTIONS, because each catches a different rot. A pointer with no section
-# is a claim that cannot be checked. A section nothing points at is an argument
-# that has outlived its code — and it is the one that goes unnoticed, because
-# nothing reading the skill would ever reach it.
+# EVERY CHECK BELOW IS BUILT ON ONE VALIDATED SET, which is the shape four rounds
+# of review arrived at. Each earlier version validated what it had EXTRACTED and
+# not what it had SKIPPED, so a pointer with a typo in the filename, or one moved
+# out of the fence, simply stopped being seen — invisible rather than wrong, and
+# green either way. So: count every line that so much as says `# WHY:`, and require
+# that number to survive each narrowing.
 _wy_doc="$ROOT/docs/skill-setup-rationale.md"
 if [ -f "$_wy_doc" ]; then
-    # THE POINTER ENDS AT THE ID. Unanchored, `…#S01x` yields `S01` — every
-    # section, anchor and claim check then passes while the literal fragment in the
-    # file names nothing. The pointer is the whole rest of the line, so end-of-line
-    # is the boundary, and both extractors use it.
-    _wy_ptr=""; _wy_ptr="$(grep -o '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*$' "$SKILL" \
-        | sed 's/.*#//' | sort -u)" || _wy_ptr=""
-    [ -n "$_wy_ptr" ] \
-        && pass "the setup block points at its rationale" \
+    # 1. EVERY MENTION, however malformed. This is the denominator; nothing below
+    #    is allowed to shrink it silently.
+    _wy_all=0; _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all=0
+    [ "$_wy_all" -gt 0 ] \
+        && pass "the setup block points at its rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
-    # …AND EVERY POINTER LINE IS WELL FORMED. With the extractors anchored, a
-    # mistyped `…#S01x` simply stops being extracted — invisible rather than
-    # wrong, which is the same silence one level along. Count the pointer lines
-    # and require the anchored extractor to have seen all of them.
-    _wy_all=0; _wy_all="$(grep -c '# WHY: docs/skill-setup-rationale' "$SKILL")" || _wy_all=0
-    _wy_ok=0;  _wy_ok="$(grep -c '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*$' "$SKILL")" || _wy_ok=0
-    [ "$_wy_all" -eq "$_wy_ok" ] \
-        && pass "…and every pointer line ends at its section id" \
-        || die "$((_wy_all - _wy_ok)) # WHY: lines are malformed and would be skipped rather than checked"
-    _wy_sec=""; _wy_sec="$(grep -o '^## S[0-9][0-9]* ' "$_wy_doc" | sed 's/^## //; s/ $//' | sort -u)" || _wy_sec=""
+
+    # 2. THE CLAIM MAP, built only from well-formed pointers INSIDE the fence, each
+    #    paired with the line above it. Its status is taken: fed straight into a
+    #    heredoc, a failed `awk` yields no records, the loop runs zero times, and a
+    #    failed parse reports as a clean contract.
+    _wy_map=""; _wy_map_rc=0
+    _wy_map="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
+       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+$/)) {
+               id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
+               c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
+               print id "|" c }
+           prev=$0 }' "$SKILL")" || _wy_map_rc=$?
+    [ "$_wy_map_rc" -eq 0 ] \
+        || die "the claim map could not be built (rc=$_wy_map_rc); pointer drift would go unchecked"
+
+    # 3. AND THE MAP ACCOUNTS FOR ALL OF THEM. This one equality closes three ways
+    #    a pointer used to disappear rather than fail: a filename typo
+    #    (`skill-setup-rational.md`), a trailing character on the id (`#S01x`), and
+    #    a valid pointer moved OUT of the fenced block, where it still reads as a
+    #    pointer to anyone grepping the file but explains nothing.
+    _wy_n=0; _wy_n="$(grep -c '^S[0-9][0-9]*|' <<<"$_wy_map")" || _wy_n=0
+    [ "$_wy_n" -eq "$_wy_all" ] \
+        && pass "…and all $_wy_all of them are well formed, in the block, and paired with a claim" \
+        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed or outside the setup block; they would be skipped rather than checked"
+
+    # 4. THE SECTIONS, with the pipeline's status taken and DUPLICATE IDS REFUSED
+    #    BEFORE dedup — `sort -u` collapses a section accidentally copied under an
+    #    existing id, after which the original's pointer and anchor satisfy every
+    #    membership check while the copy is unreachable.
+    _wy_ids=""; _wy_ids_rc=0
+    _wy_ids="$(grep -o '^## S[0-9][0-9]* ' "$_wy_doc" | sed 's/^## //; s/ $//')" || _wy_ids_rc=$?
+    [ "$_wy_ids_rc" -eq 0 ] \
+        || die "the rationale's section list could not be read (rc=$_wy_ids_rc); an orphaned section would pass"
+    _wy_iddupe=""; _wy_iddupe="$(sort <<<"$_wy_ids" | uniq -d)" || _wy_iddupe="THE_SCAN_FAILED"
+    [ -z "$_wy_iddupe" ] \
+        && pass "…and no section id is used twice" \
+        || die "a section id is used twice, so one of them is unreachable: '$_wy_iddupe'"
+    _wy_anchdupe=""; _wy_anchdupe="$(grep -o '^<a id="S[0-9][0-9]*"></a>$' "$_wy_doc" | sort | uniq -d)" || _wy_anchdupe="THE_SCAN_FAILED"
+    [ -z "$_wy_anchdupe" ] \
+        && pass "…and no anchor id is used twice" \
+        || die "an anchor id is used twice, so a link lands on whichever comes first: '$_wy_anchdupe'"
+    _wy_sec=""; _wy_sec="$(sort -u <<<"$_wy_ids")" || _wy_sec=""
+
+    # 5. NO TWO SECTIONS MAY OPEN WITH THE SAME CLAIM, which is what makes the
+    #    claim a UNIQUE key rather than a usually-unique one. S07 and S22 opened
+    #    with the same line — the transport probe and the pin probe were the same
+    #    argument written twice — and swapping their pointers passed every check.
+    _wy_dupe=""
+    _wy_dupe="$(awk '/^## S[0-9]/{f=1; next} f && NF {print; f=0}' "$_wy_doc" \
+        | sort | uniq -d)" || _wy_dupe="THE_SCAN_FAILED"
+    [ -z "$_wy_dupe" ] \
+        && pass "…and no two sections open with the same claim, so the key is unique" \
+        || die "two sections open with the same claim, so a pointer swap between them is invisible: '$_wy_dupe'"
+
+    # 6. FORWARD: every pointer resolves, its anchor sits on its own heading, and
+    #    the section opens with the claim the pointer sits under.
+    _wy_ptr=""; _wy_ptr="$(sed 's/|.*//' <<<"$_wy_map" | sort -u)" || _wy_ptr=""
     for _wy in $_wy_ptr; do
         grep -q "^## $_wy — " "$_wy_doc" \
             && pass "…and $_wy resolves to a section" \
             || die "$_wy is pointed at from SKILL.md and has no section in the rationale"
-        # AND THE ANCHOR SITS ON ITS OWN HEADING, not merely somewhere in the file.
-        # Checked for presence alone, swapping `<a id="S13">` with `<a id="S17">`
-        # left this green — both ids still occur, the headings are untouched, and
-        # following `#S13` lands on S17's argument. The "working link" has to be
-        # proven to work.
+        # THE ANCHOR SITS ON ITS OWN HEADING, not merely somewhere in the file:
+        # swapping two `<a id>` tags leaves presence checks green while following
+        # the link lands on the other argument.
         _wy_anch=""
         _wy_anch="$(awk -v id="$_wy" '
             $0 == "<a id=\"" id "\"></a>" {f=1; next}
@@ -5053,49 +5099,21 @@ if [ -f "$_wy_doc" ]; then
             *)  die "$_wy's anchor precedes '$_wy_anch', not its own heading; the link lands elsewhere" ;;
         esac
     done
-    # NO TWO SECTIONS MAY OPEN WITH THE SAME CLAIM, which is what makes comparing
-    # the claim a UNIQUE key rather than a usually-unique one. S07 and S22 opened
-    # with the same line — the transport probe and the pin probe were the same
-    # argument written twice — and swapping their pointers passed every check.
-    # S22 is gone and both cite S07; this stops the next duplicate reopening it.
-    _wy_dupe=""
-    _wy_dupe="$(awk '/^## S[0-9]/{f=1; next} f && NF {print; f=0}' "$_wy_doc" \
-        | sort | uniq -d)" || _wy_dupe="THE_SCAN_FAILED"
-    [ -z "$_wy_dupe" ] \
-        && pass "…and no two sections open with the same claim, so the key is unique" \
-        || die "two sections open with the same claim, so a pointer swap between them is invisible: '$_wy_dupe'"
+
+    # 7. REVERSE: a section nothing points at is an argument that has outlived its
+    #    code — and it is the one that goes unnoticed, because nothing reading the
+    #    skill would ever reach it.
     for _wy in $_wy_sec; do
-        grep -qF "# WHY: docs/skill-setup-rationale.md#$_wy" "$SKILL" \
+        grep -q "^$_wy|" <<<"$_wy_map" \
             && pass "…and $_wy is pointed at from the block" \
             || die "$_wy is a section nothing points at; its code is gone or its pointer rotted"
     done
-    # AND EVERY POINTER NAMES THE ARGUMENT FOR THE CLAIM ABOVE IT. Adjacency alone
-    # is not enough: with only "the previous line is a comment", SWAPPING two valid
-    # pointers keeps every check green — both sections exist, both anchors exist,
-    # both sit under a comment — while each claim now cites the argument for a
-    # different one. That is the central safeguard failing silently, so the check
-    # compares the claim to the section it points at.
-    #
-    # THE COMPARISON IS EXACT, AND CHEAP, because each section OPENS with the claim
-    # line verbatim. That is not a coincidence to rely on quietly: the document is
-    # built that way so the argument reads whole from either end, and this case is
-    # what keeps it true.
-    # THE CLAIM MAP IS BUILT AND ITS STATUS TAKEN BEFORE THE LOOP READS IT. Fed
-    # straight into a heredoc, a failed `awk` — an unreadable file between the
-    # membership scan and this parse — yields no records, the loop runs zero
-    # times, `_wy_bad` stays 0, and a failed parse reports as a clean contract.
-    _wy_map=""; _wy_map_rc=0
-    _wy_map="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
-       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+$/)) {
-               id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
-               c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
-               print id "|" c }
-           prev=$0 }' "$SKILL")" || _wy_map_rc=$?
-    [ "$_wy_map_rc" -eq 0 ] \
-        || die "the claim map could not be built (rc=$_wy_map_rc); pointer drift would go unchecked"
-    [ -n "$_wy_map" ] \
-        && pass "…and the claim each pointer sits under was read" \
-        || die "the claim map is empty; every comparison below would pass vacuously"
+
+    # 8. AND EVERY POINTER NAMES THE ARGUMENT FOR THE CLAIM ABOVE IT. Adjacency
+    #    alone is not enough: with only "the previous line is a comment", SWAPPING
+    #    two valid pointers keeps every check green while each claim cites the
+    #    argument for a different one. The comparison is exact and cheap because
+    #    each section OPENS with the claim verbatim — which is why (5) exists.
     _wy_bad=0
     while IFS='|' read -r _wy_id _wy_claim; do
         [ -n "$_wy_id" ] || continue
