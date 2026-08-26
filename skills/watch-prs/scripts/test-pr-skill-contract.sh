@@ -4179,7 +4179,27 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # a waiver that says "read that record" leaves it unable to notice that a
     # bound the waiver DEPENDS ON has been removed — and it would sign off a
     # newly unsafe `--admin` path. The bypass is waived; its bounds are not.
-    for _bd in '40-hex' 'match-head-commit' 'REVIEW_MERGE_STRICT' 'review-state probe'; do
+    # EVERY CONCRETE CONDITION, NOT FOUR BROAD LABELS. A loop over `40-hex`,
+    # `match-head-commit`, `REVIEW_MERGE_STRICT` and `review-state probe` stayed
+    # green while an edit removed the head re-read entirely, or reduced the
+    # review-state probe to a phrase with no states in it, or dropped that strict
+    # mode must be `=1` and EXPORTED — each of which leaves Copilot not knowing a
+    # bound the waiver depends on, which is the regression this exists to stop.
+    #
+    # SEMANTIC TOKENS, NOT STYLISTIC ONES: each names a condition rather than a
+    # turn of phrase, so rewording the prose around them does not fail the case
+    # while removing the condition does.
+    for _bd in 're-read and compared immediately before merging' \
+               'full 40-hex SHA' \
+               '7-character prefix' \
+               'atomic with the merge' \
+               'match-head-commit' \
+               'review-state probe' \
+               'blocked' \
+               'dismissed review' \
+               'body-only' \
+               'REVIEW_MERGE_STRICT=1' \
+               'exported, not merely assigned'; do
         grep -qF "$_bd" "$ROOT/.github/copilot-instructions.md" \
             && pass "copilot-instructions.md states the '$_bd' bound on the --admin waiver" \
             || die "the --admin bounds are deferred to a record Copilot cannot read: '$_bd' is missing"
