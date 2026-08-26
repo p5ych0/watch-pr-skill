@@ -1806,7 +1806,13 @@ case "$_a" in
                 # The racer creates the name in the window between the helper`s
                 # `[[ -e ]]` and this `mkdir`, so ours fails the way a taken name
                 # makes it fail.
+                #
+                # THE MARKER IS WRITTEN AFTER THE CREATE SUCCEEDS, and outside the
+                # candidate. A delegated `mkdir` that failed would leave the name
+                # absent, which is exactly what the deletion assertion looks for —
+                # so the case would report a directory lost that never existed.
                 "$RACE_REAL" -m 700 "$_a" || exit 1
+                [ -n "${RACE_RAN:-}" ] && echo takes > "$RACE_RAN"
                 [ -n "${RACE_MARK:-}" ] && : > "$_a/$RACE_MARK"
                 echo "mkdir: cannot create directory '$_a': File exists" >&2
                 exit 1 ;;
@@ -1842,16 +1848,29 @@ RACER
     # A RACER`S EMPTY DIRECTORY IS REMOVED, and that is the defect. `RB_PREEXISTED`
     # is `no` because nothing was there when this run looked, `-O` passes because
     # the racer is the same account, and the cleanup therefore treats it as ours.
-    rm -rf "$_rz/parent/taken"
-    RACE_MODE=takes RACE_MARK="" _rz_run "$_rz/parent/taken"
+    # THE RACER CREATED SOMETHING, AND THE HELPER REFUSED THE WAY A TAKEN NAME
+    # MAKES IT REFUSE. Neither is visible in the absence the assertion reads: a
+    # delegated `mkdir` that failed leaves the name absent too, and the case would
+    # then report a directory lost that was never there.
+    rm -rf "$_rz/parent/taken"; rm -f "$_rz/ran"; _rz_rc=0
+    RACE_MODE=takes RACE_MARK="" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/taken" || _rz_rc=$?
+    [ -s "$_rz/ran" ] \
+        && pass "the taking racer created its directory before this run's mkdir" \
+        || die "the takes arm never created anything; the deletion below would be an absence, not a loss"
+    [ "$_rz_rc" -eq 2 ] \
+        && pass "…and the helper refused it as a name it could not take" \
+        || die "the taken-name run gave rc=$_rz_rc, not the storage refusal this stages"
     [ ! -d "$_rz/parent/taken" ] \
         && pass "a racer's EMPTY directory is removed by this run's cleanup (#162)" \
         || die "the measured bound changed: the racer's empty directory survived, and the decision record says it does not"
     # …AND ONE WITH ANYTHING IN IT SURVIVES, which is the bound that makes the
     # race acceptable: `rmdir` refuses a non-empty directory, so no data a racer
     # had put there can be destroyed. Only an empty reservation is ever lost.
-    rm -rf "$_rz/parent/held"
-    RACE_MODE=takes RACE_MARK="racer-data" _rz_run "$_rz/parent/held"
+    rm -rf "$_rz/parent/held"; rm -f "$_rz/ran"; _rz_rc=0
+    RACE_MODE=takes RACE_MARK="racer-data" RACE_RAN="$_rz/ran" _rz_run "$_rz/parent/held" || _rz_rc=$?
+    { [ -s "$_rz/ran" ] && [ "$_rz_rc" -eq 2 ]; } \
+        && pass "…with that racer proved to have run and been refused too (rc=$_rz_rc)" \
+        || die "the held-directory case did not stage its racer (ran=$( [ -s "$_rz/ran" ] && echo yes || echo no) rc=$_rz_rc)"
     { [ -d "$_rz/parent/held" ] && [ -e "$_rz/parent/held/racer-data" ]; } \
         && pass "…while one holding anything survives, because rmdir refuses it" \
         || die "a racer's directory and its contents were destroyed; the decision record's bound is wrong"
@@ -1872,9 +1891,15 @@ RACER
     [ -s "$_rz/ran" ] \
         && pass "…with the freeing racer proved to have run" \
         || die "the frees arm never fired; the leak below would be the pre-created directory"
-    { [ "$_rz_rc" -ne 0 ] && [ "$_rz_rc" -ne 124 ] && [ "$_rz_rc" -ne 125 ]; } \
-        && pass "…and the signal ended the helper rather than it finishing (rc=$_rz_rc)" \
-        || die "the interrupted run gave rc=$_rz_rc, which is not a signal death"
+    # 143 EXACTLY — 128 + SIGTERM — NOT MERELY NON-ZERO. A handler regressing to
+    # `exit 1` or `exit 2` instead of re-raising leaves the marker written and the
+    # candidate in place, and a check that only excluded 0, 124 and 125 would call
+    # that ordinary exit a signal death. The helper re-raises after cleaning up,
+    # so the shell reports the signal; that is the invariant, and 128+15 is how
+    # both bash 3.2 and bash 5 spell it.
+    [ "$_rz_rc" -eq 143 ] \
+        && pass "…and the run died of the signal rather than exiting (rc=143)" \
+        || die "the interrupted run gave rc=$_rz_rc, not the 143 a re-raised TERM produces"
     if [ -d "$_rz/parent/freed" ]; then
         _rz_left=""; _rz_left="$(ls -A "$_rz/parent/freed" 2>&1)" || _rz_left="THE_SCAN_FAILED"
         [ -z "$_rz_left" ] \
