@@ -1,36 +1,32 @@
-# Decision: the transport reservation races are accepted limits
+# Decision: the transport candidate being published in argv is an accepted limit
 
 **Date:** 2026-08-26
 **Status:** accepted
 **Decided by:** the repository operator, after the measurement in PR #187
-**Closes:** #160, #162
+**Closes:** #160
 
-Two races in the transport the driver uses to read `origin` are accepted rather
-than fixed. This record is what a reviewer should be pointed at when either is
-raised again, and it exists because `AGENTS.md` makes a dated decision record the
-only thing that can accept a limitation — a comment in a diff cannot.
+One race in the transport the driver uses to read `origin` is accepted rather
+than fixed. This record is what a reviewer should be pointed at when it is raised
+again, and it exists because `AGENTS.md` makes a dated decision record the only
+thing that can accept a limitation — a comment in a diff cannot.
+
+**It accepts #160 and nothing else.** #162 — the reservation being an inference
+rather than a handoff — is a different race with a different trigger, and it is
+NOT accepted here: its interleavings have not been measured, and this record's own
+standard is that a limitation is accepted only after its cost is measured. It
+stays open.
 
 ## What is accepted
 
-**#160 — the candidate name is published in argv before it is reserved.**
 `pr-origin.sh` reserves with `/usr/bin/env mkdir -m 700 "$RB_DIR"`, an external
 command, so the path is in that process's argv. `/proc/<pid>/cmdline` is mode
 444, so any account on the machine can read it in the window between the `exec`
 and the `mkdir` syscall, and create the name first.
 
-**#162 — the reservation is an inference, not a handoff.** The helper decides
-whether a directory found after a signal is one this run created from two
-recorded facts: `RB_OWNED`, set after a successful `mkdir`, and `RB_PREEXISTED`,
-a `[[ -e ]]` taken before the traps are armed. Two same-UID interleavings defeat
-them — a process creating the name between the test and the `mkdir` makes the
-cleanup remove a directory this run did not create, and one removing an observed
-entry before the `mkdir` succeeds leaks this run's directory if a signal lands
-before `RB_OWNED=yes`.
+## Why it is acceptable, measured rather than asserted
 
-## Why they are acceptable, measured rather than asserted
-
-**The cost of #160 is a denial of service, never a forged identity**, and that is
-what took it from an unweighable race to an accepted one. `test-pr-skill-contract.sh`
+**The cost is a denial of service, never a forged identity**, and that is what
+took it from an unweighable race to an accepted one. `test-pr-skill-contract.sh`
 stages it against the real helper and a real checkout:
 
 | Staged | Measured outcome |
@@ -45,17 +41,17 @@ directory, file or symlink is refused, never written through, and left where it
 was. So the worst an attacker achieves is blocking a session, and #161's retry
 means blocking one costs them **both** candidate names rather than one.
 
-**#162's two interleavings need a same-UID process** to hit a window on a name
-carrying this session's pid and three `$RANDOM` draws. The realistic occupant of
-that class is another session of this same loop, which has a different pid.
+What those cases model is the `mkdir` failing, and nothing else. Staging a real
+squat means pre-creating a name built from `$$` and three `$RANDOM` draws inside
+a shell the fixture has not started yet — unknowable in advance, which is
+precisely why a squatter has to READ it. Everything downstream of the `mkdir` is
+the real code.
 
 ## What the fix would have been, and why it is not proportionate
 
 Reserve, then publish: `mktemp -d "$parent/watch-pr.XXXXXXXXXX"` puts only the
 TEMPLATE in argv, chooses the leaf inside the process, and creates it atomically —
-so no watcher sees the final name until it exists and is ours, and
-`RB_PREEXISTED` stops being an inference because `mktemp` returns only names it
-created.
+so no watcher sees the final name until it exists and is ours.
 
 Three attempts were made in this area and all three were closed: #176 (three
 driver-side authentications of a guessed directory, each refuted), #180
@@ -94,6 +90,6 @@ Any of these raises the price and makes the rework proportionate again:
 - a return channel whose correctness does not depend on how the call site is
   written.
 
-Until then: raising #160 or #162 against a pull request is answered by this
-record. Raising a *new* defect in the same area is not — this accepts two named
-races and nothing else.
+Until then: raising #160 against a pull request is answered by this record.
+Raising a *new* defect in the same area is not — this accepts one named race and
+nothing else, #162 included.
