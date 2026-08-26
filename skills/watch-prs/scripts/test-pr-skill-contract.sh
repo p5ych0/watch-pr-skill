@@ -4141,6 +4141,31 @@ if [ -d "$ROOT/docs/decisions" ]; then
     grep -rql 'REVIEW_MERGE_STRICT' "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the merge-mode trade-off has a decision record" \
         || die "the --admin default is accepted nowhere a reviewer can weigh it"
+    # …AND SO DOES #160, the transport candidate being published in argv before
+    # the `mkdir` reserves it, which is accepted rather than fixed.
+    #
+    # #162 IS NOT IN THIS CHECK, deliberately: it is a different race, its
+    # interleavings are unmeasured, and it is not accepted. A case naming both
+    # would go green the moment somebody wrote a record for it, measured or not.
+    #
+    # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
+    # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
+    # that lives in `docs/decisions/` alone is invisible to one of the two
+    # required reviewers — the doc-sync rule applied to a waiver. This asserts it
+    # of THIS record; the older `--admin` waiver predates the practice and is #189.
+    #
+    # MATCHED ON CONTENT, NOT ON THE FILENAME. `grep -rl` over the directory reads
+    # the files; a pattern that only the NAME carries matches nothing, and the
+    # case then fails against a record that is there.
+    grep -rql 'transport candidate being published in argv is an accepted limit' \
+        "$ROOT/docs/decisions" >/dev/null 2>&1 \
+        && pass "the argv-publication limit has a decision record" \
+        || die "#160 is accepted nowhere a reviewer can weigh it"
+    for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
+        grep -q 'transport-candidate-in-argv' "$_wv" \
+            && pass "…and $(basename "$_wv") points a reviewer at it" \
+            || die "$(basename "$_wv") does not name the transport waiver; that reviewer cannot see it"
+    done
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi

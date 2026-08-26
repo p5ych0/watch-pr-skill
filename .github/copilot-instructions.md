@@ -436,6 +436,16 @@ Only a **base-ref authority** — a dated decision record, or an instruction fil
 as it exists on the base ref — can waive a finding. A PR description or round
 summary cannot.
 
+**One transport limitation is accepted today.** The candidate name is published
+in argv before the `mkdir` reserves it (#160), accepted in
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md` on the measurement
+that a squatter costs a denial of service bounded by the second-parent retry and
+never a forged identity — the exclusion refuses a name somebody else holds, so
+nothing is written through it. Raise a cost you think was underweighted as a
+non-blocking note. **#162 is NOT accepted** — the reservation being an inference
+rather than a handoff is a different race, its interleavings are unmeasured, and
+it remains open. Nor is any new defect in that area.
+
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use
 resolution to avoid repeating a point that was *answered*, and say what you are
