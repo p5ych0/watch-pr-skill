@@ -5029,9 +5029,24 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_rel" -eq 0 ] \
         && pass "…and none is relative to the driver's working directory" \
         || die "$_wy_rel pointers name a bare docs/ path; from another project that is that project's file"
-    [ -f "${CLAUDE_PLUGIN_ROOT:-$ROOT}/docs/skill-setup-rationale.md" ] \
-        && pass "…and the rationale is where the plugin root says it is" \
-        || die "the rationale is not at \$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md"
+    # AGAINST THIS CHECKOUT, NOT AN INHERITED ROOT. `${CLAUDE_PLUGIN_ROOT:-$ROOT}`
+    # reads a variable the invoking environment may already hold — this suite runs
+    # with the driver's own exports present — so the assertion could pass against
+    # somebody else's installed copy while this tree has no such file.
+    [ -f "$ROOT/docs/skill-setup-rationale.md" ] \
+        && pass "…and the rationale is at the plugin-root path the pointers name" \
+        || die "this checkout has no docs/skill-setup-rationale.md at its root"
+
+    # AND BOTH PROBE SITES KEEP A POINTER. The transport probe and the pin probe
+    # make the SAME claim — they are one argument — so the section they share stays
+    # claimed if either pointer is deleted, and the counts fall together. The count
+    # is therefore stated: 29 claims over 28 arguments, the one duplicate being
+    # that pair. A pointer deleted, or a new claim added without an argument, moves
+    # this number and has to be looked at rather than passing quietly.
+    _wy_heads_n=0; _wy_heads_n="$(grep -c '^## ' "$_wy_doc")" || _wy_heads_n=0
+    { [ "$_wy_all" -eq 29 ] && [ "$_wy_heads_n" -eq 28 ]; } \
+        && pass "…and the block carries 29 claims over 28 arguments, the probes sharing one" \
+        || die "the block has $_wy_all claims over $_wy_heads_n arguments, not 29 over 28; a pointer was added or dropped"
 
     # 2. THE CLAIMS, taken from the setup fence alone and paired with the pointer
     #    beneath them. The status is taken: fed straight into a comparison, a
