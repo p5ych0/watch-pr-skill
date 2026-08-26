@@ -518,8 +518,8 @@ the alias.
 ## THE PIN NAMES GET THE SAME GENERIC TEST, for the reason the transport probe gives.
 
 The argument is the one above, not a second copy of it: the pin probe guards
-`RB_PIN_DIR`, `RB_PIN_DIR2`, `RB_PIN_SEEN` and `RB_DIR` exactly as the transport
-probe guards its four, and for the same reason — a list of names is wrong by
+`RB_PIN_DIR`, `RB_PIN_DIR2` and `RB_PIN_SEEN` exactly as the transport probe
+guards its four, and for the same reason — a list of names is wrong by
 omission, and `${!name}` answers generically what an enumeration cannot.
 
 It has its own claim because it is its own SITE. Sharing one claim between two

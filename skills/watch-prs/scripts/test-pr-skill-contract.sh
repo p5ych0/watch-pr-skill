@@ -5140,10 +5140,11 @@ if [ -f "$_wy_doc" ]; then
     _wy_float=0
     _wy_float="$(awk '/^## Derive identity$/{sec=1}
        sec && /^```bash$/ && !seen {f=1; seen=1; next}
-       f && /^```$/{f=0; sec=0; next}
+       f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++     # the fence is not code either
+                     f=0; sec=0; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
            prev=$0 }
-       END{print n+0}' "$SKILL")" || _wy_float=99
+       END{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
     [ "$_wy_float" -eq 0 ] \
         && pass "…and every claim and pointer sits on a line of code" \
         || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
@@ -5183,10 +5184,13 @@ EOWY
     # the `# WHY:` then leads a model to an empty section — which is the separation
     # failing completely while the contract reports clean.
     # STRUCTURE IS NOT CONTENT: `NF` counted a bare fence as body, so a section
-    # stripped to an empty code block kept every count while arguing nothing.
+    # stripped to an empty code block kept every count while arguing nothing — and
+    # a subheading is structure by the same argument, so `### Evidence` alone is
+    # not a section that argues anything either.
     _wy_empty=""; _wy_empty="$(awk '
         /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
-        h != "" && NF && $0 !~ /^[[:space:]]*```[a-z]*[[:space:]]*$/ { body=1 }
+        h != "" && NF && $0 !~ /^[[:space:]]*```[a-z]*[[:space:]]*$/ \
+             && $0 !~ /^[[:space:]]*#+[[:space:]]/ { body=1 }
         END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
     [ -z "$_wy_empty" ] \
         && pass "…and every section argues something under its heading" \
