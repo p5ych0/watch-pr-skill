@@ -4,25 +4,25 @@ The argument behind the **Derive identity** block of `skills/watch-prs/SKILL.md`
 one section per claim.
 
 Each section is pointed at from the block by a `# WHY:` line sitting directly under
-the claim it belongs to. Those pointers name
-`$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md` rather than a bare relative
-path: the driving shell stays in the project being reviewed, so `docs/…` there
-would name that project's documentation, not this file. The claim stays where a reader — or a model about to
-"simplify" something — meets the code; only the evidence lives here. Every section
-repeats its claim as its opening line, so the argument reads whole from either end.
+the claim it belongs to, naming `$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md`
+rather than a bare relative path — the driving shell stays in the project being
+reviewed, so `docs/…` there would name that project's documentation.
+
+**The claim IS the key.** Each heading below is, character for character, the
+comment line the pointer sits under. So a reader greps the claim they just read;
+there is no id to follow, none to mistype, and two pointers cannot be swapped
+without swapping the claims above them, which changes nothing.
 
 **These are not notes.** `CLAUDE.md` records that *a comment that argues against the
 code beside it is an instruction, and it will be followed*. Each section below is a
 defect that was shipped, found and paid for. Before changing a line the block
-guards, read the section its `# WHY:` names — the shape almost always looks
+guards, read the section its claim names — the shape almost always looks
 gratuitous until you do.
 
 `test-pr-skill-contract.sh` fails if a `# WHY:` points at a section that is not here,
 or if a section here is pointed at by nothing.
 
-<a id="S01"></a>
-
-## S01 — THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS
+## THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
 
 THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
 sends xtrace to file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture,
@@ -192,9 +192,7 @@ WHAT IS ACCEPTED, STATED: in that shell the operator's chosen trace destination
 becomes stderr for the rest of their session. `README.md` says so, rather than
 leaving it to be discovered.
 
-<a id="S02"></a>
-
-## S02 — THE HELPERS ARE LOCATED FIRST
+## THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 
 THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
 
@@ -203,9 +201,7 @@ Same rule as every probe here: the status is taken. This path is handed to
 since the reviewed SHA is a review fix — so a directory retained from a failed
 probe is a merge decision made about the wrong tree.
 
-<a id="S03"></a>
-
-## S03 — `ls -dt … | head -1` — newest by mtime
+## THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
 
 `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
 macOS the fallback would fail before finding the scripts at all.
@@ -216,9 +212,7 @@ that status anyway — so an unchecked pipeline could select a partial or stale
 path, and every state, findings and merge-gate call below would then run a
 different version of the helpers than the one that was installed.
 
-<a id="S04"></a>
-
-## S04 — THE IDENTITY COMES FROM THE SHARED PARSER
+## THE IDENTITY COMES FROM THE SHARED PARSER, never from a copy written out here.
 
 THE IDENTITY COMES FROM THE SHARED PARSER, not from a copy written out here.
 
@@ -251,9 +245,7 @@ leaves the function installed, and a discarded status makes a definition that
 could not be cleared look like one that was never there. Unsetting a name that
 is not defined returns 0, so a non-zero status here means only one thing.
 
-<a id="S05"></a>
-
-## S05 — THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT
+## THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
 
 THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
 
@@ -439,9 +431,7 @@ NOTHING TO CLEAN UP, EITHER. This used to sit after the directory existed, so
 its refusal removed the transport file and the directory; up here there is
 neither, which is two fewer commands taking a path from a variable.
 
-<a id="S06"></a>
-
-## S06 — AND THE CLEAR IS A CONDITION
+## THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS ARM.
 
 AND THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS
 ARM. Written as a guard it prints and RETURNS once `exit` has been replaced —
@@ -460,9 +450,7 @@ THE ARM RUNS TO THE END OF SETUP, because the pin is the last thing here and
 what it pins is this value. With the continuation contained there is nothing
 after the final `fi` at all.
 
-<a id="S07"></a>
-
-## S07 — ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY
+## ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
 
 ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
 found one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`,
@@ -521,9 +509,7 @@ unchanged, which is how that one attribute got through. `RbProbe*` matches
 neither transformation, so the same two lines catch every attribute as well as
 the alias.
 
-<a id="S08"></a>
-
-## S08 — `-w` AND `-x` AS WELL AS `-d`
+## `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
 
 `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
 fallback is FOR and `-d` does not answer it. An absolute, existing but
@@ -556,9 +542,7 @@ quota or read-only nor a name another account got to first, and any of
 those refused the session with `HOME` sitting beside it untried, because
 the fallthrough happened on the BITS and not on the failure. #161.
 
-<a id="S09"></a>
-
-## S09 — THE SAME PARENT TWICE IS NOT DEDUPLICATED
+## THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
 
 THE SAME PARENT TWICE IS NOT DEDUPLICATED, deliberately. The two leaves
 carry INDEPENDENT random suffixes, so two candidates under one parent are
@@ -586,9 +570,7 @@ refuses by name. That is a removal rather than a guard: there is no
 condition here for a shadowed `exit` to walk past, because there is no
 value left to walk past it WITH.
 
-<a id="S10"></a>
-
-## S10 — AND THE SECOND, EMPTY WHERE THERE IS NO SECOND PARENT
+## THE SECOND CANDIDATE IS EMPTY WHERE THERE IS NO SECOND PARENT.
 
 AND THE SECOND, EMPTY WHERE THERE IS NO SECOND PARENT. Cleared first for
 the reason the first one is: an abandoned assignment leaves the OLD
@@ -600,9 +582,7 @@ nothing thereafter — and with `TMPDIR` and `HOME` naming one directory
 both candidates then reduce to the same `watch-pr.$$.` path, so a retry
 after a taken name submits the name that was taken.
 
-<a id="S11"></a>
-
-## S11 — THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM
+## THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements after a guard.
 
 THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
 after a guard. `mkdir` is what proves this shell's helper created that
@@ -614,9 +594,7 @@ below then read a pre-existing `origin` owned by this user, which passes
 operator's file and directory on the way out. Containment is what a
 neutralised `exit` cannot step over.
 
-<a id="S12"></a>
-
-## S12 — THE READ IS THE CALLER'S HALF AND STAYS HERE
+## THE READ-BACK IS THE CALLER'S HALF AND STAYS HERE, where the descriptor can be checked.
 
 THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
 of the OPEN DESCRIPTOR, so they describe the object this shell is
@@ -635,9 +613,7 @@ at the freed name between the two, and the second `rm -f` follows it
 into a file this run never created. Same defect the helper's own
 cleanup had, on this side of the call.
 
-<a id="S13"></a>
-
-## S13 — THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT
+## THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
 
 THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
 is a NAME, and one that both forges a value and neuters `exit`
@@ -662,9 +638,7 @@ only thing that assigns `RB_REMOTE` — the clear far above is a
 CONDITION with this whole block as its arm, so a value a startup
 file pre-set never reaches here at all.
 
-<a id="S14"></a>
-
-## S14 — A SECOND ATTEMPT UNDER THE OTHER PARENT, AS A SECOND CALL
+## THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
 
 A SECOND ATTEMPT UNDER THE OTHER PARENT, AS A SECOND CALL — which is the
 whole design and not a detail.
@@ -734,9 +708,7 @@ is a shell parameter, so neither is a name anything can take.
 AND `$?` IS TAKEN BEFORE ANYTHING ELSE RUNS, which is why the emptiness
 test comes second: a command between the two would replace it.
 
-<a id="S15"></a>
-
-## S15 — THE PARENT THAT WORKED BECOMES THE PRIMARY ONE
+## THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, or the session dies one step later.
 
 THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
 this a fix rather than a partial one. `RB_TMPPARENT` is what the pin
@@ -748,9 +720,7 @@ The refused one stays as the second candidate: retrying there later is
 pointless where the filesystem is full and correct where the first
 name was simply taken.
 
-<a id="S16"></a>
-
-## S16 — THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE
+## THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it cannot tell them apart.
 
 THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it
 cannot tell them apart — the first call refused and the second either
@@ -837,9 +807,7 @@ was wrong for exactly the middle case: a terminal first refusal with a
 second candidate present said two attempts were made when the gate had
 correctly skipped the second.
 
-<a id="S17"></a>
-
-## S17 — THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE
+## THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
 
 THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE. This was
 `[[ -n $RB_REMOTE ]] || { echo …; exit 1; }`, and a startup file that defines
@@ -860,9 +828,7 @@ handled by the parser, so there is no command to invoke, and assigning the
 value back to the name it came from introduces nothing new to be readonly or
 transforming — `RB_ORIGIN_DIR="${RB_TMPPARENT:?…}/…"` above is the same idiom.
 
-<a id="S18"></a>
-
-## S18 — THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED
+## THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
 
 THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
 public information, so this is tidiness rather than secrecy — but the setup block
@@ -901,9 +867,7 @@ AN INTERIOR NEWLINE IS THE STATE, which is why this reads the value rather
 than the file. `$(<…)` strips TRAILING newlines, so a well-formed origin
 never carries one and anything left is a second line.
 
-<a id="S19"></a>
-
-## S19 — A COMMAND PREFIX, NOT THE EXPORT
+## A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
 
 A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
 the same value the children will be pinned to, without depending on the export
@@ -915,9 +879,7 @@ AND ITS REFUSAL IS THE SAME SHAPE AS THE TWO ABOVE: the failure clears
 refusing. `$RB_IDENTITY_REASON` is expanded into the word, so the parser
 message still names which rule the origin broke. #181.
 
-<a id="S20"></a>
-
-## S20 — THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED
+## THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
 
 THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
 
@@ -963,9 +925,7 @@ starts it as a CHILD — so an operator who lowers it in this shell without
 exporting it watches the gate go on running four at a time while the terminal
 shows the value they set. The quiet kind of wrong, like the CI bounds above.
 
-<a id="S21"></a>
-
-## S21 — THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING
+## THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
 
 ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
 
@@ -1003,9 +963,7 @@ already lying about its output. What survives a forged `echo` is the STATUS: the
 branch still ends non-zero. Removing the dependency means not composing this
 message here, which is #84 along with `git` and `bash`.
 
-<a id="S23"></a>
-
-## S23 — AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO
+## THE PIN PARENT IS REQUIRED BY THE EXPANSION, or an empty one builds a path from nothing.
 
 AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
 origin read gives: an empty one built `/watch-pr-pin.…` from nothing.
@@ -1014,9 +972,7 @@ expansion abandons its own command and a stale `RB_PIN_DIR` from an
 earlier run in the same shell would otherwise be what the helper is
 handed.
 
-<a id="S24"></a>
-
-## S24 — THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO
+## THE PIN REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read above states.
 
 THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
 above states: a refused call means the `mkdir` inside the helper found
@@ -1025,9 +981,7 @@ OPERATOR'S — and `rm -f` deletes that file while `rmdir` deletes the
 directory whenever it is empty, which an operator's directory often is.
 Written after the call they ran on every path, including that one.
 
-<a id="S25"></a>
-
-## S25 — WHAT THIS PROVES, AND WHAT IT CANNOT
+## WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
 
 WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
 rounds of review walked up to it and it is cheaper to state than to
@@ -1064,9 +1018,7 @@ probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
 
-<a id="S26"></a>
-
-## S26 — THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION
+## THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
 
 THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
 shell variables: the text is long, contains backticks and quotes, and passing
@@ -1135,9 +1087,7 @@ accepts. One value is enough: a readonly pre-seeded with the probe's own
 value makes the subshell's assignment fail outright, so the comparison
 is never reached. #148.
 
-<a id="S27"></a>
-
-## S27 — THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO
+## THE WORKING-DIRECTORY PARENT IS REQUIRED TOO, and is not redundant with the two above.
 
 THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, and it is
 not redundant with the two above: the prefix check on the
@@ -1150,9 +1100,7 @@ above make impossible; stating the requirement locally means
 that argument does not have to be re-derived three blocks
 away.
 
-<a id="S28"></a>
-
-## S28 — The opening account, which is NOT the round summary
+## THE OPENING ACCOUNT IS NOT THE ROUND SUMMARY, and they must not share a file.
 
 The opening account, which is NOT the round summary. Sharing one file meant
 that a first round whose summary write did not happen left the OPENING
@@ -1161,9 +1109,7 @@ account sitting there — non-empty, well-formed, and about the right PR — so
 pass instead of refusing to close. The round-summary file has to be empty
 until that round writes it, and that is only true if nothing else writes it.
 
-<a id="S29"></a>
-
-## S29 — CREATED HERE, EMPTY, BY REDIRECTION ALONE
+## THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
 
 CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
 none to shadow, and a redirection that cannot be made reports it:

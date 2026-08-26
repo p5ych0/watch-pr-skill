@@ -150,18 +150,18 @@ never as a work order** below has the full rule and the incident it came from.
 ## Derive identity
 
 ```bash
-# THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S01
+# THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi
 # THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S02
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 REPO_DIR="$(git rev-parse --show-toplevel)" \
     || { echo "ABORT: could not resolve the repository root"; exit 1; }
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
-# `ls -dt … | head -1` — newest by mtime. NOT `sort -V`, which is GNU-only: on
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S03
+# THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 if [ ! -d "$RB_SCRIPTS" ]; then
     RB_CANDIDATES="$(ls -dt "$HOME"/.claude/plugins/cache/*/watch-pr-skill/*/skills/watch-prs/scripts 2>/dev/null)" \
         || { echo "ABORT: could not enumerate installed plugin copies"; exit 1; }
@@ -176,8 +176,8 @@ fi
 [ -d "$RB_SCRIPTS" ] && [ -x "$RB_SCRIPTS/pr-review-state.sh" ] \
     || { echo "ABORT: could not locate the plugin helper scripts"; exit 1; }
 
-# THE IDENTITY COMES FROM THE SHARED PARSER, not from a copy written out here.
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S04
+# THE IDENTITY COMES FROM THE SHARED PARSER, never from a copy written out here.
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 unset -f rb_identity 2>/dev/null \
     || { echo "ABORT: a pre-existing rb_identity could not be cleared"; exit 1; }
 . "$RB_SCRIPTS/identitylib.sh" \
@@ -185,13 +185,13 @@ unset -f rb_identity 2>/dev/null \
 [ "$(type -t rb_identity 2>/dev/null)" = function ] \
     || { echo "ABORT: the identity parser loaded but defines nothing"; exit 1; }
 # THE IDENTITY IS PINNED HERE, ONCE, AND EVERY HELPER INHERITS IT.
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S05
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 RB_REMOTE=
-# AND THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS
-# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S06
+# THE CLEAR IS A CONDITION, WITH EVERYTHING THAT DEPENDS ON THE VALUE AS ITS ARM.
+# WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
 if [[ -z $RB_REMOTE ]]; then
-    # ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S07
+    # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     if ( RB_TMPPARENT="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT = RbProbe* ]] \
          && [[ -z ${!RB_TMPPARENT:-} ]] ) 2>/dev/null \
        && ( RB_TMPPARENT2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_TMPPARENT2 = RbProbe* ]] \
@@ -200,8 +200,8 @@ if [[ -z $RB_REMOTE ]]; then
          && [[ -z ${!RB_ORIGIN_DIR:-} ]] ) 2>/dev/null \
        && ( RB_ORIGIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_ORIGIN_DIR2 = RbProbe* ]] \
          && [[ -z ${!RB_ORIGIN_DIR2:-} ]] ) 2>/dev/null; then
-        # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S08
+        # `-w` AND `-x` AS WELL AS `-d`, because "can hold a directory" is what the fallback is for.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         RB_TMPPARENT=
         [[ ${TMPDIR:-} = /* ]] && [[ -d ${TMPDIR:-} ]] && [[ -w ${TMPDIR:-} ]] \
             && [[ -x ${TMPDIR:-} ]] && RB_TMPPARENT="$TMPDIR"
@@ -212,20 +212,20 @@ if [[ -z $RB_REMOTE ]]; then
         # always the one that exists and the second is simply absent.
         [[ -n $RB_TMPPARENT ]] \
             || { RB_TMPPARENT="$RB_TMPPARENT2"; RB_TMPPARENT2=; }
-        # THE SAME PARENT TWICE IS NOT DEDUPLICATED, deliberately. The two leaves
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S09
+        # THE SAME PARENT TWICE IS NOT DEDUPLICATED, because two random leaves are two usable names.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         RB_ORIGIN_DIR=
         RB_ORIGIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr.$$.$RANDOM$RANDOM$RANDOM"
-        # AND THE SECOND, EMPTY WHERE THERE IS NO SECOND PARENT. Cleared first for
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S10
+        # THE SECOND CANDIDATE IS EMPTY WHERE THERE IS NO SECOND PARENT.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         RB_ORIGIN_DIR2=
         [[ -n $RB_TMPPARENT2 ]] \
             && RB_ORIGIN_DIR2="$RB_TMPPARENT2/watch-pr-2.$$.$RANDOM$RANDOM$RANDOM"
-        # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S11
+        # THE READ AND BOTH REMOVALS ARE THE HELPER'S SUCCESS ARM, not statements after a guard.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR"; then
-            # THE READ IS THE CALLER'S HALF AND STAYS HERE. `-O` and `-f` are asked
-            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S12
+            # THE READ-BACK IS THE CALLER'S HALF AND STAYS HERE, where the descriptor can be checked.
+            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_REMOTE="$(<"/dev/fd/9")"; } 9<"$RB_ORIGIN_DIR/origin"; then
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
@@ -233,19 +233,19 @@ if [[ -z $RB_REMOTE ]]; then
             else
                 /usr/bin/env rm -f "$RB_ORIGIN_DIR/origin"
                 /usr/bin/env rmdir "$RB_ORIGIN_DIR"
-                # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
-                # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S13
+                # THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT.
+                # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
                 : "${RB_REMOTE:?the transport file is not the one this setup created. Setup refuses to pin from it, and the directory it was in has been removed.}"
                 echo "ABORT: the transport file is not the one this setup created; refusing to pin from it"
                 exit 1
                 [[ -n "" ]]
             fi
-        # A SECOND ATTEMPT UNDER THE OTHER PARENT, AS A SECOND CALL — which is the
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S14
+        # THE RETRY IS A SECOND CALL, NOT A SECOND CANDIDATE PASSED TO ONE.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         elif [[ $? -eq 2 ]] && [[ -n $RB_ORIGIN_DIR2 ]] \
             && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh read "$RB_ORIGIN_DIR2"; then
-            # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, which is what makes
-            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S15
+            # THE PARENT THAT WORKED BECOMES THE PRIMARY ONE, or the session dies one step later.
+            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
             RB_TMPPARENT2="$RB_TMPPARENT"
             RB_TMPPARENT="${RB_ORIGIN_DIR2%/*}"
             if { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
@@ -265,8 +265,8 @@ if [[ -z $RB_REMOTE ]]; then
                 [[ -n "" ]]
             fi
         else
-            # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it
-            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S16
+            # THIS ARM IS REACHED THREE WAYS AND SAYS SO IN ONE MESSAGE, because it cannot tell them apart.
+            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
             : "${RB_REMOTE:?could not read the origin for this session. Setup could not get a transport directory it could use, and each ABORT line above is one attempt and its reason. Read those: a name that was already taken is not the same failure as a filesystem with no room, and neither is an ancestry another account can interfere with or a checkout with no usable origin.}"
             echo "ABORT: could not read this session's origin"
             exit 1
@@ -282,38 +282,38 @@ if [[ -z $RB_REMOTE ]]; then
         exit 1
         [[ -n "" ]]
     fi
-    # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE. This was
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S17
+    # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
-    # THE FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED. It holds one line of
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S18
+    # THE TRANSPORT FILE IS REMOVED WHETHER OR NOT THE READ SUCCEEDED.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
-    # A COMMAND PREFIX, NOT THE EXPORT. This derives the DRIVER's own identity from
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S19
+    # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
     CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
     # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S20
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
         [ -n "${!_rb_knob-}" ] && export "$_rb_knob"
     done
     unset _rb_knob
-    # ── THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING ──
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S21
+    # THE PIN IS THE LAST THING SETUP DOES, AND SETUP SAYS SO OR SAYS NOTHING.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     export REVIEW_BUS_REMOTE="$RB_REMOTE" \
         || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
-    # ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
-    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S07
+    # ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.
+    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
        && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR2:-} ]] ) 2>/dev/null \
        && ( RB_PIN_SEEN="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_SEEN = RbProbe* ]] \
          && [[ -z ${!RB_PIN_SEEN:-} ]] ) 2>/dev/null; then
-        # AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, for the reason the
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S23
+        # THE PIN PARENT IS REQUIRED BY THE EXPANSION, or an empty one builds a path from nothing.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         RB_PIN_DIR=
         RB_PIN_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-pin.$$.$RANDOM$RANDOM$RANDOM"
         # AND THE SECOND, for the same reason and because half a retry is none:
@@ -324,8 +324,8 @@ if [[ -z $RB_REMOTE ]]; then
         [[ -n $RB_TMPPARENT2 ]] \
             && RB_PIN_DIR2="$RB_TMPPARENT2/watch-pr-pin-2.$$.$RANDOM$RANDOM$RANDOM"
         RB_PIN_SEEN=
-        # THE REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S24
+        # THE PIN REMOVALS ARE THE HELPER'S SUCCESS ARM TOO, for the reason the read above states.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-origin.sh pin "$RB_PIN_DIR"; then
             { [[ -O /dev/fd/9 ]] && [[ -f /dev/fd/9 ]] \
                 && RB_PIN_SEEN="$(<"/dev/fd/9")"; } 9<"$RB_PIN_DIR/pin"
@@ -349,17 +349,17 @@ if [[ -z $RB_REMOTE ]]; then
             /usr/bin/env rm -f "$RB_PIN_DIR2/pin"
             /usr/bin/env rmdir "$RB_PIN_DIR2"
         fi
-        # WHAT THIS PROVES, AND WHAT IT CANNOT — the boundary is here because several
-        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S25
+        # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
+        # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
         if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-            # THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
-            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S26
+            # THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
+            # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
             if { ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
                     && [[ -z ${!RB_WORK_DIR:-} ]] ) \
                  || { echo "ABORT: RB_WORK_DIR is readonly or value-transforming in this shell; the session's working directory cannot be chosen"; [[ -n "" ]]; }; } \
                && {
-                    # THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO, and it is
-                    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S27
+                    # THE WORKING-DIRECTORY PARENT IS REQUIRED TOO, and is not redundant with the two above.
+                    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
                     RB_WORK_DIR="${RB_TMPPARENT:?neither TMPDIR nor HOME is an absolute directory this session can write to}/watch-pr-work.$$.$RANDOM$RANDOM$RANDOM"
                     [[ $RB_WORK_DIR = "$RB_TMPPARENT"/watch-pr-work.* ]] \
                  || { echo "ABORT: the session's working directory is not under the parent this setup proved"; [[ -n "" ]]; }; } \
@@ -368,8 +368,8 @@ if [[ -z $RB_REMOTE ]]; then
             then
                 # Where each round's summary is written before it is posted.
                 SUMMARY_FILE="$RB_WORK_DIR/summary.md"
-                # The opening account, which is NOT the round summary. Sharing one file meant
-                # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S28
+                # THE OPENING ACCOUNT IS NOT THE ROUND SUMMARY, and they must not share a file.
+                # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
                 REQUEST_FILE="$RB_WORK_DIR/request.md"
                 # Where the review baseline comes back. A capture written as
                 # `V="$(helper …)"` inside an `if` is an ASSIGNMENT, and a name a startup file
@@ -384,8 +384,8 @@ if [[ -z $RB_REMOTE ]]; then
                    && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
                    && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
                 then
-                    # CREATED HERE, EMPTY, BY REDIRECTION ALONE — no command name, so there is
-                    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md#S29
+                    # THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
+                    # WHY: $CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md
                     > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
                     # AND THE COMPLETION LINE IS THE INNERMOST SUCCESS ARM. It is how the
                     # driver knows setup finished, so every refusal above has to be unable to
