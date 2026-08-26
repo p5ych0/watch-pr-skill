@@ -305,7 +305,7 @@ if [[ -z $RB_REMOTE ]]; then
     export REVIEW_BUS_REMOTE="$RB_REMOTE" \
         || { echo "ABORT: could not pin this session's repository — REVIEW_BUS_REMOTE is readonly in this shell"; exit 1; }
     # ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
-    # WHY: docs/skill-setup-rationale.md#S22
+    # WHY: docs/skill-setup-rationale.md#S07
     if ( RB_PIN_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR = RbProbe* ]] \
          && [[ -z ${!RB_PIN_DIR:-} ]] ) 2>/dev/null \
        && ( RB_PIN_DIR2="RbProbe$$$RANDOM$RANDOM"; [[ $RB_PIN_DIR2 = RbProbe* ]] \

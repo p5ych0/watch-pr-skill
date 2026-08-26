@@ -996,51 +996,6 @@ already lying about its output. What survives a forged `echo` is the STATUS: the
 branch still ends non-zero. Removing the dependency means not composing this
 message here, which is #84 along with `git` and `bash`.
 
-<a id="S22"></a>
-
-## S22 — ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY
-
-ONE GENERIC TEST, WHICH REPLACES THE ENUMERATION ENTIRELY. Thirteen names were
-found one review round apiece — `HOME`, `TMPDIR`, `REPO_DIR`, `RB_SCRIPTS`,
-`PATH`, `HOST`, `OWNER`, `REPO`, `IFS`, the operator knobs, the reviewer
-logins, `GIT_DIR`, `CDPATH` — and the last two showed the list could never be
-completed: it would have to union what this driver reads, what its tools read,
-and what the SHELL ITSELF consults, and the last grows with the shell version.
-
-`${!name}` IS THE ANSWER, and it is portable. For a NAMEREF it expands to the
-TARGET'S NAME; for an ordinary variable it is indirect expansion — the value
-of the variable NAMED by this one. So assign a value that is a legal variable
-name and cannot be a set one, and ask whether `${!name}` is empty: an ordinary
-variable names nothing and gives nothing, and a nameref gives whatever it
-points at, whether that is `HOME`, `GIT_DIR`, `CDPATH` or something no list
-here would ever have carried.
-
-AND IT WORKS WHERE `[[ -R ]]` CANNOT. `-R` answers the same question in one
-word and is bash 4.3+, and on 3.2 an unknown unary operator inside `[[ ]]` is
-a PARSE error, so the whole block would fail to parse on the shell
-`macos-shell` exists to cover. Indirect expansion is bash 2, and on a shell
-with no namerefs it simply reports nothing — which is the right answer there,
-since nothing can be one.
-
-THE VALUE IS BUILT FROM `$$` AND `$RANDOM`, not fixed. A fixed sentinel
-COLLIDES: with two fixed pairs and an operator holding one value from each,
-both pairs failed and a shell nothing had corrupted was refused.
-`RbProbe$$$RANDOM$RANDOM` is a legal variable name, and the only way to
-collide is to have a variable of exactly that name already set.
-
-`$$` IS THERE BECAUSE `RANDOM` CAN BE UNSET. `unset RANDOM` removes its
-special behaviour and every later `$RANDOM` is empty, which would leave a
-FIXED `RbProbe` — back to a value an operator can hold. `$$` is the shell's
-own pid and cannot be unset, so the sentinel stays per-session whatever has
-been done to `RANDOM`.
-
-AND THE PREFIX MATCH IS THE OTHER HALF, IN MIXED CASE. A readonly leaves the
-old value, `declare -i` stores `0`, `declare -l` lower-cases it and
-`declare -u` upper-cases it — and an ALL-CAPS sentinel survives `declare -u`
-unchanged, which is how that one attribute got through. `RbProbe*` matches
-neither transformation, so the same two lines catch every attribute as well as
-the alias.
-
 <a id="S23"></a>
 
 ## S23 — AND THE PARENT IS REQUIRED BY THE EXPANSION HERE TOO

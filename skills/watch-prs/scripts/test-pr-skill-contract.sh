@@ -5024,12 +5024,32 @@ if [ -f "$_wy_doc" ]; then
         grep -q "^## $_wy — " "$_wy_doc" \
             && pass "…and $_wy resolves to a section" \
             || die "$_wy is pointed at from SKILL.md and has no section in the rationale"
-        # AND THE ANCHOR IS THERE TOO, so the pointer is a working link rather than
-        # only a greppable token — the heading id GitHub derives is not `S07`.
-        grep -qF "<a id=\"$_wy\"></a>" "$_wy_doc" \
-            && pass "…with an anchor a reader can follow" \
-            || die "$_wy has a section but no <a id> anchor; the pointer does not link"
+        # AND THE ANCHOR SITS ON ITS OWN HEADING, not merely somewhere in the file.
+        # Checked for presence alone, swapping `<a id="S13">` with `<a id="S17">`
+        # left this green — both ids still occur, the headings are untouched, and
+        # following `#S13` lands on S17's argument. The "working link" has to be
+        # proven to work.
+        _wy_anch=""
+        _wy_anch="$(awk -v id="$_wy" '
+            $0 == "<a id=\"" id "\"></a>" {f=1; next}
+            f && NF { print; exit }' "$_wy_doc")" || _wy_anch=""
+        case "$_wy_anch" in
+            "## $_wy — "*) pass "…with an anchor on its own heading, so the link lands there" ;;
+            "") die "$_wy has no <a id> anchor; the pointer does not link" ;;
+            *)  die "$_wy's anchor precedes '$_wy_anch', not its own heading; the link lands elsewhere" ;;
+        esac
     done
+    # NO TWO SECTIONS MAY OPEN WITH THE SAME CLAIM, which is what makes comparing
+    # the claim a UNIQUE key rather than a usually-unique one. S07 and S22 opened
+    # with the same line — the transport probe and the pin probe were the same
+    # argument written twice — and swapping their pointers passed every check.
+    # S22 is gone and both cite S07; this stops the next duplicate reopening it.
+    _wy_dupe=""
+    _wy_dupe="$(awk '/^## S[0-9]/{f=1; next} f && NF {print; f=0}' "$_wy_doc" \
+        | sort | uniq -d)" || _wy_dupe="THE_SCAN_FAILED"
+    [ -z "$_wy_dupe" ] \
+        && pass "…and no two sections open with the same claim, so the key is unique" \
+        || die "two sections open with the same claim, so a pointer swap between them is invisible: '$_wy_dupe'"
     for _wy in $_wy_sec; do
         grep -qF "# WHY: docs/skill-setup-rationale.md#$_wy" "$SKILL" \
             && pass "…and $_wy is pointed at from the block" \
@@ -5046,6 +5066,22 @@ if [ -f "$_wy_doc" ]; then
     # line verbatim. That is not a coincidence to rely on quietly: the document is
     # built that way so the argument reads whole from either end, and this case is
     # what keeps it true.
+    # THE CLAIM MAP IS BUILT AND ITS STATUS TAKEN BEFORE THE LOOP READS IT. Fed
+    # straight into a heredoc, a failed `awk` — an unreadable file between the
+    # membership scan and this parse — yields no records, the loop runs zero
+    # times, `_wy_bad` stays 0, and a failed parse reports as a clean contract.
+    _wy_map=""; _wy_map_rc=0
+    _wy_map="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
+       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+/)) {
+               id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
+               c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
+               print id "|" c }
+           prev=$0 }' "$SKILL")" || _wy_map_rc=$?
+    [ "$_wy_map_rc" -eq 0 ] \
+        || die "the claim map could not be built (rc=$_wy_map_rc); pointer drift would go unchecked"
+    [ -n "$_wy_map" ] \
+        && pass "…and the claim each pointer sits under was read" \
+        || die "the claim map is empty; every comparison below would pass vacuously"
     _wy_bad=0
     while IFS='|' read -r _wy_id _wy_claim; do
         [ -n "$_wy_id" ] || continue
@@ -5061,12 +5097,7 @@ if [ -f "$_wy_doc" ]; then
             _wy_bad=$((_wy_bad + 1))
         fi
     done <<EOWY
-$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
-       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+/)) {
-               id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
-               c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
-               print id "|" c }
-           prev=$0 }' "$SKILL")
+$_wy_map
 EOWY
     [ "$_wy_bad" -eq 0 ] \
         && pass "…so no pointer cites the argument for a different claim" \
