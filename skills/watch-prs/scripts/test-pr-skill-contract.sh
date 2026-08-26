@@ -5053,6 +5053,23 @@ if [ -f "$_wy_doc" ]; then
     [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
         && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
         || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
+    # AND NO LAYER STILL NAMES THE OLD PATH. The document moved out of `docs/`
+    # during review, and a table or a rule left pointing at the old spelling sends
+    # maintenance and release work at an artifact that no longer exists.
+    # OVER THE CHECKOUT'S OWN DOCUMENTS, derived rather than listed and rather than
+    # walked: `grep -r` over the tree reaches untracked scratch — a session-memory
+    # file mentioning the old path failed this for a reason that has nothing to do
+    # with the plugin.
+    # `git grep`, WHOSE STATUS IS THE ONE THIS NEEDS: 0 found, 1 not found, above
+    # that an error. `git ls-files | xargs grep` reports 123 on the ordinary
+    # no-match, because that is xargs saying a child exited non-zero.
+    _wy_stale=""; _wy_st_rc=0
+    _wy_stale="$(git -C "$ROOT" grep -lF 'docs/skill-setup-rationale' -- '*.md' 2>/dev/null)" || _wy_st_rc=$?
+    [ "$_wy_st_rc" -le 1 ] \
+        || die "the checkout's documents could not be scanned for the old path (rc=$_wy_st_rc)"
+    [ -z "$_wy_stale" ] \
+        && pass "…and nothing still names its old path under docs/" \
+        || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
 
     # AND BOTH PROBE SITES KEEP A POINTER. The transport probe and the pin probe
     # make the SAME claim — they are one argument — so the section they share stays
@@ -5095,6 +5112,21 @@ if [ -f "$_wy_doc" ]; then
         *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
     esac
 
+    # AND THE ONE DUPLICATED CLAIM IS THE PROBE PAIR, at exactly two sites. The
+    # counts alone do not say WHICH claim is doubled: deleting the pin probe's
+    # pointer and adding a valid pair for some other already-argued heading keeps
+    # 29 over 28 and passes both membership loops, while the pin probe loses its
+    # local rationale. So the duplicate is named.
+    _wy_gen='ONE GENERIC TEST REPLACES THE ENUMERATION, because a list of names is wrong by omission.'
+    _wy_cdupe=""; _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cdupe="THE_SCAN_FAILED"
+    [ "$_wy_cdupe" = "$_wy_gen" ] \
+        && pass "…and the only claim made twice is the one the two probes share" \
+        || die "the duplicated claims are '$_wy_cdupe', not the probe pair; a site lost its own rationale"
+    _wy_gen_n=0; _wy_gen_n="$(grep -cxF "$_wy_gen" <<<"$_wy_claims")" || _wy_gen_n=0
+    [ "$_wy_gen_n" -eq 2 ] \
+        && pass "…claimed at both probe sites, not one" \
+        || die "the shared probe claim appears $_wy_gen_n times, not twice"
+
     # 3. FORWARD: every claim is a heading, verbatim. `grep -xF` — a claim is
     #    literal text and must match the WHOLE heading, or a claim that is a prefix
     #    of another answers for it.
@@ -5125,6 +5157,17 @@ EOWY
     [ -z "$_wy_hdupe" ] \
         && pass "…and no two sections carry the same claim" \
         || die "two sections carry the same claim, so one is unreachable: '$_wy_hdupe'"
+    # AND EVERY SECTION ACTUALLY ARGUES SOMETHING. A heading whose prose is deleted
+    # keeps the counts, the forward lookup and the reverse membership intact, and
+    # the `# WHY:` then leads a model to an empty section — which is the separation
+    # failing completely while the contract reports clean.
+    _wy_empty=""; _wy_empty="$(awk '
+        /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
+        h != "" && NF { body=1 }
+        END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
+    [ -z "$_wy_empty" ] \
+        && pass "…and every section argues something under its heading" \
+        || die "these sections have a heading and no argument: '$_wy_empty'"
     while IFS= read -r _wy_h; do
         [ -n "$_wy_h" ] || continue
         grep -qxF "$_wy_h" <<<"$_wy_claims" \
