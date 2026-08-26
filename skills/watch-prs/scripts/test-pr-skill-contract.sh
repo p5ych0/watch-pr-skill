@@ -4997,7 +4997,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `docs/skill-setup-rationale.md` — 28
+# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 28
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
@@ -5015,7 +5015,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # could disagree with the heading it cited. Making the heading BE the claim
 # removes every one of those states rather than checking for them — two pointers
 # cannot be swapped without swapping the claims above them, which changes nothing.
-_wy_doc="$ROOT/docs/skill-setup-rationale.md"
+_wy_doc="$SCRIPT_DIR/../SETUP-RATIONALE.md"
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
     #    silently — and every one of them well formed, inside the setup fence, and
@@ -5032,20 +5032,27 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_all" -gt 0 ] \
         && pass "the setup block points at its rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
-    _wy_rel=0; _wy_rel_rc=0
-    _wy_rel="$(grep -c '# WHY: docs/' "$SKILL")" || _wy_rel_rc=$?
-    [ "$_wy_rel_rc" -le 1 ] \
-        || die "SKILL.md could not be scanned for relative pointers (rc=$_wy_rel_rc); one could be there"
-    [ "$_wy_rel" -eq 0 ] \
-        && pass "…and none is relative to the driver's working directory" \
-        || die "$_wy_rel pointers name a bare docs/ path; from another project that is that project's file"
+    # EVERY POINTER GOES THROUGH `$RB_SCRIPTS`, and the two names it must NOT go
+    # through are refused by name. A bare relative path resolves against the
+    # project under review — the driving shell stands there, which the `git
+    # rev-parse` below the first pointer requires. And `$CLAUDE_PLUGIN_ROOT` is
+    # UNSET in setup's second discovery mode, where the block finds the newest
+    # installed copy itself, so a pointer built from it reads `/docs/…`.
+    # `RB_SCRIPTS` is set and validated in both modes.
+    _wy_bad_ptr=0; _wy_bp_rc=0
+    _wy_bad_ptr="$(grep -c '# WHY: \(docs/\|\$CLAUDE_PLUGIN_ROOT\)' "$SKILL")" || _wy_bp_rc=$?
+    [ "$_wy_bp_rc" -le 1 ] \
+        || die "SKILL.md could not be scanned for unresolvable pointers (rc=$_wy_bp_rc); one could be there"
+    [ "$_wy_bad_ptr" -eq 0 ] \
+        && pass "…and none resolves from the working directory or an unset plugin root" \
+        || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
     # AGAINST THIS CHECKOUT, NOT AN INHERITED ROOT. `${CLAUDE_PLUGIN_ROOT:-$ROOT}`
     # reads a variable the invoking environment may already hold — this suite runs
     # with the driver's own exports present — so the assertion could pass against
     # somebody else's installed copy while this tree has no such file.
-    [ -f "$ROOT/docs/skill-setup-rationale.md" ] \
-        && pass "…and the rationale is at the plugin-root path the pointers name" \
-        || die "this checkout has no docs/skill-setup-rationale.md at its root"
+    [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
+        && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
+        || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
 
     # AND BOTH PROBE SITES KEEP A POINTER. The transport probe and the pin probe
     # make the SAME claim — they are one argument — so the section they share stays
@@ -5068,7 +5075,7 @@ if [ -f "$_wy_doc" ]; then
     _wy_claims="$(awk '/^## Derive identity$/{sec=1}
        sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
        f && /^```$/{f=0; sec=0; next}
-       f { if ($0 ~ /^[[:space:]]*# WHY: \$CLAUDE_PLUGIN_ROOT\/docs\/skill-setup-rationale\.md$/) {
+       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SETUP-RATIONALE\.md$/) {
                if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
                else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
            prev=$0 }' "$SKILL")" || _wy_rc=$?
@@ -5127,7 +5134,7 @@ EOWY
 $_wy_heads
 EOWH
 else
-    die "docs/skill-setup-rationale.md is missing; the setup block's argument has nowhere to live"
+    die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
 fi
 
 # ── the identity parser rejects transports that reach no GitHub server ─────
@@ -5143,7 +5150,7 @@ fi
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"
-grep -q 'reaches no GitHub server' "$ROOT/docs/skill-setup-rationale.md" \
+grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SETUP-RATIONALE.md" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "the rationale has no rejection path for an unsupported transport"
 

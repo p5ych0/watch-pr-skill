@@ -9,10 +9,12 @@
 
   That commentary is the argument for why setup has the shape it has — each
   paragraph a defect that was shipped, found and paid for. It now lives in
-  `docs/skill-setup-rationale.md`, twenty-eight sections, reached from the block by
-  a `# WHY:` line naming `$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md` —
-  the driving shell stays in the project under review, so a bare `docs/…` would
-  name that project's documentation rather than this one. **The claim stays beside
+  `SETUP-RATIONALE.md` beside it, twenty-eight sections, reached from the block by
+  a `# WHY:` line naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`. Not a bare relative
+  path, because the driving shell stays in the project under review and `docs/…`
+  there names that project's documentation; and not `$CLAUDE_PLUGIN_ROOT`, which
+  is unset in setup's second discovery mode. `RB_SCRIPTS` is set and validated in
+  both. **The claim stays beside
   the code**: every section opens with
   the same sentence that remains in the block, so the argument reads whole from
   either end and a reader still meets the point at the line it protects.

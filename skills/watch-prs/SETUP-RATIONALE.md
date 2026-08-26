@@ -1,12 +1,18 @@
 # Why setup is shaped the way it is
 
-The argument behind the **Derive identity** block of `skills/watch-prs/SKILL.md`,
+The argument behind the **Derive identity** block of the `SKILL.md` beside this file,
 one section per claim.
 
 Each section is pointed at from the block by a `# WHY:` line sitting directly under
-the claim it belongs to, naming `$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md`
-rather than a bare relative path — the driving shell stays in the project being
-reviewed, so `docs/…` there would name that project's documentation.
+the claim it belongs to, naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`.
+
+That path rather than a bare relative one, because the driving shell stays in the
+project being reviewed — `docs/…` there would name that project's documentation.
+And `$RB_SCRIPTS` rather than `$CLAUDE_PLUGIN_ROOT`, because setup has a second
+discovery mode: where the plugin-root variable is unset it finds the newest
+installed copy itself, and a pointer built from the empty variable would read
+`/docs/…`. `RB_SCRIPTS` is set and validated in BOTH modes, which is why this file
+sits beside `SKILL.md` rather than under `docs/`.
 
 **The claim IS the key.** Each heading below is, character for character, the
 comment line the pointer sits under. So a reader greps the claim they just read;
