@@ -4995,16 +4995,79 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
     && pass "…and each element must actually carry a bucket string" \
     || die "the checks jq does not validate the bucket records"
 
+# ── EVERY `# WHY:` POINTER RESOLVES, AND EVERY SECTION IS POINTED AT ───────
+#
+# The setup block's argument lives in `docs/skill-setup-rationale.md` — 29
+# sections, ~17k tokens that used to be read on every invocation of a skill whose
+# reader needs the COMMANDS. What stayed beside the code is the CLAIM: one line,
+# then a `# WHY:` naming the section that proves it.
+#
+# THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
+# that a comment arguing against the code beside it is an instruction and will be
+# followed; moving the argument away from the code weakens exactly that. A pointer
+# that rots leaves a claim with nothing behind it, and the next session deletes the
+# shape for looking gratuitous.
+#
+# BOTH DIRECTIONS, because each catches a different rot. A pointer with no section
+# is a claim that cannot be checked. A section nothing points at is an argument
+# that has outlived its code — and it is the one that goes unnoticed, because
+# nothing reading the skill would ever reach it.
+_wy_doc="$ROOT/docs/skill-setup-rationale.md"
+if [ -f "$_wy_doc" ]; then
+    _wy_ptr=""; _wy_ptr="$(grep -o '# WHY: docs/skill-setup-rationale\.md#S[0-9][0-9]*' "$SKILL" \
+        | sed 's/.*#//' | sort -u)" || _wy_ptr=""
+    [ -n "$_wy_ptr" ] \
+        && pass "the setup block points at its rationale" \
+        || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
+    _wy_sec=""; _wy_sec="$(grep -o '^## S[0-9][0-9]* ' "$_wy_doc" | sed 's/^## //; s/ $//' | sort -u)" || _wy_sec=""
+    for _wy in $_wy_ptr; do
+        grep -q "^## $_wy — " "$_wy_doc" \
+            && pass "…and $_wy resolves to a section" \
+            || die "$_wy is pointed at from SKILL.md and has no section in the rationale"
+        # AND THE ANCHOR IS THERE TOO, so the pointer is a working link rather than
+        # only a greppable token — the heading id GitHub derives is not `S07`.
+        grep -qF "<a id=\"$_wy\"></a>" "$_wy_doc" \
+            && pass "…with an anchor a reader can follow" \
+            || die "$_wy has a section but no <a id> anchor; the pointer does not link"
+    done
+    for _wy in $_wy_sec; do
+        grep -qF "# WHY: docs/skill-setup-rationale.md#$_wy" "$SKILL" \
+            && pass "…and $_wy is pointed at from the block" \
+            || die "$_wy is a section nothing points at; its code is gone or its pointer rotted"
+    done
+    # AND EVERY CLAIM KEEPS ITS POINTER ADJACENT. A `# WHY:` that drifted away from
+    # the line it explains is a pointer nobody meets at the moment they need it, so
+    # each one must sit directly under a comment line — never under code, and never
+    # opening a run.
+    _wy_bad=0
+    _wy_bad="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
+                    f { if ($0 ~ /# WHY: docs\/skill-setup-rationale/) {
+                            if (prev !~ /^[[:space:]]*#/) b++ }
+                        prev=$0 }
+                    END{print b+0}' "$SKILL")" || _wy_bad=99
+    [ "$_wy_bad" -eq 0 ] \
+        && pass "…and every pointer sits directly under the claim it belongs to" \
+        || die "$_wy_bad # WHY: pointers do not follow a claim line"
+else
+    die "docs/skill-setup-rationale.md is missing; the setup block's argument has nowhere to live"
+fi
+
 # ── the identity parser rejects transports that reach no GitHub server ─────
-# `SKILL.md` carries its own copy of the parser, and it is the copy the driver
-# runs. `test-pr-identity.sh` can execute the three scripts' copies but not this
-# one, so the structural assertion is what covers it.
+# The rule is `identitylib.sh`'s and `test-identitylib.sh` executes it. What is
+# asserted here is that the DRIVER's own documentation says so, because a reader
+# who does not know the refusal exists writes a remote the parser will reject and
+# has nothing to read about why.
+#
+# IN THE RATIONALE DOCUMENT, NOT IN `SKILL.md`. That argument moved out of the
+# setup block with the rest of the block's `# WHY:` material; the assertion moved
+# with it rather than being dropped, which is the coupling this file is here to
+# keep honest.
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"
-grep -q 'reaches no GitHub server' "$SKILL" \
+grep -q 'reaches no GitHub server' "$ROOT/docs/skill-setup-rationale.md" \
     && pass "…and refuses the rest rather than guessing a host" \
-    || die "SKILL.md has no rejection path for an unsupported transport"
+    || die "the rationale has no rejection path for an unsupported transport"
 
 # ── acknowledging a check-in takes the gate's status, and names the reviewer ─
 # The acknowledgement is the one place the driver records the OPERATOR's

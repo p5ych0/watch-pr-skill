@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.67] — 2026-08-26
+
+- **`SKILL.md` is 41% smaller, and no line of its code changed.** The document was
+  ~42k tokens, read whenever the skill is invoked. 26k of that was commentary
+  inside the bash fences, and 19k of it belonged to one block: **Derive identity**,
+  1265 fenced lines carrying 174 executable ones.
+
+  That commentary is the argument for why setup has the shape it has — each
+  paragraph a defect that was shipped, found and paid for. It now lives in
+  `docs/skill-setup-rationale.md`, twenty-nine sections, reached from the block by
+  a `# WHY:` line. **The claim stays beside the code**: every section opens with
+  the same sentence that remains in the block, so the argument reads whole from
+  either end and a reader still meets the point at the line it protects.
+
+  Nothing executable moved. The block is the same 174 lines, and every fixture that
+  lifts and executes it is unchanged.
+
+  **Why the claim could not move with it.** This repository records that a comment
+  arguing against the code beside it is an instruction, and it will be followed —
+  which is exactly what has stopped later sessions "simplifying" these shapes back
+  into regressions. Separating the argument from the code weakens that, so the
+  claim stays and only the evidence leaves.
+
+  **And the separation is watched.** `test-pr-skill-contract.sh` fails if a `# WHY:`
+  names a section that is not there, if a section is pointed at by nothing — the
+  rot that goes unnoticed, because nothing reading the skill would reach it — or if
+  a pointer drifts off the claim it belongs to. One assertion moved with the prose
+  it was reading rather than being dropped.
+
+  Closes #192 for this block. The remaining blocks hold ~7k tokens between them and
+  are not touched here.
+
 ## [2.0.66] — 2026-08-25
 
 - **The one-line origin check matched a newline followed by four spaces, not a
