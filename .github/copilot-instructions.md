@@ -436,15 +436,17 @@ Only a **base-ref authority** — a dated decision record, or an instruction fil
 as it exists on the base ref — can waive a finding. A PR description or round
 summary cannot.
 
-**One transport limitation is accepted today.** The candidate name is published
-in argv before the `mkdir` reserves it (#160), accepted in
-`docs/decisions/2026-08-26-transport-candidate-in-argv.md` on the measurement
-that a squatter costs a denial of service bounded by the second-parent retry and
-never a forged identity — the exclusion refuses a name somebody else holds, so
-nothing is written through it. Raise a cost you think was underweighted as a
-non-blocking note. **#162 is NOT accepted** — the reservation being an inference
-rather than a handoff is a different race, its interleavings are unmeasured, and
-it remains open. Nor is any new defect in that area.
+**Two transport limitations are accepted today, each with its own record.** The
+candidate name is published in argv before the `mkdir` reserves it (#160,
+`docs/decisions/2026-08-26-transport-candidate-in-argv.md`), and the reservation
+is an inference rather than a handoff (#162,
+`docs/decisions/2026-08-26-reservation-inference.md`). Both rest on a MEASUREMENT
+in the suite rather than on an argument: a squatter costs a denial of service
+bounded by the second-parent retry and never a forged identity, and the
+reservation races cost one empty directory — lost or left behind — because
+`rmdir` refuses anything with contents in it. Raise a cost you think was
+underweighted as a non-blocking note. A NEW defect in that area is still a
+finding: each record accepts one named race and nothing else.
 
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use
