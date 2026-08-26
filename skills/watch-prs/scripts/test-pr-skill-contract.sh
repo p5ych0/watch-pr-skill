@@ -4218,13 +4218,20 @@ if [ -d "$ROOT/docs/decisions" ]; then
     #
     # STDERR IS DISCARDED, THE STATUS IS NOT: the caller names the file itself, so
     # grep's own complaint would only land in the middle of the suite's output.
-    # THE NAME IS MATCHED LITERALLY. A derived basename is a BASIC REGULAR
-    # EXPRESSION to `grep`, so a record legitimately named `2026-09-01-bash-3.2`
-    # is satisfied by the text `bash-3x2` — and the contract reports success while
-    # neither reviewer file names the waiver. `-F` is the whole fix, and it is
-    # behind a function so a case can exercise the thing the scan calls.
+    # THE NAME IS MATCHED LITERALLY, AND WHOLE. Two defects, one function.
+    #
+    # A derived basename is a BASIC REGULAR EXPRESSION to `grep`, so a record
+    # legitimately named `2026-09-01-bash-3.2` is satisfied by the text
+    # `bash-3x2`; `-F` is that half.
+    #
+    # And `-F` is still a SUBSTRING search: with `2026-09-01-bash-3.2` accepted
+    # and the reviewer files naming only `2026-09-01-bash-3.2-portability.md`,
+    # the shorter record reports as named while a reviewer cannot see it. So the
+    # match is the complete `docs/decisions/<basename>.md` path, which is
+    # delimiter-bearing at both ends — a longer basename cannot contain it,
+    # because the `.md` would have to fall in the middle of a name.
     _dr_named_in() {   # _dr_named_in <reviewer-file> <record-basename>
-        grep -qF "$2" "$1"
+        grep -qF "docs/decisions/$2.md" "$1"
     }
     _dr_action() {   # _dr_action <file> ; prints require | skip | refuse
         local _l _rc=0 _st
@@ -4312,11 +4319,18 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # version in it is the obvious case — and as a regular expression it matches
     # text that does not name the record at all.
     _dr_nm="$TMP_CL/reviewer-probe.md"
-    printf 'this file mentions 2026-09-01-bash-3x2 and nothing else\n' > "$_dr_nm"
+    printf 'this file mentions docs/decisions/2026-09-01-bash-3x2.md and nothing else\n' > "$_dr_nm"
     _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
         && die "the naming check matched '2026-09-01-bash-3.2' against 'bash-3x2'; it is a regular expression" \
         || pass "…and a record name carrying a metacharacter is matched literally"
-    printf 'this file names 2026-09-01-bash-3.2 properly\n' > "$_dr_nm"
+    # …AND A LONGER NAME DOES NOT ANSWER FOR A SHORTER ONE. `-F` is still a
+    # SUBSTRING search, so without the `.md` the accepted `…-bash-3.2` record
+    # reports as named by a file that mentions only `…-bash-3.2-portability`.
+    printf 'this file names docs/decisions/2026-09-01-bash-3.2-portability.md only\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && die "a longer record name satisfied the check for a shorter one; the match is a substring" \
+        || pass "…and a longer record name does not answer for a shorter one"
+    printf 'this file names docs/decisions/2026-09-01-bash-3.2.md properly\n' > "$_dr_nm"
     _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
         && pass "…while the record it does name is still found" \
         || die "the naming check missed a record the file names"
