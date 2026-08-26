@@ -915,11 +915,11 @@ first was ever being made.
 
 THE GATE IS A SCRIPT, not a function defined here.
 
-It was ~100 lines of shell in this document, pasted into your session and called
-from four sites below. Nothing checked it: the suite, `pr-selfcheck.sh` and the
+It was ~100 lines of shell in `SKILL.md`, pasted into your session and called from
+four sites in it. Nothing checked it: the suite, `pr-selfcheck.sh` and the
 bash 3.2 CI job all cover `scripts/`, and none of them can see shell inside a
 Markdown file — `test-pr-skill-contract.sh` had to `sed` the function back out of
-this document to execute it at all. It also needed a clear-and-verify dance
+`SKILL.md` to execute it at all. It also needed a clear-and-verify dance
 around its own definition, because a `readonly -f` copy left over in your shell
 would silently survive an `unset -f` and a stale gate returning 0 lets a red head
 close its round. A script cannot be shadowed that way, so all of that is gone

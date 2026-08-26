@@ -5108,7 +5108,13 @@ if [ -f "$_wy_doc" ]; then
                 }
             }
         }
-        !fence && /^## / { sub(/^## /, ""); print }' "$1"
+        # AN EMPTY `## ` IS STILL A HEADING. Printing its empty text made it vanish
+        # twice over — `grep -c .` skips a blank record and command substitution
+        # strips it — so a section with no claim reported clean. It is named.
+        !fence && /^## / {
+            sub(/^## /, "")
+            print ($0 == "" ? "!!EMPTY-HEADING!!" : $0)
+        }' "$1"
     }
     _wy_heads_n=0; _wy_hn_rc=0
     _wy_heads_n="$(_wy_headings_of "$_wy_doc" | grep -c .)" || _wy_hn_rc=$?
@@ -5158,6 +5164,7 @@ if [ -f "$_wy_doc" ]; then
     _wy_fx="$TMP_CL/fence-forms.md"
     {
         printf '## REAL HEADING ONE.\n\nprose\n\n'
+        printf '## \n\norphaned prose under an empty heading\n\n'
         printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
         printf '````\n```\n## decoy behind a shorter run\n````\n\n'
         printf '   ~~~\n## decoy inside an indented fence\n   ~~~\n\n'
@@ -5170,6 +5177,7 @@ if [ -f "$_wy_doc" ]; then
     } > "$_wy_fx"
     _wy_fx_out=""; _wy_fx_out="$(_wy_headings_of "$_wy_fx")" || _wy_fx_out="THE_SCAN_FAILED"
     _wy_fx_want='REAL HEADING ONE.
+!!EMPTY-HEADING!!
 VISIBLE, because that opener is invalid.
 VISIBLE, because a four-space fence is not one.
 REAL HEADING TWO.'

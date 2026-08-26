@@ -19,8 +19,11 @@
   the same sentence that remains in the block, so the argument reads whole from
   either end and a reader still meets the point at the line it protects.
 
-  Nothing executable moved. The block is the same 174 lines, and every fixture that
-  lifts and executes it is unchanged.
+  Nothing executable moved: the block is the same 174 lines, byte for byte, checked
+  mechanically rather than by eye. `test-pr-skill-contract.sh` changed — it is what
+  lifts and executes the block, and it gained the checks that keep the claims and
+  their arguments from drifting apart — but no case that runs the block was
+  altered to accommodate the move.
 
   **Why the claim could not move with it.** This repository records that a comment
   arguing against the code beside it is an instruction, and it will be followed —
