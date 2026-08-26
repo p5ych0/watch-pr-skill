@@ -9,7 +9,7 @@
 
   That commentary is the argument for why setup has the shape it has — each
   paragraph a defect that was shipped, found and paid for. It now lives in
-  `SETUP-RATIONALE.md` beside it, twenty-nine sections, reached from the block by
+  `SETUP-RATIONALE.md` beside it, thirty sections, reached from the block by
   a `# WHY:` line naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`. Not a bare relative
   path, because the driving shell stays in the project under review and `docs/…`
   there names that project's documentation; and not `$CLAUDE_PLUGIN_ROOT`, which

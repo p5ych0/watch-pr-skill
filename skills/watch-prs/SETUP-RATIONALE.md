@@ -858,6 +858,8 @@ already allocates one temporary and `test-pr-skill-contract.sh` counts what a ru
 leaves behind, so a second one that survives a refusal would be a leak the suite
 reports and nobody meant.
 
+## ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
+
 ONE LINE, OR IT IS NOT A REMOTE. Kept as the last check on a value the whole
 session is addressed by. Nothing known still writes to this stream — that is
 what the invocation form buys — so this now guards the unknown rather than the

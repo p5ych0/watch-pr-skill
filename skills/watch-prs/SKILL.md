@@ -287,6 +287,8 @@ if [[ -z $RB_REMOTE ]]; then
     # THE EXPANSION IS THE REFUSAL, NOT A GUARD IN FRONT OF ONE.
     # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     RB_REMOTE="${RB_REMOTE:?origin is empty; there is no repository to pin this session to}"
+    # ONE LINE, OR IT IS NOT A REMOTE — an interior newline means the value is not an origin.
+    # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     [[ $RB_REMOTE = *$'\n'* ]] && RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?the origin read returned more than one line; something is writing to the stream it came back on}"
     # A COMMAND PREFIX, NOT THE EXPORT, so the driver and its children cannot disagree.
