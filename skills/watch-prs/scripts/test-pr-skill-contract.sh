@@ -4173,9 +4173,26 @@ if [ -d "$ROOT/docs/decisions" ]; then
     # ACCEPTED ONES ONLY. A record whose status is superseded or rejected is
     # history rather than authority, and requiring a reviewer file to name it
     # would be requiring the opposite of what it says.
+    # …AND A PROBE THAT ERRORS IS NOT AN INACTIVE RECORD. `grep -q … || continue`
+    # treats rc 2 — unreadable, vanished between the `-f` and the read — exactly
+    # like rc 1, "this record is not accepted", so an accepted waiver nobody can
+    # read is silently skipped and the contract reports success without checking
+    # it. Only the ordinary no-match status continues; anything else fails.
+    _dr_status_of() {   # _dr_status_of <file> ; 0 accepted, 1 not, 2 unreadable
+        # STDERR IS DISCARDED, THE STATUS IS NOT. The caller branches on the
+        # status and names the file itself, so grep's own complaint would only
+        # land in the middle of the suite's output.
+        grep -qi '^\*\*Status:\*\* accepted' "$1" 2>/dev/null
+    }
     for _dr in "$ROOT"/docs/decisions/*.md; do
         [ -f "$_dr" ] || continue
-        grep -qi '^\*\*Status:\*\* accepted' "$_dr" || continue
+        _dr_rc=0; _dr_status_of "$_dr" || _dr_rc=$?
+        case "$_dr_rc" in
+            0) ;;
+            1) continue ;;
+            *) die "the status of $(basename "$_dr") could not be read (rc=$_dr_rc); an accepted waiver may be going unchecked"
+               continue ;;
+        esac
         _drn="$(basename "$_dr" .md)"
         for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
             grep -q "$_drn" "$_wv" \
@@ -4183,6 +4200,25 @@ if [ -d "$ROOT/docs/decisions" ]; then
                 || die "$(basename "$_wv") does not name $_drn; that reviewer can re-raise an accepted limit"
         done
     done
+    # …AND THAT DISTINCTION IS RUN, not merely written. A record whose status
+    # cannot be read must fail the fixture rather than be skipped as inactive.
+    #
+    # SKIPPED BY NAME WHERE THE PROBE CAN READ IT ANYWAY: a run as root, or a
+    # filesystem ignoring the mode, makes the unreadable file readable and the
+    # case would assert nothing.
+    _dr_un="$TMP_CL/unreadable-record.md"
+    printf '# Decision: a probe\n\n**Status:** accepted\n' > "$_dr_un" 2>/dev/null
+    chmod 000 "$_dr_un" 2>/dev/null || true
+    if [ -f "$_dr_un" ] && ! grep -qi 'Status' "$_dr_un" 2>/dev/null; then
+        _dr_rc=0; _dr_status_of "$_dr_un" || _dr_rc=$?
+        { [ "$_dr_rc" -ne 0 ] && [ "$_dr_rc" -ne 1 ]; } \
+            && pass "…and an unreadable record reports an error rather than 'not accepted'" \
+            || die "an unreadable record gave rc=$_dr_rc, which the loop would treat as inactive"
+    else
+        echo "ok   - (this run can read a mode-000 file; the unreadable-record case did not run)"
+    fi
+    chmod 644 "$_dr_un" 2>/dev/null || true
+    rm -f "$_dr_un"
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
