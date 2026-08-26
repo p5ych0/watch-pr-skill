@@ -4141,32 +4141,6 @@ if [ -d "$ROOT/docs/decisions" ]; then
     grep -rql 'REVIEW_MERGE_STRICT' "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the merge-mode trade-off has a decision record" \
         || die "the --admin default is accepted nowhere a reviewer can weigh it"
-    # …AND SO DOES #160, the transport candidate being published in argv before
-    # the `mkdir` reserves it, which is accepted rather than fixed.
-    #
-    # #162 HAS ITS OWN RECORD, checked the same way. They are separate races and
-    # separate acceptances, so one case per record — a single case naming both
-    # would go green with only one of them written.
-    #
-    # AND THE TWO RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one was written
-    # while #162 was still unaccepted and said so; left that way, a reviewer
-    # following it reaches the opposite verdict from one following the #162
-    # record, and both are base-ref authorities. The argv record has to name the
-    # later one.
-    grep -q 'reservation-inference' \
-        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
-        && pass "the argv record points at the later reservation decision" \
-        || die "the two decision records disagree about whether #162 is accepted"
-    #
-    # BOTH REVIEWER FILES CARRY IT, not just the record. Copilot reads only
-    # `.github/copilot-instructions.md` and follows no pointers, so an acceptance
-    # that lives in `docs/decisions/` alone is invisible to one of the two
-    # required reviewers — the doc-sync rule applied to a waiver. This asserts it
-    # of THIS record; the older `--admin` waiver predates the practice and is #189.
-    #
-    # MATCHED ON CONTENT, NOT ON THE FILENAME. `grep -rl` over the directory reads
-    # the files; a pattern that only the NAME carries matches nothing, and the
-    # case then fails against a record that is there.
     grep -rql 'transport candidate being published in argv is an accepted limit' \
         "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the argv-publication limit has a decision record" \
@@ -4175,11 +4149,38 @@ if [ -d "$ROOT/docs/decisions" ]; then
         "$ROOT/docs/decisions" >/dev/null 2>&1 \
         && pass "the reservation inference has a decision record" \
         || die "#162 is accepted nowhere a reviewer can weigh it"
-    for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
-        for _rec in transport-candidate-in-argv reservation-inference; do
-            grep -q "$_rec" "$_wv" \
-                && pass "…and $(basename "$_wv") points a reviewer at $_rec" \
-                || die "$(basename "$_wv") does not name $_rec; that reviewer cannot see it"
+    # AND THE TWO TRANSPORT RECORDS MUST NOT CONTRADICT EACH OTHER. The #160 one
+    # was written while #162 was still unaccepted and said so; left that way, a
+    # reviewer following it reaches the opposite verdict from one following the
+    # #162 record, and both are base-ref authorities.
+    grep -q 'reservation-inference' \
+        "$ROOT/docs/decisions/2026-08-26-transport-candidate-in-argv.md" \
+        && pass "the argv record points at the later reservation decision" \
+        || die "the two decision records disagree about whether #162 is accepted"
+    # ── EVERY ACCEPTED RECORD IS NAMED IN BOTH REVIEWER FILES ─────────────
+    #
+    # Codex reads the repository and can follow a pointer; Copilot reads only
+    # `.github/copilot-instructions.md` and follows none, which is why that file
+    # restates the policy inline. So an acceptance living in `docs/decisions/`
+    # alone is invisible to one of the two required reviewers, and it can re-raise
+    # what the operator already accepted. That is the doc-sync rule applied to a
+    # waiver.
+    #
+    # DERIVED FROM THE DIRECTORY, NOT LISTED. A list of two went stale the moment
+    # a third record was written — which is how the 2026-08-06 `--admin` waiver
+    # sat unreferenced in both files for twenty days. #189.
+    #
+    # ACCEPTED ONES ONLY. A record whose status is superseded or rejected is
+    # history rather than authority, and requiring a reviewer file to name it
+    # would be requiring the opposite of what it says.
+    for _dr in "$ROOT"/docs/decisions/*.md; do
+        [ -f "$_dr" ] || continue
+        grep -qi '^\*\*Status:\*\* accepted' "$_dr" || continue
+        _drn="$(basename "$_dr" .md)"
+        for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
+            grep -q "$_drn" "$_wv" \
+                && pass "$(basename "$_wv") names the $_drn waiver" \
+                || die "$(basename "$_wv") does not name $_drn; that reviewer can re-raise an accepted limit"
         done
     done
 else

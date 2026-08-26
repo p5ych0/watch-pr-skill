@@ -448,6 +448,13 @@ reservation races cost one empty directory — lost or left behind — because
 underweighted as a non-blocking note. A NEW defect in that area is still a
 finding: each record accepts one named race and nothing else.
 
+**The `--admin` merge mode is accepted too**, in
+`docs/decisions/2026-08-06-merge-admin-default.md`: the merge gate uses
+`gh pr merge --admin` by default, which bypasses branch protection, and the
+record sets out the bounds that make it acceptable and the `REVIEW_MERGE_STRICT`
+opt-out that drops it. Read that record before raising the bypass; a bound it
+claims having gone missing is a finding, and so is a new way past the gate.
+
 A resolved thread is not proof a finding was fixed: the author resolves threads
 when closing a round, and may record a finding as intentionally skipped. Use
 resolution to avoid repeating a point that was *answered*, and say what you are
