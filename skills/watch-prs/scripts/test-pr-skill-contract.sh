@@ -5076,7 +5076,14 @@ if [ -f "$_wy_doc" ]; then
     # the other — no fixed count to go stale, and nothing that has to know how many
     # there ought to be.
     _wy_heads_n=0; _wy_hn_rc=0
-    _wy_heads_n="$(awk '/^```/{f=!f; next} !f && /^## /{n++} END{print n+0}' "$_wy_doc")" || _wy_hn_rc=$?
+    _wy_heads_n="$(awk '
+        # CommonMark fenced code: ``` or ~~~, up to three leading spaces. Getting
+        # this wrong fails CLOSED — an unrecognised fence makes a fenced `## foo`
+        # count as a section, and the totals then reject a legitimate edit loudly
+        # rather than accepting a broken one quietly.
+        /^ {0,3}(```|~~~)/ { fence = !fence; next }
+        !fence && /^## / { n++ }
+        END { print n+0 }' "$_wy_doc")" || _wy_hn_rc=$?
     [ "$_wy_hn_rc" -le 1 ] \
         || die "the rationale could not be counted (rc=$_wy_hn_rc)"
     [ "$_wy_all" -eq "$_wy_heads_n" ] \
@@ -5172,7 +5179,9 @@ EOWY
     #    and duplicate headings are refused: two identical ones would let a claim
     #    resolve to either, and the second is unreachable.
     _wy_heads=""; _wy_hrc=0
-    _wy_heads="$(awk '/^```/{f=!f; next} !f && /^## /{sub(/^## /, ""); print}' "$_wy_doc")" || _wy_hrc=$?
+    _wy_heads="$(awk '
+        /^ {0,3}(```|~~~)/ { fence = !fence; next }
+        !fence && /^## / { sub(/^## /, ""); print }' "$_wy_doc")" || _wy_hrc=$?
     [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ] \
         || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
     _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
@@ -5183,32 +5192,26 @@ EOWY
     # keeps the counts, the forward lookup and the reverse membership intact, and
     # the `# WHY:` then leads a model to an empty section — which is the separation
     # failing completely while the contract reports clean.
-    # A SECTION MUST CARRY A LINE OF PROSE, and that is measured by LENGTH rather
-    # than by recognising Markdown.
+    # WHETHER A SECTION ARGUES ANYTHING IS NOT CHECKED HERE, DELIBERATELY.
     #
-    # Enumerating structure did not converge. `NF` counted a bare fence; excluding
-    # fences left `### Evidence`; excluding headings-with-a-space left a bare
-    # `###`; and after that come HTML comments, setext underlines, list bullets,
-    # and whatever the next form is. Each round removed one spelling and revealed
-    # the next — this repository has a name for that shape, and a 2,200-line
-    # scanner it deleted for being it.
+    # Four rounds went into it and it did not converge. `NF` counted a bare fence;
+    # excluding fences left `### Evidence`; excluding headings-with-a-space left a
+    # bare `###`; then HTML comments; then a long comment passing a length rule;
+    # then tilde fences and indented fences. Every rule about Markdown attracted
+    # the next Markdown form, and each one was more unverified shell in a fixture
+    # whose subject is a documentation pointer.
     #
-    # PROSE IS LONG AND SCAFFOLDING IS SHORT. This document wraps at about eighty
-    # columns, so a real argument always carries a line well over forty; every
-    # structural form is far under it, whatever its syntax. One threshold, no
-    # grammar, and nothing left for the next form to slip through.
+    # `CLAUDE.md` names this shape and what it cost: a 2,200-line scanner, fifty-two
+    # rounds, every round answering one finding and producing the next, several of
+    # its own defects rejecting valid input. The instruction is not to build one.
     #
-    # OUTSIDE FENCES, because a transcript line can be long without arguing
-    # anything — and because a fenced `## example` must not read as a heading
-    # either, which is what the two scans above now also honour.
-    _wy_empty=""; _wy_empty="$(awk '
-        /^```/ { fence = !fence; next }
-        !fence && /^## / { if (h != "" && !body) print h; h=$0; sub(/^## /, "", h); body=0; next }
-        !fence && h != "" && length($0) >= 40 { body=1 }
-        END { if (h != "" && !body) print h }' "$_wy_doc")" || _wy_empty="THE_SCAN_FAILED"
-    [ -z "$_wy_empty" ] \
-        && pass "…and every section argues something under its heading" \
-        || die "these sections have a heading and no argument: '$_wy_empty'"
+    # WHAT IS GIVEN UP, STATED PLAINLY: a section stripped of its prose while its
+    # heading remains is not caught here. That is a person deleting the content of
+    # a document — visible in the diff as the deletion it is, and leaving a heading
+    # that claims an argument it no longer makes. It is not the rot this separation
+    # risks, which is a claim and its argument drifting APART; that is what the
+    # checks above measure, and they do it with exact string comparison and no
+    # grammar at all.
     while IFS= read -r _wy_h; do
         [ -n "$_wy_h" ] || continue
         grep -qxF "$_wy_h" <<<"$_wy_claims" \
