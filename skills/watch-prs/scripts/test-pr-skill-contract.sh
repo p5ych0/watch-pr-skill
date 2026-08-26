@@ -5111,7 +5111,15 @@ if [ -f "$_wy_doc" ]; then
         # AN EMPTY `## ` IS STILL A HEADING. Printing its empty text made it vanish
         # twice over — `grep -c .` skips a blank record and command substitution
         # strips it — so a section with no claim reported clean. It is named.
-        !fence && /^## / {
+        # AND AN HTML COMMENT HIDES A HEADING TOO. Wrapping a section in `<!-- -->`
+        # left its `## ` line matched, so every check stayed green while Markdown
+        # rendered nothing at all. Comments do not nest in CommonMark, so this is
+        # one state — and it is the last construct modelled here: a fence and a
+        # comment are what can hide a heading, and anything past them is a
+        # document nobody writes by accident.
+        !fence && html { if (index($0, "-->")) { html = 0 }; next }
+        !fence && /^[[:space:]]*<!--/ { if (!index($0, "-->")) html = 1; next }
+        !fence && !html && /^## / {
             sub(/^## /, "")
             print ($0 == "" ? "!!EMPTY-HEADING!!" : $0)
         }' "$1"
@@ -5164,6 +5172,8 @@ if [ -f "$_wy_doc" ]; then
     _wy_fx="$TMP_CL/fence-forms.md"
     {
         printf '## REAL HEADING ONE.\n\nprose\n\n'
+        printf '<!--\n## decoy inside an HTML comment\n-->\n\n'
+        printf '<!-- inline --> ## decoy after an inline comment\n\n'
         printf '## \n\norphaned prose under an empty heading\n\n'
         printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
         printf '````\n```\n## decoy behind a shorter run\n````\n\n'
