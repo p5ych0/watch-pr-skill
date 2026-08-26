@@ -4218,6 +4218,14 @@ if [ -d "$ROOT/docs/decisions" ]; then
     #
     # STDERR IS DISCARDED, THE STATUS IS NOT: the caller names the file itself, so
     # grep's own complaint would only land in the middle of the suite's output.
+    # THE NAME IS MATCHED LITERALLY. A derived basename is a BASIC REGULAR
+    # EXPRESSION to `grep`, so a record legitimately named `2026-09-01-bash-3.2`
+    # is satisfied by the text `bash-3x2` — and the contract reports success while
+    # neither reviewer file names the waiver. `-F` is the whole fix, and it is
+    # behind a function so a case can exercise the thing the scan calls.
+    _dr_named_in() {   # _dr_named_in <reviewer-file> <record-basename>
+        grep -qF "$2" "$1"
+    }
     _dr_action() {   # _dr_action <file> ; prints require | skip | refuse
         local _l _rc=0 _st
         _l="$(grep -i '^\*\*Status:\*\*' "$1" 2>/dev/null)" || _rc=$?
@@ -4227,11 +4235,16 @@ if [ -d "$ROOT/docs/decisions" ]; then
         _st="${_l#*\*\*Status:\*\* }"
         _st="${_st%% *}"
         # LOWERCASED WITH `tr`, not `declare -l`: the mac-shaped job runs bash 3.2.
+        #
+        # THREE VALUES, AND THIS REPOSITORY USES ALL THREE. A fourth was carried
+        # here uncovered, which is a table arm no case could have caught
+        # regressing — anything not on this list is REFUSED, so a record reaching
+        # for a new word fails loudly and somebody decides what it means.
         _st="$(printf '%s' "$_st" | tr '[:upper:]' '[:lower:]')"
         case "$_st" in
-            accepted)                     printf require ;;
-            superseded|rejected|withdrawn) printf skip ;;
-            *)                            printf refuse ;;
+            accepted)             printf require ;;
+            superseded|rejected)  printf skip ;;
+            *)                    printf refuse ;;
         esac
         return 0
     }
@@ -4247,7 +4260,7 @@ if [ -d "$ROOT/docs/decisions" ]; then
         esac
         _drn="$(basename "$_dr" .md)"
         for _wv in "$ROOT/AGENTS.md" "$ROOT/.github/copilot-instructions.md"; do
-            grep -q "$_drn" "$_wv" \
+            _dr_named_in "$_wv" "$_drn" \
                 && pass "$(basename "$_wv") names the $_drn waiver" \
                 || die "$(basename "$_wv") does not name $_drn; that reviewer can re-raise an accepted limit"
         done
@@ -4287,13 +4300,27 @@ if [ -d "$ROOT/docs/decisions" ]; then
     done
     # …AND THE THREE LIVE VALUES CLASSIFY THE WAY THE SCAN NEEDS, so the refusals
     # above are not passing because the table refuses everything.
-    for _dr_ok in 'accepted:require' 'Accepted:require' 'superseded:skip' 'rejected:skip'; do
+    for _dr_ok in 'accepted:require' 'Accepted:require' 'superseded:skip' 'rejected:skip' 'withdrawn:refuse'; do
         printf '# Decision: a probe\n\n**Status:** %s\n' "${_dr_ok%%:*}" > "$_dr_mal"
         [ "$(_dr_action "$_dr_mal")" = "${_dr_ok##*:}" ] \
             && pass "…and '${_dr_ok%%:*}' classifies as ${_dr_ok##*:}" \
             || die "'${_dr_ok%%:*}' classified as '$(_dr_action "$_dr_mal")', not ${_dr_ok##*:}"
     done
     rm -f "$_dr_mal"
+    # …AND THE NAMING CHECK IS LITERAL, exercised through the same function the
+    # scan calls. A metacharacter in a record's basename is legitimate — a bash
+    # version in it is the obvious case — and as a regular expression it matches
+    # text that does not name the record at all.
+    _dr_nm="$TMP_CL/reviewer-probe.md"
+    printf 'this file mentions 2026-09-01-bash-3x2 and nothing else\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && die "the naming check matched '2026-09-01-bash-3.2' against 'bash-3x2'; it is a regular expression" \
+        || pass "…and a record name carrying a metacharacter is matched literally"
+    printf 'this file names 2026-09-01-bash-3.2 properly\n' > "$_dr_nm"
+    _dr_named_in "$_dr_nm" '2026-09-01-bash-3.2' \
+        && pass "…while the record it does name is still found" \
+        || die "the naming check missed a record the file names"
+    rm -f "$_dr_nm"
 else
     die "docs/decisions/ is missing; accepted limitations have nowhere to live"
 fi
