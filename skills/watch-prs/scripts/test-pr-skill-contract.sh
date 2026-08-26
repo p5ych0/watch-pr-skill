@@ -5031,8 +5031,10 @@ if [ -f "$_wy_doc" ]; then
     #    heredoc, a failed `awk` yields no records, the loop runs zero times, and a
     #    failed parse reports as a clean contract.
     _wy_map=""; _wy_map_rc=0
-    _wy_map="$(awk '/^```bash$/{f=1;prev="";next} /^```$/{f=0;next}
-       f { if (match($0, /# WHY: docs\/skill-setup-rationale\.md#S[0-9]+$/)) {
+    _wy_map="$(awk '/^## Derive identity$/{sec=1}
+       sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
+       f && /^```$/{f=0; sec=0; next}
+       f { if (match($0, /# WHY: \$CLAUDE_PLUGIN_ROOT\/docs\/skill-setup-rationale\.md#S[0-9]+$/)) {
                id=substr($0, RSTART, RLENGTH); sub(/.*#/, "", id)
                c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c)
                print id "|" c }
@@ -5046,6 +5048,18 @@ if [ -f "$_wy_doc" ]; then
     #    a valid pointer moved OUT of the fenced block, where it still reads as a
     #    pointer to anyone grepping the file but explains nothing.
     _wy_n=0; _wy_n="$(grep -c '^S[0-9][0-9]*|' <<<"$_wy_map")" || _wy_n=0
+    # AND THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever
+    # the driver happens to be standing. The driving shell stays in the project
+    # under review — the `git rev-parse` two lines below the first pointer requires
+    # it — so a bare `docs/…` names THAT project's documentation. Every pointer
+    # goes through `$CLAUDE_PLUGIN_ROOT`, and the file is there.
+    _wy_rel=0; _wy_rel="$(grep -c '# WHY: docs/' "$SKILL")" || _wy_rel=0
+    [ "$_wy_rel" -eq 0 ] \
+        && pass "…and no pointer is relative to the driver's working directory" \
+        || die "$_wy_rel pointers name a bare docs/ path; from another project that is that project's file"
+    [ -f "${CLAUDE_PLUGIN_ROOT:-$ROOT}/docs/skill-setup-rationale.md" ] \
+        && pass "…and the rationale is where the plugin root says it is" \
+        || die "the rationale is not at \$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md"
     [ "$_wy_n" -eq "$_wy_all" ] \
         && pass "…and all $_wy_all of them are well formed, in the block, and paired with a claim" \
         || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed or outside the setup block; they would be skipped rather than checked"
@@ -5066,7 +5080,13 @@ if [ -f "$_wy_doc" ]; then
     [ -z "$_wy_anchdupe" ] \
         && pass "…and no anchor id is used twice" \
         || die "an anchor id is used twice, so a link lands on whichever comes first: '$_wy_anchdupe'"
-    _wy_sec=""; _wy_sec="$(sort -u <<<"$_wy_ids")" || _wy_sec=""
+    # THE THIRD SORT TAKES ITS STATUS TOO. Converted to an empty set, the reverse
+    # loop runs zero times and an orphaned section reports clean — the same
+    # fail-open the two scans above it already refuse.
+    _wy_sec=""; _wy_sec_rc=0
+    _wy_sec="$(sort -u <<<"$_wy_ids")" || _wy_sec_rc=$?
+    [ "$_wy_sec_rc" -eq 0 ] && [ -n "$_wy_sec" ] \
+        || die "the section list could not be ordered (rc=$_wy_sec_rc); an orphaned section would pass"
 
     # 5. NO TWO SECTIONS MAY OPEN WITH THE SAME CLAIM, which is what makes the
     #    claim a UNIQUE key rather than a usually-unique one. S07 and S22 opened

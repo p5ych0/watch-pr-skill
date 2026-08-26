@@ -4,7 +4,10 @@ The argument behind the **Derive identity** block of `skills/watch-prs/SKILL.md`
 one section per claim.
 
 Each section is pointed at from the block by a `# WHY:` line sitting directly under
-the claim it belongs to. The claim stays where a reader — or a model about to
+the claim it belongs to. Those pointers name
+`$CLAUDE_PLUGIN_ROOT/docs/skill-setup-rationale.md` rather than a bare relative
+path: the driving shell stays in the project being reviewed, so `docs/…` there
+would name that project's documentation, not this file. The claim stays where a reader — or a model about to
 "simplify" something — meets the code; only the evidence lives here. Every section
 repeats its claim as its opening line, so the argument reads whole from either end.
 
