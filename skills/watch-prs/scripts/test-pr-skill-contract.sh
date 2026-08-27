@@ -5192,15 +5192,19 @@ _wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
 # re-adding any one of them would leave this file green while the decision above
 # had been reversed.
 #
-# So a STAGED rationale carries all four, and the contract must ACCEPT it. It is
+# So a STAGED rationale carries all five, and the contract must ACCEPT it. It is
 # the shipped document plus an HTML comment, a heading indented to column three,
-# a setext-underlined heading and a bare `##` — chosen because none of them
-# changes what `grep '^## '` matches, so the bijection is untouched and the only
-# thing that can reject this pair is a guard that came back.
+# a setext-underlined heading, a bare `##` and a fenced block — chosen because
+# none of them changes what `grep '^## '` matches, so the bijection is untouched
+# and the only thing that can reject this pair is a guard that came back.
 #
-# A FENCED `## example` IS NOT AMONG THEM, deliberately: `grep` DOES match it, so
-# it becomes a 32nd heading with no claim and the bijection rejects it on its own.
-# That one never needed a guard, and staging it here would assert the opposite.
+# THE FENCE IS THE EMPTY-OF-HEADINGS KIND, and that distinction is the whole of
+# why it is here. A fence carrying a column-zero `## example` needs no guard:
+# `grep` DOES match it, so it becomes a 32nd heading with no claim and the
+# bijection rejects it unaided — staging that one would assert the opposite. A
+# fence with no such line inside changes nothing the bijection can see, so the
+# deleted delimiter guard is the only thing that ever rejected it, and without it
+# staged the guard could come back green.
 #
 # The staged run's own `ok` lines are captured rather than printed — it is one
 # assertion, not a second copy of the suite — and `die` sets a flag rather than
@@ -5221,6 +5225,11 @@ A setext heading, which has no hash run at all
 ---
 
 ##
+
+```text
+a fenced transcript, whose delimiter one removed guard rejected; nothing in
+it begins a line with a hash, so `^## ` matches exactly what it did before
+```
 EOSTAGE
 _wy_staged=""
 _wy_staged="$(_wy_contract "$_wy_stage/SKILL.md" "$_wy_stage/doc.md" 2>&1)" \
