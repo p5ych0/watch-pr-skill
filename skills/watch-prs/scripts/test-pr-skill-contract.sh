@@ -4997,10 +4997,14 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SKILL-RATIONALE.md` beside it — 31
-# sections, ~17k tokens that used to be read on every invocation of a skill whose
-# reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
+# The lifted blocks' argument lives in `SKILL-RATIONALE.md` beside them — one
+# section per claim, tokens that used to be read on every invocation of a skill
+# whose reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
+#
+# NO COUNT IS GIVEN HERE. A block lands per pull request, and a number written
+# into this comment is one that goes stale on the next one — the totals the
+# checks below compare are read from the two files.
 #
 # THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
 # that a comment arguing against the code beside it is an instruction and will be
@@ -5026,14 +5030,14 @@ local _wy_claims _wy_rc _wy_n _wy_sent_rc _wy_float _wy_heads _wy_hrc
 local _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
-    #    silently — and every one well formed, in the setup fence, under a claim,
+    #    silently — and every one well formed, inside a bash fence, under a claim,
     #    and annotating code. One equality closes a filename typo, a stray
-    #    character, a pointer moved to another fence, and a pointer under code.
+    #    character, a pointer outside every fence, and a pointer under code.
     _wy_all=0; _wy_all_rc=0
     _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
     [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
-        && pass "the setup block points at its rationale ($_wy_all pointers)" \
+        && pass "the lifted blocks point at their rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
 
     # THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever the
@@ -5155,7 +5159,7 @@ EOWH
     pass "…and every '## ' line in the rationale is one of them"
     _wy_heads_n=0; _wy_heads_n="$(grep -c . <<<"$_wy_heads")" || _wy_heads_n=0
     [ "$_wy_all" -eq "$_wy_heads_n" ] \
-        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
+        && pass "…and the $_wy_all claims in SKILL.md match the rationale's $_wy_heads_n arguments" \
         || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
     _wy_bad=0
     while IFS= read -r _wy_c; do
@@ -5240,7 +5244,7 @@ grep -qF 'revoke, prove, baseline, request' "$SKILL" \
 #
 # THE FENCE IS THE EMPTY-OF-HEADINGS KIND, and that distinction is the whole of
 # why it is here. A fence carrying a column-zero `## example` needs no guard:
-# `grep` DOES match it, so it becomes a 32nd heading with no claim and the
+# `grep` DOES match it, so it becomes one more heading with no claim and the
 # bijection rejects it unaided — staging that one would assert the opposite. A
 # fence with no such line inside changes nothing the bijection can see, so the
 # deleted delimiter guard is the only thing that ever rejected it, and without it
@@ -5291,7 +5295,7 @@ fi
 # has nothing to read about why.
 #
 # IN THE RATIONALE DOCUMENT, NOT IN `SKILL.md`. That argument moved out of the
-# setup block with the rest of the block's `# WHY:` material; the assertion moved
+# setup block with the rest of that block's `# WHY:` material; the assertion moved
 # with it rather than being dropped, which is the coupling this file is here to
 # keep honest.
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \

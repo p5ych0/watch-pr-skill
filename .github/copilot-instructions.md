@@ -152,7 +152,7 @@ This repository ships as a Claude Code plugin, so `version` in
 
 **That last one is a document and is still on the release side.** The installed
 `SKILL.md` points at it by path, so the driving model reaches it at runtime and it
-is part of the driver contract: each claim beside the setup code is an assertion
+is part of the driver contract: each claim beside the code is an assertion
 whose argument lives only there. Correct an argument without a release and a user
 keeps the stale one behind a claim that has changed. What separates it from the
 files below is that a reader FOLLOWS it — nothing follows `AGENTS.md` or this
