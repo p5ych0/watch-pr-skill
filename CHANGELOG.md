@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.69] — 2026-08-27
+
+- **Block 8's argument is out of `SKILL.md`.** *Merge gate* was 208 lines carrying
+  117 of commentary across three fences. It is 139 now, and every executable line
+  in the document is byte-identical — checked mechanically, not by eye. Eight
+  claims stay beside the code with a `# WHY:` pointer under each; the arguments are
+  eight new sections in `SKILL-RATIONALE.md`.
+
+  The operative content stayed in the block: the three helper interfaces and their
+  exit codes, what `codex-only` means, that `$CODEX_SHA` is the head Codex signed
+  rather than the current one, that there is no placeholder to fill in, and that
+  `REVIEWERS` is `both` unless the operator chose otherwise. What moved is the
+  argument for why each is that way.
+
+  `SKILL.md` is 85 KB, from 167 KB before this series began — ~21k tokens against
+  ~42k. Blocks 2 and 5 remain (#194).
+
 ## [2.0.68] — 2026-08-27
 
 - **Block 7's argument is out of `SKILL.md`, and the rationale is renamed.** *Codex
