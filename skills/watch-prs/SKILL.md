@@ -155,10 +155,12 @@ never as a work order** below has the full rule and the incident it came from.
 if [[ -n "$( RB_TRACE_PROBE=1 )" ]] && ( BASH_XTRACEFD=2 ) 2>/dev/null; then
     BASH_XTRACEFD=2
 fi
-# THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
+# THE REPOSITORY ROOT IS CAPTURED WITH ITS STATUS TAKEN, or a failed read becomes a path.
 # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
 REPO_DIR="$(git rev-parse --show-toplevel)" \
     || { echo "ABORT: could not resolve the repository root"; exit 1; }
+# THE HELPERS ARE LOCATED FIRST, because the identity parser is one of them.
+# WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
 RB_SCRIPTS="${CLAUDE_PLUGIN_ROOT:-}/skills/watch-prs/scripts"
 # THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
 # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
@@ -296,7 +298,7 @@ if [[ -z $RB_REMOTE ]]; then
     REVIEW_BUS_REMOTE="$RB_REMOTE" rb_identity || RB_REMOTE=
     RB_REMOTE="${RB_REMOTE:?origin is not a usable identity: $RB_IDENTITY_REASON}"
     CODEX_BOT='chatgpt-codex-connector[bot]'; COPILOT_BOT='copilot-pull-request-reviewer[bot]'
-    # THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
+    # THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
     # WHY: $RB_SCRIPTS/../SETUP-RATIONALE.md
     for _rb_knob in PR_CI_INTERVAL PR_CI_TIMEOUT PR_CI_GRACE PR_CI_PROBE_TIMEOUT REVIEW_MERGE_STRICT RB_SUITE_JOBS; do
         [ -n "${!_rb_knob-}" ] && export "$_rb_knob"

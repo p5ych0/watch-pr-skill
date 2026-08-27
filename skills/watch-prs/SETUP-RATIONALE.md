@@ -1,3 +1,36 @@
+**Five constraints on this file, because the contract uses `grep` and not a parser.**
+
+`test-pr-skill-contract.sh` compares the claims and the headings as exact strings.
+It fails if a `# WHY:` names a claim that is not a heading here, or if a heading
+here is named by no claim, or if either side carries a duplicate. It has no
+Markdown parser, deliberately — an earlier version grew one to tell a real heading
+from a fenced `## example`, and then needed tilde fences, indented fences, info
+strings, HTML comments and their ordering; `CLAUDE.md` records what a text scanner
+of that kind cost this repository once already.
+
+So the constructs that would make a `grep` lie are forbidden here rather than
+parsed around, and each is one `grep` with its status taken:
+
+- **every `## ` line is a claim.** A transcript line that would begin with `## ` is
+  indented by one space so it is not a heading;
+- **every heading is `## ` followed by text.** `## ` alone reduces to an empty
+  record that command substitution strips, and a bare `##` is a heading the scan
+  never sees — either way a section exists that no claim introduces;
+- **no raw HTML.** A comment can wrap a section and a block such as `<div>` can
+  swallow one, and Markdown then renders neither as sections;
+- **no fence.** A section wrapped in one keeps its `## ` line while the whole thing
+  renders as code, so the two transcripts here are INDENTED by four spaces;
+- **no setext underline.** Text followed by `---` is a level-two heading that
+  `^## ` cannot match, so an argument could sit here with no claim at all.
+
+**That list is what has been found, not a proof.** Each entry was a live fail-open
+caught in review, and the one before it looked complete at the time. What holds it
+together is the shape rather than the enumeration: this file is plain prose and
+indented code, and every construct that creates or conceals a heading is refused.
+If a sixth turns up, add it here and to the staged document in the fixture — which
+carries all of them, so a guard cannot be deleted unnoticed merely because this
+file happens not to contain the form it refuses.
+
 # Why setup is shaped the way it is
 
 The argument behind the **Derive identity** block of the `SKILL.md` beside this file,
@@ -232,6 +265,19 @@ Same rule as every probe here: the status is taken. This path is handed to
 `pr-merge-range.sh`, which inspects history in it to decide whether every commit
 since the reviewed SHA is a review fix — so a directory retained from a failed
 probe is a merge decision made about the wrong tree.
+
+## THE REPOSITORY ROOT IS CAPTURED WITH ITS STATUS TAKEN, or a failed read becomes a path.
+
+`git rev-parse --show-toplevel` is a command substitution, and command
+substitution keeps whatever the command printed before it failed. Written
+`REPO_DIR="$(git rev-parse --show-toplevel)"` with no status check, a `git` that
+emitted a plausible line and then errored leaves that line in `REPO_DIR`, and
+every later stage inspects history in a tree nobody chose. So the status is taken
+on the same line, and the abort names what could not be resolved.
+
+`REPO_DIR` survives for `pr-merge-range.sh`, which inspects HISTORY rather than
+identity — a tree, not a repository name. The identity itself comes from the pin,
+which is why nothing else here reads this value.
 
 ## THE NEWEST INSTALLED COPY IS CHOSEN BY MTIME, not by `sort -V`, which is GNU-only.
 
@@ -927,7 +973,7 @@ AND ITS REFUSAL IS THE SAME SHAPE AS THE TWO ABOVE: the failure clears
 refusing. `$RB_IDENTITY_REASON` is expanded into the word, so the parser
 message still names which rule the origin broke. #181.
 
-## THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
+## THE CI KNOBS ARE EXPORTED, because a child process is what reads them now.
 
 THE PUSHED HEAD MUST NOT BE RED BEFORE A ROUND IS CLOSED.
 

@@ -5113,21 +5113,33 @@ if [ -f "$_wy_doc" ]; then
     # AN HTML COMMENT HIDES A SECTION: wrapping one in `<!-- -->` leaves its `## `
     # line matched, so every check passes while Markdown renders nothing. The
     # document has no use for them, so it may not contain one.
+    # NO RAW HTML AT ALL, not just no comment. `<!-- -->` hides a section, and so
+    # does any HTML BLOCK — `<div>` opens one that runs to the next blank line or
+    # beyond, and Markdown renders everything inside it as HTML rather than as
+    # sections. Refusing the comment alone left the block; refusing any line that
+    # starts with `<` closes both, and the document has no use for either.
     _wy_htm=0; _wy_htm_rc=0
-    _wy_htm="$(grep -c '<!--' "$_wy_doc")" || _wy_htm_rc=$?
-    [ "$_wy_htm_rc" -le 1 ] || die "the rationale could not be scanned for HTML comments (rc=$_wy_htm_rc)"
+    _wy_htm="$(grep -c '^[[:space:]]\{0,3\}<' "$_wy_doc")" || _wy_htm_rc=$?
+    [ "$_wy_htm_rc" -le 1 ] || die "the rationale could not be scanned for raw HTML (rc=$_wy_htm_rc)"
     [ "$_wy_htm" -eq 0 ] \
-        && pass "…and the rationale contains no HTML comment, which could hide a section" \
-        || die "$_wy_htm HTML comments in the rationale; one can hide a section from every check here. Delete them."
+        && pass "…and the rationale opens no raw HTML, which could hide a section" \
+        || die "$_wy_htm lines in the rationale open raw HTML; a comment or a block can hide a section from every check here. Delete them."
     #
     # AND A HEADING MUST HAVE TEXT. `## ` with nothing after it matches the scan
     # and reduces to an empty record, which command substitution strips; a bare
     # `##` is a heading Markdown renders and this scan never sees at all. Either
     # way a section exists that no claim introduces, so both spellings are refused
     # and the only permitted form is `## ` followed by text.
+    # THE FIRST SCAN'S STATUS SURVIVES. `grep -n … | grep -v …` reports only the
+    # second stage, so an unreadable document arrived as "no malformed headings".
+    # The lines are captured first and filtered after.
+    _wy_hash=""; _wy_hash_rc=0
+    _wy_hash="$(grep -n '^##' "$_wy_doc")" || _wy_hash_rc=$?
+    [ "$_wy_hash_rc" -le 1 ] || die "the rationale could not be scanned for headings (rc=$_wy_hash_rc)"
     _wy_mal=""; _wy_mal_rc=0
-    _wy_mal="$(grep -n '^##' "$_wy_doc" | grep -v '^[0-9]*:## [^[:space:]]')" || _wy_mal_rc=$?
-    [ "$_wy_mal_rc" -le 1 ] || die "the rationale could not be scanned for malformed headings (rc=$_wy_mal_rc)"
+    _wy_mal="$(grep -v '^[0-9]*:## [^[:space:]]' <<<"$_wy_hash")" || _wy_mal_rc=$?
+    [ "$_wy_mal_rc" -le 1 ] || die "the heading lines could not be filtered (rc=$_wy_mal_rc)"
+    [ -z "$_wy_hash" ] && _wy_mal=""
     [ -z "$_wy_mal" ] \
         && pass "…and every heading line is '## ' followed by text" \
         || die "malformed heading lines in the rationale, which no claim can match: $_wy_mal"
@@ -5160,7 +5172,7 @@ if [ -f "$_wy_doc" ]; then
     # and the case use the same greps, spelled once here and applied to a file.
     _wy_guard() {   # _wy_guard <file> ; prints the guard that refuses it, or ok
         local f="$1" n
-        n="$(grep -c '<!--' "$f")"                                    || n=0
+        n="$(grep -c '^[[:space:]]\{0,3\}<' "$f")"                    || n=0
         [ "$n" -eq 0 ] || { printf html; return 0; }
         n="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$f")"         || n=0
         [ "$n" -eq 0 ] || { printf fence; return 0; }
@@ -5172,6 +5184,7 @@ if [ -f "$_wy_doc" ]; then
     }
     _wy_gd="$TMP_CL/rationale-forms.md"
     for _wy_form in 'html|<!--\n## A CLAIM.\n-->' \
+                    'html|<div>\n## A CLAIM.\n</div>' \
                     'fence|~~~~\n## A CLAIM.\n~~~~' \
                     'setext|An orphan argument\n---' \
                     'malformed|## ' \
