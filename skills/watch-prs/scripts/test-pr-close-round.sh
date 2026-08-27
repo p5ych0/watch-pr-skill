@@ -849,6 +849,22 @@ for _st_bad in "PR:x:$CODEXBOT" "reviewer:7:some-other-bot[bot]"; do
         && pass "…and a gate refused on the $_st_what leaves no stale head either" \
         || die "a bad $_st_what left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
 done
+# AND A BOOTSTRAP REFUSAL TOO, which is earlier than any argument. With no origin
+# and no pin, `rb_identity` cannot answer and the stage exits before it has parsed
+# anything — so the clearing has to happen before the loads, not after them.
+world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+# THE REFUSAL IS STAGED BY EMPTYING A LIBRARY IN A COPY OF THE TREE, which is a
+# real bootstrap failure — `rb_load` refuses and the stage exits at the top of the
+# file, long before any argument is looked at.
+rm -rf "$TMP/broken"; cp -R "$DIR" "$TMP/broken" || die "could not copy the scripts for the bootstrap case"
+: > "$TMP/broken/recordlib.sh"
+_st_out="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
+    REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
+    "$TMP/broken/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF" 2>&1)"; _st_rc=$?
+{ [ "$_st_rc" != 0 ] && [ ! -s "$HEADF" ]; } \
+    && pass "…and a gate that cannot bootstrap leaves no stale head either" \
+    || die "a bootstrap refusal left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=$_st_rc out='$_st_out')"
+
 # AND THE ALIAS REFUSAL IS THE EXCEPTION, deliberately: truncating a head file that
 # IS the summary destroys the account. The summary must survive it.
 world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/summary.md")"

@@ -108,6 +108,37 @@ fi
 
 set -uo pipefail
 
+# ── THE STALE HEAD IS CLEARED BEFORE THE BOOTSTRAP, not after the arguments are
+# parsed. Everything below this — the library loads, the identity, the argument
+# validation — can refuse, and a refusal that happens before the file is emptied
+# leaves the PREVIOUS round's OID in it. The driver proves the head before it
+# resolves any thread, so a stale OID passing that proof is a resolve on a round
+# that never gated. Measured: emptying an inline `recordlib.sh` makes this stage
+# exit at `reason=recordlib_empty`, which is above every line that parses `$5`.
+#
+# WITH NOTHING BUT RESERVED WORDS AND A REDIRECTION, because no library has been
+# loaded yet and none is needed. It is deliberately BEFORE `shift`, so `$1` is the
+# stage and `$6` is the head file.
+#
+# ONLY A FILE THAT ALREADY EXISTS, which is what lets this ask no question about
+# the VALUE. The pre-#202 form puts the head itself in that position, and a shape
+# test here would be a second copy of the rule `recordlib.sh` owns — `sha_reason`
+# is not loaded yet, so there would be no way to ask it. `-e` answers the same
+# question from the other side: an OID is not a path that exists, so the old form
+# creates nothing and is refused by name further down, where the library is there.
+#
+# AND NOT THE SUMMARY, because truncating a head file that IS the summary destroys
+# the account this stage is about to post. That refusal is below too, and this must
+# not commit the damage it exists to prevent.
+#
+# IT DOES NOT REFUSE, and that is not an oversight. The authoritative emptying
+# further down takes its status and aborts; this one only makes sure that what a
+# bootstrap refusal leaves behind is not a head somebody could act on.
+if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
+    > "${6}" 2>/dev/null
+fi
+
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
