@@ -5345,12 +5345,28 @@ $_wy_ptr" \
 
 first argument"
 
-# REFUSED — a heading whose argument was deleted while the heading stayed.
-_wy_case "a section that is a heading with nothing under it" fail \
+# REFUSED — a heading whose argument was deleted while the heading stayed. TWICE,
+# because the scan has two arms and the two are reached by different documents: the
+# `END` arm fires on the LAST section, and the heading-transition arm on any
+# earlier one. Staging only the last section left the transition arm unexercised,
+# so a non-final argument could have vanished with every case still green.
+_wy_case "a section that is a heading with nothing under it, at the end" fail \
 "# CLAIM ONE.
 $_wy_ptr
 x=1" \
 "## CLAIM ONE."
+
+_wy_case "an empty section followed by another heading" fail \
+"# CLAIM ONE.
+$_wy_ptr
+# CLAIM TWO.
+$_wy_ptr
+x=1" \
+"## CLAIM ONE.
+
+## CLAIM TWO.
+
+second argument"
 
 # ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
 #

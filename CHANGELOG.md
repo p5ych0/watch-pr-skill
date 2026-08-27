@@ -34,8 +34,10 @@
   relaxed check shipped accepting the case it exists for. Five synthetic pairs now
   put stacked claims and a usage table through it and expect acceptance, and a
   pointer with no code after it, a pointer as a fence's last line, and an emptied
-  section and expect refusal. Reverting either half of the fence-close condition
-  turns one of them red. Closes #198.
+  section — at the end of the document and again before another heading, because
+  the scan's two arms are reached by different documents — and expect refusal.
+  Reverting either half of the fence-close condition, or the empty scan's
+  heading-transition arm, turns one of them red. Closes #198.
 
 ## [2.0.70] — 2026-08-27
 
