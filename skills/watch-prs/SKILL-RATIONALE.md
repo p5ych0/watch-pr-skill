@@ -1810,30 +1810,32 @@ a command run as a CONDITION, and this is not one — so the successful path wou
 have died after the push and before the replies. `:` would also be true, and is a
 name; a reserved word that is true is both.
 
-THE REASON IS WRITTEN BY THE SHELL WHERE IT CAN BE, AND BY `echo` OTHERWISE. Each
-arm clears a name, PROVES the clear with `[[ -z … ]]`, and only then expands it with
-`${…:?}` — so in an ordinary shell the shell itself writes the reason and stops,
-and a shadowed `echo` cannot silence it.
+A SHADOWED `echo` COSTS THE MESSAGE, NOT THE REFUSAL, and that is ACCEPTED. The
+refusal is the arm being taken and the head not being proven; the `echo` only says
+why.
 
-THE PROOF IS WHAT MAKES THAT SAFE, and it was missing from the first attempt. A
-startup file that has already run `declare -i RB_HEAD_BAD=1` makes the clear store
-`0`, which is not empty, so the expansion would never fire — a guard that
-introduces a seedable name to protect against a shadowed name is worse than none.
-With the `[[ -z … ]]` in front, that shell simply skips the expansion and falls to
-the `echo`, which is where it was before. The check adds a path and removes none.
+MAKING THE SHELL WRITE IT WAS TRIED TWICE AND COST MORE EACH TIME. A `${…:?}`
+expansion needs a name to expand, and the name is the operator's to seed:
+`declare -i RB_HEAD_BAD=1` makes the clear store `0`, so the expansion never fires
+and the guard is decoration. Proving the clear with `[[ -z … ]]` fixes that and
+opens a worse door — `declare -n RB_HEAD_BAD=BASH_XTRACEFD` makes the CLEAR itself
+write through the nameref and close the operator's stdout, so the refusal is not
+merely silent, it has damaged the shell it was protecting.
 
-WHAT IS STILL ACCEPTED is the shell where BOTH the name is seeded and `echo` is
-shadowed: there the arm is taken, nothing is printed, and a returning `exit` walks
-into the prose. That is the same residue as #26 and it is not closable from inside
-a fence.
+SO THE SCRATCH NAME IS GONE. A defence against a shadowable name that introduces a
+seedable name is not a defence, and the second attempt was worse than the first.
+The residue is the same one #26 names: in a shell with `echo` shadowed and `exit`
+returning, the arm is taken, nothing is printed, and control reaches the prose. It
+closes when this code lives in a `.sh` file, and not before.
 
 WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
 They are PROSE, in a Markdown document, between two fences — so a driver whose
 `exit` returns can read them whatever the fence above did. That is issue #26, and
 the answer to it is moving this code into `.sh` files rather than another guard.
-What holds meanwhile: every path prints a refusal first, `post` asks the content
-question again and refuses, so no summary is posted and no pass requested, and the
-allocation the paths come from cannot produce the aliased case at all.
+What holds meanwhile: every path takes a refusal arm and prints it unless `echo`
+has been shadowed, `post` asks the content question again and refuses, so no
+summary is posted and no pass requested, and the allocation the paths come from
+cannot produce the aliased case at all.
 
 ## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
 

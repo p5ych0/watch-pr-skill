@@ -879,13 +879,22 @@ got="$(cd "$TMP" && run_limited 25 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/
     || die "the OID-named file case gave rc=$_oid_rc out='$got' content='$(cat "$TMP/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" 2>/dev/null)'"
 # AND A HEAD FILE THAT CANNOT BE EMPTIED STOPS THE STAGE, rather than leaving the
 # previous round's OID for a bootstrap refusal to hand on.
+# THE PRECONDITION IS ESTABLISHED RATHER THAN ASSUMED. `chmod 400` does not stop
+# uid 0 from writing, and containers run this suite as root — so the case would
+# report a defect in the implementation when the fixture is what could not be set
+# up. It probes the mode bits first and skips itself by name when they do not bite.
 world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
 chmod 400 "$HEADF"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
-chmod 600 "$HEADF"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'cannot be emptied' <<<"${got#*|}"; } \
-    && pass "…and a head file that cannot be emptied stops the stage" \
-    || die "an untruncatable head file gave '${got}'"
+if ( > "$HEADF" ) 2>/dev/null; then
+    chmod 600 "$HEADF"
+    pass "…(the untruncatable-head case is skipped: this uid can write through mode 400)"
+else
+    got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEADF")"
+    chmod 600 "$HEADF"
+    { [ "${got%%|*}" = 1 ] && grep -qF 'cannot be emptied' <<<"${got#*|}"; } \
+        && pass "…and a head file that cannot be emptied stops the stage" \
+        || die "an untruncatable head file gave '${got}'"
+fi
 
 # AND THE ALIAS REFUSAL IS THE EXCEPTION, deliberately: truncating a head file that
 # IS the summary destroys the account. The summary must survive it.
