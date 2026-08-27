@@ -5008,61 +5008,48 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 # whose argument has gone leaves the next session deleting a shape for looking
 # gratuitous.
 #
-# THE CLAIM IS THE KEY, WHICH IS WHY THIS IS FOUR CHECKS AND NOT TWELVE. An
-# earlier shape gave each section an id and an anchor, and five review rounds went
-# into the machinery that kept those honest: ids that could be duplicated, anchors
-# that could be swapped, pointers that could name the wrong section, a claim that
-# could disagree with the heading it cited. Making the heading BE the claim
-# removes every one of those states rather than checking for them — two pointers
-# cannot be swapped without swapping the claims above them, which changes nothing.
+# EXACT STRING COMPARISON, AND NO MARKDOWN PARSER. An earlier shape grew one: to
+# tell a real `## ` heading from a fenced `## example` it tracked fenced code,
+# then tilde fences, indented fences, info strings, HTML comments, the ordering
+# between comments and fences, `## ` and then bare `##`. Every rule attracted the
+# next construct — the shape `CLAUDE.md` names, and the 2,200-line scanner it
+# cost the repository once already.
+#
+# SO THE AMBIGUITY IS FORBIDDEN RATHER THAN PARSED. Every line of the rationale
+# that begins with `## ` must be a claim. A transcript that wants one indents it
+# by a space, and the failure below says so. That is a constraint on one
+# document, checkable with `grep`, in place of a parser nobody verifies.
 _wy_doc="$SCRIPT_DIR/../SETUP-RATIONALE.md"
 if [ -f "$_wy_doc" ]; then
     # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
-    #    silently — and every one of them well formed, inside the setup fence, and
-    #    paired with a claim. One equality closes a filename typo, a stray
+    #    silently — and every one well formed, in the setup fence, under a claim,
+    #    and annotating code. One equality closes a filename typo, a stray
     #    character, a pointer moved to another fence, and a pointer under code.
-    # A COUNT OF ZERO AND A FAILED READ ARE DIFFERENT ANSWERS. `grep -c` reports 1
-    # when it matched nothing and 2 when it could not read at all, and `|| VAR=0`
-    # turns both into "none" — so a transiently unreadable `SKILL.md` reports no
-    # relative pointers, which is exactly what the check wants to see.
     _wy_all=0; _wy_all_rc=0
     _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
-    [ "$_wy_all_rc" -le 1 ] \
-        || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
+    [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
     [ "$_wy_all" -gt 0 ] \
         && pass "the setup block points at its rationale ($_wy_all pointers)" \
         || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
-    # EVERY POINTER GOES THROUGH `$RB_SCRIPTS`, and the two names it must NOT go
-    # through are refused by name. A bare relative path resolves against the
-    # project under review — the driving shell stands there, which the `git
-    # rev-parse` below the first pointer requires. And `$CLAUDE_PLUGIN_ROOT` is
-    # UNSET in setup's second discovery mode, where the block finds the newest
-    # installed copy itself, so a pointer built from it reads `/docs/…`.
-    # `RB_SCRIPTS` is set and validated in both modes.
+
+    # THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever the
+    # driver happens to be standing — the shell stays in the project under review
+    # — and not `$CLAUDE_PLUGIN_ROOT`, which is UNSET in setup's second discovery
+    # mode. `RB_SCRIPTS` is set and validated in both.
     _wy_bad_ptr=0; _wy_bp_rc=0
     _wy_bad_ptr="$(grep -c '# WHY: \(docs/\|\$CLAUDE_PLUGIN_ROOT\)' "$SKILL")" || _wy_bp_rc=$?
-    [ "$_wy_bp_rc" -le 1 ] \
-        || die "SKILL.md could not be scanned for unresolvable pointers (rc=$_wy_bp_rc); one could be there"
+    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for unresolvable pointers (rc=$_wy_bp_rc)"
     [ "$_wy_bad_ptr" -eq 0 ] \
         && pass "…and none resolves from the working directory or an unset plugin root" \
         || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
-    # AGAINST THIS CHECKOUT, NOT AN INHERITED ROOT. `${CLAUDE_PLUGIN_ROOT:-$ROOT}`
-    # reads a variable the invoking environment may already hold — this suite runs
-    # with the driver's own exports present — so the assertion could pass against
-    # somebody else's installed copy while this tree has no such file.
     [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
         && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
         || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
-    # AND NO LAYER STILL NAMES THE OLD PATH. The document moved out of `docs/`
-    # during review, and a table or a rule left pointing at the old spelling sends
-    # maintenance and release work at an artifact that no longer exists.
-    # OVER THE CHECKOUT'S OWN DOCUMENTS, derived rather than listed and rather than
-    # walked: `grep -r` over the tree reaches untracked scratch — a session-memory
-    # file mentioning the old path failed this for a reason that has nothing to do
-    # with the plugin.
-    # `git grep`, WHOSE STATUS IS THE ONE THIS NEEDS: 0 found, 1 not found, above
-    # that an error. `git ls-files | xargs grep` reports 123 on the ordinary
-    # no-match, because that is xargs saying a child exited non-zero.
+
+    # …AND NO LAYER STILL NAMES THE OLD PATH under `docs/`. Through `git grep`,
+    # whose status is the one this needs: 0 found, 1 not found, above that an
+    # error. `git ls-files | xargs grep` reports 123 on the ordinary no-match, and
+    # `grep -r` over the tree reaches untracked scratch.
     _wy_stale=""; _wy_st_rc=0
     _wy_stale="$(git -C "$ROOT" grep -lF 'docs/skill-setup-rationale' -- '*.md' 2>/dev/null)" || _wy_st_rc=$?
     [ "$_wy_st_rc" -le 1 ] \
@@ -5071,83 +5058,9 @@ if [ -f "$_wy_doc" ]; then
         && pass "…and nothing still names its old path under docs/" \
         || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
 
-    # AND THE TWO TOTALS MATCH. With one claim per argument the mapping is a
-    # bijection, so a pointer dropped or a section deleted moves one number and not
-    # the other — no fixed count to go stale, and nothing that has to know how many
-    # there ought to be.
-    # THE HEADING SCANNER IS ONE FUNCTION, so the case below exercises what the two
-    # scans actually run rather than a copy of it — the lesson three earlier rounds
-    # of this region were spent on.
-    _wy_headings_of() {   # _wy_headings_of <file> ; prints each ## heading, fences honoured
-        awk '
-        # AN OPEN COMMENT IS CONSUMED FIRST, before the fence parser looks at the
-        # line. A three-backtick line inside `<!-- -->` is not a fence, and letting
-        # the fence rule run first set `fence` while the comment was still open —
-        # after which nothing could close either, and every later real section was
-        # suppressed. Order is the fix, not another condition.
-        html { if (index($0, "-->")) html = 0; next }
-        # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
-        # is three or more backticks or tildes with up to three leading spaces; a
-        # backtick opener may not carry a backtick in its info string; and it
-        # closes only on the SAME character, a run at least as long, with nothing
-        # else on the line. Approximating it rejected legitimate documentation
-        # three rounds running, each time by hiding real headings, so the rule is
-        # written out once from the definition.
-        {
-            line = $0
-            indent = match(line, /[^ ]/) - 1
-            if (indent >= 0 && indent <= 3) {
-                rest = substr(line, indent + 1)
-                ch = substr(rest, 1, 1)
-                if (ch == "`" || ch == "~") {
-                    run = 0
-                    while (substr(rest, run + 1, 1) == ch) run++
-                    if (run >= 3) {
-                        info = substr(rest, run + 1)
-                        if (!fence && !(ch == "`" && index(info, "`"))) {
-                            fence = 1; fch = ch; frun = run; next
-                        } else if (fence && ch == fch && run >= frun \
-                                   && info ~ /^[[:space:]]*$/) {
-                            fence = 0; next
-                        }
-                    }
-                }
-            }
-        }
-        # AN EMPTY `## ` IS STILL A HEADING. Printing its empty text made it vanish
-        # twice over — `grep -c .` skips a blank record and command substitution
-        # strips it — so a section with no claim reported clean. It is named.
-        # AND AN HTML COMMENT HIDES A HEADING TOO. Wrapping a section in `<!-- -->`
-        # left its `## ` line matched, so every check stayed green while Markdown
-        # rendered nothing at all. Comments do not nest in CommonMark, so this is
-        # one state — and it is the last construct modelled here: a fence and a
-        # comment are what can hide a heading, and anything past them is a
-        # document nobody writes by accident.
-        # AND AN OPENER CARRIES AT MOST THREE LEADING SPACES: four is an indented
-        # code line, where a literal `<!--` opens nothing.
-        !fence && /^ {0,3}<!--/ { if (!index($0, "-->")) html = 1; next }
-        # `##` WITH NOTHING AFTER IT IS A LEVEL-TWO HEADING TOO — end of line
-        # terminates the hash run just as a space does, so requiring the space let
-        # a bare `##` carry orphaned prose past every check.
-        !fence && !html && /^##([[:space:]]|$)/ {
-            sub(/^##[[:space:]]?/, "")
-            print ($0 == "" ? "!!EMPTY-HEADING!!" : $0)
-        }' "$1"
-    }
-    _wy_heads_n=0; _wy_hn_rc=0
-    _wy_heads_n="$(_wy_headings_of "$_wy_doc" | grep -c .)" || _wy_hn_rc=$?
-    # EXACTLY ZERO. The `-le 1` tolerance is `grep`'s contract, where 1 means "no
-    # match"; `awk` has no such thing, so an extractor that printed the expected
-    # count and then failed would keep the value and let the equality pass.
-    [ "$_wy_hn_rc" -eq 0 ] \
-        || die "the rationale could not be counted (rc=$_wy_hn_rc)"
-    [ "$_wy_all" -eq "$_wy_heads_n" ] \
-        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
-        || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
-
-    # 2. THE CLAIMS, taken from the setup fence alone and paired with the pointer
-    #    beneath them. The status is taken: fed straight into a comparison, a
-    #    failed `awk` yields nothing and every check below passes vacuously.
+    # 2. THE CLAIMS, from the setup fence alone, each paired with the pointer
+    #    beneath it. The status is taken: fed straight into a comparison, a failed
+    #    `awk` yields nothing and every check below passes vacuously.
     _wy_claims=""; _wy_rc=0
     _wy_claims="$(awk '/^## Derive identity$/{sec=1}
        sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
@@ -5162,8 +5075,6 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_n" -eq "$_wy_all" ] \
         && pass "…and all $_wy_all sit under a claim, in the setup block, in the documented form" \
         || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside the setup block, or not under a claim"
-    # AND THE SENTINEL PROBE TELLS A MISS FROM A FAILURE for the same reason: with
-    # `&& die || pass`, a `grep` that could not read routes straight to the pass.
     _wy_sent_rc=0
     grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" || _wy_sent_rc=$?
     case "$_wy_sent_rc" in
@@ -5172,77 +5083,19 @@ if [ -f "$_wy_doc" ]; then
         *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
     esac
 
-    # …AND THE SCANNER IS EXERCISED, over forms this document does not contain.
-    #
-    # Every fence rule here was added because approximating it REJECTED a
-    # legitimate documentation edit — a `## example` inside a transcript read as a
-    # section. Nothing in the rationale carries those forms, so without a staged
-    # document the guards could all be removed and the suite would stay green:
-    # each one is a case this file has to bring its own input for.
-    _wy_fx="$TMP_CL/fence-forms.md"
-    {
-        printf '## REAL HEADING ONE.\n\nprose\n\n'
-        printf '<!--\n## decoy inside an HTML comment\n-->\n\n'
-        printf '<!-- inline --> ## decoy after an inline comment\n\n'
-        printf '<!--\n```\n-->\n## VISIBLE, the fence inside that comment was not one.\n\n'
-        printf '    <!--\n## VISIBLE, a four-space <!-- is an indented code line.\n\n'
-        printf '## \n\norphaned prose under an empty heading\n\n'
-        printf '##\n\norphaned prose under a bare hash pair\n\n'
-        printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
-        printf '````\n```\n## decoy behind a shorter run\n````\n\n'
-        printf '   ~~~\n## decoy inside an indented fence\n   ~~~\n\n'
-        printf '```\n``` not a closer\n## decoy after a closer carrying text\n```\n\n'
-        printf '```` lang`option``\n## VISIBLE, because that opener is invalid.\n\n'
-        # FOUR SPACES IS AN INDENTED CODE BLOCK, NOT A FENCE, so what follows is
-        # still a heading — the bound on the indent is what says so.
-        printf '    ```\n## VISIBLE, because a four-space fence is not one.\n\n'
-        printf '## REAL HEADING TWO.\n\nprose\n'
-    } > "$_wy_fx"
-    _wy_fx_out=""; _wy_fx_out="$(_wy_headings_of "$_wy_fx")" || _wy_fx_out="THE_SCAN_FAILED"
-    _wy_fx_want='REAL HEADING ONE.
-VISIBLE, the fence inside that comment was not one.
-VISIBLE, a four-space <!-- is an indented code line.
-!!EMPTY-HEADING!!
-!!EMPTY-HEADING!!
-VISIBLE, because that opener is invalid.
-VISIBLE, because a four-space fence is not one.
-REAL HEADING TWO.'
-    [ "$_wy_fx_out" = "$_wy_fx_want" ] \
-        && pass "…and the heading scanner honours every fence form, and no other" \
-        || die "the fence scanner disagrees; got '$_wy_fx_out'"
-    rm -f "$_wy_fx"
-
-    # THE MAPPING IS ONE TO ONE, which is what makes counting sufficient. Two sites
-    # once shared a claim — the transport probe and the pin probe make the same
-    # argument — and while they did, the counts could not say WHICH claim was
-    # doubled: deleting one site's pointer and adding the pair anywhere else kept
-    # the totals and passed both membership loops, with that site silently
-    # unannotated. Each site has its own claim now, and the second section says it
-    # is the same argument rather than repeating it — so no claim is duplicated, no
-    # heading is, and a relocation is a number that stops matching.
-    _wy_cdupe=""; _wy_cd_rc=0
-    _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cd_rc=$?
-    { [ "$_wy_cd_rc" -eq 0 ] && [ -z "$_wy_cdupe" ]; } \
-        && pass "…and no claim is made at two sites, so the mapping is one to one" \
-        || die "a claim is made at two sites (rc=$_wy_cd_rc): '\''$_wy_cdupe'\''; a relocation between them would be invisible"
-
-    # AND EVERY PAIR ANNOTATES CODE. A claim and its pointer must be followed by a
-    # line that is neither comment nor blank, so the pair sits ON something rather
-    # than floating in a comment block.
-    #
-    # WHAT THIS DOES NOT CATCH, stated rather than left to be discovered: a pair
-    # moved from one code line to another INSIDE the fence. Every count, both
-    # membership loops and this adjacency all still hold, because the pair is
-    # intact and still annotates code — it is simply annotating the wrong code.
-    # Catching that means the fixture knowing which line each claim belongs to,
-    # which couples the contract to the block's shape: any legitimate edit to the
-    # setup then fails it for a reason that has nothing to do with the rationale.
-    # A relocated claim is visible in the diff as code losing its annotation; a
-    # contract that breaks on every refactor is not.
+    # …AND EVERY PAIR ANNOTATES CODE, so it sits ON something rather than floating
+    # in a comment block. What this does not catch is a pair moved from one code
+    # line to ANOTHER inside the fence: the pair is intact and still annotates
+    # code, it is annotating the wrong code. Catching that means the fixture
+    # knowing which line each claim belongs to, which couples the contract to the
+    # block's shape — every legitimate refactor of setup would then fail it. A
+    # relocated claim is visible in the diff as code losing its annotation; a
+    # contract that breaks on every refactor is not. Found once that way, in
+    # review, which is the disposition this assumes.
     _wy_float=0
     _wy_float="$(awk '/^## Derive identity$/{sec=1}
        sec && /^```bash$/ && !seen {f=1; seen=1; next}
-       f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++     # the fence is not code either
+       f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++
                      f=0; sec=0; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
            prev=$0 }
@@ -5251,14 +5104,41 @@ REAL HEADING TWO.'
         && pass "…and every claim and pointer sits on a line of code" \
         || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
 
-    # 3. FORWARD: every claim is a heading, verbatim. `grep -xF` — a claim is
-    #    literal text and must match the WHOLE heading, or a claim that is a prefix
-    #    of another answers for it.
+    # 3. THE HEADINGS, by exact prefix and nothing else. Every `## ` line in the
+    #    rationale is a claim — that is the constraint replacing the parser, and
+    #    the failure says how to satisfy it.
+    _wy_heads=""; _wy_hrc=0
+    _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
+    { [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ]; } \
+        || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
+
+    # 4. BIJECTION. No claim twice, no heading twice, every claim a heading, every
+    #    heading a claim, and the totals equal. Five string comparisons.
+    _wy_cdupe=""; _wy_cd_rc=0
+    _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cd_rc=$?
+    { [ "$_wy_cd_rc" -eq 0 ] && [ -z "$_wy_cdupe" ]; } \
+        && pass "…and no claim is made at two sites, so the mapping is one to one" \
+        || die "a claim is made at two sites (rc=$_wy_cd_rc): '$_wy_cdupe'; a relocation between them would be invisible"
+    _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
+    [ -z "$_wy_hdupe" ] \
+        && pass "…and no two sections carry the same claim" \
+        || die "two sections carry the same claim, so one is unreachable: '$_wy_hdupe'"
+    while IFS= read -r _wy_h; do
+        [ -n "$_wy_h" ] || continue
+        grep -qxF "$_wy_h" <<<"$_wy_claims" \
+            || die "the rationale has a '## ' line that no claim matches: '$_wy_h'. Every one must be a claim; indent a transcript line by a space so it is not a heading."
+    done <<EOWH
+$_wy_heads
+EOWH
+    pass "…and every '## ' line in the rationale is one of them"
+    _wy_heads_n=0; _wy_heads_n="$(grep -c . <<<"$_wy_heads")" || _wy_heads_n=0
+    [ "$_wy_all" -eq "$_wy_heads_n" ] \
+        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
+        || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
     _wy_bad=0
     while IFS= read -r _wy_c; do
         [ -n "$_wy_c" ] || continue
         grep -qxF "## $_wy_c" "$_wy_doc" \
-            && pass "…and the rationale carries: ${_wy_c%%,*}" \
             || { die "no section for the claim '$_wy_c'; it is asserted beside the code and argued nowhere"
                  _wy_bad=$((_wy_bad + 1)); }
     done <<EOWY
@@ -5267,52 +5147,6 @@ EOWY
     [ "$_wy_bad" -eq 0 ] \
         && pass "…so every claim beside the code has its argument" \
         || die "$_wy_bad claims have no section"
-
-    # 4. REVERSE: every section is a claim. A section nothing claims is an argument
-    #    that outlived its code, and it is the one that goes unnoticed — nothing
-    #    reading the skill would ever reach it. The heading list takes its status,
-    #    and duplicate headings are refused: two identical ones would let a claim
-    #    resolve to either, and the second is unreachable.
-    _wy_heads=""; _wy_hrc=0
-    _wy_heads="$(_wy_headings_of "$_wy_doc")" || _wy_hrc=$?
-    [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ] \
-        || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
-    _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
-    [ -z "$_wy_hdupe" ] \
-        && pass "…and no two sections carry the same claim" \
-        || die "two sections carry the same claim, so one is unreachable: '$_wy_hdupe'"
-    # AND EVERY SECTION ACTUALLY ARGUES SOMETHING. A heading whose prose is deleted
-    # keeps the counts, the forward lookup and the reverse membership intact, and
-    # the `# WHY:` then leads a model to an empty section — which is the separation
-    # failing completely while the contract reports clean.
-    # WHETHER A SECTION ARGUES ANYTHING IS NOT CHECKED HERE, DELIBERATELY.
-    #
-    # Four rounds went into it and it did not converge. `NF` counted a bare fence;
-    # excluding fences left `### Evidence`; excluding headings-with-a-space left a
-    # bare `###`; then HTML comments; then a long comment passing a length rule;
-    # then tilde fences and indented fences. Every rule about Markdown attracted
-    # the next Markdown form, and each one was more unverified shell in a fixture
-    # whose subject is a documentation pointer.
-    #
-    # `CLAUDE.md` names this shape and what it cost: a 2,200-line scanner, fifty-two
-    # rounds, every round answering one finding and producing the next, several of
-    # its own defects rejecting valid input. The instruction is not to build one.
-    #
-    # WHAT IS GIVEN UP, STATED PLAINLY: a section stripped of its prose while its
-    # heading remains is not caught here. That is a person deleting the content of
-    # a document — visible in the diff as the deletion it is, and leaving a heading
-    # that claims an argument it no longer makes. It is not the rot this separation
-    # risks, which is a claim and its argument drifting APART; that is what the
-    # checks above measure, and they do it with exact string comparison and no
-    # grammar at all.
-    while IFS= read -r _wy_h; do
-        [ -n "$_wy_h" ] || continue
-        grep -qxF "$_wy_h" <<<"$_wy_claims" \
-            && pass "…and it is claimed beside the code: ${_wy_h%%,*}" \
-            || die "the rationale argues '$_wy_h', which nothing in the setup block claims"
-    done <<EOWH
-$_wy_heads
-EOWH
 else
     die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
 fi
