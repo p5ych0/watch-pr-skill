@@ -1093,13 +1093,15 @@ same way. Freshly created per PR and per session, because a reused path is how
 a stale summary from another round — or another PR — gets posted as if it were
 this one's.
 
-ONE DIRECTORY, AND THE THREE PATHS DERIVED FROM IT. Three `mktemp` calls made
-them three separate answers, and `mktemp` is a NAME: a function returning the
-same existing empty path each time passes every validation and leaves all three
+ONE DIRECTORY, AND THE FOUR PATHS DERIVED FROM IT. Four `mktemp` calls would make
+them four separate answers, and `mktemp` is a NAME: a function returning the
+same existing empty path each time passes every validation and leaves all four
 ALIASED. Writing the opening account would then populate the round-summary
 file, and a first round that missed its own summary write would post that
 account as the summary and request another pass — the exact regression the
-separate files exist to prevent. Derived by literal suffixes there is nothing to
+separate files exist to prevent. `pr-close-round.sh` refuses the head file and the
+summary file being one file for the same reason, from the other end: there the
+head would overwrite the account and be posted as the round summary. Derived by literal suffixes there is nothing to
 make equal: the distinctness is in the source, not in what a command returned.
 
 AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
@@ -1108,7 +1110,7 @@ shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
 write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
 an account on this machine that guesses the name gets nothing rather than a
 file this session then writes through, and `-m 700` is applied by `mkdir`
-itself, so all three files inherit that protection rather than each needing its
+itself, so all four files inherit that protection rather than each needing its
 own. It runs through `/usr/bin/env` for the reason every other command in this
 block does.
 
@@ -1731,18 +1733,32 @@ the condition's own, and each refusal ends in a reserved word.
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
 
-## THE POST STEP REFUSES AN EMPTY HEAD FILE, so a walked-past refusal stops here.
+## THE POST STEP REFUSES A HEAD FILE THAT DOES NOT HOLD AN OID, not merely an empty one.
 
 The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
 status — and nothing reads it. What actually stops a driver whose `exit` has been
 replaced by a function that returns is not the arm it took but the STATE it is
-left in: `gate` empties the head file before it does anything, and writes it only
-on success, so after a refusal the file is empty and this step refuses.
+left in.
 
-That is why the emptying is at the top of the stage rather than beside the write.
-A file still holding the PREVIOUS round's head would pass this check, and would
-then be refused only by `post`'s own re-proof — after the threads had been
-resolved, which cannot be taken back.
+NON-EMPTY IS NOT ENOUGH, and that is the whole of why this is a `case` rather than
+a `-s`. `gate` refuses a head file that IS the summary file, and it refuses BEFORE
+it empties anything — it has to, or the refusal would destroy the account it is
+protecting. So on that one path the file is left holding the summary: non-empty,
+and a `-s` guard passes on it. Asking whether the file holds a COMMIT ID closes
+that, because a summary never does.
+
+A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
+name is a second name a startup file can seed, and a seeded pattern accepting a
+seeded value is a check that agrees with itself; `case` is a reserved word and
+these patterns are in the source. The forty-character test and the hex test are
+separate arms because one pattern cannot say both in a glob.
+
+Every other refusal leaves the file EMPTY, which this also rejects: `gate` empties
+it before any other refusal can happen, and writes it only on success. The
+emptying is at the top of the stage rather than beside the write because an
+unreadable summary aborts further down, and emptying after that point would leave
+the PREVIOUS round's head behind for exactly the refusals a driver is most likely
+to walk past.
 
 It is the same containment the rest of this document argues for, reached across a
 fence boundary that no `if` can span: the thread replies happen between the two

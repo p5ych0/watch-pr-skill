@@ -988,13 +988,20 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# THE POST STEP REFUSES AN EMPTY HEAD FILE, so a walked-past refusal stops here.
+# THE POST STEP REFUSES A HEAD FILE THAT DOES NOT HOLD AN OID, not merely an empty one.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-if [[ ! -s "$HEAD_FILE" ]]; then
-    echo "ABORT: $HEAD_FILE is empty, so no gate has proven a head for this round. Nothing has been posted."
-    exit 1
-    [[ -n "" ]]
-fi
+case "$(<"$HEAD_FILE")" in
+    ????????????????????????????????????????)
+        case "$(<"$HEAD_FILE")" in
+            *[!0-9a-f]*)
+                echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
+                exit 1
+                [[ -n "" ]] ;;
+        esac ;;
+    *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
+        exit 1
+        [[ -n "" ]] ;;
+esac
 # ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.

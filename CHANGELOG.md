@@ -35,7 +35,11 @@
 
   **A gate empties it before any other refusal can happen**, so every refusal leaves
   it empty rather than holding the previous round's head — and the driver's `post`
-  step refuses an empty one. That is what stops a walked-past refusal: the thread
+  step refuses a file that does not hold a commit id. Not merely an empty one: the
+  alias refusal below has to come BEFORE the emptying, or it would destroy the
+  account it is protecting, so on that one path the file is left holding the
+  summary. Asking for an OID closes that, through a literal pattern in a `case`
+  rather than a regex in a name a startup file could seed. That is what stops a walked-past refusal: the thread
   replies sit between the two stages and are not shell at all, so no `if` can span
   them, and what a driver whose `exit` returns meets at the next step is the STATE
   rather than an ordering it was told to respect.
