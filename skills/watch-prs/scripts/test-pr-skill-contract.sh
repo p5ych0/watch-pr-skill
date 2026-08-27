@@ -5126,8 +5126,11 @@ if [ -f "$_wy_doc" ]; then
         # AND AN OPENER CARRIES AT MOST THREE LEADING SPACES: four is an indented
         # code line, where a literal `<!--` opens nothing.
         !fence && /^ {0,3}<!--/ { if (!index($0, "-->")) html = 1; next }
-        !fence && !html && /^## / {
-            sub(/^## /, "")
+        # `##` WITH NOTHING AFTER IT IS A LEVEL-TWO HEADING TOO — end of line
+        # terminates the hash run just as a space does, so requiring the space let
+        # a bare `##` carry orphaned prose past every check.
+        !fence && !html && /^##([[:space:]]|$)/ {
+            sub(/^##[[:space:]]?/, "")
             print ($0 == "" ? "!!EMPTY-HEADING!!" : $0)
         }' "$1"
     }
@@ -5184,6 +5187,7 @@ if [ -f "$_wy_doc" ]; then
         printf '<!--\n```\n-->\n## VISIBLE, the fence inside that comment was not one.\n\n'
         printf '    <!--\n## VISIBLE, a four-space <!-- is an indented code line.\n\n'
         printf '## \n\norphaned prose under an empty heading\n\n'
+        printf '##\n\norphaned prose under a bare hash pair\n\n'
         printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
         printf '````\n```\n## decoy behind a shorter run\n````\n\n'
         printf '   ~~~\n## decoy inside an indented fence\n   ~~~\n\n'
@@ -5198,6 +5202,7 @@ if [ -f "$_wy_doc" ]; then
     _wy_fx_want='REAL HEADING ONE.
 VISIBLE, the fence inside that comment was not one.
 VISIBLE, a four-space <!-- is an indented code line.
+!!EMPTY-HEADING!!
 !!EMPTY-HEADING!!
 VISIBLE, because that opener is invalid.
 VISIBLE, because a four-space fence is not one.
