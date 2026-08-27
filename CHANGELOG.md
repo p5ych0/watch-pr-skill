@@ -18,7 +18,8 @@
   at.
 
   The four claims that had been merged under the old rule are split back into
-  fifteen, one per invariant, each with its own section. `SKILL-RATIONALE.md` now
+  twenty, one per invariant, each with its own section — the document's pointer
+  count goes from 51 to 67. `SKILL-RATIONALE.md` now
   states which of a fence's three kinds of comment carries a pointer — an
   instruction does not and is written in sentence case, a short argument in place
   does not, and a claim does.
@@ -31,7 +32,7 @@
 
   **Both new branches are staged, accept and reject.** `_wy_contract` only ever ran
   on pairs that PASS, so every refusing branch was unexercised — which is how the
-  relaxed check shipped accepting the case it exists for. Five synthetic pairs now
+  relaxed check shipped accepting the case it exists for. Six synthetic pairs now
   put stacked claims and a usage table through it and expect acceptance, and a
   pointer with no code after it, a pointer as a fence's last line, and an emptied
   section — at the end of the document and again before another heading, because
