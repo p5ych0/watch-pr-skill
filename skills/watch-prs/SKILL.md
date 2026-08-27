@@ -1411,8 +1411,6 @@ was reached with. This is the recipe that restores them. Run it before step 8, o
 before continuing into the Copilot phase.
 
 ```bash
-# THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS.
-#
 #   pr-phase-state.sh <pr>
 #
 #     0  readable, and the record it names still stands
@@ -1420,7 +1418,7 @@ before continuing into the Copilot phase.
 #        verdict that no longer stands
 #     2  unreadable — fail closed. NOT "no signoff"
 #
-# NO STATUS VARIABLE, AND THE CONTINUATION IS THE `then` BRANCH.
+# THE PHASE IS A FACT ON THE PR, AND ITS STATUS IS BRANCHED ON WHERE IT IS PRODUCED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-phase-state.sh N; then
     # THE SHA THE GATE IS PINNED TO, its status and its shape both checked.

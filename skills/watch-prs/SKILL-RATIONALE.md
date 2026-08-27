@@ -1333,7 +1333,7 @@ structural sentinel that is non-zero whatever `echo` and `exit` have been replac
 with. Both halves are needed: the reserved word decides whether the branch is
 ENTERED, and the sentinel decides what it reports once it has been.
 
-## NO STATUS VARIABLE, AND THE CONTINUATION IS THE `then` BRANCH.
+## THE PHASE IS A FACT ON THE PR, AND ITS STATUS IS BRANCHED ON WHERE IT IS PRODUCED.
 
 THE PHASE IS A FACT ON THE PR, NOT SOMETHING A SESSION REMEMBERS. `record` writes a signoff precisely so a later session can read it back, and
 `pr-phase-state.sh` is that reading: it takes the two signoffs and the head,
