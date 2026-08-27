@@ -1371,9 +1371,14 @@ still stand — the head must BE the Codex commit before the Copilot phase, and 
 COPILOT commit after it, where the head has advanced through Copilot fixes by
 design.
 
-IT WAS 112 LINES HERE, and nothing executed them: three arms and six refusals,
-every abort exiting 0 so that "the phase is not closed" and "this ran correctly"
-were the same status to anything that read it. Issues #123 and #26.
+## READING IT IS A HELPER, because 112 lines here exited 0 on every refusal.
+
+Three arms and six refusals lived in this fence, and nothing executed them. Every
+abort exited 0, so "the phase is not closed" and "this ran correctly" were the same
+status to anything that read it — which is the whole of what a caller has to go on.
+
+In `scripts/` the suite covers it, `pr-selfcheck.sh` gates it, and the statuses are
+asserted. Issues #123 and #26.
 
 ## THERE IS NO STATUS VARIABLE; THE STATUS IS BRANCHED WHERE IT IS PRODUCED.
 
@@ -1432,12 +1437,20 @@ by none of them. Issue #26.
 
 ## RUN FROM THE REPOSITORY THIS SESSION STARTED IN.
 
-The gate derives its identity and its range-check root from the current directory,
-so a `cd` into another checkout between setup and here would point every gate —
-and the `--admin` merge — at whatever PR of that repository shares this number.
+The gate resolves its own repository root from the CURRENT DIRECTORY, and hands
+that tree to `pr-merge-range.sh` — which decides whether every commit since the
+reviewed sha is a `Review-Phase: copilot` fix. Run from another checkout, the range
+is computed over history that has nothing to do with this pull request, and a merge
+is licensed or refused on the wrong commits.
 
-`$REPO_DIR` was captured in the setup block, and everything else in this session
-already used the identity derived there.
+WHICH REPOSITORY IT ACTS ON IS NOT WHAT THIS PROTECTS. That is settled by the
+session pin: `rb_identity` prefers the exported `REVIEW_BUS_REMOTE` over
+`git remote get-url origin`, so a `cd` cannot retarget the gate's GitHub calls or
+the `--admin` merge. Reading this as an identity defence is what the pin replaced,
+and it was written that way here until Copilot read the two against each other.
+
+`$REPO_DIR` was captured in the setup block, and it is a TREE rather than a name —
+which is the same distinction the pin draws from the other side.
 
 ## AUTO_REVIEW IS PASSED AS AN ARGUMENT, not read from the environment.
 
@@ -1537,17 +1550,23 @@ It is also what makes the success arm mean something: with the request as the
 condition, everything that depends on it having been posted sits inside the branch
 a refusal does not take.
 
-## THE BODY NEVER BECOMES SHELL SOURCE, WHICH IS WHY IT IS NOT WRITTEN HERE.
+## THE BODY NEVER BECOMES SHELL SOURCE, because an account can close a heredoc.
 
 A heredoc splices it in: an account containing a line that is exactly the delimiter
 ENDS the heredoc, and whatever follows is parsed by your long-lived shell — and
 `EOF` is a line this loop's own accounts quote, out of a diff or a finding.
+
 Choosing a rarer delimiter narrows that and does not close it, because the body is
 not known when the delimiter is chosen.
 
-And writing the file from here needs a command — `cat`, `printf` — which is a NAME
-your shell can replace, so the account validated and posted would be the function's
-text. Your file tool is neither: it does not go through this shell at all.
+## AND THE FILE IS NOT WRITTEN FROM THIS SHELL, because `cat` and `printf` are names.
+
+Writing the file from here needs a command, and your shell can replace either of
+those with a function — so the account that was validated and posted would be the
+function's text rather than what you wrote.
+
+Your file tool is neither a heredoc nor a command: it does not go through this
+shell at all, which is what makes it the one way in that has no name to take.
 
 ## NOTHING HERE IS AN ASSIGNMENT.
 
