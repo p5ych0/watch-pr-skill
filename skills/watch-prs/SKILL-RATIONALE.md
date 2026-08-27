@@ -1388,7 +1388,7 @@ branch says nothing and returns 0 — a failed read indistinguishable from a res
 phase. `[[ … ]]` is a reserved word, so the block ends non-zero whatever was done
 to the builtins.
 
-## RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+## THE GATE IS A SCRIPT, RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
 
 THE GATE IS A SCRIPT. It was 291 lines here, pasted into your shell, and nothing
 checked it — which is how it came to contain a construct the bash macOS ships

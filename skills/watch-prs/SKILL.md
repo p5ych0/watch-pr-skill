@@ -1448,8 +1448,6 @@ fi
 ### Then: the gate
 
 ```bash
-# THE GATE IS A SCRIPT.
-#
 #   pr-merge-gate.sh <pr> <codex-sha> <auto-review>
 #
 #     0  merged   — the head it names is on the base branch
@@ -1466,7 +1464,7 @@ fi
 #
 # REVIEWERS is `both` unless the operator chose otherwise at the stop that closed
 # the Codex phase.
-# RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
+# THE GATE IS A SCRIPT, RUN FROM THE REPOSITORY THIS SESSION STARTED IN, WITH AUTO_REVIEW AS AN ARGUMENT.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 (cd "$REPO_DIR" && /usr/bin/env bash -p "$RB_SCRIPTS"/pr-merge-gate.sh N "$CODEX_SHA" "$AUTO_REVIEW" "$REVIEWERS")
 MERGE_RC=$?
