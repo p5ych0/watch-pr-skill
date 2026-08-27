@@ -5080,6 +5080,12 @@ if [ -f "$_wy_doc" ]; then
     # of this region were spent on.
     _wy_headings_of() {   # _wy_headings_of <file> ; prints each ## heading, fences honoured
         awk '
+        # AN OPEN COMMENT IS CONSUMED FIRST, before the fence parser looks at the
+        # line. A three-backtick line inside `<!-- -->` is not a fence, and letting
+        # the fence rule run first set `fence` while the comment was still open —
+        # after which nothing could close either, and every later real section was
+        # suppressed. Order is the fix, not another condition.
+        html { if (index($0, "-->")) html = 0; next }
         # FENCED CODE, TO COMMONMARK RATHER THAN BY APPROXIMATION. An opening fence
         # is three or more backticks or tildes with up to three leading spaces; a
         # backtick opener may not carry a backtick in its info string; and it
@@ -5117,8 +5123,9 @@ if [ -f "$_wy_doc" ]; then
         # one state — and it is the last construct modelled here: a fence and a
         # comment are what can hide a heading, and anything past them is a
         # document nobody writes by accident.
-        !fence && html { if (index($0, "-->")) { html = 0 }; next }
-        !fence && /^[[:space:]]*<!--/ { if (!index($0, "-->")) html = 1; next }
+        # AND AN OPENER CARRIES AT MOST THREE LEADING SPACES: four is an indented
+        # code line, where a literal `<!--` opens nothing.
+        !fence && /^ {0,3}<!--/ { if (!index($0, "-->")) html = 1; next }
         !fence && !html && /^## / {
             sub(/^## /, "")
             print ($0 == "" ? "!!EMPTY-HEADING!!" : $0)
@@ -5174,6 +5181,8 @@ if [ -f "$_wy_doc" ]; then
         printf '## REAL HEADING ONE.\n\nprose\n\n'
         printf '<!--\n## decoy inside an HTML comment\n-->\n\n'
         printf '<!-- inline --> ## decoy after an inline comment\n\n'
+        printf '<!--\n```\n-->\n## VISIBLE, the fence inside that comment was not one.\n\n'
+        printf '    <!--\n## VISIBLE, a four-space <!-- is an indented code line.\n\n'
         printf '## \n\norphaned prose under an empty heading\n\n'
         printf '~~~\n## decoy inside a tilde fence\n```\n## decoy after a mismatched delimiter\n~~~\n\n'
         printf '````\n```\n## decoy behind a shorter run\n````\n\n'
@@ -5187,6 +5196,8 @@ if [ -f "$_wy_doc" ]; then
     } > "$_wy_fx"
     _wy_fx_out=""; _wy_fx_out="$(_wy_headings_of "$_wy_fx")" || _wy_fx_out="THE_SCAN_FAILED"
     _wy_fx_want='REAL HEADING ONE.
+VISIBLE, the fence inside that comment was not one.
+VISIBLE, a four-space <!-- is an indented code line.
 !!EMPTY-HEADING!!
 VISIBLE, because that opener is invalid.
 VISIBLE, because a four-space fence is not one.
