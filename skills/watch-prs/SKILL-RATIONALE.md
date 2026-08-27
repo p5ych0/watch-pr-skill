@@ -1083,9 +1083,9 @@ probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
 
-## THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
+## THE SESSION'S FOUR WORKING FILES COME FROM ONE ALLOCATION.
 
-THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
+THE SESSION'S FOUR WORKING FILES, FROM ONE ALLOCATION. Files rather than
 shell variables: the text is long, contains backticks and quotes, and passing
 it inline mangles it — and the baseline comes back in one because a variable is
 a name a startup file can have made readonly, which `pr-origin.sh` settled the
@@ -1730,6 +1730,23 @@ the condition's own, and each refusal ends in a reserved word.
 
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
+
+## THE POST STEP REFUSES AN EMPTY HEAD FILE, so a walked-past refusal stops here.
+
+The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
+status — and nothing reads it. What actually stops a driver whose `exit` has been
+replaced by a function that returns is not the arm it took but the STATE it is
+left in: `gate` empties the head file before it does anything, and writes it only
+on success, so after a refusal the file is empty and this step refuses.
+
+That is why the emptying is at the top of the stage rather than beside the write.
+A file still holding the PREVIOUS round's head would pass this check, and would
+then be refused only by `post`'s own re-proof — after the threads had been
+resolved, which cannot be taken back.
+
+It is the same containment the rest of this document argues for, reached across a
+fence boundary that no `if` can span: the thread replies happen between the two
+stages and are not shell at all.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 

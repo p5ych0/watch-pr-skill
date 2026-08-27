@@ -2588,6 +2588,17 @@ grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HE
 grep -q 'GATED_HEAD=' "$SKILL" \
     && die "the driver assigns GATED_HEAD again; the head is meant to travel in a file (#202)" \
     || pass "…and the driver holds the head in no name of its own"
+# AND THE POST STEP REFUSES AN EMPTY HEAD FILE. The gate's refusal arms end in a
+# reserved word, which gives their `if` a non-zero status that nothing reads —
+# and the thread replies sit between the two stages, so no `if` can span them.
+# What stops a driver whose `exit` returns is the STATE: `gate` empties the file
+# before it does anything and writes it only on success, so a refusal leaves it
+# empty and this guard is what the next step meets.
+_hf_guard_ln="$(grep -n '^if \[\[ ! -s "\$HEAD_FILE" \]\]; then' "$SKILL" | head -1 | cut -d: -f1)" || true
+_hf_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_hf_guard_ln" ] && [ -n "$_hf_post_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_post_ln" ]; } \
+    && pass "…and the post step refuses an empty head file before it runs the stage" \
+    || die "the post step does not guard on the head file (guard=$_hf_guard_ln post=$_hf_post_ln)"
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script

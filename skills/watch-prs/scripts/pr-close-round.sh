@@ -357,6 +357,33 @@ if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
     echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
     exit 1
 fi
+# AND IT IS NOT THE SUMMARY. `gate` reads the summary and then writes the head, so
+# one file serving as both means the head OVERWRITES the account: `post` then finds
+# a well-formed OID in the summary file, passes the non-empty test, and posts the
+# sha as this round's summary to the reviewer that reads it before the diff.
+#
+# BOTH IDENTITIES, because neither covers the other. Equal strings catch the plain
+# case, including before either file exists; `-ef` catches a hard link or a symlink,
+# which is the same file under two names and is what an operator with a tidy
+# scratch directory can produce by accident.
+if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+    echo "ABORT: the head file and the summary file are the same file ('$HEAD_FILE'); the head would overwrite the account and be posted as this round's summary."
+    exit 1
+fi
+# AND A GATE EMPTIES IT BEFORE ANY OTHER REFUSAL CAN HAPPEN, so that EVERY refusal
+# leaves it empty rather than holding the PREVIOUS round's head. That is what lets
+# the driver's `post` step guard on the file being non-empty and have the guard
+# mean something: the STATE says whether a gate succeeded, rather than the driver's
+# obedience to an ordering.
+#
+# BEFORE THE SUMMARY IS READ, not beside the write. An unreadable summary aborts
+# further down, and emptying after that point left a stale head behind for exactly
+# the refusals a driver is most likely to walk past. A stale head passes the
+# driver's guard and is refused only later, by `post`'s own re-proof — after the
+# threads have been resolved, which cannot be taken back.
+if [ "$STAGE" = gate ]; then
+    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
+fi
 
 # THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read

@@ -356,7 +356,7 @@ if [[ -z $RB_REMOTE ]]; then
         # WHAT THE PIN PROOF PROVES, AND WHAT IT CANNOT, stated because review walks up to it every time.
         # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
         if [[ -n $RB_PIN_SEEN ]] && [[ $RB_PIN_SEEN = "$RB_REMOTE" ]]; then
-            # THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
+            # THE SESSION'S FOUR WORKING FILES COME FROM ONE ALLOCATION.
             # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
             if { ( RB_WORK_DIR="RbProbe$$$RANDOM$RANDOM"; [[ $RB_WORK_DIR = RbProbe* ]] \
                     && [[ -z ${!RB_WORK_DIR:-} ]] ) \
@@ -988,6 +988,13 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
+# THE POST STEP REFUSES AN EMPTY HEAD FILE, so a walked-past refusal stops here.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+if [[ ! -s "$HEAD_FILE" ]]; then
+    echo "ABORT: $HEAD_FILE is empty, so no gate has proven a head for this round. Nothing has been posted."
+    exit 1
+    [[ -n "" ]]
+fi
 # ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.

@@ -29,10 +29,23 @@
   and each refusal ends in a reserved word.
 
   `$HEAD_FILE` is the fourth working file, created empty at setup beside the
-  summary, the opening account and the review baseline — so a `post` run before any
-  `gate` finds nothing rather than something stale. The contract now exercises all
-  four names under a hostile shell, which the three that predate this change had
-  never been. Closes #202.
+  summary, the opening account and the review baseline. The contract now exercises
+  all four names under a hostile shell, which the three that predate this change had
+  never been.
+
+  **A gate empties it before any other refusal can happen**, so every refusal leaves
+  it empty rather than holding the previous round's head — and the driver's `post`
+  step refuses an empty one. That is what stops a walked-past refusal: the thread
+  replies sit between the two stages and are not shell at all, so no `if` can span
+  them, and what a driver whose `exit` returns meets at the next step is the STATE
+  rather than an ordering it was told to respect.
+
+  **And the head file may not be the summary file.** `gate` reads the summary and
+  then writes the head, so one file serving as both means the head overwrites the
+  account — and `post` finds a well-formed OID there, passes the non-empty test, and
+  posts the sha as this round's summary to the reviewer that reads it before the
+  diff. Both identities are refused: the same path, and a link, which is the same
+  file under two names. Closes #202.
 
 ## [2.0.72] — 2026-08-27
 

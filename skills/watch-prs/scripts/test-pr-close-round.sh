@@ -813,6 +813,30 @@ world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/no-such-head")
 { [ "${got%%|*}" = 1 ] && grep -qF 'could not read the gated head' <<<"${got#*|}"; } \
     && pass "…and a head file that is not there stops the post" \
     || die "post with a missing head file gave '${got}'"
+# THE HEAD FILE MAY NOT BE THE SUMMARY FILE. `gate` reads the summary and then
+# writes the head, so one file serving as both means the head overwrites the
+# account — and `post` then finds a well-formed OID there, passes the non-empty
+# test, and posts the sha as this round's summary. Both identities are staged: the
+# same path, and a symlink, which is the same file under two names.
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/summary.md")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'are the same file' <<<"${got#*|}"; } \
+    && pass "a head file that IS the summary file is refused" \
+    || die "the aliased head file gave '${got}'"
+world; ln -sf "$TMP/summary.md" "$TMP/alias.txt"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/alias.txt")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'are the same file' <<<"${got#*|}"; } \
+    && pass "…and so is a symlink to it" \
+    || die "the symlinked head file gave '${got}'"
+rm -f "$TMP/alias.txt"
+# AND A REFUSAL LEAVES THE HEAD FILE EMPTY, which is what the driver's post step
+# guards on. `gate` empties it before it does anything, so a file still holding
+# the PREVIOUS round's head cannot pass that guard.
+world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/nope.md" no "$HEADF")"
+{ [ "${got%%|*}" = 1 ] && [ ! -s "$HEADF" ]; } \
+    && pass "…and a refused gate leaves no stale head behind" \
+    || die "a refused gate left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
+
 # THE OLD FORM IS REFUSED BY NAME, on BOTH stages. A caller still passing the sha
 # would otherwise have `gate` create a file called `a8ec960…` and `post` fail with
 # a reason about a missing file rather than about the caller. #202.
