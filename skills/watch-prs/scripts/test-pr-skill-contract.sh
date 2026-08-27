@@ -5132,6 +5132,61 @@ if [ -f "$_wy_doc" ]; then
         && pass "…and every heading line is '## ' followed by text" \
         || die "malformed heading lines in the rationale, which no claim can match: $_wy_mal"
 
+    # A FENCE HIDES A SECTION TOO: wrapping one in `~~~~` leaves its exact `## `
+    # line matched while Markdown renders the whole thing as code. The document
+    # uses INDENTED code for its two transcripts, so it needs no fence and may not
+    # contain one.
+    _wy_fen=0; _wy_fen_rc=0
+    _wy_fen="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$_wy_doc")" || _wy_fen_rc=$?
+    [ "$_wy_fen_rc" -le 1 ] || die "the rationale could not be scanned for fences (rc=$_wy_fen_rc)"
+    [ "$_wy_fen" -eq 0 ] \
+        && pass "…and no fence, which could render a whole section as code" \
+        || die "$_wy_fen fenced lines in the rationale; indent code by four spaces instead, so a fence cannot hide a section"
+
+    # AND A SETEXT UNDERLINE MAKES A HEADING THIS SCAN NEVER SEES: a line of text
+    # followed by `---` is a level-two heading Markdown renders and `^## ` cannot
+    # match, so an argument could exist here with no claim at all.
+    _wy_stx=0; _wy_stx_rc=0
+    _wy_stx="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$_wy_doc")" || _wy_stx_rc=$?
+    [ "$_wy_stx_rc" -le 1 ] || die "the rationale could not be scanned for setext underlines (rc=$_wy_stx_rc)"
+    [ "$_wy_stx" -eq 0 ] \
+        && pass "…and no setext underline, which would be a heading with no ## to find" \
+        || die "$_wy_stx setext underlines in the rationale; write headings as '## ' so the contract can see them"
+
+    # …AND ALL FIVE REFUSALS ARE STAGED, over a document this repository does not
+    # contain. Each guard exists because the form it refuses passes every other
+    # check, and none of those forms is in the rationale — so without staged input
+    # every one of them could be deleted with the suite staying green. The rule
+    # and the case use the same greps, spelled once here and applied to a file.
+    _wy_guard() {   # _wy_guard <file> ; prints the guard that refuses it, or ok
+        local f="$1" n
+        n="$(grep -c '<!--' "$f")"                                    || n=0
+        [ "$n" -eq 0 ] || { printf html; return 0; }
+        n="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$f")"         || n=0
+        [ "$n" -eq 0 ] || { printf fence; return 0; }
+        n="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$f")"  || n=0
+        [ "$n" -eq 0 ] || { printf setext; return 0; }
+        n="$(grep -n '^##' "$f" | grep -cv '^[0-9]*:## [^[:space:]]')" || n=0
+        [ "$n" -eq 0 ] || { printf malformed; return 0; }
+        printf ok
+    }
+    _wy_gd="$TMP_CL/rationale-forms.md"
+    for _wy_form in 'html|<!--\n## A CLAIM.\n-->' \
+                    'fence|~~~~\n## A CLAIM.\n~~~~' \
+                    'setext|An orphan argument\n---' \
+                    'malformed|## ' \
+                    'malformed|##' \
+                    'ok|## A CLAIM.\n\nprose'; do
+        _wy_want="${_wy_form%%|*}"
+        printf '# doc\n\n' > "$_wy_gd"
+        printf "${_wy_form#*|}\n" >> "$_wy_gd"
+        _wy_got="$(_wy_guard "$_wy_gd")" || _wy_got=SCAN_FAILED
+        [ "$_wy_got" = "$_wy_want" ] \
+            && pass "…and a rationale carrying that form is refused as '$_wy_want'" \
+            || die "the $_wy_want form was classified '$_wy_got'; that guard could be deleted unnoticed"
+    done
+    rm -f "$_wy_gd"
+
     _wy_heads=""; _wy_hrc=0
     _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
     { [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ]; } \

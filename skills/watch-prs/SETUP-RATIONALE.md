@@ -43,7 +43,18 @@ So three things are forbidden here rather than parsed around, and each is a `gre
   Markdown renders nothing;
 - **every heading is `## ` followed by text.** `## ` alone reduces to an empty
   record that command substitution strips, and a bare `##` is a heading the scan
-  never sees — either way a section exists that no claim introduces.
+  never sees — either way a section exists that no claim introduces;
+- **no fence.** A section wrapped in one keeps its `## ` line while Markdown
+  renders the whole thing as code, so the two transcripts here are INDENTED by
+  four spaces instead;
+- **no setext underline.** Text followed by `---` is a level-two heading that
+  `^## ` cannot match, so an argument could sit here with no claim at all.
+
+Those are all of them. A heading can be hidden (a comment, a fence), faked
+(setext), or made unmatchable (`## ` alone, a bare `##`), and each is refused by
+one `grep` with its status taken — and by a staged document in the fixture, so a
+guard cannot be deleted unnoticed just because this file happens not to contain
+the form it refuses.
 
 ## THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
 
@@ -51,11 +62,9 @@ THE TRACE IS MOVED OFF THE CAPTURE, BEFORE ANY `$( )` RUNS. `BASH_XTRACEFD=1`
 sends xtrace to file descriptor 1 — and inside `X="$(cmd)"` fd 1 IS the capture,
 so the trace of `cmd` is assigned to `X` along with its output. Measured:
 
-```bash
-SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
-[++ printf hello
-hello]
-```
+    SHELLOPTS=xtrace BASH_XTRACEFD=1 bash -c 'X="$(printf hello)"; echo "[$X]"'
+    [++ printf hello
+    hello]
 
 Every substitution in this block is affected — the repository root, the plugin
 discovery, the `mktemp`, the `type -t` probe — so it is one property of the
@@ -658,10 +667,8 @@ THE EXPANSION IS FIRST, AND THAT ORDER IS THE WHOLE OF IT. `echo`
 is a NAME, and one that both forges a value and neuters `exit`
 walks straight past everything below it:
 
-```bash
-echo() { RB_REMOTE=git@github.com:attacker/other.git
-         exit() { return 0; }; }
-```
+    echo() { RB_REMOTE=git@github.com:attacker/other.git
+             exit() { return 0; }; }
 
 `echo` runs, the assignment has happened, `exit` returns, and
 `[[ -n "" ]]` ends this `if` list false — which is containment
