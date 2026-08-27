@@ -12,10 +12,14 @@ So the constructs that would make a `grep` lie are forbidden here rather than
 parsed around, and each is one `grep` with its status taken:
 
 - **every `## ` line is a claim.** A transcript line that would begin with `## ` is
-  indented by one space so it is not a heading;
+  indented by FOUR spaces, which makes it an indented code block rather than a
+  heading — one space would stop it being an ATX heading only up to three, and
+  four is what this file uses for code anyway;
 - **every heading is `## ` followed by text.** `## ` alone reduces to an empty
   record that command substitution strips, and a bare `##` is a heading the scan
   never sees — either way a section exists that no claim introduces;
+- **one `# ` title and no other.** A second top-level section would hold content
+  belonging to no claim at all;
 - **no raw HTML.** A comment can wrap a section and a block such as `<div>` can
   swallow one, and Markdown then renders neither as sections;
 - **no fence.** A section wrapped in one keeps its `## ` line while the whole thing

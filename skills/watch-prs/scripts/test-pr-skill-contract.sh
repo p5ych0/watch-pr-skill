@@ -5113,79 +5113,62 @@ if [ -f "$_wy_doc" ]; then
     # AN HTML COMMENT HIDES A SECTION: wrapping one in `<!-- -->` leaves its `## `
     # line matched, so every check passes while Markdown renders nothing. The
     # document has no use for them, so it may not contain one.
-    # NO RAW HTML AT ALL, not just no comment. `<!-- -->` hides a section, and so
-    # does any HTML BLOCK — `<div>` opens one that runs to the next blank line or
-    # beyond, and Markdown renders everything inside it as HTML rather than as
-    # sections. Refusing the comment alone left the block; refusing any line that
-    # starts with `<` closes both, and the document has no use for either.
-    _wy_htm=0; _wy_htm_rc=0
-    _wy_htm="$(grep -c '^[[:space:]]\{0,3\}<' "$_wy_doc")" || _wy_htm_rc=$?
-    [ "$_wy_htm_rc" -le 1 ] || die "the rationale could not be scanned for raw HTML (rc=$_wy_htm_rc)"
-    [ "$_wy_htm" -eq 0 ] \
-        && pass "…and the rationale opens no raw HTML, which could hide a section" \
-        || die "$_wy_htm lines in the rationale open raw HTML; a comment or a block can hide a section from every check here. Delete them."
+    # THE CONSTRUCTS THAT WOULD MAKE A `grep` LIE ARE FORBIDDEN, BY ONE FUNCTION
+    # the document and the staged cases below both call. Written twice — once as
+    # the check and once as the case — a guard could be deleted from the check
+    # while the case went on proving the copy, which is the defect this pull
+    # request has had in four different clothes.
     #
-    # AND A HEADING MUST HAVE TEXT. `## ` with nothing after it matches the scan
-    # and reduces to an empty record, which command substitution strips; a bare
-    # `##` is a heading Markdown renders and this scan never sees at all. Either
-    # way a section exists that no claim introduces, so both spellings are refused
-    # and the only permitted form is `## ` followed by text.
-    # THE FIRST SCAN'S STATUS SURVIVES. `grep -n … | grep -v …` reports only the
-    # second stage, so an unreadable document arrived as "no malformed headings".
-    # The lines are captured first and filtered after.
-    _wy_hash=""; _wy_hash_rc=0
-    _wy_hash="$(grep -n '^[[:space:]]\{0,3\}##' "$_wy_doc")" || _wy_hash_rc=$?
-    [ "$_wy_hash_rc" -le 1 ] || die "the rationale could not be scanned for headings (rc=$_wy_hash_rc)"
-    _wy_mal=""; _wy_mal_rc=0
-    _wy_mal="$(grep -v '^[0-9]*:## [^[:space:]]' <<<"$_wy_hash")" || _wy_mal_rc=$?
-    # AN INDENTED ATX HEADING IS ONE TOO: CommonMark allows up to three leading
-    # spaces, and both scans anchor at column zero — so `   ## Orphan` renders as a
-    # section and is invisible to every check. It is caught by the scan above,
-    # which now sees it, and refused by the filter here, which requires column zero.
-    [ "$_wy_mal_rc" -le 1 ] || die "the heading lines could not be filtered (rc=$_wy_mal_rc)"
-    [ -z "$_wy_hash" ] && _wy_mal=""
-    [ -z "$_wy_mal" ] \
-        && pass "…and every heading line is '## ' followed by text" \
-        || die "malformed heading lines in the rationale, which no claim can match: $_wy_mal"
-
-    # A FENCE HIDES A SECTION TOO: wrapping one in `~~~~` leaves its exact `## `
-    # line matched while Markdown renders the whole thing as code. The document
-    # uses INDENTED code for its two transcripts, so it needs no fence and may not
-    # contain one.
-    _wy_fen=0; _wy_fen_rc=0
-    _wy_fen="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$_wy_doc")" || _wy_fen_rc=$?
-    [ "$_wy_fen_rc" -le 1 ] || die "the rationale could not be scanned for fences (rc=$_wy_fen_rc)"
-    [ "$_wy_fen" -eq 0 ] \
-        && pass "…and no fence, which could render a whole section as code" \
-        || die "$_wy_fen fenced lines in the rationale; indent code by four spaces instead, so a fence cannot hide a section"
-
-    # AND A SETEXT UNDERLINE MAKES A HEADING THIS SCAN NEVER SEES: a line of text
-    # followed by `---` is a level-two heading Markdown renders and `^## ` cannot
-    # match, so an argument could exist here with no claim at all.
-    _wy_stx=0; _wy_stx_rc=0
-    _wy_stx="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$_wy_doc")" || _wy_stx_rc=$?
-    [ "$_wy_stx_rc" -le 1 ] || die "the rationale could not be scanned for setext underlines (rc=$_wy_stx_rc)"
-    [ "$_wy_stx" -eq 0 ] \
-        && pass "…and no setext underline, which would be a heading with no ## to find" \
-        || die "$_wy_stx setext underlines in the rationale; write headings as '## ' so the contract can see them"
-
-    # …AND ALL FIVE REFUSALS ARE STAGED, over a document this repository does not
-    # contain. Each guard exists because the form it refuses passes every other
-    # check, and none of those forms is in the rationale — so without staged input
-    # every one of them could be deleted with the suite staying green. The rule
-    # and the case use the same greps, spelled once here and applied to a file.
-    _wy_guard() {   # _wy_guard <file> ; prints the guard that refuses it, or ok
-        local f="$1" n
-        n="$(grep -c '^[[:space:]]\{0,3\}<' "$f")"                    || n=0
+    # EVERY STATUS IS TAKEN. `grep -c` reports 1 for "no match" and above that an
+    # error, so a bare `|| n=0` on any of these would turn an unreadable document
+    # into a clean answer — the exact shape these guards exist to refuse.
+    _wy_guard() {   # _wy_guard <file> ; prints html|fence|setext|malformed|scan|ok
+        local f="$1" n rc good titles
+        # RAW HTML, not merely a comment: `<!-- -->` hides a section and a block
+        # such as `<div>` swallows one; Markdown renders neither as sections.
+        rc=0; n="$(grep -c '^[[:space:]]\{0,3\}<' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
         [ "$n" -eq 0 ] || { printf html; return 0; }
-        n="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$f")"         || n=0
+        # A FENCE renders a whole section as code while its `## ` line still
+        # matches; the transcripts here are indented instead.
+        rc=0; n="$(grep -c '^[[:space:]]\{0,3\}\(```\|~~~\)' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
         [ "$n" -eq 0 ] || { printf fence; return 0; }
-        n="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$f")"  || n=0
+        # A SETEXT UNDERLINE makes a heading `^## ` cannot match at all.
+        rc=0; n="$(grep -cE '^[[:space:]]{0,3}(=+|-+)[[:space:]]*$' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
         [ "$n" -eq 0 ] || { printf setext; return 0; }
-        n="$(grep -n '^[[:space:]]\{0,3\}##' "$f" | grep -cv '^[0-9]*:## [^[:space:]]')" || n=0
-        [ "$n" -eq 0 ] || { printf malformed; return 0; }
+        # AND EVERY HASH LINE IS THE ONE TITLE OR A WELL-FORMED `## ` HEADING —
+        # which covers an indented heading, `## ` with nothing after it, a bare
+        # `##`, and a second `# ` section holding content no claim introduces.
+        # A HASH RUN IS A HEADING ONLY WHEN A SPACE OR END OF LINE FOLLOWS IT.
+        # `#161.` starting a wrapped line is an issue reference and renders as
+        # text — counting it made the guard refuse the document it guards.
+        rc=0; n="$(grep -cE '^[[:space:]]{0,3}#+([[:space:]]|$)' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
+        rc=0; good="$(grep -c '^\(# \|## \)[^[:space:]]' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
+        [ "$n" -eq "$good" ] || { printf malformed; return 0; }
+        rc=0; titles="$(grep -c '^# [^[:space:]]' "$f")" || rc=$?
+        [ "$rc" -le 1 ] || { printf scan; return 0; }
+        [ "$titles" -le 1 ] || { printf malformed; return 0; }
         printf ok
     }
+    _wy_verdict="$(_wy_guard "$_wy_doc")" || _wy_verdict=scan
+    case "$_wy_verdict" in
+        ok)        pass "…and the rationale is plain prose and indented code, as the contract needs" ;;
+        html)      die "the rationale opens raw HTML; a comment or a block can hide a section from every check here" ;;
+        fence)     die "the rationale carries a fence; indent code by four spaces so a fence cannot render a section as code" ;;
+        setext)    die "the rationale carries a setext underline; write headings as '## ' so the contract can see them" ;;
+        malformed) die "the rationale has a hash line that is neither its one title nor '## ' followed by text at column zero" ;;
+        *)         die "the rationale could not be scanned (verdict=$_wy_verdict)" ;;
+    esac
+
+    # …AND EVERY REFUSAL IS STAGED, over documents this repository does not
+    # contain, THROUGH THE SAME FUNCTION. Each guard exists because the form it
+    # refuses passes everything else, and none of those forms is in the rationale
+    # — so without staged input any of them could be deleted with the suite green.
+
     _wy_gd="$TMP_CL/rationale-forms.md"
     for _wy_form in 'html|<!--\n## A CLAIM.\n-->' \
                     'html|<div>\n## A CLAIM.\n</div>' \
@@ -5194,6 +5177,8 @@ if [ -f "$_wy_doc" ]; then
                     'malformed|## ' \
                     'malformed|   ## An indented heading' \
                     'malformed|##' \
+                    'malformed|# A second top-level section' \
+                    'ok|## A CLAIM.\n\nprose mentioning\n#161. as a wrapped reference' \
                     'ok|## A CLAIM.\n\nprose'; do
         _wy_want="${_wy_form%%|*}"
         printf '# doc\n\n' > "$_wy_gd"
