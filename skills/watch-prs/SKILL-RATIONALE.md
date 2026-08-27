@@ -1711,8 +1711,11 @@ A FILE HAS NO SUCH FAILURE, and it removes two more names with it. There is no
 capture, and there is no `sed` — which is a NAME, and one that prints a plausible
 forty hex and exits 0 sends `post` at whatever it says. Both stages take the same
 path, `gate` writes and `post` reads, and the value never enters this shell at all:
-what is checked here is only that the file is non-empty, which is a question about
-the file rather than about a name.
+what is checked here is that the file holds a COMMIT ID, which is a question about
+the file rather than about a name. Not merely that it is non-empty — the section
+below says why that is not enough — and not that it equals what `gate` reported,
+which the driver cannot know, since the record and the file are two claims and only
+one of them reaches this shell.
 
 It is the shape `pr-request-review.sh` uses for the review baseline and
 `pr-origin.sh` for the origin. A path rather than a name.
@@ -1733,13 +1736,18 @@ the condition's own, and each refusal ends in a reserved word.
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
 
-## AND THE HEAD IS PROVEN AN OID BEFORE THE REPLIES, which is the boundary that matters.
+## AND THE HEAD IS PROVEN AN OID AFTER EVERY OUTCOME, before the replies.
 
 The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
 status — and nothing reads it. What stops a driver whose `exit` has been replaced
-by a function that returns is not the arm it took but the STATE it is left in, and
-this is where that state is read: BEFORE the thread replies, which are the
-irreversible part. A resolve cannot be taken back.
+by a function that returns is not the arm it took but the STATE it is left in.
+
+AFTER THE `fi`, NOT INSIDE THE SUCCESS ARM. Placed in the success arm it is on the
+one path that does not need it: a refusal takes the `else`, and with `exit`
+returning, control leaves the `if` and reaches the replies having evaluated
+nothing. After the `fi` it is on every path out of the stage, which is what "the
+state decides" has to mean. The replies are the irreversible part, and a resolve
+cannot be taken back.
 
 NON-EMPTY IS NOT ENOUGH, and that is why this is a `case` rather than a `-s`.
 `gate` refuses a head file that IS the summary file, and it refuses BEFORE it

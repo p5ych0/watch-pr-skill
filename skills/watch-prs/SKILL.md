@@ -966,21 +966,10 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE HEAD IS PROVEN AN OID BEFORE THE REPLIES, which is the boundary that matters.
+# AND THE HEAD IS PROVEN AN OID AFTER EVERY OUTCOME, before the replies.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
-    case "$(<"$HEAD_FILE")" in
-        ????????????????????????????????????????)
-            case "$(<"$HEAD_FILE")" in
-                *[!0-9a-f]*)
-                    echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-                    exit 1
-                    [[ -n "" ]] ;;
-            esac ;;
-        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-            exit 1
-            [[ -n "" ]] ;;
-    esac
+    [[ -n "" ]]   # a reserved word, not `:` — nothing reads this arm's status
 else
     case $? in
         3) echo "Stopping here: the operator decides at a round boundary."
@@ -991,6 +980,18 @@ else
            [[ -n "" ]] ;;
     esac
 fi
+case "$(<"$HEAD_FILE")" in
+    ????????????????????????????????????????)
+        case "$(<"$HEAD_FILE")" in
+            *[!0-9a-f]*)
+                echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+                exit 1
+                [[ -n "" ]] ;;
+        esac ;;
+    *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+        exit 1
+        [[ -n "" ]] ;;
+esac
 ```
 
 **Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.

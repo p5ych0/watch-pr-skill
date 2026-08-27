@@ -35,10 +35,11 @@
 
   **A gate empties it before any other refusal can happen**, so every refusal leaves
   it empty rather than holding the previous round's head — and the driver's `post`
-  step proves the file holds a commit id **before the thread replies**, which is the
-  boundary that matters — a guard after them stops `post` and not the irreversible
-  resolve. The post step asks again, for a session that resumes into it with no
-  gate having run in its own shell.
+  step proves the file holds a commit id **after every outcome of the gate and before
+  the thread replies**, which is the boundary that matters — a guard after them stops
+  `post` and not the irreversible resolve, and one inside the gate's success arm is
+  on the only path that does not need it. The post step asks again, for a session
+  that resumes into it with no gate having run in its own shell.
 
   Not merely an empty file, either: the alias refusal below has to come BEFORE the
   emptying, or it would destroy the account it is protecting, so on that one path
