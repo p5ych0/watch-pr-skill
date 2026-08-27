@@ -5208,6 +5208,23 @@ _wy_stale="$(git -C "$ROOT" grep -lE 'docs/skill-setup-rationale|SETUP-RATIONALE
     || die "these name a path the rationale no longer has: $_wy_stale"
 
 
+# ── THE OPEN STAGE'S ORDERING IS NAMED BESIDE THE CALL ───────────────────────
+# The lift moved block 7's arguments into the rationale, which a driver reaches
+# only by following a pointer. This one decides WHICH review the request waits
+# for: with the Copilot baseline taken before the request, a pass landing in
+# between is accepted as the answer to a request made after it. `open` enforces
+# the order, and the claim beside the call is what stops a later session
+# reordering the stage without reading why it is that way — so the ordering is
+# in the claim rather than only behind the pointer.
+#
+# ONE ANCHORED SUBSTRING, no grammar. It asks whether the four steps are named
+# in that order on a line of `SKILL.md`, which is what the finding asked to pin;
+# it does not parse the block, and `CLAUDE.md` is explicit that a scanner is what
+# this contract must not grow.
+grep -qF 'revoke, prove, baseline, request' "$SKILL" \
+    && pass "the open stage's ordering is named beside the call, not only in the rationale" \
+    || die "block 7 no longer names the revoke/prove/baseline/request order; a reordering would read as ordinary"
+
 # ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
 #
 # The guards above were removed on the operator's instruction, and a removal has

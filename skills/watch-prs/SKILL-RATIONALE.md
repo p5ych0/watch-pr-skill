@@ -1253,7 +1253,7 @@ to the builtins, and the block's status is the last signal left. It is the same
 containment the setup block's abort arms use, reached by the same argument: an
 `exit` that returns is not a refusal.
 
-## THE PHASE IS PROVED STILL OPEN BEFORE ANYTHING IS TOUCHED, three times over.
+## PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 
 `open` proves three things, and all three are needed because NONE of them requires
 the head to move:

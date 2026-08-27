@@ -1313,7 +1313,7 @@ way — the signoff is on the PR, so a later session reads it back with
 # ── ONLY ON (b) ────────────────────────────────────────────────────────────
 # Everything here runs when the operator has asked for the Copilot phase, and only
 # then.
-# THE PHASE IS PROVED STILL OPEN BEFORE ANYTHING IS TOUCHED, three times over.
+# PROVED STILL OPEN THREE TIMES, AND THE ORDER IS revoke, prove, baseline, request.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 OPEN_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-copilot-phase.sh open N "$CODEX_SHA" 2>&1)"; OPEN_RC=$?
 printf '%s\n' "$OPEN_OUT"
