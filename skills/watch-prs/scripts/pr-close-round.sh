@@ -2,8 +2,12 @@
 # Close a review round: push the fixes, prove the head is green, post the summary
 # and request the next pass.
 #
-#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no>
-#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <gated-head>
+#   pr-close-round.sh gate <pr> <reviewer-login> <summary-file> <auto-review: yes|no> <head-file>
+#   pr-close-round.sh post <pr> <reviewer-login> <summary-file> <auto-review> <head-file>
+#
+# BOTH STAGES TAKE THE SAME <head-file>: `gate` writes the head it proved into it,
+# `post` reads it back. The head itself in that position is the pre-#202 form and
+# is refused by name.
 #
 #   0  gated/closed — `gate`: the head is pushed and green, and the threads may
 #                     now be answered. `post`: the summary is posted and the next
@@ -104,6 +108,44 @@ fi
 
 set -uo pipefail
 
+# ── THE STALE HEAD IS CLEARED BEFORE THE BOOTSTRAP, not after the arguments are
+# parsed. Everything below this — the library loads, the identity, the argument
+# validation — can refuse, and a refusal that happens before the file is emptied
+# leaves the PREVIOUS round's OID in it. The driver proves the head before it
+# resolves any thread, so a stale OID passing that proof is a resolve on a round
+# that never gated. Measured: emptying an inline `recordlib.sh` makes this stage
+# exit at `reason=recordlib_empty`, which is above every line that parses `$5`.
+#
+# WITH NOTHING BUT RESERVED WORDS AND A REDIRECTION, because no library has been
+# loaded yet and none is needed. It is deliberately BEFORE `shift`, so `$1` is the
+# stage and `$6` is the head file.
+#
+# ONLY A FILE THAT ALREADY EXISTS, and only a path with a `/` in it. A shape test
+# here would be a second copy of the rule `recordlib.sh` owns — `sha_reason` is not
+# loaded yet, so there would be no way to ask it — and the pre-#202 form puts the
+# head ITSELF in that position. A commit id contains no `/`, and every head file
+# this loop names is a path under the session's working directory, so the slash
+# tells the two apart without knowing what an OID looks like. Without it, a file
+# named after a sha in the current directory would be truncated by a call that is
+# about to be refused for passing the old form.
+#
+# AND NOT THE SUMMARY, because truncating a head file that IS the summary destroys
+# the account this stage is about to post. That refusal is below too, and this must
+# not commit the damage it exists to prevent.
+#
+# AND THE TRUNCATION'S STATUS IS TAKEN. A head file that cannot be truncated — its
+# permissions changed, its filesystem gone read-only — keeps the PREVIOUS round's
+# OID, and a bootstrap refusal after that leaves exactly the state this block
+# exists to prevent. Refusing here is safe in a way it is not further down: nothing
+# has been loaded, nothing pushed, nothing posted.
+if [[ ${1:-} = gate ]] && [[ -n ${6:-} ]] && [[ -f ${6} ]] && [[ ${6} = */* ]] \
+   && [[ -n ${4:-} ]] && [[ ! ${6} -ef ${4} ]]; then
+    > "${6}" || {
+        echo "ABORT: the head file '${6}' exists and cannot be emptied; a stale head would be left for the driver to accept."
+        exit 1
+    }
+fi
+
 _RB_SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" || {
     echo "ABORT: reason=lib_dir_unresolvable"; exit 1; }
 unset -f rb_load 2>/dev/null || { echo "ABORT: reason=loadlib_stale_definition"; exit 1; }
@@ -168,7 +210,70 @@ case "$STAGE" in
 esac
 shift
 
-PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; GATED_HEAD="${5:-}"
+PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"
+# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
+# stages take the same path: `gate` writes the head it proved into it, and `post`
+# reads it back out. The value never enters the driving shell.
+#
+# IT WAS A STRING, AND THAT IS WHAT #202 WAS. The driver captured `gate`'s output,
+# `sed`ed the head out of the record and assigned it — `GATED_HEAD="$( … )"`, an
+# ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+# pushed. A startup file that has made that name readonly fails it there: with
+# `errexit` the shell ends, and without it the name keeps whatever it held, so the
+# non-empty check passes on a seeded value and `post` is handed a head the gate
+# never reported. `CLAUDE.md` records that an assignment's status cannot be taken,
+# so a `||` on it catches nothing.
+#
+# A FILE HAS NO SUCH FAILURE, and it removes two more names with it: the driver no
+# longer needs a capture, and it no longer needs `sed` — which is a NAME, and one
+# that prints a plausible forty hex and exits 0 sends `post` at whatever it says.
+# It is the shape `pr-request-review.sh` uses for the review baseline and
+# `pr-origin.sh` for the origin: a path rather than a name.
+#
+# THE OLD FORM IS REFUSED BY NAME rather than ignored, because a caller still
+# passing the sha would have `gate` try to create a file called `a8ec960…` and
+# `post` try to read one — the first would succeed and the second would fail with a
+# reason about the file rather than about the caller.
+[ -n "$HEAD_FILE" ] \
+    || { echo "ABORT: a head file is required: 'gate' writes the head it proved into it and 'post' reads it back."; exit 1; }
+if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
+    echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
+    exit 1
+fi
+# AND IT IS NOT THE SUMMARY. `gate` reads the summary and then writes the head, so
+# one file serving as both means the head OVERWRITES the account: `post` then finds
+# a well-formed OID in the summary file, passes the non-empty test, and posts the
+# sha as this round's summary to the reviewer that reads it before the diff.
+#
+# BOTH IDENTITIES, because neither covers the other. Equal strings catch the plain
+# case, including before either file exists; `-ef` catches a hard link or a symlink,
+# which is the same file under two names and is what an operator with a tidy
+# scratch directory can produce by accident.
+if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+    echo "ABORT: the head file and the summary file are the same file ('$HEAD_FILE'); the head would overwrite the account and be posted as this round's summary."
+    exit 1
+fi
+# AND A GATE EMPTIES IT BEFORE ANY OTHER REFUSAL CAN HAPPEN — before the PR number
+# and the reviewer are validated, and before the summary is read — so that EVERY
+# refusal but the aliased one leaves it empty rather than holding the PREVIOUS
+# round's head. It sat below all of those and was reached by none of them: a
+# readonly `WHO` holding an invalid reviewer, or a library that would not load, left
+# a stale OID in place for a driver to accept. That is what lets
+# the driver's `post` step guard on the file being non-empty and have the guard
+# mean something: the STATE says whether a gate succeeded, rather than the driver's
+# obedience to an ordering.
+#
+# A STALE HEAD PASSES THE DRIVER'S GUARD, which is what makes the position matter
+# rather than being tidiness: it is refused only later, by `post`'s own re-proof —
+# after the threads have been resolved, which cannot be taken back.
+#
+# THE ALIAS CHECK STAYS AHEAD OF IT, and that ordering is forced: truncating a head
+# file that IS the summary destroys the account this stage is about to post. The
+# driver asks the file identity first for the same reason.
+if [ "$STAGE" = gate ]; then
+    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
+fi
+
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
@@ -324,24 +429,6 @@ case "$AUTO_REVIEW" in
 esac
 if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
 
-# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, and it is required in exactly
-# one of them. `post` without it has nothing to check the working tree against and
-# would summarise whatever happens to be there; `gate` given one is a caller that
-# believes it is running the other half, which is worth refusing rather than
-# quietly ignoring.
-case "$STAGE" in
-    post)
-        [ -n "$GATED_HEAD" ] \
-            || { echo "ABORT: 'post' needs the head 'gate' reported, so the summary is about the commit that was proven."; exit 1; }
-        _why="$(sha_reason "$GATED_HEAD")" \
-            || { echo "ABORT: the gated head is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
-        ;;
-    gate)
-        [ -z "$GATED_HEAD" ] \
-            || { echo "ABORT: 'gate' takes no head — it reports one (got '$GATED_HEAD')."; exit 1; }
-        ;;
-esac
-
 # THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read
 # still produced a successful `gh pr comment` — and the reviewer contract makes the
@@ -398,6 +485,24 @@ if [ "$STAGE" = gate ]; then
     esac
 fi
 
+report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then reports it
+    # THE WRITE COMES FIRST AND ITS STATUS IS TAKEN. `printf` can fail on a full
+    # filesystem, and a record printed after an unchecked write leaves `post`
+    # reading a truncated or absent value while the driver has already been told
+    # the round was gated. Reporting only after the write means the record and the
+    # file agree or neither exists.
+    #
+    # IT IS NOT READ BACK HERE, and that is deliberate. `post` reads this file and
+    # validates what it finds with `sha_reason` before anything is posted, so a
+    # write that succeeded on a file that holds something else is caught there —
+    # by the stage that depends on it, at no cost, and on the read that matters. A
+    # second check here would be a branch no fixture can stage.
+    printf '%s\n' "$1" > "$HEAD_FILE" \
+        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read."; return 1; }
+    echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
+    return 0
+}
+
 request_review() {   # request_review ; posts the summary and asks for the pass
     # THE BASELINE IS READ IMMEDIATELY BEFORE THE REQUEST, never earlier. A
     # baseline captured before the push accepts a pass that FINISHED during the CI
@@ -436,6 +541,15 @@ $SUMMARY" \
 
 if [ "$STAGE" = post ]; then
     # ── THE THREADS ARE ANSWERED; CLOSE THE ROUND ──────────────────────────
+    # THE GATED HEAD COMES OUT OF THE FILE `gate` WROTE, with a redirection rather
+    # than a command: `$(<file)` is handled by the parser, so there is no `cat` to
+    # shadow. An unreadable or empty file is a refusal, not an empty head — this
+    # runs before anything is posted, so a refusal here costs a rerun of `post`
+    # and nothing else.
+    GATED_HEAD="$(<"$HEAD_FILE")" \
+        || { echo "ABORT: could not read the gated head from '$HEAD_FILE'; run 'gate' first."; exit 1; }
+    _why="$(sha_reason "$GATED_HEAD")" \
+        || { echo "ABORT: the gated head read back from '$HEAD_FILE' is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
     # THE HEAD IS RE-PROVEN RATHER THAN ASSUMED. Answering threads takes as long
     # as it takes, and a commit made in between — an afterthought fix, an amend —
     # leaves the summary describing one commit while the reviewer reads another.
@@ -466,7 +580,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     rb_push_is_the_prs || exit 1
     git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
-    echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
+    report_gated "$HEAD_PUSHED" || exit 1
     exit 0
 fi
 
@@ -551,5 +665,5 @@ if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     esac
 fi
 
-echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=$_MODE"
+report_gated "$HEAD_AFTER" || exit 1
 exit 0

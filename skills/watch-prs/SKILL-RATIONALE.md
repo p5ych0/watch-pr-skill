@@ -1083,9 +1083,9 @@ probe reports empty because no child was asked, and `"" = ""` SUCCEEDS — so
 setup announced success with no `REVIEW_BUS_REMOTE` at all, and every later
 stage derived its identity from wherever the session happened to stand.
 
-## THE SESSION'S THREE WORKING FILES COME FROM ONE ALLOCATION.
+## THE SESSION'S FOUR WORKING FILES COME FROM ONE ALLOCATION.
 
-THE SESSION'S THREE WORKING FILES, FROM ONE ALLOCATION. Files rather than
+THE SESSION'S FOUR WORKING FILES, FROM ONE ALLOCATION. Files rather than
 shell variables: the text is long, contains backticks and quotes, and passing
 it inline mangles it — and the baseline comes back in one because a variable is
 a name a startup file can have made readonly, which `pr-origin.sh` settled the
@@ -1093,13 +1093,15 @@ same way. Freshly created per PR and per session, because a reused path is how
 a stale summary from another round — or another PR — gets posted as if it were
 this one's.
 
-ONE DIRECTORY, AND THE THREE PATHS DERIVED FROM IT. Three `mktemp` calls made
-them three separate answers, and `mktemp` is a NAME: a function returning the
-same existing empty path each time passes every validation and leaves all three
+ONE DIRECTORY, AND THE FOUR PATHS DERIVED FROM IT. Four `mktemp` calls would make
+them four separate answers, and `mktemp` is a NAME: a function returning the
+same existing empty path each time passes every validation and leaves all four
 ALIASED. Writing the opening account would then populate the round-summary
 file, and a first round that missed its own summary write would post that
 account as the summary and request another pass — the exact regression the
-separate files exist to prevent. Derived by literal suffixes there is nothing to
+separate files exist to prevent. `pr-close-round.sh` refuses the head file and the
+summary file being one file for the same reason, from the other end: there the
+head would overwrite the account and be posted as the round summary. Derived by literal suffixes there is nothing to
 make equal: the distinctness is in the source, not in what a command returned.
 
 AND NO `mktemp` AT ALL, WHICH IS THE SAME ANSWER THE TRANSPORT DIRECTORY ABOVE
@@ -1108,7 +1110,7 @@ shell's own, so nothing runs and a driving shell tracing to fd 1 has nothing to
 write into the value. `mkdir` IS THE EXCLUSION: it fails if the name exists, so
 an account on this machine that guesses the name gets nothing rather than a
 file this session then writes through, and `-m 700` is applied by `mkdir`
-itself, so all three files inherit that protection rather than each needing its
+itself, so all four files inherit that protection rather than each needing its
 own. It runs through `/usr/bin/env` for the reason every other command in this
 block does.
 
@@ -1683,18 +1685,168 @@ shell without `export` also reaches a function and not a child process, so readi
 it from the environment would give the script a silent default — and the default
 answer is a round closed on a mode nobody chose.
 
-## THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
+## THE GATED HEAD TRAVELS IN A FILE, and this is where it lands.
 
-`gate` runs as a child process, so it cannot set a variable here however it is
-invoked. It says what the value was, in its success record, and this reads it back
-out of that record.
+The fourth working file, alongside the summary, the opening account and the review
+baseline. It is created empty at setup like the others, so `post` reading it before
+any `gate` has run finds nothing rather than something stale.
 
-WHAT THAT DOES NOT BUY IS ASSIGNMENT SAFETY, and saying otherwise was wrong: the
-read-back is itself `GATED_HEAD="$( … )"`, so a startup file that has already made
-that name readonly fails it here exactly as it would have failed a direct capture —
-after `gate` has pushed. `pr-request-review.sh`'s baseline avoids that by writing to
-a FILE and proving the read-back against it; this one does not, and the difference
-is that there the assignment precedes the mutation and here it follows one.
+It is named here, in the one place the session's paths are chosen and proved
+against their literals, rather than by whichever step happens to need it first —
+which is what makes it a path the driver can hand to both stages without either of
+them agreeing on a convention.
+
+## THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
+
+It was a string, and that is what #202 was. The driver captured `gate`'s output,
+`sed`ed the head out of the record, and assigned it — `GATED_HEAD="$( … )"`, an
+ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+pushed. A startup file that has made that name readonly fails it there: with
+`errexit` on the shell ends, and without it the name keeps whatever it held, so the
+non-empty check passes on a seeded value and `post` is handed a head the gate never
+reported. `CLAUDE.md` records that an assignment's status cannot be taken, so a
+`||` on it catches nothing.
+
+A FILE HAS NO SUCH FAILURE, and it removes two more names with it. There is no
+capture, and there is no `sed` — which is a NAME, and one that prints a plausible
+forty hex and exits 0 sends `post` at whatever it says. Both stages take the same
+path, `gate` writes and `post` reads, and the value never enters this shell at all:
+what is checked here is that the file holds a COMMIT ID, which is a question about
+the file rather than about a name. Not merely that it is non-empty — the section
+below says why that is not enough — and not that it equals what `gate` reported,
+which the driver cannot know, since the record and the file are two claims and only
+one of them reaches this shell.
+
+It is the shape `pr-request-review.sh` uses for the review baseline and
+`pr-origin.sh` for the origin. A path rather than a name.
+
+WHAT THE DRIVER STILL CANNOT PROVE is that the file holds what `gate` reported —
+and it does not have to. `post` reads it and validates what it finds against
+`sha_reason` before anything is posted, so a truncated or corrupted file stops the
+round at the stage that depends on it, at the cost of a rerun. Checking it twice
+would be a branch no fixture can stage.
+
+## AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
+
+`GATE_OUT="$( … )"` captured everything the stage printed so that a `sed` could
+lift the head back out of it. Both halves are gone: the head travels in a file, and
+what the stage prints goes straight to the operator, which is where a reason
+belongs.
+
+A capture is also an assignment made AFTER the push, which is the defect this whole
+change is about, reached by the other road.
+
+## AND NO NAME HOLDS ITS STATUS EITHER.
+
+`; GATE_RC=$?` and a `case` on it: a readonly `GATE_RC` keeps its old value, so the
+`case` branched on a status from another round. Run as a condition there is no
+status variable at all, and `$?` in the `else` arm is the condition's own, read
+before anything can change it.
+
+WHAT NEITHER BUYS IS CONTAINMENT, and the claim used to say otherwise. With `exit`
+replaced by a function that returns, the `else` arm's `exit` returns, the trailing
+reserved word leaves the completed `if` with status 1, and execution carries on
+after the `fi`. Nothing consumes that status. What follows the `fi` is the head
+proof, which refuses on every path that is not a proven success — and after THAT is
+prose, which no shell construct reaches.
+
+## AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
+
+`gate` refuses an aliased head file BEFORE it clears anything — it has to, or the
+refusal would destroy the account it is protecting — so on that one path the file
+is left holding the summary.
+
+THE IDENTITY IS ASKED FIRST, and the content test is its success arm. A summary
+that IS forty lowercase hex characters, a commit id someone pasted on a line of its
+own, satisfies the content test exactly, and is the one summary that can. `-ef`
+answers what the content cannot, and it answers it about the two paths this session
+chose rather than about what is in them.
+
+ONE DECISION RATHER THAN TWO STATEMENTS. Written as a guard above the content test,
+a shadowed `exit` that returns would walk from the identity refusal straight into
+the arm that accepts.
+
+WHERE THE INVARIANT IS ACTUALLY ESTABLISHED is the setup block: the four working
+paths are derived from one directory by DISTINCT literal suffixes and each is read
+back against its own literal, so in the documented flow they cannot be the same
+file. This is defence for a path that allocation already excludes, which is why it
+costs one reserved-word test and no lookup.
+
+## AND ITS CONTENT IS PROVEN A COMMIT ID.
+
+Not merely non-empty. Every refusal other than the aliased one leaves the file
+EMPTY — `gate` empties it before any other refusal can happen, and writes it only
+on success — so an empty file is already the ordinary evidence that no gate
+succeeded. Asking for a commit id also covers the aliased path, where the file
+holds the summary.
+
+A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
+name is a second name a startup file can seed, and a seeded pattern accepting a
+seeded value is a check that agrees with itself; `case` is a reserved word and
+these patterns are in the source. The forty-character test and the hex test are
+separate arms because one glob cannot say both.
+
+WHAT IT CANNOT PROVE is that the file holds what `gate` REPORTED. The record and
+the file are two claims and only one of them reaches this shell. A file that was
+written truthfully and then changed by something else would pass; `post` re-proves
+the head against the local HEAD and the PR before it posts, which is where that is
+caught.
+
+## AND BOTH ARE PROVEN BEFORE THE REPLIES, which are the irreversible part.
+
+A resolve cannot be taken back. Resolving before the head is proven records this
+round's findings as answered on a commit that may never have landed, and with
+automatic review on the pass the push started reads threads already marked
+resolved with no summary saying what resolved them.
+
+AFTER THE `fi`, NOT INSIDE THE GATE'S SUCCESS ARM. Placed there it is on the one
+path that does not need it: a refusal takes the `else`, and with `exit` replaced by
+a function that returns, control leaves the `if` having evaluated nothing. After
+the `fi` it is on every path out of the stage.
+
+THE GATE'S SUCCESS ARM IS TRUE, and `[[ -n x ]]` rather than `[[ -n "" ]]`. Under
+`errexit` a false statement in a `then` BODY ends the shell — the exemption is for
+a command run as a CONDITION, and this is not one — so the successful path would
+have died after the push and before the replies. `:` would also be true, and is a
+name; a reserved word that is true is both.
+
+A SHADOWED `echo` COSTS THE MESSAGE, NOT THE REFUSAL, and that is ACCEPTED. The
+refusal is the arm being taken and the head not being proven; the `echo` only says
+why.
+
+MAKING THE SHELL WRITE IT WAS TRIED TWICE AND COST MORE EACH TIME. A `${…:?}`
+expansion needs a name to expand, and the name is the operator's to seed:
+`declare -i RB_HEAD_BAD=1` makes the clear store `0`, so the expansion never fires
+and the guard is decoration. Proving the clear with `[[ -z … ]]` fixes that and
+opens a worse door — `declare -n RB_HEAD_BAD=BASH_XTRACEFD` makes the CLEAR itself
+write through the nameref and close the operator's stdout, so the refusal is not
+merely silent, it has damaged the shell it was protecting.
+
+SO THE SCRATCH NAME IS GONE. A defence against a shadowable name that introduces a
+seedable name is not a defence, and the second attempt was worse than the first.
+The residue is the same one #26 names: in a shell with `echo` shadowed and `exit`
+returning, the arm is taken, nothing is printed, and control reaches the prose. It
+closes when this code lives in a `.sh` file, and not before.
+
+WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
+They are PROSE, in a Markdown document, between two fences — so a driver whose
+`exit` returns can read them whatever the fence above did. That is issue #26, and
+the answer to it is moving this code into `.sh` files rather than another guard.
+What holds meanwhile: every path takes a refusal arm and prints it unless `echo`
+has been shadowed, `post` asks the content question again and refuses, so no
+summary is posted and no pass requested, and the allocation the paths come from
+cannot produce the aliased case at all.
+
+## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
+
+The check that matters is the one before the replies; this one is for the other
+way in. A later session — tomorrow, another machine — resumes at the post step
+with no gate having run in ITS shell, and the head file is whatever the last one
+left. The same question is the right question there, and the answer costs nothing.
+
+It is a deliberate second copy rather than a rule with two callers, because the
+two guard different boundaries: one stops a walked-past refusal from reaching an
+irreversible resolve, and this one stops a post that never had a gate at all.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 

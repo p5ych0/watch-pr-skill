@@ -1,5 +1,67 @@
 # Changelog
 
+## [2.0.73] — 2026-08-27
+
+- **The gated head travelled through an assignment made after the push.** Closing a
+  round is two stages with the thread replies between them, and the head `gate`
+  proved had to reach `post`. The driver captured `gate`'s output, `sed`ed the head
+  out of the record and assigned it — `GATED_HEAD="$( … )"`, in the operator's own
+  long-lived shell, **after `gate` had already pushed**.
+
+  A startup file that has made that name readonly fails it there. With `errexit` on
+  the shell ends; without it the name keeps whatever it held, the non-empty check
+  passes on that seeded value, and `post` is handed a head the gate never reported —
+  which it then proves the working tree against, and refuses, leaving a pushed
+  commit and no round closed. `CLAUDE.md` records that an assignment's status cannot
+  be taken, so the `||` beside it caught nothing.
+
+  **The head travels in a file now, and never enters the driving shell.** Both
+  stages take the same path as their fifth argument: `gate` writes the head it
+  proved into it, `post` reads it back and validates it before anything is posted.
+  The old form — the head itself in that position — is refused by name on both
+  stages, because a caller still passing it would have `gate` create a file named
+  after an OID and `post` fail with a reason about a missing file rather than about
+  the caller.
+
+  That removes two more names with it. There is no capture and no `sed` — a name
+  that prints a plausible forty hex and exits 0 would have sent `post` at whatever
+  it said. The stage runs as a condition, so there is no status variable either,
+  and each refusal ends in a reserved word.
+
+  `$HEAD_FILE` is the fourth working file, created empty at setup beside the
+  summary, the opening account and the review baseline. The contract now exercises
+  all four names under a hostile shell, which the three that predate this change had
+  never been.
+
+  **A gate empties it before the bootstrap**, above the library loads and the
+  argument validation, so every refusal but one
+  leaves it empty rather than holding the previous round's head — the alias refusal
+  below has to stay ahead of the truncation, since truncating a head file that IS
+  the summary destroys the account — and the driver's `post`
+  step proves the file holds a commit id **after every outcome of the gate and before
+  the thread replies**, which is the boundary that matters — a guard after them stops
+  `post` and not the irreversible resolve, and one inside the gate's success arm is
+  on the only path that does not need it. The post step asks again, for a session
+  that resumes into it with no gate having run in its own shell.
+
+  Not merely an empty file, either: the alias refusal below has to come BEFORE the
+  emptying, or it would destroy the account it is protecting, so on that one path
+  the file is left holding the summary. The identity is asked FIRST and the shape
+  test is its success arm — a summary that IS forty lowercase hex characters, a
+  commit id someone pasted on a line of its own, satisfies the shape test exactly,
+  and is the one summary that can. The shape test itself is a literal pattern in a
+  `case` rather than a regex in a name a startup file could seed. That is what stops a walked-past refusal: the thread
+  replies sit between the two stages and are not shell at all, so no `if` can span
+  them, and what a driver whose `exit` returns meets at the next step is the STATE
+  rather than an ordering it was told to respect.
+
+  **And the head file may not be the summary file.** `gate` reads the summary and
+  then writes the head, so one file serving as both means the head overwrites the
+  account — and `post` finds a well-formed OID there, passes the non-empty test, and
+  posts the sha as this round's summary to the reviewer that reads it before the
+  diff. Both identities are refused: the same path, and a link, which is the same
+  file under two names. Closes #202.
+
 ## [2.0.72] — 2026-08-27
 
 - **Block 5's argument is out of `SKILL.md`, and it is the last block.** *Fix, then
