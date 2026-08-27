@@ -480,13 +480,13 @@ WHO="$CODEX_BOT"
 # as a record, or an `@codex review` on the automatic path, is refused rather than
 # published. `$REQUEST_FILE` was created empty at setup and an empty body is
 # refused, so a write that does not happen stops the request.
-# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION.
+# THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if { ( PRIOR_REVIEW="RbProbe$$$RANDOM$RANDOM"; [[ $PRIOR_REVIEW = RbProbe* ]] \
                     && [[ -z ${!PRIOR_REVIEW:-} ]] ) \
      || { echo "ABORT: PRIOR_REVIEW is readonly or value-transforming in this shell; the review baseline cannot be read back, and nothing has been posted."; [[ -n "" ]]; }; }
 then
-    # THE REQUEST IS A SCRIPT, AND ITS ANSWER GOES TO A FILE RATHER THAN A NAME.
+    # THE REQUEST IS A SCRIPT, RUN AS A CONDITION, WITH ITS ANSWER IN A FILE AND THE CONTINUATION IN ITS SUCCESS ARM.
     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
     if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-request-review.sh N "$AUTO_REVIEW" < "$REQUEST_FILE" > "$PRIOR_FILE"; then
         PRIOR_REVIEW="$(<"$PRIOR_FILE")"

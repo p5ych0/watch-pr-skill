@@ -1428,7 +1428,7 @@ the final `exit` the block reports success for a blocked, paused or queued merge
 and whatever runs it next carries on as though the PR had landed. The distinction
 the gate exists to draw survives only if it is passed on.
 
-## THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION.
+## THE NAME IS PROVEN ASSIGNABLE BEFORE THE MUTATION, IN A SUBSHELL, AS A CONDITION WHOSE SUCCESS ARM HOLDS THE REQUEST.
 
 BEFORE THE MUTATION, because nothing after one can undo it. The read-back further
 down is a simple command: with `errexit` on and `PRIOR_REVIEW` already readonly it
@@ -1457,7 +1457,7 @@ gives the `if` a false status that nothing consumes — so execution reached the
 request and posted it anyway, which is the state these probes exist to prevent.
 Only containment excludes it.
 
-## THE REQUEST IS A SCRIPT, AND ITS ANSWER GOES TO A FILE RATHER THAN A NAME.
+## THE REQUEST IS A SCRIPT, RUN AS A CONDITION, WITH ITS ANSWER IN A FILE AND THE CONTINUATION IN ITS SUCCESS ARM.
 
 THE REQUEST IS A SCRIPT. It was eighteen lines here that nothing executed, and what
 they do is post the comment that — on the manual path — IS the review request. It
