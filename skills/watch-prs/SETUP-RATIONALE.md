@@ -25,8 +25,25 @@ defect that was shipped, found and paid for. Before changing a line the block
 guards, read the section its claim names — the shape almost always looks
 gratuitous until you do.
 
-`test-pr-skill-contract.sh` fails if a `# WHY:` points at a section that is not here,
-or if a section here is pointed at by nothing.
+**Three constraints on this file, because the contract uses `grep` and not a parser.**
+
+`test-pr-skill-contract.sh` compares the claims and the headings as exact strings.
+It fails if a `# WHY:` names a claim that is not a heading here, or if a heading
+here is named by no claim, or if either side carries a duplicate. It has no
+Markdown parser, deliberately — an earlier version grew one to tell a real heading
+from a fenced `## example`, and then needed tilde fences, indented fences, info
+strings, HTML comments and their ordering; `CLAUDE.md` records what a text scanner
+of that kind cost this repository once already.
+
+So three things are forbidden here rather than parsed around, and each is a `grep`:
+
+- **every `## ` line is a claim.** A transcript line that would begin with `## ` is
+  indented by one space so it is not a heading;
+- **no HTML comment.** One can wrap a section and hide it from every check while
+  Markdown renders nothing;
+- **every heading is `## ` followed by text.** `## ` alone reduces to an empty
+  record that command substitution strips, and a bare `##` is a heading the scan
+  never sees — either way a section exists that no claim introduces.
 
 ## THE TRACE IS MOVED OFF THE CAPTURE BEFORE ANY `$( )` RUNS, or xtrace lands inside the value.
 

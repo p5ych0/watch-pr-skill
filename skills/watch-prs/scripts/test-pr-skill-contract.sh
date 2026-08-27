@@ -5107,6 +5107,31 @@ if [ -f "$_wy_doc" ]; then
     # 3. THE HEADINGS, by exact prefix and nothing else. Every `## ` line in the
     #    rationale is a claim — that is the constraint replacing the parser, and
     #    the failure says how to satisfy it.
+    # …AND THE TWO CONSTRUCTS THAT WOULD MAKE A `grep` LIE ARE FORBIDDEN, which is
+    # how the parser-free design stays honest.
+    #
+    # AN HTML COMMENT HIDES A SECTION: wrapping one in `<!-- -->` leaves its `## `
+    # line matched, so every check passes while Markdown renders nothing. The
+    # document has no use for them, so it may not contain one.
+    _wy_htm=0; _wy_htm_rc=0
+    _wy_htm="$(grep -c '<!--' "$_wy_doc")" || _wy_htm_rc=$?
+    [ "$_wy_htm_rc" -le 1 ] || die "the rationale could not be scanned for HTML comments (rc=$_wy_htm_rc)"
+    [ "$_wy_htm" -eq 0 ] \
+        && pass "…and the rationale contains no HTML comment, which could hide a section" \
+        || die "$_wy_htm HTML comments in the rationale; one can hide a section from every check here. Delete them."
+    #
+    # AND A HEADING MUST HAVE TEXT. `## ` with nothing after it matches the scan
+    # and reduces to an empty record, which command substitution strips; a bare
+    # `##` is a heading Markdown renders and this scan never sees at all. Either
+    # way a section exists that no claim introduces, so both spellings are refused
+    # and the only permitted form is `## ` followed by text.
+    _wy_mal=""; _wy_mal_rc=0
+    _wy_mal="$(grep -n '^##' "$_wy_doc" | grep -v '^[0-9]*:## [^[:space:]]')" || _wy_mal_rc=$?
+    [ "$_wy_mal_rc" -le 1 ] || die "the rationale could not be scanned for malformed headings (rc=$_wy_mal_rc)"
+    [ -z "$_wy_mal" ] \
+        && pass "…and every heading line is '## ' followed by text" \
+        || die "malformed heading lines in the rationale, which no claim can match: $_wy_mal"
+
     _wy_heads=""; _wy_hrc=0
     _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
     { [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ]; } \
