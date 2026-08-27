@@ -5107,13 +5107,19 @@ if [ -f "$_wy_doc" ]; then
     # breaks on every refactor is not. Found once that way, in review, which is the
     # disposition this assumes.
     _wy_float=0
+    #
+    # THE CLOSING LINE IS TESTED ON `prev` AS WELL AS ON `pend`, and that is not
+    # belt and braces. The fence-close rule runs BEFORE the body rule that sets
+    # `pend`, so a pair whose pointer is the LAST line of the fence never sets it —
+    # which is the most obvious way to write a pair that annotates nothing, and the
+    # first version of this check passed against exactly that.
     _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; pend=0; next}
-       f && /^```$/{ if (pend) n++
+       f && /^```$/{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++
                      f=0; prev=""; pend=0; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/) pend=1
            if (pend && $0 !~ /^[[:space:]]*#/ && NF > 0) pend=0
            prev=$0 }
-       END{ if (pend) n++; print n+0 }' "$SKILL")" || _wy_float=99
+       END{ if (pend || prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
     [ "$_wy_float" -eq 0 ] \
         && pass "…and every claim and pointer has code after it before its fence closes" \
         || die "$_wy_float claim/pointer pairs annotate nothing; no code follows them in their fence"
