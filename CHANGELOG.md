@@ -27,7 +27,15 @@
   headings, so deleting a section's argument while leaving its heading passed every
   check. One `awk`, no grammar: a heading with nothing but blank lines under it is
   a failure. It does not ask whether an argument is still complete — that is a
-  judgement, it is the reviewer's, and both reviewer files now say so. Closes #198.
+  judgement, it is the reviewer's, and both reviewer files now say so.
+
+  **Both new branches are staged, accept and reject.** `_wy_contract` only ever ran
+  on pairs that PASS, so every refusing branch was unexercised — which is how the
+  relaxed check shipped accepting the case it exists for. Five synthetic pairs now
+  put stacked claims and a usage table through it and expect acceptance, and a
+  pointer with no code after it, a pointer as a fence's last line, and an emptied
+  section and expect refusal. Reverting either half of the fence-close condition
+  turns one of them red. Closes #198.
 
 ## [2.0.70] — 2026-08-27
 
