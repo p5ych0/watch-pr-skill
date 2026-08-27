@@ -4995,16 +4995,271 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
     && pass "…and each element must actually carry a bucket string" \
     || die "the checks jq does not validate the bucket records"
 
+# ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
+#
+# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 31
+# sections, ~17k tokens that used to be read on every invocation of a skill whose
+# reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
+# complete line, then a `# WHY:` naming the document.
+#
+# THE SEPARATION IS THE RISK, AND THIS IS WHAT PAYS FOR IT. `CLAUDE.md` records
+# that a comment arguing against the code beside it is an instruction and will be
+# followed; moving the argument away from the code weakens exactly that. A claim
+# whose argument has gone leaves the next session deleting a shape for looking
+# gratuitous.
+#
+# SO WHAT IS CHECKED IS THE BIJECTION, by exact string comparison and nothing
+# else: every claim beside the code has a section, every section has a claim,
+# neither side repeats, and the totals agree. The rationale's own Markdown shape
+# is NOT checked — see the note further down for what that gives up and why two
+# answers to it were removed rather than extended.
+# THE CHECK IS A FUNCTION SO A STAGED PAIR CAN BE PUT THROUGH THE REAL ONE. It
+# takes the two paths and nothing else; the caller below runs it on the shipped
+# files, and then on a staged rationale carrying the shapes this deliberately no
+# longer rejects. Both go through the same code, which is the only way the second
+# run says anything about the first.
+_wy_contract() {
+local SKILL="$1"
+local _wy_doc="$2"
+local _wy_all _wy_all_rc _wy_bad_ptr _wy_bp_rc _wy_stale _wy_st_rc
+local _wy_claims _wy_rc _wy_n _wy_sent_rc _wy_float _wy_heads _wy_hrc
+local _wy_cdupe _wy_cd_rc _wy_hdupe _wy_h _wy_heads_n _wy_bad _wy_c
+if [ -f "$_wy_doc" ]; then
+    # 1. EVERY MENTION, however malformed — the denominator nothing may shrink
+    #    silently — and every one well formed, in the setup fence, under a claim,
+    #    and annotating code. One equality closes a filename typo, a stray
+    #    character, a pointer moved to another fence, and a pointer under code.
+    _wy_all=0; _wy_all_rc=0
+    _wy_all="$(grep -c '# WHY:' "$SKILL")" || _wy_all_rc=$?
+    [ "$_wy_all_rc" -le 1 ] || die "SKILL.md could not be scanned for pointers (rc=$_wy_all_rc)"
+    [ "$_wy_all" -gt 0 ] \
+        && pass "the setup block points at its rationale ($_wy_all pointers)" \
+        || die "no # WHY: pointers in SKILL.md; the rationale is unreachable from the code"
+
+    # THE POINTER NAMES THE INSTALLED PLUGIN, not a path relative to wherever the
+    # driver happens to be standing — the shell stays in the project under review
+    # — and not `$CLAUDE_PLUGIN_ROOT`, which is UNSET in setup's second discovery
+    # mode. `RB_SCRIPTS` is set and validated in both.
+    _wy_bad_ptr=0; _wy_bp_rc=0
+    _wy_bad_ptr="$(grep -c '# WHY: \(docs/\|\$CLAUDE_PLUGIN_ROOT\)' "$SKILL")" || _wy_bp_rc=$?
+    [ "$_wy_bp_rc" -le 1 ] || die "SKILL.md could not be scanned for unresolvable pointers (rc=$_wy_bp_rc)"
+    [ "$_wy_bad_ptr" -eq 0 ] \
+        && pass "…and none resolves from the working directory or an unset plugin root" \
+        || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
+    [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
+        && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
+        || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
+
+    # …AND NO LAYER STILL NAMES THE OLD PATH under `docs/`. Through `git grep`,
+    # whose status is the one this needs: 0 found, 1 not found, above that an
+    # error. `git ls-files | xargs grep` reports 123 on the ordinary no-match, and
+    # `grep -r` over the tree reaches untracked scratch.
+    _wy_stale=""; _wy_st_rc=0
+    _wy_stale="$(git -C "$ROOT" grep -lF 'docs/skill-setup-rationale' -- '*.md' 2>/dev/null)" || _wy_st_rc=$?
+    [ "$_wy_st_rc" -le 1 ] \
+        || die "the checkout's documents could not be scanned for the old path (rc=$_wy_st_rc)"
+    [ -z "$_wy_stale" ] \
+        && pass "…and nothing still names its old path under docs/" \
+        || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
+
+    # 2. THE CLAIMS, from the setup fence alone, each paired with the pointer
+    #    beneath it. The status is taken: fed straight into a comparison, a failed
+    #    `awk` yields nothing and every check below passes vacuously.
+    _wy_claims=""; _wy_rc=0
+    _wy_claims="$(awk '/^## Derive identity$/{sec=1}
+       sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
+       f && /^```$/{f=0; sec=0; next}
+       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SETUP-RATIONALE\.md$/) {
+               if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
+               else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
+           prev=$0 }' "$SKILL")" || _wy_rc=$?
+    [ "$_wy_rc" -eq 0 ] \
+        || die "the claim list could not be built (rc=$_wy_rc); pointer rot would go unchecked"
+    _wy_n=0; _wy_n="$(grep -c . <<<"$_wy_claims")" || _wy_n=0
+    [ "$_wy_n" -eq "$_wy_all" ] \
+        && pass "…and all $_wy_all sit under a claim, in the setup block, in the documented form" \
+        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside the setup block, or not under a claim"
+    _wy_sent_rc=0
+    grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" || _wy_sent_rc=$?
+    case "$_wy_sent_rc" in
+        0) die "a # WHY: pointer follows code rather than the claim it belongs to" ;;
+        1) pass "…each directly under the claim it belongs to" ;;
+        *) die "the claim list could not be scanned for the sentinel (rc=$_wy_sent_rc)" ;;
+    esac
+
+    # …AND EVERY PAIR ANNOTATES CODE, so it sits ON something rather than floating
+    # in a comment block. What this does not catch is a pair moved from one code
+    # line to ANOTHER inside the fence: the pair is intact and still annotates
+    # code, it is annotating the wrong code. Catching that means the fixture
+    # knowing which line each claim belongs to, which couples the contract to the
+    # block's shape — every legitimate refactor of setup would then fail it. A
+    # relocated claim is visible in the diff as code losing its annotation; a
+    # contract that breaks on every refactor is not. Found once that way, in
+    # review, which is the disposition this assumes.
+    _wy_float=0
+    _wy_float="$(awk '/^## Derive identity$/{sec=1}
+       sec && /^```bash$/ && !seen {f=1; seen=1; next}
+       f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++
+                     f=0; sec=0; next }
+       f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
+           prev=$0 }
+       END{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
+    [ "$_wy_float" -eq 0 ] \
+        && pass "…and every claim and pointer sits on a line of code" \
+        || die "$_wy_float claim/pointer pairs annotate a comment or a blank line rather than code"
+
+    # 3. THE HEADINGS, by exact prefix and nothing else: every `## ` line in the
+    #    rationale is taken as a claim, and the failure says how to satisfy it.
+    #
+    # WHAT THE RATIONALE'S OWN SHAPE IS NOT CHECKED FOR, AND WHY IT STOPPED BEING.
+    #
+    # The heading list below comes from `grep '^## '`, and Markdown can make that
+    # lie: a comment or a fence hides a section, a setext underline makes one this
+    # cannot match, an indented `## ` is a heading at column three, and `## ` alone
+    # is a heading with no text. Each was caught in review here, and each was
+    # answered — first with a parser, then with five greps forbidding the forms.
+    #
+    # BOTH ANSWERS GREW WITHOUT CONVERGING. The parser needed fenced code, tilde
+    # fences, indented fences, info strings, HTML comments and their ordering; the
+    # greps then needed HTML blocks, indented headings, a second title, and a hash
+    # run that is not a heading at all. Twelve rounds, and the next construct was
+    # always one round away. `CLAUDE.md` records the shape and the 2,200-line
+    # scanner it cost this repository once already.
+    #
+    # SO IT IS NOT CHECKED, ON THE OPERATOR'S INSTRUCTION, and what remains is the
+    # BIJECTION: every claim beside the code has a section, every section has a
+    # claim, neither side repeats, and the totals agree. All exact string
+    # comparison, no grammar anywhere.
+    #
+    # WHAT THAT GIVES UP: a rationale edited so that a heading is hidden or faked.
+    # That is a person mangling a document — visible in the diff as the mangling
+    # it is — and it is not the rot the separation risks, which is a claim and its
+    # argument drifting apart. Every one of those forms was found by a reviewer
+    # READING the file, which is the disposition this now assumes.
+
+
+    _wy_heads=""; _wy_hrc=0
+    _wy_heads="$(grep '^## ' "$_wy_doc" | sed 's/^## //')" || _wy_hrc=$?
+    { [ "$_wy_hrc" -eq 0 ] && [ -n "$_wy_heads" ]; } \
+        || die "the rationale's headings could not be read (rc=$_wy_hrc); an orphaned section would pass"
+
+    # 4. BIJECTION. No claim twice, no heading twice, every claim a heading, every
+    #    heading a claim, and the totals equal. Five string comparisons.
+    _wy_cdupe=""; _wy_cd_rc=0
+    _wy_cdupe="$(sort <<<"$_wy_claims" | uniq -d)" || _wy_cd_rc=$?
+    { [ "$_wy_cd_rc" -eq 0 ] && [ -z "$_wy_cdupe" ]; } \
+        && pass "…and no claim is made at two sites, so the mapping is one to one" \
+        || die "a claim is made at two sites (rc=$_wy_cd_rc): '$_wy_cdupe'; a relocation between them would be invisible"
+    _wy_hdupe=""; _wy_hdupe="$(sort <<<"$_wy_heads" | uniq -d)" || _wy_hdupe="THE_SCAN_FAILED"
+    [ -z "$_wy_hdupe" ] \
+        && pass "…and no two sections carry the same claim" \
+        || die "two sections carry the same claim, so one is unreachable: '$_wy_hdupe'"
+    while IFS= read -r _wy_h; do
+        [ -n "$_wy_h" ] || continue
+        grep -qxF "$_wy_h" <<<"$_wy_claims" \
+            || die "the rationale has a '## ' line that no claim matches: '$_wy_h'. Every one must be a claim; indent a transcript line by four spaces so it is not a heading."
+    done <<EOWH
+$_wy_heads
+EOWH
+    pass "…and every '## ' line in the rationale is one of them"
+    _wy_heads_n=0; _wy_heads_n="$(grep -c . <<<"$_wy_heads")" || _wy_heads_n=0
+    [ "$_wy_all" -eq "$_wy_heads_n" ] \
+        && pass "…and the block's $_wy_all claims match the rationale's $_wy_heads_n arguments" \
+        || die "$_wy_all claims against $_wy_heads_n arguments; one was added or dropped without the other"
+    _wy_bad=0
+    while IFS= read -r _wy_c; do
+        [ -n "$_wy_c" ] || continue
+        grep -qxF "## $_wy_c" "$_wy_doc" \
+            || { die "no section for the claim '$_wy_c'; it is asserted beside the code and argued nowhere"
+                 _wy_bad=$((_wy_bad + 1)); }
+    done <<EOWY
+$_wy_claims
+EOWY
+    [ "$_wy_bad" -eq 0 ] \
+        && pass "…so every claim beside the code has its argument" \
+        || die "$_wy_bad claims have no section"
+else
+    die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
+fi
+}
+
+_wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
+
+# ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
+#
+# The guards above were removed on the operator's instruction, and a removal has
+# no witness: the shipped rationale carries none of the forms they rejected, so
+# re-adding any one of them would leave this file green while the decision above
+# had been reversed.
+#
+# So a STAGED rationale carries all five, and the contract must ACCEPT it. It is
+# the shipped document plus an HTML comment, a heading indented to column three,
+# a setext-underlined heading, a bare `##` and a fenced block — chosen because
+# none of them changes what `grep '^## '` matches, so the bijection is untouched
+# and the only thing that can reject this pair is a guard that came back.
+#
+# THE FENCE IS THE EMPTY-OF-HEADINGS KIND, and that distinction is the whole of
+# why it is here. A fence carrying a column-zero `## example` needs no guard:
+# `grep` DOES match it, so it becomes a 32nd heading with no claim and the
+# bijection rejects it unaided — staging that one would assert the opposite. A
+# fence with no such line inside changes nothing the bijection can see, so the
+# deleted delimiter guard is the only thing that ever rejected it, and without it
+# staged the guard could come back green.
+#
+# The staged run's own `ok` lines are captured rather than printed — it is one
+# assertion, not a second copy of the suite — and `die` sets a flag rather than
+# exiting, so what is looked for is a `FAIL - ` line in what it wrote.
+_wy_stage=""
+_wy_stage="$(mktemp_d)" || { die "no scratch directory for the staged-rationale probe"; _wy_stage=""; }
+if [ -n "$_wy_stage" ]; then
+cp "$SKILL" "$_wy_stage/SKILL.md" || die "the staged skill could not be written"
+cp "$SCRIPT_DIR/../SETUP-RATIONALE.md" "$_wy_stage/doc.md" \
+    || die "the staged rationale could not be written"
+cat >>"$_wy_stage/doc.md" <<'EOSTAGE'
+
+<!-- an HTML comment, which one removed guard rejected outright -->
+
+  ## a heading at column three, which `^## ` does not match
+
+A setext heading, which has no hash run at all
+---
+
+##
+
+```text
+a fenced transcript, whose delimiter one removed guard rejected; nothing in
+it begins a line with a hash, so `^## ` matches exactly what it did before
+```
+EOSTAGE
+_wy_staged=""
+_wy_staged="$(_wy_contract "$_wy_stage/SKILL.md" "$_wy_stage/doc.md" 2>&1)" \
+    || _wy_staged="FAIL - the staged run ended non-zero: $_wy_staged"
+case "$_wy_staged" in
+    *"FAIL - "*) die "a rationale-shape guard has come back; the staged pair was rejected: $_wy_staged" ;;
+    *)           pass "…and a rationale using the accepted shapes still passes, so the removal holds" ;;
+esac
+# …and the tree is given back. Safe unquoted-free only because `mktemp_d` is the
+# definition of a path that was actually created, and the `if` above is what
+# stops this running on an empty one.
+rm -rf "$_wy_stage"
+fi
+
 # ── the identity parser rejects transports that reach no GitHub server ─────
-# `SKILL.md` carries its own copy of the parser, and it is the copy the driver
-# runs. `test-pr-identity.sh` can execute the three scripts' copies but not this
-# one, so the structural assertion is what covers it.
+# The rule is `identitylib.sh`'s and `test-identitylib.sh` executes it. What is
+# asserted here is that the DRIVER's own documentation says so, because a reader
+# who does not know the refusal exists writes a remote the parser will reject and
+# has nothing to read about why.
+#
+# IN THE RATIONALE DOCUMENT, NOT IN `SKILL.md`. That argument moved out of the
+# setup block with the rest of the block's `# WHY:` material; the assertion moved
+# with it rather than being dropped, which is the coupling this file is here to
+# keep honest.
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"
-grep -q 'reaches no GitHub server' "$SKILL" \
+grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SETUP-RATIONALE.md" \
     && pass "…and refuses the rest rather than guessing a host" \
-    || die "SKILL.md has no rejection path for an unsupported transport"
+    || die "the rationale has no rejection path for an unsupported transport"
 
 # ── acknowledging a check-in takes the gate's status, and names the reviewer ─
 # The acknowledgement is the one place the driver records the OPERATOR's

@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.0.67] — 2026-08-26
+
+- **`SKILL.md` is 41% smaller, and no line of its code changed.** The document was
+  ~42k tokens, read whenever the skill is invoked. 26k of that was commentary
+  inside the bash fences, and 19k of it belonged to one block: **Derive identity**,
+  1265 fenced lines carrying 174 executable ones.
+
+  That commentary is the argument for why setup has the shape it has — each
+  paragraph a defect that was shipped, found and paid for. It now lives in
+  `SETUP-RATIONALE.md` beside it, thirty-one sections, reached from the block by
+  a `# WHY:` line naming `$RB_SCRIPTS/../SETUP-RATIONALE.md`. Not a bare relative
+  path, because the driving shell stays in the project under review and `docs/…`
+  there names that project's documentation; and not `$CLAUDE_PLUGIN_ROOT`, which
+  is unset in setup's second discovery mode. `RB_SCRIPTS` is set and validated in
+  both. **The claim stays beside
+  the code**: every section opens with
+  the same sentence that remains in the block, so the argument reads whole from
+  either end and a reader still meets the point at the line it protects.
+
+  Nothing executable moved: the block is the same 174 lines, byte for byte, checked
+  mechanically rather than by eye. `test-pr-skill-contract.sh` changed — it is what
+  lifts and executes the block, and it gained the checks that keep the claims and
+  their arguments from drifting apart — but no case that runs the block was
+  altered to accommodate the move.
+
+  **Why the claim could not move with it.** This repository records that a comment
+  arguing against the code beside it is an instruction, and it will be followed —
+  which is exactly what has stopped later sessions "simplifying" these shapes back
+  into regressions. Separating the argument from the code weakens that, so the
+  claim stays and only the evidence leaves.
+
+  **And the separation is watched.** `test-pr-skill-contract.sh` fails if a `# WHY:`
+  names a section that is not there, if a section is pointed at by nothing — the
+  rot that goes unnoticed, because nothing reading the skill would reach it — or if
+  a pointer drifts off the claim it belongs to. One assertion moved with the prose
+  it was reading rather than being dropped.
+
+  What it does **not** check is the rationale's own Markdown shape. A parser and
+  then a set of `grep`s forbidding the constructs that make a `grep` lie were both
+  built and both removed: each attracted the next construct without converging, and
+  `CLAUDE.md` records what a scanner of that kind cost this repository once already.
+  So `SETUP-RATIONALE.md` asks for plain prose and four-space-indented transcripts
+  rather than enumerating what is forbidden, and the contract is the bijection and
+  nothing else — exact string comparison, no grammar anywhere. What that gives up
+  is a document edited so a heading is hidden or faked, which is visible in a diff
+  as the mangling it is, and is not the drift the split risks.
+
+  Closes #192 for this block. The remaining blocks hold ~7k tokens between them and
+  are not touched here.
+
 ## [2.0.66] — 2026-08-25
 
 - **The one-line origin check matched a newline followed by four spaces, not a
