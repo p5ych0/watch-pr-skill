@@ -2575,12 +2575,19 @@ gates="$(grep -cE '^(if ! )?"\$RB_SCRIPTS"/pr-ci-gate\.sh N ' "$SKILL")" || gate
 [ -x "$SCRIPT_DIR/pr-close-round.sh" ] \
     && pass "the round-closer ships" \
     || die "the round-closer is missing"
-grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW"' "$SKILL" \
+grep -q 'pr-close-round.sh gate N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE"' "$SKILL" \
     && pass "…and the recipe gates on the mode this PR is actually in" \
-    || die "the recipe does not run the gate with \$AUTO_REVIEW"
-grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$GATED_HEAD"' "$SKILL" \
-    && pass "…and posts against the head the gate proved" \
-    || die "the recipe does not post with the gated head"
+    || die "the recipe does not run the gate with \$AUTO_REVIEW and the head file"
+# BOTH STAGES ARE GIVEN THE SAME PATH, and that is the whole of the handoff since
+# #202: `gate` writes the head it proved into it and `post` reads it back, so the
+# value never enters the driving shell. A recipe that passed a captured head here
+# would be back to an assignment made after the push.
+grep -q 'pr-close-round.sh post N "\$WHO" "\$SUMMARY_FILE" "\$AUTO_REVIEW" "\$HEAD_FILE"' "$SKILL" \
+    && pass "…and posts against the head file the gate wrote" \
+    || die "the recipe does not post with the head file"
+grep -q 'GATED_HEAD=' "$SKILL" \
+    && die "the driver assigns GATED_HEAD again; the head is meant to travel in a file (#202)" \
+    || pass "…and the driver holds the head in no name of its own"
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script
@@ -2599,7 +2606,7 @@ grep -qE 'pr-close-round\.sh (gate|post) N "\$WHO" "\$SUMMARY_FILE" (yes|no)' "$
 # `grep` in a command substitution ABORTS THE WHOLE FILE, so a document that
 # dropped the very line being checked killed the run instead of failing it: no
 # FAIL, no RESULT, and a caller grepping for failures saw none.
-_gate_ln="$(grep -n '^GATE_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
+_gate_ln="$(grep -n '^if /usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh gate N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
 _res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_gate_ln" ] && [ -n "$_post_ln" ] && [ -n "$_res_ln" ] \

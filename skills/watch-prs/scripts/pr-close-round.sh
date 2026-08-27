@@ -168,7 +168,7 @@ case "$STAGE" in
 esac
 shift
 
-PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; GATED_HEAD="${5:-}"
+PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
@@ -324,23 +324,35 @@ case "$AUTO_REVIEW" in
 esac
 if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
 
-# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, and it is required in exactly
-# one of them. `post` without it has nothing to check the working tree against and
-# would summarise whatever happens to be there; `gate` given one is a caller that
-# believes it is running the other half, which is worth refusing rather than
-# quietly ignoring.
-case "$STAGE" in
-    post)
-        [ -n "$GATED_HEAD" ] \
-            || { echo "ABORT: 'post' needs the head 'gate' reported, so the summary is about the commit that was proven."; exit 1; }
-        _why="$(sha_reason "$GATED_HEAD")" \
-            || { echo "ABORT: the gated head is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
-        ;;
-    gate)
-        [ -z "$GATED_HEAD" ] \
-            || { echo "ABORT: 'gate' takes no head — it reports one (got '$GATED_HEAD')."; exit 1; }
-        ;;
-esac
+# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
+# stages take the same path: `gate` writes the head it proved into it, and `post`
+# reads it back out. The value never enters the driving shell.
+#
+# IT WAS A STRING, AND THAT IS WHAT #202 WAS. The driver captured `gate`'s output,
+# `sed`ed the head out of the record and assigned it — `GATED_HEAD="$( … )"`, an
+# ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+# pushed. A startup file that has made that name readonly fails it there: with
+# `errexit` the shell ends, and without it the name keeps whatever it held, so the
+# non-empty check passes on a seeded value and `post` is handed a head the gate
+# never reported. `CLAUDE.md` records that an assignment's status cannot be taken,
+# so a `||` on it catches nothing.
+#
+# A FILE HAS NO SUCH FAILURE, and it removes two more names with it: the driver no
+# longer needs a capture, and it no longer needs `sed` — which is a NAME, and one
+# that prints a plausible forty hex and exits 0 sends `post` at whatever it says.
+# It is the shape `pr-request-review.sh` uses for the review baseline and
+# `pr-origin.sh` for the origin: a path rather than a name.
+#
+# THE OLD FORM IS REFUSED BY NAME rather than ignored, because a caller still
+# passing the sha would have `gate` try to create a file called `a8ec960…` and
+# `post` try to read one — the first would succeed and the second would fail with a
+# reason about the file rather than about the caller.
+[ -n "$HEAD_FILE" ] \
+    || { echo "ABORT: a head file is required: 'gate' writes the head it proved into it and 'post' reads it back."; exit 1; }
+if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
+    echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
+    exit 1
+fi
 
 # THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read
@@ -398,6 +410,24 @@ if [ "$STAGE" = gate ]; then
     esac
 fi
 
+report_gated() {   # report_gated <head> ; writes the head to $HEAD_FILE, then reports it
+    # THE WRITE COMES FIRST AND ITS STATUS IS TAKEN. `printf` can fail on a full
+    # filesystem, and a record printed after an unchecked write leaves `post`
+    # reading a truncated or absent value while the driver has already been told
+    # the round was gated. Reporting only after the write means the record and the
+    # file agree or neither exists.
+    #
+    # IT IS NOT READ BACK HERE, and that is deliberate. `post` reads this file and
+    # validates what it finds with `sha_reason` before anything is posted, so a
+    # write that succeeded on a file that holds something else is caught there —
+    # by the stage that depends on it, at no cost, and on the read that matters. A
+    # second check here would be a branch no fixture can stage.
+    printf '%s\n' "$1" > "$HEAD_FILE" \
+        || { echo "ABORT: could not write the gated head to '$HEAD_FILE'; 'post' would have nothing to read."; return 1; }
+    echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$1 mode=$_MODE"
+    return 0
+}
+
 request_review() {   # request_review ; posts the summary and asks for the pass
     # THE BASELINE IS READ IMMEDIATELY BEFORE THE REQUEST, never earlier. A
     # baseline captured before the push accepts a pass that FINISHED during the CI
@@ -436,6 +466,15 @@ $SUMMARY" \
 
 if [ "$STAGE" = post ]; then
     # ── THE THREADS ARE ANSWERED; CLOSE THE ROUND ──────────────────────────
+    # THE GATED HEAD COMES OUT OF THE FILE `gate` WROTE, with a redirection rather
+    # than a command: `$(<file)` is handled by the parser, so there is no `cat` to
+    # shadow. An unreadable or empty file is a refusal, not an empty head — this
+    # runs before anything is posted, so a refusal here costs a rerun of `post`
+    # and nothing else.
+    GATED_HEAD="$(<"$HEAD_FILE")" \
+        || { echo "ABORT: could not read the gated head from '$HEAD_FILE'; run 'gate' first."; exit 1; }
+    _why="$(sha_reason "$GATED_HEAD")" \
+        || { echo "ABORT: the gated head read back from '$HEAD_FILE' is not a full OID ($_why: '$GATED_HEAD')."; exit 1; }
     # THE HEAD IS RE-PROVEN RATHER THAN ASSUMED. Answering threads takes as long
     # as it takes, and a commit made in between — an afterthought fix, an amend —
     # leaves the summary describing one commit while the reviewer reads another.
@@ -466,7 +505,7 @@ if [ "$AUTO_REVIEW" = no ]; then
     rb_push_is_the_prs || exit 1
     git push origin "$RB_PUSH_REFSPEC" || { echo "ABORT: push failed; the fixes are not on the PR."; exit 1; }
     /usr/bin/env bash -p "$_RB_SELF_DIR"/pr-ci-gate.sh "$PR" "$HEAD_PUSHED" || exit 1
-    echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_PUSHED mode=$_MODE"
+    report_gated "$HEAD_PUSHED" || exit 1
     exit 0
 fi
 
@@ -551,5 +590,5 @@ if [ "$WHO" != "$COPILOT_BOT" ] && [ "$PUSH_FROM" != "$HEAD_AFTER" ]; then
     esac
 fi
 
-echo "PR_ROUND_GATED pr=$PR reviewer=$WHO head=$HEAD_AFTER mode=$_MODE"
+report_gated "$HEAD_AFTER" || exit 1
 exit 0

@@ -381,23 +381,28 @@ if [[ -z $RB_REMOTE ]]; then
                 # either branch running, so a refusal falls through into the wait. A plain
                 # command with its output redirected has no assignment to fail.
                 PRIOR_FILE="$RB_WORK_DIR/prior.txt"
+                # THE GATED HEAD TRAVELS IN A FILE, and this is where it lands.
+                # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+                HEAD_FILE="$RB_WORK_DIR/head.txt"
                 # READ BACK AGAINST THE LITERALS, and again as a CONDITION whose body is the
                 # work: this is what catches a readonly name still pointing somewhere else,
                 # and it has to exclude the writes rather than merely precede them.
                 if [[ $SUMMARY_FILE = "$RB_WORK_DIR/summary.md" ]] \
                    && [[ $REQUEST_FILE = "$RB_WORK_DIR/request.md" ]] \
-                   && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]]
+                   && [[ $PRIOR_FILE = "$RB_WORK_DIR/prior.txt" ]] \
+                   && [[ $HEAD_FILE = "$RB_WORK_DIR/head.txt" ]]
                 then
                     # THE WORKING FILES ARE CREATED EMPTY BY REDIRECTION ALONE, so there is no command name to shadow.
                     # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-                    > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE"
+                    > "$SUMMARY_FILE" ; > "$REQUEST_FILE" ; > "$PRIOR_FILE" ; > "$HEAD_FILE"
                     # AND THE COMPLETION LINE IS THE INNERMOST SUCCESS ARM. It is how the
                     # driver knows setup finished, so every refusal above has to be unable to
                     # REACH it — and with `exit` replaced by a function that returns, "the
                     # abort ran" does not mean "the line did not". Only containment does.
                     if [[ -f "$SUMMARY_FILE" ]] && [[ ! -s "$SUMMARY_FILE" ]] \
                        && [[ -f "$REQUEST_FILE" ]] && [[ ! -s "$REQUEST_FILE" ]] \
-                       && [[ -f "$PRIOR_FILE" ]] && [[ ! -s "$PRIOR_FILE" ]]; then
+                       && [[ -f "$PRIOR_FILE" ]] && [[ ! -s "$PRIOR_FILE" ]] \
+                       && [[ -f "$HEAD_FILE" ]] && [[ ! -s "$HEAD_FILE" ]]; then
                         echo "OWNER=$OWNER REPO=$REPO RB_SCRIPTS=$RB_SCRIPTS SUMMARY_FILE=$SUMMARY_FILE"
                     else
                         echo "ABORT: the session's working files were not created empty under $RB_WORK_DIR"
@@ -405,7 +410,7 @@ if [[ -z $RB_REMOTE ]]; then
                         [[ -n "" ]]
                     fi
                 else
-                    echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE and PRIOR_FILE is readonly in this shell; the session's working paths cannot be set"
+                    echo "ABORT: one of SUMMARY_FILE, REQUEST_FILE, PRIOR_FILE and HEAD_FILE is readonly in this shell; the session's working paths cannot be set"
                     exit 1
                     [[ -n "" ]]
                 fi
@@ -925,8 +930,11 @@ Both orderings live in the script, which takes `$AUTO_REVIEW` rather than a
 hard-coded answer — one recipe here, two orders there:
 
 ```bash
-#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW"
-#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD"
+#   pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"
+#   pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"
+#
+# `gate` writes the head it proved into `$HEAD_FILE`; `post` reads it back out.
+# The same path both times, and the value never enters this shell.
 #
 #     0  gated (`gate`) / closed (`post`)
 #     1  stopped  — the reason is on stdout; the round is NOT closed
@@ -954,19 +962,25 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # `$AUTO_REVIEW` IS PASSED, NOT WRITTEN IN.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-GATE_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" 2>&1)"; GATE_RC=$?
-printf '%s\n' "$GATE_OUT"
-case "$GATE_RC" in
-    0) ;;
-    3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
-    *) echo "The round did not close, and nothing has been resolved or posted. The reason is above; do not retry it blind."; exit "$GATE_RC" ;;
-esac
-# THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
+# THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-GATED_HEAD="$(printf '%s\n' "$GATE_OUT" \
-    | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p')"
-[ -n "$GATED_HEAD" ] \
-    || { echo "ABORT: the gate reported no head; there is nothing to hold the summary to."; exit 1; }
+# AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
+    [[ -s "$HEAD_FILE" ]] \
+        || { echo "ABORT: the gate reported success but wrote no head to $HEAD_FILE; there is nothing to hold the summary to."
+             exit 1
+             [[ -n "" ]]; }
+else
+    case $? in
+        3) echo "Stopping here: the operator decides at a round boundary."
+           exit 3
+           [[ -n "" ]] ;;
+        *) echo "The round did not close, and nothing has been resolved or posted. The reason is above; do not retry it blind."
+           exit 1
+           [[ -n "" ]] ;;
+    esac
+fi
 ```
 
 **Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.
@@ -978,7 +992,7 @@ Then, and only then:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
+POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE" 2>&1)"; ROUND_RC=$?
 printf '%s\n' "$POST_OUT"
 # THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md

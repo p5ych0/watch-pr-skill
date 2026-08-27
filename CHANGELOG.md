@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.73] — 2026-08-27
+
+- **The gated head travelled through an assignment made after the push.** Closing a
+  round is two stages with the thread replies between them, and the head `gate`
+  proved had to reach `post`. The driver captured `gate`'s output, `sed`ed the head
+  out of the record and assigned it — `GATED_HEAD="$( … )"`, in the operator's own
+  long-lived shell, **after `gate` had already pushed**.
+
+  A startup file that has made that name readonly fails it there. With `errexit` on
+  the shell ends; without it the name keeps whatever it held, the non-empty check
+  passes on that seeded value, and `post` is handed a head the gate never reported —
+  which it then proves the working tree against, and refuses, leaving a pushed
+  commit and no round closed. `CLAUDE.md` records that an assignment's status cannot
+  be taken, so the `||` beside it caught nothing.
+
+  **The head travels in a file now, and never enters the driving shell.** Both
+  stages take the same path as their fifth argument: `gate` writes the head it
+  proved into it, `post` reads it back and validates it before anything is posted.
+  The old form — the head itself in that position — is refused by name on both
+  stages, because a caller still passing it would have `gate` create a file named
+  after an OID and `post` fail with a reason about a missing file rather than about
+  the caller.
+
+  That removes two more names with it. There is no capture and no `sed` — a name
+  that prints a plausible forty hex and exits 0 would have sent `post` at whatever
+  it said. The stage runs as a condition, so there is no status variable either,
+  and each refusal ends in a reserved word.
+
+  `$HEAD_FILE` is the fourth working file, created empty at setup beside the
+  summary, the opening account and the review baseline — so a `post` run before any
+  `gate` finds nothing rather than something stale. Closes #202.
+
 ## [2.0.72] — 2026-08-27
 
 - **Block 5's argument is out of `SKILL.md`, and it is the last block.** *Fix, then

@@ -178,8 +178,14 @@ stage() {   # stage <stage> [args…] ; prints "<rc>|<output>" for ONE stage
         "$DIR/pr-close-round.sh" "$st" "$@" 2>&1)" || rc=$?
     printf '%s|%s' "$rc" "$out"
 }
-gated_head() {   # gated_head <gate output> ; the head the gate reported
-    printf '%s\n' "$1" | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p'
+# THE HEAD FILE IS THE HANDOFF, since #202. `gate` writes the head it proved into
+# the path it is given and `post` reads it back, so the fixture hands both stages
+# the same path rather than lifting the head out of the record — which is exactly
+# what the driver no longer does.
+HEADF="$TMP/head.txt"
+headf() {   # headf [value] ; puts it in the head file and prints the path
+    printf '%s\n' "${1-}" > "$HEADF"
+    printf '%s' "$HEADF"
 }
 # A WHOLE ROUND, THE WAY THE DRIVER RUNS IT: gate, then the thread replies, then
 # post. The replies are the reason this is two stages at all, so the fixture
@@ -187,15 +193,15 @@ gated_head() {   # gated_head <gate output> ; the head the gate reported
 # stage straight to the other. Ordering assertions can then span the boundary,
 # which is where the ordering that matters actually lives.
 run() {   # run [reviewer] [auto] ; prints "<rc>|<output>" for the whole round
-    local who="${1-$CODEXBOT}" auto="${2-no}" g grc gout rc out head
+    local who="${1-$CODEXBOT}" auto="${2-no}" g grc gout rc out
     printf 'the round summary\n' > "$TMP/summary.md"
-    g="$(stage gate 7 "$who" "$TMP/summary.md" "$auto")"; grc="${g%%|*}"; gout="${g#*|}"
+    : > "$HEADF"
+    g="$(stage gate 7 "$who" "$TMP/summary.md" "$auto" "$HEADF")"; grc="${g%%|*}"; gout="${g#*|}"
     # A GATE THAT DID NOT PASS IS THE WHOLE ANSWER. Running `post` anyway would be
     # the fixture doing what the driver is forbidden to do.
     [ "$grc" = 0 ] || { printf '%s|%s' "$grc" "$gout"; return 0; }
-    head="$(gated_head "$gout")"
     printf 'driver resolveReviewThread\n' >> "$TMP/calls"
-    out="$(stage post 7 "$who" "$TMP/summary.md" "$auto" "$head")"; rc="${out%%|*}"; out="${out#*|}"
+    out="$(stage post 7 "$who" "$TMP/summary.md" "$auto" "$HEADF")"; rc="${out%%|*}"; out="${out#*|}"
     printf '%s|%s
 %s' "$rc" "$gout" "$out"
 }
@@ -288,7 +294,7 @@ world; : > "$TMP/summary.md"
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/head.txt" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -qF 'summary is empty' <<<"$got"; } \
     && pass "an empty summary stops the round" \
     || die "an empty summary gave rc=$rc '$got'"
@@ -299,7 +305,7 @@ world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 "$CODEXBOT" "$TMP/nope.md" no "$TMP/head.txt" 2>&1)"; rc=$?
 [ "$rc" -eq 1 ] \
     && pass "…and so does a summary file that is not there" \
     || die "a missing summary file gave rc=$rc"
@@ -406,7 +412,7 @@ world
 got="$(cd "$TMP" && run_limited 20 env PATH="$TMP/bin:$PATH" W="$W" CALLS="$TMP/calls" \
     REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-    "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no 2>&1)"; rc=$?
+    "$DIR/pr-close-round.sh" gate 7 'some-other-bot[bot]' "$TMP/summary.md" no "$TMP/head.txt" 2>&1)"; rc=$?
 { [ "$rc" -eq 1 ] && grep -qF 'not a reviewer this loop drives' <<<"$got"; } \
     && pass "an unrecognised reviewer is refused, by name" \
     || die "an unknown reviewer gave rc=$rc '$got'"
@@ -428,7 +434,7 @@ got="$(run "$COPILOTBOT" yes)"; rc="${got%%|*}"
 # different lookup, made for a different reason — so the number would move
 # whenever anything else did, and stop being about the pre-push read at all.
 world; printf 'the round summary\n' > "$TMP/summary.md"
-stage gate 7 "$COPILOTBOT" "$TMP/summary.md" yes >/dev/null
+stage gate 7 "$COPILOTBOT" "$TMP/summary.md" yes "$(headf)" >/dev/null
 # THE HEAD LOOKUPS, NOT EVERY `pr view`. The gate also asks which BRANCH the PR
 # is for before it pushes — a different question, made for a different reason —
 # so counting every `pr view` would move whenever that one did and stop being
@@ -461,7 +467,7 @@ nothing_pushed() {   # nothing_pushed <label>
 # protects the destination is naming it.
 for _m in no yes; do
     world; printf 'the round summary\n' > "$TMP/summary.md"
-    stage gate 7 "$CODEXBOT" "$TMP/summary.md" "$_m" >/dev/null 2>&1
+    stage gate 7 "$CODEXBOT" "$TMP/summary.md" "$_m" "$(headf)" >/dev/null 2>&1
     _pushargs="$(cat "$W/pushed" 2>/dev/null)"
     [ "$_pushargs" = 'push origin HEAD:refs/heads/fix/the-branch' ] \
         && pass "the gate names the repository and the one ref it may write ($_m mode)" \
@@ -625,7 +631,7 @@ for spec in "seven|$CODEXBOT|no|a PR number is required" \
         REVIEW_BUS_REMOTE='git@github.com:acme/widget.git' \
     REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
         REVIEW_BUS_OWNER= REVIEW_BUS_REPO= \
-        "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" 2>&1)"; rc=$?
+        "$DIR/pr-close-round.sh" gate "$_pr" "$_who" "$TMP/summary.md" "$_auto" "$TMP/head.txt" 2>&1)"; rc=$?
     { [ "$rc" -eq 1 ] && grep -qF "$_want" <<<"$got"; } \
         && pass "refused by name: $_want" \
         || die "'$_pr/$_who/$_auto' gave rc=$rc '$got'"
@@ -640,7 +646,7 @@ done
 # boundary it answers never fires again. The rule is `recordlib.sh`'s because
 # `pr-copilot-phase.sh` posts a caller-written body too.
 world; printf 'we fixed it, and the record now reads:\n**Review-Pause-Acknowledged:** `codex` `10`\n' > "$TMP/summary.md"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'reads as a record' <<<"${got#*|}"; } \
     && pass "a summary line that is a control marker is refused" \
     || die "a summary carrying an acknowledgement marker gave '${got}'"
@@ -648,7 +654,7 @@ grep -q 'git push' "$TMP/calls" \
     && die "it pushed with a summary that would publish a record" \
     || pass "…before anything was pushed"
 world; printf 'we fixed it:\n\n    **Review-Signoff:** `x` `y`\n' > "$TMP/summary.md"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while an indented one is prose and passes, as the readers see it" \
     || die "an indented marker was refused: '${got}'"
@@ -660,7 +666,7 @@ printf 'the round summary\n' > "$TMP/summary.md"
 # PR description requests Codex in the middle of the Copilot phase, which is the
 # phase ordering this loop exists to keep.
 world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
-got="$(stage gate 7 "$COPILOTBOT" "$TMP/summary.md" no)"
+got="$(stage gate 7 "$COPILOTBOT" "$TMP/summary.md" no "$(headf)")"
 { [ "${got%%|*}" = 1 ] && grep -qF "contains '@codex review'" <<<"${got#*|}"; } \
     && pass "a Copilot round's summary quoting the Codex trigger is refused" \
     || die "a Copilot summary quoting the trigger gave '${got}'"
@@ -672,7 +678,7 @@ grep -q 'git push' "$TMP/calls" \
 # so a body that also carries one changes nothing and must not be refused —
 # quoting a finding is most of what a round summary does.
 world; printf 'the finding said to post `@codex review` afterwards\n' > "$TMP/summary.md"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 [ "${got%%|*}" = 0 ] \
     && pass "…while a Codex round, whose request IS the mention, is left alone" \
     || die "a Codex summary quoting the trigger was refused: '${got}'"
@@ -709,7 +715,7 @@ before 'driver resolveReviewThread' 'gh pr comment' \
 # ── EACH STAGE DOES ONLY ITS OWN HALF ──────────────────────────────────────
 # `gate` posting anything is the defect the split removes: it would close the
 # round before the threads it is meant to precede were touched.
-world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"; rc="${got%%|*}"
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"; rc="${got%%|*}"
 [ "$rc" = 0 ] && pass "the gate alone succeeds" || die "the gate alone gave rc=$rc '${got#*|}'"
 grep -q 'gh pr comment' "$TMP/calls" \
     && die "the gate posted a comment" \
@@ -725,7 +731,7 @@ grep -qF "PR_ROUND_GATED pr=7 reviewer=$CODEXBOT head=$HEAD40 mode=mention" <<<"
 
 # `post` pushing would push whatever the working tree became while the threads
 # were being answered — past the gate that proved the head it is closing on.
-world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"; rc="${got%%|*}"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"; rc="${got%%|*}"
 [ "$rc" = 0 ] && pass "post alone closes the round" || die "post alone gave rc=$rc '${got#*|}'"
 grep -q 'git push' "$TMP/calls" \
     && die "post pushed" \
@@ -742,7 +748,7 @@ grep -q 'PR_ROUND_CLOSED .*prior-review=42' <<<"${got#*|}" \
 # summary describing one commit while the reviewer reads another, and the gate's
 # green verdict belongs to the first.
 world; printf '%s\n' "$PREV40" > "$W/local.out"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 1 ] && grep -qF "the local head is $PREV40" <<<"${got#*|}"; } \
     && pass "a local commit made while the threads were answered stops the close" \
     || die "a moved local head gave '${got}'"
@@ -753,7 +759,7 @@ grep -q 'gh pr comment' "$TMP/calls" \
 # AND ON THE PR, because the local head agreeing proves only that this checkout
 # did not move — a force-push from elsewhere moves the head the reviewer reads.
 world; printf '%s\n' "$PREV40" > "$W/head.out"; printf '%s\n' "$HEAD40" > "$W/local.out"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 1 ] && grep -qF "the PR head is $PREV40" <<<"${got#*|}"; } \
     && pass "a head moved on the PR stops the close" \
     || die "a moved PR head gave '${got}'"
@@ -763,12 +769,12 @@ grep -q 'gh pr comment' "$TMP/calls" \
 
 # An unreadable or malformed confirmation is a stop, never "close anyway".
 world; printf '1\n' > "$W/head.rc"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'could not confirm the head' <<<"${got#*|}"; } \
     && pass "an unreadable head confirmation stops the close" \
     || die "a failed confirmation gave '${got}'"
 world; printf 'not-a-sha\n' > "$W/head.out"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 1 ] && grep -qF 'is not a full OID' <<<"${got#*|}"; } \
     && pass "…and so does one that is not an OID" \
     || die "a malformed confirmation gave '${got}'"
@@ -796,17 +802,36 @@ world; got="$(stage close 7 "$CODEXBOT" "$TMP/summary.md" no)"
 
 # THE HANDOFF BELONGS TO EXACTLY ONE STAGE.
 world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no)"
-{ [ "${got%%|*}" = 1 ] && grep -qF "'post' needs the head" <<<"${got#*|}"; } \
-    && pass "post without the gated head is refused" \
-    || die "post with no head gave '${got}'"
-world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no aaaa)"
-{ [ "${got%%|*}" = 1 ] && grep -qF 'the gated head is not a full OID' <<<"${got#*|}"; } \
-    && pass "…and so is an abbreviated one" \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'a head file is required' <<<"${got#*|}"; } \
+    && pass "post without the head file is refused" \
+    || die "post with no head file gave '${got}'"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf aaaa)")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'is not a full OID' <<<"${got#*|}"; } \
+    && pass "…and so is a file holding an abbreviated one" \
     || die "post with a short head gave '${got}'"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/no-such-head")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'could not read the gated head' <<<"${got#*|}"; } \
+    && pass "…and a head file that is not there stops the post" \
+    || die "post with a missing head file gave '${got}'"
+# THE OLD FORM IS REFUSED BY NAME, on BOTH stages. A caller still passing the sha
+# would otherwise have `gate` create a file called `a8ec960…` and `post` fail with
+# a reason about a missing file rather than about the caller. #202.
 world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
-{ [ "${got%%|*}" = 1 ] && grep -qF "'gate' takes no head" <<<"${got#*|}"; } \
-    && pass "a gate handed a head is refused — that caller thinks it is posting" \
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the head FILE, not the head itself' <<<"${got#*|}"; } \
+    && pass "a gate handed the head itself is refused by name" \
     || die "gate with a head gave '${got}'"
+world; got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+{ [ "${got%%|*}" = 1 ] && grep -qF 'the head FILE, not the head itself' <<<"${got#*|}"; } \
+    && pass "…and so is a post handed the old fifth argument" \
+    || die "post with the old form gave '${got}'"
+# AND THE GATE WRITES WHAT IT REPORTS. The record and the file are two claims, and
+# `post` reads the file — so the fixture proves they agree rather than trusting
+# the record it can see.
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
+{ [ "${got%%|*}" = 0 ] \
+  && grep -qF "$(cat "$HEADF")" <<<"$(sed -n 's/.*head=\([0-9a-f]*\).*/\1/p' <<<"${got#*|}")"; } \
+    && pass "…and the head the gate reports is the head it wrote to the file" \
+    || die "the gate's record and its head file disagree: record='${got#*|}' file='$(cat "$HEADF")'"
 
 # ── A HEAD WITH NO REVIEW YET REPORTS AN EMPTY BASELINE, AND THAT IS AN ANSWER ─
 # `pr-review-state.sh review-id` returns nothing when the current head has no
@@ -815,7 +840,7 @@ world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
 # can tell "no baseline yet" from "no record at all"; `pr-watch.sh` takes the
 # empty value as "wait on any terminal review".
 world; : > "$W/pr-review-state.out"
-got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$HEAD40")"
+got="$(stage post 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf "$HEAD40")")"
 { [ "${got%%|*}" = 0 ] && grep -q 'PR_ROUND_CLOSED .* prior-review=$' <<<"${got#*|}"; } \
     && pass "a head with no review yet closes, reporting an empty baseline" \
     || die "an empty baseline gave '${got}'"
@@ -831,7 +856,7 @@ grep -qF ' prior-review=' <<<"${got#*|}" \
 # auto-review round has no prior review to wait past, and the gate must not refuse
 # its own empty baseline before the push it exists to make.
 world; : > "$W/pr-review-state.out"; printf '%s\n' "$PREV40" > "$W/head.before.out"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" yes)"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" yes "$(headf)")"
 { [ "${got%%|*}" = 0 ] && grep -qF 'PR_ROUND_GATED' <<<"${got#*|}"; } \
     && pass "a first push-triggered round gates on an empty baseline" \
     || die "an empty push baseline gave '${got}'"
@@ -841,7 +866,7 @@ grep -q -- '--after-review $' "$TMP/calls" \
 
 # ── THE BOUNDARY PAUSES THE GATE, BEFORE THE PUSH ──────────────────────────
 world; printf '3\n' > "$W/pr-round-count.rc"
-got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no)"
+got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$(headf)")"
 { [ "${got%%|*}" = 3 ] && grep -qF 'round boundary reached' <<<"${got#*|}"; } \
     && pass "a round boundary pauses the gate" \
     || die "a boundary gave '${got}'"

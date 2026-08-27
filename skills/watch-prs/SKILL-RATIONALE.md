@@ -1683,18 +1683,53 @@ shell without `export` also reaches a function and not a child process, so readi
 it from the environment would give the script a silent default — and the default
 answer is a round closed on a mode nobody chose.
 
-## THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
+## THE GATED HEAD TRAVELS IN A FILE, and this is where it lands.
 
-`gate` runs as a child process, so it cannot set a variable here however it is
-invoked. It says what the value was, in its success record, and this reads it back
-out of that record.
+The fourth working file, alongside the summary, the opening account and the review
+baseline. It is created empty at setup like the others, so `post` reading it before
+any `gate` has run finds nothing rather than something stale.
 
-WHAT THAT DOES NOT BUY IS ASSIGNMENT SAFETY, and saying otherwise was wrong: the
-read-back is itself `GATED_HEAD="$( … )"`, so a startup file that has already made
-that name readonly fails it here exactly as it would have failed a direct capture —
-after `gate` has pushed. `pr-request-review.sh`'s baseline avoids that by writing to
-a FILE and proving the read-back against it; this one does not, and the difference
-is that there the assignment precedes the mutation and here it follows one.
+It is named here, in the one place the session's paths are chosen and proved
+against their literals, rather than by whichever step happens to need it first —
+which is what makes it a path the driver can hand to both stages without either of
+them agreeing on a convention.
+
+## THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
+
+It was a string, and that is what #202 was. The driver captured `gate`'s output,
+`sed`ed the head out of the record, and assigned it — `GATED_HEAD="$( … )"`, an
+ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+pushed. A startup file that has made that name readonly fails it there: with
+`errexit` on the shell ends, and without it the name keeps whatever it held, so the
+non-empty check passes on a seeded value and `post` is handed a head the gate never
+reported. `CLAUDE.md` records that an assignment's status cannot be taken, so a
+`||` on it catches nothing.
+
+A FILE HAS NO SUCH FAILURE, and it removes two more names with it. There is no
+capture, and there is no `sed` — which is a NAME, and one that prints a plausible
+forty hex and exits 0 sends `post` at whatever it says. Both stages take the same
+path, `gate` writes and `post` reads, and the value never enters this shell at all:
+what is checked here is only that the file is non-empty, which is a question about
+the file rather than about a name.
+
+It is the shape `pr-request-review.sh` uses for the review baseline and
+`pr-origin.sh` for the origin. A path rather than a name.
+
+WHAT THE DRIVER STILL CANNOT PROVE is that the file holds what `gate` reported —
+and it does not have to. `post` reads it and validates what it finds against
+`sha_reason` before anything is posted, so a truncated or corrupted file stops the
+round at the stage that depends on it, at the cost of a rerun. Checking it twice
+would be a branch no fixture can stage.
+
+## AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
+
+The capture came with `; GATE_RC=$?` and a `case` on it, and both halves were
+names: a readonly `GATE_RC` keeps its old value, and `exit` can be a function that
+returns. Run as a condition there is no status variable, `$?` in the `else` arm is
+the condition's own, and each refusal ends in a reserved word.
+
+It is the same shape step 2 uses for the request, and for the same reason: the work
+sits inside the branch a refusal does not take.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 
