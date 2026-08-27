@@ -966,10 +966,11 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE HEAD IS PROVEN AN OID AFTER EVERY OUTCOME, before the replies.
+# AND THE HEAD IS PROVEN AN OID FROM A FILE THAT IS NOT THE SUMMARY, before the replies.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
-    [[ -n "" ]]   # a reserved word, not `:` — nothing reads this arm's status
+    [[ -n x ]]    # a reserved word, not `:`, and TRUE — under `errexit` a false
+                  # one here would end the shell on the successful path
 else
     case $? in
         3) echo "Stopping here: the operator decides at a round boundary."
@@ -980,18 +981,24 @@ else
            [[ -n "" ]] ;;
     esac
 fi
-case "$(<"$HEAD_FILE")" in
-    ????????????????????????????????????????)
-        case "$(<"$HEAD_FILE")" in
-            *[!0-9a-f]*)
-                echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-                exit 1
-                [[ -n "" ]] ;;
-        esac ;;
-    *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
-        exit 1
-        [[ -n "" ]] ;;
-esac
+if [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+    case "$(<"$HEAD_FILE")" in
+        ????????????????????????????????????????)
+            case "$(<"$HEAD_FILE")" in
+                *[!0-9a-f]*)
+                    echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+                    exit 1
+                    [[ -n "" ]] ;;
+            esac ;;
+        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            exit 1
+            [[ -n "" ]] ;;
+    esac
+else
+    echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
+    exit 1
+    [[ -n "" ]]
+fi
 ```
 
 **Now answer the threads** — reply, react 👍/👎, and resolve, per step 4 above.

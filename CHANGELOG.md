@@ -43,9 +43,11 @@
 
   Not merely an empty file, either: the alias refusal below has to come BEFORE the
   emptying, or it would destroy the account it is protecting, so on that one path
-  the file is left holding the summary. Asking for an OID closes that, through a
-  literal pattern in a `case` rather than a regex in a name a startup file could
-  seed. That is what stops a walked-past refusal: the thread
+  the file is left holding the summary. The identity is asked FIRST and the shape
+  test is its success arm — a summary that IS forty lowercase hex characters, a
+  commit id someone pasted on a line of its own, satisfies the shape test exactly,
+  and is the one summary that can. The shape test itself is a literal pattern in a
+  `case` rather than a regex in a name a startup file could seed. That is what stops a walked-past refusal: the thread
   replies sit between the two stages and are not shell at all, so no `if` can span
   them, and what a driver whose `exit` returns meets at the next step is the STATE
   rather than an ordering it was told to respect.

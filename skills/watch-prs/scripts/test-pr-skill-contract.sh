@@ -2603,17 +2603,19 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # fence alone is reached only after the threads have been resolved, so it stops
 # `post` and not the irreversible part. The proof sits in the gate's success arm,
 # and the ordering is what this asserts.
-# THE TWO GUARDS ARE THE FIRST AND SECOND OCCURRENCE, and both sit at column 0
-# since the gate's moved out of the success arm — so they are told apart by
-# ORDER rather than by indentation, which was what distinguished them before and
-# silently made both lookups find the same line.
-_hf_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | sed -n '1p' | cut -d: -f1)" || true
+# THE TWO GUARDS ARE ANCHORED ON DIFFERENT LINES, because they are no longer the
+# same shape: the one before the replies asks the file IDENTITY first and has the
+# shape test as its success arm, since `gate` refuses an aliased head file before
+# it clears anything and a summary that is forty hex characters satisfies the
+# shape test exactly. The post step's is the shape test alone, and by then the
+# identity question has been settled or the round never got here.
+_hf_guard_ln="$(grep -n '^if \[\[ ! \$HEAD_FILE -ef \$SUMMARY_FILE \]\]; then' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
 { [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
-    && pass "…and the head is proven a commit id after the gate, before the thread replies" \
+    && pass "…and the head is proven, identity first, after the gate and before the replies" \
     || die "the head is not proven before the replies (guard=$_hf_guard_ln replies=$_hf_res_ln)"
-_hf_post_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | sed -n '2p' | cut -d: -f1)" || true
+_hf_post_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | sed -n '1p' | cut -d: -f1)" || true
 { [ -n "$_hf_post_guard_ln" ] && [ -n "$_hf_post_ln" ] \
     && [ "$_hf_post_guard_ln" -gt "$_hf_res_ln" ] && [ "$_hf_post_guard_ln" -lt "$_hf_post_ln" ]; } \
     && pass "…and the post step asks again, for a session that resumes into it" \

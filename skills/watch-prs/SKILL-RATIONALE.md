@@ -1736,11 +1736,17 @@ the condition's own, and each refusal ends in a reserved word.
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
 
-## AND THE HEAD IS PROVEN AN OID AFTER EVERY OUTCOME, before the replies.
+## AND THE HEAD IS PROVEN AN OID FROM A FILE THAT IS NOT THE SUMMARY, before the replies.
 
 The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
 status — and nothing reads it. What stops a driver whose `exit` has been replaced
 by a function that returns is not the arm it took but the STATE it is left in.
+
+THE GATE'S SUCCESS ARM IS TRUE, and `[[ -n x ]]` rather than `[[ -n "" ]]`. Under
+`errexit` a false statement in a `then` BODY ends the shell — the exemption is for
+a command run as a CONDITION, and this is not one — so the successful path would
+have died after the push and before the replies. `:` would also be true, and is a
+name; a reserved word that is true is both.
 
 AFTER THE `fi`, NOT INSIDE THE SUCCESS ARM. Placed in the success arm it is on the
 one path that does not need it: a refusal takes the `else`, and with `exit`
@@ -1755,6 +1761,18 @@ empties anything — it has to, or the refusal would destroy the account it is
 protecting. So on that one path the file is left holding the summary: non-empty,
 and a `-s` guard passes on it. Asking whether the file holds a COMMIT ID closes
 that, because a summary never does.
+
+AND THE IDENTITY IS ASKED FIRST, because the shape alone is not enough. `gate`
+refuses an aliased head file before it clears anything, so on that path the file
+still holds the summary — and a summary that IS forty lowercase hex characters, a
+commit id someone pasted on a line of its own, satisfies the shape test exactly. It
+is the one summary that can. `-ef` answers the question the shape cannot, and it
+answers it about the two paths this session chose rather than about their contents.
+
+The two are ONE decision rather than two statements: the shape test is the identity
+test's success arm. Written as a guard above it, a shadowed `exit` that returns
+would walk from the identity refusal straight into the shape test, which is the
+case that accepts.
 
 A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
 name is a second name a startup file can seed, and a seeded pattern accepting a
