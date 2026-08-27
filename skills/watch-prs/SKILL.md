@@ -959,7 +959,7 @@ case "$GATE_RC" in
     3) echo "Stopping here: the operator decides at a round boundary."; exit 3 ;;
     *) echo "The round did not close, and nothing has been resolved or posted. The reason is above; do not retry it blind."; exit "$GATE_RC" ;;
 esac
-# THE GATED HEAD IS CARRIED TO `post`, WHICH RE-PROVES IT.
+# THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 GATED_HEAD="$(printf '%s\n' "$GATE_OUT" \
     | sed -n 's/^PR_ROUND_GATED .*[[:space:]]head=\([0-9a-f]*\).*$/\1/p')"
@@ -972,7 +972,9 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# ONLY NOW IS THE ROUND CLOSED, and `post` re-proves the head before it posts.
+# ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 POST_OUT="$(/usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh post N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$GATED_HEAD" 2>&1)"; ROUND_RC=$?
 printf '%s\n' "$POST_OUT"

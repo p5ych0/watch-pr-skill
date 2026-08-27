@@ -1677,25 +1677,35 @@ shell without `export` also reaches a function and not a child process, so readi
 it from the environment would give the script a silent default — and the default
 answer is a round closed on a mode nobody chose.
 
-## THE GATED HEAD IS CARRIED TO `post`, WHICH RE-PROVES IT.
+## THE GATED HEAD IS CARRIED OUT OF THE CHILD, which cannot assign in this shell.
 
-A child cannot assign a variable in this shell, so `gate` says what the value was
-and this reads it back out.
+`gate` runs as a child process, so it cannot set a variable here however it is
+invoked. It says what the value was, in its success record, and this reads it back
+out of that record.
 
-`post` re-proves it locally and on the PR because the replies take as long as they
-take: a commit made in between leaves the summary describing one commit while the
-reviewer reads another, and the gate's green verdict belongs to the commit the gate
-saw and to no other.
+A capture written as an assignment would be one more name a startup file can have
+made readonly, which is the question `pr-request-review.sh`'s baseline settled the
+same way.
 
-## ONLY NOW IS THE ROUND CLOSED, and `post` re-proves the head before it posts.
+## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 
 The threads are answered against a head that is pushed and green, so a resolve is a
 claim that is true when it is made. Resolving before the push means a round that
 then fails to push, or pushes red, has already recorded its findings as answered on
-a commit that never landed.
+a commit that never landed — and a resolved thread cannot be taken back.
 
 With automatic review on it is worse: the pass the push starts reads threads
 already marked resolved, with no summary saying what resolved them.
+
+## AND THE HEAD IS RE-PROVED BEFORE ANYTHING IS POSTED.
+
+Locally and on the PR, because the replies take as long as they take. A commit made
+between the gate and the post leaves the summary describing one commit while the
+reviewer reads another, and the gate's green verdict belongs to the commit the gate
+saw and to no other.
+
+This is a separate question from when the round closes: the ordering says the post
+comes last, and this says the post is still allowed to happen when it gets there.
 
 ## THE BASELINE COMES BACK IN THE SUCCESS RECORD, and step 3's watch needs exactly it.
 
@@ -1732,8 +1742,9 @@ through, which is the wrong way round for a value step 3 is about to watch on.
 
 ## `prior-review=` IS LAST IN THE RECORD, so everything after it is the value.
 
-An empty value is carried through rather than rejected, which is what makes
-`${CLOSED_REC##* prior-review=}` the whole of the read.
+`${CLOSED_REC##* prior-review=}` strips through the last occurrence, so the field
+being last is what makes that expansion the whole of the read — with nothing else to
+match and no second field to be confused with.
 
 Anything appended after that field would be swallowed into the baseline, which is
 the same field-order rule the signoff records follow and for the same reason.

@@ -5,8 +5,8 @@
 - **Block 5's argument is out of `SKILL.md`, and it is the last block.** *Fix, then
   close the round* was 315 lines carrying 70 of commentary inside its fences. It is
   291 now, and every executable line in the document is byte-identical — checked
-  mechanically, not by eye. Ten claims stay beside the code with a `# WHY:` pointer
-  under each; the arguments are ten new sections in `SKILL-RATIONALE.md`.
+  mechanically, not by eye. Eleven claims stay beside the code with a `# WHY:` pointer
+  under each; the arguments are eleven new sections in `SKILL-RATIONALE.md`.
 
   This is the first lift under 2.0.71's rule, and it shows: **nothing had to be
   merged.** Claims stack above the code they annotate, the two helper interfaces
