@@ -966,11 +966,21 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE STAGE RUNS AS A CONDITION, so a refusal cannot be walked past.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND THE HEAD IS PROVEN AN OID BEFORE THE REPLIES, which is the boundary that matters.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 if /usr/bin/env bash -p "$RB_SCRIPTS"/pr-close-round.sh gate N "$WHO" "$SUMMARY_FILE" "$AUTO_REVIEW" "$HEAD_FILE"; then
-    [[ -s "$HEAD_FILE" ]] \
-        || { echo "ABORT: the gate reported success but wrote no head to $HEAD_FILE; there is nothing to hold the summary to."
-             exit 1
-             [[ -n "" ]]; }
+    case "$(<"$HEAD_FILE")" in
+        ????????????????????????????????????????)
+            case "$(<"$HEAD_FILE")" in
+                *[!0-9a-f]*)
+                    echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+                    exit 1
+                    [[ -n "" ]] ;;
+            esac ;;
+        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+            exit 1
+            [[ -n "" ]] ;;
+    esac
 else
     case $? in
         3) echo "Stopping here: the operator decides at a round boundary."
@@ -988,7 +998,7 @@ The head is pushed and green, so a resolve is a claim that is true when made.
 Then, and only then:
 
 ```bash
-# THE POST STEP REFUSES A HEAD FILE THAT DOES NOT HOLD AN OID, not merely an empty one.
+# THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 case "$(<"$HEAD_FILE")" in
     ????????????????????????????????????????)

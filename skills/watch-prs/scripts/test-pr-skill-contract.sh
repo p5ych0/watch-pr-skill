@@ -2599,11 +2599,21 @@ grep -q 'GATED_HEAD=' "$SKILL" \
 # file that IS the summary file, and it refuses BEFORE it empties anything — it
 # has to, or the refusal would destroy the account it is protecting — so on that
 # one path the file is left holding the summary, which a `-s` guard accepts.
-_hf_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | head -1 | cut -d: -f1)" || true
+# BEFORE THE REPLIES, WHICH IS THE BOUNDARY THAT MATTERS. A guard in the post
+# fence alone is reached only after the threads have been resolved, so it stops
+# `post` and not the irreversible part. The proof sits in the gate's success arm,
+# and the ordering is what this asserts.
+_hf_guard_ln="$(grep -n '^    case "\$(<"\$HEAD_FILE")" in' "$SKILL" | head -1 | cut -d: -f1)" || true
+_hf_res_ln="$(grep -n 'Now answer the threads' "$SKILL" | head -1 | cut -d: -f1)" || true
 _hf_post_ln="$(grep -n '^POST_OUT="\$(/usr/bin/env bash -p "\$RB_SCRIPTS"/pr-close-round.sh post N' "$SKILL" | head -1 | cut -d: -f1)" || true
-{ [ -n "$_hf_guard_ln" ] && [ -n "$_hf_post_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_post_ln" ]; } \
-    && pass "…and the post step refuses an empty head file before it runs the stage" \
-    || die "the post step does not guard on the head file (guard=$_hf_guard_ln post=$_hf_post_ln)"
+{ [ -n "$_hf_guard_ln" ] && [ -n "$_hf_res_ln" ] && [ "$_hf_guard_ln" -lt "$_hf_res_ln" ]; } \
+    && pass "…and the head is proven a commit id before the thread replies" \
+    || die "the head is not proven before the replies (guard=$_hf_guard_ln replies=$_hf_res_ln)"
+_hf_post_guard_ln="$(grep -n '^case "\$(<"\$HEAD_FILE")" in' "$SKILL" | head -1 | cut -d: -f1)" || true
+{ [ -n "$_hf_post_guard_ln" ] && [ -n "$_hf_post_ln" ] \
+    && [ "$_hf_post_guard_ln" -gt "$_hf_res_ln" ] && [ "$_hf_post_guard_ln" -lt "$_hf_post_ln" ]; } \
+    && pass "…and the post step asks again, for a session that resumes into it" \
+    || die "the post step does not guard on the head file (guard=$_hf_post_guard_ln post=$_hf_post_ln)"
 # THE MODE IS PASSED, NOT WRITTEN IN. A driver that hard-codes `no` would close
 # every automatic-review round in the wrong order — pushing after it had already
 # posted — and nothing in the script's own tests would notice, because the script

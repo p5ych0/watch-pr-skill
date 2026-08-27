@@ -35,11 +35,16 @@
 
   **A gate empties it before any other refusal can happen**, so every refusal leaves
   it empty rather than holding the previous round's head — and the driver's `post`
-  step refuses a file that does not hold a commit id. Not merely an empty one: the
-  alias refusal below has to come BEFORE the emptying, or it would destroy the
-  account it is protecting, so on that one path the file is left holding the
-  summary. Asking for an OID closes that, through a literal pattern in a `case`
-  rather than a regex in a name a startup file could seed. That is what stops a walked-past refusal: the thread
+  step proves the file holds a commit id **before the thread replies**, which is the
+  boundary that matters — a guard after them stops `post` and not the irreversible
+  resolve. The post step asks again, for a session that resumes into it with no
+  gate having run in its own shell.
+
+  Not merely an empty file, either: the alias refusal below has to come BEFORE the
+  emptying, or it would destroy the account it is protecting, so on that one path
+  the file is left holding the summary. Asking for an OID closes that, through a
+  literal pattern in a `case` rather than a regex in a name a startup file could
+  seed. That is what stops a walked-past refusal: the thread
   replies sit between the two stages and are not shell at all, so no `if` can span
   them, and what a driver whose `exit` returns meets at the next step is the STATE
   rather than an ordering it was told to respect.

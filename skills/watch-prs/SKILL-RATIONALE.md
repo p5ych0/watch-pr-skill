@@ -1733,16 +1733,17 @@ the condition's own, and each refusal ends in a reserved word.
 It is the same shape step 2 uses for the request, and for the same reason: the work
 sits inside the branch a refusal does not take.
 
-## THE POST STEP REFUSES A HEAD FILE THAT DOES NOT HOLD AN OID, not merely an empty one.
+## AND THE HEAD IS PROVEN AN OID BEFORE THE REPLIES, which is the boundary that matters.
 
 The gate's refusal arms end in a reserved word, which gives the `if` a non-zero
-status — and nothing reads it. What actually stops a driver whose `exit` has been
-replaced by a function that returns is not the arm it took but the STATE it is
-left in.
+status — and nothing reads it. What stops a driver whose `exit` has been replaced
+by a function that returns is not the arm it took but the STATE it is left in, and
+this is where that state is read: BEFORE the thread replies, which are the
+irreversible part. A resolve cannot be taken back.
 
-NON-EMPTY IS NOT ENOUGH, and that is the whole of why this is a `case` rather than
-a `-s`. `gate` refuses a head file that IS the summary file, and it refuses BEFORE
-it empties anything — it has to, or the refusal would destroy the account it is
+NON-EMPTY IS NOT ENOUGH, and that is why this is a `case` rather than a `-s`.
+`gate` refuses a head file that IS the summary file, and it refuses BEFORE it
+empties anything — it has to, or the refusal would destroy the account it is
 protecting. So on that one path the file is left holding the summary: non-empty,
 and a `-s` guard passes on it. Asking whether the file holds a COMMIT ID closes
 that, because a summary never does.
@@ -1751,7 +1752,7 @@ A LITERAL PATTERN IN A `case`, not a regex in a variable. A validator held in a
 name is a second name a startup file can seed, and a seeded pattern accepting a
 seeded value is a check that agrees with itself; `case` is a reserved word and
 these patterns are in the source. The forty-character test and the hex test are
-separate arms because one pattern cannot say both in a glob.
+separate arms because one glob cannot say both.
 
 Every other refusal leaves the file EMPTY, which this also rejects: `gate` empties
 it before any other refusal can happen, and writes it only on success. The
@@ -1760,9 +1761,16 @@ unreadable summary aborts further down, and emptying after that point would leav
 the PREVIOUS round's head behind for exactly the refusals a driver is most likely
 to walk past.
 
-It is the same containment the rest of this document argues for, reached across a
-fence boundary that no `if` can span: the thread replies happen between the two
-stages and are not shell at all.
+## THE POST STEP ASKS THE SAME QUESTION AGAIN, because it is a step a session can resume into.
+
+The check that matters is the one before the replies; this one is for the other
+way in. A later session — tomorrow, another machine — resumes at the post step
+with no gate having run in ITS shell, and the head file is whatever the last one
+left. The same question is the right question there, and the answer costs nothing.
+
+It is a deliberate second copy rather than a rule with two callers, because the
+two guard different boundaries: one stops a walked-past refusal from reaching an
+irreversible resolve, and this one stops a post that never had a gate at all.
 
 ## ONLY NOW IS THE ROUND CLOSED, after the threads are answered.
 
