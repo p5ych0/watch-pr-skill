@@ -3494,7 +3494,7 @@ _mk_n="$(grep -c . <<<"$_mk_set")" || _mk_n=0
 # has nothing to do with what an author may write. That is the "the token also
 # appears elsewhere" trap, and the first version of this check fell into it: a
 # marker deleted from the refusal list still passed.
-_skill_pass="$(awk '/^# THE BODY IS PROSE AND MUST NOT BECOME A RECORD/{c=12} c-->0' "$SKILL")" || true
+_skill_pass="$(awk '/^# THE RESERVED MARKERS MUST NOT START A LINE IN THIS BODY:/{c=5} c-->0' "$SKILL")" || true
 _readme_pass="$(awk '/^   The body you supply is prose/{c=12} c-->0' "$ROOT/README.md")" || true
 { [ -n "$_skill_pass" ] && [ -n "$_readme_pass" ]; } \
     && pass "…and both layers still carry the passage that tells an author about them" \
@@ -4997,7 +4997,7 @@ grep -q 'any(.\[\]; type != "object" or (.bucket | type) != "string")' "$SCRIPT_
 
 # ── EVERY CLAIM HAS ITS ARGUMENT, AND EVERY ARGUMENT ITS CLAIM ─────────────
 #
-# The setup block's argument lives in `SETUP-RATIONALE.md` beside it — 31
+# The setup block's argument lives in `SKILL-RATIONALE.md` beside it — 31
 # sections, ~17k tokens that used to be read on every invocation of a skill whose
 # reader needs the COMMANDS. What stayed beside the code is the CLAIM: one
 # complete line, then a `# WHY:` naming the document.
@@ -5046,30 +5046,22 @@ if [ -f "$_wy_doc" ]; then
     [ "$_wy_bad_ptr" -eq 0 ] \
         && pass "…and none resolves from the working directory or an unset plugin root" \
         || die "$_wy_bad_ptr pointers are unresolvable in one of setup's two discovery modes"
-    [ -f "$SCRIPT_DIR/../SETUP-RATIONALE.md" ] \
-        && pass "…and the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
-        || die "there is no SETUP-RATIONALE.md beside SKILL.md; the pointers name nothing"
 
-    # …AND NO LAYER STILL NAMES THE OLD PATH under `docs/`. Through `git grep`,
-    # whose status is the one this needs: 0 found, 1 not found, above that an
-    # error. `git ls-files | xargs grep` reports 123 on the ordinary no-match, and
-    # `grep -r` over the tree reaches untracked scratch.
-    _wy_stale=""; _wy_st_rc=0
-    _wy_stale="$(git -C "$ROOT" grep -lF 'docs/skill-setup-rationale' -- '*.md' 2>/dev/null)" || _wy_st_rc=$?
-    [ "$_wy_st_rc" -le 1 ] \
-        || die "the checkout's documents could not be scanned for the old path (rc=$_wy_st_rc)"
-    [ -z "$_wy_stale" ] \
-        && pass "…and nothing still names its old path under docs/" \
-        || die "these still name docs/skill-setup-rationale.md, which does not exist: $_wy_stale"
-
-    # 2. THE CLAIMS, from the setup fence alone, each paired with the pointer
-    #    beneath it. The status is taken: fed straight into a comparison, a failed
-    #    `awk` yields nothing and every check below passes vacuously.
+    # 2. THE CLAIMS, from the bash fences, each paired with the pointer beneath it.
+    #    The status is taken: fed straight into a comparison, a failed `awk` yields
+    #    nothing and every check below passes vacuously.
+    #
+    #    EVERY FENCE, NOT ONE NAMED SECTION. This was restricted to `## Derive
+    #    identity` while that was the only block whose argument had been lifted,
+    #    and the restriction was doing nothing the count below does not: a pointer
+    #    outside every fence is already caught, because `_wy_all` counts the whole
+    #    file and this counts only what a fence contains. Naming the sections here
+    #    would mean editing this awk for each block that lands, which is a list
+    #    that goes one entry stale exactly when someone forgets it.
     _wy_claims=""; _wy_rc=0
-    _wy_claims="$(awk '/^## Derive identity$/{sec=1}
-       sec && /^```bash$/ && !seen {f=1; seen=1; prev=""; next}
-       f && /^```$/{f=0; sec=0; next}
-       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SETUP-RATIONALE\.md$/) {
+    _wy_claims="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
+       f && /^```$/{f=0; next}
+       f { if ($0 ~ /^[[:space:]]*# WHY: \$RB_SCRIPTS\/\.\.\/SKILL-RATIONALE\.md$/) {
                if (prev ~ /^[[:space:]]*#/) { c=prev; sub(/^[[:space:]]*#[[:space:]]?/, "", c); print c }
                else print "!!POINTER-NOT-UNDER-A-CLAIM!!" }
            prev=$0 }' "$SKILL")" || _wy_rc=$?
@@ -5077,8 +5069,8 @@ if [ -f "$_wy_doc" ]; then
         || die "the claim list could not be built (rc=$_wy_rc); pointer rot would go unchecked"
     _wy_n=0; _wy_n="$(grep -c . <<<"$_wy_claims")" || _wy_n=0
     [ "$_wy_n" -eq "$_wy_all" ] \
-        && pass "…and all $_wy_all sit under a claim, in the setup block, in the documented form" \
-        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside the setup block, or not under a claim"
+        && pass "…and all $_wy_all sit under a claim, inside a bash fence, in the documented form" \
+        || die "$((_wy_all - _wy_n)) of $_wy_all # WHY: lines are malformed, outside every bash fence, or not under a claim"
     _wy_sent_rc=0
     grep -qF '!!POINTER-NOT-UNDER-A-CLAIM!!' <<<"$_wy_claims" || _wy_sent_rc=$?
     case "$_wy_sent_rc" in
@@ -5097,10 +5089,9 @@ if [ -f "$_wy_doc" ]; then
     # contract that breaks on every refactor is not. Found once that way, in
     # review, which is the disposition this assumes.
     _wy_float=0
-    _wy_float="$(awk '/^## Derive identity$/{sec=1}
-       sec && /^```bash$/ && !seen {f=1; seen=1; next}
+    _wy_float="$(awk '/^```bash$/ && !f {f=1; prev=""; next}
        f && /^```$/{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++
-                     f=0; sec=0; next }
+                     f=0; prev=""; next }
        f { if (prev ~ /# WHY: \$RB_SCRIPTS/ && ($0 ~ /^[[:space:]]*#/ || NF == 0)) n++
            prev=$0 }
        END{ if (prev ~ /# WHY: \$RB_SCRIPTS/) n++; print n+0 }' "$SKILL")" || _wy_float=99
@@ -5179,11 +5170,43 @@ EOWY
         && pass "…so every claim beside the code has its argument" \
         || die "$_wy_bad claims have no section"
 else
-    die "SETUP-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
+    die "SKILL-RATIONALE.md is missing from beside SKILL.md; the argument has nowhere to live"
 fi
 }
 
-_wy_contract "$SKILL" "$SCRIPT_DIR/../SETUP-RATIONALE.md"
+_wy_contract "$SKILL" "$SCRIPT_DIR/../SKILL-RATIONALE.md"
+
+# ── AND THE TREE AROUND THE PAIR ─────────────────────────────────────────────
+# These two ask about the CHECKOUT rather than about the two files handed in, so
+# they run once, outside the function. Inside it they ran again on the staged
+# pair — where they say nothing new, and where a failure reported itself as "a
+# rationale-shape guard has come back", which is a diagnosis of the wrong thing.
+[ -f "$SCRIPT_DIR/../SKILL-RATIONALE.md" ] \
+    && pass "the rationale is where \$RB_SCRIPTS/.. puts it, beside SKILL.md" \
+    || die "there is no SKILL-RATIONALE.md beside SKILL.md; the pointers name nothing"
+
+# …AND NO LAYER STILL NAMES EITHER OLD PATH. The document has been moved twice
+# — out of `docs/`, and then renamed once a second block's argument landed in
+# it and `SETUP-` stopped being true — and each move leaves pointers behind in
+# documents nothing executes. Through `git grep`, whose status is the one this
+# needs: 0 found, 1 not found, above that an error. `git ls-files | xargs grep`
+# reports 123 on the ordinary no-match, and `grep -r` over the tree reaches
+# untracked scratch.
+#
+# `CHANGELOG.md` IS EXCLUDED, and only it. A changelog records what a release
+# shipped, and 2.0.67 shipped a file under the old name; rewriting that entry
+# to match today's tree would make the record say something that was never
+# true. Nothing follows a changelog to find a file, which is what this check
+# is for.
+_wy_stale=""; _wy_st_rc=0
+_wy_stale="$(git -C "$ROOT" grep -lE 'docs/skill-setup-rationale|SETUP-RATIONALE' \
+    -- '*.md' ':!CHANGELOG.md' 2>/dev/null)" || _wy_st_rc=$?
+[ "$_wy_st_rc" -le 1 ] \
+    || die "the checkout's documents could not be scanned for the old paths (rc=$_wy_st_rc)"
+[ -z "$_wy_stale" ] \
+    && pass "…and nothing still names a path the document has been moved off" \
+    || die "these name a path the rationale no longer has: $_wy_stale"
+
 
 # ── AND THE REMOVAL ITSELF IS PINNED, so it cannot be undone by accident ──────
 #
@@ -5213,7 +5236,7 @@ _wy_stage=""
 _wy_stage="$(mktemp_d)" || { die "no scratch directory for the staged-rationale probe"; _wy_stage=""; }
 if [ -n "$_wy_stage" ]; then
 cp "$SKILL" "$_wy_stage/SKILL.md" || die "the staged skill could not be written"
-cp "$SCRIPT_DIR/../SETUP-RATIONALE.md" "$_wy_stage/doc.md" \
+cp "$SCRIPT_DIR/../SKILL-RATIONALE.md" "$_wy_stage/doc.md" \
     || die "the staged rationale could not be written"
 cat >>"$_wy_stage/doc.md" <<'EOSTAGE'
 
@@ -5257,7 +5280,7 @@ fi
 grep -q 'ssh://\*|git://\*|https://\*|http://\*|git+ssh://\*' "$SCRIPT_DIR/identitylib.sh" \
     && pass "the identity parser accepts only GitHub network transports" \
     || die "the parser reads any URL scheme as a GitHub identity"
-grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SETUP-RATIONALE.md" \
+grep -q 'reaches no GitHub server' "$SCRIPT_DIR/../SKILL-RATIONALE.md" \
     && pass "…and refuses the rest rather than guessing a host" \
     || die "the rationale has no rejection path for an unsupported transport"
 

@@ -148,7 +148,7 @@ that block is judged against both:
 This repository ships as a Claude Code plugin, so `version` in
 `.claude-plugin/plugin.json` and a `CHANGELOG.md` entry accompany a change to
 **what is installed** — the scripts under `skills/watch-prs/`, `SKILL.md`,
-`skills/watch-prs/SETUP-RATIONALE.md`, or the manifests.
+`skills/watch-prs/SKILL-RATIONALE.md`, or the manifests.
 
 **That last one is a document and is still on the release side.** The installed
 `SKILL.md` points at it by path, so the driving model reaches it at runtime and it

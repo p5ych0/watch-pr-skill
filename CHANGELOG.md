@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.68] — 2026-08-27
+
+- **Block 7's argument is out of `SKILL.md`, and the rationale is renamed.** *Codex
+  is clean — now the Copilot phase* was 221 lines carrying 127 of commentary. It is
+  135 now, and every executable line is byte-identical — checked mechanically, not
+  by eye. Seven claims stay beside the code with a `# WHY:` pointer under each; the
+  arguments are seven new sections. `SKILL.md` loses ~1.5k tokens off what is read
+  on every invocation.
+
+  **`SETUP-RATIONALE.md` is now `SKILL-RATIONALE.md`.** The old name was true while
+  the setup block was the only one lifted and stopped being true the moment a
+  second block's argument landed in it. One document for the whole driver, because
+  the alternative is a file per block and a separate bijection for each. All 38
+  pointers name the new path, and the contract fails on either old one — except in
+  this changelog, where 2.0.67 records what that release actually shipped.
+
+  **The contract scans every bash fence now**, rather than the one section named in
+  its `awk`. That restriction was doing nothing the pointer count does not already
+  do — a pointer outside every fence was already caught — and keeping it would have
+  meant editing the fixture for each block that lands, which is a list that goes
+  stale exactly when someone forgets it.
+
+  What is *not* checked is unchanged and deliberate: the rationale's own Markdown
+  shape. See 2.0.67. The remaining blocks are #194.
+
 ## [2.0.67] — 2026-08-26
 
 - **`SKILL.md` is 41% smaller, and no line of its code changed.** The document was

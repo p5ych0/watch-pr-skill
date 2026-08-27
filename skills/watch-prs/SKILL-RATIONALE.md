@@ -1154,3 +1154,142 @@ Each is then proven present and empty. A missing one fails closed later
 anyway — the request's `<` refuses and `pr-close-round.sh` cannot read
 its summary — but "fails closed later" is not a reason to leave setup
 unable to say so.
+
+## THE ACCOUNT IS PROSE, AND MUST NOT BECOME A RECORD, A REQUEST, OR A FRAGMENT.
+
+THE BODY IS PROSE AND MUST NOT BECOME A RECORD. It is posted under YOUR identity,
+which `pr-signoff.sh` and `pr-round-count.sh` trust — so a line reproducing one of
+the markers they honour, coming from you, CREATES the record it was quoting. A
+finding quoted verbatim about a signoff becomes the signoff; a quoted
+acknowledgement becomes the acknowledgement, and the round boundary it answers
+never fires again. The script refuses such a body rather than publishing it.
+
+`**Reviewed commit:**` is NOT one of them, and is left alone deliberately: it is
+read only from a reviewer bot's own comment, so writing it here creates nothing.
+Listing it as forbidden would be a rule with no failure behind it.
+
+THE MARKERS ARE HONOURED AT THE START OF A LINE, so indenting by four spaces or
+quoting inline is enough. A FENCE DOES NOT HELP — the readers scan the raw comment
+body, where a line inside a fence still begins at column 0.
+
+AND IT MUST NOT CONTAIN `@codex review`. Any comment containing that text requests
+a Codex pass. This summary is posted on its own and the loop stops immediately
+after it, so a quoted mention starts a pass that answers nobody and burns the
+round. In a Codex ROUND the mention IS the request and `pr-close-round.sh` writes
+it itself, so quoting it there changes nothing — which is why the rule is stated
+here and not there.
+
+THE REMEDY IS NOT THE SAME ONE, and that is the point of separating them. The
+trigger is matched case-insensitively ANYWHERE in the body rather than at the
+start of a line, so indenting it, quoting it inline or fencing it changes nothing
+and the summary is still refused. Break the mention up, or write it without the
+`@`.
+
+THE WRITE IS CHECKED, not only the read the script does. A redirection that
+truncates the file and then fails — a full filesystem — leaves a non-empty
+FRAGMENT which passes the script's own non-empty test and is posted as this
+phase's account. A failed open leaves the PREVIOUS round's contents there to be
+posted as this one's. Neither is distinguishable afterwards from an account
+somebody wrote.
+
+## WHICH REPOSITORY THIS ACTS ON IS SETTLED IN THE SETUP BLOCK, not here.
+
+The session's origin is read once and exported as `REVIEW_BUS_REMOTE`, which this
+stage and everything it drives inherit — so this call has no cwd dependency and
+needs no wrapper.
+
+Do not add one. A `(cd … && …)` guard here is what the pin replaced, and `cd` is a
+name a function can take; a list of call sites to wrap is missing the next one,
+which is the shape `CLAUDE.md` records paying for twice.
+
+## THE SIGNED-OFF HEAD IS READ BACK FROM THE RECORD, on the pause as well as on 0.
+
+Step 8 needs the full 40 characters of it, and a child cannot assign a variable
+here — so it is read back from the record `record` just wrote.
+
+READ ON THE PAUSE TOO. The boundary message offers "merge on the Codex signoff",
+and that path needs this sha: exiting without it made the operator re-run a phase
+that had already been proved clean, just to recover a value that was printed and
+thrown away.
+
+ASKED OF THE HELPER THAT OWNS THE RECORD, rather than parsed out of the stage's
+stdout. This was ~90 lines of expansion-only code against `PR_PHASE_RECORDED …
+codex-sha=`, and every one of them was paid for in review: a truncated record that
+could not overwrite a stale candidate, a bare `PR_PHASE_RECORDED` with no trailing
+space, `xcodex-sha=` matching as the field, a greedy `##*codex-sha=` reading the
+value after a LATER substring. Nine rounds on #74, for a fact the PR itself
+already holds.
+
+`sha` PRINTS THE HEAD ALONE, and stdout carries that value or nothing — every
+reason goes to stderr, so there is no record shape here to get wrong and no `sed`
+in the path. That matters beyond tidiness: `sed` is a NAME, and one that prints a
+plausible forty hex and exits 0 pins a merge to whatever it says. The rule about
+what a well-formed record is stays in `recordlib.sh`, where it is tested. Issue
+#89.
+
+IT IS A ROUND TRIP, and that is the trade. `record` posted the signoff and this
+reads it straight back, so a stale or eventually-consistent read is a failure mode
+the parse did not have — but it is the same read a RESUMED session makes at the
+bottom of `SKILL.md`, so the exposure is the system's rather than this step's, and
+it fails as a stop rather than as a silent empty. A revocation landing in between
+reads as status 1, which is a refusal here: the phase it would open is no longer
+closed.
+
+## THE STATUS AND THE SHAPE, because neither covers the other.
+
+A status of 1 with an empty answer is the phase not being closed. A status of 0
+with something that is not 40 hex cannot happen through the helper, and is checked
+anyway — because this value is what every gate in step 8 is pinned to, and a gate
+pinned to a value nobody validated is a gate in name only.
+
+## THE LAST WORD IS A RESERVED ONE, because both lines above it can be taken away.
+
+`echo` and `exit` are builtins a function can shadow, and with both shadowed this
+branch says nothing and returns 0 — a failed read indistinguishable from an
+ordinary phase, which is the reading that lets the driver carry on.
+
+`[[ … ]]` is a reserved word, so this branch ends non-zero whatever has been done
+to the builtins, and the block's status is the last signal left. It is the same
+containment the setup block's abort arms use, reached by the same argument: an
+`exit` that returns is not a refusal.
+
+## THE PHASE IS PROVED STILL OPEN BEFORE ANYTHING IS TOUCHED, three times over.
+
+`open` proves three things, and all three are needed because NONE of them requires
+the head to move:
+
+- the head is unmoved;
+- Codex's LIVE verdict on that sha is clean — a recorded signoff is history, and a
+  review dismissed while the head stood still leaves head-equality passing;
+- the RECORDED Codex signoff still names it — a revocation is how a phase is
+  deliberately reopened, and GitHub serves the old clean verdict until the new pass
+  reports, so the verdict alone cannot see it.
+
+It re-enforces the ROUND BOUNDARY too, which is why `open` can return 3: the
+signoff is published before `record` pauses, so a later session can resume straight
+into this stage with the boundary unacknowledged.
+
+ALL OF IT RUNS THREE TIMES — up front, before the revocation, and again after it —
+because another session can change any of it while the probes in between are
+running, and the revocation is itself a mutation with the request still to come.
+
+THE ORDER IS revoke → prove → baseline → request. Two constraints pull against
+each other: the proof wants to be last, and the Copilot BASELINE must be last or a
+pass landing in between is accepted as the answer to a request made after it. This
+is the proof as late as the baseline rule allows.
+
+THE SESSION PIN COVERS THIS STAGE TOO, and it is the one where getting the
+repository wrong costs most: `open` posts a signoff revocation and requests a
+review. Both are inherited from the setup export rather than decided by the current
+directory, so there is nothing to wrap here either.
+
+## THE BASELINE COMES BACK IN THE SUCCESS RECORD, AND THE RECORD IS WHAT IS CHECKED.
+
+Not the value. A head with no Copilot review yet has no id, and `pr-watch.sh` takes
+an empty baseline as "wait on any terminal review" — so testing the VALUE for
+emptiness would abort here, after the pass has already been requested, leaving a
+review in flight that nothing is waiting for.
+
+What is checked is that the record arrived and carries the field at all. An absent
+record means the stage reported nothing, and step 3 would then watch against a
+baseline left over from the previous phase.
