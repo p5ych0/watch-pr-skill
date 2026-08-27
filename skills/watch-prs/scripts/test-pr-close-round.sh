@@ -836,6 +836,25 @@ got="$(stage gate 7 "$CODEXBOT" "$TMP/nope.md" no "$HEADF")"
 { [ "${got%%|*}" = 1 ] && [ ! -s "$HEADF" ]; } \
     && pass "…and a refused gate leaves no stale head behind" \
     || die "a refused gate left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
+# EVERY NON-ALIAS REFUSAL, INCLUDING THE ONES VALIDATED BEFORE THE SUMMARY IS READ.
+# The truncation sat below the PR-number and reviewer checks and was reached by
+# neither, so a stale OID survived exactly the refusals a driver is most likely to
+# walk past. Both are staged because they abort at different points.
+for _st_bad in "PR:x:$CODEXBOT" "reviewer:7:some-other-bot[bot]"; do
+    _st_what="${_st_bad%%:*}"; _st_rest="${_st_bad#*:}"
+    _st_pr="${_st_rest%%:*}"; _st_who="${_st_rest#*:}"
+    world; printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' > "$HEADF"
+    got="$(stage gate "$_st_pr" "$_st_who" "$TMP/summary.md" no "$HEADF")"
+    { [ "${got%%|*}" = 1 ] && [ ! -s "$HEADF" ]; } \
+        && pass "…and a gate refused on the $_st_what leaves no stale head either" \
+        || die "a bad $_st_what left '$(cat "$HEADF" 2>/dev/null)' in the head file (rc=${got%%|*})"
+done
+# AND THE ALIAS REFUSAL IS THE EXCEPTION, deliberately: truncating a head file that
+# IS the summary destroys the account. The summary must survive it.
+world; got="$(stage gate 7 "$CODEXBOT" "$TMP/summary.md" no "$TMP/summary.md")"
+{ [ "${got%%|*}" = 1 ] && [ -s "$TMP/summary.md" ]; } \
+    && pass "…while the alias refusal leaves the summary intact, which is why it comes first" \
+    || die "the alias refusal destroyed the summary (rc=${got%%|*})"
 
 # THE OLD FORM IS REFUSED BY NAME, on BOTH stages. A caller still passing the sha
 # would otherwise have `gate` create a file called `a8ec960…` and `post` fail with

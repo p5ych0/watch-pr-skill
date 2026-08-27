@@ -964,7 +964,9 @@ hard-coded answer — one recipe here, two orders there:
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # THE GATED HEAD TRAVELS IN A FILE, so no name in this shell has to hold it.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
-# AND THE STAGE RUNS AS A CONDITION, so no name holds its output or its status.
+# AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
+# WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
+# AND NO NAME HOLDS ITS STATUS EITHER.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
 # AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
 # WHY: $RB_SCRIPTS/../SKILL-RATIONALE.md
@@ -990,21 +992,15 @@ if [[ ! $HEAD_FILE -ef $SUMMARY_FILE ]]; then
         ????????????????????????????????????????)
             case "$(<"$HEAD_FILE")" in
                 *[!0-9a-f]*)
-                    RB_HEAD_BAD=
-                    RB_HEAD_BAD="${RB_HEAD_BAD:?$HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread.}"
                     echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
                     exit 1
                     [[ -n "" ]] ;;
             esac ;;
-        *)  RB_HEAD_BAD=
-            RB_HEAD_BAD="${RB_HEAD_BAD:?$HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread.}"
-            echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
+        *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head. Do not resolve any thread."
             exit 1
             [[ -n "" ]] ;;
     esac
 else
-    RB_HEAD_BAD=
-    RB_HEAD_BAD="${RB_HEAD_BAD:?$HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread.}"
     echo "ABORT: $HEAD_FILE and $SUMMARY_FILE are the same file, so the gate refused before it could write and what is there is the summary. Do not resolve any thread."
     exit 1
     [[ -n "" ]]
@@ -1022,15 +1018,11 @@ case "$(<"$HEAD_FILE")" in
     ????????????????????????????????????????)
         case "$(<"$HEAD_FILE")" in
             *[!0-9a-f]*)
-                RB_HEAD_BAD=
-                RB_HEAD_BAD="${RB_HEAD_BAD:?$HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted.}"
                 echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
                 exit 1
                 [[ -n "" ]] ;;
         esac ;;
-    *)  RB_HEAD_BAD=
-        RB_HEAD_BAD="${RB_HEAD_BAD:?$HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted.}"
-        echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
+    *)  echo "ABORT: $HEAD_FILE does not hold a commit id, so no gate has proven a head for this round. Nothing has been posted."
         exit 1
         [[ -n "" ]] ;;
 esac

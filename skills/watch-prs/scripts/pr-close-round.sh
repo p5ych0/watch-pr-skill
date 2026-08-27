@@ -173,6 +173,69 @@ esac
 shift
 
 PR="${1:-}"; WHO="${2:-}"; SUMMARY_FILE="${3:-}"; AUTO_REVIEW="${4:-}"; HEAD_FILE="${5:-}"
+# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
+# stages take the same path: `gate` writes the head it proved into it, and `post`
+# reads it back out. The value never enters the driving shell.
+#
+# IT WAS A STRING, AND THAT IS WHAT #202 WAS. The driver captured `gate`'s output,
+# `sed`ed the head out of the record and assigned it — `GATED_HEAD="$( … )"`, an
+# ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
+# pushed. A startup file that has made that name readonly fails it there: with
+# `errexit` the shell ends, and without it the name keeps whatever it held, so the
+# non-empty check passes on a seeded value and `post` is handed a head the gate
+# never reported. `CLAUDE.md` records that an assignment's status cannot be taken,
+# so a `||` on it catches nothing.
+#
+# A FILE HAS NO SUCH FAILURE, and it removes two more names with it: the driver no
+# longer needs a capture, and it no longer needs `sed` — which is a NAME, and one
+# that prints a plausible forty hex and exits 0 sends `post` at whatever it says.
+# It is the shape `pr-request-review.sh` uses for the review baseline and
+# `pr-origin.sh` for the origin: a path rather than a name.
+#
+# THE OLD FORM IS REFUSED BY NAME rather than ignored, because a caller still
+# passing the sha would have `gate` try to create a file called `a8ec960…` and
+# `post` try to read one — the first would succeed and the second would fail with a
+# reason about the file rather than about the caller.
+[ -n "$HEAD_FILE" ] \
+    || { echo "ABORT: a head file is required: 'gate' writes the head it proved into it and 'post' reads it back."; exit 1; }
+if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
+    echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
+    exit 1
+fi
+# AND IT IS NOT THE SUMMARY. `gate` reads the summary and then writes the head, so
+# one file serving as both means the head OVERWRITES the account: `post` then finds
+# a well-formed OID in the summary file, passes the non-empty test, and posts the
+# sha as this round's summary to the reviewer that reads it before the diff.
+#
+# BOTH IDENTITIES, because neither covers the other. Equal strings catch the plain
+# case, including before either file exists; `-ef` catches a hard link or a symlink,
+# which is the same file under two names and is what an operator with a tidy
+# scratch directory can produce by accident.
+if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
+    echo "ABORT: the head file and the summary file are the same file ('$HEAD_FILE'); the head would overwrite the account and be posted as this round's summary."
+    exit 1
+fi
+# AND A GATE EMPTIES IT BEFORE ANY OTHER REFUSAL CAN HAPPEN — before the PR number
+# and the reviewer are validated, and before the summary is read — so that EVERY
+# refusal but the aliased one leaves it empty rather than holding the PREVIOUS
+# round's head. It sat below all of those and was reached by none of them: a
+# readonly `WHO` holding an invalid reviewer, or a library that would not load, left
+# a stale OID in place for a driver to accept. That is what lets
+# the driver's `post` step guard on the file being non-empty and have the guard
+# mean something: the STATE says whether a gate succeeded, rather than the driver's
+# obedience to an ordering.
+#
+# A STALE HEAD PASSES THE DRIVER'S GUARD, which is what makes the position matter
+# rather than being tidiness: it is refused only later, by `post`'s own re-proof —
+# after the threads have been resolved, which cannot be taken back.
+#
+# THE ALIAS CHECK STAYS AHEAD OF IT, and that ordering is forced: truncating a head
+# file that IS the summary destroys the account this stage is about to post. The
+# driver asks the file identity first for the same reason.
+if [ "$STAGE" = gate ]; then
+    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
+fi
+
 case "$PR" in
     ""|*[!0-9]*) echo "ABORT: a PR number is required (got '$PR')"; exit 1 ;;
 esac
@@ -327,63 +390,6 @@ case "$AUTO_REVIEW" in
     *) echo "ABORT: auto-review must be 'yes' or 'no' (got '$AUTO_REVIEW')"; exit 1 ;;
 esac
 if [ "$AUTO_REVIEW" = no ]; then _MODE=mention; else _MODE=push; fi
-
-# THE GATED HEAD IS THE HANDOFF BETWEEN THE STAGES, AND IT TRAVELS IN A FILE. Both
-# stages take the same path: `gate` writes the head it proved into it, and `post`
-# reads it back out. The value never enters the driving shell.
-#
-# IT WAS A STRING, AND THAT IS WHAT #202 WAS. The driver captured `gate`'s output,
-# `sed`ed the head out of the record and assigned it — `GATED_HEAD="$( … )"`, an
-# ASSIGNMENT, in the operator's own long-lived shell, AFTER `gate` had already
-# pushed. A startup file that has made that name readonly fails it there: with
-# `errexit` the shell ends, and without it the name keeps whatever it held, so the
-# non-empty check passes on a seeded value and `post` is handed a head the gate
-# never reported. `CLAUDE.md` records that an assignment's status cannot be taken,
-# so a `||` on it catches nothing.
-#
-# A FILE HAS NO SUCH FAILURE, and it removes two more names with it: the driver no
-# longer needs a capture, and it no longer needs `sed` — which is a NAME, and one
-# that prints a plausible forty hex and exits 0 sends `post` at whatever it says.
-# It is the shape `pr-request-review.sh` uses for the review baseline and
-# `pr-origin.sh` for the origin: a path rather than a name.
-#
-# THE OLD FORM IS REFUSED BY NAME rather than ignored, because a caller still
-# passing the sha would have `gate` try to create a file called `a8ec960…` and
-# `post` try to read one — the first would succeed and the second would fail with a
-# reason about the file rather than about the caller.
-[ -n "$HEAD_FILE" ] \
-    || { echo "ABORT: a head file is required: 'gate' writes the head it proved into it and 'post' reads it back."; exit 1; }
-if sha_reason "$HEAD_FILE" >/dev/null 2>&1; then
-    echo "ABORT: the fifth argument is now the head FILE, not the head itself (got what looks like an OID: '$HEAD_FILE'). 'gate' writes the head into that file and 'post' reads it back."
-    exit 1
-fi
-# AND IT IS NOT THE SUMMARY. `gate` reads the summary and then writes the head, so
-# one file serving as both means the head OVERWRITES the account: `post` then finds
-# a well-formed OID in the summary file, passes the non-empty test, and posts the
-# sha as this round's summary to the reviewer that reads it before the diff.
-#
-# BOTH IDENTITIES, because neither covers the other. Equal strings catch the plain
-# case, including before either file exists; `-ef` catches a hard link or a symlink,
-# which is the same file under two names and is what an operator with a tidy
-# scratch directory can produce by accident.
-if [[ $HEAD_FILE = "$SUMMARY_FILE" ]] || [[ $HEAD_FILE -ef $SUMMARY_FILE ]]; then
-    echo "ABORT: the head file and the summary file are the same file ('$HEAD_FILE'); the head would overwrite the account and be posted as this round's summary."
-    exit 1
-fi
-# AND A GATE EMPTIES IT BEFORE ANY OTHER REFUSAL CAN HAPPEN, so that EVERY refusal
-# leaves it empty rather than holding the PREVIOUS round's head. That is what lets
-# the driver's `post` step guard on the file being non-empty and have the guard
-# mean something: the STATE says whether a gate succeeded, rather than the driver's
-# obedience to an ordering.
-#
-# BEFORE THE SUMMARY IS READ, not beside the write. An unreadable summary aborts
-# further down, and emptying after that point left a stale head behind for exactly
-# the refusals a driver is most likely to walk past. A stale head passes the
-# driver's guard and is refused only later, by `post`'s own re-proof — after the
-# threads have been resolved, which cannot be taken back.
-if [ "$STAGE" = gate ]; then
-    > "$HEAD_FILE" || { echo "ABORT: could not empty the head file '$HEAD_FILE'."; exit 1; }
-fi
 
 # THE SUMMARY IS READ WITH ITS STATUS TAKEN, before anything is posted or pushed.
 # `$(cat …)` inside the argument swallows the reader's status, so a partial read

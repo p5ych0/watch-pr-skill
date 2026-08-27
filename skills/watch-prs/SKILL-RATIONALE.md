@@ -1726,23 +1726,29 @@ and it does not have to. `post` reads it and validates what it finds against
 round at the stage that depends on it, at the cost of a rerun. Checking it twice
 would be a branch no fixture can stage.
 
-## AND THE STAGE RUNS AS A CONDITION, so no name holds its output or its status.
+## AND THE STAGE RUNS AS A CONDITION, so no name holds its OUTPUT.
 
-The capture came with `; GATE_RC=$?` and a `case` on it, and both halves were
-names: a readonly `GATE_RC` keeps its old value, and `exit` can be a function that
-returns. Run as a condition there is no capture and no status variable, and `$?` in
-the `else` arm is the condition's own, read before anything can change it.
+`GATE_OUT="$( … )"` captured everything the stage printed so that a `sed` could
+lift the head back out of it. Both halves are gone: the head travels in a file, and
+what the stage prints goes straight to the operator, which is where a reason
+belongs.
 
-WHAT IT DOES NOT BUY IS CONTAINMENT, and the claim used to say otherwise. With
-`exit` replaced by a function that returns, the `else` arm's `exit` returns, the
-trailing reserved word leaves the completed `if` with status 1, and execution
-carries on after the `fi`. Nothing consumes that status. What follows the `fi` is
-the head proof, which refuses on every path that is not a proven success — and
-after THAT is prose, which no shell construct reaches. See the section on proving
-the head before the replies for what holds and what does not.
+A capture is also an assignment made AFTER the push, which is the defect this whole
+change is about, reached by the other road.
 
-It is the same shape step 2 uses for the request, where the work genuinely does sit
-inside the branch a refusal does not take because it is all one fence.
+## AND NO NAME HOLDS ITS STATUS EITHER.
+
+`; GATE_RC=$?` and a `case` on it: a readonly `GATE_RC` keeps its old value, so the
+`case` branched on a status from another round. Run as a condition there is no
+status variable at all, and `$?` in the `else` arm is the condition's own, read
+before anything can change it.
+
+WHAT NEITHER BUYS IS CONTAINMENT, and the claim used to say otherwise. With `exit`
+replaced by a function that returns, the `else` arm's `exit` returns, the trailing
+reserved word leaves the completed `if` with status 1, and execution carries on
+after the `fi`. Nothing consumes that status. What follows the `fi` is the head
+proof, which refuses on every path that is not a proven success — and after THAT is
+prose, which no shell construct reaches.
 
 ## AND THE HEAD FILE IS PROVEN NOT TO BE THE SUMMARY FILE.
 
@@ -1804,12 +1810,14 @@ a command run as a CONDITION, and this is not one — so the successful path wou
 have died after the push and before the replies. `:` would also be true, and is a
 name; a reserved word that is true is both.
 
-THE REFUSALS DO NOT DEPEND ON `echo`. Each fires a `${…:?}` expansion FIRST, on a
-name cleared on the line above: the shell itself writes the reason and stops, so a
-shadowed `echo` that prints nothing cannot silence the refusal. The `echo` stays
-after it, because the expansion's message is terse and the arms that follow are
-where a reader looks. The ORDER is the whole of it, which is the rule setup's own
-abort arms follow.
+A SHADOWED `echo` COSTS THE MESSAGE, NOT THE REFUSAL, and that is accepted rather
+than guarded. The refusal is the arm being taken and the head not being proven; the
+`echo` only says why. An earlier version cleared a name and expanded it with
+`${…:?}` so the shell itself would write the reason — and that ADDED a hole, since
+`declare -i RB_HEAD_BAD=1` makes the clear store `0`, which is not empty, so the
+expansion never fires. A guard that introduces a seedable name to protect against a
+shadowed name is not a fix. Setup's abort arms can use that shape because their
+expansion is on a value that is already known empty; here there is no such value.
 
 WHAT NO SHELL CONSTRUCT HERE CAN DO is make the reply instructions unreachable.
 They are PROSE, in a Markdown document, between two fences — so a driver whose
